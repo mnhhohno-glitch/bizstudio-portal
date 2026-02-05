@@ -16,7 +16,7 @@ export default async function DashboardPage() {
         <div className="rounded-lg border bg-white p-4">
           <div className="text-sm font-semibold">システム一覧</div>
           <div className="mt-2 text-sm text-slate-600">
-            登録されたシステムへリンクで移動します（次タスクH）。
+            登録されたシステムへリンクで移動します。
           </div>
           <Link className="mt-3 inline-block text-sm underline" href="/systems">
             /systems へ
