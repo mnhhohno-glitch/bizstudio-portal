@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  member
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum SystemStatus {
+  active
+  disabled
+}
+
+enum AuditTargetType {
+  AUTH
+  USER
+  SYSTEM
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  role         UserRole   @default(member)
+  status       UserStatus @default(active)
+
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt      @map("updated_at")
+
+  auditLogs    AuditLog[] @relation("ActorAuditLogs")
+  invitesMade  Invite[]   @relation("InvitesMade")
+
+  @@map("users")
+}
+
+model SystemLink {
+  id          String       @id @default(cuid())
+  name        String
+  description String
+  url         String
+  status      SystemStatus @default(active)
+  sortOrder   Int          @default(0) @map("sort_order")
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt      @map("updated_at")
+
+  @@map("systems")
+}
+
+model Invite {
+  id              String    @id @default(cuid())
+  email           String
+  tokenHash       String    @map("token_hash")
+  expiresAt       DateTime  @map("expires_at")
+  usedAt          DateTime? @map("used_at")
+
+  createdByUserId String    @map("created_by_user_id")
+  createdByUser   User      @relation("InvitesMade", fields: [createdByUserId], references: [id])
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("invites")
+}
+
+model AuditLog {
+  id          String          @id @default(cuid())
+  actorUserId String          @map("actor_user_id")
+  actorUser   User            @relation("ActorAuditLogs", fields: [actorUserId], references: [id])
+
+  action      String
+  targetType  AuditTargetType @map("target_type")
+  targetId    String?         @map("target_id")
+  metadata    Json?
+
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([actorUserId, createdAt])
+  @@index([targetType, createdAt])
+  @@map("audit_logs")
+}
