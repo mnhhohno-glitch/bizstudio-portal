@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
+import { Card, CardBody } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +20,11 @@ export default async function SystemsPage() {
   });
 
   return (
-    <div className="bg-white text-slate-900">
-      <h1 className="text-xl font-semibold">システム一覧</h1>
-      <p className="mt-2 text-sm text-slate-600">
+    <div>
+      <PageTitle>システム一覧</PageTitle>
+      <PageSubtleText>
         ここから各システムに移動できます。
-      </p>
+      </PageSubtleText>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         {systems.map((s) => (
@@ -31,25 +33,33 @@ export default async function SystemsPage() {
             href={s.url}
             target="_blank"
             rel="noreferrer"
-            className="rounded-lg border bg-white p-4 hover:bg-slate-50"
+            className="block"
           >
-            <div className="text-sm font-semibold">{s.name}</div>
-            <div className="mt-2 text-sm text-slate-600">{s.description}</div>
-            <div className="mt-3 text-xs font-mono break-all text-slate-500">
-              {s.url}
-            </div>
+            <Card>
+              <CardBody>
+                <div className="text-[15px] font-semibold text-[#374151]">{s.name}</div>
+                <div className="mt-2 text-[14px] text-[#374151]/80">{s.description}</div>
+                <div className="mt-3 font-mono text-[12px] break-all text-[#374151]/60">
+                  {s.url}
+                </div>
+              </CardBody>
+            </Card>
           </a>
         ))}
         {systems.length === 0 && (
-          <div className="rounded-lg border bg-white p-4 text-sm text-slate-600">
-            まだシステムが登録されていません。管理者は「システム管理」から追加してください。
-          </div>
+          <Card>
+            <CardBody>
+              <span className="text-[14px] text-[#374151]/60">
+                まだシステムが登録されていません。管理者は「システム管理」から追加してください。
+              </span>
+            </CardBody>
+          </Card>
         )}
       </div>
 
       <div className="mt-6">
-        <Link className="text-sm underline" href="/">
-          ダッシュボードへ戻る
+        <Link className="text-[14px] text-[#2563EB] hover:underline" href="/">
+          ← ダッシュボードへ戻る
         </Link>
       </div>
     </div>

@@ -8,15 +8,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
 
   const isAdmin = user.role === "admin";
+  const userName = user.name ?? user.email;
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      <TopBar companyName="Bizstudio Portal" isAdmin={isAdmin} />
-      <div className="flex">
+    <div className="min-h-screen bg-white">
+      <div className="flex min-h-screen">
         <Sidebar isAdmin={isAdmin} />
-        <main className="min-h-[calc(100vh-56px)] flex-1 bg-white p-6">
-          {children}
-        </main>
+
+        <div className="flex min-h-screen flex-1 flex-col">
+          <TopBar companyName="Bizstudio Portal" userName={userName} />
+
+          <main className="flex-1 bg-[#F5F7FA] p-6">
+            <div className="mx-auto max-w-6xl">{children}</div>
+          </main>
+        </div>
       </div>
     </div>
   );

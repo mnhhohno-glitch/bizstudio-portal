@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
+import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 
 type SystemRow = {
   id: string;
@@ -151,172 +154,184 @@ export default function AdminSystemsPage() {
   }
 
   return (
-    <div className="bg-white text-slate-900">
-      <h1 className="text-xl font-semibold">システム管理</h1>
-      <p className="mt-2 text-sm text-slate-600">
+    <div>
+      <PageTitle>システム管理</PageTitle>
+      <PageSubtleText>
         有効なシステム数: <span className="font-semibold">{activeCount}</span>
-      </p>
+      </PageSubtleText>
 
-      <div className="mt-6 rounded-lg border bg-white p-4">
-        <div className="text-sm font-semibold">
-          {editId ? "編集" : "新規追加"}
-        </div>
+      <div className="mt-6">
+        <Card>
+          <CardHeader title={editId ? "編集" : "新規追加"} />
+          <CardBody>
+            <form className="grid gap-4 md:grid-cols-2" onSubmit={submit}>
+              <div>
+                <label className="text-[12px] text-[#374151]/80">名前</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
 
-        <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={submit}>
-          <div>
-            <label className="text-xs text-slate-600">名前</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
+              <div>
+                <label className="text-[12px] text-[#374151]/80">
+                  並び順（小さいほど上）
+                </label>
+                <input
+                  className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none"
+                  type="number"
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(Number(e.target.value))}
+                  min={0}
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="text-xs text-slate-600">
-              並び順（小さいほど上）
-            </label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              type="number"
-              value={sortOrder}
-              onChange={(e) => setSortOrder(Number(e.target.value))}
-              min={0}
-              required
-            />
-          </div>
+              <div className="md:col-span-2">
+                <label className="text-[12px] text-[#374151]/80">説明</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  required
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <label className="text-xs text-slate-600">説明</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              required
-            />
-          </div>
+              <div className="md:col-span-2">
+                <label className="text-[12px] text-[#374151]/80">URL（http/https）</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 font-mono text-[14px] focus:border-[#2563EB] focus:outline-none"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  required
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <label className="text-xs text-slate-600">URL（http/https）</label>
-            <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm font-mono"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-            />
-          </div>
+              <div className="md:col-span-2 flex items-center gap-4">
+                <div>
+                  <label className="text-[12px] text-[#374151]/80">状態</label>
+                  <select
+                    className="mt-1 rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none"
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as "active" | "disabled")}
+                  >
+                    <option value="active">active</option>
+                    <option value="disabled">disabled</option>
+                  </select>
+                </div>
+              </div>
 
-          <div className="md:col-span-2 flex items-center gap-3">
-            <label className="text-xs text-slate-600">状態</label>
-            <select
-              className="rounded-md border px-3 py-2 text-sm bg-white"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as "active" | "disabled")}
-            >
-              <option value="active">active</option>
-              <option value="disabled">disabled</option>
-            </select>
-          </div>
+              <div className="md:col-span-2 flex items-center gap-3">
+                <button
+                  className="rounded-md border border-[#E5E7EB] bg-white px-4 py-2 text-[14px] text-[#374151] hover:bg-[#F5F7FA]"
+                  type="submit"
+                  disabled={busy}
+                >
+                  {busy ? "処理中..." : editId ? "更新する" : "追加する"}
+                </button>
 
-          <div className="md:col-span-2 flex items-center gap-2">
-            <button
-              className="rounded-md border px-3 py-2 text-sm hover:bg-slate-50"
-              type="submit"
-              disabled={busy}
-            >
-              {busy ? "処理中..." : editId ? "更新する" : "追加する"}
-            </button>
-
-            {editId && (
-              <button
-                className="rounded-md border px-3 py-2 text-sm hover:bg-slate-50"
-                type="button"
-                onClick={resetForm}
-              >
-                編集をやめる
-              </button>
-            )}
-          </div>
-        </form>
+                {editId && (
+                  <button
+                    className="rounded-md border border-[#E5E7EB] bg-white px-4 py-2 text-[14px] text-[#374151] hover:bg-[#F5F7FA]"
+                    type="button"
+                    onClick={resetForm}
+                  >
+                    編集をやめる
+                  </button>
+                )}
+              </div>
+            </form>
+          </CardBody>
+        </Card>
       </div>
 
-      <div className="mt-6 rounded-lg border bg-white p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">登録済みシステム</div>
-          <button
-            className="rounded-md border px-3 py-2 text-sm hover:bg-slate-50"
-            onClick={fetchAll}
-            disabled={loading}
-          >
-            {loading ? "更新中..." : "更新"}
-          </button>
-        </div>
+      <div className="mt-6">
+        <Card>
+          <CardHeader
+            title="登録済みシステム"
+            right={
+              <button
+                className="rounded-md border border-[#E5E7EB] bg-white px-4 py-2 text-[14px] text-[#374151] hover:bg-[#F5F7FA]"
+                onClick={fetchAll}
+                disabled={loading}
+              >
+                {loading ? "更新中..." : "更新"}
+              </button>
+            }
+          />
+          <CardBody>
+            {error && <div className="mb-3 text-[14px] text-[#DC2626]">{error}</div>}
 
-        {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
-
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b">
-                <th className="py-2 text-left">並び</th>
-                <th className="py-2 text-left">名前</th>
-                <th className="py-2 text-left">状態</th>
-                <th className="py-2 text-left">URL</th>
-                <th className="py-2 text-left">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {systems.map((s) => (
-                <tr key={s.id} className="border-b">
-                  <td className="py-2">{s.sortOrder}</td>
-                  <td className="py-2">
-                    <div className="font-semibold">{s.name}</div>
-                    <div className="text-xs text-slate-600">{s.description}</div>
-                  </td>
-                  <td className="py-2">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${
-                        s.status === "active"
-                          ? "border-green-300 bg-green-50 text-green-700"
-                          : "border-slate-300 bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="py-2 font-mono text-xs break-all max-w-xs">
-                    {s.url}
-                  </td>
-                  <td className="py-2">
-                    <div className="flex gap-2">
-                      <button
-                        className="rounded-md border px-3 py-1.5 text-xs hover:bg-slate-50"
-                        onClick={() => startEdit(s)}
-                      >
-                        編集
-                      </button>
-                      <button
-                        className="rounded-md border px-3 py-1.5 text-xs hover:bg-slate-50"
-                        onClick={() => toggleStatus(s)}
-                        disabled={busy}
-                      >
-                        {s.status === "active" ? "無効化" : "有効化"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!loading && systems.length === 0 && (
-                <tr>
-                  <td className="py-4 text-slate-600" colSpan={5}>
-                    システムがまだ登録されていません
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            <TableWrap>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>並び</Th>
+                    <Th>名前</Th>
+                    <Th>状態</Th>
+                    <Th>URL</Th>
+                    <Th>操作</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {systems.map((s) => (
+                    <tr key={s.id}>
+                      <Td>{s.sortOrder}</Td>
+                      <Td>
+                        <div className="font-semibold">{s.name}</div>
+                        <div className="text-[12px] text-[#374151]/60">{s.description}</div>
+                      </Td>
+                      <Td>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
+                            s.status === "active"
+                              ? "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]"
+                              : "border-[#6B7280]/30 bg-[#6B7280]/10 text-[#6B7280]"
+                          }`}
+                        >
+                          {s.status}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span className="font-mono text-[12px] break-all">{s.url}</span>
+                      </Td>
+                      <Td>
+                        <div className="flex gap-2">
+                          <button
+                            className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F7FA]"
+                            onClick={() => startEdit(s)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F5F7FA]"
+                            onClick={() => toggleStatus(s)}
+                            disabled={busy}
+                          >
+                            {s.status === "active" ? "無効化" : "有効化"}
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                  {!loading && systems.length === 0 && (
+                    <tr>
+                      <Td>
+                        <span className="text-[#374151]/60">システムがまだ登録されていません</span>
+                      </Td>
+                      <Td></Td>
+                      <Td></Td>
+                      <Td></Td>
+                      <Td></Td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </TableWrap>
+          </CardBody>
+        </Card>
       </div>
     </div>
   );
