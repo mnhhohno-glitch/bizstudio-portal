@@ -32,8 +32,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-sm rounded-xl border p-6">
+    <div className="min-h-screen flex items-center justify-center p-6 bg-white text-slate-900">
+      <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6">
         <h1 className="text-xl font-semibold">ログイン</h1>
         <p className="text-sm text-gray-500 mt-1">
           メールとパスワードでログインします。
