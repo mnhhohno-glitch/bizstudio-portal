@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
@@ -15,7 +17,13 @@ function formatDate(iso: string) {
 }
 
 export default function JobsListPage() {
-  const jobs = DUMMY_JOBS;
+  const searchParams = useSearchParams();
+  const jobId = (searchParams.get("jobId") ?? "").trim() || undefined;
+
+  const jobs = useMemo(() => {
+    if (!jobId) return DUMMY_JOBS;
+    return DUMMY_JOBS.filter((j) => j.aiJobId === jobId);
+  }, [jobId]);
 
   async function handleExportAll() {
     try {
@@ -53,9 +61,24 @@ export default function JobsListPage() {
           className="rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8]"
           onClick={handleExportAll}
         >
-          全件Excel出力
+          {jobId ? "絞り込み結果をExcel出力" : "全件Excel出力"}
         </button>
       </div>
+
+      {/* 絞り込み中の表示 */}
+      {jobId && (
+        <div className="mt-4 flex items-center justify-between rounded-[8px] border border-[#E5E7EB] bg-white px-4 py-3">
+          <div className="text-[14px] text-[#374151]">
+            絞り込み中: <span className="font-medium text-[#2563EB]">jobId={jobId}</span>
+          </div>
+          <Link
+            href="/jobs"
+            className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1 text-[13px] text-[#374151] hover:bg-[#F5F7FA] transition-colors"
+          >
+            解除
+          </Link>
+        </div>
+      )}
 
       <div className="mt-6">
         <Card>
@@ -110,7 +133,9 @@ export default function JobsListPage() {
                   {jobs.length === 0 && (
                     <tr>
                       <td colSpan={5} className="py-8 text-center text-[14px] text-[#374151]/60">
-                        求人データがありません
+                        {jobId
+                          ? "該当する求人がありません"
+                          : "求人データがありません"}
                       </td>
                     </tr>
                   )}

@@ -1,6 +1,7 @@
 export type Job = {
   id: string;
   seq_no: number;
+  aiJobId: string; // 関連するAIジョブID
   company_name: string;
   job_title: string;
   job_db: string;
@@ -20,6 +21,7 @@ export const DUMMY_JOBS: Job[] = [
   {
     id: "job-001",
     seq_no: 1,
+    aiJobId: "AJ-2024-002",
     company_name: "株式会社テックイノベーション",
     job_title: "シニアフロントエンドエンジニア",
     job_db: "リクナビNEXT",
@@ -37,6 +39,7 @@ export const DUMMY_JOBS: Job[] = [
   {
     id: "job-002",
     seq_no: 2,
+    aiJobId: "AJ-2024-002",
     company_name: "グローバルコンサルティング合同会社",
     job_title: "ITコンサルタント",
     job_db: "doda",
@@ -54,6 +57,7 @@ export const DUMMY_JOBS: Job[] = [
   {
     id: "job-003",
     seq_no: 3,
+    aiJobId: "AJ-2024-003",
     company_name: "ヘルスケアソリューションズ株式会社",
     job_title: "バックエンドエンジニア",
     job_db: "マイナビ転職",
@@ -71,6 +75,7 @@ export const DUMMY_JOBS: Job[] = [
   {
     id: "job-004",
     seq_no: 4,
+    aiJobId: "AJ-2024-002",
     company_name: "エンタープライズシステムズ株式会社",
     job_title: "インフラエンジニア",
     job_db: "リクナビNEXT",
