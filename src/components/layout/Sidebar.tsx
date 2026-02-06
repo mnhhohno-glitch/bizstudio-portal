@@ -26,7 +26,8 @@ function NavItem({ href, label, icon }: Item) {
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const common: Item[] = [
-    { href: "/", label: "ダッシュボード", icon: "🏠" },
+    { href: "/jobs", label: "求人解析結果", icon: "📋" },
+    { href: "/ai-jobs", label: "AIジョブ（履歴）", icon: "🧠" },
     { href: "/systems", label: "データ管理", icon: "🗂️" },
   ];
 
