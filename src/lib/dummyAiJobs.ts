@@ -1,51 +1,75 @@
-export type AiJobStatus = "running" | "done" | "failed" | "queued";
+export type AiJobStatus = "completed" | "processing" | "failed";
 
 export type DummyAiJob = {
   id: string;
-  createdAt: string; // ISO
-  type: "求人AI抽出" | "面接資料生成";
-  target: string; // 例: 求人#123
+  executedAt: string; // ISO
+  candidateName: string; // 求職者名
+  caName: string; // 担当CA
+  jobDb: string; // 求人DB
+  areas: string[]; // 対象エリア
+  jobCount: number; // 求人数
   status: AiJobStatus;
-  actorName: string;
-  progress?: number; // running時
-  summary?: string;  // done時の結果要約（ダミー）
 };
 
 export const DUMMY_AI_JOBS: DummyAiJob[] = [
   {
-    id: "JOB-000123",
-    createdAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
-    type: "求人AI抽出",
-    target: "求人#123",
-    status: "running",
-    actorName: "将幸",
-    progress: 34,
+    id: "AJ-2024-001",
+    executedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    candidateName: "田中 太郎",
+    caName: "山田 花子",
+    jobDb: "リクナビNEXT",
+    areas: ["東京都", "神奈川県"],
+    jobCount: 45,
+    status: "processing",
   },
   {
-    id: "JOB-000122",
-    createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    type: "面接資料生成",
-    target: "候補者#88",
-    status: "queued",
-    actorName: "将幸",
-    progress: 0,
+    id: "AJ-2024-002",
+    executedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    candidateName: "佐藤 一郎",
+    caName: "鈴木 次郎",
+    jobDb: "マイナビ転職",
+    areas: ["大阪府", "兵庫県", "京都府"],
+    jobCount: 128,
+    status: "completed",
   },
   {
-    id: "JOB-000121",
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    type: "求人AI抽出",
-    target: "求人#121",
-    status: "done",
-    actorName: "将幸",
-    summary: "求人票から要件・魅力・注意点を抽出しました（ダミー）。",
+    id: "AJ-2024-003",
+    executedAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    candidateName: "高橋 美咲",
+    caName: "山田 花子",
+    jobDb: "doda",
+    areas: ["愛知県"],
+    jobCount: 67,
+    status: "completed",
   },
   {
-    id: "JOB-000120",
-    createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    type: "面接資料生成",
-    target: "候補者#72",
+    id: "AJ-2024-004",
+    executedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    candidateName: "伊藤 健二",
+    caName: "鈴木 次郎",
+    jobDb: "リクナビNEXT",
+    areas: ["福岡県", "熊本県"],
+    jobCount: 0,
     status: "failed",
-    actorName: "将幸",
-    summary: "生成に失敗しました（ダミー）。",
+  },
+  {
+    id: "AJ-2024-005",
+    executedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    candidateName: "渡辺 真由",
+    caName: "山田 花子",
+    jobDb: "エン転職",
+    areas: ["北海道"],
+    jobCount: 34,
+    status: "completed",
+  },
+  {
+    id: "AJ-2024-006",
+    executedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    candidateName: "中村 大輔",
+    caName: "鈴木 次郎",
+    jobDb: "マイナビ転職",
+    areas: ["東京都", "千葉県", "埼玉県"],
+    jobCount: 210,
+    status: "completed",
   },
 ];
