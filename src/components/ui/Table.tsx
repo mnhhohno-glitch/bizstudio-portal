@@ -16,6 +16,6 @@ export function Th({ children }: { children: ReactNode }) {
   );
 }
 
-export function Td({ children }: { children: ReactNode }) {
+export function Td({ children }: { children?: ReactNode }) {
   return <td className="border-b border-[#E5E7EB] px-3 py-2 text-[#374151]">{children}</td>;
 }
