@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { AuditTargetType } from "@prisma/client";
+import type { AuditTargetType, Prisma } from "@prisma/client";
 
 type WriteAuditArgs = {
   actorUserId: string | null;
@@ -23,7 +23,7 @@ export async function writeAudit(args: WriteAuditArgs) {
       action,
       targetType,
       targetId,
-      metadata: metadata ?? undefined,
+      metadata: metadata as Prisma.InputJsonValue | undefined,
     },
   });
 }
