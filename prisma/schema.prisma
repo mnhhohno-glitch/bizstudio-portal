@@ -25,6 +25,13 @@ enum AuditTargetType {
   AUTH
   USER
   SYSTEM
+  EMPLOYEE
+  CANDIDATE
+}
+
+enum EmployeeStatus {
+  active
+  disabled
 }
 
 model User {
@@ -90,4 +97,27 @@ model AuditLog {
   @@index([actorUserId, createdAt])
   @@index([targetType, createdAt])
   @@map("audit_logs")
+}
+
+model Employee {
+  id             String         @id @default(cuid())
+  employeeNumber String         @unique @map("employee_number")
+  name           String
+  status         EmployeeStatus @default(active)
+
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt      @map("updated_at")
+
+  @@map("employees")
+}
+
+model Candidate {
+  id              String   @id @default(cuid())
+  candidateNumber String   @unique @map("candidate_number")
+  name            String
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@map("candidates")
 }

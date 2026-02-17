@@ -33,6 +33,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
 
   const admin: Item[] = [
     { href: "/admin/users", label: "ユーザー管理", icon: "👤" },
+    { href: "/admin/master", label: "マスター管理", icon: "📇" },
     { href: "/admin/systems", label: "システム管理", icon: "⚙️" },
     { href: "/admin/audit", label: "監査ログ", icon: "📄" },
   ];
