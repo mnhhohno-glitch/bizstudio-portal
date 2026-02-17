@@ -117,9 +117,9 @@ export default function AdminUsersPage() {
 
   return (
     <div>
-      <PageTitle>ユーザー管理</PageTitle>
+      <PageTitle>社員管理</PageTitle>
       <PageSubtleText>
-        現在の有効ユーザー数: <span className="font-semibold">{activeCount}</span>
+        現在の有効社員数: <span className="font-semibold">{activeCount}</span>
       </PageSubtleText>
 
       {/* 招待発行 */}
@@ -235,7 +235,7 @@ export default function AdminUsersPage() {
                   {!loading && users.length === 0 && (
                     <tr>
                       <Td>
-                        <span className="text-[#374151]/60">ユーザーがいません</span>
+                        <span className="text-[#374151]/60">社員がいません</span>
                       </Td>
                       <Td></Td>
                       <Td></Td>
