@@ -163,7 +163,7 @@ async function main() {
     {
       name: "面接対策資料作成",
       description: "求職者向けの支援計画書・面接対策資料を生成",
-      url: "https://manus-input-packager-prod-production.up.railway.app",
+      url: "https://tender-reverence-production.up.railway.app",
       sortOrder: 3,
     },
   ];
