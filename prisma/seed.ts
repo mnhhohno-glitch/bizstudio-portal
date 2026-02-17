@@ -35,7 +35,27 @@ async function main() {
     },
   });
 
-  console.log("Seed completed: anonymous@local, admin@local created");
+  // 社員マスターデータ
+  const employees = [
+    { employeeNumber: "1000001", name: "大野 将幸" },
+    { employeeNumber: "1000007", name: "岡田 愛子" },
+    { employeeNumber: "1000008", name: "安藤 嘉富" },
+    { employeeNumber: "1000009", name: "南條 雄三" },
+  ];
+
+  for (const emp of employees) {
+    await prisma.employee.upsert({
+      where: { employeeNumber: emp.employeeNumber },
+      update: { name: emp.name },
+      create: {
+        employeeNumber: emp.employeeNumber,
+        name: emp.name,
+        status: "active",
+      },
+    });
+  }
+
+  console.log("Seed completed: users and employees created");
 }
 
 main()
