@@ -65,17 +65,13 @@ export default function LoginPage() {
           {error && <div className="text-[14px] text-[#DC2626]">{error}</div>}
 
           <button
-            className="w-full rounded-md border border-[#E5E7EB] bg-white px-4 py-2 text-[14px] text-[#374151] hover:bg-[#F5F7FA]"
+            className="w-full rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
             type="submit"
             disabled={loading}
           >
             {loading ? "処理中..." : "ログイン"}
           </button>
         </form>
-
-        <div className="mt-4 text-[12px] text-[#374151]/60">
-          ※ 初期admin: <code className="font-mono">admin@local</code> / <code className="font-mono">Admin1234!</code>
-        </div>
       </div>
     </div>
   );
