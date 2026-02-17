@@ -55,7 +55,50 @@ async function main() {
     });
   }
 
-  console.log("Seed completed: users and employees created");
+  // システムリンク（連携アプリ）
+  const systemLinks = [
+    {
+      name: "求人PDF解析ツール",
+      description: "求人票PDFから情報を抽出し、求職者向け資料を生成",
+      url: "https://kyuujin-pdf-tool-production.up.railway.app",
+      sortOrder: 1,
+    },
+    {
+      name: "候補者情報取り込み",
+      description: "求職者の履歴書・職務経歴書から質問文を生成",
+      url: "https://candidate-intake-production.up.railway.app",
+      sortOrder: 2,
+    },
+    {
+      name: "面接対策資料作成",
+      description: "求職者向けの支援計画書・面接対策資料を生成",
+      url: "https://manus-input-packager-prod-production.up.railway.app",
+      sortOrder: 3,
+    },
+  ];
+
+  for (const sys of systemLinks) {
+    // URLで既存チェック（重複登録を防ぐ）
+    const existing = await prisma.systemLink.findFirst({
+      where: { url: sys.url },
+    });
+    if (!existing) {
+      await prisma.systemLink.create({
+        data: {
+          name: sys.name,
+          description: sys.description,
+          url: sys.url,
+          sortOrder: sys.sortOrder,
+          status: "active",
+        },
+      });
+      console.log(`Created system link: ${sys.name}`);
+    } else {
+      console.log(`System link already exists: ${sys.name}`);
+    }
+  }
+
+  console.log("Seed completed: users, employees, and system links created");
 }
 
 main()
