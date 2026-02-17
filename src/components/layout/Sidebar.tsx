@@ -58,7 +58,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   return (
     <aside className="w-60 shrink-0 bg-[#1E3A8A] text-white">
       {/* ロゴ - クリックでトップへ */}
-      <Link href="/" className="h-16 border-b border-white/10 px-4 flex items-center hover:bg-white/5 transition-colors">
+      <Link href="/" className="h-16 bg-white px-4 flex items-center hover:bg-gray-50 transition-colors">
         <img src="/logo.png" alt="BIZSTUDIO" className="h-10 w-auto" />
       </Link>
 
