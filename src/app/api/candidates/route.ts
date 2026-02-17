@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 export async function GET() {
   try {
     const candidates = await prisma.candidate.findMany({
-      orderBy: { candidateNumber: "asc" },
+      orderBy: { candidateNumber: "desc" },
       select: {
         id: true,
         candidateNumber: true,

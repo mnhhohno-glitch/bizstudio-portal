@@ -7,7 +7,7 @@ import { z } from "zod";
 export async function GET() {
   try {
     const candidates = await prisma.candidate.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { candidateNumber: "desc" },
     });
     return NextResponse.json(candidates);
   } catch (error) {

@@ -21,7 +21,7 @@ function formatGender(gender: string | null) {
 export default async function CandidateMasterPage() {
   const [candidates, employees] = await Promise.all([
     prisma.candidate.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { candidateNumber: "desc" },
       include: { employee: true },
     }),
     prisma.employee.findMany({
