@@ -13,14 +13,20 @@ export async function GET() {
         id: true,
         candidateNumber: true,
         name: true,
+        employee: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
-    // レスポンス形式を統一（candidateNo として返す）
+    // レスポンス形式を統一（candidateNo, careerAdvisor として返す）
     const response = candidates.map((c) => ({
       id: c.id,
       candidateNo: c.candidateNumber,
       name: c.name,
+      careerAdvisor: c.employee?.name || null,
     }));
 
     return NextResponse.json(response, {
