@@ -105,6 +105,9 @@ model Employee {
   name           String
   status         EmployeeStatus @default(active)
 
+  // 担当求職者
+  candidates     Candidate[]
+
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt      @map("updated_at")
 
@@ -115,6 +118,12 @@ model Candidate {
   id              String   @id @default(cuid())
   candidateNumber String   @unique @map("candidate_number")
   name            String
+  nameKana        String?  @map("name_kana")
+  gender          String?  // "male" | "female" | "other"
+
+  // 担当キャリアアドバイザー
+  employeeId      String?  @map("employee_id")
+  employee        Employee? @relation(fields: [employeeId], references: [id])
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")

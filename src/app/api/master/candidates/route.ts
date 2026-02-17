@@ -23,6 +23,11 @@ export async function GET() {
 const createSchema = z.object({
   candidateNumber: z.string().min(1, "求職者番号を入力してください"),
   name: z.string().min(1, "氏名を入力してください"),
+  nameKana: z.string().min(1, "ふりがなを入力してください"),
+  gender: z.enum(["male", "female", "other"], {
+    message: "性別を選択してください",
+  }),
+  employeeId: z.string().min(1, "担当キャリアアドバイザーを選択してください"),
 });
 
 export async function POST(request: NextRequest) {
@@ -37,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { candidateNumber, name } = parsed.data;
+    const { candidateNumber, name, nameKana, gender, employeeId } = parsed.data;
 
     // 氏名バリデーション
     const nameValidation = validateName(name);
@@ -59,12 +64,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 担当キャリアアドバイザーの存在確認
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId },
+    });
+    if (!employee) {
+      return NextResponse.json(
+        { error: "指定された担当キャリアアドバイザーが見つかりません" },
+        { status: 400 }
+      );
+    }
+
     // 氏名を整形して登録
     const formattedName = formatName(name);
     const candidate = await prisma.candidate.create({
       data: {
         candidateNumber,
         name: formattedName,
+        nameKana: nameKana.trim(),
+        gender,
+        employeeId,
       },
     });
 
