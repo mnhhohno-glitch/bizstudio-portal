@@ -1,46 +1,18 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import { prisma } from "@/lib/prisma";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 
-type LogRow = {
-  id: string;
-  action: string;
-  targetType: string;
-  targetId: string | null;
-  createdAt: string;
-  actorUser: {
-    email: string;
-    name: string;
-  };
-};
-
-export default function AdminAuditPage() {
-  const [logs, setLogs] = useState<LogRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  async function fetchLogs() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/admin/audit");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "取得に失敗しました");
-      setLogs(data.logs ?? []);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "取得に失敗しました";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    fetchLogs();
-  }, []);
+export default async function AdminAuditPage() {
+  const logs = await prisma.auditLog.findMany({
+    take: 200,
+    orderBy: { createdAt: "desc" },
+    include: {
+      actorUser: {
+        select: { email: true, name: true },
+      },
+    },
+  });
 
   return (
     <div>
@@ -51,21 +23,8 @@ export default function AdminAuditPage() {
 
       <div className="mt-6">
         <Card>
-          <CardHeader
-            title="ログ一覧"
-            right={
-              <button
-                className="rounded-md border border-[#E5E7EB] bg-white px-4 py-2 text-[14px] text-[#374151] hover:bg-[#F5F7FA]"
-                onClick={fetchLogs}
-                disabled={loading}
-              >
-                {loading ? "更新中..." : "更新"}
-              </button>
-            }
-          />
+          <CardHeader title="ログ一覧" />
           <CardBody>
-            {error && <div className="mb-3 text-[14px] text-[#DC2626]">{error}</div>}
-
             <TableWrap>
               <Table>
                 <thead>
@@ -81,7 +40,7 @@ export default function AdminAuditPage() {
                     <tr key={l.id}>
                       <Td>
                         <span className="font-mono text-[13px]">
-                          {new Date(l.createdAt).toLocaleString()}
+                          {l.createdAt.toLocaleString("ja-JP")}
                         </span>
                       </Td>
                       <Td>
@@ -113,7 +72,7 @@ export default function AdminAuditPage() {
                       </Td>
                     </tr>
                   ))}
-                  {!loading && logs.length === 0 && (
+                  {logs.length === 0 && (
                     <tr>
                       <Td>
                         <span className="text-[#374151]/60">ログがありません</span>
