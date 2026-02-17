@@ -48,12 +48,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "https://candidate-intake-production.up.railway.app", label: "面談登録", icon: "👥" },
   ];
 
-  const common: Item[] = [
-    { href: "/jobs", label: "求人解析結果", icon: "📋" },
-    { href: "/ai-jobs", label: "AIジョブ（履歴）", icon: "🧠" },
-    { href: "/systems", label: "データ管理", icon: "🗂️" },
-  ];
-
   const admin: Item[] = [
     { href: "/admin/users", label: "社員管理", icon: "👤" },
     { href: "/admin/master", label: "求職者管理", icon: "📇" },
@@ -63,9 +57,10 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <aside className="w-60 shrink-0 bg-[#1E3A8A] text-white">
-      <div className="h-16 border-b border-white/10 px-4 flex items-center">
-        <div className="text-[20px] font-bold tracking-wide text-[#2563EB]">LOGO</div>
-      </div>
+      {/* ロゴ - クリックでトップへ */}
+      <Link href="/" className="h-16 border-b border-white/10 px-4 flex items-center hover:bg-white/5 transition-colors">
+        <img src="/logo.png" alt="BIZSTUDIO" className="h-10 w-auto" />
+      </Link>
 
       <nav className="py-2">
         {/* 外部アプリ */}
@@ -75,16 +70,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
         {apps.map((it) => (
           <ExternalNavItem key={it.href} {...it} />
         ))}
-
-        {/* 内部ページ */}
-        <div className="mt-2 border-t border-white/10 pt-2">
-          <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
-            データ
-          </div>
-          {common.map((it) => (
-            <NavItem key={it.href} {...it} />
-          ))}
-        </div>
 
         {/* 管理者メニュー */}
         {isAdmin && (
