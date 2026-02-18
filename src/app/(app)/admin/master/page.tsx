@@ -3,6 +3,9 @@ import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import CandidateForm from "./CandidateForm";
+import Link from "next/link";
+
+const PAGE_SIZE = 20;
 
 function formatDate(date: Date) {
   return date.toLocaleString("ja-JP");
@@ -18,17 +21,30 @@ function formatGender(gender: string | null) {
   }
 }
 
-export default async function CandidateMasterPage() {
-  const [candidates, employees] = await Promise.all([
+type Props = {
+  searchParams: Promise<{ page?: string }>;
+};
+
+export default async function CandidateMasterPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const currentPage = Math.max(1, parseInt(params.page || "1", 10));
+  const skip = (currentPage - 1) * PAGE_SIZE;
+
+  const [candidates, totalCount, employees] = await Promise.all([
     prisma.candidate.findMany({
       orderBy: { candidateNumber: "desc" },
       include: { employee: true },
+      skip,
+      take: PAGE_SIZE,
     }),
+    prisma.candidate.count(),
     prisma.employee.findMany({
       where: { status: "active" },
       orderBy: { employeeNumber: "asc" },
     }),
   ]);
+
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   return (
     <div>
@@ -88,6 +104,42 @@ export default async function CandidateMasterPage() {
                 </tbody>
               </Table>
             </TableWrap>
+
+            {/* ページネーション */}
+            <div className="mt-4 flex items-center justify-between border-t border-[#E5E7EB] pt-4">
+              <div className="text-[13px] text-[#374151]/70">
+                全 {totalCount.toLocaleString()} 件中 {skip + 1}〜{Math.min(skip + PAGE_SIZE, totalCount)} 件を表示
+              </div>
+              <div className="flex items-center gap-2">
+                {currentPage > 1 ? (
+                  <Link
+                    href={`/admin/master?page=${currentPage - 1}`}
+                    className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#374151] hover:bg-[#F5F7FA]"
+                  >
+                    前へ
+                  </Link>
+                ) : (
+                  <span className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#374151]/40">
+                    前へ
+                  </span>
+                )}
+                <span className="text-[13px] text-[#374151]">
+                  {currentPage} / {totalPages}
+                </span>
+                {currentPage < totalPages ? (
+                  <Link
+                    href={`/admin/master?page=${currentPage + 1}`}
+                    className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#374151] hover:bg-[#F5F7FA]"
+                  >
+                    次へ
+                  </Link>
+                ) : (
+                  <span className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#374151]/40">
+                    次へ
+                  </span>
+                )}
+              </div>
+            </div>
           </CardBody>
         </Card>
       </div>
