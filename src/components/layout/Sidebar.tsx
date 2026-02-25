@@ -48,9 +48,14 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "https://candidate-intake-production.up.railway.app", label: "面談登録", icon: "👥" },
   ];
 
-  const admin: Item[] = [
-    { href: "/admin/users", label: "社員管理", icon: "👤" },
+  // 全ユーザー向けメニュー
+  const common: Item[] = [
     { href: "/admin/master", label: "求職者管理", icon: "📇" },
+  ];
+
+  // 管理者専用メニュー
+  const adminOnly: Item[] = [
+    { href: "/admin/users", label: "社員管理", icon: "👤" },
     { href: "/admin/audit", label: "監査ログ", icon: "📄" },
   ];
 
@@ -70,17 +75,19 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
           <ExternalNavItem key={it.href} {...it} />
         ))}
 
-        {/* 管理者メニュー */}
-        {isAdmin && (
-          <div className="mt-2 border-t border-white/10 pt-2">
-            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
-              管理
-            </div>
-            {admin.map((it) => (
-              <NavItem key={it.href} {...it} />
-            ))}
+        {/* 全ユーザー向けメニュー */}
+        <div className="mt-2 border-t border-white/10 pt-2">
+          <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
+            管理
           </div>
-        )}
+          {common.map((it) => (
+            <NavItem key={it.href} {...it} />
+          ))}
+          {/* 管理者専用メニュー */}
+          {isAdmin && adminOnly.map((it) => (
+            <NavItem key={it.href} {...it} />
+          ))}
+        </div>
       </nav>
     </aside>
   );

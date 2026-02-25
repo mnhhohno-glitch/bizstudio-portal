@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatName, validateName } from "@/lib/formatName";
+import { getSessionUser } from "@/lib/auth";
 import { z } from "zod";
 
 // GET: 求職者一覧取得
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   try {
     const candidates = await prisma.candidate.findMany({
       orderBy: { candidateNumber: "desc" },
@@ -31,6 +37,11 @@ const createSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const parsed = createSchema.safeParse(body);

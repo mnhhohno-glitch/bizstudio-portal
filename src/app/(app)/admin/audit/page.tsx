@@ -1,9 +1,22 @@
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 
 export default async function AdminAuditPage() {
+  const user = await getSessionUser();
+  if (!user || user.role !== "admin") {
+    return (
+      <div className="rounded-lg border bg-white p-6">
+        <h1 className="text-xl font-semibold">403 Forbidden</h1>
+        <p className="mt-2 text-slate-600 text-sm">
+          このページにアクセスする権限がありません。
+        </p>
+      </div>
+    );
+  }
+
   const logs = await prisma.auditLog.findMany({
     take: 200,
     orderBy: { createdAt: "desc" },
