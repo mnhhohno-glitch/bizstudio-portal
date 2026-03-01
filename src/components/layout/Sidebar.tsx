@@ -84,22 +84,29 @@ function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
 }
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
+  const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL
+    || "https://tender-reverence-production.up.railway.app";
+  const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
+    || "https://kyuujin-pdf-tool-production.up.railway.app";
+  const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
+    || "https://candidate-intake-production.up.railway.app";
+
   const apps: AppItem[] = [
     {
-      href: "https://tender-reverence-production.up.railway.app",
+      href: materialCreatorUrl,
       label: "資料生成",
       icon: "📝",
       requiresAuth: true,
       appId: "material_creator",
     },
     {
-      href: "https://web-production-95808.up.railway.app",
+      href: jobAnalyzerUrl,
       label: "求人出力",
       icon: "📄",
       requiresAuth: false,
     },
     {
-      href: "https://candidate-intake-production.up.railway.app",
+      href: candidateIntakeUrl,
       label: "面談登録",
       icon: "👥",
       requiresAuth: false,

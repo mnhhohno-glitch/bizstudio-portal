@@ -3,6 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { generateToken, hashToken } from "@/lib/encryption";
 
+const APP_URL_ENV_MAP: Record<string, string | undefined> = {
+  material_creator: process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL,
+  job_analyzer: process.env.NEXT_PUBLIC_JOB_ANALYZER_URL,
+  candidate_intake: process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL,
+};
+
 const APP_ID_REGISTRY: Record<string, boolean> = {
   material_creator: true,
 };
@@ -55,10 +61,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const targetUrl = APP_URL_ENV_MAP[target_app] || systemLink.url;
+
     return NextResponse.json({
       token,
       expires_at: expiresAt.toISOString(),
-      target_url: systemLink.url,
+      target_url: targetUrl,
     });
   } catch (error) {
     console.error("Failed to issue app token:", error);
