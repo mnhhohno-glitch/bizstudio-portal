@@ -22,25 +22,33 @@ async function main() {
     },
   });
 
-  // 初期admin（あなた用） - パスワードは後で変更できる
+  // admin@local を削除（不要なため）
+  const oldAdmin = await prisma.user.findUnique({ where: { email: "admin@local" } });
+  if (oldAdmin) {
+    await prisma.user.delete({ where: { email: "admin@local" } });
+    console.log("Deleted old admin@local user");
+  }
+
+  // 正式な管理者アカウント: 大野 将幸
   await prisma.user.upsert({
-    where: { email: "admin@local" },
-    update: {},
+    where: { email: "masayuki_oono@bizstudio.co.jp" },
+    update: { role: "admin" },
     create: {
-      name: "Admin",
-      email: "admin@local",
-      passwordHash: bcrypt.hashSync("Admin1234!", 10),
+      name: "大野 将幸",
+      email: "masayuki_oono@bizstudio.co.jp",
+      passwordHash: bcrypt.hashSync("BizStudio2026!", 10),
       role: "admin",
       status: "active",
     },
   });
+  console.log("Admin user configured: masayuki_oono@bizstudio.co.jp");
 
   // 社員マスターデータ
   const employees = [
-    { employeeNumber: "1000001", name: "大野 将幸" },
-    { employeeNumber: "1000007", name: "岡田 愛子" },
-    { employeeNumber: "1000008", name: "安藤 嘉富" },
-    { employeeNumber: "1000009", name: "南條 雄三" },
+    { employeeNumber: "BS1000001", name: "大野 将幸" },
+    { employeeNumber: "BS1000007", name: "岡田 愛子" },
+    { employeeNumber: "BS1000008", name: "安藤 嘉富" },
+    { employeeNumber: "BS1000009", name: "南條 雄三" },
   ];
 
   for (const emp of employees) {

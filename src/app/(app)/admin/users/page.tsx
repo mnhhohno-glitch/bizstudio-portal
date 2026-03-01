@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { decrypt } from "@/lib/encryption";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 import InviteForm from "./InviteForm";
 import UserStatusButton from "./UserStatusButton";
+import ManusKeyButton from "./ManusKeyButton";
 
 export default async function AdminUsersPage() {
   const user = await getSessionUser();
@@ -21,6 +23,23 @@ export default async function AdminUsersPage() {
 
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
+  });
+
+  const usersWithManusInfo = users.map((u) => {
+    let manusLast4: string | null = null;
+    if (u.manusApiKeyEncrypted) {
+      try {
+        const decrypted = decrypt(u.manusApiKeyEncrypted);
+        manusLast4 = decrypted.slice(-4);
+      } catch {
+        manusLast4 = "****";
+      }
+    }
+    return {
+      ...u,
+      manusLast4,
+      manusSetAt: u.manusApiKeySetAt?.toISOString() ?? null,
+    };
   });
 
   const activeCount = users.filter((u) => u.status === "active").length;
@@ -60,7 +79,7 @@ export default async function AdminUsersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => (
+                  {usersWithManusInfo.map((u) => (
                     <tr key={u.id}>
                       <Td>{u.name}</Td>
                       <Td><span className="font-mono">{u.email}</span></Td>
@@ -88,15 +107,24 @@ export default async function AdminUsersPage() {
                         </span>
                       </Td>
                       <Td>
-                        <UserStatusButton
-                          userId={u.id}
-                          email={u.email}
-                          currentStatus={u.status}
-                        />
+                        <div className="flex gap-2">
+                          <ManusKeyButton
+                            userId={u.id}
+                            userName={u.name}
+                            hasKey={!!u.manusApiKeyEncrypted}
+                            last4={u.manusLast4}
+                            setAt={u.manusSetAt}
+                          />
+                          <UserStatusButton
+                            userId={u.id}
+                            email={u.email}
+                            currentStatus={u.status}
+                          />
+                        </div>
                       </Td>
                     </tr>
                   ))}
-                  {users.length === 0 && (
+                  {usersWithManusInfo.length === 0 && (
                     <tr>
                       <Td>
                         <span className="text-[#374151]/60">社員がいません</span>
