@@ -57,7 +57,12 @@ function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
       }
 
       const { token, target_url } = await response.json();
-      window.open(`${target_url}?auth_token=${token}`, "_blank");
+      // ai-resume-generator は /auth/callback?token=xxx パターンを使用
+      // 他のアプリは従来の ?auth_token=xxx パターンを維持
+      const redirectUrl = appId === "ai-resume-generator"
+        ? `${target_url}/auth/callback?token=${token}`
+        : `${target_url}?auth_token=${token}`;
+      window.open(redirectUrl, "_blank");
     } catch {
       alert("トークン取得に失敗しました");
     } finally {
