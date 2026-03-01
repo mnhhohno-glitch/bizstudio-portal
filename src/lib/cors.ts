@@ -1,10 +1,24 @@
 import { NextResponse } from "next/server";
 
-const ALLOWED_ORIGINS = [
+const HARDCODED_ORIGINS = [
+  // Production
   "https://tender-reverence-production.up.railway.app",
   "https://candidate-intake-production.up.railway.app",
   "https://kyuujin-pdf-tool-production.up.railway.app",
+  // Staging
+  "https://tender-reverence-staging.up.railway.app",
+  "https://candidate-intake-staging.up.railway.app",
 ];
+
+function getAllowedOrigins(): string[] {
+  const origins = [...HARDCODED_ORIGINS];
+  const envOrigins = process.env.ALLOWED_ORIGINS;
+  if (envOrigins) {
+    const additional = envOrigins.split(",").map((o) => o.trim()).filter(Boolean);
+    origins.push(...additional);
+  }
+  return origins;
+}
 
 export function getCorsHeaders(origin: string | null): Record<string, string> {
   const headers: Record<string, string> = {
@@ -13,7 +27,8 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
     "Access-Control-Allow-Credentials": "true",
   };
 
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  const allowedOrigins = getAllowedOrigins();
+  if (origin && allowedOrigins.includes(origin)) {
     headers["Access-Control-Allow-Origin"] = origin;
   }
 
