@@ -2,9 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 type Item = { href: string; label: string; icon: string };
-type ExternalItem = { href: string; label: string; icon: string };
+type AppItem = {
+  href: string;
+  label: string;
+  icon: string;
+  requiresAuth: boolean;
+  appId?: string;
+};
 
 function NavItem({ href, label, icon }: Item) {
   const pathname = usePathname();
@@ -25,15 +32,51 @@ function NavItem({ href, label, icon }: Item) {
   );
 }
 
-function ExternalNavItem({ href, label, icon }: ExternalItem) {
+function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    if (!requiresAuth || !appId) {
+      return;
+    }
+
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/issue-app-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_app: appId }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        alert(err.error || "トークン取得に失敗しました");
+        return;
+      }
+
+      const { token, target_url } = await response.json();
+      window.open(`${target_url}?auth_token=${token}`, "_blank");
+    } catch {
+      alert("トークン取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="relative flex h-12 items-center gap-3 px-4 text-[14px] transition-colors text-white/90 hover:bg-white/10"
+      href={requiresAuth ? "#" : href}
+      target={requiresAuth ? undefined : "_blank"}
+      rel={requiresAuth ? undefined : "noopener noreferrer"}
+      onClick={handleClick}
+      className={[
+        "relative flex h-12 items-center gap-3 px-4 text-[14px] transition-colors text-white/90",
+        loading ? "opacity-50 cursor-wait" : "hover:bg-white/10",
+      ].join(" ")}
     >
-      <span className="text-[16px]">{icon}</span>
+      <span className="text-[16px]">{loading ? "⏳" : icon}</span>
       <span className="font-medium">{label}</span>
       <span className="ml-auto text-[12px] opacity-60">↗</span>
     </a>
@@ -41,19 +84,33 @@ function ExternalNavItem({ href, label, icon }: ExternalItem) {
 }
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
-  // 外部アプリケーション
-  const apps: ExternalItem[] = [
-    { href: "https://tender-reverence-production.up.railway.app", label: "資料生成", icon: "📝" },
-    { href: "https://web-production-95808.up.railway.app", label: "求人出力", icon: "📄" },
-    { href: "https://candidate-intake-production.up.railway.app", label: "面談登録", icon: "👥" },
+  const apps: AppItem[] = [
+    {
+      href: "https://tender-reverence-production.up.railway.app",
+      label: "資料生成",
+      icon: "📝",
+      requiresAuth: true,
+      appId: "material_creator",
+    },
+    {
+      href: "https://web-production-95808.up.railway.app",
+      label: "求人出力",
+      icon: "📄",
+      requiresAuth: false,
+    },
+    {
+      href: "https://candidate-intake-production.up.railway.app",
+      label: "面談登録",
+      icon: "👥",
+      requiresAuth: false,
+    },
   ];
 
-  // 全ユーザー向けメニュー
   const common: Item[] = [
     { href: "/admin/master", label: "求職者管理", icon: "📇" },
+    { href: "/settings", label: "設定", icon: "⚙️" },
   ];
 
-  // 管理者専用メニュー
   const adminOnly: Item[] = [
     { href: "/admin/users", label: "社員管理", icon: "👤" },
     { href: "/admin/audit", label: "監査ログ", icon: "📄" },
@@ -61,21 +118,18 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <aside className="w-60 shrink-0 bg-[#1E3A8A] text-white">
-      {/* ロゴ - クリックでトップへ */}
       <Link href="/" className="h-16 bg-white px-4 flex items-center hover:bg-gray-50 transition-colors">
         <img src="/logo.png" alt="BIZSTUDIO" className="h-10 w-auto" />
       </Link>
 
       <nav className="py-2">
-        {/* 外部アプリ */}
         <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
           アプリ
         </div>
         {apps.map((it) => (
-          <ExternalNavItem key={it.href} {...it} />
+          <AppNavItem key={it.href} {...it} />
         ))}
 
-        {/* 全ユーザー向けメニュー */}
         <div className="mt-2 border-t border-white/10 pt-2">
           <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
             管理
@@ -83,7 +137,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
           {common.map((it) => (
             <NavItem key={it.href} {...it} />
           ))}
-          {/* 管理者専用メニュー */}
           {isAdmin && adminOnly.map((it) => (
             <NavItem key={it.href} {...it} />
           ))}

@@ -42,25 +42,35 @@ model User {
   role         UserRole   @default(member)
   status       UserStatus @default(active)
 
+  // ManusAPIキー（AES-256-GCM暗号化済み）
+  manusApiKeyEncrypted String?   @map("manus_api_key_encrypted")
+  manusApiKeySetAt     DateTime? @map("manus_api_key_set_at")
+
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt      @map("updated_at")
 
   auditLogs    AuditLog[] @relation("ActorAuditLogs")
   invitesMade  Invite[]   @relation("InvitesMade")
+  appTokens    AppToken[]
+  appSessions  AppSession[]
 
   @@map("users")
 }
 
 model SystemLink {
-  id          String       @id @default(cuid())
-  name        String
-  description String
-  url         String
-  status      SystemStatus @default(active)
-  sortOrder   Int          @default(0) @map("sort_order")
+  id           String       @id @default(cuid())
+  name         String
+  description  String
+  url          String
+  status       SystemStatus @default(active)
+  sortOrder    Int          @default(0) @map("sort_order")
 
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt      @map("updated_at")
+  // SSO認証連携
+  requiresAuth Boolean      @default(false) @map("requires_auth")
+  appId        String?      @map("app_id")
+
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt      @map("updated_at")
 
   @@map("systems")
 }
@@ -129,4 +139,33 @@ model Candidate {
   updatedAt       DateTime @updatedAt      @map("updated_at")
 
   @@map("candidates")
+}
+
+// 外部アプリ遷移用ワンタイムトークン
+model AppToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @map("token_hash")
+  targetApp String    @map("target_app")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([tokenHash])
+  @@map("app_tokens")
+}
+
+// 外部アプリ用セッション
+model AppSession {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  user             User     @relation(fields: [userId], references: [id])
+  sessionTokenHash String   @map("session_token_hash")
+  appId            String   @map("app_id")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([sessionTokenHash])
+  @@map("app_sessions")
 }

@@ -54,6 +54,7 @@ export default async function AdminUsersPage() {
                     <Th>名前</Th>
                     <Th>メール</Th>
                     <Th>権限</Th>
+                    <Th>Manus連携</Th>
                     <Th>状態</Th>
                     <Th>操作</Th>
                   </tr>
@@ -64,6 +65,17 @@ export default async function AdminUsersPage() {
                       <Td>{u.name}</Td>
                       <Td><span className="font-mono">{u.email}</span></Td>
                       <Td>{u.role}</Td>
+                      <Td>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
+                            u.manusApiKeyEncrypted
+                              ? "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]"
+                              : "border-[#6B7280]/30 bg-[#6B7280]/10 text-[#6B7280]"
+                          }`}
+                        >
+                          {u.manusApiKeyEncrypted ? "設定済み" : "未設定"}
+                        </span>
+                      </Td>
                       <Td>
                         <span
                           className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
@@ -89,6 +101,7 @@ export default async function AdminUsersPage() {
                       <Td>
                         <span className="text-[#374151]/60">社員がいません</span>
                       </Td>
+                      <Td></Td>
                       <Td></Td>
                       <Td></Td>
                       <Td></Td>

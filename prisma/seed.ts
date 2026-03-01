@@ -153,18 +153,24 @@ async function main() {
       description: "求人票PDFから情報を抽出し、求職者向け資料を生成",
       url: "https://kyuujin-pdf-tool-production.up.railway.app",
       sortOrder: 1,
+      requiresAuth: false,
+      appId: null,
     },
     {
       name: "候補者情報取り込み",
       description: "求職者の履歴書・職務経歴書から質問文を生成",
       url: "https://candidate-intake-production.up.railway.app",
       sortOrder: 2,
+      requiresAuth: false,
+      appId: null,
     },
     {
       name: "面接対策資料作成",
       description: "求職者向けの支援計画書・面接対策資料を生成",
       url: "https://tender-reverence-production.up.railway.app",
       sortOrder: 3,
+      requiresAuth: true,
+      appId: "material_creator",
     },
   ];
 
@@ -181,11 +187,21 @@ async function main() {
           url: sys.url,
           sortOrder: sys.sortOrder,
           status: "active",
+          requiresAuth: sys.requiresAuth,
+          appId: sys.appId,
         },
       });
       console.log(`Created system link: ${sys.name}`);
     } else {
-      console.log(`System link already exists: ${sys.name}`);
+      // 既存の場合は requiresAuth, appId を更新
+      await prisma.systemLink.update({
+        where: { id: existing.id },
+        data: {
+          requiresAuth: sys.requiresAuth,
+          appId: sys.appId,
+        },
+      });
+      console.log(`Updated system link: ${sys.name}`);
     }
   }
 

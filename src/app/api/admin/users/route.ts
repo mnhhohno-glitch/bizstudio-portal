@@ -17,8 +17,19 @@ export async function GET() {
       role: true,
       status: true,
       createdAt: true,
+      manusApiKeyEncrypted: true,
     },
   });
 
-  return NextResponse.json({ users });
+  const usersWithManusStatus = users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    status: u.status,
+    createdAt: u.createdAt,
+    has_manus_key: !!u.manusApiKeyEncrypted,
+  }));
+
+  return NextResponse.json({ users: usersWithManusStatus });
 }
