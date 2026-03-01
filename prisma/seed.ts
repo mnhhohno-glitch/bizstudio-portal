@@ -181,12 +181,12 @@ async function main() {
       appId: "material_creator",
     },
     {
-      name: "履歴書・職経歴書生成",
+      name: "履歴書・職務経歴書生成",
       description: "PDFとExcelから履歴書・職務経歴書を自動生成",
       url: "https://ai-resume-generator-production-66cb.up.railway.app",
       sortOrder: 4,
       requiresAuth: true,
-      appId: "ai_resume_generator",
+      appId: "ai-resume-generator",
     },
   ];
 
