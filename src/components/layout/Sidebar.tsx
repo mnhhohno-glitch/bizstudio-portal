@@ -114,12 +114,14 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   ];
 
   const common: Item[] = [
+    { href: "/announcements", label: "お知らせ", icon: "📢" },
     { href: "/admin/master", label: "求職者管理", icon: "📇" },
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
 
   const adminOnly: Item[] = [
     { href: "/admin/users", label: "社員管理", icon: "👤" },
+    { href: "/admin/announcements", label: "お知らせ管理", icon: "📢" },
     { href: "/admin/audit", label: "監査ログ", icon: "📄" },
   ];
 

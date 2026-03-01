@@ -27,6 +27,20 @@ enum AuditTargetType {
   SYSTEM
   EMPLOYEE
   CANDIDATE
+  ANNOUNCEMENT
+}
+
+enum AnnouncementCategory {
+  IMPORTANT
+  FEATURE
+  FIX
+  MAINTENANCE
+  RELEASE
+}
+
+enum AnnouncementStatus {
+  PUBLISHED
+  DRAFT
 }
 
 enum EmployeeStatus {
@@ -49,10 +63,11 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt      @map("updated_at")
 
-  auditLogs    AuditLog[] @relation("ActorAuditLogs")
-  invitesMade  Invite[]   @relation("InvitesMade")
-  appTokens    AppToken[]
-  appSessions  AppSession[]
+  auditLogs     AuditLog[]     @relation("ActorAuditLogs")
+  invitesMade   Invite[]       @relation("InvitesMade")
+  appTokens     AppToken[]
+  appSessions   AppSession[]
+  announcements Announcement[]
 
   @@map("users")
 }
@@ -168,4 +183,20 @@ model AppSession {
 
   @@index([sessionTokenHash])
   @@map("app_sessions")
+}
+
+// お知らせ
+model Announcement {
+  id           String               @id @default(cuid())
+  title        String
+  content      String               @db.Text
+  category     AnnouncementCategory
+  status       AnnouncementStatus   @default(DRAFT)
+  publishedAt  DateTime?            @map("published_at")
+  authorUserId String               @map("author_user_id")
+  author       User                 @relation(fields: [authorUserId], references: [id])
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  @@map("announcements")
 }
