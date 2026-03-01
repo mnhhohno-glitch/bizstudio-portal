@@ -183,16 +183,20 @@ export default function SettingsPage() {
                 )}
               </div>
             </form>
-            <p className="text-slate-500 text-xs">
+            <div className="rounded bg-slate-50 border border-slate-200 p-3 text-slate-600 text-xs">
+              <p className="font-medium mb-1">APIキーの取得方法:</p>
+              <p>
+                ManusのダッシュボードのSettings → Integration → Build with Manus APIからAPIキーを取得してください。
+              </p>
               <a
-                href="https://manus.app/dashboard"
+                href="https://manus.app/settings"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline"
+                className="inline-block mt-2 text-blue-600 hover:underline"
               >
-                ManusダッシュボードでAPIキーを取得する →
+                Manusダッシュボードを開く →
               </a>
-            </p>
+            </div>
           </div>
         )}
       </div>
