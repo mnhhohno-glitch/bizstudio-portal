@@ -5,6 +5,7 @@ const HARDCODED_ORIGINS = [
   "https://tender-reverence-production.up.railway.app",
   "https://candidate-intake-production.up.railway.app",
   "https://kyuujin-pdf-tool-production.up.railway.app",
+  "https://ai-resume-generator-production-66cb.up.railway.app",
   // Staging
   "https://tender-reverence-staging.up.railway.app",
   "https://candidate-intake-staging.up.railway.app",
