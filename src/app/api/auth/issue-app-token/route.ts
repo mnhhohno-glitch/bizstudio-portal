@@ -7,10 +7,12 @@ const APP_URL_ENV_MAP: Record<string, string | undefined> = {
   material_creator: process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL,
   job_analyzer: process.env.NEXT_PUBLIC_JOB_ANALYZER_URL,
   candidate_intake: process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL,
+  "ai-resume-generator": process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL,
 };
 
 const APP_ID_REGISTRY: Record<string, boolean> = {
   material_creator: true,
+  "ai-resume-generator": true,
 };
 
 export async function POST(request: NextRequest) {
