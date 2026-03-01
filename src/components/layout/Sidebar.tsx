@@ -90,6 +90,8 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     || "https://kyuujin-pdf-tool-production.up.railway.app";
   const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
     || "https://candidate-intake-production.up.railway.app";
+  const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
+    || "https://ai-resume-generator-production-66cb.up.railway.app";
 
   const apps: AppItem[] = [
     {
@@ -110,6 +112,13 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
       label: "面談登録",
       icon: "👥",
       requiresAuth: false,
+    },
+    {
+      href: resumeGeneratorUrl,
+      label: "履歴書生成",
+      icon: "📋",
+      requiresAuth: true,
+      appId: "ai-resume-generator",
     },
   ];
 
