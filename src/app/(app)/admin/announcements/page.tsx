@@ -33,6 +33,8 @@ export default function AdminAnnouncementsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [aiFormatting, setAiFormatting] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const fetchAnnouncements = useCallback(async () => {
     setLoading(true);
@@ -111,6 +113,36 @@ export default function AdminAnnouncementsPage() {
     if (!dateStr) return "—";
     const date = new Date(dateStr);
     return `${date.getMonth() + 1}/${date.getDate()}`;
+  };
+
+  const handleAiFormat = async () => {
+    if (formData.content.trim().length < 10) return;
+
+    setAiFormatting(true);
+    setAiError(null);
+
+    try {
+      const res = await fetch("/api/admin/announcements/ai-format", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: formData.content }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setAiError(data.error || "AI整理に失敗しました");
+        setTimeout(() => setAiError(null), 3000);
+        return;
+      }
+
+      const data = await res.json();
+      setFormData({ ...formData, content: data.formattedContent });
+    } catch {
+      setAiError("AI整理に失敗しました");
+      setTimeout(() => setAiError(null), 3000);
+    } finally {
+      setAiFormatting(false);
+    }
   };
 
   return (
@@ -222,14 +254,28 @@ export default function AdminAnnouncementsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-[14px] font-medium text-[#374151] mb-1">本文（Markdown）</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[14px] font-medium text-[#374151]">本文（Markdown）</label>
+                  <button
+                    type="button"
+                    onClick={handleAiFormat}
+                    disabled={aiFormatting || formData.content.trim().length < 10}
+                    className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-3 py-1.5 text-[13px] hover:bg-[#F9FAFB] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {aiFormatting ? "⏳ 整理中..." : "✨ AIで整理する"}
+                  </button>
+                </div>
                 <textarea
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                   rows={10}
-                  className="w-full border border-[#E5E7EB] rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] font-mono"
+                  disabled={aiFormatting}
+                  className="w-full border border-[#E5E7EB] rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] font-mono disabled:bg-[#F9FAFB] disabled:cursor-not-allowed"
                   placeholder="本文を入力（Markdown形式）"
                 />
+                {aiError && (
+                  <p className="mt-1 text-[12px] text-[#DC2626]">{aiError}</p>
+                )}
               </div>
             </div>
             <div className="border-t border-[#E5E7EB] px-6 py-4 flex justify-between">
