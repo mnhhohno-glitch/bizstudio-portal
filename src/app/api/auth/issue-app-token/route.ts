@@ -3,11 +3,19 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { generateToken, hashToken } from "@/lib/encryption";
 
+// 環境変数が未設定の場合の本番URLフォールバック
+const APP_URL_FALLBACKS: Record<string, string> = {
+  material_creator: "https://tender-reverence-production.up.railway.app",
+  job_analyzer: "https://kyuujin-pdf-tool-production.up.railway.app",
+  candidate_intake: "https://candidate-intake-production.up.railway.app",
+  "ai-resume-generator": "https://ai-resume-generator-production-66cb.up.railway.app",
+};
+
 const APP_URL_ENV_MAP: Record<string, string | undefined> = {
-  material_creator: process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL,
-  job_analyzer: process.env.NEXT_PUBLIC_JOB_ANALYZER_URL,
-  candidate_intake: process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL,
-  "ai-resume-generator": process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL,
+  material_creator: process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL || APP_URL_FALLBACKS.material_creator,
+  job_analyzer: process.env.NEXT_PUBLIC_JOB_ANALYZER_URL || APP_URL_FALLBACKS.job_analyzer,
+  candidate_intake: process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL || APP_URL_FALLBACKS.candidate_intake,
+  "ai-resume-generator": process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL || APP_URL_FALLBACKS["ai-resume-generator"],
 };
 
 const APP_ID_REGISTRY: Record<string, boolean> = {
