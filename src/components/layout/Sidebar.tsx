@@ -92,7 +92,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL
     || "https://tender-reverence-production.up.railway.app";
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
-    || "https://kyuujin-pdf-tool-production.up.railway.app";
+    || "https://web-production-95808.up.railway.app";
   const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
     || "https://candidate-intake-production.up.railway.app";
   const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
