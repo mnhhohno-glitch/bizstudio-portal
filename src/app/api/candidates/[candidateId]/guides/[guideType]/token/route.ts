@@ -38,7 +38,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+    || "https://bizstudio-portal-production.up.railway.app";
   const url = `${appUrl}/g/${guideEntry.token}`;
 
   return NextResponse.json({ token: guideEntry.token, url });

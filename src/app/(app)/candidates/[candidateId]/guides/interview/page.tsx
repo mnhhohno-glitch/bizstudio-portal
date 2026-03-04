@@ -68,7 +68,10 @@ export default function CaInterviewGuidePage() {
       const res = await fetch(`/api/candidates/${candidateId}/guides/interview/token`);
       if (!res.ok) return;
       const data = await res.json();
-      await navigator.clipboard.writeText(data.url);
+      const fullUrl = data.url.startsWith("http")
+        ? data.url
+        : `${window.location.origin}/g/${data.token}`;
+      await navigator.clipboard.writeText(fullUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
