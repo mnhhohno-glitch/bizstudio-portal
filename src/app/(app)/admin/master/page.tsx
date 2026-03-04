@@ -67,6 +67,7 @@ export default async function CandidateMasterPage({ searchParams }: Props) {
                     <Th>性別</Th>
                     <Th>担当CA</Th>
                     <Th>登録日時</Th>
+                    <Th>操作</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -92,11 +93,19 @@ export default async function CandidateMasterPage({ searchParams }: Props) {
                           {formatDate(cand.createdAt)}
                         </span>
                       </Td>
+                      <Td>
+                        <Link
+                          href={`/candidates/${cand.id}/guides/interview`}
+                          className="text-[12px] text-[#2563EB] hover:underline"
+                        >
+                          面接対策
+                        </Link>
+                      </Td>
                     </tr>
                   ))}
                   {candidates.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-[14px] text-[#374151]/60">
+                      <td colSpan={7} className="py-8 text-center text-[14px] text-[#374151]/60">
                         求職者が登録されていません
                       </td>
                     </tr>

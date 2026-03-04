@@ -54,6 +54,10 @@ enum EmployeeStatus {
   disabled
 }
 
+enum GuideType {
+  INTERVIEW
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -157,10 +161,26 @@ model Candidate {
   employeeId      String?  @map("employee_id")
   employee        Employee? @relation(fields: [employeeId], references: [id])
 
+  guideEntries    GuideEntry[]
+
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
 
   @@map("candidates")
+}
+
+model GuideEntry {
+  id            String    @id @default(cuid())
+  candidateId   String    @map("candidate_id")
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  guideType     GuideType @map("guide_type")
+  token         String    @unique @default(cuid())
+  data          Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([candidateId, guideType])
+  @@map("guide_entries")
 }
 
 // 外部アプリ遷移用ワンタイムトークン
