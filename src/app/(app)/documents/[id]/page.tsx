@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import DocumentPdfButton from "./DocumentPdfButton";
+import DocumentActions from "./DocumentPdfButton";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -46,7 +46,7 @@ export default async function DocumentDetailPage({ params }: Props) {
               <span>更新日: {formatDate(document.updatedAt)}</span>
             </div>
           </div>
-          <DocumentPdfButton />
+          <DocumentActions documentUrl={document.url} />
         </div>
 
         <div className="mt-6">
