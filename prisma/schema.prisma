@@ -28,6 +28,7 @@ enum AuditTargetType {
   EMPLOYEE
   CANDIDATE
   ANNOUNCEMENT
+  DOCUMENT
 }
 
 enum AnnouncementCategory {
@@ -39,6 +40,11 @@ enum AnnouncementCategory {
 }
 
 enum AnnouncementStatus {
+  PUBLISHED
+  DRAFT
+}
+
+enum DocumentStatus {
   PUBLISHED
   DRAFT
 }
@@ -68,6 +74,7 @@ model User {
   appTokens     AppToken[]
   appSessions   AppSession[]
   announcements Announcement[]
+  documents     Document[]     @relation("UserDocuments")
 
   @@map("users")
 }
@@ -183,6 +190,22 @@ model AppSession {
 
   @@index([sessionTokenHash])
   @@map("app_sessions")
+}
+
+// 資料
+model Document {
+  id             String          @id @default(cuid())
+  title          String
+  description    String          @db.Text
+  category       String
+  url            String
+  status         DocumentStatus  @default(DRAFT)
+  authorUserId   String          @map("author_user_id")
+  author         User            @relation("UserDocuments", fields: [authorUserId], references: [id])
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  @@map("documents")
 }
 
 // お知らせ
