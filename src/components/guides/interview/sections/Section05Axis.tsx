@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import SectionWrapper from "../SectionWrapper";
 import InsightBlock from "../InsightBlock";
 import WorksheetExampleModal from "../WorksheetExampleModal";
@@ -38,11 +40,64 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allFilled =
     !!data["reason_for_change"]?.trim() &&
     !!data["work_values"]?.trim() &&
     !!data["future_vision"]?.trim();
+
+  const parsedResume = data["parsed_resume"] || "";
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "application/pdf") {
+      setUploadError("PDFファイルのみアップロード可能です");
+      setTimeout(() => setUploadError(""), 3000);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError("ファイルサイズは10MB以下にしてください");
+      setTimeout(() => setUploadError(""), 3000);
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/guides/parse-resume", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || "PDF解析に失敗しました");
+      }
+
+      onChange("parsed_resume", result.parsedResume);
+    } catch (err) {
+      setUploadError(
+        err instanceof Error ? err.message : "PDF解析に失敗しました"
+      );
+      setTimeout(() => setUploadError(""), 5000);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
 
   const handleGenerateAxis = async () => {
     if (!allFilled) return;
@@ -58,6 +113,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
           reason_for_change: data["reason_for_change"],
           work_values: data["work_values"],
           future_vision: data["future_vision"],
+          parsed_resume: data["parsed_resume"] || undefined,
         }),
       });
 
@@ -97,6 +153,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
 
   const axisContent = data["ai_generated_axis"] || "";
   const previewText = axisContent.length > 200 ? axisContent.slice(0, 200) + "..." : axisContent;
+  const resumePreview = parsedResume.length > 300 ? parsedResume.slice(0, 300) + "..." : parsedResume;
 
   return (
     <SectionWrapper id="section-5" number="05" title="転職軸とは何か" bg="white">
@@ -118,6 +175,81 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
         <p className="text-sm text-gray-600 mb-6">
           3つの問いに答えて、あなたの「軸」を言語化しよう
         </p>
+
+        {/* 職務経歴書アップロードエリア */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+
+        {isUploading ? (
+          <div className="bg-[#F4F7F9] border-2 border-[#003366] rounded-xl p-6 text-center mb-6">
+            <p className="text-sm font-medium text-[#003366]">📄 職務経歴書</p>
+            <p className="text-sm text-[#003366] mt-2 animate-pulse">
+              ⏳ PDFを解析しています...
+            </p>
+          </div>
+        ) : uploadError ? (
+          <div className="bg-red-50 border-2 border-red-300 rounded-xl p-6 text-center mb-6">
+            <p className="text-sm font-medium text-gray-700">📄 職務経歴書</p>
+            <p className="text-sm text-red-600 mt-2">❌ {uploadError}</p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-3 bg-white border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              🔄 再度アップロード
+            </button>
+          </div>
+        ) : parsedResume ? (
+          <div className="bg-[#F0FFF4] border-2 border-green-300 rounded-xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium text-gray-700">📄 職務経歴書</p>
+              <span className="text-green-600 font-medium text-sm">✅ 解析済み</span>
+            </div>
+            <div className="relative bg-white rounded-lg p-3 max-h-32 overflow-hidden">
+              <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
+                {resumePreview}
+              </p>
+              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent" />
+            </div>
+            <div className="flex items-center gap-4 mt-3">
+              <button
+                type="button"
+                onClick={() => setShowResumeModal(true)}
+                className="text-[#003366] text-sm font-medium hover:underline"
+              >
+                📄 全文を見る
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-gray-500 text-sm hover:text-gray-700 transition-colors"
+              >
+                🔄 別のPDFをアップロード
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-6 text-center mb-6">
+            <p className="text-sm font-medium text-gray-700 mb-1">📄 職務経歴書（任意）</p>
+            <p className="text-sm text-gray-500 mb-4">
+              職務経歴書をアップロードすると、<br />
+              AIがより精度の高い転職軸を生成できます
+            </p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-white border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              📎 PDFをアップロード
+            </button>
+            <p className="text-xs text-gray-400 mt-3">※ PDF形式・10MB以下</p>
+          </div>
+        )}
 
         <div className="space-y-6">
           {worksheetFields.map((field) => (
@@ -211,6 +343,70 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
           exampleSet={currentExampleSet}
           onSelect={handleExampleSelect}
         />
+      )}
+
+      {/* 職務経歴書全文モーダル */}
+      {showResumeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowResumeModal(false)}
+          />
+          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-[#003366]">
+                職務経歴書の解析結果
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowResumeModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto p-6">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h2: ({ children, ...props }) => (
+                    <h2 className="text-lg font-bold text-[#003366] mt-6 first:mt-0 mb-3 pb-1 border-b border-gray-200" {...props}>
+                      {children}
+                    </h2>
+                  ),
+                  h3: ({ children, ...props }) => (
+                    <h3 className="text-base font-bold text-[#003366] mt-4 mb-2" {...props}>
+                      {children}
+                    </h3>
+                  ),
+                  p: ({ children, ...props }) => (
+                    <p className="text-gray-700 leading-relaxed text-sm mb-3" {...props}>
+                      {children}
+                    </p>
+                  ),
+                  ul: ({ children, ...props }) => (
+                    <ul className="text-gray-700 space-y-1 mb-3 list-disc pl-5 text-sm" {...props}>
+                      {children}
+                    </ul>
+                  ),
+                  li: ({ children, ...props }) => (
+                    <li className="text-gray-700 leading-relaxed" {...props}>
+                      {children}
+                    </li>
+                  ),
+                  strong: ({ children, ...props }) => (
+                    <strong className="font-bold text-[#003366]" {...props}>
+                      {children}
+                    </strong>
+                  ),
+                  hr: () => <hr className="border-gray-200 my-4" />,
+                }}
+              >
+                {parsedResume}
+              </ReactMarkdown>
+            </div>
+          </div>
+        </div>
       )}
     </SectionWrapper>
   );

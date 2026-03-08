@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { reason_for_change, work_values, future_vision } = body;
+    const { reason_for_change, work_values, future_vision, parsed_resume } = body;
 
     if (
       !reason_for_change?.trim() ||
@@ -133,7 +133,20 @@ ${reason_for_change}
 ${work_values}
 
 ## ■ どんな自分になりたいか？
-${future_vision}`;
+${future_vision}${parsed_resume ? `
+
+---
+
+# 職務経歴書の情報
+
+以下は求職者の職務経歴書から抽出した情報です。
+転職軸の生成において、**ワークシートの回答を主軸としつつ**、職務経歴書の情報を補足材料として活用してください。
+
+- 職務経歴から読み取れる **経験・スキル・実績** を転職軸の裏付けに使う
+- 職務経歴とワークシートの回答の **一貫性** を見つけて強調する
+- 職務経歴書にあるが本人が言語化できていない **隠れた強み** があれば指摘する
+
+${parsed_resume}` : ""}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
