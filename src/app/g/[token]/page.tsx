@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import GuideForm from "@/components/guides/GuideForm";
-import { interviewGuideConfig } from "@/lib/guides/interview/config";
+import InterviewGuideContent from "@/components/guides/interview/InterviewGuideContent";
 
 type GuideEntry = {
   id: string;
@@ -18,6 +17,7 @@ export default function CandidateGuidePage() {
 
   const [guideEntry, setGuideEntry] = useState<GuideEntry | null>(null);
   const [candidateName, setCandidateName] = useState("");
+  const [data, setData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -30,9 +30,10 @@ export default function CandidateGuidePage() {
         setError(true);
         return;
       }
-      const data = await res.json();
-      setGuideEntry(data.guideEntry);
-      setCandidateName(data.candidate.name);
+      const json = await res.json();
+      setGuideEntry(json.guideEntry);
+      setCandidateName(json.candidate.name);
+      setData((json.guideEntry?.data as Record<string, string>) || {});
     } catch {
       setError(true);
     } finally {
@@ -44,7 +45,7 @@ export default function CandidateGuidePage() {
     fetchData();
   }, [fetchData]);
 
-  const handleSave = async (data: Record<string, string>) => {
+  const handleSave = async () => {
     setSaving(true);
     try {
       const res = await fetch(`/api/guides/${token}`, {
@@ -63,7 +64,7 @@ export default function CandidateGuidePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center">
+      <div className="min-h-screen bg-[#F4F7F9] flex items-center justify-center">
         <p className="text-[14px] text-[#6B7280]">読み込み中...</p>
       </div>
     );
@@ -71,7 +72,7 @@ export default function CandidateGuidePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center p-6">
+      <div className="min-h-screen bg-[#F4F7F9] flex items-center justify-center p-6">
         <div className="w-full max-w-md bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-8 text-center">
           <div className="text-[32px] mb-4">⚠️</div>
           <h1 className="text-[20px] font-semibold text-[#374151] mb-2">このURLは無効です</h1>
@@ -84,25 +85,18 @@ export default function CandidateGuidePage() {
     );
   }
 
-  const config = interviewGuideConfig;
-
   return (
-    <div className="min-h-screen bg-[#F5F7FA] py-8 px-4">
-      <div className="max-w-3xl mx-auto">
-        <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-6">
-          <div className="mb-6">
-            <h1 className="text-[20px] font-semibold text-[#374151]">{config.title}</h1>
-            <p className="text-[14px] text-[#6B7280] mt-1">{candidateName} さん</p>
-          </div>
-
-          <GuideForm
-            config={config}
-            data={(guideEntry?.data as Record<string, string>) || {}}
-            onSave={handleSave}
-            isSaving={saving}
-            lastUpdated={guideEntry?.updatedAt}
-          />
-        </div>
+    <div className="bg-[#F4F7F9] min-h-screen">
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <InterviewGuideContent
+          candidateName={candidateName}
+          data={data}
+          onChange={(key, value) => setData((prev) => ({ ...prev, [key]: value }))}
+          onSave={handleSave}
+          isSaving={saving}
+          lastUpdated={guideEntry?.updatedAt}
+          showCopyButton={false}
+        />
       </div>
     </div>
   );

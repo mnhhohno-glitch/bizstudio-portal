@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import GuideForm from "@/components/guides/GuideForm";
-import { interviewGuideConfig } from "@/lib/guides/interview/config";
+import InterviewGuideContent from "@/components/guides/interview/InterviewGuideContent";
 
 type GuideEntry = {
   id: string;
@@ -18,23 +17,25 @@ export default function CaInterviewGuidePage() {
 
   const [guideEntry, setGuideEntry] = useState<GuideEntry | null>(null);
   const [candidateName, setCandidateName] = useState("");
+  const [data, setData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copyText, setCopyText] = useState("🔗 求職者用URLをコピー");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/candidates/${candidateId}/guides/interview`);
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "データの取得に失敗しました");
+        const json = await res.json();
+        setError(json.error || "データの取得に失敗しました");
         return;
       }
-      const data = await res.json();
-      setGuideEntry(data.guideEntry);
-      setCandidateName(data.candidate.name);
+      const json = await res.json();
+      setGuideEntry(json.guideEntry);
+      setCandidateName(json.candidate.name);
+      setData((json.guideEntry?.data as Record<string, string>) || {});
     } catch {
       setError("データの取得に失敗しました");
     } finally {
@@ -46,7 +47,7 @@ export default function CaInterviewGuidePage() {
     fetchData();
   }, [fetchData]);
 
-  const handleSave = async (data: Record<string, string>) => {
+  const handleSave = async () => {
     setSaving(true);
     try {
       const res = await fetch(`/api/candidates/${candidateId}/guides/interview`, {
@@ -67,13 +68,13 @@ export default function CaInterviewGuidePage() {
     try {
       const res = await fetch(`/api/candidates/${candidateId}/guides/interview/token`);
       if (!res.ok) return;
-      const data = await res.json();
-      const fullUrl = data.url.startsWith("http")
-        ? data.url
-        : `${window.location.origin}/g/${data.token}`;
+      const json = await res.json();
+      const fullUrl = json.url.startsWith("http")
+        ? json.url
+        : `${window.location.origin}/g/${json.token}`;
       await navigator.clipboard.writeText(fullUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopyText("✅ コピーしました");
+      setTimeout(() => setCopyText("🔗 求職者用URLをコピー"), 2000);
     } catch {
       // ignore
     }
@@ -95,7 +96,7 @@ export default function CaInterviewGuidePage() {
   }
 
   return (
-    <div>
+    <div className="px-4 py-6">
       <Link
         href="/admin/master"
         className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-6"
@@ -103,30 +104,17 @@ export default function CaInterviewGuidePage() {
         ← 求職者一覧に戻る
       </Link>
 
-      <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-6">
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-[20px] font-semibold text-[#374151]">
-              {candidateName} さんの{interviewGuideConfig.title}
-            </h1>
-            <p className="text-[14px] text-[#6B7280] mt-1">
-              {interviewGuideConfig.description}
-            </p>
-          </div>
-          <button
-            onClick={handleCopyUrl}
-            className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-4 py-2 text-[14px] hover:bg-[#F9FAFB] shrink-0"
-          >
-            {copied ? "✅ コピーしました" : "🔗 求職者用URLをコピー"}
-          </button>
-        </div>
-
-        <GuideForm
-          config={interviewGuideConfig}
-          data={(guideEntry?.data as Record<string, string>) || {}}
+      <div className="max-w-4xl mx-auto">
+        <InterviewGuideContent
+          candidateName={candidateName}
+          data={data}
+          onChange={(key, value) => setData((prev) => ({ ...prev, [key]: value }))}
           onSave={handleSave}
           isSaving={saving}
           lastUpdated={guideEntry?.updatedAt}
+          showCopyButton={true}
+          onCopyUrl={handleCopyUrl}
+          copyButtonText={copyText}
         />
       </div>
     </div>
