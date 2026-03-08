@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import SectionWrapper from "../SectionWrapper";
 import InsightBlock from "../InsightBlock";
 
@@ -28,6 +31,48 @@ const worksheetFields = [
 ];
 
 export default function Section05Axis({ data, onChange }: Section05Props) {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+
+  const allFilled =
+    !!data["reason_for_change"]?.trim() &&
+    !!data["work_values"]?.trim() &&
+    !!data["future_vision"]?.trim();
+
+  const handleGenerateAxis = async () => {
+    if (!allFilled) return;
+
+    setIsGenerating(true);
+    setGenerateError("");
+
+    try {
+      const res = await fetch("/api/guides/generate-axis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason_for_change: data["reason_for_change"],
+          work_values: data["work_values"],
+          future_vision: data["future_vision"],
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || "AI生成に失敗しました");
+      }
+
+      onChange("ai_generated_axis", result.axis);
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error ? err.message : "AI生成に失敗しました"
+      );
+      setTimeout(() => setGenerateError(""), 3000);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <SectionWrapper id="section-5" number="05" title="転職軸とは何か" bg="white">
       <div className="text-base leading-relaxed text-gray-700 mb-6">
@@ -67,6 +112,44 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
               />
             </div>
           ))}
+        </div>
+
+        {/* AI軸書き起こし */}
+        <div className="border-t border-gray-200 mt-8 pt-8">
+          <button
+            onClick={handleGenerateAxis}
+            disabled={!allFilled || isGenerating}
+            className="bg-[#003366] text-white rounded-lg px-6 py-3 font-bold hover:bg-[#002244] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? "⏳ AIが考えています..." : "🤖 AIで軸を書き起こす"}
+          </button>
+
+          {!allFilled && (
+            <p className="text-xs text-gray-500 mt-2">
+              ※ 3つの問いすべてに回答するとボタンが有効になります
+            </p>
+          )}
+
+          {generateError && (
+            <p className="text-sm text-red-500 mt-2">{generateError}</p>
+          )}
+
+          {data["ai_generated_axis"] && (
+            <div className="mt-6">
+              <p className="text-lg font-bold text-[#003366] mb-2">
+                ✨ あなたの転職軸
+              </p>
+              <textarea
+                value={data["ai_generated_axis"]}
+                onChange={(e) => onChange("ai_generated_axis", e.target.value)}
+                rows={6}
+                className="w-full border-2 border-[#F39200] rounded-lg p-4 bg-[#FFF8F0] text-gray-800 focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/20 focus:outline-none transition-colors duration-200"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                ※ AIが生成した内容は自由に編集できます。面接で使いやすい表現に調整してください。
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </SectionWrapper>

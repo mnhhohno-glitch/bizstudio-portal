@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Section01Tension from "./sections/Section01Tension";
 import Section02Essence from "./sections/Section02Essence";
 import Section03Preparation from "./sections/Section03Preparation";
@@ -41,8 +41,59 @@ export default function InterviewGuideContent({
   copyButtonText,
 }: InterviewGuideContentProps) {
   const [saved, setSaved] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasLoadedRef = useRef(false);
+  const isSavingRef = useRef(false);
+
+  useEffect(() => {
+    isSavingRef.current = isSaving;
+  }, [isSaving]);
+
+  // 初回読み込み完了を待ってからフラグON
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      hasLoadedRef.current = true;
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // デバウンス自動保存
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      if (isSavingRef.current) return;
+      setAutoSaveStatus("saving");
+      try {
+        await onSaveRef.current();
+        setAutoSaveStatus("saved");
+        setTimeout(() => setAutoSaveStatus("idle"), 3000);
+      } catch {
+        setAutoSaveStatus("idle");
+      }
+    }, 2000);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [data]);
 
   const handleSave = async () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    setAutoSaveStatus("idle");
     await onSave();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -57,6 +108,12 @@ export default function InterviewGuideContent({
           <p className="text-sm opacity-80">{candidateName} さん</p>
         </div>
         <div className="flex items-center gap-3">
+          {autoSaveStatus === "saving" && (
+            <span className="text-xs text-white/70">⏳ 自動保存中...</span>
+          )}
+          {autoSaveStatus === "saved" && (
+            <span className="text-xs text-white/70">✅ 保存済み</span>
+          )}
           {showCopyButton && onCopyUrl && (
             <button
               onClick={onCopyUrl}
