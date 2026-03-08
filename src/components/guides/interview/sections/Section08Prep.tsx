@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import SectionWrapper from "../SectionWrapper";
-import WorksheetExampleModal from "../WorksheetExampleModal";
-import { worksheetExamples } from "@/lib/guides/interview/worksheet-examples";
+import PrepExampleModal from "../PrepExampleModal";
 
 interface Section08Props {
   data: Record<string, string>;
@@ -83,19 +82,7 @@ const rules = [
 ];
 
 export default function Section08Prep({ data, onChange }: Section08Props) {
-  const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
-
-  const handleExampleSelect = (text: string) => {
-    if (!modalFieldKey) return;
-    const currentValue = data[modalFieldKey] || "";
-    const newValue = currentValue ? `${currentValue}\n\n${text}` : text;
-    onChange(modalFieldKey, newValue);
-    setModalFieldKey(null);
-  };
-
-  const currentExampleSet = modalFieldKey
-    ? worksheetExamples.find((e) => e.fieldKey === modalFieldKey)
-    : null;
+  const [showPrepExamples, setShowPrepExamples] = useState(false);
 
   return (
     <SectionWrapper id="section-8" number="08" title="評価を上げる話し方の技術" bg="soft">
@@ -117,7 +104,16 @@ export default function Section08Prep({ data, onChange }: Section08Props) {
       </div>
 
       <div className="border-2 border-[#003366] rounded-xl p-6 md:p-8 my-8 bg-white">
-        <h3 className="text-lg font-bold text-[#003366] mb-1">🎤 PREP法 練習シート</h3>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-bold text-[#003366]">🎤 PREP法 練習シート</h3>
+          <button
+            type="button"
+            onClick={() => setShowPrepExamples(true)}
+            className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
+          >
+            📝 例を見てみる
+          </button>
+        </div>
         <p className="text-sm text-gray-600 mb-6">
           自己PRをPREP法で組み立ててみよう
         </p>
@@ -134,24 +130,15 @@ export default function Section08Prep({ data, onChange }: Section08Props) {
                   </span>
                   <span className="text-sm font-medium text-[#003366] ml-2">{field.label}</span>
                 </label>
-                <div className="flex items-center gap-3">
+                {!!data[field.key]?.trim() && (
                   <button
                     type="button"
-                    onClick={() => setModalFieldKey(field.key)}
-                    className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
+                    onClick={() => onChange(field.key, "")}
+                    className="text-gray-400 hover:text-red-500 text-xs cursor-pointer transition-colors"
                   >
-                    📝 例を見てみる
+                    ✕ クリア
                   </button>
-                  {!!data[field.key]?.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => onChange(field.key, "")}
-                      className="text-gray-400 hover:text-red-500 text-xs cursor-pointer transition-colors"
-                    >
-                      ✕ クリア
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
               <textarea
                 value={data[field.key] || ""}
@@ -186,15 +173,11 @@ export default function Section08Prep({ data, onChange }: Section08Props) {
         ))}
       </div>
 
-      {/* 例文モーダル */}
-      {currentExampleSet && (
-        <WorksheetExampleModal
-          isOpen={!!modalFieldKey}
-          onClose={() => setModalFieldKey(null)}
-          exampleSet={currentExampleSet}
-          onSelect={handleExampleSelect}
-        />
-      )}
+      {/* PREP例文閲覧モーダル */}
+      <PrepExampleModal
+        isOpen={showPrepExamples}
+        onClose={() => setShowPrepExamples(false)}
+      />
     </SectionWrapper>
   );
 }
