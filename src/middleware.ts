@@ -31,7 +31,7 @@ export function middleware(request: NextRequest) {
   }
 
   // 未認証 → ログインへリダイレクト
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
   const redirectUrl = `${appUrl}${pathname}${request.nextUrl.search}`;
   const loginUrl = new URL("/login", appUrl);
   loginUrl.searchParams.set("redirect", redirectUrl);
