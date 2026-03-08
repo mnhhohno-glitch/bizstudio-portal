@@ -231,6 +231,15 @@ export default function InterviewGuideContent({
         <>
           {/* スライドナビ */}
           <div className="flex items-center justify-center gap-2 py-4 bg-white border-b border-gray-200">
+            <button
+              onClick={goPrev}
+              disabled={currentSlide === 0}
+              className={`w-8 h-8 flex items-center justify-center text-sm font-bold text-[#003366] transition-colors ${
+                currentSlide === 0 ? "opacity-30 cursor-not-allowed" : "hover:bg-gray-100 rounded-full cursor-pointer"
+              }`}
+            >
+              ◀
+            </button>
             {Array.from({ length: totalSlides }, (_, i) => (
               <button
                 key={i}
@@ -240,6 +249,15 @@ export default function InterviewGuideContent({
                 {String(i + 1).padStart(2, "0")}
               </button>
             ))}
+            <button
+              onClick={goNext}
+              disabled={currentSlide === totalSlides - 1}
+              className={`w-8 h-8 flex items-center justify-center text-sm font-bold text-[#003366] transition-colors ${
+                currentSlide === totalSlides - 1 ? "opacity-30 cursor-not-allowed" : "hover:bg-gray-100 rounded-full cursor-pointer"
+              }`}
+            >
+              ▶
+            </button>
           </div>
 
           {/* スライドコンテンツ */}
@@ -249,37 +267,6 @@ export default function InterviewGuideContent({
             style={{ height: "calc(100vh - 280px)" }}
           >
             {sections[currentSlide]}
-          </div>
-
-          {/* ナビゲーションバー */}
-          <div className="flex items-center justify-between px-6 py-3 bg-white border-t border-gray-200">
-            <button
-              onClick={goPrev}
-              disabled={currentSlide === 0}
-              className="flex items-center gap-2 text-[#003366] font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ← 前へ
-            </button>
-            <div className="text-center">
-              <p className="text-sm text-gray-500 font-medium">
-                {currentSlide + 1} / {totalSlides}
-              </p>
-              <p className="text-xs text-gray-400">
-                {String(currentSlide + 1).padStart(2, "0")}{" "}
-                {sectionTitles[currentSlide]}
-              </p>
-            </div>
-            <button
-              onClick={goNext}
-              disabled={currentSlide === totalSlides - 1}
-              className={`flex items-center gap-2 font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                currentSlide === totalSlides - 1
-                  ? "bg-[#F39200] text-white hover:bg-[#e08600]"
-                  : "bg-[#003366] text-white hover:bg-[#002244]"
-              }`}
-            >
-              {currentSlide === totalSlides - 1 ? "完了" : "次へ →"}
-            </button>
           </div>
         </>
       ) : (
