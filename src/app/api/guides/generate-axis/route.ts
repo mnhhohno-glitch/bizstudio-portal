@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
         { error: "AI生成に失敗しました。しばらく経ってから再度お試しください" },
@@ -24,18 +24,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `あなたは転職支援のキャリアアドバイザーです。
+    const prompt = `あなたは転職支援のキャリアアドバイザーです。
 求職者が記入した3つの問い（なぜ転職するのか・何を大切にして働きたいか・どんな自分になりたいか）の回答を読み、
 その人の「転職軸」を簡潔にまとめてください。
 
@@ -49,11 +38,9 @@ export async function POST(request: Request) {
   （1〜3文の転職軸）
 
   【根拠】
-  （2〜3行の補足説明）`,
-          },
-          {
-            role: "user",
-            content: `以下の3つの問いへの回答から、転職軸をまとめてください。
+  （2〜3行の補足説明）
+
+以下の3つの問いへの回答から、転職軸をまとめてください。
 
 ■ なぜ転職するのか？
 ${reason_for_change}
@@ -62,13 +49,22 @@ ${reason_for_change}
 ${work_values}
 
 ■ どんな自分になりたいか？
-${future_vision}`,
+${future_vision}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.5,
+            maxOutputTokens: 500,
           },
-        ],
-        temperature: 0.5,
-        max_tokens: 500,
-      }),
-    });
+        }),
+      }
+    );
 
     if (!response.ok) {
       return NextResponse.json(
@@ -78,7 +74,7 @@ ${future_vision}`,
     }
 
     const result = await response.json();
-    const axis = result.choices?.[0]?.message?.content;
+    const axis = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!axis) {
       return NextResponse.json(
