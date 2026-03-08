@@ -43,6 +43,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [showResumeModal, setShowResumeModal] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allFilled =
@@ -52,10 +53,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
 
   const parsedResume = data["parsed_resume"] || "";
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = async (file: File) => {
     if (file.type !== "application/pdf") {
       setUploadError("PDFファイルのみアップロード可能です");
       setTimeout(() => setUploadError(""), 3000);
@@ -97,6 +95,43 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
         fileInputRef.current.value = "";
       }
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleDeleteResume = () => {
+    if (!confirm("職務経歴書の解析結果を削除します。よろしいですか？")) return;
+    onChange("parsed_resume", "");
+  };
+
+  const handleDeleteAxis = () => {
+    if (!confirm("自己分析レポートを削除します。よろしいですか？")) return;
+    onChange("ai_generated_axis", "");
   };
 
   const handleGenerateAxis = async () => {
@@ -181,7 +216,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
           ref={fileInputRef}
           type="file"
           accept="application/pdf"
-          onChange={handleFileUpload}
+          onChange={handleFileChange}
           className="hidden"
         />
 
@@ -231,21 +266,40 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
               >
                 🔄 別のPDFをアップロード
               </button>
+              <button
+                type="button"
+                onClick={handleDeleteResume}
+                className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors"
+              >
+                🗑 削除
+              </button>
             </div>
           </div>
         ) : (
-          <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-6 text-center mb-6">
+          <div
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`rounded-xl p-6 text-center mb-6 border-2 border-dashed transition-colors ${
+              isDragging
+                ? "bg-[#F4F7F9] border-[#003366]"
+                : "bg-gray-50 border-gray-300"
+            }`}
+          >
             <p className="text-sm font-medium text-gray-700 mb-1">📄 職務経歴書（任意）</p>
             <p className="text-sm text-gray-500 mb-4">
               職務経歴書をアップロードすると、<br />
               AIがより精度の高い転職軸を生成できます
             </p>
+            <p className="text-xs text-gray-400 mb-2">PDFをここにドラッグ＆ドロップ</p>
+            <p className="text-xs text-gray-400 mb-3">または</p>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="bg-white border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
-              📎 PDFをアップロード
+              📎 ファイルを選択
             </button>
             <p className="text-xs text-gray-400 mt-3">※ PDF形式・10MB以下</p>
           </div>
@@ -261,13 +315,24 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
                   </span>
                   {field.label}
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setModalFieldKey(field.key)}
-                  className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
-                >
-                  📝 例を見てみる
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModalFieldKey(field.key)}
+                    className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
+                  >
+                    📝 例を見てみる
+                  </button>
+                  {!!data[field.key]?.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => onChange(field.key, "")}
+                      className="text-gray-400 hover:text-red-500 text-xs cursor-pointer transition-colors"
+                    >
+                      ✕ クリア
+                    </button>
+                  )}
+                </div>
               </div>
               <textarea
                 value={data[field.key] || ""}
@@ -308,11 +373,11 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
                   {previewText}
                 </p>
               </div>
-              <div className="flex items-center gap-4 mt-3">
+              <div className="flex flex-wrap gap-4 mt-4">
                 {axisResultUrl && (
                   <Link
                     href={axisResultUrl}
-                    className="text-[#003366] font-medium hover:underline"
+                    className="bg-[#003366] text-white rounded-lg px-6 py-3 font-bold hover:bg-[#002244] transition-colors"
                   >
                     📄 全文を見る →
                   </Link>
@@ -321,9 +386,16 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
                   type="button"
                   onClick={handleRegenerate}
                   disabled={isGenerating}
-                  className={`text-gray-500 text-sm hover:text-gray-700 cursor-pointer transition-colors ${isGenerating ? "animate-pulse" : ""}`}
+                  className={`bg-white border-2 border-[#003366] text-[#003366] rounded-lg px-6 py-3 font-bold hover:bg-[#F4F7F9] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isGenerating ? "animate-pulse" : ""}`}
                 >
                   {isGenerating ? "⏳ AIが考えています..." : "🔄 再生成する"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAxis}
+                  className="border-2 border-red-400 text-red-500 rounded-lg px-6 py-3 font-bold hover:bg-red-50 transition-colors"
+                >
+                  🗑 削除
                 </button>
               </div>
             </div>
