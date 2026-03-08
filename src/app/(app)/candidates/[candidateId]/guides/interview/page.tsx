@@ -96,15 +96,15 @@ export default function CaInterviewGuidePage() {
   }
 
   return (
-    <div className="px-4 py-6">
+    <div className="px-2 py-2">
       <Link
         href="/admin/master"
-        className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-6"
+        className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-1"
       >
         ← 求職者一覧に戻る
       </Link>
 
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <InterviewGuideContent
           candidateName={candidateName}
           data={data}
