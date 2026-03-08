@@ -3,6 +3,8 @@
 import { useState } from "react";
 import SectionWrapper from "../SectionWrapper";
 import InsightBlock from "../InsightBlock";
+import WorksheetExampleModal from "../WorksheetExampleModal";
+import { worksheetExamples } from "@/lib/guides/interview/worksheet-examples";
 
 interface Section05Props {
   data: Record<string, string>;
@@ -33,6 +35,7 @@ const worksheetFields = [
 export default function Section05Axis({ data, onChange }: Section05Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
+  const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
 
   const allFilled =
     !!data["reason_for_change"]?.trim() &&
@@ -73,6 +76,18 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
     }
   };
 
+  const handleExampleSelect = (text: string) => {
+    if (!modalFieldKey) return;
+    const currentValue = data[modalFieldKey] || "";
+    const newValue = currentValue ? `${currentValue}\n\n${text}` : text;
+    onChange(modalFieldKey, newValue);
+    setModalFieldKey(null);
+  };
+
+  const currentExampleSet = modalFieldKey
+    ? worksheetExamples.find((e) => e.fieldKey === modalFieldKey)
+    : null;
+
   return (
     <SectionWrapper id="section-5" number="05" title="転職軸とは何か" bg="white">
       <div className="text-base leading-relaxed text-gray-700 mb-6">
@@ -97,12 +112,21 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
         <div className="space-y-6">
           {worksheetFields.map((field) => (
             <div key={field.key}>
-              <label className="block text-sm font-medium text-[#003366] mb-2">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#003366] text-white text-xs font-bold mr-2">
-                  {field.number}
-                </span>
-                {field.label}
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-[#003366]">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#003366] text-white text-xs font-bold mr-2">
+                    {field.number}
+                  </span>
+                  {field.label}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setModalFieldKey(field.key)}
+                  className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
+                >
+                  📝 例を見てみる
+                </button>
+              </div>
               <textarea
                 value={data[field.key] || ""}
                 onChange={(e) => onChange(field.key, e.target.value)}
@@ -152,6 +176,16 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
           )}
         </div>
       </div>
+
+      {/* 例文モーダル */}
+      {currentExampleSet && (
+        <WorksheetExampleModal
+          isOpen={!!modalFieldKey}
+          onClose={() => setModalFieldKey(null)}
+          exampleSet={currentExampleSet}
+          onSelect={handleExampleSelect}
+        />
+      )}
     </SectionWrapper>
   );
 }
