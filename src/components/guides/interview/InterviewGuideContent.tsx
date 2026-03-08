@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import Section01Tension from "./sections/Section01Tension";
 import Section02Essence from "./sections/Section02Essence";
 import Section03Preparation from "./sections/Section03Preparation";
@@ -24,6 +24,19 @@ interface InterviewGuideContentProps {
   copyButtonText?: string;
 }
 
+const sectionTitles = [
+  "面接で緊張してしまう理由",
+  "面接の本質とは何か",
+  "面接準備の正しい順番",
+  "面接質問の3大分類",
+  "転職軸とは何か",
+  "「軸でつなぐ」最強のロジック",
+  "強みの整理と具体的な伝え方",
+  "評価を上げる話し方の技術",
+  "企業研究と逆質問",
+  "まとめ：今日から始めるアクション",
+];
+
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -42,6 +55,11 @@ export default function InterviewGuideContent({
 }: InterviewGuideContentProps) {
   const [saved, setSaved] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  const totalSlides = 10;
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
@@ -54,7 +72,6 @@ export default function InterviewGuideContent({
     isSavingRef.current = isSaving;
   }, [isSaving]);
 
-  // 初回読み込み完了を待ってからフラグON
   useEffect(() => {
     const timer = setTimeout(() => {
       hasLoadedRef.current = true;
@@ -89,6 +106,54 @@ export default function InterviewGuideContent({
     };
   }, [data]);
 
+  // レスポンシブ判定
+  useEffect(() => {
+    const checkDesktop = () => setIsDesktop(window.innerWidth >= 768);
+    checkDesktop();
+    window.addEventListener("resize", checkDesktop);
+    return () => window.removeEventListener("resize", checkDesktop);
+  }, []);
+
+  // スライド切り替え時スクロールリセット
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+  }, [currentSlide]);
+
+  const goNext = useCallback(
+    () => setCurrentSlide((prev) => Math.min(prev + 1, totalSlides - 1)),
+    []
+  );
+  const goPrev = useCallback(
+    () => setCurrentSlide((prev) => Math.max(prev - 1, 0)),
+    []
+  );
+
+  // キーボード操作
+  useEffect(() => {
+    if (!isDesktop) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLInputElement
+      )
+        return;
+
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        goPrev();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDesktop, goNext, goPrev]);
+
   const handleSave = async () => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -97,6 +162,36 @@ export default function InterviewGuideContent({
     await onSave();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const sections: ReactNode[] = [
+    <Section01Tension key="s1" />,
+    <Section02Essence key="s2" />,
+    <Section03Preparation key="s3" />,
+    <Section04Categories key="s4" />,
+    <Section05Axis key="s5" data={data} onChange={onChange} />,
+    <Section06Logic key="s6" />,
+    <Section07Strengths key="s7" />,
+    <Section08Prep key="s8" data={data} onChange={onChange} />,
+    <Section09Research key="s9" />,
+    <Section10Action key="s10" data={data} onChange={onChange} />,
+  ];
+
+  const hasSection5Data =
+    !!data["reason_for_change"]?.trim() ||
+    !!data["work_values"]?.trim() ||
+    !!data["future_vision"]?.trim();
+  const hasSection8Data =
+    !!data["prep_point"]?.trim() ||
+    !!data["prep_reason"]?.trim() ||
+    !!data["prep_example"]?.trim() ||
+    !!data["prep_conclusion"]?.trim();
+
+  const getIndicatorStyle = (index: number) => {
+    if (index === currentSlide) return "bg-[#003366] text-white font-bold";
+    if ((index === 4 && hasSection5Data) || (index === 7 && hasSection8Data))
+      return "bg-[#F39200] text-white";
+    return "bg-gray-100 text-gray-500 hover:bg-gray-200";
   };
 
   return (
@@ -132,17 +227,68 @@ export default function InterviewGuideContent({
         </div>
       </div>
 
-      {/* セクション */}
-      <Section01Tension />
-      <Section02Essence />
-      <Section03Preparation />
-      <Section04Categories />
-      <Section05Axis data={data} onChange={onChange} />
-      <Section06Logic />
-      <Section07Strengths />
-      <Section08Prep data={data} onChange={onChange} />
-      <Section09Research />
-      <Section10Action data={data} onChange={onChange} />
+      {isDesktop ? (
+        <>
+          {/* スライドナビ */}
+          <div className="flex items-center justify-center gap-2 py-4 bg-white border-b border-gray-200">
+            {Array.from({ length: totalSlides }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => setCurrentSlide(i)}
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs cursor-pointer transition-colors ${getIndicatorStyle(i)}`}
+              >
+                {String(i + 1).padStart(2, "0")}
+              </button>
+            ))}
+          </div>
+
+          {/* スライドコンテンツ */}
+          <div
+            ref={contentRef}
+            className="overflow-y-auto"
+            style={{ height: "calc(100vh - 280px)" }}
+          >
+            {sections[currentSlide]}
+          </div>
+
+          {/* ナビゲーションバー */}
+          <div className="flex items-center justify-between px-6 py-3 bg-white border-t border-gray-200">
+            <button
+              onClick={goPrev}
+              disabled={currentSlide === 0}
+              className="flex items-center gap-2 text-[#003366] font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← 前へ
+            </button>
+            <div className="text-center">
+              <p className="text-sm text-gray-500 font-medium">
+                {currentSlide + 1} / {totalSlides}
+              </p>
+              <p className="text-xs text-gray-400">
+                {String(currentSlide + 1).padStart(2, "0")}{" "}
+                {sectionTitles[currentSlide]}
+              </p>
+            </div>
+            <button
+              onClick={goNext}
+              disabled={currentSlide === totalSlides - 1}
+              className={`flex items-center gap-2 font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                currentSlide === totalSlides - 1
+                  ? "bg-[#F39200] text-white hover:bg-[#e08600]"
+                  : "bg-[#003366] text-white hover:bg-[#002244]"
+              }`}
+            >
+              {currentSlide === totalSlides - 1 ? "完了" : "次へ →"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {sections.map((section, index) => (
+            <div key={index}>{section}</div>
+          ))}
+        </>
+      )}
 
       {/* フッターバー */}
       <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex items-center justify-between">
