@@ -22,6 +22,7 @@ interface InterviewGuideContentProps {
   showCopyButton?: boolean;
   onCopyUrl?: () => void;
   copyButtonText?: string;
+  axisResultUrl?: string;
 }
 
 const sectionTitles = [
@@ -52,6 +53,7 @@ export default function InterviewGuideContent({
   showCopyButton,
   onCopyUrl,
   copyButtonText,
+  axisResultUrl,
 }: InterviewGuideContentProps) {
   const [saved, setSaved] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
@@ -169,7 +171,7 @@ export default function InterviewGuideContent({
     <Section02Essence key="s2" />,
     <Section03Preparation key="s3" />,
     <Section04Categories key="s4" />,
-    <Section05Axis key="s5" data={data} onChange={onChange} />,
+    <Section05Axis key="s5" data={data} onChange={onChange} axisResultUrl={axisResultUrl} />,
     <Section06Logic key="s6" />,
     <Section07Strengths key="s7" />,
     <Section08Prep key="s8" data={data} onChange={onChange} />,

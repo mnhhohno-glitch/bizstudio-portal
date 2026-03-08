@@ -96,6 +96,7 @@ export default function CandidateGuidePage() {
           isSaving={saving}
           lastUpdated={guideEntry?.updatedAt}
           showCopyButton={false}
+          axisResultUrl={`/g/${token}/axis-result`}
         />
       </div>
     </div>

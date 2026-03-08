@@ -115,6 +115,7 @@ export default function CaInterviewGuidePage() {
           showCopyButton={true}
           onCopyUrl={handleCopyUrl}
           copyButtonText={copyText}
+          axisResultUrl={`/candidates/${candidateId}/guides/interview/axis-result`}
         />
       </div>
     </div>

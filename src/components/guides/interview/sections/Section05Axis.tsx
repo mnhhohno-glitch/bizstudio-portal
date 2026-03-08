@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import SectionWrapper from "../SectionWrapper";
 import InsightBlock from "../InsightBlock";
 import WorksheetExampleModal from "../WorksheetExampleModal";
@@ -9,6 +10,7 @@ import { worksheetExamples } from "@/lib/guides/interview/worksheet-examples";
 interface Section05Props {
   data: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  axisResultUrl?: string;
 }
 
 const worksheetFields = [
@@ -32,7 +34,7 @@ const worksheetFields = [
   },
 ];
 
-export default function Section05Axis({ data, onChange }: Section05Props) {
+export default function Section05Axis({ data, onChange, axisResultUrl }: Section05Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
@@ -76,6 +78,11 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
     }
   };
 
+  const handleRegenerate = () => {
+    if (!confirm("再生成すると現在の内容が上書きされます。よろしいですか？")) return;
+    handleGenerateAxis();
+  };
+
   const handleExampleSelect = (text: string) => {
     if (!modalFieldKey) return;
     const currentValue = data[modalFieldKey] || "";
@@ -87,6 +94,9 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
   const currentExampleSet = modalFieldKey
     ? worksheetExamples.find((e) => e.fieldKey === modalFieldKey)
     : null;
+
+  const axisContent = data["ai_generated_axis"] || "";
+  const previewText = axisContent.length > 200 ? axisContent.slice(0, 200) + "..." : axisContent;
 
   return (
     <SectionWrapper id="section-5" number="05" title="転職軸とは何か" bg="white">
@@ -140,39 +150,55 @@ export default function Section05Axis({ data, onChange }: Section05Props) {
 
         {/* AI軸書き起こし */}
         <div className="border-t border-gray-200 mt-8 pt-8">
-          <button
-            onClick={handleGenerateAxis}
-            disabled={!allFilled || isGenerating}
-            className="bg-[#003366] text-white rounded-lg px-6 py-3 font-bold hover:bg-[#002244] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isGenerating ? "⏳ AIが考えています..." : "🤖 AIで軸を書き起こす"}
-          </button>
+          {!axisContent ? (
+            <>
+              <button
+                onClick={handleGenerateAxis}
+                disabled={!allFilled || isGenerating}
+                className={`bg-[#003366] text-white rounded-lg px-6 py-3 font-bold hover:bg-[#002244] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isGenerating ? "animate-pulse" : ""}`}
+              >
+                {isGenerating ? "⏳ AIが考えています..." : "🤖 AIで軸を書き起こす"}
+              </button>
 
-          {!allFilled && (
-            <p className="text-xs text-gray-500 mt-2">
-              ※ 3つの問いすべてに回答するとボタンが有効になります
-            </p>
+              {!allFilled && (
+                <p className="text-xs text-gray-500 mt-2">
+                  ※ 3つの問いすべてに回答するとボタンが有効になります
+                </p>
+              )}
+            </>
+          ) : (
+            <div>
+              <p className="text-lg font-bold text-[#003366] mb-3">
+                ✨ あなたの自己分析レポート
+              </p>
+              <div className="bg-[#FFF8F0] border border-[#F39200] rounded-xl p-4">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                  {previewText}
+                </p>
+              </div>
+              <div className="flex items-center gap-4 mt-3">
+                {axisResultUrl && (
+                  <Link
+                    href={axisResultUrl}
+                    className="text-[#003366] font-medium hover:underline"
+                  >
+                    📄 全文を見る →
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRegenerate}
+                  disabled={isGenerating}
+                  className={`text-gray-500 text-sm hover:text-gray-700 cursor-pointer transition-colors ${isGenerating ? "animate-pulse" : ""}`}
+                >
+                  {isGenerating ? "⏳ AIが考えています..." : "🔄 再生成する"}
+                </button>
+              </div>
+            </div>
           )}
 
           {generateError && (
             <p className="text-sm text-red-500 mt-2">{generateError}</p>
-          )}
-
-          {data["ai_generated_axis"] && (
-            <div className="mt-6">
-              <p className="text-lg font-bold text-[#003366] mb-2">
-                ✨ あなたの転職軸
-              </p>
-              <textarea
-                value={data["ai_generated_axis"]}
-                onChange={(e) => onChange("ai_generated_axis", e.target.value)}
-                rows={6}
-                className="w-full border-2 border-[#F39200] rounded-lg p-4 bg-[#FFF8F0] text-gray-800 focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/20 focus:outline-none transition-colors duration-200"
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                ※ AIが生成した内容は自由に編集できます。面接で使いやすい表現に調整してください。
-              </p>
-            </div>
           )}
         </div>
       </div>
