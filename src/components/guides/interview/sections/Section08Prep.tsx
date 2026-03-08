@@ -1,4 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import SectionWrapper from "../SectionWrapper";
+import WorksheetExampleModal from "../WorksheetExampleModal";
+import { worksheetExamples } from "@/lib/guides/interview/worksheet-examples";
 
 interface Section08Props {
   data: Record<string, string>;
@@ -78,6 +83,20 @@ const rules = [
 ];
 
 export default function Section08Prep({ data, onChange }: Section08Props) {
+  const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
+
+  const handleExampleSelect = (text: string) => {
+    if (!modalFieldKey) return;
+    const currentValue = data[modalFieldKey] || "";
+    const newValue = currentValue ? `${currentValue}\n\n${text}` : text;
+    onChange(modalFieldKey, newValue);
+    setModalFieldKey(null);
+  };
+
+  const currentExampleSet = modalFieldKey
+    ? worksheetExamples.find((e) => e.fieldKey === modalFieldKey)
+    : null;
+
   return (
     <SectionWrapper id="section-8" number="08" title="評価を上げる話し方の技術" bg="soft">
       <p className="text-base leading-relaxed text-gray-700 mb-6">
@@ -106,14 +125,34 @@ export default function Section08Prep({ data, onChange }: Section08Props) {
         <div className="space-y-6">
           {prepFields.map((field) => (
             <div key={field.key}>
-              <label className="block mb-2">
-                <span
-                  className={`${field.badgeColor} text-white text-xs font-bold px-2 py-1 rounded`}
-                >
-                  {field.letter}
-                </span>
-                <span className="text-sm font-medium text-[#003366] ml-2">{field.label}</span>
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="flex items-center">
+                  <span
+                    className={`${field.badgeColor} text-white text-xs font-bold px-2 py-1 rounded`}
+                  >
+                    {field.letter}
+                  </span>
+                  <span className="text-sm font-medium text-[#003366] ml-2">{field.label}</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModalFieldKey(field.key)}
+                    className="text-sm text-[#0090D1] hover:text-[#003366] cursor-pointer underline transition-colors"
+                  >
+                    📝 例を見てみる
+                  </button>
+                  {!!data[field.key]?.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => onChange(field.key, "")}
+                      className="text-gray-400 hover:text-red-500 text-xs cursor-pointer transition-colors"
+                    >
+                      ✕ クリア
+                    </button>
+                  )}
+                </div>
+              </div>
               <textarea
                 value={data[field.key] || ""}
                 onChange={(e) => onChange(field.key, e.target.value)}
@@ -146,6 +185,16 @@ export default function Section08Prep({ data, onChange }: Section08Props) {
           </div>
         ))}
       </div>
+
+      {/* 例文モーダル */}
+      {currentExampleSet && (
+        <WorksheetExampleModal
+          isOpen={!!modalFieldKey}
+          onClose={() => setModalFieldKey(null)}
+          exampleSet={currentExampleSet}
+          onSelect={handleExampleSelect}
+        />
+      )}
     </SectionWrapper>
   );
 }
