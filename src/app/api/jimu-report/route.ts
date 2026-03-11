@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AppState } from "@/types/jimu";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
     const state = session.state as unknown as AppState;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
         { error: "API キーが設定されていません" },
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const anthropic = new Anthropic({ apiKey });
+    const openai = new OpenAI({ apiKey });
 
     const jobTypeLabel =
       state.detectedJobType === "general" ? "一般事務" : "営業事務";
@@ -94,17 +94,16 @@ export async function POST(request: Request) {
 【過去の近い体験】${state.reflection.pastExperience}
 【一番うれしかった瞬間】${state.reflection.happiestMoment || "（未回答）"}`;
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
       max_tokens: 2000,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
     });
 
-    const reportText = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
+    const reportText = response.choices[0]?.message?.content || "";
 
     const updatedState = { ...state, reportText };
     await prisma.jimuSession.update({
