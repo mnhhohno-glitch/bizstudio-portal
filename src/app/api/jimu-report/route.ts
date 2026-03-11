@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 【一番うれしかった瞬間】${state.reflection.happiestMoment || "（未回答）"}`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5.4",
       max_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt },
