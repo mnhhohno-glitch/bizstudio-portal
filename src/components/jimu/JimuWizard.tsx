@@ -98,6 +98,7 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
         if (!scenario) return null;
         return (
           <QuizScreen
+            key={state.currentScreen}
             state={state}
             scenario={scenario}
             onChange={handleChange}
