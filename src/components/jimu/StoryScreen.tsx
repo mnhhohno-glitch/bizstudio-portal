@@ -59,7 +59,13 @@ export default function StoryScreen({ state, onChange, onNext }: StoryScreenProp
         const currentSection = story.findIndex(
           (s) => s.checkpoint?.id === checkpointId
         );
-        const nextVisible = currentSection + 2;
+        let nextVisible = currentSection + 2;
+        while (
+          nextVisible < story.length &&
+          !story[nextVisible - 1].checkpoint
+        ) {
+          nextVisible++;
+        }
         return Math.max(prev, Math.min(nextVisible, story.length));
       });
     }, 300);
