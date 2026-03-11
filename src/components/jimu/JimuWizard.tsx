@@ -11,6 +11,8 @@ import Q3Screen from "./Q3Screen";
 import Q4Screen from "./Q4Screen";
 import StoryScreen from "./StoryScreen";
 import QuizScreen from "./QuizScreen";
+import ReflectionScreen from "./ReflectionScreen";
+import PastExperienceScreen from "./PastExperienceScreen";
 
 const TOTAL_SCREENS = 14;
 
@@ -103,12 +105,12 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
         );
       }
       case 11:
+        return (
+          <ReflectionScreen state={state} onChange={handleChange} onNext={handleNext} />
+        );
       case 12:
         return (
-          <div className="py-12 text-center text-gray-400">
-            <p className="text-lg font-bold text-[#1e3a5f] mb-2">振り返り画面</p>
-            <p>フェーズ3で実装予定</p>
-          </div>
+          <PastExperienceScreen state={state} onChange={handleChange} onNext={handleNext} />
         );
       case 13:
         return (
