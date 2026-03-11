@@ -2,12 +2,15 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { AppState } from "@/types/jimu";
+import { GENERAL_SCENARIOS, SALES_SCENARIOS } from "@/data/jimu-scenarios";
 import ProgressBar from "./ProgressBar";
 import TopScreen from "./TopScreen";
 import Q1Screen from "./Q1Screen";
 import Q2Screen from "./Q2Screen";
 import Q3Screen from "./Q3Screen";
 import Q4Screen from "./Q4Screen";
+import StoryScreen from "./StoryScreen";
+import QuizScreen from "./QuizScreen";
 
 const TOTAL_SCREENS = 14;
 
@@ -78,22 +81,27 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
         return <Q4Screen state={state} onChange={handleChange} onNext={handleNext} />;
       case 5:
         return (
-          <div className="py-12 text-center text-gray-400">
-            <p className="text-lg font-bold text-[#1e3a5f] mb-2">ストーリー画面</p>
-            <p>フェーズ2で実装予定</p>
-          </div>
+          <StoryScreen state={state} onChange={handleChange} onNext={handleNext} />
         );
       case 6:
       case 7:
       case 8:
       case 9:
-      case 10:
+      case 10: {
+        const quizIndex = state.currentScreen - 6;
+        const scenarios =
+          state.detectedJobType === "sales" ? SALES_SCENARIOS : GENERAL_SCENARIOS;
+        const scenario = scenarios[quizIndex];
+        if (!scenario) return null;
         return (
-          <div className="py-12 text-center text-gray-400">
-            <p className="text-lg font-bold text-[#1e3a5f] mb-2">クイズ画面 {state.currentScreen - 5}</p>
-            <p>フェーズ2で実装予定</p>
-          </div>
+          <QuizScreen
+            state={state}
+            scenario={scenario}
+            onChange={handleChange}
+            onNext={handleNext}
+          />
         );
+      }
       case 11:
       case 12:
         return (
