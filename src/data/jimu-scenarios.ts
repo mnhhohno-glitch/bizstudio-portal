@@ -22,6 +22,11 @@ export const GENERAL_SCENARIOS: Scenario[] = [
     options: [
       { id: "gq1_a", label: "急いで全部更新して提出する", result: "incorrect" },
       {
+        id: "gq1_d",
+        label: "量が多いので締め切りを延ばしてもらう",
+        result: "incorrect",
+      },
+      {
         id: "gq1_b",
         label: "更新箇所をリスト化して上司に確認してから着手する",
         result: "correct",
@@ -29,11 +34,6 @@ export const GENERAL_SCENARIOS: Scenario[] = [
       {
         id: "gq1_c",
         label: "前回版のまま「最新です」と提出する",
-        result: "incorrect",
-      },
-      {
-        id: "gq1_d",
-        label: "量が多いので締め切りを延ばしてもらう",
         result: "incorrect",
       },
     ],
@@ -49,24 +49,24 @@ export const GENERAL_SCENARIOS: Scenario[] = [
       '社内の備品発注を担当しています。先月から「コピー用紙の在庫がいつもギリギリ」と現場から声が上がっています。あなたはどう対応しますか？',
     options: [
       {
-        id: "gq2_a",
-        label: "言われたタイミングで都度発注する",
-        result: "incorrect",
-      },
-      {
         id: "gq2_b",
         label:
           "使用量を記録して、なくなる前に自動的に発注できる仕組みを作る",
         result: "correct",
       },
       {
-        id: "gq2_c",
-        label: "現場に節約してもらうよう伝える",
+        id: "gq2_a",
+        label: "言われたタイミングで都度発注する",
         result: "incorrect",
       },
       {
         id: "gq2_d",
         label: "多めに大量発注して保管する",
+        result: "incorrect",
+      },
+      {
+        id: "gq2_c",
+        label: "現場に節約してもらうよう伝える",
         result: "incorrect",
       },
     ],
@@ -81,22 +81,22 @@ export const GENERAL_SCENARIOS: Scenario[] = [
     scenario:
       "決算期、経理担当から「先月の交通費精算書に未提出者が3名いる、確認してほしい」と依頼が来ました。3名とも他部署の忙しそうな社員です。どう動きますか？",
     options: [
-      { id: "gq3_a", label: "メールで一斉に催促する", result: "partial" },
-      {
-        id: "gq3_b",
-        label:
-          "締め切りと理由を明示した上で、個別に丁寧に連絡する",
-        result: "correct",
-      },
       {
         id: "gq3_c",
         label: "経理に「自分で連絡してください」と返す",
         result: "incorrect",
       },
+      { id: "gq3_a", label: "メールで一斉に催促する", result: "partial" },
       {
         id: "gq3_d",
         label: "3名分を代わりに記入して提出する",
         result: "incorrect",
+      },
+      {
+        id: "gq3_b",
+        label:
+          "締め切りと理由を明示した上で、個別に丁寧に連絡する",
+        result: "correct",
       },
     ],
     correctExplanation:
@@ -145,6 +145,11 @@ export const GENERAL_SCENARIOS: Scenario[] = [
       "午後、同時に3つの依頼が来ました。\n① 総務部長「明日の会議室、設備の確認をお願い」（所要15分）\n② 経理「今日17時締め切りの支払い申請データ、チェックして」（所要1時間）\n③ 同僚「来週の歓迎会の出欠とりまとめ、今日中にお願い」（所要30分）\n現在14時。どの順序で取りかかりますか？",
     options: [
       {
+        id: "gq5_d",
+        label: "3つ同時に少しずつ進める",
+        result: "incorrect",
+      },
+      {
         id: "gq5_a",
         label: "①→②→③（来た順番に処理する）",
         result: "incorrect",
@@ -158,11 +163,6 @@ export const GENERAL_SCENARIOS: Scenario[] = [
       {
         id: "gq5_c",
         label: "③→①→②（簡単なものから片付ける）",
-        result: "incorrect",
-      },
-      {
-        id: "gq5_d",
-        label: "3つ同時に少しずつ進める",
         result: "incorrect",
       },
     ],
@@ -181,19 +181,13 @@ export const SALES_SCENARIOS: Scenario[] = [
       "担当営業から「今日の17時までに見積書を出したい、急ぎで作って」と連絡が来ました。必要情報を確認すると、単価が2パターンあり、どちらで作るか不明です。どうしますか？",
     options: [
       {
-        id: "sq1_a",
-        label: "どちらか判断して作り、送付する",
+        id: "sq1_c",
+        label: "確認が取れるまで作業を止める",
         result: "incorrect",
       },
       {
-        id: "sq1_b",
-        label:
-          "両パターンで作り、どちらかを選ぶよう営業に確認する",
-        result: "correct",
-      },
-      {
-        id: "sq1_c",
-        label: "確認が取れるまで作業を止める",
+        id: "sq1_a",
+        label: "どちらか判断して作り、送付する",
         result: "incorrect",
       },
       {
@@ -201,6 +195,12 @@ export const SALES_SCENARIOS: Scenario[] = [
         label:
           "17時に間に合わなくてもいいので翌日確認してから作る",
         result: "incorrect",
+      },
+      {
+        id: "sq1_b",
+        label:
+          "両パターンで作り、どちらかを選ぶよう営業に確認する",
+        result: "correct",
       },
     ],
     correctExplanation:
@@ -214,7 +214,6 @@ export const SALES_SCENARIOS: Scenario[] = [
     scenario:
       "受注した契約書を確認していると、金額の記載が口頭合意と異なることに気づきました。担当営業はすでに客先訪問中です。あなたはどうしますか？",
     options: [
-      { id: "sq2_a", label: "営業が戻るまで待つ", result: "incorrect" },
       {
         id: "sq2_b",
         label:
@@ -226,6 +225,7 @@ export const SALES_SCENARIOS: Scenario[] = [
         label: "そのまま処理を進める",
         result: "incorrect",
       },
+      { id: "sq2_a", label: "営業が戻るまで待つ", result: "incorrect" },
       { id: "sq2_d", label: "上司に丸投げする", result: "incorrect" },
     ],
     correctExplanation:
@@ -239,12 +239,10 @@ export const SALES_SCENARIOS: Scenario[] = [
     scenario:
       '月末、複数の担当営業から納品確認・請求書作成・在庫確認の依頼が重なりました。全部締め切りが「今日中」です。どう動きますか？',
     options: [
-      { id: "sq3_a", label: "来た順番に処理する", result: "incorrect" },
       {
-        id: "sq3_b",
-        label:
-          "各依頼の影響度・締め切りの優先度を確認し、営業に順番を相談してから着手",
-        result: "correct",
+        id: "sq3_d",
+        label: "上司に全部引き継ぐ",
+        result: "incorrect",
       },
       {
         id: "sq3_c",
@@ -252,10 +250,12 @@ export const SALES_SCENARIOS: Scenario[] = [
         result: "incorrect",
       },
       {
-        id: "sq3_d",
-        label: "上司に全部引き継ぐ",
-        result: "incorrect",
+        id: "sq3_b",
+        label:
+          "各依頼の影響度・締め切りの優先度を確認し、営業に順番を相談してから着手",
+        result: "correct",
       },
+      { id: "sq3_a", label: "来た順番に処理する", result: "incorrect" },
     ],
     correctExplanation:
       "鈴木さんもまさにこうしていました。営業事務は「チーム全体の優先度を把握して動く力」が求められます。大事なのは、自分の判断だけでさばくのではなく、営業と連携しながら優先度を合わせること。これが最強のサポート力です。",
@@ -302,25 +302,25 @@ export const SALES_SCENARIOS: Scenario[] = [
       "来月から新しい営業担当があなたのチームに配属されます。まだ引き継ぎは始まっていませんが、1週間後に着任予定です。あなたは何をしますか？",
     options: [
       {
-        id: "sq5_a",
-        label: "着任してから必要なことを聞かれたら教える",
-        result: "incorrect",
-      },
-      {
         id: "sq5_b",
         label:
           "担当顧客リスト・進行中案件の一覧・よく使う書類テンプレートを先に準備しておく",
         result: "correct",
       },
       {
-        id: "sq5_c",
-        label: "前任者に引き継ぎ資料を作ってもらうよう依頼する",
-        result: "partial",
-      },
-      {
         id: "sq5_d",
         label: "特に何もしない。上司が指示を出すだろう",
         result: "incorrect",
+      },
+      {
+        id: "sq5_a",
+        label: "着任してから必要なことを聞かれたら教える",
+        result: "incorrect",
+      },
+      {
+        id: "sq5_c",
+        label: "前任者に引き継ぎ資料を作ってもらうよう依頼する",
+        result: "partial",
       },
     ],
     correctExplanation:
