@@ -43,6 +43,7 @@ export interface AppState {
   storyResponses: StoryResponses;
   quizResults: QuizResult[];
   reflection: Reflection;
+  reportText: string;
 }
 
 export const initialAppState: AppState = {
@@ -62,4 +63,5 @@ export const initialAppState: AppState = {
     pastExperience: "",
     happiestMoment: "",
   },
+  reportText: "",
 };

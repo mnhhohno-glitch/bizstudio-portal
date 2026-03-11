@@ -13,6 +13,7 @@ import StoryScreen from "./StoryScreen";
 import QuizScreen from "./QuizScreen";
 import ReflectionScreen from "./ReflectionScreen";
 import PastExperienceScreen from "./PastExperienceScreen";
+import ReportScreen from "./ReportScreen";
 
 const TOTAL_SCREENS = 14;
 
@@ -114,10 +115,7 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
         );
       case 13:
         return (
-          <div className="py-12 text-center text-gray-400">
-            <p className="text-lg font-bold text-[#1e3a5f] mb-2">レポート画面</p>
-            <p>フェーズ4で実装予定</p>
-          </div>
+          <ReportScreen token={token} state={state} onChange={handleChange} />
         );
       default:
         return null;
