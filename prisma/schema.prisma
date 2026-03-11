@@ -228,6 +228,19 @@ model Document {
   @@map("documents")
 }
 
+// 事務深掘りセッション
+model JimuSession {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  candidateName String?   @map("candidate_name")
+  state         Json
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  @@map("jimu_sessions")
+}
+
 // お知らせ
 model Announcement {
   id           String               @id @default(cuid())

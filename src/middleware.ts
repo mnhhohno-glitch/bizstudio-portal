@@ -5,7 +5,12 @@ export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // 求職者用ページ・APIは認証不要（最優先）
-  if (pathname.startsWith("/g/") || pathname.startsWith("/api/guides/")) {
+  if (
+    pathname.startsWith("/g/") ||
+    pathname.startsWith("/api/guides/") ||
+    pathname.startsWith("/j/") ||
+    pathname.startsWith("/api/jimu/")
+  ) {
     return NextResponse.next();
   }
 
