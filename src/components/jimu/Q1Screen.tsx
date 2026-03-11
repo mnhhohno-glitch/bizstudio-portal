@@ -65,6 +65,11 @@ export default function Q1Screen({ state, onChange, onNext }: Q1ScreenProps) {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-gray-500 mb-4">
+        まず最初に、あなたの気持ちを教えてください。
+        <br />
+        正解・不正解はありません。
+      </p>
       <div>
         <h2 className="text-lg font-bold text-[#1e3a5f]">
           事務を目指した理由を、一番正直に選んでください

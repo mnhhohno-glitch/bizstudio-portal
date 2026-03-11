@@ -45,6 +45,9 @@ export default function Q4Screen({ state, onChange, onNext }: Q4ScreenProps) {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-gray-500 mb-4">
+        ここからは、事務の仕事をもう少し具体的にイメージしてみましょう。
+      </p>
       <div>
         <h2 className="text-lg font-bold text-[#1e3a5f]">
           {questionData.question}

@@ -38,6 +38,14 @@ export default function PastExperienceScreen({
 
   return (
     <div className="space-y-6">
+      <div className="bg-[#e8f4fd] rounded-lg p-4 mb-6">
+        <p className="text-sm text-[#1e3a5f]">
+          最後の質問です。
+          <br />
+          事務の仕事と、あなた自身の経験をつなげてみましょう。
+        </p>
+      </div>
+
       {/* ③ 過去の近い体験 */}
       <div className="space-y-3">
         <h2 className="text-lg font-bold text-[#1e3a5f]">

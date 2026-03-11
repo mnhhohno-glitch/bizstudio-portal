@@ -43,6 +43,9 @@ export default function Q3Screen({ state, onChange, onNext }: Q3ScreenProps) {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-gray-500 mb-4">
+        あと少しで、あなたに合った事務のタイプがわかります。
+      </p>
       <div>
         <h2 className="text-lg font-bold text-[#1e3a5f]">
           {Q3_OPTIONS.question}

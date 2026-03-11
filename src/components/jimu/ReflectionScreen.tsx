@@ -108,7 +108,16 @@ export default function ReflectionScreen({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-bold text-[#1e3a5f]">振り返り</h2>
+      <div className="bg-[#e8f4fd] rounded-lg p-4 mb-6">
+        <p className="text-sm text-[#1e3a5f]">
+          お疲れさまでした。最後に、今日の体験を振り返りましょう。
+        </p>
+        <p className="text-sm text-[#1e3a5f] mt-2">
+          ストーリーやシナリオを見返しながら、あなたが一番心に残った場面を教えてください。
+          <br />
+          ここで書いた内容が、あなただけの志望動機のもとになります。
+        </p>
+      </div>
 
       {/* ストーリーアコーディオン */}
       <div className="border border-gray-200 rounded-lg overflow-hidden">

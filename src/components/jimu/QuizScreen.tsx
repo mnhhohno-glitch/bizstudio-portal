@@ -59,6 +59,15 @@ export default function QuizScreen({
 
   return (
     <div className="space-y-6">
+      {scenario.questionNumber === 1 && (
+        <div className="bg-[#e8f4fd] rounded-lg p-4 mb-6">
+          <p className="text-sm text-[#1e3a5f]">
+            次は、実際の仕事場面を想定したシナリオです。
+            <br />
+            ストーリーで見た場面も出てきます。「自分ならどうするか？」を考えてみてください。
+          </p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <span className="inline-block bg-[#e8f4fd] text-[#1e3a5f] text-xs font-medium px-3 py-1 rounded-full">
           シナリオ {scenario.questionNumber}/5

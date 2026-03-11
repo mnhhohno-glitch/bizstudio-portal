@@ -44,6 +44,9 @@ export default function Q2Screen({ state, onChange, onNext }: Q2ScreenProps) {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-gray-500 mb-4">
+        もう少し詳しく聞かせてください。
+      </p>
       <div>
         <h2 className="text-lg font-bold text-[#1e3a5f]">
           {questionData.question}

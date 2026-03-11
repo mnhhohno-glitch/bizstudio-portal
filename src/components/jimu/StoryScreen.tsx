@@ -83,6 +83,16 @@ export default function StoryScreen({ state, onChange, onNext }: StoryScreenProp
 
   return (
     <div className="space-y-6">
+      <div className="bg-[#e8f4fd] rounded-lg p-4 mb-6">
+        <p className="text-sm text-[#1e3a5f]">
+          ここからは、事務職のリアルな1日を体験してみましょう。
+        </p>
+        <p className="text-sm text-[#1e3a5f] mt-2">
+          途中で「あなたならどう思う？」と聞く場面があります。
+          <br />
+          難しく考えず、感じたままに答えてください。
+        </p>
+      </div>
       <div className="text-center mb-4">
         <span className="inline-block bg-[#e8f4fd] text-[#1e3a5f] text-xs font-medium px-3 py-1 rounded-full">
           {state.detectedJobType === "sales" ? "営業事務" : "一般事務"}の1日
