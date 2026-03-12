@@ -79,7 +79,8 @@ model User {
   appSessions   AppSession[]
   announcements Announcement[]
   documents     Document[]     @relation("UserDocuments")
-  manuals       Manual[]       @relation("UserManuals")
+  manuals        Manual[]       @relation("UserManuals")
+  candidateNotes CandidateNote[] @relation("UserCandidateNotes")
 
   @@map("users")
 }
@@ -157,17 +158,32 @@ model Candidate {
   name            String
   nameKana        String?  @map("name_kana")
   gender          String?  // "male" | "female" | "other"
+  email           String?
 
   // 担当キャリアアドバイザー
   employeeId      String?  @map("employee_id")
   employee        Employee? @relation(fields: [employeeId], references: [id])
 
   guideEntries    GuideEntry[]
+  notes           CandidateNote[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
 
   @@map("candidates")
+}
+
+model CandidateNote {
+  id            String    @id @default(cuid())
+  candidateId   String    @map("candidate_id")
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  content       String    @db.Text
+  authorUserId  String    @map("author_user_id")
+  author        User      @relation("UserCandidateNotes", fields: [authorUserId], references: [id])
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("candidate_notes")
 }
 
 model GuideEntry {

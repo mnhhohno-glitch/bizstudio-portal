@@ -167,7 +167,14 @@ export default function CandidateListClient({
                         {cand.candidateNumber}
                       </span>
                     </Td>
-                    <Td>{cand.name}</Td>
+                    <Td>
+                      <Link
+                        href={`/candidates/${cand.id}`}
+                        className="text-[#2563EB] hover:underline cursor-pointer"
+                      >
+                        {cand.name}
+                      </Link>
+                    </Td>
                     <Td>
                       <span className="text-[13px] text-[#374151]/70">
                         {cand.nameKana || "-"}
