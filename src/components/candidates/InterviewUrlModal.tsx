@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 type UrlType = "interview" | "consultation";
 type InterviewMethod = "in-person" | "online" | "flexible";
@@ -10,6 +10,7 @@ interface InterviewUrlModalProps {
   onClose: () => void;
   candidateName: string;
   advisorName: string | null;
+  initialType?: UrlType;
 }
 
 const INTERVIEW_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
@@ -23,6 +24,7 @@ export default function InterviewUrlModal({
   onClose,
   candidateName,
   advisorName,
+  initialType,
 }: InterviewUrlModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [urlType, setUrlType] = useState<UrlType>("interview");
@@ -30,6 +32,46 @@ export default function InterviewUrlModal({
   const [generatedUrl, setGeneratedUrl] = useState("");
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const autoTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      autoTriggeredRef.current = false;
+      return;
+    }
+    if (initialType && !autoTriggeredRef.current && advisorName) {
+      autoTriggeredRef.current = true;
+      setUrlType(initialType);
+      if (initialType === "consultation") {
+        (async () => {
+          setGenerating(true);
+          try {
+            const res = await fetch("/api/schedule-links", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                candidateName,
+                advisorName: advisorName || "",
+                interviewMethod: "",
+                type: initialType,
+              }),
+            });
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            setGeneratedUrl(data.url);
+            setStep(3);
+          } catch {
+            alert("URL生成に失敗しました。もう一度お試しください。");
+          } finally {
+            setGenerating(false);
+          }
+        })();
+      } else {
+        setMethod("online");
+        setStep(2);
+      }
+    }
+  }, [isOpen, initialType, advisorName, candidateName]);
 
   if (!isOpen) return null;
 
@@ -40,6 +82,7 @@ export default function InterviewUrlModal({
     setGeneratedUrl("");
     setGenerating(false);
     setCopied(false);
+    autoTriggeredRef.current = false;
     onClose();
   };
 
