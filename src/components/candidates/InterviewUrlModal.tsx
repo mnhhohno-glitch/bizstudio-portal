@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 type UrlType = "interview" | "consultation";
-type InterviewMethod = "in-person" | "online" | "flexible" | "phone";
+type InterviewMethod = "in-person" | "online" | "flexible";
 
 interface InterviewUrlModalProps {
   isOpen: boolean;
@@ -16,11 +16,6 @@ const INTERVIEW_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
   { value: "in-person", label: "対面" },
   { value: "online", label: "オンライン" },
   { value: "flexible", label: "どちらでも可" },
-];
-
-const CONSULTATION_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
-  { value: "phone", label: "電話" },
-  { value: "online", label: "オンライン" },
 ];
 
 export default function InterviewUrlModal({
@@ -75,8 +70,12 @@ export default function InterviewUrlModal({
   const handleSelectType = (type: UrlType) => {
     if (!advisorName) return;
     setUrlType(type);
-    setMethod(type === "consultation" ? "phone" : "online");
-    setStep(2);
+    if (type === "consultation") {
+      doGenerate(type, "");
+    } else {
+      setMethod("online");
+      setStep(2);
+    }
   };
 
   const handleCopy = async () => {
@@ -88,11 +87,6 @@ export default function InterviewUrlModal({
       // fallback
     }
   };
-
-  const methodOptions =
-    urlType === "consultation"
-      ? CONSULTATION_METHOD_OPTIONS
-      : INTERVIEW_METHOD_OPTIONS;
 
   return (
     <div
@@ -191,14 +185,14 @@ export default function InterviewUrlModal({
             </div>
           )}
 
-          {/* ステップ2: 形式選択 */}
+          {/* ステップ2: 面接方式の選択（面接のみ） */}
           {step === 2 && (
             <div>
               <p className="text-[13px] text-[#6B7280] mb-4">
-                {urlType === "interview" ? "面接方式" : "面談形式"}を選択してください
+                面接方式を選択してください
               </p>
               <div className="space-y-2 mb-6">
-                {methodOptions.map((opt) => (
+                {INTERVIEW_METHOD_OPTIONS.map((opt) => (
                   <label
                     key={opt.value}
                     className={`flex items-center gap-3 border rounded-lg p-3 cursor-pointer transition-colors ${
@@ -250,8 +244,9 @@ export default function InterviewUrlModal({
               <div className="mb-2 text-[12px] text-[#6B7280]">
                 対象：{candidateName} 様 ／ 担当：{advisorName} ／ 用途：
                 {urlType === "interview" ? "面接希望日の回収" : "面談調整"}
-                {" ／ 方式："}
-                {methodOptions.find((o) => o.value === method)?.label}
+                {urlType === "interview" && (
+                  <> ／ 方式：{INTERVIEW_METHOD_OPTIONS.find((o) => o.value === method)?.label}</>
+                )}
               </div>
               <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-md p-3 mb-4">
                 <p className="text-[12px] text-[#374151] break-all font-mono leading-relaxed">
