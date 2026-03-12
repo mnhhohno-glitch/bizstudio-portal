@@ -281,18 +281,8 @@ function ManualsList() {
             return (
               <div
                 key={manual.id}
-                className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-4 relative"
+                className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-4"
               >
-                {isAdmin && (
-                  <button
-                    onClick={() => handleDelete(manual.id)}
-                    disabled={deletingId === manual.id}
-                    className="absolute top-3 right-3 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                    title="削除"
-                  >
-                    {deletingId === manual.id ? "..." : "🗑"}
-                  </button>
-                )}
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[16px]">{ct.icon}</span>
                   <h3 className="text-[16px] font-semibold text-[#374151]">{manual.title}</h3>
@@ -309,12 +299,23 @@ function ManualsList() {
                   <span>・</span>
                   <span>{formatDate(manual.createdAt)}</span>
                 </div>
-                <Link
-                  href={`/manuals/${manual.id}`}
-                  className="inline-block text-[14px] text-[#2563EB] hover:underline mt-3"
-                >
-                  詳細を見る →
-                </Link>
+                <div className="flex items-center justify-between mt-3">
+                  <Link
+                    href={`/manuals/${manual.id}`}
+                    className="text-[14px] text-[#2563EB] hover:underline"
+                  >
+                    詳細を見る →
+                  </Link>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDelete(manual.id)}
+                      disabled={deletingId === manual.id}
+                      className="text-red-400 hover:text-red-600 text-sm font-medium transition-colors disabled:opacity-50"
+                    >
+                      {deletingId === manual.id ? "削除中..." : "🗑 削除"}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
