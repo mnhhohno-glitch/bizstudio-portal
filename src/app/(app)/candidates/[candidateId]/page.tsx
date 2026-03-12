@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -51,7 +50,7 @@ type SessionUser = {
 const TABS = [
   { key: "overview", label: "概要" },
   { key: "interview", label: "面接対策" },
-  { key: "notes", label: "メモ" },
+  { key: "notes", label: "URL生成 / メモ" },
   { key: "tasks", label: "タスク" },
   { key: "documents", label: "書類" },
   { key: "history", label: "履歴" },
@@ -401,9 +400,17 @@ function InterviewTab({
 
   return (
     <div className="space-y-6">
-      <h3 className="text-[16px] font-semibold text-[#374151]">
-        面接対策ガイド
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[16px] font-semibold text-[#374151]">
+          面接対策ガイド
+        </h3>
+        <Link
+          href={`/candidates/${candidate.id}/guides/interview`}
+          className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
+        >
+          📖 面接対策ガイドを開く
+        </Link>
+      </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <p className="text-[14px] text-[#374151]">
@@ -502,12 +509,6 @@ function InterviewTab({
         )}
       </div>
 
-      <Link
-        href={`/candidates/${candidate.id}/guides/interview`}
-        className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-      >
-        📖 ガイドを開く
-      </Link>
     </div>
   );
 }
@@ -515,6 +516,63 @@ function InterviewTab({
 /* ================================================================== */
 /*  Tab: Notes                                                          */
 /* ================================================================== */
+function GuideUrlSection({ candidate }: { candidate: Candidate }) {
+  const interviewGuide = candidate.guideEntries.find(
+    (e) => e.guideType === "INTERVIEW"
+  );
+  const [copied, setCopied] = useState(false);
+  const appUrl =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const guideUrl = interviewGuide
+    ? `${appUrl}/g/${interviewGuide.token}`
+    : null;
+
+  const handleCopy = async () => {
+    if (!guideUrl) return;
+    try {
+      await navigator.clipboard.writeText(guideUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+      <h3 className="text-[14px] font-semibold text-[#374151] mb-2">
+        🔗 URL生成
+      </h3>
+      {guideUrl ? (
+        <>
+          <p className="text-[13px] text-gray-500 mb-3">
+            求職者用の面接対策ガイドURLです。このURLを求職者に共有してください。
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-600 truncate">
+              {guideUrl}
+            </div>
+            <button
+              onClick={handleCopy}
+              className={`border rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+                copied
+                  ? "border-green-300 bg-green-50 text-green-700"
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {copied ? "✅ コピーしました" : "📋 コピー"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="text-[13px] text-gray-400">
+          面接対策ガイドがまだ作成されていません。面接対策タブからガイドを開いてください。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function NotesTab({
   candidate,
   currentUser,
@@ -572,72 +630,80 @@ function NotesTab({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-[14px] font-semibold text-[#374151]">メモ</h3>
-        <span className="text-[12px] text-gray-500">
-          （{candidate.notes.length}件）
-        </span>
-      </div>
+    <div>
+      {/* URL生成セクション */}
+      <GuideUrlSection candidate={candidate} />
 
-      {/* 新規メモ入力 */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <textarea
-          rows={3}
-          placeholder="メモを入力..."
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none resize-none"
-        />
-        <div className="flex justify-end mt-2">
-          <button
-            onClick={handlePost}
-            disabled={!content.trim() || posting}
-            className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {posting ? "投稿中..." : "📝 投稿する"}
-          </button>
+      {/* メモセクション */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[14px] font-semibold text-[#374151]">
+            📝 メモ
+          </h3>
+          <span className="text-[12px] text-gray-500">
+            （{candidate.notes.length}件）
+          </span>
         </div>
-      </div>
 
-      {/* メモ一覧 */}
-      {candidate.notes.length > 0 ? (
-        <div className="space-y-3">
-          {candidate.notes.map((note) => (
-            <div
-              key={note.id}
-              className="bg-white rounded-lg border border-gray-200 p-4"
+        {/* 新規メモ入力 */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <textarea
+            rows={3}
+            placeholder="メモを入力..."
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none resize-none"
+          />
+          <div className="flex justify-end mt-2">
+            <button
+              onClick={handlePost}
+              disabled={!content.trim() || posting}
+              className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[13px] font-medium text-[#374151]">
-                  {note.author.name}
-                </span>
-                <span className="text-[12px] text-gray-500">
-                  {formatDateTime(note.createdAt)}
-                </span>
-              </div>
-              <p className="text-[13px] text-gray-700 whitespace-pre-wrap">
-                {note.content}
-              </p>
-              {canDelete(note) && (
-                <div className="flex justify-end mt-3">
-                  <button
-                    onClick={() => handleDelete(note.id)}
-                    disabled={deletingId === note.id}
-                    className="text-red-400 hover:text-red-600 text-sm transition-colors disabled:opacity-50"
-                  >
-                    🗑 削除
-                  </button>
+              {posting ? "投稿中..." : "📝 投稿する"}
+            </button>
+          </div>
+        </div>
+
+        {/* メモ一覧 */}
+        {candidate.notes.length > 0 ? (
+          <div className="space-y-3">
+            {candidate.notes.map((note) => (
+              <div
+                key={note.id}
+                className="bg-white rounded-lg border border-gray-200 p-4"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[13px] font-medium text-[#374151]">
+                    {note.author.name}
+                  </span>
+                  <span className="text-[12px] text-gray-500">
+                    {formatDateTime(note.createdAt)}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-[13px] text-gray-400">
-          メモはまだありません
-        </div>
-      )}
+                <p className="text-[13px] text-gray-700 whitespace-pre-wrap">
+                  {note.content}
+                </p>
+                {canDelete(note) && (
+                  <div className="flex justify-end mt-3">
+                    <button
+                      onClick={() => handleDelete(note.id)}
+                      disabled={deletingId === note.id}
+                      className="text-red-400 hover:text-red-600 text-sm transition-colors disabled:opacity-50"
+                    >
+                      🗑 削除
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-[13px] text-gray-400">
+            メモはまだありません
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -683,7 +749,6 @@ export default function CandidateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [urlModalOpen, setUrlModalOpen] = useState(false);
 
   const fetchCandidate = useCallback(async () => {
     try {
@@ -819,18 +884,6 @@ export default function CandidateDetailPage() {
         </div>
 
         <div className="flex gap-3 mt-4">
-          <Link
-            href={`/candidates/${candidate.id}/guides/interview`}
-            className="bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-          >
-            面接対策
-          </Link>
-          <button
-            onClick={() => setUrlModalOpen(true)}
-            className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            URL生成
-          </button>
           <button
             onClick={() => setEditModalOpen(true)}
             className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
@@ -897,13 +950,6 @@ export default function CandidateDetailPage() {
         />
       )}
 
-      {/* URL生成モーダル */}
-      <InterviewUrlModal
-        isOpen={urlModalOpen}
-        onClose={() => setUrlModalOpen(false)}
-        candidateName={candidate.name}
-        advisorName={candidate.employee?.name ?? null}
-      />
     </div>
   );
 }
