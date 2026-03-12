@@ -39,13 +39,12 @@ export default function InterviewUrlModal({
   };
 
   const handleGenerate = () => {
-    const params = {
+    const query = new URLSearchParams({
       cn: candidateName,
       an: advisorName || "",
       im: method,
-    };
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(params))));
-    const url = `https://schedule.bizstudio.co.jp/interview?d=${encoded}`;
+    });
+    const url = `https://schedule.bizstudio.co.jp/interview?${query.toString()}`;
     setGeneratedUrl(url);
     setStep(3);
   };
