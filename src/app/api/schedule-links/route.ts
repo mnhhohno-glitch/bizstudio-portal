@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { candidateName, advisorName, interviewMethod } = body;
+  const { candidateName, advisorName, interviewMethod, type = "interview" } = body;
 
   if (!candidateName || !advisorName || !interviewMethod) {
     return NextResponse.json(
@@ -32,10 +32,12 @@ export async function POST(request: NextRequest) {
       candidateName,
       advisorName,
       interviewMethod,
+      type,
     },
   });
 
-  const url = `https://schedule.bizstudio.co.jp/i/${token}`;
+  const prefix = type === "consultation" ? "c" : "i";
+  const url = `https://schedule.bizstudio.co.jp/${prefix}/${token}`;
 
   return NextResponse.json({ token, url });
 }

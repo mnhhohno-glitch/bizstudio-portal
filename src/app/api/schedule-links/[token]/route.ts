@@ -22,6 +22,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       candidateName: link.candidateName,
       advisorName: link.advisorName,
       interviewMethod: link.interviewMethod,
+      type: link.type,
     },
     {
       headers: {

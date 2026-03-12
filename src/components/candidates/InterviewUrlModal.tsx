@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-type InterviewMethod = "in-person" | "online" | "flexible";
+type UrlType = "interview" | "consultation";
+type InterviewMethod = "in-person" | "online" | "flexible" | "phone";
 
 interface InterviewUrlModalProps {
   isOpen: boolean;
@@ -11,10 +12,15 @@ interface InterviewUrlModalProps {
   advisorName: string | null;
 }
 
-const METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
+const INTERVIEW_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
   { value: "in-person", label: "対面" },
   { value: "online", label: "オンライン" },
   { value: "flexible", label: "どちらでも可" },
+];
+
+const CONSULTATION_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
+  { value: "phone", label: "電話" },
+  { value: "online", label: "オンライン" },
 ];
 
 export default function InterviewUrlModal({
@@ -24,6 +30,7 @@ export default function InterviewUrlModal({
   advisorName,
 }: InterviewUrlModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [urlType, setUrlType] = useState<UrlType>("interview");
   const [method, setMethod] = useState<InterviewMethod>("online");
   const [generatedUrl, setGeneratedUrl] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -33,12 +40,25 @@ export default function InterviewUrlModal({
 
   const handleClose = () => {
     setStep(1);
+    setUrlType("interview");
     setMethod("online");
     setGeneratedUrl("");
     setGenerating(false);
     setCopied(false);
     onClose();
   };
+
+  const handleSelectType = (type: UrlType) => {
+    if (!advisorName) return;
+    setUrlType(type);
+    setMethod(type === "interview" ? "online" : "phone");
+    setStep(2);
+  };
+
+  const methodOptions =
+    urlType === "interview"
+      ? INTERVIEW_METHOD_OPTIONS
+      : CONSULTATION_METHOD_OPTIONS;
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -50,6 +70,7 @@ export default function InterviewUrlModal({
           candidateName,
           advisorName: advisorName || "",
           interviewMethod: method,
+          type: urlType,
         }),
       });
       if (!res.ok) throw new Error();
@@ -72,6 +93,8 @@ export default function InterviewUrlModal({
       // fallback
     }
   };
+
+  const methodLabel = methodOptions.find((o) => o.value === method)?.label;
 
   return (
     <div
@@ -131,34 +154,54 @@ export default function InterviewUrlModal({
               <p className="text-[13px] text-[#6B7280] mb-4">
                 生成するURLの用途を選択してください
               </p>
-              <button
-                onClick={() => advisorName && setStep(2)}
-                disabled={!advisorName}
-                className="w-full text-left border border-[#E5E7EB] rounded-lg p-4 hover:border-[#2563EB] hover:bg-[#F0F7FF] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[#E5E7EB] disabled:hover:bg-white"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">📅</span>
-                  <div>
-                    <p className="text-[14px] font-bold text-[#374151]">
-                      面接希望日の回収
-                    </p>
-                    <p className="text-[12px] text-[#6B7280] mt-0.5">
-                      求職者に面接希望日時を入力してもらうURLを生成します
-                    </p>
+              <div className="space-y-3">
+                <button
+                  onClick={() => handleSelectType("interview")}
+                  disabled={!advisorName}
+                  className="w-full text-left border border-[#E5E7EB] rounded-lg p-4 hover:border-[#2563EB] hover:bg-[#F0F7FF] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[#E5E7EB] disabled:hover:bg-white"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">📅</span>
+                    <div>
+                      <p className="text-[14px] font-bold text-[#374151]">
+                        面接希望日の回収
+                      </p>
+                      <p className="text-[12px] text-[#6B7280] mt-0.5">
+                        求職者に面接希望日時を入力してもらうURLを生成します
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => handleSelectType("consultation")}
+                  disabled={!advisorName}
+                  className="w-full text-left border border-[#E5E7EB] rounded-lg p-4 hover:border-[#2563EB] hover:bg-[#F0F7FF] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[#E5E7EB] disabled:hover:bg-white"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">🤝</span>
+                    <div>
+                      <p className="text-[14px] font-bold text-[#374151]">
+                        面談調整
+                      </p>
+                      <p className="text-[12px] text-[#6B7280] mt-0.5">
+                        求職者との面談日程を調整するURLを生成します
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
             </div>
           )}
 
-          {/* ステップ2: 面接方式の選択 */}
+          {/* ステップ2: 形式選択 */}
           {step === 2 && (
             <div>
               <p className="text-[13px] text-[#6B7280] mb-4">
-                面接方式を選択してください
+                {urlType === "interview" ? "面接方式" : "面談方式"}
+                を選択してください
               </p>
               <div className="space-y-2 mb-6">
-                {METHOD_OPTIONS.map((opt) => (
+                {methodOptions.map((opt) => (
                   <label
                     key={opt.value}
                     className={`flex items-center gap-3 border rounded-lg p-3 cursor-pointer transition-colors ${
@@ -208,8 +251,9 @@ export default function InterviewUrlModal({
                 </p>
               </div>
               <div className="mb-2 text-[12px] text-[#6B7280]">
-                対象：{candidateName} 様 ／ 担当：{advisorName} ／ 方式：
-                {METHOD_OPTIONS.find((o) => o.value === method)?.label}
+                対象：{candidateName} 様 ／ 担当：{advisorName} ／ 用途：
+                {urlType === "interview" ? "面接希望日の回収" : "面談調整"} ／
+                方式：{methodLabel}
               </div>
               <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-md p-3 mb-4">
                 <p className="text-[12px] text-[#374151] break-all font-mono leading-relaxed">

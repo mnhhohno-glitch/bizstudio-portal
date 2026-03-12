@@ -265,6 +265,7 @@ model ScheduleLink {
   candidateName   String   @map("candidate_name")
   advisorName     String   @map("advisor_name")
   interviewMethod String   @map("interview_method")
+  type            String   @default("interview")
   createdAt       DateTime @default(now()) @map("created_at")
 
   @@map("schedule_links")
