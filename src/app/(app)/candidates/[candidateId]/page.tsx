@@ -21,7 +21,6 @@ type GuideEntry = {
   id: string;
   guideType: string;
   token: string;
-  data: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 };
@@ -245,9 +244,11 @@ function EditModal({
 /* ================================================================== */
 function OverviewTab({
   candidate,
+  guideData,
   onTabChange,
 }: {
   candidate: Candidate;
+  guideData: Record<string, unknown> | null;
   onTabChange: (tab: TabKey) => void;
 }) {
   const interviewGuide = candidate.guideEntries.find(
@@ -255,9 +256,7 @@ function OverviewTab({
   );
   const notesCount = candidate.notes.length;
   const recentNotes = candidate.notes.slice(0, 3);
-  const aiAxis = interviewGuide?.data
-    ? (interviewGuide.data as Record<string, unknown>).ai_generated_axis
-    : null;
+  const aiAxis = guideData?.ai_generated_axis ?? null;
 
   return (
     <div className="space-y-6">
@@ -367,11 +366,17 @@ function OverviewTab({
 /* ================================================================== */
 /*  Tab: Interview                                                      */
 /* ================================================================== */
-function InterviewTab({ candidate }: { candidate: Candidate }) {
+function InterviewTab({
+  candidate,
+  guideData,
+}: {
+  candidate: Candidate;
+  guideData: Record<string, unknown> | null;
+}) {
   const interviewGuide = candidate.guideEntries.find(
     (e) => e.guideType === "INTERVIEW"
   );
-  const data = (interviewGuide?.data || {}) as Record<string, unknown>;
+  const data = (guideData || {}) as Record<string, unknown>;
   const appUrl =
     typeof window !== "undefined" ? window.location.origin : "";
 
@@ -672,6 +677,9 @@ export default function CandidateDetailPage() {
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>(
     []
   );
+  const [guideData, setGuideData] = useState<Record<string, unknown> | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -697,8 +705,25 @@ export default function CandidateDetailPage() {
     }
   }, [candidateId]);
 
+  const fetchGuideData = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/guides/interview`
+      );
+      if (res.ok) {
+        const json = await res.json();
+        if (json.guideEntry?.data) {
+          setGuideData(json.guideEntry.data as Record<string, unknown>);
+        }
+      }
+    } catch {
+      // silent
+    }
+  }, [candidateId]);
+
   useEffect(() => {
     fetchCandidate();
+    fetchGuideData();
     fetch("/api/auth/session")
       .then((r) => r.json())
       .then((d) => {
@@ -713,7 +738,7 @@ export default function CandidateDetailPage() {
         }
       })
       .catch(() => {});
-  }, [fetchCandidate]);
+  }, [fetchCandidate, fetchGuideData]);
 
   const handleTabChange = (tab: TabKey) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -837,11 +862,12 @@ export default function CandidateDetailPage() {
         {activeTab === "overview" && (
           <OverviewTab
             candidate={candidate}
+            guideData={guideData}
             onTabChange={handleTabChange}
           />
         )}
         {activeTab === "interview" && (
-          <InterviewTab candidate={candidate} />
+          <InterviewTab candidate={candidate} guideData={guideData} />
         )}
         {activeTab === "notes" && (
           <NotesTab

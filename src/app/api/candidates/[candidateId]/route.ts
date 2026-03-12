@@ -21,7 +21,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
           id: true,
           guideType: true,
           token: true,
-          data: true,
           createdAt: true,
           updatedAt: true,
         },
