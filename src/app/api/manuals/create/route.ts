@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { title, category, contentType, videoUrl, pdfPath, pdfData, externalUrl, markdownContent, description } = body;
+  const { title, category, subCategory, contentType, videoUrl, pdfPath, pdfData, externalUrl, markdownContent, description } = body;
 
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return NextResponse.json({ error: "タイトルは必須です" }, { status: 400 });
@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
     data: {
       title: title.trim(),
       category,
+      subCategory: subCategory?.trim() || null,
       contentType,
       videoUrl: videoUrl?.trim() || null,
       pdfPath: pdfPath?.trim() || null,

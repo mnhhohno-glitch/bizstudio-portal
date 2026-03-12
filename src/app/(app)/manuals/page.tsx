@@ -3,11 +3,13 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { MANUAL_CATEGORIES, getSubCategories, getSubCategoryLabel } from "@/lib/constants/manual-categories";
 
 type Manual = {
   id: string;
   title: string;
   category: "INTERNAL" | "CANDIDATE" | "CLIENT";
+  subCategory: string | null;
   contentType: "VIDEO" | "PDF" | "URL" | "MARKDOWN";
   author: { name: string };
   createdAt: string;
@@ -19,13 +21,6 @@ type Pagination = {
   limit: number;
   totalPages: number;
 };
-
-const CATEGORY_OPTIONS = [
-  { value: "", label: "すべて" },
-  { value: "INTERNAL", label: "社内" },
-  { value: "CANDIDATE", label: "求職者" },
-  { value: "CLIENT", label: "求人企業" },
-] as const;
 
 const CONTENT_TYPE_OPTIONS = [
   { value: "", label: "すべて" },
@@ -60,27 +55,30 @@ function ManualsList() {
 
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [category, setCategory] = useState(searchParams.get("category") || "");
+  const [subCategory, setSubCategory] = useState(searchParams.get("subCategory") || "");
   const [contentType, setContentType] = useState(searchParams.get("contentType") || "");
   const page = parseInt(searchParams.get("page") || "1", 10);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateURL = useCallback(
-    (params: { search?: string; category?: string; contentType?: string; page?: number }) => {
+    (params: { search?: string; category?: string; subCategory?: string; contentType?: string; page?: number }) => {
       const newParams = new URLSearchParams();
       const newSearch = params.search ?? search;
       const newCategory = params.category ?? category;
+      const newSubCategory = params.subCategory ?? subCategory;
       const newContentType = params.contentType ?? contentType;
       const newPage = params.page ?? 1;
 
       if (newSearch) newParams.set("search", newSearch);
       if (newCategory) newParams.set("category", newCategory);
+      if (newSubCategory && newCategory) newParams.set("subCategory", newSubCategory);
       if (newContentType) newParams.set("contentType", newContentType);
       if (newPage > 1) newParams.set("page", String(newPage));
 
       router.push(`/manuals?${newParams.toString()}`);
     },
-    [router, search, category, contentType]
+    [router, search, category, subCategory, contentType]
   );
 
   const fetchManuals = useCallback(async () => {
@@ -89,6 +87,7 @@ function ManualsList() {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       if (category) params.set("category", category);
+      if (subCategory) params.set("subCategory", subCategory);
       if (contentType) params.set("contentType", contentType);
       params.set("page", String(page));
       params.set("limit", "10");
@@ -102,7 +101,7 @@ function ManualsList() {
     } finally {
       setLoading(false);
     }
-  }, [search, category, contentType, page]);
+  }, [search, category, subCategory, contentType, page]);
 
   useEffect(() => {
     fetchManuals();
@@ -135,6 +134,7 @@ function ManualsList() {
   useEffect(() => {
     setSearch(searchParams.get("search") || "");
     setCategory(searchParams.get("category") || "");
+    setSubCategory(searchParams.get("subCategory") || "");
     setContentType(searchParams.get("contentType") || "");
   }, [searchParams]);
 
@@ -241,13 +241,31 @@ function ManualsList() {
           value={category}
           onChange={(e) => {
             setCategory(e.target.value);
-            updateURL({ category: e.target.value, page: 1 });
+            setSubCategory("");
+            updateURL({ category: e.target.value, subCategory: "", page: 1 });
           }}
           className="px-3 py-2 border border-[#E5E7EB] rounded-md text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]"
         >
-          {CATEGORY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              カテゴリ: {opt.label}
+          <option value="">カテゴリ: すべて</option>
+          {MANUAL_CATEGORIES.map((cat) => (
+            <option key={cat.value} value={cat.value}>
+              カテゴリ: {cat.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={subCategory}
+          onChange={(e) => {
+            setSubCategory(e.target.value);
+            updateURL({ subCategory: e.target.value, page: 1 });
+          }}
+          disabled={!category}
+          className="px-3 py-2 border border-[#E5E7EB] rounded-md text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+        >
+          <option value="">小項目: すべて</option>
+          {getSubCategories(category).map((sub) => (
+            <option key={sub.value} value={sub.value}>
+              小項目: {sub.label}
             </option>
           ))}
         </select>
@@ -287,10 +305,15 @@ function ManualsList() {
                   <span className="text-[16px]">{ct.icon}</span>
                   <h3 className="text-[16px] font-semibold text-[#374151]">{manual.title}</h3>
                 </div>
-                <div className="flex items-center gap-2 text-[12px] text-[#6B7280]">
+                <div className="flex items-center gap-2 text-[12px] text-[#6B7280] flex-wrap">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-[12px] ${badge.bg} ${badge.text}`}>
                     {badge.label}
                   </span>
+                  {manual.subCategory && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">
+                      {getSubCategoryLabel(manual.category, manual.subCategory)}
+                    </span>
+                  )}
                   <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#F3F4F6] text-[#6B7280] text-[12px]">
                     {ct.label}
                   </span>

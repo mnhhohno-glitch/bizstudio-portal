@@ -3,15 +3,10 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { MANUAL_CATEGORIES, getSubCategories } from "@/lib/constants/manual-categories";
 
 type ManualCategory = "INTERNAL" | "CANDIDATE" | "CLIENT";
 type ManualContentType = "VIDEO" | "PDF" | "URL" | "MARKDOWN";
-
-const CATEGORY_OPTIONS: { value: ManualCategory; label: string }[] = [
-  { value: "INTERNAL", label: "社内" },
-  { value: "CANDIDATE", label: "求職者" },
-  { value: "CLIENT", label: "求人企業" },
-];
 
 const CONTENT_TYPE_OPTIONS: { value: ManualContentType; icon: string; label: string }[] = [
   { value: "VIDEO", icon: "🎥", label: "動画" },
@@ -31,6 +26,7 @@ export default function ManualCreatePage() {
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<ManualCategory | "">("");
+  const [subCategory, setSubCategory] = useState("");
   const [contentType, setContentType] = useState<ManualContentType | "">("");
   const [videoUrl, setVideoUrl] = useState("");
   const [pdfData, setPdfData] = useState("");
@@ -134,6 +130,7 @@ export default function ManualCreatePage() {
         category,
         contentType,
       };
+      if (subCategory) body.subCategory = subCategory;
       if (contentType === "VIDEO") body.videoUrl = videoUrl.trim();
       if (contentType === "PDF") body.pdfData = pdfData;
       if (contentType === "URL") body.externalUrl = externalUrl.trim();
@@ -195,20 +192,45 @@ export default function ManualCreatePage() {
               />
             </div>
 
-            {/* カテゴリ */}
+            {/* カテゴリ（大項目） */}
             <div>
               <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
-                カテゴリ <span className="text-red-500">*</span>
+                カテゴリ（大項目） <span className="text-red-500">*</span>
               </label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value as ManualCategory)}
+                onChange={(e) => {
+                  setCategory(e.target.value as ManualCategory);
+                  setSubCategory("");
+                }}
                 className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
               >
                 <option value="">選択してください</option>
-                {CATEGORY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
+                {MANUAL_CATEGORIES.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* サブカテゴリ（小項目） */}
+            <div>
+              <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
+                サブカテゴリ（小項目） <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={subCategory}
+                onChange={(e) => setSubCategory(e.target.value)}
+                disabled={!category}
+                className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">
+                  {category ? "選択してください" : "大項目を先に選択してください"}
+                </option>
+                {getSubCategories(category).map((sub) => (
+                  <option key={sub.value} value={sub.value}>
+                    {sub.label}
                   </option>
                 ))}
               </select>

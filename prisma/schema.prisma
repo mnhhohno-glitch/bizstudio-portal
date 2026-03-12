@@ -287,6 +287,7 @@ model Manual {
   id              String             @id @default(cuid())
   title           String
   category        ManualCategory
+  subCategory     String?            @map("sub_category")
   contentType     ManualContentType  @map("content_type")
   videoUrl        String?            @map("video_url")
   pdfPath         String?            @map("pdf_path")

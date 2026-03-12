@@ -5,11 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { getCategoryLabel, getSubCategoryLabel } from "@/lib/constants/manual-categories";
 
 type Manual = {
   id: string;
   title: string;
   category: "INTERNAL" | "CANDIDATE" | "CLIENT";
+  subCategory: string | null;
   contentType: "VIDEO" | "PDF" | "URL" | "MARKDOWN";
   videoUrl: string | null;
   pdfPath: string | null;
@@ -112,6 +114,10 @@ export default function ManualDetailPage() {
 
   const badge = CATEGORY_BADGE[manual.category];
   const ct = CONTENT_TYPE_MAP[manual.contentType];
+  const categoryLabel = getCategoryLabel(manual.category);
+  const subCategoryLabel = manual.subCategory
+    ? getSubCategoryLabel(manual.category, manual.subCategory)
+    : null;
 
   return (
     <div>
@@ -125,7 +131,8 @@ export default function ManualDetailPage() {
       <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-6">
         <div className="flex items-center gap-2 mb-3">
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[12px] ${badge.bg} ${badge.text}`}>
-            {badge.label}
+            {categoryLabel}
+            {subCategoryLabel && <span> &gt; {subCategoryLabel}</span>}
           </span>
           <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#F3F4F6] text-[#6B7280] text-[12px]">
             {ct.icon} {ct.label}
