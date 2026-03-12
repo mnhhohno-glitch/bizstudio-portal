@@ -525,14 +525,6 @@ function ScheduleUrlSection({
   advisorName: string | null;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<"interview" | "consultation">(
-    "interview"
-  );
-
-  const openModal = (type: "interview" | "consultation") => {
-    setModalType(type);
-    setModalOpen(true);
-  };
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
@@ -542,26 +534,17 @@ function ScheduleUrlSection({
       <p className="text-[13px] text-gray-500 mb-4">
         求職者への日程調整用URLを生成します。
       </p>
-      <div className="flex gap-3">
-        <button
-          onClick={() => openModal("consultation")}
-          className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-        >
-          📅 面談日程調整URLを生成
-        </button>
-        <button
-          onClick={() => openModal("interview")}
-          className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-        >
-          📅 面接日程調整URLを生成
-        </button>
-      </div>
+      <button
+        onClick={() => setModalOpen(true)}
+        className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
+      >
+        📅 日程調整URLを生成
+      </button>
       <InterviewUrlModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         candidateName={candidateName}
         advisorName={advisorName}
-        initialType={modalType}
       />
     </div>
   );
