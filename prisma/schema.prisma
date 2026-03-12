@@ -241,6 +241,18 @@ model JimuSession {
   @@map("jimu_sessions")
 }
 
+// 面接希望日回収URL短縮リンク
+model ScheduleLink {
+  id              String   @id @default(cuid())
+  token           String   @unique
+  candidateName   String   @map("candidate_name")
+  advisorName     String   @map("advisor_name")
+  interviewMethod String   @map("interview_method")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("schedule_links")
+}
+
 // お知らせ
 model Announcement {
   id           String               @id @default(cuid())

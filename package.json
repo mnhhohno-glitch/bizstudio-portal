@@ -19,6 +19,7 @@
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.3",
     "iconv-lite": "^0.7.2",
+    "nanoid": "^5.1.6",
     "next": "16.1.6",
     "openai": "^6.27.0",
     "prisma": "^7.3.0",

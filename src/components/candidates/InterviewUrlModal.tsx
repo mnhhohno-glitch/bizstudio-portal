@@ -26,6 +26,7 @@ export default function InterviewUrlModal({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [method, setMethod] = useState<InterviewMethod>("online");
   const [generatedUrl, setGeneratedUrl] = useState("");
+  const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!isOpen) return null;
@@ -34,19 +35,32 @@ export default function InterviewUrlModal({
     setStep(1);
     setMethod("online");
     setGeneratedUrl("");
+    setGenerating(false);
     setCopied(false);
     onClose();
   };
 
-  const handleGenerate = () => {
-    const query = new URLSearchParams({
-      cn: candidateName,
-      an: advisorName || "",
-      im: method,
-    });
-    const url = `https://schedule.bizstudio.co.jp/interview?${query.toString()}`;
-    setGeneratedUrl(url);
-    setStep(3);
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/schedule-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName,
+          advisorName: advisorName || "",
+          interviewMethod: method,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setGeneratedUrl(data.url);
+      setStep(3);
+    } catch {
+      alert("URL生成に失敗しました。もう一度お試しください。");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleCopy = async () => {
@@ -176,9 +190,10 @@ export default function InterviewUrlModal({
                 </button>
                 <button
                   onClick={handleGenerate}
-                  className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2.5 text-[13px] font-bold hover:bg-[#1D4ED8] transition-colors"
+                  disabled={generating}
+                  className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2.5 text-[13px] font-bold hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  URLを生成
+                  {generating ? "生成中..." : "URLを生成"}
                 </button>
               </div>
             </div>
