@@ -13,6 +13,7 @@ type Manual = {
   contentType: "VIDEO" | "PDF" | "URL" | "MARKDOWN";
   videoUrl: string | null;
   pdfPath: string | null;
+  pdfData: string | null;
   externalUrl: string | null;
   markdownContent: string | null;
   description: string | null;
@@ -150,12 +151,12 @@ export default function ManualDetailPage() {
           </div>
         )}
 
-        {manual.contentType === "PDF" && manual.pdfPath && (
-          <iframe
-            src={manual.pdfPath}
+        {manual.contentType === "PDF" && manual.pdfData && (
+          <embed
+            src={manual.pdfData}
+            type="application/pdf"
             className="w-full border border-[#E5E7EB] rounded-[8px]"
             style={{ height: "calc(100vh - 300px)" }}
-            title={manual.title}
           />
         )}
 

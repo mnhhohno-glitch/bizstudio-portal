@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
-import crypto from "crypto";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -27,14 +24,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "ファイルサイズは20MB以下にしてください" }, { status: 400 });
   }
 
-  const uploadDir = path.join(process.cwd(), "public", "manuals");
-  await mkdir(uploadDir, { recursive: true });
-
-  const filename = `${crypto.randomUUID()}.pdf`;
-  const filePath = path.join(uploadDir, filename);
-
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(filePath, buffer);
+  const base64 = buffer.toString("base64");
+  const pdfData = `data:application/pdf;base64,${base64}`;
 
-  return NextResponse.json({ pdfPath: `/manuals/${filename}` });
+  return NextResponse.json({ pdfData });
 }

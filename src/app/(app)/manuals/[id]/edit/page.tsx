@@ -14,6 +14,7 @@ type Manual = {
   contentType: ManualContentType;
   videoUrl: string | null;
   pdfPath: string | null;
+  pdfData: string | null;
   externalUrl: string | null;
   markdownContent: string | null;
   description: string | null;
@@ -56,6 +57,7 @@ export default function ManualEditPage() {
   const [category, setCategory] = useState<ManualCategory | "">("");
   const [contentType, setContentType] = useState<ManualContentType | "">("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [pdfData, setPdfData] = useState("");
   const [pdfPath, setPdfPath] = useState("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfFileSize, setPdfFileSize] = useState(0);
@@ -105,10 +107,13 @@ export default function ManualEditPage() {
         setMarkdownContent(manual.markdownContent || "");
         setDescription(manual.description || "");
 
-        if (manual.pdfPath) {
+        if (manual.pdfData) {
+          setPdfData(manual.pdfData);
+          setPdfPath(manual.pdfData);
+          setPdfFileName("アップロード済みPDF");
+        } else if (manual.pdfPath) {
           setPdfPath(manual.pdfPath);
-          const fileName = manual.pdfPath.split("/").pop() || "uploaded.pdf";
-          setPdfFileName(fileName);
+          setPdfFileName(manual.pdfPath.split("/").pop() || "uploaded.pdf");
         }
       } catch {
         router.push("/manuals");
@@ -144,7 +149,8 @@ export default function ManualEditPage() {
         return;
       }
       const data = await res.json();
-      setPdfPath(data.pdfPath);
+      setPdfData(data.pdfData);
+      setPdfPath(data.pdfData);
       setPdfFileName(file.name);
       setPdfFileSize(file.size);
     } catch {
@@ -185,7 +191,7 @@ export default function ManualEditPage() {
       setError("Loom URLを入力してください");
       return;
     }
-    if (contentType === "PDF" && !pdfPath) {
+    if (contentType === "PDF" && !pdfData) {
       setError("PDFファイルをアップロードしてください");
       return;
     }
@@ -205,7 +211,8 @@ export default function ManualEditPage() {
         category,
         contentType,
         videoUrl: contentType === "VIDEO" ? videoUrl.trim() : null,
-        pdfPath: contentType === "PDF" ? pdfPath : null,
+        pdfData: contentType === "PDF" ? pdfData : null,
+        pdfPath: null,
         externalUrl: contentType === "URL" ? externalUrl.trim() : null,
         markdownContent: contentType === "MARKDOWN" ? markdownContent : null,
         description: description.trim() || null,
@@ -334,7 +341,7 @@ export default function ManualEditPage() {
                 <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
                   PDFファイル <span className="text-red-500">*</span>
                 </label>
-                {pdfPath ? (
+                {pdfData ? (
                   <div className="flex items-center gap-3 rounded-md border border-[#E5E7EB] px-4 py-3">
                     <span className="text-[20px]">📄</span>
                     <div className="flex-1 min-w-0">
@@ -346,6 +353,7 @@ export default function ManualEditPage() {
                     <button
                       type="button"
                       onClick={() => {
+                        setPdfData("");
                         setPdfPath("");
                         setPdfFileName("");
                         setPdfFileSize(0);
