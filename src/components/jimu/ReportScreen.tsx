@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useId } from "react";
 import type { AppState } from "@/types/jimu";
 
 interface ReportScreenProps {
@@ -93,8 +93,8 @@ export default function ReportScreen({
   const [error, setError] = useState("");
   const [report, setReport] = useState(state.reportText);
   const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+  const printStyleId = useId();
 
   const generateReport = useCallback(async () => {
     setLoading(true);
@@ -152,46 +152,32 @@ export default function ReportScreen({
     }
   };
 
-  const handleDownloadPDF = async () => {
+  const handlePrint = () => {
     const element = reportRef.current;
     if (!element) return;
 
-    setDownloading(true);
-    try {
-      const html2canvas = (await import("html2canvas")).default;
-      const jsPDF = (await import("jspdf")).default;
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
-
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      let heightLeft = pdfHeight;
-      let position = 0;
-
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - pdfHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save("事務職_志望動機レポート.pdf");
-    } catch {
-      // silent fail
-    } finally {
-      setDownloading(false);
+    const styleId = `print-style-${printStyleId.replace(/:/g, "")}`;
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
     }
+    styleEl.textContent = `
+      @media print {
+        body * { visibility: hidden !important; }
+        [data-print-area], [data-print-area] * { visibility: visible !important; }
+        [data-print-area] {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 100% !important;
+          padding: 20px !important;
+        }
+      }
+    `;
+
+    window.print();
   };
 
   if (loading) {
@@ -235,7 +221,7 @@ export default function ReportScreen({
         </h2>
       </div>
 
-      <div ref={reportRef} className="space-y-6">
+      <div ref={reportRef} data-print-area className="space-y-6">
         {parsed.part1 && (
           <ReportSection
             title="■ パート1：あなたの志望動機の素材"
@@ -277,11 +263,10 @@ export default function ReportScreen({
 
       <button
         type="button"
-        onClick={handleDownloadPDF}
-        disabled={downloading}
-        className="w-full border-2 border-[#1e3a5f] text-[#1e3a5f] bg-white rounded-lg px-6 py-3 font-bold text-base hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={handlePrint}
+        className="w-full border-2 border-[#1e3a5f] text-[#1e3a5f] bg-white rounded-lg px-6 py-3 font-bold text-base hover:bg-gray-50 transition-colors"
       >
-        {downloading ? "ダウンロード中..." : "PDFでダウンロード"}
+        PDFで保存（印刷）
       </button>
     </div>
   );
