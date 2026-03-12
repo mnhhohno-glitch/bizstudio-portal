@@ -12,7 +12,7 @@ import QuizScreen from "./QuizScreen";
 import ReflectionScreen from "./ReflectionScreen";
 import ReportScreen from "./ReportScreen";
 
-const TOTAL_SCREENS = 11;
+const TOTAL_SCREENS = 10;
 
 interface JimuWizardProps {
   token: string;
