@@ -2,20 +2,17 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { AppState } from "@/types/jimu";
-import { GENERAL_SCENARIOS, SALES_SCENARIOS } from "@/data/jimu-scenarios";
+import { UNIFIED_SCENARIOS } from "@/data/jimu-scenarios";
 import ProgressBar from "./ProgressBar";
 import TopScreen from "./TopScreen";
 import Q1Screen from "./Q1Screen";
 import Q2Screen from "./Q2Screen";
-import Q3Screen from "./Q3Screen";
-import Q4Screen from "./Q4Screen";
 import StoryScreen from "./StoryScreen";
 import QuizScreen from "./QuizScreen";
 import ReflectionScreen from "./ReflectionScreen";
-import PastExperienceScreen from "./PastExperienceScreen";
 import ReportScreen from "./ReportScreen";
 
-const TOTAL_SCREENS = 14;
+const TOTAL_SCREENS = 11;
 
 interface JimuWizardProps {
   token: string;
@@ -79,22 +76,16 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
       case 2:
         return <Q2Screen state={state} onChange={handleChange} onNext={handleNext} />;
       case 3:
-        return <Q3Screen state={state} onChange={handleChange} onNext={handleNext} />;
-      case 4:
-        return <Q4Screen state={state} onChange={handleChange} onNext={handleNext} />;
-      case 5:
         return (
           <StoryScreen state={state} onChange={handleChange} onNext={handleNext} />
         );
+      case 4:
+      case 5:
       case 6:
       case 7:
-      case 8:
-      case 9:
-      case 10: {
-        const quizIndex = state.currentScreen - 6;
-        const scenarios =
-          state.detectedJobType === "sales" ? SALES_SCENARIOS : GENERAL_SCENARIOS;
-        const scenario = scenarios[quizIndex];
+      case 8: {
+        const quizIndex = state.currentScreen - 4;
+        const scenario = UNIFIED_SCENARIOS[quizIndex];
         if (!scenario) return null;
         return (
           <QuizScreen
@@ -106,15 +97,11 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
           />
         );
       }
-      case 11:
+      case 9:
         return (
           <ReflectionScreen state={state} onChange={handleChange} onNext={handleNext} />
         );
-      case 12:
-        return (
-          <PastExperienceScreen state={state} onChange={handleChange} onNext={handleNext} />
-        );
-      case 13:
+      case 10:
         return (
           <ReportScreen token={token} state={state} onChange={handleChange} />
         );

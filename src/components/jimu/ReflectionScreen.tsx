@@ -2,28 +2,17 @@
 
 import { useState } from "react";
 import type { AppState, StoryResponses } from "@/types/jimu";
-import { GENERAL_STORY, SALES_STORY } from "@/data/jimu-story";
-import {
-  GENERAL_SCENARIOS,
-  SALES_SCENARIOS,
-} from "@/data/jimu-scenarios";
+import { UNIFIED_STORY } from "@/data/jimu-story";
+import { UNIFIED_SCENARIOS } from "@/data/jimu-scenarios";
 import OptionButton from "./OptionButton";
 import NextButton from "./NextButton";
 
-const GENERAL_REFLECTION_OPTIONS = [
-  { id: "r1", label: "問1：取締役会議の資料更新", value: 1 },
-  { id: "r2", label: "問2：備品の在庫管理と仕組み作り", value: 2 },
-  { id: "r3", label: "問3：他部署への経費精算フォロー", value: 3 },
-  { id: "r4", label: "問4：社員名簿の異動データ更新", value: 4 },
-  { id: "r5", label: "問5：3つの同時依頼の優先判断", value: 5 },
-];
-
-const SALES_REFLECTION_OPTIONS = [
-  { id: "r1", label: "問1：急ぎの見積書作成", value: 1 },
-  { id: "r2", label: "問2：契約書の金額ミス発見", value: 2 },
-  { id: "r3", label: "問3：月末の複数依頼をさばく", value: 3 },
-  { id: "r4", label: "問4：顧客からの納期前倒し相談", value: 4 },
-  { id: "r5", label: "問5：新メンバー着任への先回り準備", value: 5 },
+const UNIFIED_REFLECTION_OPTIONS = [
+  { id: "r1", label: "問1：取締役会議の資料更新（正確さ）", value: 1 },
+  { id: "r2", label: "問2：急ぎの見積書作成（スピード × 正確さ）", value: 2 },
+  { id: "r3", label: "問3：他部署への経費精算フォロー（社内調整）", value: 3 },
+  { id: "r4", label: "問4：契約書の金額ミス発見（気づきと先回り）", value: 4 },
+  { id: "r5", label: "問5：3つの同時依頼の優先判断（マルチタスク）", value: 5 },
 ];
 
 interface ReflectionScreenProps {
@@ -37,12 +26,8 @@ export default function ReflectionScreen({
   onChange,
   onNext,
 }: ReflectionScreenProps) {
-  const isSales = state.detectedJobType === "sales";
-  const story = isSales ? SALES_STORY : GENERAL_STORY;
-  const scenarios = isSales ? SALES_SCENARIOS : GENERAL_SCENARIOS;
-  const reflectionOptions = isSales
-    ? SALES_REFLECTION_OPTIONS
-    : GENERAL_REFLECTION_OPTIONS;
+  const story = UNIFIED_STORY;
+  const scenarios = UNIFIED_SCENARIOS;
 
   const [storyOpen, setStoryOpen] = useState(false);
   const [scenarioOpen, setScenarioOpen] = useState(false);
@@ -50,6 +35,12 @@ export default function ReflectionScreen({
     state.reflection.mostImpressiveScenario
   );
   const [whyText, setWhyText] = useState(state.reflection.whyImpressive);
+  const [pastExperience, setPastExperience] = useState(
+    state.reflection.pastExperience
+  );
+  const [happiestMoment, setHappiestMoment] = useState(
+    state.reflection.happiestMoment
+  );
 
   const getStoryAnswerLabel = (checkpointId: string) => {
     const key = checkpointId as keyof StoryResponses;
@@ -96,15 +87,19 @@ export default function ReflectionScreen({
   const handleNext = () => {
     onChange({
       reflection: {
-        ...state.reflection,
         mostImpressiveScenario: selectedScenario,
         whyImpressive: whyText,
+        pastExperience,
+        happiestMoment,
       },
     });
     onNext();
   };
 
-  const canProceed = selectedScenario !== null && whyText.trim().length > 0;
+  const canProceed =
+    selectedScenario !== null &&
+    whyText.trim().length > 0 &&
+    pastExperience.trim().length > 0;
 
   return (
     <div className="space-y-6">
@@ -211,7 +206,7 @@ export default function ReflectionScreen({
           5つのシナリオの中で、一番印象に残った場面はどれですか？
         </h3>
         <div className="space-y-2">
-          {reflectionOptions.map((opt) => (
+          {UNIFIED_REFLECTION_OPTIONS.map((opt) => (
             <OptionButton
               key={opt.id}
               label={opt.label}
@@ -242,6 +237,53 @@ export default function ReflectionScreen({
           onChange={(e) => setWhyText(e.target.value)}
           rows={4}
           placeholder="印象に残った理由を書いてください"
+          className="w-full border border-gray-300 rounded-lg p-4 text-sm focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/20 focus:outline-none placeholder:text-gray-400"
+        />
+      </div>
+
+      {/* ③ 過去の近い体験 */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-bold text-[#1e3a5f]">
+          あなたの過去の経験（バイト・前職・学校・日常生活なんでもOK）で、今日見た事務の仕事に&quot;近いな&quot;と感じた体験を教えてください。
+        </h2>
+
+        <div className="bg-gray-50 rounded-lg p-4 text-xs text-gray-500 leading-relaxed">
+          <p className="font-medium mb-1">💡 こんな体験はありませんか？</p>
+          <p>・書類やデータを丁寧に整理して、誰かに「助かった」と言われた</p>
+          <p>・誰かの段取り・準備を先回りしてやったら感謝された</p>
+          <p>・おかしいと思ったことに自分から声をかけて、トラブルを防いだ</p>
+          <p>・複数の人の要望を整理して、うまくさばいた経験</p>
+          <p>・自分で気づいて改善したこと（ファイルの整理方法を変えた、連絡のやり方を工夫した、など）</p>
+          <p className="mt-2">
+            例文：「前職の飲食店でシフト表の管理を任されていて、いつも直前に混乱していたのを、2週間前に確定するルールに変えたら店長に&quot;助かる&quot;と言われました」
+          </p>
+        </div>
+
+        <textarea
+          value={pastExperience}
+          onChange={(e) => setPastExperience(e.target.value)}
+          rows={5}
+          placeholder="過去の体験を書いてください"
+          className="w-full border border-gray-300 rounded-lg p-4 text-sm focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/20 focus:outline-none placeholder:text-gray-400"
+        />
+      </div>
+
+      {/* ④ 一番うれしかった瞬間 */}
+      <div className="space-y-3">
+        <h3 className="text-base font-bold text-[#1e3a5f]">
+          その体験で、あなたが一番うれしかったのはどんな瞬間でしたか？
+        </h3>
+        <p className="text-xs text-gray-400">（任意）</p>
+
+        <div className="bg-gray-50 rounded-lg p-4 text-xs text-gray-500 leading-relaxed">
+          <p>例文：「&quot;中村さんがいると安心する&quot;と言ってもらえたとき」</p>
+        </div>
+
+        <textarea
+          value={happiestMoment}
+          onChange={(e) => setHappiestMoment(e.target.value)}
+          rows={3}
+          placeholder="一番うれしかった瞬間（任意）"
           className="w-full border border-gray-300 rounded-lg p-4 text-sm focus:border-[#1e3a5f] focus:ring-2 focus:ring-[#1e3a5f]/20 focus:outline-none placeholder:text-gray-400"
         />
       </div>

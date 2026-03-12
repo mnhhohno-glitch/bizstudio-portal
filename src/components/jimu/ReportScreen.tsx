@@ -212,9 +212,7 @@ export default function ReportScreen({
           💡 企業への志望動機について
         </p>
         <p>
-          これは&quot;なぜ
-          {state.detectedJobType === "sales" ? "営業" : "一般"}
-          事務をやりたいか&quot;の志望動機です。
+          これは&quot;なぜ事務職をやりたいか&quot;の志望動機です。
         </p>
         <p>面接では&quot;なぜこの会社か&quot;も聞かれます。</p>
         <p>

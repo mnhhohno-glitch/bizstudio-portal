@@ -35,25 +35,22 @@ export async function POST(request: Request) {
 
     const openai = new OpenAI({ apiKey });
 
-    const jobTypeLabel =
-      state.detectedJobType === "general" ? "一般事務" : "営業事務";
-
     const systemPrompt = `あなたはキャリアアドバイザーです。
 転職・就活希望者が事務職を目指す理由を深掘りした結果を受け取り、
 「職種への志望動機」を言語化するレポートを生成してください。
 
-※ これは「職種への志望動機」です。「企業への志望動機」ではありません。
+※ これは「事務職への志望動機」です。「企業への志望動機」ではありません。
 
-出力は以下の構造で、マークダウンではなくプレーンテキストで出力してください：
+出力は2部構成で生成してください：
 
 ━━━━━━━━━━━━━━━━━━━━
 ■ パート1：あなたの志望動機の素材
 ━━━━━━━━━━━━━━━━━━━━
 
 【あなたの事務タイプ】
-一行で表現（例：「正確さで組織を支える・縁の下タイプ」）
+一行で表現（例：「正確さと先回りで組織を支える・縁の下タイプ」）
 
-【あなたが${jobTypeLabel}に惹かれた理由】
+【あなたが事務職に惹かれた理由】
 シナリオで一番印象に残った場面と、その理由から読み取れる価値観を2〜3文で整理。
 
 【過去の経験とのつながり】
@@ -68,9 +65,9 @@ export async function POST(request: Request) {
 
 【職種志望動機（3〜4文）】
 パート1の素材を使って、面接でそのまま話せるレベルの志望動機を生成。
-- 1文目：この職種に興味を持ったきっかけ
+- 1文目：事務職に興味を持ったきっかけ
 - 2文目：自分の経験との接点
-- 3文目：この職種でどう貢献したいか
+- 3文目：事務職でどう貢献したいか
 - 条件面（土日休み・安定など）は絶対に含めない
 
 【面接で使えるキーフレーズ】
@@ -81,13 +78,9 @@ export async function POST(request: Request) {
 トーン：温かく・断言する・上から目線にならない
 文体：です・ます調`;
 
-    const userMessage = `【診断された職種】${jobTypeLabel}
-【Q1の回答】${state.answers.q1}
+    const userMessage = `【Q1の回答】${state.answers.q1}
 【Q2の回答】${state.answers.q2}
-【Q3の回答】${state.answers.q3}
-【Q4の回答】${state.answers.q4}
 【自由記述があれば】${Object.values(state.freeTexts).filter(Boolean).join("、")}
-【やりがいワード】${state.yarigaiWord}
 【ストーリーで共感した場面（問いかけ③の回答）】${state.storyResponses.q3}
 【一番印象に残ったシナリオ】シナリオ${state.reflection.mostImpressiveScenario}
 【印象に残った理由】${state.reflection.whyImpressive}

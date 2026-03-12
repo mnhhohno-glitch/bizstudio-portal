@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { AppState, StoryResponses } from "@/types/jimu";
-import { GENERAL_STORY, SALES_STORY } from "@/data/jimu-story";
+import { UNIFIED_STORY } from "@/data/jimu-story";
 import OptionButton from "./OptionButton";
 import NextButton from "./NextButton";
 
@@ -13,7 +13,7 @@ interface StoryScreenProps {
 }
 
 export default function StoryScreen({ state, onChange, onNext }: StoryScreenProps) {
-  const story = state.detectedJobType === "sales" ? SALES_STORY : GENERAL_STORY;
+  const story = UNIFIED_STORY;
 
   const getInitialVisible = () => {
     const responses = state.storyResponses;
@@ -101,7 +101,7 @@ export default function StoryScreen({ state, onChange, onNext }: StoryScreenProp
       </div>
       <div className="text-center mb-4">
         <span className="inline-block bg-[#e8f4fd] text-[#1e3a5f] text-xs font-medium px-3 py-1 rounded-full">
-          {state.detectedJobType === "sales" ? "営業事務" : "一般事務"}の1日
+          事務職の1日
         </span>
       </div>
 

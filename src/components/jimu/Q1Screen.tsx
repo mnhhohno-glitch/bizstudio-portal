@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { AppState, Q1Route } from "@/types/jimu";
+import type { AppState } from "@/types/jimu";
 import { Q1_OPTIONS } from "@/data/jimu-questions";
 import OptionButton from "./OptionButton";
 import NextButton from "./NextButton";
@@ -24,14 +24,13 @@ export default function Q1Screen({ state, onChange, onNext }: Q1ScreenProps) {
     };
   }, []);
 
-  const handleSelect = (optionId: string, route: Q1Route) => {
+  const handleSelect = (optionId: string) => {
     setSelected(optionId);
 
     if (optionId === "condition") {
       setShowConditionMsg(true);
       onChange({
         answers: { ...state.answers, q1: optionId },
-        q1Route: route,
       });
       autoAdvanceRef.current = setTimeout(() => {
         onNext();
@@ -40,7 +39,6 @@ export default function Q1Screen({ state, onChange, onNext }: Q1ScreenProps) {
       setShowConditionMsg(false);
       onChange({
         answers: { ...state.answers, q1: optionId },
-        q1Route: route,
       });
     }
   };
@@ -48,7 +46,6 @@ export default function Q1Screen({ state, onChange, onNext }: Q1ScreenProps) {
   const handleNext = () => {
     const updates: Partial<AppState> = {
       answers: { ...state.answers, q1: selected },
-      q1Route: Q1_OPTIONS.find((o) => o.id === selected)?.route || null,
     };
     if (selected === "other") {
       updates.freeTexts = { ...state.freeTexts, q1: freeText };
@@ -85,7 +82,7 @@ export default function Q1Screen({ state, onChange, onNext }: Q1ScreenProps) {
             key={option.id}
             label={option.label}
             selected={selected === option.id}
-            onClick={() => handleSelect(option.id, option.route)}
+            onClick={() => handleSelect(option.id)}
           />
         ))}
       </div>
