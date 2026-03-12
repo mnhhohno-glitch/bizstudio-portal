@@ -3,6 +3,7 @@ import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import CandidateForm from "./CandidateForm";
+import GenerateUrlButton from "./GenerateUrlButton";
 import Link from "next/link";
 
 const PAGE_SIZE = 20;
@@ -94,12 +95,18 @@ export default async function CandidateMasterPage({ searchParams }: Props) {
                         </span>
                       </Td>
                       <Td>
-                        <Link
-                          href={`/candidates/${cand.id}/guides/interview`}
-                          className="text-[12px] text-[#2563EB] hover:underline"
-                        >
-                          面接対策
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`/candidates/${cand.id}/guides/interview`}
+                            className="text-[12px] text-[#2563EB] hover:underline"
+                          >
+                            面接対策
+                          </Link>
+                          <GenerateUrlButton
+                            candidateName={cand.name}
+                            advisorName={cand.employee?.name ?? null}
+                          />
+                        </div>
                       </Td>
                     </tr>
                   ))}
