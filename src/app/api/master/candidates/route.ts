@@ -5,17 +5,24 @@ import { getSessionUser } from "@/lib/auth";
 import { z } from "zod";
 
 // GET: 求職者一覧取得
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const includeEmployee = searchParams.get("include") === "employee";
+
     const candidates = await prisma.candidate.findMany({
       orderBy: { candidateNumber: "desc" },
+      ...(includeEmployee && {
+        include: { employee: { select: { id: true, name: true } } },
+      }),
     });
-    return NextResponse.json(candidates);
+    const total = candidates.length;
+    return NextResponse.json({ candidates, total });
   } catch (error) {
     console.error("Failed to fetch candidates:", error);
     return NextResponse.json(
