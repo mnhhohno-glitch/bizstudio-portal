@@ -17,9 +17,16 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { candidateName, advisorName, interviewMethod, type = "interview" } = body;
 
-  if (!candidateName || !advisorName || !interviewMethod) {
+  if (!candidateName || !advisorName) {
     return NextResponse.json(
       { error: "必須パラメータが不足しています" },
+      { status: 400 }
+    );
+  }
+
+  if (type === "interview" && !interviewMethod) {
+    return NextResponse.json(
+      { error: "面接方式を指定してください" },
       { status: 400 }
     );
   }
@@ -31,7 +38,7 @@ export async function POST(request: NextRequest) {
       token,
       candidateName,
       advisorName,
-      interviewMethod,
+      interviewMethod: interviewMethod || "",
       type,
     },
   });
