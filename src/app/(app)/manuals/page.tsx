@@ -109,7 +109,7 @@ function ManualsList() {
   }, [fetchManuals]);
 
   useEffect(() => {
-    fetch("/api/auth/me")
+    fetch("/api/auth/session")
       .then((res) => (res.ok ? res.json() : null))
       .then((user) => { if (user) setIsAdmin(user.role === "admin"); });
   }, []);

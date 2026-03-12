@@ -58,7 +58,7 @@ export default function ManualDetailPage() {
       try {
         const [manualRes, userRes] = await Promise.all([
           fetch(`/api/manuals/${id}`),
-          fetch("/api/auth/me"),
+          fetch("/api/auth/session"),
         ]);
         if (manualRes.ok) {
           setManual(await manualRes.json());
