@@ -3,7 +3,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
-import GenerateUrlButton from "./GenerateUrlButton";
 import CandidateRegistrationModal from "./CandidateRegistrationModal";
 
 type Employee = {
@@ -156,7 +155,6 @@ export default function CandidateListClient({
                   <Th>性別</Th>
                   <Th>担当CA</Th>
                   <Th>登録日時</Th>
-                  <Th>操作</Th>
                 </tr>
               </thead>
               <tbody>
@@ -195,26 +193,12 @@ export default function CandidateListClient({
                         {formatDate(cand.createdAt)}
                       </span>
                     </Td>
-                    <Td>
-                      <div className="flex items-center gap-3">
-                        <Link
-                          href={`/candidates/${cand.id}/guides/interview`}
-                          className="text-[12px] text-[#2563EB] hover:underline"
-                        >
-                          面接対策
-                        </Link>
-                        <GenerateUrlButton
-                          candidateName={cand.name}
-                          advisorName={cand.employee?.name ?? null}
-                        />
-                      </div>
-                    </Td>
                   </tr>
                 ))}
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={6}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

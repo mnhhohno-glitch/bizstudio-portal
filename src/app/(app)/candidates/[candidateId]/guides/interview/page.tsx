@@ -87,8 +87,8 @@ export default function CaInterviewGuidePage() {
   if (error) {
     return (
       <div>
-        <Link href="/admin/master" className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-6">
-          ← 求職者一覧に戻る
+        <Link href={`/candidates/${candidateId}`} className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-6">
+          ← 求職者詳細に戻る
         </Link>
         <div className="py-12 text-center text-[#DC2626]">{error}</div>
       </div>
@@ -98,10 +98,10 @@ export default function CaInterviewGuidePage() {
   return (
     <div className="px-2 py-2">
       <Link
-        href="/admin/master"
+        href={`/candidates/${candidateId}`}
         className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-1"
       >
-        ← 求職者一覧に戻る
+        ← 求職者詳細に戻る
       </Link>
 
       <div className="max-w-7xl mx-auto">
