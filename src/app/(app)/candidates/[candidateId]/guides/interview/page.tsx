@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import InterviewGuideContent from "@/components/guides/interview/InterviewGuideContent";
+import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 
 type GuideEntry = {
   id: string;
@@ -17,11 +18,13 @@ export default function CaInterviewGuidePage() {
 
   const [guideEntry, setGuideEntry] = useState<GuideEntry | null>(null);
   const [candidateName, setCandidateName] = useState("");
+  const [advisorName, setAdvisorName] = useState<string | null>(null);
   const [data, setData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyText, setCopyText] = useState("🔗 求職者用URLをコピー");
+  const [urlModalOpen, setUrlModalOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -35,6 +38,7 @@ export default function CaInterviewGuidePage() {
       const json = await res.json();
       setGuideEntry(json.guideEntry);
       setCandidateName(json.candidate.name);
+      setAdvisorName(json.candidate.employee?.name ?? null);
       setData((json.guideEntry?.data as Record<string, string>) || {});
     } catch {
       setError("データの取得に失敗しました");
@@ -97,12 +101,27 @@ export default function CaInterviewGuidePage() {
 
   return (
     <div className="px-2 py-2">
-      <Link
-        href="/admin/master"
-        className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline mb-1"
-      >
-        ← 求職者一覧に戻る
-      </Link>
+      <div className="flex items-center justify-between mb-1">
+        <Link
+          href="/admin/master"
+          className="inline-flex items-center text-[14px] text-[#2563EB] hover:underline"
+        >
+          ← 求職者一覧に戻る
+        </Link>
+        <button
+          onClick={() => setUrlModalOpen(true)}
+          className="inline-flex items-center gap-1.5 bg-[#2563EB] text-white text-[13px] font-bold rounded-md px-4 py-2 hover:bg-[#1D4ED8] transition-colors"
+        >
+          🔗 URL生成
+        </button>
+      </div>
+
+      <InterviewUrlModal
+        isOpen={urlModalOpen}
+        onClose={() => setUrlModalOpen(false)}
+        candidateName={candidateName}
+        advisorName={advisorName}
+      />
 
       <div className="max-w-7xl mx-auto">
         <InterviewGuideContent
