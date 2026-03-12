@@ -22,7 +22,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { id: true, name: true },
+    select: {
+      id: true,
+      name: true,
+      employee: { select: { id: true, name: true } },
+    },
   });
 
   if (!candidate) {
