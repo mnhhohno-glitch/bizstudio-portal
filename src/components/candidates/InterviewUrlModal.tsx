@@ -44,7 +44,7 @@ export default function InterviewUrlModal({
       an: advisorName || "",
       im: method,
     };
-    const encoded = btoa(encodeURIComponent(JSON.stringify(params)));
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(params))));
     const url = `https://schedule.bizstudio.co.jp/interview?d=${encoded}`;
     setGeneratedUrl(url);
     setStep(3);
