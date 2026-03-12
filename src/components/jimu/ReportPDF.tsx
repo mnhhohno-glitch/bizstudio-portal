@@ -216,8 +216,8 @@ export default function ReportPDF({ state, reportText }: Props) {
         <Text style={s.coverLogo}>Bizstudio</Text>
       </Page>
 
-      {/* 回答履歴 */}
-      <Page size="A4" style={s.page}>
+      {/* 回答履歴 → レポート（連続フロー） */}
+      <Page size="A4" style={s.page} wrap>
         <Text style={s.sectionHeader}>■ 質問と回答</Text>
 
         <Text style={s.questionLabel}>
@@ -307,20 +307,13 @@ export default function ReportPDF({ state, reportText }: Props) {
           → {state.reflection.happiestMoment || "（未回答）"}
         </Text>
 
-        <Text style={s.pageNumber}>2</Text>
-      </Page>
+        <View style={s.divider} />
 
-      {/* レポート パート1 */}
-      <Page size="A4" style={s.page}>
         <Text style={s.sectionHeader}>■ パート1：あなたの志望動機の素材</Text>
         <View style={s.blueBox}>
           <ReportTextBlock text={parsed.part1} />
         </View>
-        <Text style={s.pageNumber}>3</Text>
-      </Page>
 
-      {/* レポート パート2 */}
-      <Page size="A4" style={s.page}>
         <Text style={s.sectionHeader}>
           ■ パート2：面接で使える志望動機（完成版）
         </Text>
@@ -339,7 +332,12 @@ export default function ReportPDF({ state, reportText }: Props) {
             "この会社だからこそ"の理由も準備しましょう。
           </Text>
         </View>
-        <Text style={s.pageNumber}>4</Text>
+
+        <Text
+          style={s.pageNumber}
+          render={({ pageNumber }) => `${pageNumber}`}
+          fixed
+        />
       </Page>
     </Document>
   );
