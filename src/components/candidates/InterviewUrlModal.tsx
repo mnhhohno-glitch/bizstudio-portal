@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 type UrlType = "interview" | "consultation";
-type InterviewMethod = "in-person" | "online" | "flexible";
+type InterviewMethod = "in-person" | "online" | "flexible" | "phone";
 
 interface InterviewUrlModalProps {
   isOpen: boolean;
@@ -16,6 +16,11 @@ const INTERVIEW_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
   { value: "in-person", label: "対面" },
   { value: "online", label: "オンライン" },
   { value: "flexible", label: "どちらでも可" },
+];
+
+const CONSULTATION_METHOD_OPTIONS: { value: InterviewMethod; label: string }[] = [
+  { value: "phone", label: "電話" },
+  { value: "online", label: "オンライン" },
 ];
 
 export default function InterviewUrlModal({
@@ -70,12 +75,8 @@ export default function InterviewUrlModal({
   const handleSelectType = (type: UrlType) => {
     if (!advisorName) return;
     setUrlType(type);
-    if (type === "consultation") {
-      doGenerate(type, "");
-    } else {
-      setMethod("online");
-      setStep(2);
-    }
+    setMethod(type === "consultation" ? "phone" : "online");
+    setStep(2);
   };
 
   const handleCopy = async () => {
@@ -88,9 +89,10 @@ export default function InterviewUrlModal({
     }
   };
 
-  const totalSteps = urlType === "interview" ? 3 : 2;
-  const displayStep =
-    urlType === "consultation" && step === 3 ? 2 : step;
+  const methodOptions =
+    urlType === "consultation"
+      ? CONSULTATION_METHOD_OPTIONS
+      : INTERVIEW_METHOD_OPTIONS;
 
   return (
     <div
@@ -116,21 +118,21 @@ export default function InterviewUrlModal({
         <div className="p-6">
           {/* ステップインジケーター */}
           <div className="flex items-center gap-2 mb-6">
-            {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => (
+            {[1, 2, 3].map((s) => (
               <div key={s} className="flex items-center gap-2">
                 <div
                   className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold ${
-                    displayStep >= s
+                    step >= s
                       ? "bg-[#2563EB] text-white"
                       : "bg-[#E5E7EB] text-[#6B7280]"
                   }`}
                 >
                   {s}
                 </div>
-                {s < totalSteps && (
+                {s < 3 && (
                   <div
                     className={`w-8 h-0.5 ${
-                      displayStep > s ? "bg-[#2563EB]" : "bg-[#E5E7EB]"
+                      step > s ? "bg-[#2563EB]" : "bg-[#E5E7EB]"
                     }`}
                   />
                 )}
@@ -186,22 +188,17 @@ export default function InterviewUrlModal({
                   </div>
                 </button>
               </div>
-              {generating && (
-                <div className="mt-4 text-center text-[13px] text-[#6B7280]">
-                  URL生成中...
-                </div>
-              )}
             </div>
           )}
 
-          {/* ステップ2: 面接方式の選択（面接のみ） */}
+          {/* ステップ2: 形式選択 */}
           {step === 2 && (
             <div>
               <p className="text-[13px] text-[#6B7280] mb-4">
-                面接方式を選択してください
+                {urlType === "interview" ? "面接方式" : "面談形式"}を選択してください
               </p>
               <div className="space-y-2 mb-6">
-                {INTERVIEW_METHOD_OPTIONS.map((opt) => (
+                {methodOptions.map((opt) => (
                   <label
                     key={opt.value}
                     className={`flex items-center gap-3 border rounded-lg p-3 cursor-pointer transition-colors ${
@@ -253,9 +250,8 @@ export default function InterviewUrlModal({
               <div className="mb-2 text-[12px] text-[#6B7280]">
                 対象：{candidateName} 様 ／ 担当：{advisorName} ／ 用途：
                 {urlType === "interview" ? "面接希望日の回収" : "面談調整"}
-                {urlType === "interview" && (
-                  <> ／ 方式：{INTERVIEW_METHOD_OPTIONS.find((o) => o.value === method)?.label}</>
-                )}
+                {" ／ 方式："}
+                {methodOptions.find((o) => o.value === method)?.label}
               </div>
               <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-md p-3 mb-4">
                 <p className="text-[12px] text-[#374151] break-all font-mono leading-relaxed">
