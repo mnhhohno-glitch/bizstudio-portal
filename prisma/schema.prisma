@@ -79,6 +79,7 @@ model User {
   appSessions   AppSession[]
   announcements Announcement[]
   documents     Document[]     @relation("UserDocuments")
+  manuals       Manual[]       @relation("UserManuals")
 
   @@map("users")
 }
@@ -267,4 +268,35 @@ model Announcement {
   updatedAt    DateTime             @updatedAt @map("updated_at")
 
   @@map("announcements")
+}
+
+enum ManualCategory {
+  INTERNAL
+  CANDIDATE
+  CLIENT
+}
+
+enum ManualContentType {
+  VIDEO
+  PDF
+  URL
+  MARKDOWN
+}
+
+model Manual {
+  id              String             @id @default(cuid())
+  title           String
+  category        ManualCategory
+  contentType     ManualContentType  @map("content_type")
+  videoUrl        String?            @map("video_url")
+  pdfPath         String?            @map("pdf_path")
+  externalUrl     String?            @map("external_url")
+  markdownContent String?            @map("markdown_content") @db.Text
+  description     String?            @db.Text
+  authorUserId    String             @map("author_user_id")
+  author          User               @relation("UserManuals", fields: [authorUserId], references: [id])
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  @@map("manuals")
 }
