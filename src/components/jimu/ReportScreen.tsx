@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { AppState } from "@/types/jimu";
 
 interface ReportScreenProps {
@@ -93,6 +93,8 @@ export default function ReportScreen({
   const [error, setError] = useState("");
   const [report, setReport] = useState(state.reportText);
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const generateReport = useCallback(async () => {
     setLoading(true);
@@ -150,6 +152,48 @@ export default function ReportScreen({
     }
   };
 
+  const handleDownloadPDF = async () => {
+    const element = reportRef.current;
+    if (!element) return;
+
+    setDownloading(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const jsPDF = (await import("jspdf")).default;
+
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      let heightLeft = pdfHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - pdfHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save("事務職_志望動機レポート.pdf");
+    } catch {
+      // silent fail
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
@@ -191,34 +235,36 @@ export default function ReportScreen({
         </h2>
       </div>
 
-      {parsed.part1 && (
-        <ReportSection
-          title="■ パート1：あなたの志望動機の素材"
-          content={parsed.part1.replace(/■ パート1[^\n]*\n?/, "").trim()}
-          variant="material"
-        />
-      )}
+      <div ref={reportRef} className="space-y-6">
+        {parsed.part1 && (
+          <ReportSection
+            title="■ パート1：あなたの志望動機の素材"
+            content={parsed.part1.replace(/■ パート1[^\n]*\n?/, "").trim()}
+            variant="material"
+          />
+        )}
 
-      {parsed.part2 && (
-        <ReportSection
-          title="■ パート2：面接で使える志望動機（完成版）"
-          content={parsed.part2.replace(/■ パート2[^\n]*\n?/, "").trim()}
-          variant="final"
-        />
-      )}
+        {parsed.part2 && (
+          <ReportSection
+            title="■ パート2：面接で使える志望動機（完成版）"
+            content={parsed.part2.replace(/■ パート2[^\n]*\n?/, "").trim()}
+            variant="final"
+          />
+        )}
 
-      <div className="bg-gray-50 rounded-lg p-4 text-xs text-gray-500 leading-relaxed">
-        <p className="font-medium text-gray-600 mb-2">
-          💡 企業への志望動機について
-        </p>
-        <p>
-          これは&quot;なぜ事務職をやりたいか&quot;の志望動機です。
-        </p>
-        <p>面接では&quot;なぜこの会社か&quot;も聞かれます。</p>
-        <p>
-          企業の事業内容・社風・求人情報を調べて、
-          &quot;この会社だからこそ&quot;の理由も準備しましょう。
-        </p>
+        <div className="bg-gray-50 rounded-lg p-4 text-xs text-gray-500 leading-relaxed">
+          <p className="font-medium text-gray-600 mb-2">
+            💡 企業への志望動機について
+          </p>
+          <p>
+            これは&quot;なぜ事務職をやりたいか&quot;の志望動機です。
+          </p>
+          <p>面接では&quot;なぜこの会社か&quot;も聞かれます。</p>
+          <p>
+            企業の事業内容・社風・求人情報を調べて、
+            &quot;この会社だからこそ&quot;の理由も準備しましょう。
+          </p>
+        </div>
       </div>
 
       <button
@@ -227,6 +273,15 @@ export default function ReportScreen({
         className="w-full bg-[#1e3a5f] text-white rounded-lg px-6 py-3 font-bold text-base hover:bg-[#16304f] transition-colors"
       >
         {copied ? "コピーしました！" : "レポートをコピー"}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleDownloadPDF}
+        disabled={downloading}
+        className="w-full border-2 border-[#1e3a5f] text-[#1e3a5f] bg-white rounded-lg px-6 py-3 font-bold text-base hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {downloading ? "ダウンロード中..." : "PDFでダウンロード"}
       </button>
     </div>
   );
