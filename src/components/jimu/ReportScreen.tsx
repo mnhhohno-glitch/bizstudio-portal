@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useId } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { AppState } from "@/types/jimu";
 
 interface ReportScreenProps {
@@ -93,8 +93,7 @@ export default function ReportScreen({
   const [error, setError] = useState("");
   const [report, setReport] = useState(state.reportText);
   const [copied, setCopied] = useState(false);
-  const reportRef = useRef<HTMLDivElement>(null);
-  const printStyleId = useId();
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const generateReport = useCallback(async () => {
     setLoading(true);
@@ -152,32 +151,36 @@ export default function ReportScreen({
     }
   };
 
-  const handlePrint = () => {
-    const element = reportRef.current;
-    if (!element) return;
+  const handleDownloadPDF = async () => {
+    setIsDownloading(true);
+    try {
+      const { pdf } = await import("@react-pdf/renderer");
+      const { default: ReportPDF } = await import("./ReportPDF");
+      const { createElement } = await import("react");
 
-    const styleId = `print-style-${printStyleId.replace(/:/g, "")}`;
-    let styleEl = document.getElementById(styleId);
-    if (!styleEl) {
-      styleEl = document.createElement("style");
-      styleEl.id = styleId;
-      document.head.appendChild(styleEl);
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+      const fileName = `${state.candidateName || "未入力"}-${dateStr}-事務（事務職志望動機分析資料）.pdf`;
+
+      const doc = createElement(ReportPDF, {
+        state,
+        reportText: report || "",
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blob = await pdf(doc as any).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("PDF generation error:", err);
+      alert("PDFの生成に失敗しました。「レポートをコピー」をお使いください。");
+    } finally {
+      setIsDownloading(false);
     }
-    styleEl.textContent = `
-      @media print {
-        body * { visibility: hidden !important; }
-        [data-print-area], [data-print-area] * { visibility: visible !important; }
-        [data-print-area] {
-          position: absolute !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 100% !important;
-          padding: 20px !important;
-        }
-      }
-    `;
-
-    window.print();
   };
 
   if (loading) {
@@ -221,7 +224,7 @@ export default function ReportScreen({
         </h2>
       </div>
 
-      <div ref={reportRef} data-print-area className="space-y-6">
+      <div className="space-y-6">
         {parsed.part1 && (
           <ReportSection
             title="■ パート1：あなたの志望動機の素材"
@@ -263,10 +266,11 @@ export default function ReportScreen({
 
       <button
         type="button"
-        onClick={handlePrint}
-        className="w-full border-2 border-[#1e3a5f] text-[#1e3a5f] bg-white rounded-lg px-6 py-3 font-bold text-base hover:bg-gray-50 transition-colors"
+        onClick={handleDownloadPDF}
+        disabled={isDownloading}
+        className="w-full border-2 border-[#1e3a5f] text-[#1e3a5f] bg-white rounded-lg px-6 py-3 font-bold text-base hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        PDFで保存（印刷）
+        {isDownloading ? "PDF生成中..." : "PDFでダウンロード"}
       </button>
     </div>
   );

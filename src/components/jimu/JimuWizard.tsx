@@ -31,7 +31,10 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
         await fetch(`/api/jimu/${token}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state: newState }),
+          body: JSON.stringify({
+            state: newState,
+            candidateName: newState.candidateName || undefined,
+          }),
         });
       } catch {
         // silent fail
@@ -70,7 +73,7 @@ export default function JimuWizard({ token, initialState }: JimuWizardProps) {
   const renderScreen = () => {
     switch (state.currentScreen) {
       case 0:
-        return <TopScreen onNext={handleNext} />;
+        return <TopScreen state={state} onChange={handleChange} onNext={handleNext} />;
       case 1:
         return <Q1Screen state={state} onChange={handleChange} onNext={handleNext} />;
       case 2:

@@ -20,6 +20,7 @@ export interface Reflection {
 
 export interface AppState {
   currentScreen: number;
+  candidateName: string;
   answers: {
     q1: string;
     q2: string;
@@ -36,6 +37,7 @@ export interface AppState {
 
 export const initialAppState: AppState = {
   currentScreen: 0,
+  candidateName: "",
   answers: { q1: "", q2: "" },
   freeTexts: {},
   storyResponses: { q1: "", q2: "", q3: "" },
