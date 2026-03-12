@@ -128,10 +128,10 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   ];
 
   const common: Item[] = [
+    { href: "/admin/master", label: "求職者管理", icon: "📇" },
     { href: "/announcements", label: "お知らせ", icon: "📢" },
     { href: "/documents", label: "資料一覧", icon: "📄" },
     { href: "/manuals", label: "マニュアル", icon: "📖" },
-    { href: "/admin/master", label: "求職者管理", icon: "📇" },
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
 
