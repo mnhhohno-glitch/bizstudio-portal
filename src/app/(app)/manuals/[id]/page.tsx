@@ -83,7 +83,7 @@ export default function ManualDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm("このマニュアルを削除してもよろしいですか？")) return;
+    if (!confirm("このマニュアルを削除します。よろしいですか？")) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/manuals/${id}/delete`, { method: "DELETE" });
@@ -240,18 +240,18 @@ export default function ManualDetailPage() {
               {canEdit && (
                 <Link
                   href={`/manuals/${manual.id}/edit`}
-                  className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-4 py-2 text-[14px] hover:bg-[#F9FAFB]"
+                  className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-4 py-2 text-[14px] font-medium hover:bg-[#F9FAFB]"
                 >
-                  編集する
+                  ✏️ 編集
                 </Link>
               )}
               {canDelete && (
                 <button
                   onClick={handleDelete}
                   disabled={deleting}
-                  className="bg-[#DC2626] text-white rounded-md px-4 py-2 text-[14px] hover:bg-[#B91C1C] disabled:opacity-50"
+                  className="bg-[#DC2626] text-white rounded-md px-4 py-2 text-[14px] font-medium hover:bg-[#B91C1C] disabled:opacity-50"
                 >
-                  {deleting ? "削除中..." : "削除する"}
+                  {deleting ? "削除中..." : "🗑 削除"}
                 </button>
               )}
             </div>

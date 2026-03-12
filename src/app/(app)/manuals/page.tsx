@@ -55,6 +55,8 @@ function ManualsList() {
   const [manuals, setManuals] = useState<Manual[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ total: 0, page: 1, limit: 10, totalPages: 0 });
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [category, setCategory] = useState(searchParams.get("category") || "");
@@ -105,6 +107,30 @@ function ManualsList() {
   useEffect(() => {
     fetchManuals();
   }, [fetchManuals]);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((user) => { if (user) setIsAdmin(user.role === "admin"); });
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("このマニュアルを削除します。よろしいですか？")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/manuals/${id}/delete`, { method: "DELETE" });
+      if (res.ok) {
+        fetchManuals();
+      } else {
+        const data = await res.json();
+        alert(data.error || "削除に失敗しました");
+      }
+    } catch {
+      alert("削除に失敗しました");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     setSearch(searchParams.get("search") || "");
@@ -255,8 +281,18 @@ function ManualsList() {
             return (
               <div
                 key={manual.id}
-                className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-4"
+                className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-4 relative"
               >
+                {isAdmin && (
+                  <button
+                    onClick={() => handleDelete(manual.id)}
+                    disabled={deletingId === manual.id}
+                    className="absolute top-3 right-3 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                    title="削除"
+                  >
+                    {deletingId === manual.id ? "..." : "🗑"}
+                  </button>
+                )}
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[16px]">{ct.icon}</span>
                   <h3 className="text-[16px] font-semibold text-[#374151]">{manual.title}</h3>
