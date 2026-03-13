@@ -517,34 +517,187 @@ function InterviewTab({
 /* ================================================================== */
 /*  Tab: Notes                                                          */
 /* ================================================================== */
-function ScheduleUrlSection({
-  candidateName,
-  advisorName,
+function UrlGenerationSection({
+  candidate,
 }: {
-  candidateName: string;
-  advisorName: string | null;
+  candidate: Candidate;
 }) {
-  const [modalOpen, setModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+
+  const interviewGuide = candidate.guideEntries.find(
+    (e) => e.guideType === "INTERVIEW"
+  );
+  const appUrl =
+    typeof window !== "undefined" ? window.location.origin : "";
+
+  const [guideUrl, setGuideUrl] = useState(
+    interviewGuide ? `${appUrl}/g/${interviewGuide.token}` : ""
+  );
+  const [guideCopied, setGuideCopied] = useState(false);
+  const [guideGenerating, setGuideGenerating] = useState(false);
+
+  const [jimuUrl, setJimuUrl] = useState("");
+  const [jimuCopied, setJimuCopied] = useState(false);
+  const [jimuGenerating, setJimuGenerating] = useState(false);
+
+  const handleCopy = async (
+    url: string,
+    setCopied: (v: boolean) => void
+  ) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // silent
+    }
+  };
+
+  const handleGenerateGuide = async () => {
+    setGuideGenerating(true);
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidate.id}/guides/interview/token`
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setGuideUrl(data.url);
+    } catch {
+      alert("ガイドURLの生成に失敗しました");
+    } finally {
+      setGuideGenerating(false);
+    }
+  };
+
+  const handleGenerateJimu = async () => {
+    setJimuGenerating(true);
+    try {
+      const res = await fetch("/api/jimu/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateName: candidate.name }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setJimuUrl(data.url);
+    } catch {
+      alert("事務職診断URLの生成に失敗しました");
+    } finally {
+      setJimuGenerating(false);
+    }
+  };
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-      <h3 className="text-[14px] font-semibold text-[#374151] mb-2">
+      <h3 className="text-[14px] font-semibold text-[#374151] mb-4">
         🔗 URL生成
       </h3>
-      <p className="text-[13px] text-gray-500 mb-4">
-        求職者への日程調整用URLを生成します。
-      </p>
-      <button
-        onClick={() => setModalOpen(true)}
-        className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-      >
-        📅 日程調整URLを生成
-      </button>
+
+      <div className="space-y-4">
+        {/* 面接対策ガイドURL */}
+        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[13px] font-medium text-[#374151]">
+              📋 面接対策ガイドURL
+            </span>
+            {!guideUrl && (
+              <button
+                onClick={handleGenerateGuide}
+                disabled={guideGenerating}
+                className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors disabled:opacity-50"
+              >
+                {guideGenerating ? "生成中..." : "URLを生成"}
+              </button>
+            )}
+          </div>
+          {guideUrl ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-2 text-[12px] text-gray-600 truncate font-mono">
+                {guideUrl}
+              </div>
+              <button
+                onClick={() => handleCopy(guideUrl, setGuideCopied)}
+                className={`border rounded-md px-3 py-2 text-[12px] whitespace-nowrap transition-colors ${
+                  guideCopied
+                    ? "border-green-300 bg-green-50 text-green-700"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                {guideCopied ? "✅ コピー済" : "📋 コピー"}
+              </button>
+            </div>
+          ) : (
+            <p className="text-[12px] text-gray-400">
+              {interviewGuide
+                ? "URLを読み込み中..."
+                : "ガイドが未作成です。「URLを生成」でガイドを作成してURLを取得できます。"}
+            </p>
+          )}
+        </div>
+
+        {/* 日程調整URL */}
+        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[13px] font-medium text-[#374151]">
+              📅 日程調整URL
+            </span>
+            <button
+              onClick={() => setScheduleModalOpen(true)}
+              className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors"
+            >
+              URLを生成
+            </button>
+          </div>
+          <p className="text-[12px] text-gray-400">
+            面談・面接の日程調整URLを生成します。
+          </p>
+        </div>
+
+        {/* 事務職診断URL */}
+        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[13px] font-medium text-[#374151]">
+              📝 事務職診断URL
+            </span>
+            {!jimuUrl && (
+              <button
+                onClick={handleGenerateJimu}
+                disabled={jimuGenerating}
+                className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors disabled:opacity-50"
+              >
+                {jimuGenerating ? "生成中..." : "URLを生成"}
+              </button>
+            )}
+          </div>
+          {jimuUrl ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-2 text-[12px] text-gray-600 truncate font-mono">
+                {jimuUrl}
+              </div>
+              <button
+                onClick={() => handleCopy(jimuUrl, setJimuCopied)}
+                className={`border rounded-md px-3 py-2 text-[12px] whitespace-nowrap transition-colors ${
+                  jimuCopied
+                    ? "border-green-300 bg-green-50 text-green-700"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                {jimuCopied ? "✅ コピー済" : "📋 コピー"}
+              </button>
+            </div>
+          ) : (
+            <p className="text-[12px] text-gray-400">
+              事務職深掘り診断のURLを生成します。
+            </p>
+          )}
+        </div>
+      </div>
+
       <InterviewUrlModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        candidateName={candidateName}
-        advisorName={advisorName}
+        isOpen={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+        candidateName={candidate.name}
+        advisorName={candidate.employee?.name ?? null}
       />
     </div>
   );
@@ -609,10 +762,7 @@ function NotesTab({
   return (
     <div>
       {/* URL生成セクション */}
-      <ScheduleUrlSection
-        candidateName={candidate.name}
-        advisorName={candidate.employee?.name ?? null}
-      />
+      <UrlGenerationSection candidate={candidate} />
 
       {/* メモセクション */}
       <div className="space-y-4">
