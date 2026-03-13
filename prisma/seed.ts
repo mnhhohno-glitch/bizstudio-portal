@@ -395,7 +395,7 @@ async function main() {
   }
 
   await upsertField(cat4.id, "エントリー日", "DATE", true, 1);
-  await upsertField(cat4.id, "エントリー件数", "TEXT", true, 2, "例: 5件");
+  await upsertField(cat4.id, "エントリー件数", "TEXT", true, 2, "5");
   await upsertField(cat4.id, "コメント", "TEXTAREA", false, 3, "補足事項があれば入力してください");
 
   // カテゴリ5: その他

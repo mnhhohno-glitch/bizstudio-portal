@@ -674,6 +674,21 @@ function renderField(
 
   switch (field.fieldType) {
     case "TEXT":
+      if (field.label === "エントリー件数") {
+        return (
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="1"
+              value={value}
+              placeholder="5"
+              onChange={(e) => setFieldValue(field.id, e.target.value)}
+              className="max-w-[120px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <span className="text-[14px] text-[#374151]">件</span>
+          </div>
+        );
+      }
       return (
         <input
           type="text"
