@@ -8,6 +8,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const candidateName = body.candidateName || null;
+    const candidateId = body.candidateId || null;
 
     const token = crypto.randomBytes(16).toString("hex");
 
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
       data: {
         token,
         candidateName,
+        candidateId,
         state: initialAppState as unknown as Prisma.InputJsonValue,
       },
     });

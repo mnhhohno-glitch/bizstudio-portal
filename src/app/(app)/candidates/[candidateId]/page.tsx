@@ -25,6 +25,32 @@ type GuideEntry = {
   updatedAt: string;
 };
 
+type JimuSession = {
+  id: string;
+  token: string;
+  candidateName: string | null;
+  state: AppState;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+type AppState = {
+  currentScreen: number;
+  candidateName: string;
+  answers: { q1: string; q2: string };
+  freeTexts: { q1?: string; q2?: string };
+  storyResponses: { q1: string; q2: string; q3: string };
+  quizResults: { questionNumber: number; selectedAnswer: string; correct: boolean; scene: string }[];
+  reflection: {
+    mostImpressiveScenario: number | null;
+    whyImpressive: string;
+    pastExperience: string;
+    happiestMoment: string;
+  };
+  reportText: string;
+};
+
 type Candidate = {
   id: string;
   candidateNumber: string;
@@ -51,7 +77,8 @@ type SessionUser = {
 const TABS = [
   { key: "overview", label: "概要" },
   { key: "interview", label: "面接対策" },
-  { key: "notes", label: "URL生成 / メモ" },
+  { key: "counseling", label: "面談サポート" },
+  { key: "schedule", label: "日程調整" },
   { key: "tasks", label: "タスク" },
   { key: "documents", label: "書類" },
   { key: "history", label: "履歴" },
@@ -296,7 +323,7 @@ function OverviewTab({
           </h3>
           {notesCount > 0 && (
             <button
-              onClick={() => onTabChange("notes")}
+              onClick={() => onTabChange("schedule")}
               className="text-[12px] text-[#2563EB] hover:underline"
             >
               すべて見る →
@@ -515,59 +542,54 @@ function InterviewTab({
 }
 
 /* ================================================================== */
-/*  Tab: Notes                                                          */
+/*  Q1/Q2 option labels                                                 */
 /* ================================================================== */
-function UrlGenerationSection({
+const Q1_LABELS: Record<string, string> = {
+  condition: "土日休み・残業の少なさなど、働き方の条件が合うと思った",
+  personality: "几帳面・コツコツ作業が得意で、自分に向いていると思った",
+  support: "誰かをサポートする・縁の下で支える仕事がしたい",
+  other: "その他",
+};
+const Q2_LABELS: Record<string, string> = {
+  u1: "正確さ。ミスなく仕事をやり遂げたい",
+  u2: "スピード。頼まれたことに素早く対応したい",
+  u3: "気配り。周りが動きやすいよう先回りしたい",
+  u4: "安定。無理なく長く続けられる働き方をしたい",
+  u5: "その他",
+};
+const SCENARIO_LABELS: Record<number, string> = {
+  1: "取締役会議の資料更新（正確さ）",
+  2: "急ぎの見積書作成（スピード × 正確さ）",
+  3: "他部署への経費精算フォロー（社内調整）",
+  4: "契約書の金額ミス発見（気づきと先回り）",
+  5: "3つの同時依頼の優先判断（マルチタスク）",
+};
+const REFLECTION_LABELS: Record<number, string> = {
+  1: "問1：取締役会議の資料更新（正確さ）",
+  2: "問2：急ぎの見積書作成（スピード × 正確さ）",
+  3: "問3：他部署への経費精算フォロー（社内調整）",
+  4: "問4：契約書の金額ミス発見（気づきと先回り）",
+  5: "問5：3つの同時依頼の優先判断（マルチタスク）",
+};
+
+/* ================================================================== */
+/*  Tab: Counseling (面談サポート)                                       */
+/* ================================================================== */
+function CounselingTab({
   candidate,
+  jimuSessions,
+  onJimuCreated,
 }: {
   candidate: Candidate;
+  jimuSessions: JimuSession[];
+  onJimuCreated: () => void;
 }) {
-  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
-
-  const interviewGuide = candidate.guideEntries.find(
-    (e) => e.guideType === "INTERVIEW"
-  );
-  const appUrl =
-    typeof window !== "undefined" ? window.location.origin : "";
-
-  const [guideUrl, setGuideUrl] = useState(
-    interviewGuide ? `${appUrl}/g/${interviewGuide.token}` : ""
-  );
-  const [guideCopied, setGuideCopied] = useState(false);
-  const [guideGenerating, setGuideGenerating] = useState(false);
-
-  const [jimuUrl, setJimuUrl] = useState("");
-  const [jimuCopied, setJimuCopied] = useState(false);
   const [jimuGenerating, setJimuGenerating] = useState(false);
-
-  const handleCopy = async (
-    url: string,
-    setCopied: (v: boolean) => void
-  ) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // silent
-    }
-  };
-
-  const handleGenerateGuide = async () => {
-    setGuideGenerating(true);
-    try {
-      const res = await fetch(
-        `/api/candidates/${candidate.id}/guides/interview/token`
-      );
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setGuideUrl(data.url);
-    } catch {
-      alert("ガイドURLの生成に失敗しました");
-    } finally {
-      setGuideGenerating(false);
-    }
-  };
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [expandedSession, setExpandedSession] = useState<string | null>(
+    jimuSessions.length > 0 ? jimuSessions[0].id : null
+  );
+  const appUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const handleGenerateJimu = async () => {
     setJimuGenerating(true);
@@ -575,11 +597,13 @@ function UrlGenerationSection({
       const res = await fetch("/api/jimu/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidateName: candidate.name }),
+        body: JSON.stringify({
+          candidateName: candidate.name,
+          candidateId: candidate.id,
+        }),
       });
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setJimuUrl(data.url);
+      onJimuCreated();
     } catch {
       alert("事務職診断URLの生成に失敗しました");
     } finally {
@@ -587,123 +611,247 @@ function UrlGenerationSection({
     }
   };
 
+  const handleCopy = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(`${appUrl}/j/${token}`);
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2000);
+    } catch { /* silent */ }
+  };
+
+  const getProgress = (state: AppState) => {
+    const total = 10;
+    return Math.min(state.currentScreen, total);
+  };
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-      <h3 className="text-[14px] font-semibold text-[#374151] mb-4">
-        🔗 URL生成
-      </h3>
-
-      <div className="space-y-4">
-        {/* 面接対策ガイドURL */}
-        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[13px] font-medium text-[#374151]">
-              📋 面接対策ガイドURL
-            </span>
-            {!guideUrl && (
-              <button
-                onClick={handleGenerateGuide}
-                disabled={guideGenerating}
-                className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors disabled:opacity-50"
-              >
-                {guideGenerating ? "生成中..." : "URLを生成"}
-              </button>
-            )}
-          </div>
-          {guideUrl ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-2 text-[12px] text-gray-600 truncate font-mono">
-                {guideUrl}
-              </div>
-              <button
-                onClick={() => handleCopy(guideUrl, setGuideCopied)}
-                className={`border rounded-md px-3 py-2 text-[12px] whitespace-nowrap transition-colors ${
-                  guideCopied
-                    ? "border-green-300 bg-green-50 text-green-700"
-                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                {guideCopied ? "✅ コピー済" : "📋 コピー"}
-              </button>
-            </div>
-          ) : (
-            <p className="text-[12px] text-gray-400">
-              {interviewGuide
-                ? "URLを読み込み中..."
-                : "ガイドが未作成です。「URLを生成」でガイドを作成してURLを取得できます。"}
-            </p>
-          )}
-        </div>
-
-        {/* 日程調整URL */}
-        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[13px] font-medium text-[#374151]">
-              📅 日程調整URL
-            </span>
-            <button
-              onClick={() => setScheduleModalOpen(true)}
-              className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors"
-            >
-              URLを生成
-            </button>
-          </div>
-          <p className="text-[12px] text-gray-400">
-            面談・面接の日程調整URLを生成します。
-          </p>
-        </div>
-
-        {/* 事務職診断URL */}
-        <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[13px] font-medium text-[#374151]">
-              📝 事務職診断URL
-            </span>
-            {!jimuUrl && (
-              <button
-                onClick={handleGenerateJimu}
-                disabled={jimuGenerating}
-                className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors disabled:opacity-50"
-              >
-                {jimuGenerating ? "生成中..." : "URLを生成"}
-              </button>
-            )}
-          </div>
-          {jimuUrl ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-2 text-[12px] text-gray-600 truncate font-mono">
-                {jimuUrl}
-              </div>
-              <button
-                onClick={() => handleCopy(jimuUrl, setJimuCopied)}
-                className={`border rounded-md px-3 py-2 text-[12px] whitespace-nowrap transition-colors ${
-                  jimuCopied
-                    ? "border-green-300 bg-green-50 text-green-700"
-                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                {jimuCopied ? "✅ コピー済" : "📋 コピー"}
-              </button>
-            </div>
-          ) : (
-            <p className="text-[12px] text-gray-400">
-              事務職深掘り診断のURLを生成します。
-            </p>
-          )}
-        </div>
+    <div className="space-y-6">
+      {/* ヘッダー */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-[16px] font-semibold text-[#374151]">
+          事務職診断
+        </h3>
+        <button
+          onClick={handleGenerateJimu}
+          disabled={jimuGenerating}
+          className="inline-flex items-center gap-2 bg-[#003366] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors disabled:opacity-50"
+        >
+          {jimuGenerating ? "生成中..." : "診断URLを生成"}
+        </button>
       </div>
 
-      <InterviewUrlModal
-        isOpen={scheduleModalOpen}
-        onClose={() => setScheduleModalOpen(false)}
-        candidateName={candidate.name}
-        advisorName={candidate.employee?.name ?? null}
-      />
+      {jimuSessions.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-[13px] text-gray-400">
+          まだ事務職診断が作成されていません。「診断URLを生成」ボタンからURLを発行してください。
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {jimuSessions.map((session) => {
+            const state = session.state;
+            const progress = getProgress(state);
+            const isCompleted = session.completedAt !== null || progress >= 10;
+            const isExpanded = expandedSession === session.id;
+
+            return (
+              <div key={session.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {/* セッションヘッダー */}
+                <div
+                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => setExpandedSession(isExpanded ? null : session.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
+                      isCompleted
+                        ? "bg-green-100 text-green-700"
+                        : "bg-yellow-100 text-yellow-700"
+                    }`}>
+                      {isCompleted ? "完了" : `進行中 (${progress}/10)`}
+                    </span>
+                    <span className="text-[13px] text-gray-600">
+                      {formatDateTime(session.createdAt)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCopy(session.token); }}
+                      className={`border rounded-md px-3 py-1.5 text-[12px] whitespace-nowrap transition-colors ${
+                        copiedToken === session.token
+                          ? "border-green-300 bg-green-50 text-green-700"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {copiedToken === session.token ? "コピー済" : "URLをコピー"}
+                    </button>
+                    <span className="text-gray-400 text-sm">{isExpanded ? "▲" : "▼"}</span>
+                  </div>
+                </div>
+
+                {/* 診断結果（展開時） */}
+                {isExpanded && (
+                  <JimuSessionDetail state={state} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function NotesTab({
+/* ================================================================== */
+/*  JimuSessionDetail - 診断結果表示                                    */
+/* ================================================================== */
+function JimuSessionDetail({ state }: { state: AppState }) {
+  const q1Label = Q1_LABELS[state.answers.q1] || state.answers.q1;
+  const q2Label = Q2_LABELS[state.answers.q2] || state.answers.q2;
+
+  return (
+    <div className="border-t border-gray-200 p-4 space-y-5">
+      {/* Q1 */}
+      <div>
+        <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+          Q1. 事務を目指した理由
+        </h4>
+        <div className="bg-gray-50 rounded-lg p-3">
+          {state.answers.q1 ? (
+            <>
+              <p className="text-[13px] text-gray-700">{q1Label}</p>
+              {state.answers.q1 === "other" && state.freeTexts.q1 && (
+                <p className="text-[13px] text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">
+                  {state.freeTexts.q1}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[13px] text-gray-400">未回答</p>
+          )}
+        </div>
+      </div>
+
+      {/* Q2 */}
+      <div>
+        <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+          Q2. 事務の仕事で大切にしたいこと
+        </h4>
+        <div className="bg-gray-50 rounded-lg p-3">
+          {state.answers.q2 ? (
+            <>
+              <p className="text-[13px] text-gray-700">{q2Label}</p>
+              {state.answers.q2 === "u5" && state.freeTexts.q2 && (
+                <p className="text-[13px] text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">
+                  {state.freeTexts.q2}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[13px] text-gray-400">未回答</p>
+          )}
+        </div>
+      </div>
+
+      {/* ストーリー回答 */}
+      {(state.storyResponses.q1 || state.storyResponses.q2 || state.storyResponses.q3) && (
+        <div>
+          <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+            ストーリー回答
+          </h4>
+          <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+            {["q1", "q2", "q3"].map((key, idx) => {
+              const val = state.storyResponses[key as keyof typeof state.storyResponses];
+              return val ? (
+                <div key={key} className="text-[13px]">
+                  <span className="text-gray-500">質問{idx + 1}:</span>{" "}
+                  <span className="text-gray-700">{val}</span>
+                </div>
+              ) : null;
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* シナリオクイズ結果 */}
+      {state.quizResults.length > 0 && (
+        <div>
+          <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+            シナリオクイズ結果（{state.quizResults.filter(r => r.correct).length}/{state.quizResults.length} 正解）
+          </h4>
+          <div className="space-y-2">
+            {state.quizResults.map((result) => (
+              <div key={result.questionNumber} className="bg-gray-50 rounded-lg p-3 flex items-start gap-2">
+                <span className={`text-[13px] font-bold ${result.correct ? "text-green-600" : "text-red-500"}`}>
+                  {result.correct ? "○" : "×"}
+                </span>
+                <div className="text-[13px]">
+                  <span className="text-gray-500">
+                    問{result.questionNumber}:
+                  </span>{" "}
+                  <span className="text-gray-700">
+                    {SCENARIO_LABELS[result.questionNumber] || result.scene}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 振り返り */}
+      {(state.reflection.mostImpressiveScenario !== null || state.reflection.whyImpressive || state.reflection.pastExperience) && (
+        <div>
+          <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+            振り返り
+          </h4>
+          <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+            {state.reflection.mostImpressiveScenario !== null && (
+              <div>
+                <p className="text-[12px] text-gray-500 mb-0.5">最も印象に残ったシナリオ</p>
+                <p className="text-[13px] text-gray-700">
+                  {REFLECTION_LABELS[state.reflection.mostImpressiveScenario] || `問${state.reflection.mostImpressiveScenario}`}
+                </p>
+              </div>
+            )}
+            {state.reflection.whyImpressive && (
+              <div>
+                <p className="text-[12px] text-gray-500 mb-0.5">印象に残った理由</p>
+                <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{state.reflection.whyImpressive}</p>
+              </div>
+            )}
+            {state.reflection.pastExperience && (
+              <div>
+                <p className="text-[12px] text-gray-500 mb-0.5">過去の近い経験</p>
+                <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{state.reflection.pastExperience}</p>
+              </div>
+            )}
+            {state.reflection.happiestMoment && (
+              <div>
+                <p className="text-[12px] text-gray-500 mb-0.5">一番うれしかった瞬間</p>
+                <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{state.reflection.happiestMoment}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AIレポート */}
+      {state.reportText && (
+        <div>
+          <h4 className="text-[13px] font-semibold text-[#374151] mb-2">
+            AIレポート
+          </h4>
+          <div className="bg-blue-50 rounded-lg p-3">
+            <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{state.reportText}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Tab: Schedule (日程調整)                                             */
+/* ================================================================== */
+function ScheduleTab({
   candidate,
   currentUser,
   onRefresh,
@@ -712,6 +860,7 @@ function NotesTab({
   currentUser: SessionUser | null;
   onRefresh: () => void;
 }) {
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [content, setContent] = useState("");
   const [posting, setPosting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -761,21 +910,42 @@ function NotesTab({
 
   return (
     <div>
-      {/* URL生成セクション */}
-      <UrlGenerationSection candidate={candidate} />
+      {/* 日程調整URLセクション */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[14px] font-semibold text-[#374151]">
+            日程調整URL
+          </h3>
+          <button
+            onClick={() => setScheduleModalOpen(true)}
+            className="text-[12px] bg-[#003366] text-white rounded-md px-3 py-1.5 font-medium hover:bg-[#002244] transition-colors"
+          >
+            URLを生成
+          </button>
+        </div>
+        <p className="text-[12px] text-gray-400">
+          面談・面接の日程調整URLを生成します。
+        </p>
+      </div>
+
+      <InterviewUrlModal
+        isOpen={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+        candidateName={candidate.name}
+        advisorName={candidate.employee?.name ?? null}
+      />
 
       {/* メモセクション */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-[14px] font-semibold text-[#374151]">
-            📝 メモ
+            メモ
           </h3>
           <span className="text-[12px] text-gray-500">
-            （{candidate.notes.length}件）
+            ({candidate.notes.length}件)
           </span>
         </div>
 
-        {/* 新規メモ入力 */}
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <textarea
             rows={3}
@@ -790,12 +960,11 @@ function NotesTab({
               disabled={!content.trim() || posting}
               className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {posting ? "投稿中..." : "📝 投稿する"}
+              {posting ? "投稿中..." : "投稿する"}
             </button>
           </div>
         </div>
 
-        {/* メモ一覧 */}
         {candidate.notes.length > 0 ? (
           <div className="space-y-3">
             {candidate.notes.map((note) => (
@@ -821,7 +990,7 @@ function NotesTab({
                       disabled={deletingId === note.id}
                       className="text-red-400 hover:text-red-600 text-sm transition-colors disabled:opacity-50"
                     >
-                      🗑 削除
+                      削除
                     </button>
                   </div>
                 )}
@@ -876,6 +1045,7 @@ export default function CandidateDetailPage() {
   const [guideData, setGuideData] = useState<Record<string, unknown> | null>(
     null
   );
+  const [jimuSessions, setJimuSessions] = useState<JimuSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -916,9 +1086,22 @@ export default function CandidateDetailPage() {
     }
   }, [candidateId]);
 
+  const fetchJimuSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/jimu-sessions`);
+      if (res.ok) {
+        const json = await res.json();
+        setJimuSessions(json.sessions || []);
+      }
+    } catch {
+      // silent
+    }
+  }, [candidateId]);
+
   useEffect(() => {
     fetchCandidate();
     fetchGuideData();
+    fetchJimuSessions();
     fetch("/api/auth/session")
       .then((r) => r.json())
       .then((d) => {
@@ -933,7 +1116,7 @@ export default function CandidateDetailPage() {
         }
       })
       .catch(() => {});
-  }, [fetchCandidate, fetchGuideData]);
+  }, [fetchCandidate, fetchGuideData, fetchJimuSessions]);
 
   const handleTabChange = (tab: TabKey) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1052,8 +1235,15 @@ export default function CandidateDetailPage() {
         {activeTab === "interview" && (
           <InterviewTab candidate={candidate} guideData={guideData} />
         )}
-        {activeTab === "notes" && (
-          <NotesTab
+        {activeTab === "counseling" && (
+          <CounselingTab
+            candidate={candidate}
+            jimuSessions={jimuSessions}
+            onJimuCreated={fetchJimuSessions}
+          />
+        )}
+        {activeTab === "schedule" && (
+          <ScheduleTab
             candidate={candidate}
             currentUser={currentUser}
             onRefresh={fetchCandidate}
