@@ -58,6 +58,27 @@ enum GuideType {
   INTERVIEW
 }
 
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TaskFieldType {
+  TEXT
+  TEXTAREA
+  SELECT
+  MULTI_SELECT
+  DATE
+  CHECKBOX
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -81,6 +102,8 @@ model User {
   documents     Document[]     @relation("UserDocuments")
   manuals        Manual[]       @relation("UserManuals")
   candidateNotes CandidateNote[] @relation("UserCandidateNotes")
+  tasksCreated   Task[]         @relation("TaskCreator")
+  taskComments   TaskComment[]  @relation("TaskComments")
 
   @@map("users")
 }
@@ -145,6 +168,7 @@ model Employee {
 
   // 担当求職者
   candidates     Candidate[]
+  taskAssignees  TaskAssignee[]
 
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt      @map("updated_at")
@@ -167,6 +191,7 @@ model Candidate {
   guideEntries    GuideEntry[]
   notes           CandidateNote[]
   jimuSessions    JimuSession[]
+  tasks           Task[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -323,4 +348,139 @@ model Manual {
   updatedAt       DateTime           @updatedAt @map("updated_at")
 
   @@map("manuals")
+}
+
+// タスクカテゴリマスター（大分類）
+model TaskCategory {
+  id          String   @id @default(cuid())
+  name        String   // 例: 履歴書作成、職務経歴書作成、推薦状作成
+  description String?  @db.Text
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  fields      TaskTemplateField[]
+  tasks       Task[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("task_categories")
+}
+
+// カテゴリに紐付くテンプレート項目マスター
+model TaskTemplateField {
+  id            String        @id @default(cuid())
+  categoryId    String        @map("category_id")
+  category      TaskCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  label         String        // 表示ラベル（例: 志望動機タイプ）
+  fieldType     TaskFieldType @map("field_type")
+  isRequired    Boolean       @default(false) @map("is_required")
+  placeholder   String?
+  sortOrder     Int           @default(0) @map("sort_order")
+
+  options       TaskTemplateOption[]
+  fieldValues   TaskFieldValue[]
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("task_template_fields")
+}
+
+// 選択式項目の選択肢マスター
+model TaskTemplateOption {
+  id        String            @id @default(cuid())
+  fieldId   String            @map("field_id")
+  field     TaskTemplateField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  label     String
+  value     String
+  sortOrder Int               @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("task_template_options")
+}
+
+// タスク本体
+model Task {
+  id              String       @id @default(cuid())
+  title           String
+  description     String?      @db.Text
+  categoryId      String?      @map("category_id")
+  category        TaskCategory? @relation(fields: [categoryId], references: [id])
+  candidateId     String?      @map("candidate_id")
+  candidate       Candidate?   @relation(fields: [candidateId], references: [id])
+  status          TaskStatus   @default(NOT_STARTED)
+  priority        TaskPriority?
+  dueDate         DateTime?    @map("due_date")
+  createdByUserId String       @map("created_by_user_id")
+  createdByUser   User         @relation("TaskCreator", fields: [createdByUserId], references: [id])
+
+  assignees       TaskAssignee[]
+  fieldValues     TaskFieldValue[]
+  attachments     TaskAttachment[]
+  comments        TaskComment[]
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("tasks")
+}
+
+// タスク担当者（複数可）
+model TaskAssignee {
+  id          String   @id @default(cuid())
+  taskId      String   @map("task_id")
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employeeId  String   @map("employee_id")
+  employee    Employee @relation(fields: [employeeId], references: [id])
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([taskId, employeeId])
+  @@map("task_assignees")
+}
+
+// タスクに入力されたテンプレート値
+model TaskFieldValue {
+  id        String            @id @default(cuid())
+  taskId    String            @map("task_id")
+  task      Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fieldId   String            @map("field_id")
+  field     TaskTemplateField @relation(fields: [fieldId], references: [id])
+  value     String            @db.Text  // JSON文字列（複数選択の場合は配列）
+
+  @@unique([taskId, fieldId])
+  @@map("task_field_values")
+}
+
+// 添付ファイル
+model TaskAttachment {
+  id               String   @id @default(cuid())
+  taskId           String   @map("task_id")
+  task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileName         String   @map("file_name")
+  fileUrl          String   @map("file_url")
+  fileSize         Int?     @map("file_size")
+  mimeType         String?  @map("mime_type")
+  uploadedByUserId String   @map("uploaded_by_user_id")
+
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("task_attachments")
+}
+
+// コメント
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation("TaskComments", fields: [userId], references: [id])
+  content   String   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("task_comments")
 }
