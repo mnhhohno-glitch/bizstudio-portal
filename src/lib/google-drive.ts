@@ -11,7 +11,7 @@ function getAuth() {
 
   return new google.auth.GoogleAuth({
     credentials,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
 }
 
@@ -37,6 +37,7 @@ export async function uploadPdfToDrive(
       body: Readable.from(fileBuffer),
     },
     fields: "id, webViewLink",
+    supportsAllDrives: true,
   });
 
   const fileId = response.data.id!;
@@ -47,11 +48,13 @@ export async function uploadPdfToDrive(
       role: "reader",
       type: "anyone",
     },
+    supportsAllDrives: true,
   });
 
   const fileInfo = await drive.files.get({
     fileId,
     fields: "webViewLink, webContentLink",
+    supportsAllDrives: true,
   });
 
   return {
@@ -67,7 +70,7 @@ export async function deletePdfFromDrive(fileId: string): Promise<void> {
   const drive = google.drive({ version: "v3", auth });
 
   try {
-    await drive.files.delete({ fileId });
+    await drive.files.delete({ fileId, supportsAllDrives: true });
   } catch (error) {
     console.error("Google Drive ファイル削除エラー:", error);
   }
