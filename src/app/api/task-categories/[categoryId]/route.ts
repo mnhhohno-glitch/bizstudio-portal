@@ -4,7 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 
 export async function PUT(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ categoryId: string }> }
 ) {
   const actor = await getSessionUser();
   if (!actor || actor.role !== "admin") {
@@ -12,12 +12,12 @@ export async function PUT(
   }
 
   try {
-    const { id } = await params;
+    const { categoryId } = await params;
     const body = await request.json();
     const { name, description, sortOrder, isActive } = body;
 
     const category = await prisma.taskCategory.update({
-      where: { id },
+      where: { id: categoryId },
       data: {
         ...(name !== undefined && { name: name.trim() }),
         ...(description !== undefined && { description: description?.trim() || null }),
@@ -34,7 +34,7 @@ export async function PUT(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ categoryId: string }> }
 ) {
   const actor = await getSessionUser();
   if (!actor || actor.role !== "admin") {
@@ -42,8 +42,8 @@ export async function DELETE(
   }
 
   try {
-    const { id } = await params;
-    await prisma.taskCategory.delete({ where: { id } });
+    const { categoryId } = await params;
+    await prisma.taskCategory.delete({ where: { id: categoryId } });
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "削除に失敗しました" }, { status: 500 });
