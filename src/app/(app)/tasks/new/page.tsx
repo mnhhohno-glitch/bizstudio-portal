@@ -555,30 +555,46 @@ export default function TaskNewPage() {
                     <dd className="mt-1 space-y-1">
                       {selectedCategory.fields.map((f) => {
                         const raw = fieldValues[f.id] ?? "";
-                        let display = raw;
+                        if (!raw) return null;
+
                         if (
                           f.fieldType === "MULTI_SELECT" &&
                           raw.startsWith("[")
                         ) {
+                          let labels: string[] = [];
                           try {
-                            const arr: string[] = JSON.parse(raw);
-                            display = arr
-                              .map(
-                                (v) =>
-                                  f.options.find((o) => o.value === v)?.label ??
-                                  v
-                              )
-                              .join("、");
+                            labels = (JSON.parse(raw) as string[]).map(
+                              (v) =>
+                                f.options.find((o) => o.value === v)?.label ?? v
+                            );
                           } catch {
-                            /* keep raw */
+                            /* skip */
                           }
-                        } else if (f.fieldType === "SELECT") {
+                          if (labels.length === 0) return null;
+                          return (
+                            <div key={f.id}>
+                              <span className="text-[12px] text-[#6B7280]">{f.label}:</span>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {labels.map((l) => (
+                                  <span
+                                    key={l}
+                                    className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                                  >
+                                    {l}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        let display = raw;
+                        if (f.fieldType === "SELECT") {
                           display =
                             f.options.find((o) => o.value === raw)?.label ?? raw;
                         } else if (f.fieldType === "CHECKBOX") {
                           display = raw === "true" ? "はい" : "いいえ";
                         }
-                        if (!display) return null;
                         return (
                           <p key={f.id} className="text-[13px] text-[#374151]">
                             <span className="text-[#6B7280]">{f.label}:</span>{" "}
@@ -701,21 +717,45 @@ function renderField(
         }
       })();
       return (
-        <div className="space-y-2 rounded-[6px] border border-[#E5E7EB] p-3">
-          {field.options.map((opt) => (
-            <label
-              key={opt.id}
-              className="flex cursor-pointer items-center gap-2"
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(opt.value)}
-                onChange={() => toggleMultiSelect(field.id, opt.value)}
-                className="h-4 w-4 accent-[#2563EB]"
-              />
-              <span className="text-[14px] text-[#374151]">{opt.label}</span>
-            </label>
-          ))}
+        <div>
+          {selected.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {selected.map((v) => {
+                const opt = field.options.find((o) => o.value === v);
+                return (
+                  <span
+                    key={v}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                  >
+                    {opt?.label ?? v}
+                    <button
+                      type="button"
+                      onClick={() => toggleMultiSelect(field.id, v)}
+                      className="ml-0.5 text-[#93C5FD] hover:text-[#2563EB]"
+                    >
+                      &times;
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <div className="max-h-[240px] space-y-2 overflow-y-auto rounded-[6px] border border-[#E5E7EB] p-3">
+            {field.options.map((opt) => (
+              <label
+                key={opt.id}
+                className="flex cursor-pointer items-center gap-2"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt.value)}
+                  onChange={() => toggleMultiSelect(field.id, opt.value)}
+                  className="h-4 w-4 shrink-0 accent-[#2563EB]"
+                />
+                <span className="text-[14px] text-[#374151]">{opt.label}</span>
+              </label>
+            ))}
+          </div>
         </div>
       );
     }
