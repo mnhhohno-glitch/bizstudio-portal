@@ -89,9 +89,10 @@ export async function POST(
       return NextResponse.json({ error: "許可されていないファイル形式です" }, { status: 400 });
     }
 
-    // Supabase Storageにアップロード
+    // Supabase Storageにアップロード（パスはASCII文字のみ）
     const fileId = randomUUID();
-    const storagePath = `${taskId}/${fileId}_${file.name}`;
+    const ext = (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "");
+    const storagePath = `${taskId}/${fileId}.${ext}`;
     const buffer = Buffer.from(await file.arrayBuffer());
 
     const { error: uploadError } = await supabase.storage
