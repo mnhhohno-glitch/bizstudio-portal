@@ -35,6 +35,9 @@ const STEPS = [
   "確認・作成",
 ];
 
+/** 履歴書作成カテゴリ名 */
+const RIREKISHO_CATEGORY = "履歴書作成";
+
 /** 数字実績ありと判定する大分類 */
 const SALES_MAJORS = ["営業", "販売・フード・アミューズメント"];
 
@@ -85,6 +88,16 @@ export default function TaskNewPage() {
   const [selectedMiddleName, setSelectedMiddleName] = useState("");
   const [selectedMinorName, setSelectedMinorName] = useState("");
 
+  // step 2 - 志望動機選択 (履歴書作成用)
+  const [motivMajors, setMotivMajors] = useState<JobCatItem[]>([]);
+  const [motivMiddles, setMotivMiddles] = useState<JobCatItem[]>([]);
+  const [motivMinors, setMotivMinors] = useState<JobCatItem[]>([]);
+  const [motivMajorId, setMotivMajorId] = useState("");
+  const [motivMiddleId, setMotivMiddleId] = useState("");
+  const [motivMajorName, setMotivMajorName] = useState("");
+  const [motivMiddleName, setMotivMiddleName] = useState("");
+  const [selectedMotivMinors, setSelectedMotivMinors] = useState<string[]>([]);
+
   // step 2 - 職務経歴書: 非営業用の経歴概要
   const [careerSummary, setCareerSummary] = useState("");
 
@@ -111,6 +124,7 @@ export default function TaskNewPage() {
     [candidates, candidateId]
   );
 
+  const isRirekisho = selectedCategory?.name === RIREKISHO_CATEGORY;
   const isShokumu = selectedCategory?.name === SHOKUMU_CATEGORY;
   const isSalesJob = SALES_MAJORS.includes(selectedMajorName);
 
@@ -127,20 +141,23 @@ export default function TaskNewPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [catRes, empRes, canRes, jobRes] = await Promise.all([
+      const [catRes, empRes, canRes, jobRes, motivRes] = await Promise.all([
         fetch("/api/task-categories?includeFields=true"),
         fetch("/api/employees"),
         fetch("/api/candidates"),
         fetch("/api/job-categories"),
+        fetch("/api/motivation-categories"),
       ]);
       const catJson = await catRes.json();
       const empJson = await empRes.json();
       const canJson = await canRes.json();
       const jobJson = await jobRes.json();
+      const motivJson = await motivRes.json();
       setCategories(catJson.categories ?? []);
       setEmployees(Array.isArray(empJson) ? empJson : []);
       setCandidates(Array.isArray(canJson) ? canJson : []);
       setJobMajors(Array.isArray(jobJson) ? jobJson : []);
+      setMotivMajors(Array.isArray(motivJson) ? motivJson : []);
     } catch {
       alert("データの取得に失敗しました");
     } finally {
@@ -191,6 +208,41 @@ export default function TaskNewPage() {
       });
   }, [selectedMiddleId]);
 
+  /* ----- motivation category cascading ----- */
+  useEffect(() => {
+    if (!motivMajorId) {
+      setMotivMiddles([]);
+      setMotivMiddleId("");
+      setMotivMiddleName("");
+      setMotivMinors([]);
+      setSelectedMotivMinors([]);
+      return;
+    }
+    fetch(`/api/motivation-categories/${motivMajorId}/middles`)
+      .then((r) => r.json())
+      .then((data) => {
+        setMotivMiddles(Array.isArray(data) ? data : []);
+        setMotivMiddleId("");
+        setMotivMiddleName("");
+        setMotivMinors([]);
+        setSelectedMotivMinors([]);
+      });
+  }, [motivMajorId]);
+
+  useEffect(() => {
+    if (!motivMiddleId) {
+      setMotivMinors([]);
+      setSelectedMotivMinors([]);
+      return;
+    }
+    fetch(`/api/motivation-categories/middles/${motivMiddleId}/minors`)
+      .then((r) => r.json())
+      .then((data) => {
+        setMotivMinors(Array.isArray(data) ? data : []);
+        setSelectedMotivMinors([]);
+      });
+  }, [motivMiddleId]);
+
   /* ----- auto title ----- */
   useEffect(() => {
     if (step === 4) {
@@ -209,6 +261,10 @@ export default function TaskNewPage() {
         return !!categoryId;
       case 2: {
         if (!selectedCategory) return false;
+        // 履歴書作成: 志望動機の大中小必須
+        if (isRirekisho) {
+          if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
+        }
         // 職務経歴書: 職種大分類は必須
         if (isShokumu && !selectedMajorName) return false;
         // テンプレート必須フィールドのバリデーション
@@ -218,6 +274,8 @@ export default function TaskNewPage() {
           .every((f) => {
             // 応募職種は職種選択UIで代替するのでスキップ
             if (f.label === "応募職種") return true;
+            // 志望動機フィールドはカスケードUIで代替するのでスキップ
+            if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return true;
             const v = fieldValues[f.id];
             return v !== undefined && v !== "";
           });
@@ -231,9 +289,19 @@ export default function TaskNewPage() {
     }
   };
 
-  /** 職務経歴書で表示するフィールドを返す */
+  /** 表示するフィールドを返す */
   const getVisibleFields = useCallback((): Field[] => {
     if (!selectedCategory) return [];
+
+    // 履歴書作成: 志望動機フィールドはカスケードUIで代替するので非表示
+    if (isRirekisho) {
+      return selectedCategory.fields.filter((f) =>
+        f.label !== "志望動機（大分類）" &&
+        f.label !== "志望動機（中分類）" &&
+        f.label !== "志望動機（小分類）"
+      );
+    }
+
     if (!isShokumu) return selectedCategory.fields;
 
     return selectedCategory.fields.filter((f) => {
@@ -249,15 +317,31 @@ export default function TaskNewPage() {
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
     });
-  }, [selectedCategory, isShokumu, isSalesJob, noNumbersChecked]);
+  }, [selectedCategory, isRirekisho, isShokumu, isSalesJob, noNumbersChecked]);
 
   /* ----- submit ----- */
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
     try {
-      // 職種情報をfieldValuesに追加
+      // 追加のfieldValues
       const extraFieldValues: { fieldId: string; value: string }[] = [];
+
+      // 履歴書作成: 志望動機フィールドをセット
+      if (isRirekisho && selectedCategory) {
+        const majorField = selectedCategory.fields.find((f) => f.label === "志望動機（大分類）");
+        const middleField = selectedCategory.fields.find((f) => f.label === "志望動機（中分類）");
+        const minorField = selectedCategory.fields.find((f) => f.label === "志望動機（小分類）");
+        if (majorField && motivMajorName) {
+          extraFieldValues.push({ fieldId: majorField.id, value: motivMajorName });
+        }
+        if (middleField && motivMiddleName) {
+          extraFieldValues.push({ fieldId: middleField.id, value: motivMiddleName });
+        }
+        if (minorField && selectedMotivMinors.length > 0) {
+          extraFieldValues.push({ fieldId: minorField.id, value: JSON.stringify(selectedMotivMinors) });
+        }
+      }
 
       // 応募職種フィールドに職種名をセット
       if (isShokumu && selectedCategory) {
@@ -503,6 +587,11 @@ export default function TaskNewPage() {
                     setSelectedMinorId("");
                     setSelectedMinorName("");
                     setCareerSummary("");
+                    setMotivMajorId("");
+                    setMotivMajorName("");
+                    setMotivMiddleId("");
+                    setMotivMiddleName("");
+                    setSelectedMotivMinors([]);
                   }}
                   className={[
                     "rounded-[8px] border-2 p-4 text-left transition-colors",
@@ -531,6 +620,126 @@ export default function TaskNewPage() {
             <h2 className="mb-4 text-[16px] font-bold text-[#374151]">
               {selectedCategory.name} - テンプレート入力
             </h2>
+
+            {/* 履歴書作成: 志望動機カスケード選択 */}
+            {isRirekisho && (
+              <div className="mb-6 space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                <p className="text-[13px] font-bold text-[#374151]">
+                  志望動機<span className="ml-1 text-red-500">*</span>
+                </p>
+                {/* 大分類 */}
+                <div>
+                  <label className="mb-1 block text-[12px] text-[#6B7280]">
+                    志望動機（大分類）
+                  </label>
+                  <select
+                    value={motivMajorId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setMotivMajorId(id);
+                      const name = motivMajors.find((m) => m.id === id)?.name ?? "";
+                      setMotivMajorName(name);
+                    }}
+                    className={selectCls}
+                  >
+                    <option value="">選択してください</option>
+                    {motivMajors.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* 中分類 */}
+                {motivMajorId && (
+                  <div>
+                    <label className="mb-1 block text-[12px] text-[#6B7280]">
+                      志望動機（中分類）
+                    </label>
+                    <select
+                      value={motivMiddleId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setMotivMiddleId(id);
+                        const name = motivMiddles.find((m) => m.id === id)?.name ?? "";
+                        setMotivMiddleName(name);
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">選択してください</option>
+                      {motivMiddles.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {/* 小分類 (複数選択) */}
+                {motivMiddleId && motivMinors.length > 0 && (
+                  <div>
+                    <label className="mb-1 block text-[12px] text-[#6B7280]">
+                      志望動機（小分類）<span className="ml-1 text-[#9CA3AF]">（複数選択可）</span>
+                    </label>
+                    {selectedMotivMinors.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {selectedMotivMinors.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                          >
+                            {name}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedMotivMinors((prev) =>
+                                  prev.filter((n) => n !== name)
+                                )
+                              }
+                              className="ml-0.5 text-[#93C5FD] hover:text-[#2563EB]"
+                            >
+                              &times;
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="max-h-[240px] space-y-2 overflow-y-auto rounded-[6px] border border-[#E5E7EB] p-3">
+                      {motivMinors.map((minor) => (
+                        <label
+                          key={minor.id}
+                          className="flex cursor-pointer items-center gap-2"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedMotivMinors.includes(minor.name)}
+                            onChange={() => {
+                              setSelectedMotivMinors((prev) =>
+                                prev.includes(minor.name)
+                                  ? prev.filter((n) => n !== minor.name)
+                                  : [...prev, minor.name]
+                              );
+                            }}
+                            className="h-4 w-4 shrink-0 accent-[#2563EB]"
+                          />
+                          <span className="text-[14px] text-[#374151]">{minor.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 選択結果 */}
+                {motivMajorName && (
+                  <p className="text-[12px] text-[#2563EB]">
+                    選択中: {motivMajorName}
+                    {motivMiddleName ? ` > ${motivMiddleName}` : ""}
+                    {selectedMotivMinors.length > 0
+                      ? ` > ${selectedMotivMinors.join("、")}`
+                      : ""}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* 職務経歴書: 職種カスケード選択 */}
             {isShokumu && (
@@ -797,6 +1006,30 @@ export default function TaskNewPage() {
                 label="カテゴリ"
                 value={selectedCategory?.name ?? "-"}
               />
+              {/* 志望動機情報 */}
+              {isRirekisho && motivMajorName && (
+                <>
+                  <ConfirmRow label="志望動機（大分類）" value={motivMajorName} />
+                  {motivMiddleName && (
+                    <ConfirmRow label="志望動機（中分類）" value={motivMiddleName} />
+                  )}
+                  {selectedMotivMinors.length > 0 && (
+                    <div>
+                      <dt className="text-[12px] font-medium text-[#6B7280]">志望動機（小分類）</dt>
+                      <dd className="mt-1 flex flex-wrap gap-1">
+                        {selectedMotivMinors.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                          >
+                            {name}
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
               {/* 職種情報 */}
               {isShokumu && selectedMajorName && (
                 <ConfirmRow
@@ -832,6 +1065,8 @@ export default function TaskNewPage() {
                     </dt>
                     <dd className="mt-1 space-y-1">
                       {selectedCategory.fields.map((f) => {
+                        // 志望動機フィールドは上で表示済み
+                        if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return null;
                         // 応募職種は上で表示済み
                         if (f.label === "応募職種" && isShokumu) return null;
                         const raw = fieldValues[f.id] ?? "";

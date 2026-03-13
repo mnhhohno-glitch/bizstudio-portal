@@ -485,6 +485,42 @@ model TaskComment {
   @@map("task_comments")
 }
 
+// 志望動機マスター（大分類）
+model MotivationCategoryMajor {
+  id        String                    @id @default(cuid())
+  name      String                    @unique
+  sortOrder Int                       @default(0) @map("sort_order")
+  middles   MotivationCategoryMiddle[]
+  createdAt DateTime                  @default(now()) @map("created_at")
+
+  @@map("motivation_category_majors")
+}
+
+// 志望動機マスター（中分類）
+model MotivationCategoryMiddle {
+  id        String                   @id @default(cuid())
+  name      String
+  majorId   String                   @map("major_id")
+  major     MotivationCategoryMajor  @relation(fields: [majorId], references: [id], onDelete: Cascade)
+  sortOrder Int                      @default(0) @map("sort_order")
+  minors    MotivationCategoryMinor[]
+  createdAt DateTime                 @default(now()) @map("created_at")
+
+  @@map("motivation_category_middles")
+}
+
+// 志望動機マスター（小分類）
+model MotivationCategoryMinor {
+  id        String                   @id @default(cuid())
+  name      String
+  middleId  String                   @map("middle_id")
+  middle    MotivationCategoryMiddle @relation(fields: [middleId], references: [id], onDelete: Cascade)
+  sortOrder Int                      @default(0) @map("sort_order")
+  createdAt DateTime                 @default(now()) @map("created_at")
+
+  @@map("motivation_category_minors")
+}
+
 // 職種マスター（大分類）
 model JobCategoryMajor {
   id        String              @id @default(cuid())

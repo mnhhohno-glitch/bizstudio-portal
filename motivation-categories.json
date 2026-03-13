@@ -1,0 +1,678 @@
+[
+  {
+    "name": "1. 経験を活かす系",
+    "sortOrder": 1,
+    "middles": [
+      {
+        "name": "1-1 接客・顧客対応経験",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "接客販売経験",
+            "sortOrder": 1
+          },
+          {
+            "name": "飲食サービス経験",
+            "sortOrder": 2
+          },
+          {
+            "name": "ホテル・観光サービス経験",
+            "sortOrder": 3
+          },
+          {
+            "name": "カスタマーサポート経験",
+            "sortOrder": 4
+          },
+          {
+            "name": "コールセンター経験",
+            "sortOrder": 5
+          },
+          {
+            "name": "クレーム対応経験",
+            "sortOrder": 6
+          },
+          {
+            "name": "VIP顧客対応経験",
+            "sortOrder": 7
+          },
+          {
+            "name": "顧客満足度向上経験",
+            "sortOrder": 8
+          },
+          {
+            "name": "リピート顧客獲得経験",
+            "sortOrder": 9
+          },
+          {
+            "name": "顧客関係構築経験",
+            "sortOrder": 10
+          }
+        ]
+      },
+      {
+        "name": "1-2 営業経験",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "個人営業経験",
+            "sortOrder": 1
+          },
+          {
+            "name": "法人営業経験",
+            "sortOrder": 2
+          },
+          {
+            "name": "新規開拓営業経験",
+            "sortOrder": 3
+          },
+          {
+            "name": "既存顧客営業経験",
+            "sortOrder": 4
+          },
+          {
+            "name": "ルート営業経験",
+            "sortOrder": 5
+          },
+          {
+            "name": "提案型営業経験",
+            "sortOrder": 6
+          },
+          {
+            "name": "コンサルティング営業経験",
+            "sortOrder": 7
+          },
+          {
+            "name": "代理店営業経験",
+            "sortOrder": 8
+          },
+          {
+            "name": "インサイドセールス経験",
+            "sortOrder": 9
+          },
+          {
+            "name": "クロージング経験",
+            "sortOrder": 10
+          }
+        ]
+      },
+      {
+        "name": "1-3 事務・バックオフィス経験",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "一般事務経験",
+            "sortOrder": 1
+          },
+          {
+            "name": "営業事務経験",
+            "sortOrder": 2
+          },
+          {
+            "name": "総務経験",
+            "sortOrder": 3
+          },
+          {
+            "name": "人事経験",
+            "sortOrder": 4
+          },
+          {
+            "name": "経理経験",
+            "sortOrder": 5
+          },
+          {
+            "name": "労務管理経験",
+            "sortOrder": 6
+          },
+          {
+            "name": "データ入力経験",
+            "sortOrder": 7
+          },
+          {
+            "name": "書類管理経験",
+            "sortOrder": 8
+          },
+          {
+            "name": "社内外調整業務経験",
+            "sortOrder": 9
+          },
+          {
+            "name": "秘書業務経験",
+            "sortOrder": 10
+          }
+        ]
+      },
+      {
+        "name": "1-4 技術・専門職経験",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "ITエンジニア経験",
+            "sortOrder": 1
+          },
+          {
+            "name": "システム運用経験",
+            "sortOrder": 2
+          },
+          {
+            "name": "技術サポート経験",
+            "sortOrder": 3
+          },
+          {
+            "name": "設計業務経験",
+            "sortOrder": 4
+          },
+          {
+            "name": "製造業務経験",
+            "sortOrder": 5
+          },
+          {
+            "name": "品質管理経験",
+            "sortOrder": 6
+          },
+          {
+            "name": "研究開発経験",
+            "sortOrder": 7
+          },
+          {
+            "name": "医療職経験",
+            "sortOrder": 8
+          },
+          {
+            "name": "福祉職経験",
+            "sortOrder": 9
+          },
+          {
+            "name": "教育関連経験",
+            "sortOrder": 10
+          }
+        ]
+      },
+      {
+        "name": "1-5 マネジメント経験",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "店舗管理経験",
+            "sortOrder": 1
+          },
+          {
+            "name": "チームリーダー経験",
+            "sortOrder": 2
+          },
+          {
+            "name": "部下育成経験",
+            "sortOrder": 3
+          },
+          {
+            "name": "新人教育経験",
+            "sortOrder": 4
+          },
+          {
+            "name": "シフト管理経験",
+            "sortOrder": 5
+          },
+          {
+            "name": "プロジェクト管理経験",
+            "sortOrder": 6
+          },
+          {
+            "name": "目標管理経験",
+            "sortOrder": 7
+          },
+          {
+            "name": "業績管理経験",
+            "sortOrder": 8
+          },
+          {
+            "name": "チームビルディング経験",
+            "sortOrder": 9
+          },
+          {
+            "name": "組織運営経験",
+            "sortOrder": 10
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "2. 思考・価値観系",
+    "sortOrder": 2,
+    "middles": [
+      {
+        "name": "2-1 顧客志向",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "顧客満足重視の姿勢",
+            "sortOrder": 1
+          },
+          {
+            "name": "相手の立場で考える姿勢",
+            "sortOrder": 2
+          },
+          {
+            "name": "課題解決志向",
+            "sortOrder": 3
+          },
+          {
+            "name": "長期的関係構築志向",
+            "sortOrder": 4
+          },
+          {
+            "name": "顧客価値提供志向",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "2-2 チーム志向",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "チームワーク重視",
+            "sortOrder": 1
+          },
+          {
+            "name": "協力して成果を出す姿勢",
+            "sortOrder": 2
+          },
+          {
+            "name": "組織貢献意識",
+            "sortOrder": 3
+          },
+          {
+            "name": "周囲との信頼関係構築",
+            "sortOrder": 4
+          },
+          {
+            "name": "チーム目標達成志向",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "2-3 貢献志向",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "人の役に立つ仕事への関心",
+            "sortOrder": 1
+          },
+          {
+            "name": "社会貢献意識",
+            "sortOrder": 2
+          },
+          {
+            "name": "顧客支援志向",
+            "sortOrder": 3
+          },
+          {
+            "name": "組織サポート志向",
+            "sortOrder": 4
+          },
+          {
+            "name": "公共性の高い仕事への関心",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "2-4 改善志向",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "業務改善意識",
+            "sortOrder": 1
+          },
+          {
+            "name": "効率化志向",
+            "sortOrder": 2
+          },
+          {
+            "name": "問題解決思考",
+            "sortOrder": 3
+          },
+          {
+            "name": "現状改善志向",
+            "sortOrder": 4
+          },
+          {
+            "name": "継続的改善志向",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "3. 成長志向系",
+    "sortOrder": 3,
+    "middles": [
+      {
+        "name": "3-1 自己成長",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "新しい分野への挑戦",
+            "sortOrder": 1
+          },
+          {
+            "name": "未経験分野へのチャレンジ",
+            "sortOrder": 2
+          },
+          {
+            "name": "スキル習得意欲",
+            "sortOrder": 3
+          },
+          {
+            "name": "学習意欲",
+            "sortOrder": 4
+          },
+          {
+            "name": "自己研鑽姿勢",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "3-2 キャリア形成",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "長期キャリア形成志向",
+            "sortOrder": 1
+          },
+          {
+            "name": "専門性向上志向",
+            "sortOrder": 2
+          },
+          {
+            "name": "キャリアアップ志向",
+            "sortOrder": 3
+          },
+          {
+            "name": "職域拡大志向",
+            "sortOrder": 4
+          },
+          {
+            "name": "経験の幅を広げたい",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "3-3 成果志向",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "成果を出すことへの意欲",
+            "sortOrder": 1
+          },
+          {
+            "name": "高い目標への挑戦",
+            "sortOrder": 2
+          },
+          {
+            "name": "数値目標達成志向",
+            "sortOrder": 3
+          },
+          {
+            "name": "自己成長と成果両立志向",
+            "sortOrder": 4
+          },
+          {
+            "name": "成果評価志向",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "4. スキル活用系",
+    "sortOrder": 4,
+    "middles": [
+      {
+        "name": "4-1 語学スキル",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "英語活用",
+            "sortOrder": 1
+          },
+          {
+            "name": "中国語活用",
+            "sortOrder": 2
+          },
+          {
+            "name": "韓国語活用",
+            "sortOrder": 3
+          },
+          {
+            "name": "多言語コミュニケーション",
+            "sortOrder": 4
+          },
+          {
+            "name": "国際業務志向",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "4-2 ITスキル",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "ITツール活用",
+            "sortOrder": 1
+          },
+          {
+            "name": "データ分析スキル",
+            "sortOrder": 2
+          },
+          {
+            "name": "システム知識活用",
+            "sortOrder": 3
+          },
+          {
+            "name": "DX推進スキル",
+            "sortOrder": 4
+          },
+          {
+            "name": "業務システム活用",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "4-3 ビジネススキル",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "コミュニケーション力",
+            "sortOrder": 1
+          },
+          {
+            "name": "プレゼンテーション力",
+            "sortOrder": 2
+          },
+          {
+            "name": "調整力",
+            "sortOrder": 3
+          },
+          {
+            "name": "問題解決力",
+            "sortOrder": 4
+          },
+          {
+            "name": "論理的思考力",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "5. 資格活用系",
+    "sortOrder": 5,
+    "middles": [
+      {
+        "name": "5-1 専門資格",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "IT資格活用",
+            "sortOrder": 1
+          },
+          {
+            "name": "技術資格活用",
+            "sortOrder": 2
+          },
+          {
+            "name": "医療資格活用",
+            "sortOrder": 3
+          },
+          {
+            "name": "業界資格活用",
+            "sortOrder": 4
+          },
+          {
+            "name": "国家資格活用",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "5-2 ビジネス資格",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "簿記資格活用",
+            "sortOrder": 1
+          },
+          {
+            "name": "語学資格活用",
+            "sortOrder": 2
+          },
+          {
+            "name": "マネジメント資格活用",
+            "sortOrder": 3
+          },
+          {
+            "name": "ビジネス系資格活用",
+            "sortOrder": 4
+          },
+          {
+            "name": "学習資格活用",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "6. 働く環境志向系",
+    "sortOrder": 6,
+    "middles": [
+      {
+        "name": "6-1 成長環境",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "成長できる環境志向",
+            "sortOrder": 1
+          },
+          {
+            "name": "挑戦できる環境志向",
+            "sortOrder": 2
+          },
+          {
+            "name": "裁量のある環境志向",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "6-2 働き方",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "安定した環境志向",
+            "sortOrder": 1
+          },
+          {
+            "name": "長期就業志向",
+            "sortOrder": 2
+          },
+          {
+            "name": "ワークライフバランス志向",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "6-3 組織文化",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "チーム重視文化志向",
+            "sortOrder": 1
+          },
+          {
+            "name": "挑戦を評価する文化志向",
+            "sortOrder": 2
+          },
+          {
+            "name": "協力的な組織文化志向",
+            "sortOrder": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "7. 企業理解・共感系",
+    "sortOrder": 7,
+    "middles": [
+      {
+        "name": "7-1 理念共感",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "企業理念への共感",
+            "sortOrder": 1
+          }
+        ]
+      },
+      {
+        "name": "7-2 事業共感",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "事業内容への興味",
+            "sortOrder": 1
+          },
+          {
+            "name": "業界への関心",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "7-3 社会的意義",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "社会貢献性への共感",
+            "sortOrder": 1
+          },
+          {
+            "name": "業界発展への貢献意欲",
+            "sortOrder": 2
+          }
+        ]
+      }
+    ]
+  }
+]

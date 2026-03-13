@@ -225,12 +225,54 @@ async function main() {
 
   console.log("Seed completed: users, employees, and system links created");
 
-  // ========== 職種マスター初期データ ==========
-  console.log("\n=== 職種マスター初期データ投入 ===");
+  // ========== 志望動機マスター初期データ ==========
+  console.log("\n=== 志望動機マスター初期データ投入 ===");
 
   type MinorData = { name: string; sortOrder: number };
   type MiddleData = { name: string; sortOrder: number; minors: MinorData[] };
   type MajorData = { name: string; sortOrder: number; middles: MiddleData[] };
+
+  const motivationCategoriesPath = join(__dirname, "..", "motivation-categories.json");
+  const motivationCategories: MajorData[] = JSON.parse(readFileSync(motivationCategoriesPath, "utf-8"));
+
+  for (const major of motivationCategories) {
+    const majorRec = await prisma.motivationCategoryMajor.upsert({
+      where: { name: major.name },
+      update: { sortOrder: major.sortOrder },
+      create: { name: major.name, sortOrder: major.sortOrder },
+    });
+
+    for (const middle of major.middles) {
+      let middleRec = await prisma.motivationCategoryMiddle.findFirst({
+        where: { majorId: majorRec.id, name: middle.name },
+      });
+      if (!middleRec) {
+        middleRec = await prisma.motivationCategoryMiddle.create({
+          data: { name: middle.name, majorId: majorRec.id, sortOrder: middle.sortOrder },
+        });
+      } else {
+        await prisma.motivationCategoryMiddle.update({
+          where: { id: middleRec.id },
+          data: { sortOrder: middle.sortOrder },
+        });
+      }
+
+      for (const minor of middle.minors) {
+        const existingMinor = await prisma.motivationCategoryMinor.findFirst({
+          where: { middleId: middleRec.id, name: minor.name },
+        });
+        if (!existingMinor) {
+          await prisma.motivationCategoryMinor.create({
+            data: { name: minor.name, middleId: middleRec.id, sortOrder: minor.sortOrder },
+          });
+        }
+      }
+    }
+  }
+  console.log(`志望動機マスター投入完了: ${motivationCategories.length} 大分類`);
+
+  // ========== 職種マスター初期データ ==========
+  console.log("\n=== 職種マスター初期データ投入 ===");
 
   const jobCategoriesPath = join(__dirname, "..", "job-categories.json");
   const jobCategories: MajorData[] = JSON.parse(readFileSync(jobCategoriesPath, "utf-8"));
@@ -314,50 +356,25 @@ async function main() {
   }
 
   // === 既存データの修正 ===
-  // 「志望動機の詳細」を SELECT → MULTI_SELECT に更新
-  const existingMotivationField = await prisma.taskTemplateField.findFirst({
-    where: { label: "志望動機の詳細", fieldType: "SELECT" },
-  });
-  if (existingMotivationField) {
-    await prisma.taskTemplateField.update({
-      where: { id: existingMotivationField.id },
-      data: { fieldType: "MULTI_SELECT" },
-    });
-    console.log('  [update] 「志望動機の詳細」を MULTI_SELECT に変更');
-  }
-
-  // カテゴリ1: 履歴書作成
+  // 履歴書作成カテゴリの旧「志望動機カテゴリ」「志望動機の詳細」フィールドを削除
   const cat1 = await upsertCategory("履歴書作成", 1);
 
-  const f1_1 = await upsertField(cat1.id, "志望動機カテゴリ", "SELECT", true, 1);
-  for (const [i, label] of [
-    "未経験から営業へ",
-    "経験者としてのステップアップ",
-    "成長志向を強調",
-  ].entries()) {
-    await upsertOption(f1_1.id, label, i + 1);
+  const oldMotivationLabels = ["志望動機カテゴリ", "志望動機の詳細"];
+  for (const label of oldMotivationLabels) {
+    const oldField = await prisma.taskTemplateField.findFirst({
+      where: { categoryId: cat1.id, label },
+    });
+    if (oldField) {
+      await prisma.taskTemplateField.delete({ where: { id: oldField.id } });
+      console.log(`    [delete] 旧項目 "${label}"`);
+    }
   }
 
-  const f1_2 = await upsertField(cat1.id, "志望動機の詳細", "MULTI_SELECT", true, 2);
-  for (const [i, label] of [
-    "接客・販売経験あり → 未経験だが接客販売で培ったコミュニケーション力や販売スキルを活かし、営業職として活躍していきたい。",
-    "事務経験あり → 未経験ながら事務職で培った正確性や調整力、社内外の調整経験を活かし、営業職としてお客様に信頼される対応をしたい。",
-    "サービス業経験（ホテル・飲食など） → お客様のニーズをくみ取り満足度を高める経験を積んできた。営業でも相手の立場を理解した提案で成果を上げていきたい。",
-    '教育/保育/医療系など「人を支える」職種経験 → 人を支える中で培った傾聴力や信頼関係構築力を武器に、営業として顧客の課題解決をしたい。',
-    "経験を活かす → 営業職としての経験を活かしつつ、より大きな規模の案件や裁量のある仕事に挑戦し、キャリアアップを図りたい。",
-    "個人営業→法人営業 → これまで培った営業経験をもとに、法人営業へステップアップし、より幅広い顧客に価値提供を行いたい。",
-    "新規開拓→既存顧客対応 → 新規営業で培った開拓力を活かし、既存顧客との長期的な信頼関係を構築していきたい。",
-    "既存顧客対応→新規開拓 → 既存顧客対応で培った課題把握力や提案力を、新規開拓営業に活かし、より多くの顧客へアプローチしていきたい。",
-    "成長環境で挑戦 → 早い段階から成果を求められる環境で自分を鍛え、営業として成長し続けたい。",
-    "キャリアアップ・収入向上 → 成果が正当に評価される環境でスキルを磨き、収入やキャリアアップを実現したい。",
-    "英語を活かす → 英語力を活かして業務の幅を広げ、国際的なビジネスシーンでも成果を出せる人材として成長したい。",
-    "中国語を活かす → 中国語を強みに、アジア圏との取引やグローバルな環境で活躍し、自身のキャリアを広げていきたい。",
-    "資格を活かす → 資格を実務に活かし、専門性を高めることで成果を上げ、さらなるキャリアアップにつなげたい。",
-  ].entries()) {
-    await upsertOption(f1_2.id, label, i + 1);
-  }
-
-  await upsertField(cat1.id, "追加メモ", "TEXTAREA", false, 3, "補足情報があれば入力してください");
+  // 新しい志望動機フィールド（大中小 + 追加メモ）
+  await upsertField(cat1.id, "志望動機（大分類）", "TEXT", true, 1);
+  await upsertField(cat1.id, "志望動機（中分類）", "TEXT", true, 2);
+  await upsertField(cat1.id, "志望動機（小分類）", "TEXT", true, 3);
+  await upsertField(cat1.id, "追加メモ", "TEXTAREA", false, 4, "補足情報があれば入力してください");
 
   // カテゴリ2: 職務経歴書作成
   const cat2 = await upsertCategory("職務経歴書作成", 2);
