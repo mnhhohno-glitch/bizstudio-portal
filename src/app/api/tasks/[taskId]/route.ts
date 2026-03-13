@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(
   _request: Request,
@@ -147,6 +148,21 @@ export async function DELETE(
     // 作成者 or admin のみ削除可能
     if (task.createdByUserId !== actor.id && actor.role !== "admin") {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
+    }
+
+    // 添付ファイルをSupabase Storageから削除
+    const attachments = await prisma.taskAttachment.findMany({
+      where: { taskId },
+      select: { storagePath: true },
+    });
+    if (attachments.length > 0) {
+      const paths = attachments.map((a) => a.storagePath);
+      const { error: storageError } = await supabase.storage
+        .from("task-attachments")
+        .remove(paths);
+      if (storageError) {
+        console.error("Failed to delete attachments from storage:", storageError);
+      }
     }
 
     await prisma.task.delete({ where: { id: taskId } });

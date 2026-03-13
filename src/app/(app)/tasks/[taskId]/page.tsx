@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import TaskAttachments from "@/components/tasks/TaskAttachments";
 
 type Option = { id: string; label: string; value: string };
 type FieldValue = {
@@ -296,11 +297,14 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* attachments placeholder */}
-        <div className="mt-6 border-t border-[#F3F4F6] pt-4">
-          <h2 className="mb-3 text-[14px] font-bold text-[#374151]">添付ファイル</h2>
-          <p className="text-[13px] text-[#9CA3AF]">この機能は準備中です</p>
-        </div>
+        {/* attachments */}
+        {user && (
+          <TaskAttachments
+            taskId={taskId}
+            currentUserId={user.id}
+            currentUserRole={user.role}
+          />
+        )}
 
         {/* comments placeholder */}
         <div className="mt-6 border-t border-[#F3F4F6] pt-4">

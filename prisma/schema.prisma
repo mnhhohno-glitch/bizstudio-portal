@@ -102,8 +102,9 @@ model User {
   documents     Document[]     @relation("UserDocuments")
   manuals        Manual[]       @relation("UserManuals")
   candidateNotes CandidateNote[] @relation("UserCandidateNotes")
-  tasksCreated   Task[]         @relation("TaskCreator")
-  taskComments   TaskComment[]  @relation("TaskComments")
+  tasksCreated      Task[]            @relation("TaskCreator")
+  taskComments      TaskComment[]     @relation("TaskComments")
+  taskAttachments   TaskAttachment[]  @relation("UploadedAttachments")
 
   @@map("users")
 }
@@ -460,13 +461,16 @@ model TaskAttachment {
   taskId           String   @map("task_id")
   task             Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   fileName         String   @map("file_name")
-  fileUrl          String   @map("file_url")
-  fileSize         Int?     @map("file_size")
-  mimeType         String?  @map("mime_type")
+  fileSize         Int      @map("file_size")
+  mimeType         String   @map("mime_type")
+  storagePath      String   @map("storage_path")
+  publicUrl        String   @map("public_url")
   uploadedByUserId String   @map("uploaded_by_user_id")
+  uploadedByUser   User     @relation("UploadedAttachments", fields: [uploadedByUserId], references: [id])
 
   createdAt        DateTime @default(now()) @map("created_at")
 
+  @@index([taskId])
   @@map("task_attachments")
 }
 
