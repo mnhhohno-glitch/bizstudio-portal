@@ -24,6 +24,7 @@ type Category = {
   description: string | null;
   fields: Field[];
 };
+type JobCatItem = { id: string; name: string; sortOrder: number };
 
 const STEPS = [
   "求職者選択",
@@ -32,6 +33,20 @@ const STEPS = [
   "担当者選択",
   "追加情報",
   "確認・作成",
+];
+
+/** 数字実績ありと判定する大分類 */
+const SALES_MAJORS = ["営業", "販売・フード・アミューズメント"];
+
+/** 職務経歴書の「応募職種」フィールドラベル */
+const SHOKUMU_CATEGORY = "職務経歴書作成";
+
+/** 職務経歴書で非表示にするフィールド（職種に応じて出し分け） */
+const SALES_ONLY_LABELS = ["営業実績"];
+const NON_SALES_HIDDEN_LABELS = [
+  "提示できる実績や数字がない（「数字実績なしで構いません」と記載する）",
+  "営業実績",
+  "その他実績",
 ];
 
 /* ========================================================== */
@@ -59,6 +74,20 @@ export default function TaskNewPage() {
   // step 2
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
+  // step 2 - 職種選択 (職務経歴書作成用)
+  const [jobMajors, setJobMajors] = useState<JobCatItem[]>([]);
+  const [jobMiddles, setJobMiddles] = useState<JobCatItem[]>([]);
+  const [jobMinors, setJobMinors] = useState<JobCatItem[]>([]);
+  const [selectedMajorId, setSelectedMajorId] = useState("");
+  const [selectedMiddleId, setSelectedMiddleId] = useState("");
+  const [selectedMinorId, setSelectedMinorId] = useState("");
+  const [selectedMajorName, setSelectedMajorName] = useState("");
+  const [selectedMiddleName, setSelectedMiddleName] = useState("");
+  const [selectedMinorName, setSelectedMinorName] = useState("");
+
+  // step 2 - 職務経歴書: 非営業用の経歴概要
+  const [careerSummary, setCareerSummary] = useState("");
+
   // step 3
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -82,21 +111,36 @@ export default function TaskNewPage() {
     [candidates, candidateId]
   );
 
+  const isShokumu = selectedCategory?.name === SHOKUMU_CATEGORY;
+  const isSalesJob = SALES_MAJORS.includes(selectedMajorName);
+
+  /** 職務経歴書: 「実績なし」チェックがONか */
+  const noNumbersChecked = useMemo(() => {
+    if (!isShokumu || !selectedCategory) return false;
+    const checkField = selectedCategory.fields.find((f) =>
+      f.label.startsWith("提示できる実績や数字がない")
+    );
+    return checkField ? fieldValues[checkField.id] === "true" : false;
+  }, [isShokumu, selectedCategory, fieldValues]);
+
   /* ----- fetch master data ----- */
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [catRes, empRes, canRes] = await Promise.all([
+      const [catRes, empRes, canRes, jobRes] = await Promise.all([
         fetch("/api/task-categories?includeFields=true"),
         fetch("/api/employees"),
         fetch("/api/candidates"),
+        fetch("/api/job-categories"),
       ]);
       const catJson = await catRes.json();
       const empJson = await empRes.json();
       const canJson = await canRes.json();
+      const jobJson = await jobRes.json();
       setCategories(catJson.categories ?? []);
       setEmployees(Array.isArray(empJson) ? empJson : []);
       setCandidates(Array.isArray(canJson) ? canJson : []);
+      setJobMajors(Array.isArray(jobJson) ? jobJson : []);
     } catch {
       alert("データの取得に失敗しました");
     } finally {
@@ -107,6 +151,45 @@ export default function TaskNewPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  /* ----- job category cascading ----- */
+  useEffect(() => {
+    if (!selectedMajorId) {
+      setJobMiddles([]);
+      setSelectedMiddleId("");
+      setSelectedMiddleName("");
+      setJobMinors([]);
+      setSelectedMinorId("");
+      setSelectedMinorName("");
+      return;
+    }
+    fetch(`/api/job-categories/${selectedMajorId}/middles`)
+      .then((r) => r.json())
+      .then((data) => {
+        setJobMiddles(Array.isArray(data) ? data : []);
+        setSelectedMiddleId("");
+        setSelectedMiddleName("");
+        setJobMinors([]);
+        setSelectedMinorId("");
+        setSelectedMinorName("");
+      });
+  }, [selectedMajorId]);
+
+  useEffect(() => {
+    if (!selectedMiddleId) {
+      setJobMinors([]);
+      setSelectedMinorId("");
+      setSelectedMinorName("");
+      return;
+    }
+    fetch(`/api/job-categories/middles/${selectedMiddleId}/minors`)
+      .then((r) => r.json())
+      .then((data) => {
+        setJobMinors(Array.isArray(data) ? data : []);
+        setSelectedMinorId("");
+        setSelectedMinorName("");
+      });
+  }, [selectedMiddleId]);
 
   /* ----- auto title ----- */
   useEffect(() => {
@@ -126,9 +209,15 @@ export default function TaskNewPage() {
         return !!categoryId;
       case 2: {
         if (!selectedCategory) return false;
-        return selectedCategory.fields
+        // 職務経歴書: 職種大分類は必須
+        if (isShokumu && !selectedMajorName) return false;
+        // テンプレート必須フィールドのバリデーション
+        const visibleFields = getVisibleFields();
+        return visibleFields
           .filter((f) => f.isRequired)
           .every((f) => {
+            // 応募職種は職種選択UIで代替するのでスキップ
+            if (f.label === "応募職種") return true;
             const v = fieldValues[f.id];
             return v !== undefined && v !== "";
           });
@@ -142,11 +231,65 @@ export default function TaskNewPage() {
     }
   };
 
+  /** 職務経歴書で表示するフィールドを返す */
+  const getVisibleFields = useCallback((): Field[] => {
+    if (!selectedCategory) return [];
+    if (!isShokumu) return selectedCategory.fields;
+
+    return selectedCategory.fields.filter((f) => {
+      // 応募職種は職種カスケードで代替
+      if (f.label === "応募職種") return false;
+      // 営業系の場合
+      if (isSalesJob) {
+        // 「実績なし」チェック時は営業実績を非表示
+        if (noNumbersChecked && SALES_ONLY_LABELS.includes(f.label)) return false;
+        return true;
+      }
+      // 非営業系の場合
+      if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
+      return true;
+    });
+  }, [selectedCategory, isShokumu, isSalesJob, noNumbersChecked]);
+
   /* ----- submit ----- */
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
     try {
+      // 職種情報をfieldValuesに追加
+      const extraFieldValues: { fieldId: string; value: string }[] = [];
+
+      // 応募職種フィールドに職種名をセット
+      if (isShokumu && selectedCategory) {
+        const shokuField = selectedCategory.fields.find(
+          (f) => f.label === "応募職種"
+        );
+        if (shokuField && selectedMinorName) {
+          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMinorName });
+        } else if (shokuField && selectedMiddleName) {
+          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMiddleName });
+        } else if (shokuField && selectedMajorName) {
+          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMajorName });
+        }
+      }
+
+      // 通常のfieldValues
+      const normalFieldValues = Object.entries(fieldValues)
+        .filter(([, v]) => v !== "")
+        .map(([fieldId, value]) => ({ fieldId, value }));
+
+      // 非営業の経歴概要 → 「その他実績」フィールドに保存
+      if (isShokumu && !isSalesJob && careerSummary.trim() && selectedCategory) {
+        const otherField = selectedCategory.fields.find(
+          (f) => f.label === "その他実績"
+        );
+        if (otherField) {
+          extraFieldValues.push({ fieldId: otherField.id, value: careerSummary.trim() });
+        }
+      }
+
+      const allFieldValues = [...normalFieldValues, ...extraFieldValues];
+
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -159,9 +302,7 @@ export default function TaskNewPage() {
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           assigneeIds,
-          fieldValues: Object.entries(fieldValues)
-            .filter(([, v]) => v !== "")
-            .map(([fieldId, value]) => ({ fieldId, value })),
+          fieldValues: allFieldValues,
         }),
       });
 
@@ -224,6 +365,9 @@ export default function TaskNewPage() {
 
   const priorityLabel = (p: string) =>
     p === "HIGH" ? "高" : p === "MEDIUM" ? "中" : "低";
+
+  const selectCls =
+    "w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
 
   /* ----- loading ----- */
   if (loading) {
@@ -352,6 +496,13 @@ export default function TaskNewPage() {
                   onClick={() => {
                     setCategoryId(cat.id);
                     setFieldValues({});
+                    setSelectedMajorId("");
+                    setSelectedMajorName("");
+                    setSelectedMiddleId("");
+                    setSelectedMiddleName("");
+                    setSelectedMinorId("");
+                    setSelectedMinorName("");
+                    setCareerSummary("");
                   }}
                   className={[
                     "rounded-[8px] border-2 p-4 text-left transition-colors",
@@ -380,25 +531,139 @@ export default function TaskNewPage() {
             <h2 className="mb-4 text-[16px] font-bold text-[#374151]">
               {selectedCategory.name} - テンプレート入力
             </h2>
-            {selectedCategory.fields.length === 0 ? (
-              <p className="text-[14px] text-[#6B7280]">
-                テンプレート項目はありません。次へ進んでください。
-              </p>
-            ) : (
-              <div className="space-y-5">
-                {selectedCategory.fields.map((field) => (
-                  <div key={field.id}>
-                    <label className="mb-1 block text-[13px] font-medium text-[#374151]">
-                      {field.label}
-                      {field.isRequired && (
-                        <span className="ml-1 text-red-500">*</span>
-                      )}
+
+            {/* 職務経歴書: 職種カスケード選択 */}
+            {isShokumu && (
+              <div className="mb-6 space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                <p className="text-[13px] font-bold text-[#374151]">
+                  応募職種<span className="ml-1 text-red-500">*</span>
+                </p>
+                {/* 大分類 */}
+                <div>
+                  <label className="mb-1 block text-[12px] text-[#6B7280]">
+                    職種（大分類）
+                  </label>
+                  <select
+                    value={selectedMajorId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedMajorId(id);
+                      const name = jobMajors.find((m) => m.id === id)?.name ?? "";
+                      setSelectedMajorName(name);
+                    }}
+                    className={selectCls}
+                  >
+                    <option value="">選択してください</option>
+                    {jobMajors.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* 中分類 */}
+                {selectedMajorId && (
+                  <div>
+                    <label className="mb-1 block text-[12px] text-[#6B7280]">
+                      職種（中分類）
                     </label>
-                    {renderField(field, fieldValues, setFieldValue, toggleMultiSelect)}
+                    <select
+                      value={selectedMiddleId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedMiddleId(id);
+                        const name = jobMiddles.find((m) => m.id === id)?.name ?? "";
+                        setSelectedMiddleName(name);
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">選択してください</option>
+                      {jobMiddles.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                ))}
+                )}
+                {/* 小分類 */}
+                {selectedMiddleId && jobMinors.length > 0 && (
+                  <div>
+                    <label className="mb-1 block text-[12px] text-[#6B7280]">
+                      職種（小分類）
+                    </label>
+                    <select
+                      value={selectedMinorId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedMinorId(id);
+                        const name = jobMinors.find((m) => m.id === id)?.name ?? "";
+                        setSelectedMinorName(name);
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">選択してください</option>
+                      {jobMinors.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {/* 選択結果 */}
+                {selectedMajorName && (
+                  <p className="text-[12px] text-[#2563EB]">
+                    選択中: {selectedMajorName}
+                    {selectedMiddleName ? ` > ${selectedMiddleName}` : ""}
+                    {selectedMinorName ? ` > ${selectedMinorName}` : ""}
+                  </p>
+                )}
               </div>
             )}
+
+            {/* テンプレートフィールド */}
+            {(() => {
+              const visibleFields = getVisibleFields();
+              if (visibleFields.length === 0 && !isShokumu) {
+                return (
+                  <p className="text-[14px] text-[#6B7280]">
+                    テンプレート項目はありません。次へ進んでください。
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-5">
+                  {visibleFields.map((field) => (
+                    <div key={field.id}>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        {field.label}
+                        {field.isRequired && (
+                          <span className="ml-1 text-red-500">*</span>
+                        )}
+                      </label>
+                      {renderField(field, fieldValues, setFieldValue, toggleMultiSelect)}
+                    </div>
+                  ))}
+
+                  {/* 非営業: 経歴・実績の概要 */}
+                  {isShokumu && selectedMajorName && !isSalesJob && (
+                    <div>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        経歴・実績の概要
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={careerSummary}
+                        placeholder="これまでの経歴や実績、アピールポイントを入力してください"
+                        onChange={(e) => setCareerSummary(e.target.value)}
+                        className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -532,6 +797,15 @@ export default function TaskNewPage() {
                 label="カテゴリ"
                 value={selectedCategory?.name ?? "-"}
               />
+              {/* 職種情報 */}
+              {isShokumu && selectedMajorName && (
+                <ConfirmRow
+                  label="応募職種"
+                  value={[selectedMajorName, selectedMiddleName, selectedMinorName]
+                    .filter(Boolean)
+                    .join(" > ")}
+                />
+              )}
               <ConfirmRow
                 label="担当者"
                 value={
@@ -546,6 +820,10 @@ export default function TaskNewPage() {
               {description && (
                 <ConfirmRow label="詳細メモ" value={description} />
               )}
+              {/* 経歴概要（非営業） */}
+              {isShokumu && !isSalesJob && careerSummary && (
+                <ConfirmRow label="経歴・実績の概要" value={careerSummary} />
+              )}
               {selectedCategory &&
                 selectedCategory.fields.length > 0 && (
                   <div>
@@ -554,6 +832,8 @@ export default function TaskNewPage() {
                     </dt>
                     <dd className="mt-1 space-y-1">
                       {selectedCategory.fields.map((f) => {
+                        // 応募職種は上で表示済み
+                        if (f.label === "応募職種" && isShokumu) return null;
                         const raw = fieldValues[f.id] ?? "";
                         if (!raw) return null;
 

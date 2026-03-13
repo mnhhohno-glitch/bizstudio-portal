@@ -1,0 +1,2024 @@
+[
+  {
+    "name": "営業",
+    "sortOrder": 1,
+    "middles": [
+      {
+        "name": "営業・代理店営業・ルートセールス・MR",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "営業・企画営業（法人向け）",
+            "sortOrder": 1
+          },
+          {
+            "name": "営業・企画営業（個人向け）",
+            "sortOrder": 2
+          },
+          {
+            "name": "営業マネジャー・営業管理職",
+            "sortOrder": 3
+          },
+          {
+            "name": "代理店営業・パートナーセールス",
+            "sortOrder": 4
+          },
+          {
+            "name": "内勤営業・カウンターセールス",
+            "sortOrder": 5
+          },
+          {
+            "name": "ルートセールス・渉外・外商",
+            "sortOrder": 6
+          },
+          {
+            "name": "海外営業",
+            "sortOrder": 7
+          },
+          {
+            "name": "メディカル営業（MR・MS・その他）",
+            "sortOrder": 8
+          },
+          {
+            "name": "その他営業・代理店営業・ルートセールス・MR関連職",
+            "sortOrder": 9
+          }
+        ]
+      },
+      {
+        "name": "人材コーディネーター・カウンセラー",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "キャリアカウンセラー",
+            "sortOrder": 1
+          },
+          {
+            "name": "人材コーディネーター",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "コールセンター・カスタマーサポート",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "コールセンター管理・運営",
+            "sortOrder": 1
+          },
+          {
+            "name": "カスタマーサポート・サポートデスク",
+            "sortOrder": 2
+          },
+          {
+            "name": "テクニカルサポート",
+            "sortOrder": 3
+          },
+          {
+            "name": "オペレーター・アポインター",
+            "sortOrder": 4
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "販売・フード・アミューズメント",
+    "sortOrder": 2,
+    "middles": [
+      {
+        "name": "スーパーバイザー・教育担当",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "スーパーバイザー・エリアマネジャー",
+            "sortOrder": 1
+          },
+          {
+            "name": "教育・研修トレーナー",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "小売・流通",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "店長・店長候補（小売・流通系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "販売・販売アドバイザー・売り場担当",
+            "sortOrder": 2
+          },
+          {
+            "name": "美容部員",
+            "sortOrder": 3
+          },
+          {
+            "name": "その他小売・流通関連職",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "フード・アミューズメント",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "店長・店長候補（フード・アミューズメント系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "ホール・フロアスタッフ",
+            "sortOrder": 2
+          },
+          {
+            "name": "調理・調理補助",
+            "sortOrder": 3
+          },
+          {
+            "name": "その他フード・アミューズメント関連職",
+            "sortOrder": 4
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "医療・福祉",
+    "sortOrder": 3,
+    "middles": [
+      {
+        "name": "医療サービス",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "管理薬剤師・薬剤師・登録販売者",
+            "sortOrder": 1
+          },
+          {
+            "name": "医師",
+            "sortOrder": 2
+          },
+          {
+            "name": "看護師・准看護師・保健師・助産師",
+            "sortOrder": 3
+          },
+          {
+            "name": "歯科医師",
+            "sortOrder": 4
+          },
+          {
+            "name": "歯科技工士・歯科衛生士",
+            "sortOrder": 5
+          },
+          {
+            "name": "PT（理学療法士）・OT（作業療法士）・ST（言語聴覚士）・ORT（視能訓練士）",
+            "sortOrder": 6
+          },
+          {
+            "name": "マッサージ師・柔道整復師・鍼師・灸師",
+            "sortOrder": 7
+          },
+          {
+            "name": "各種検査技師",
+            "sortOrder": 8
+          },
+          {
+            "name": "臨床心理士・カウンセラー・セラピスト",
+            "sortOrder": 9
+          },
+          {
+            "name": "医療事務・医療秘書",
+            "sortOrder": 10
+          },
+          {
+            "name": "獣医",
+            "sortOrder": 11
+          },
+          {
+            "name": "その他医療サービス関連職",
+            "sortOrder": 12
+          }
+        ]
+      },
+      {
+        "name": "福祉・介護サービス・栄養",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "介護・福祉事業責任者・施設長",
+            "sortOrder": 1
+          },
+          {
+            "name": "ケアマネジャー（介護支援専門員）",
+            "sortOrder": 2
+          },
+          {
+            "name": "サービス提供責任者",
+            "sortOrder": 3
+          },
+          {
+            "name": "介護職・ヘルパー",
+            "sortOrder": 4
+          },
+          {
+            "name": "生活相談員・生活支援員",
+            "sortOrder": 5
+          },
+          {
+            "name": "介護系事務職",
+            "sortOrder": 6
+          },
+          {
+            "name": "管理栄養士・栄養士・フードコーディネーター",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他福祉・介護サービス・栄養関連職",
+            "sortOrder": 8
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "企画・経営",
+    "sortOrder": 4,
+    "middles": [
+      {
+        "name": "マーケティング・企画・宣伝",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "マーケティングリサーチ・分析",
+            "sortOrder": 1
+          },
+          {
+            "name": "販促企画・営業企画",
+            "sortOrder": 2
+          },
+          {
+            "name": "商品企画・商品開発",
+            "sortOrder": 3
+          },
+          {
+            "name": "広告宣伝",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他マーケティング・企画・宣伝関連職",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "MD・バイヤー・店舗開発",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "マーチャンダイザー",
+            "sortOrder": 1
+          },
+          {
+            "name": "仕入れ・バイヤー",
+            "sortOrder": 2
+          },
+          {
+            "name": "店舗開発・FC開発",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "事業企画・経営企画・エグゼクティブ",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "事業企画・事業プロデュース",
+            "sortOrder": 1
+          },
+          {
+            "name": "海外事業企画",
+            "sortOrder": 2
+          },
+          {
+            "name": "経営企画",
+            "sortOrder": 3
+          },
+          {
+            "name": "CIO・CTO",
+            "sortOrder": 4
+          },
+          {
+            "name": "経営幹部（CEO・CFO・COO等）",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "FCオーナー・代理店研修生",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "FCオーナー・代理店研修生",
+            "sortOrder": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "建築・土木",
+    "sortOrder": 5,
+    "middles": [
+      {
+        "name": "設計・積算・測量・構造解析",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "建設コンサルタント",
+            "sortOrder": 1
+          },
+          {
+            "name": "測量",
+            "sortOrder": 2
+          },
+          {
+            "name": "建築設計",
+            "sortOrder": 3
+          },
+          {
+            "name": "土木設計",
+            "sortOrder": 4
+          },
+          {
+            "name": "プラント設計",
+            "sortOrder": 5
+          },
+          {
+            "name": "電気設備設計",
+            "sortOrder": 6
+          },
+          {
+            "name": "空調設備設計",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他設計・設備設計",
+            "sortOrder": 8
+          },
+          {
+            "name": "CADオペレーター（建築）・製図",
+            "sortOrder": 9
+          },
+          {
+            "name": "積算",
+            "sortOrder": 10
+          },
+          {
+            "name": "構造解析（建築・土木）",
+            "sortOrder": 11
+          }
+        ]
+      },
+      {
+        "name": "施工管理・設備・環境保全",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "建築施工管理・工事監理者",
+            "sortOrder": 1
+          },
+          {
+            "name": "内装施工管理・工事監理者（リフォーム・住宅・商業施設等）",
+            "sortOrder": 2
+          },
+          {
+            "name": "土木施工管理・工事監理者",
+            "sortOrder": 3
+          },
+          {
+            "name": "造園施工管理・工事監理者",
+            "sortOrder": 4
+          },
+          {
+            "name": "プラント施工管理・工事監理者",
+            "sortOrder": 5
+          },
+          {
+            "name": "電気設備施工管理・工事監理者",
+            "sortOrder": 6
+          },
+          {
+            "name": "空調設備施工管理・工事監理者",
+            "sortOrder": 7
+          },
+          {
+            "name": "管工事施工管理・工事監理者",
+            "sortOrder": 8
+          },
+          {
+            "name": "その他施工管理",
+            "sortOrder": 9
+          },
+          {
+            "name": "設備保全・メンテナンス",
+            "sortOrder": 10
+          },
+          {
+            "name": "環境保全・管理・調査・分析",
+            "sortOrder": 11
+          }
+        ]
+      },
+      {
+        "name": "研究開発・品質管理・特許その他",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "製品・研究開発（建築・土木・プラント・設備）",
+            "sortOrder": 1
+          },
+          {
+            "name": "生産技術・生産管理（建築・土木・プラント・設備）",
+            "sortOrder": 2
+          },
+          {
+            "name": "品質管理・保証（建築・土木・プラント・設備）",
+            "sortOrder": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "ITエンジニア",
+    "sortOrder": 6,
+    "middles": [
+      {
+        "name": "コンサルタント・アナリスト・プリセールス",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "システムアナリスト",
+            "sortOrder": 1
+          },
+          {
+            "name": "ITアーキテクト",
+            "sortOrder": 2
+          },
+          {
+            "name": "システムコンサルタント（業務系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "システムコンサルタント（DB・ミドルウェア）",
+            "sortOrder": 4
+          },
+          {
+            "name": "システムコンサルタント（ネットワーク・通信）",
+            "sortOrder": 5
+          },
+          {
+            "name": "パッケージ導入コンサルタント（ERP・SCM・CRM等）",
+            "sortOrder": 6
+          },
+          {
+            "name": "セキュリティコンサルタント",
+            "sortOrder": 7
+          },
+          {
+            "name": "プリセールス・セールスエンジニア",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "システム開発（WEB・オープン・モバイル系）",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "プロジェクトマネジャー・リーダー(WEB・オープン・モバイル系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "システムエンジニア（アプリ設計／WEB・オープン・モバイル系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "システムエンジニア（DB・ミドルウェア設計／WEB・オープン・モバイル系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "プログラマー（WEB・オープン・モバイル系）",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "システム開発（汎用機系）",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "プロジェクトマネジャー・リーダー（汎用機系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "システムエンジニア（アプリ設計／汎用機系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "システムエンジニア（DB・ミドルウェア設計／汎用機系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "プログラマー（汎用機系）",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "システム開発（組み込み・ファームウェア・制御系）",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "プロジェクトマネジャー(制御系)",
+            "sortOrder": 1
+          },
+          {
+            "name": "システムエンジニア(通信制御ソフト開発／制御系)",
+            "sortOrder": 2
+          },
+          {
+            "name": "システムエンジニア(マイコン・計測・画像等／制御系)",
+            "sortOrder": 3
+          },
+          {
+            "name": "プログラマー(制御系)",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "パッケージソフト・ミドルウェア開発",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "プロダクトマネジャー（パッケージソフト・ミドルウェア）",
+            "sortOrder": 1
+          },
+          {
+            "name": "システムエンジニア（パッケージソフト・ミドルウェア）",
+            "sortOrder": 2
+          },
+          {
+            "name": "プログラマー（パッケージソフト・ミドルウェア）",
+            "sortOrder": 3
+          },
+          {
+            "name": "ローカライズ　（パッケージソフト・ミドルウェア）",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "ネットワーク・通信インフラ・サーバー設計・構築",
+        "sortOrder": 6,
+        "minors": [
+          {
+            "name": "ネットワーク設計・構築（LAN・WAN・インターネット）",
+            "sortOrder": 1
+          },
+          {
+            "name": "サーバ設計・構築（LAN・WAN・インターネット）",
+            "sortOrder": 2
+          },
+          {
+            "name": "通信設備計画策定",
+            "sortOrder": 3
+          },
+          {
+            "name": "通信設備設計・構築（有線系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "通信設備設計・構築（無線系）",
+            "sortOrder": 5
+          },
+          {
+            "name": "通信設備設置・テスト",
+            "sortOrder": 6
+          }
+        ]
+      },
+      {
+        "name": "テクニカルサポート・監視・運用・保守",
+        "sortOrder": 7,
+        "minors": [
+          {
+            "name": "サーバ・マシン運用・監視",
+            "sortOrder": 1
+          },
+          {
+            "name": "ネットワーク運用・監視",
+            "sortOrder": 2
+          },
+          {
+            "name": "テクニカルサポート（ソフトウェア・ネットワーク）",
+            "sortOrder": 3
+          },
+          {
+            "name": "導入・運用トレーナー",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "社内システム",
+        "sortOrder": 8,
+        "minors": [
+          {
+            "name": "社内情報化戦略・推進",
+            "sortOrder": 1
+          },
+          {
+            "name": "社内システム開発・運用",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "研究開発・特許・品質管理・その他",
+        "sortOrder": 9,
+        "minors": [
+          {
+            "name": "研究開発（ソフトウェア・ネットワーク）",
+            "sortOrder": 1
+          },
+          {
+            "name": "特許技術者（ソフトウェア・ネットワーク）",
+            "sortOrder": 2
+          },
+          {
+            "name": "品質管理（ソフトウェア・ネットワーク）",
+            "sortOrder": 3
+          },
+          {
+            "name": "その他研究開発・特許・品質管理関連職",
+            "sortOrder": 4
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "電気・電子・機械・半導体",
+    "sortOrder": 7,
+    "middles": [
+      {
+        "name": "研究・開発・特許",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "基礎研究（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "応用研究（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "特許技術者（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "回路・システム・半導体設計・光学関連",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "システム設計・アーキテクチャー",
+            "sortOrder": 1
+          },
+          {
+            "name": "デジタル回路設計",
+            "sortOrder": 2
+          },
+          {
+            "name": "アナログ回路設計",
+            "sortOrder": 3
+          },
+          {
+            "name": "高周波回路設計",
+            "sortOrder": 4
+          },
+          {
+            "name": "混載回路設計",
+            "sortOrder": 5
+          },
+          {
+            "name": "システムLSI設計",
+            "sortOrder": 6
+          },
+          {
+            "name": "デジタルIC設計",
+            "sortOrder": 7
+          },
+          {
+            "name": "アナログIC設計",
+            "sortOrder": 8
+          },
+          {
+            "name": "高周波IC設計",
+            "sortOrder": 9
+          },
+          {
+            "name": "混載IC設計",
+            "sortOrder": 10
+          },
+          {
+            "name": "パワーIC設計",
+            "sortOrder": 11
+          },
+          {
+            "name": "光学設計・その他光学関連職",
+            "sortOrder": 12
+          },
+          {
+            "name": "その他設計",
+            "sortOrder": 13
+          }
+        ]
+      },
+      {
+        "name": "制御設計",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "制御設計（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "制御設計（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "制御設計（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "制御設計（工作機械・ロボット系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "制御設計（その他）",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "機械・機構設計・金型設計・解析",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "機械・機構設計（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "機械・機構設計（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "機械・機構設計（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "機械・機構設計（工作機械・ロボット・機械系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "機械・機構設計（その他）",
+            "sortOrder": 5
+          },
+          {
+            "name": "金型設計",
+            "sortOrder": 6
+          },
+          {
+            "name": "解析",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "生産・製造・プロセス技術",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "生産・製造・プロセス技術（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "生産・製造・プロセス技術（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "生産・製造・プロセス技術（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "生産・製造・プロセス技術（工作機械・ロボット系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "生産・製造・プロセス技術（半導体・電子部品系）",
+            "sortOrder": 5
+          },
+          {
+            "name": "生産・製造・プロセス技術（機械部品・金型・治工具系）",
+            "sortOrder": 6
+          },
+          {
+            "name": "生産・製造・プロセス技術（その他）",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "品質保証・品質管理・生産管理・製造管理",
+        "sortOrder": 6,
+        "minors": [
+          {
+            "name": "品質保証（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "品質管理（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "生産管理・製造管理（電気・電子・機械・半導体・材料系）",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "セールスエンジニア・FAE",
+        "sortOrder": 7,
+        "minors": [
+          {
+            "name": "セールスエンジニア・FAE（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "セールスエンジニア・FAE（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "セールスエンジニア・FAE（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "セールスエンジニア・FAE（工作機械・ロボット・機械系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "セールスエンジニア・FAE（その他）",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "サービスエンジニア・サポートエンジニア",
+        "sortOrder": 8,
+        "minors": [
+          {
+            "name": "サービスエンジニア・サポートエンジニア（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "サービスエンジニア・サポートエンジニア（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "サービスエンジニア・サポートエンジニア（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "サービスエンジニア・サポートエンジニア（工作機械・ロボット・機械系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "サービスエンジニア・サポートエンジニア（その他）",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "CAD・CAM（電気・電子・半導体・機械系）",
+        "sortOrder": 9,
+        "minors": [
+          {
+            "name": "CAD・CAMオペレーター（電気・電子・機械・半導体系）",
+            "sortOrder": 1
+          }
+        ]
+      },
+      {
+        "name": "評価・検査",
+        "sortOrder": 10,
+        "minors": [
+          {
+            "name": "評価・検査（家電・コンピューター・通信機器系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "評価・検査（精密・医療用機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "評価・検査（自動車・輸送用機器系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "評価・検査（工作機械・ロボット・機械系）",
+            "sortOrder": 4
+          },
+          {
+            "name": "評価・検査（その他）",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "医薬・食品・化学・素材",
+    "sortOrder": 8,
+    "middles": [
+      {
+        "name": "化学・素材・バイオ",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "基礎・応用研究・技術開発",
+            "sortOrder": 1
+          },
+          {
+            "name": "生産技術・製造技術",
+            "sortOrder": 2
+          },
+          {
+            "name": "生産管理",
+            "sortOrder": 3
+          },
+          {
+            "name": "設備管理",
+            "sortOrder": 4
+          },
+          {
+            "name": "品質管理・保証(化学・素材・バイオ系)",
+            "sortOrder": 5
+          },
+          {
+            "name": "フィールドエンジニア",
+            "sortOrder": 6
+          },
+          {
+            "name": "セールスエンジニア(化学・素材・バイオ系)",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他化学・素材・バイオ関連職",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "食品・化粧品",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "基礎研究",
+            "sortOrder": 1
+          },
+          {
+            "name": "商品開発",
+            "sortOrder": 2
+          },
+          {
+            "name": "生産技術・生産管理・製造技術（食品・化粧品系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "品質管理・保証(食品・化粧品系)",
+            "sortOrder": 4
+          },
+          {
+            "name": "申請関連",
+            "sortOrder": 5
+          },
+          {
+            "name": "その他食品・化粧品関連職",
+            "sortOrder": 6
+          }
+        ]
+      },
+      {
+        "name": "医薬品・医療機器",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "研究(基礎・シーズ探索・スクリーニング)",
+            "sortOrder": 1
+          },
+          {
+            "name": "研究(ゲノム・バイオ)",
+            "sortOrder": 2
+          },
+          {
+            "name": "前臨床研究",
+            "sortOrder": 3
+          },
+          {
+            "name": "臨床開発モニター(CRA)",
+            "sortOrder": 4
+          },
+          {
+            "name": "治験コーディネーター（CRC）",
+            "sortOrder": 5
+          },
+          {
+            "name": "臨床開発",
+            "sortOrder": 6
+          },
+          {
+            "name": "薬事申請（医薬品・医療機器・医薬部外品・化粧品系）",
+            "sortOrder": 7
+          },
+          {
+            "name": "生産技術・生産管理・製造技術（医薬品・医療機器系）",
+            "sortOrder": 8
+          },
+          {
+            "name": "品質管理・保証(医薬品・医療機器系)",
+            "sortOrder": 9
+          },
+          {
+            "name": "データマネジメント・生物統計",
+            "sortOrder": 10
+          },
+          {
+            "name": "学術",
+            "sortOrder": 11
+          },
+          {
+            "name": "その他医薬品・医療機器関連職",
+            "sortOrder": 12
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "コンサルタント・金融・不動産専門職",
+    "sortOrder": 9,
+    "middles": [
+      {
+        "name": "コンサルタント",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "コンサルタント（経営戦略）",
+            "sortOrder": 1
+          },
+          {
+            "name": "コンサルタント（財務・会計）",
+            "sortOrder": 2
+          },
+          {
+            "name": "コンサルタント（業務プロセス）",
+            "sortOrder": 3
+          },
+          {
+            "name": "コンサルタント（組織・人事）",
+            "sortOrder": 4
+          },
+          {
+            "name": "コンサルタント（生産・物流）",
+            "sortOrder": 5
+          },
+          {
+            "name": "コンサルタント（営業・マーケティング）",
+            "sortOrder": 6
+          },
+          {
+            "name": "ISOコンサルタント・ISO審査員",
+            "sortOrder": 7
+          },
+          {
+            "name": "公開業務(IPO)",
+            "sortOrder": 8
+          },
+          {
+            "name": "M&A",
+            "sortOrder": 9
+          },
+          {
+            "name": "研究調査員・リサーチャー",
+            "sortOrder": 10
+          },
+          {
+            "name": "その他コンサルタント関連職",
+            "sortOrder": 11
+          }
+        ]
+      },
+      {
+        "name": "士業（公認会計士・税理士・弁護士・その他）",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "公認会計士",
+            "sortOrder": 1
+          },
+          {
+            "name": "税理士",
+            "sortOrder": 2
+          },
+          {
+            "name": "弁護士",
+            "sortOrder": 3
+          },
+          {
+            "name": "弁理士・特許技術者",
+            "sortOrder": 4
+          },
+          {
+            "name": "司法書士・行政書士",
+            "sortOrder": 5
+          },
+          {
+            "name": "社会保険労務士",
+            "sortOrder": 6
+          },
+          {
+            "name": "士業補助者",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "金融系専門職（営業・投資銀行・運用・分析）",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "金融営業（法人）",
+            "sortOrder": 1
+          },
+          {
+            "name": "金融営業（個人）・リテール・FP",
+            "sortOrder": 2
+          },
+          {
+            "name": "金融営業（代理店）・パートナーセールス",
+            "sortOrder": 3
+          },
+          {
+            "name": "投資銀行業務（インベストバンキング）",
+            "sortOrder": 4
+          },
+          {
+            "name": "運用業務・ファンドマネジャー",
+            "sortOrder": 5
+          },
+          {
+            "name": "トレーダー・ディーラー",
+            "sortOrder": 6
+          },
+          {
+            "name": "アナリスト・エコノミスト",
+            "sortOrder": 7
+          },
+          {
+            "name": "ストラテジックファイナンス",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "金融系専門職（ミドル・バック・その他）",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "金融商品開発・アクチュアリー",
+            "sortOrder": 1
+          },
+          {
+            "name": "投資理論・クオンツ",
+            "sortOrder": 2
+          },
+          {
+            "name": "金融システム企画",
+            "sortOrder": 3
+          },
+          {
+            "name": "リスク・与信・債権管理",
+            "sortOrder": 4
+          },
+          {
+            "name": "金融事務",
+            "sortOrder": 5
+          },
+          {
+            "name": "生損保系専門職（査定・損害調査等）",
+            "sortOrder": 6
+          },
+          {
+            "name": "その他金融関連職",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "不動産系専門職",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "不動産営業",
+            "sortOrder": 1
+          },
+          {
+            "name": "アセットマネジャー",
+            "sortOrder": 2
+          },
+          {
+            "name": "不動産鑑定・デューデリジェンス",
+            "sortOrder": 3
+          },
+          {
+            "name": "プロパティマネジャー",
+            "sortOrder": 4
+          },
+          {
+            "name": "ファシリティマネジャー",
+            "sortOrder": 5
+          },
+          {
+            "name": "用地仕入",
+            "sortOrder": 6
+          },
+          {
+            "name": "不動産事業企画",
+            "sortOrder": 7
+          },
+          {
+            "name": "不動産管理",
+            "sortOrder": 8
+          },
+          {
+            "name": "フロント（マンション管理・ビル管理）",
+            "sortOrder": 9
+          },
+          {
+            "name": "その他不動産関連職",
+            "sortOrder": 10
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "クリエイティブ",
+    "sortOrder": 10,
+    "middles": [
+      {
+        "name": "広告・グラフィック",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "アカウントエグゼクティブ（AE）・アカウントプランナー",
+            "sortOrder": 1
+          },
+          {
+            "name": "メディアプランナー（MP)",
+            "sortOrder": 2
+          },
+          {
+            "name": "クリエイティブディレクター",
+            "sortOrder": 3
+          },
+          {
+            "name": "コピーライター",
+            "sortOrder": 4
+          },
+          {
+            "name": "アートディレクター",
+            "sortOrder": 5
+          },
+          {
+            "name": "グラフィックデザイナー・CGデザイナー・イラストレーター(広告系)",
+            "sortOrder": 6
+          },
+          {
+            "name": "フォトグラファー",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他広告・グラフィック関連職",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "編集・制作",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "ディレクター・プロデューサー・進行管理（編集・制作系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "編集・校正",
+            "sortOrder": 2
+          },
+          {
+            "name": "記者・ライター",
+            "sortOrder": 3
+          },
+          {
+            "name": "テクニカルライター",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "印刷",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "DTPオペレーター",
+            "sortOrder": 1
+          },
+          {
+            "name": "その他出版・印刷関連職",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "ファッション",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "ファッションデザイナー・服飾雑貨デザイナー・テキスタイルデザイナー",
+            "sortOrder": 1
+          },
+          {
+            "name": "パタンナー・縫製",
+            "sortOrder": 2
+          },
+          {
+            "name": "生産管理・品質管理（アパレル・ファッション）",
+            "sortOrder": 3
+          },
+          {
+            "name": "スタイリスト・ヘアメイク",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他ファッション関連職",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "工業デザイン・インテリア・空間デザイン",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "プロダクトデザイナー（工業デザイン）",
+            "sortOrder": 1
+          },
+          {
+            "name": "生産管理・品質管理（工業プロダクト）",
+            "sortOrder": 2
+          },
+          {
+            "name": "インテリアデザイナー・インテリアコーディネーター",
+            "sortOrder": 3
+          },
+          {
+            "name": "空間・ディスプレイ・店舗デザイナー",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "放送・映像・音響・イベント・芸能",
+        "sortOrder": 6,
+        "minors": [
+          {
+            "name": "プロデューサー・ディレクター・プランナー・演出",
+            "sortOrder": 1
+          },
+          {
+            "name": "脚本家・放送作家",
+            "sortOrder": 2
+          },
+          {
+            "name": "アシスタントプロデューサー・アシスタントディレクター・進行",
+            "sortOrder": 3
+          },
+          {
+            "name": "アナウンサー・イベントコンパニオン・モデル・俳優",
+            "sortOrder": 4
+          },
+          {
+            "name": "芸能マネジャー",
+            "sortOrder": 5
+          },
+          {
+            "name": "グラフィックデザイナー・CGデザイナー・イラストレーター（映像系）",
+            "sortOrder": 6
+          },
+          {
+            "name": "制作関連技術者（カメラ・照明・音響）",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他放送・映像・音響・イベント・芸能関連職",
+            "sortOrder": 8
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "技能工・設備・配送・農林水産 他",
+    "sortOrder": 11,
+    "middles": [
+      {
+        "name": "技能工（整備・生産・製造・工事）",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "整備・メカニック（自動車・二輪車）",
+            "sortOrder": 1
+          },
+          {
+            "name": "工場生産・製造（輸送用機器・家電・電子機器系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "工場生産・製造（食品・化粧品・医薬品系）",
+            "sortOrder": 3
+          },
+          {
+            "name": "土木・建築・解体工事（とび工・鉄筋工等）",
+            "sortOrder": 4
+          },
+          {
+            "name": "外装・内装工事（塗装工・防水工等）",
+            "sortOrder": 5
+          },
+          {
+            "name": "設備工事（電気・通信）",
+            "sortOrder": 6
+          },
+          {
+            "name": "工場生産・製造（アパレル・ファッション・その他製品）",
+            "sortOrder": 7
+          },
+          {
+            "name": "その他整備・生産・製造・工事関連職",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "施設・設備管理・警備・清掃",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "警備・守衛・清掃",
+            "sortOrder": 1
+          },
+          {
+            "name": "マンション・ビル管理者",
+            "sortOrder": 2
+          },
+          {
+            "name": "設備管理・保守（ガス・空調・上下水・消防等）",
+            "sortOrder": 3
+          },
+          {
+            "name": "ビル施設管理",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他施設・設備管理・警備・清掃関連職",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "配送・運送・倉庫",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "配送・宅配・セールスドライバー",
+            "sortOrder": 1
+          },
+          {
+            "name": "運送ドライバー（中・長距離）",
+            "sortOrder": 2
+          },
+          {
+            "name": "新聞配達・集金",
+            "sortOrder": 3
+          },
+          {
+            "name": "倉庫作業・管理",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他配達・運送・倉庫関連職",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "農林水産関連",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "農林水産関連（農業）",
+            "sortOrder": 1
+          },
+          {
+            "name": "農林水産関連（林業）",
+            "sortOrder": 2
+          },
+          {
+            "name": "農林水産関連（水産業）",
+            "sortOrder": 3
+          },
+          {
+            "name": "農林水産関連（畜産業・その他）",
+            "sortOrder": 4
+          },
+          {
+            "name": "飼育員（ブリーダー・調教師等）",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "その他",
+        "sortOrder": 5,
+        "minors": [
+          {
+            "name": "その他職種",
+            "sortOrder": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "公共サービス",
+    "sortOrder": 12,
+    "middles": [
+      {
+        "name": "公務員・警察・消防・自衛隊",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "公務員（事務系）",
+            "sortOrder": 1
+          },
+          {
+            "name": "公務員（技術系）",
+            "sortOrder": 2
+          },
+          {
+            "name": "警察官",
+            "sortOrder": 3
+          },
+          {
+            "name": "消防士",
+            "sortOrder": 4
+          },
+          {
+            "name": "自衛隊",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "団体・学校法人職員",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "団体職員",
+            "sortOrder": 1
+          },
+          {
+            "name": "学校法人職員",
+            "sortOrder": 2
+          },
+          {
+            "name": "公共施設職員（図書館・美術館等）",
+            "sortOrder": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "管理・事務",
+    "sortOrder": 13,
+    "middles": [
+      {
+        "name": "購買・資材・貿易・物流",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "購買・資材調達",
+            "sortOrder": 1
+          },
+          {
+            "name": "貿易業務・国際業務",
+            "sortOrder": 2
+          },
+          {
+            "name": "物流企画・物流管理",
+            "sortOrder": 3
+          },
+          {
+            "name": "商品管理・在庫管理",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "経理・財務・会計",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "経理・財務",
+            "sortOrder": 1
+          },
+          {
+            "name": "会計・税務",
+            "sortOrder": 2
+          }
+        ]
+      },
+      {
+        "name": "人事・総務・法務・広報・IR・内部監査",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "総務",
+            "sortOrder": 1
+          },
+          {
+            "name": "人事・労務・採用",
+            "sortOrder": 2
+          },
+          {
+            "name": "法務・コンプライアンス",
+            "sortOrder": 3
+          },
+          {
+            "name": "知的財産・特許",
+            "sortOrder": 4
+          },
+          {
+            "name": "広報",
+            "sortOrder": 5
+          },
+          {
+            "name": "IR",
+            "sortOrder": 6
+          },
+          {
+            "name": "内部監査",
+            "sortOrder": 7
+          },
+          {
+            "name": "情報セキュリティ",
+            "sortOrder": 8
+          }
+        ]
+      },
+      {
+        "name": "一般事務・受付・秘書",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "一般事務・庶務",
+            "sortOrder": 1
+          },
+          {
+            "name": "営業事務・営業アシスタント",
+            "sortOrder": 2
+          },
+          {
+            "name": "受付",
+            "sortOrder": 3
+          },
+          {
+            "name": "秘書",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他一般事務・アシスタント・受付・秘書関連職",
+            "sortOrder": 5
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "美容・ブライダル・ホテル・交通",
+    "sortOrder": 14,
+    "middles": [
+      {
+        "name": "エステ・理美容・リラクゼーション",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "エステティシャン",
+            "sortOrder": 1
+          },
+          {
+            "name": "理容師・美容師",
+            "sortOrder": 2
+          },
+          {
+            "name": "アロマセラピスト・ネイリスト",
+            "sortOrder": 3
+          },
+          {
+            "name": "トリマー",
+            "sortOrder": 4
+          },
+          {
+            "name": "その他エステ・理美容・リラクゼーション関連職",
+            "sortOrder": 5
+          }
+        ]
+      },
+      {
+        "name": "ブライダル・葬祭",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "ブライダルコーディネーター・ウェディングプランナー",
+            "sortOrder": 1
+          },
+          {
+            "name": "葬祭ディレクター・プランナー",
+            "sortOrder": 2
+          },
+          {
+            "name": "その他ブライダル・葬祭関連職",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "旅行・ホテル",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "旅行コーディネーター・添乗",
+            "sortOrder": 1
+          },
+          {
+            "name": "カウンタースタッフ・予約手配・オペレーター",
+            "sortOrder": 2
+          },
+          {
+            "name": "ホテル・宿泊施設サービス",
+            "sortOrder": 3
+          },
+          {
+            "name": "その他旅行・ホテル関連職",
+            "sortOrder": 4
+          }
+        ]
+      },
+      {
+        "name": "交通・運輸",
+        "sortOrder": 4,
+        "minors": [
+          {
+            "name": "タクシードライバー・ハイヤードライバー",
+            "sortOrder": 1
+          },
+          {
+            "name": "バス運転手・バス乗務員",
+            "sortOrder": 2
+          },
+          {
+            "name": "パイロット・航空管制官等空輸職",
+            "sortOrder": 3
+          },
+          {
+            "name": "フライトアテンダント（CA・FA）・グランドスタッフ",
+            "sortOrder": 4
+          },
+          {
+            "name": "鉄道乗務員・船舶乗務員",
+            "sortOrder": 5
+          },
+          {
+            "name": "その他交通・運輸関連職",
+            "sortOrder": 6
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "保育・教育・通訳",
+    "sortOrder": 15,
+    "middles": [
+      {
+        "name": "保育",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "保育士・幼稚園教諭",
+            "sortOrder": 1
+          },
+          {
+            "name": "児童相談員",
+            "sortOrder": 2
+          },
+          {
+            "name": "その他保育関連職",
+            "sortOrder": 3
+          }
+        ]
+      },
+      {
+        "name": "教師・講師・インストラクター",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "スクール運営・マネジメント",
+            "sortOrder": 1
+          },
+          {
+            "name": "教師",
+            "sortOrder": 2
+          },
+          {
+            "name": "講師",
+            "sortOrder": 3
+          },
+          {
+            "name": "スポーツインストラクター・トレーナー",
+            "sortOrder": 4
+          },
+          {
+            "name": "インストラクター(OA・その他)",
+            "sortOrder": 5
+          },
+          {
+            "name": "教務事務",
+            "sortOrder": 6
+          },
+          {
+            "name": "その他教師・講師・インストラクター関連職",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "通訳・翻訳",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "通訳",
+            "sortOrder": 1
+          },
+          {
+            "name": "翻訳",
+            "sortOrder": 2
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "WEB・インターネット・ゲーム",
+    "sortOrder": 16,
+    "middles": [
+      {
+        "name": "WEBサイト・インターネットサービス",
+        "sortOrder": 1,
+        "minors": [
+          {
+            "name": "SEOコンサルタント・SEMコンサルタント",
+            "sortOrder": 1
+          },
+          {
+            "name": "インターネットサービス企画",
+            "sortOrder": 2
+          },
+          {
+            "name": "WEBプロデューサー・ディレクター",
+            "sortOrder": 3
+          },
+          {
+            "name": "情報アーキテクト・UI/UXデザイナー",
+            "sortOrder": 4
+          },
+          {
+            "name": "システムディレクター・テクニカルディレクター",
+            "sortOrder": 5
+          },
+          {
+            "name": "アクセス解析・統計解析",
+            "sortOrder": 6
+          },
+          {
+            "name": "WEBコンテンツ企画・制作",
+            "sortOrder": 7
+          },
+          {
+            "name": "WEBデザイナー",
+            "sortOrder": 8
+          },
+          {
+            "name": "フロントエンドエンジニア・コーダー",
+            "sortOrder": 9
+          },
+          {
+            "name": "プログラマー(WEBサイト・インターネットサービス系)",
+            "sortOrder": 10
+          },
+          {
+            "name": "その他WEBサイト・インターネットサービス関連職",
+            "sortOrder": 11
+          }
+        ]
+      },
+      {
+        "name": "ゲーム・アミューズメント",
+        "sortOrder": 2,
+        "minors": [
+          {
+            "name": "ディレクター・プロデューサー（ゲーム・アミューズメント系)",
+            "sortOrder": 1
+          },
+          {
+            "name": "ゲームプランナー・ゲーム企画",
+            "sortOrder": 2
+          },
+          {
+            "name": "シナリオライター",
+            "sortOrder": 3
+          },
+          {
+            "name": "グラフィックデザイナー・CGデザイナー・イラストレーター(ゲーム・アミューズメント系)",
+            "sortOrder": 4
+          },
+          {
+            "name": "プログラマー(ゲーム・アミューズメント系)",
+            "sortOrder": 5
+          },
+          {
+            "name": "サウンドクリエイター",
+            "sortOrder": 6
+          },
+          {
+            "name": "その他ゲーム・アミューズメント関連職",
+            "sortOrder": 7
+          }
+        ]
+      },
+      {
+        "name": "WEBショップ・ECサイト運営",
+        "sortOrder": 3,
+        "minors": [
+          {
+            "name": "WEBショップ・ECサイト運営",
+            "sortOrder": 1
+          }
+        ]
+      }
+    ]
+  }
+]

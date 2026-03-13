@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
+import { readFileSync } from "fs";
+import { join } from "path";
 import "dotenv/config";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -222,6 +224,52 @@ async function main() {
   }
 
   console.log("Seed completed: users, employees, and system links created");
+
+  // ========== 職種マスター初期データ ==========
+  console.log("\n=== 職種マスター初期データ投入 ===");
+
+  type MinorData = { name: string; sortOrder: number };
+  type MiddleData = { name: string; sortOrder: number; minors: MinorData[] };
+  type MajorData = { name: string; sortOrder: number; middles: MiddleData[] };
+
+  const jobCategoriesPath = join(__dirname, "..", "job-categories.json");
+  const jobCategories: MajorData[] = JSON.parse(readFileSync(jobCategoriesPath, "utf-8"));
+
+  for (const major of jobCategories) {
+    const majorRec = await prisma.jobCategoryMajor.upsert({
+      where: { name: major.name },
+      update: { sortOrder: major.sortOrder },
+      create: { name: major.name, sortOrder: major.sortOrder },
+    });
+
+    for (const middle of major.middles) {
+      let middleRec = await prisma.jobCategoryMiddle.findFirst({
+        where: { majorId: majorRec.id, name: middle.name },
+      });
+      if (!middleRec) {
+        middleRec = await prisma.jobCategoryMiddle.create({
+          data: { name: middle.name, majorId: majorRec.id, sortOrder: middle.sortOrder },
+        });
+      } else {
+        await prisma.jobCategoryMiddle.update({
+          where: { id: middleRec.id },
+          data: { sortOrder: middle.sortOrder },
+        });
+      }
+
+      for (const minor of middle.minors) {
+        const existingMinor = await prisma.jobCategoryMinor.findFirst({
+          where: { middleId: middleRec.id, name: minor.name },
+        });
+        if (!existingMinor) {
+          await prisma.jobCategoryMinor.create({
+            data: { name: minor.name, middleId: middleRec.id, sortOrder: minor.sortOrder },
+          });
+        }
+      }
+    }
+  }
+  console.log(`職種マスター投入完了: ${jobCategories.length} 大分類`);
 
   // ========== タスクマスター初期データ ==========
   console.log("\n=== タスクマスター初期データ投入 ===");

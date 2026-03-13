@@ -484,3 +484,39 @@ model TaskComment {
 
   @@map("task_comments")
 }
+
+// 職種マスター（大分類）
+model JobCategoryMajor {
+  id        String              @id @default(cuid())
+  name      String              @unique
+  sortOrder Int                 @default(0) @map("sort_order")
+  middles   JobCategoryMiddle[]
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  @@map("job_category_majors")
+}
+
+// 職種マスター（中分類）
+model JobCategoryMiddle {
+  id        String             @id @default(cuid())
+  name      String
+  majorId   String             @map("major_id")
+  major     JobCategoryMajor   @relation(fields: [majorId], references: [id], onDelete: Cascade)
+  sortOrder Int                @default(0) @map("sort_order")
+  minors    JobCategoryMinor[]
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  @@map("job_category_middles")
+}
+
+// 職種マスター（小分類）
+model JobCategoryMinor {
+  id        String            @id @default(cuid())
+  name      String
+  middleId  String            @map("middle_id")
+  middle    JobCategoryMiddle @relation(fields: [middleId], references: [id], onDelete: Cascade)
+  sortOrder Int               @default(0) @map("sort_order")
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  @@map("job_category_minors")
+}
