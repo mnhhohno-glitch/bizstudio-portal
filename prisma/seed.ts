@@ -265,6 +265,19 @@ async function main() {
     });
   }
 
+  // === 既存データの修正 ===
+  // 「志望動機の詳細」を SELECT → MULTI_SELECT に更新
+  const existingMotivationField = await prisma.taskTemplateField.findFirst({
+    where: { label: "志望動機の詳細", fieldType: "SELECT" },
+  });
+  if (existingMotivationField) {
+    await prisma.taskTemplateField.update({
+      where: { id: existingMotivationField.id },
+      data: { fieldType: "MULTI_SELECT" },
+    });
+    console.log('  [update] 「志望動機の詳細」を MULTI_SELECT に変更');
+  }
+
   // カテゴリ1: 履歴書作成
   const cat1 = await upsertCategory("履歴書作成", 1);
 
@@ -277,7 +290,7 @@ async function main() {
     await upsertOption(f1_1.id, label, i + 1);
   }
 
-  const f1_2 = await upsertField(cat1.id, "志望動機の詳細", "SELECT", true, 2);
+  const f1_2 = await upsertField(cat1.id, "志望動機の詳細", "MULTI_SELECT", true, 2);
   for (const [i, label] of [
     "接客・販売経験あり → 未経験だが接客販売で培ったコミュニケーション力や販売スキルを活かし、営業職として活躍していきたい。",
     "事務経験あり → 未経験ながら事務職で培った正確性や調整力、社内外の調整経験を活かし、営業職としてお客様に信頼される対応をしたい。",
@@ -371,9 +384,19 @@ async function main() {
   // カテゴリ4: エントリー対応
   const cat4 = await upsertCategory("エントリー対応", 4);
 
-  await upsertField(cat4.id, "エントリー先企業名", "TEXT", true, 1, "例: 株式会社○○");
-  await upsertField(cat4.id, "求人名/ポジション", "TEXT", false, 2, "例: 法人営業");
-  await upsertField(cat4.id, "エントリー指示・メモ", "TEXTAREA", false, 3, "エントリーに関する指示や補足事項");
+  // 旧項目を削除して新項目に入れ替え
+  const oldEntryFields = await prisma.taskTemplateField.findMany({ where: { categoryId: cat4.id } });
+  const newEntryLabels = ["エントリー日", "エントリー件数", "コメント"];
+  for (const oldField of oldEntryFields) {
+    if (!newEntryLabels.includes(oldField.label)) {
+      await prisma.taskTemplateField.delete({ where: { id: oldField.id } });
+      console.log(`    [delete] 旧項目 "${oldField.label}"`);
+    }
+  }
+
+  await upsertField(cat4.id, "エントリー日", "DATE", true, 1);
+  await upsertField(cat4.id, "エントリー件数", "TEXT", true, 2, "例: 5件");
+  await upsertField(cat4.id, "コメント", "TEXTAREA", false, 3, "補足事項があれば入力してください");
 
   // カテゴリ5: その他
   const cat5 = await upsertCategory("その他", 5);
