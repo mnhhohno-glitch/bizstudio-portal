@@ -1,11 +1,149 @@
 "use client";
 
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { PageTitle } from "@/components/ui/PageTitle";
 
+type Task = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string | null;
+  dueDate: string | null;
+  createdAt: string;
+  category: { id: string; name: string } | null;
+  candidate: { name: string } | null;
+  assignees: { employee: { name: string } }[];
+};
+type Category = { id: string; name: string };
+type Employee = { id: string; name: string; employeeNo: string };
+type UserMe = { id: string; name: string; role: string };
+
+const STATUS_LABEL: Record<string, string> = {
+  NOT_STARTED: "未着手",
+  IN_PROGRESS: "対応中",
+  COMPLETED: "完了",
+};
+const STATUS_COLOR: Record<string, string> = {
+  NOT_STARTED: "bg-gray-100 text-gray-600",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  COMPLETED: "bg-green-100 text-green-700",
+};
+const PRIORITY_LABEL: Record<string, string> = {
+  HIGH: "高",
+  MEDIUM: "中",
+  LOW: "低",
+};
+const PRIORITY_COLOR: Record<string, string> = {
+  HIGH: "bg-red-100 text-red-700",
+  MEDIUM: "bg-yellow-100 text-yellow-700",
+  LOW: "bg-gray-100 text-gray-600",
+};
+
 export default function TasksPage() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserMe | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  // filters
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterCandidateName, setFilterCandidateName] = useState("");
+  const [filterAssigneeId, setFilterAssigneeId] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  // fetch user & master data
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/users/me").then((r) => r.json()),
+      fetch("/api/task-categories").then((r) => r.json()),
+      fetch("/api/employees").then((r) => r.json()),
+    ]).then(([u, catJson, empJson]) => {
+      setUser(u);
+      setCategories(catJson.categories ?? []);
+      setEmployees(Array.isArray(empJson) ? empJson : []);
+    });
+  }, []);
+
+  // fetch tasks
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterStatus) params.set("status", filterStatus);
+      if (filterCategoryId) params.set("categoryId", filterCategoryId);
+      if (filterPriority) params.set("priority", filterPriority);
+      if (filterCandidateName.trim()) params.set("candidateName", filterCandidateName.trim());
+      if (filterAssigneeId) params.set("assigneeId", filterAssigneeId);
+      if (showAll) params.set("showAll", "true");
+      params.set("page", String(page));
+      params.set("sortBy", sortBy);
+      params.set("sortOrder", sortOrder);
+
+      const res = await fetch(`/api/tasks?${params.toString()}`);
+      const data = await res.json();
+      setTasks(data.tasks ?? []);
+      setTotal(data.total ?? 0);
+      setTotalPages(data.totalPages ?? 1);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [filterStatus, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, page, sortBy, sortOrder]);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  const resetPage = () => setPage(1);
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "createdAt" || field === "dueDate" ? "desc" : "asc");
+    }
+    resetPage();
+  };
+
+  const sortIcon = (field: string) => {
+    if (sortBy !== field) return "";
+    return sortOrder === "asc" ? " ↑" : " ↓";
+  };
+
+  const formatDate = (d: string | null) => {
+    if (!d) return "-";
+    return new Date(d).toLocaleDateString("ja-JP");
+  };
+
+  const isOverdue = (d: string | null, status: string) => {
+    if (!d || status === "COMPLETED") return false;
+    return new Date(d) < new Date(new Date().toDateString());
+  };
+
+  const debounceRef = useMemo(() => ({ timer: null as ReturnType<typeof setTimeout> | null }), []);
+  const handleCandidateSearch = (v: string) => {
+    setFilterCandidateName(v);
+    if (debounceRef.timer) clearTimeout(debounceRef.timer);
+    debounceRef.timer = setTimeout(() => resetPage(), 400);
+  };
+
+  const selectCls =
+    "rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
+
   return (
     <div>
+      {/* header */}
       <div className="mb-6 flex items-center justify-between">
         <PageTitle>タスク管理</PageTitle>
         <Link
@@ -16,9 +154,198 @@ export default function TasksPage() {
         </Link>
       </div>
 
-      <div className="rounded-[8px] border border-[#E5E7EB] bg-white p-8 text-center text-[14px] text-[#6B7280] shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
-        タスク一覧は今後実装予定です。上のボタンからタスクを作成できます。
+      {/* admin toggle */}
+      {user?.role === "admin" && (
+        <div className="mb-4">
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={(e) => {
+                setShowAll(e.target.checked);
+                resetPage();
+              }}
+              className="h-4 w-4 accent-[#2563EB]"
+            />
+            全タスクを表示
+          </label>
+        </div>
+      )}
+
+      {/* filters */}
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-[8px] border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">ステータス</label>
+          <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            <option value="NOT_STARTED">未着手</option>
+            <option value="IN_PROGRESS">対応中</option>
+            <option value="COMPLETED">完了</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">カテゴリ</label>
+          <select value={filterCategoryId} onChange={(e) => { setFilterCategoryId(e.target.value); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">優先度</label>
+          <select value={filterPriority} onChange={(e) => { setFilterPriority(e.target.value); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            <option value="HIGH">高</option>
+            <option value="MEDIUM">中</option>
+            <option value="LOW">低</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">求職者</label>
+          <input
+            type="text"
+            placeholder="名前で検索"
+            value={filterCandidateName}
+            onChange={(e) => handleCandidateSearch(e.target.value)}
+            className={`${selectCls} w-[140px]`}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">担当者</label>
+          <select value={filterAssigneeId} onChange={(e) => { setFilterAssigneeId(e.target.value); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {/* table */}
+      <div className="overflow-x-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-[12px] font-medium text-[#6B7280]">
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("status")}>
+                ステータス{sortIcon("status")}
+              </th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("title")}>
+                タスクタイトル{sortIcon("title")}
+              </th>
+              <th className="whitespace-nowrap px-4 py-3">カテゴリ</th>
+              <th className="whitespace-nowrap px-4 py-3">求職者</th>
+              <th className="whitespace-nowrap px-4 py-3">担当者</th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("priority")}>
+                優先度{sortIcon("priority")}
+              </th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("dueDate")}>
+                期限{sortIcon("dueDate")}
+              </th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("createdAt")}>
+                作成日{sortIcon("createdAt")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-12 text-center text-[#6B7280]">
+                  読み込み中...
+                </td>
+              </tr>
+            ) : tasks.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-12 text-center text-[#6B7280]">
+                  タスクがありません
+                </td>
+              </tr>
+            ) : (
+              tasks.map((t) => (
+                <tr key={t.id} className="border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB]">
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
+                      {STATUS_LABEL[t.status] ?? t.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Link href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
+                      {t.title}
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+                    {t.category?.name ?? "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
+                    {t.candidate?.name ?? "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
+                    {t.assignees.map((a) => a.employee.name).join("、") || "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {t.priority ? (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY_COLOR[t.priority] ?? ""}`}>
+                        {PRIORITY_LABEL[t.priority] ?? t.priority}
+                      </span>
+                    ) : "-"}
+                  </td>
+                  <td className={`whitespace-nowrap px-4 py-3 ${isOverdue(t.dueDate, t.status) ? "font-medium text-red-600" : "text-[#374151]"}`}>
+                    {formatDate(t.dueDate)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+                    {formatDate(t.createdAt)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* pagination */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between text-[13px]">
+          <p className="text-[#6B7280]">
+            全{total}件中 {(page - 1) * 20 + 1}〜{Math.min(page * 20, total)}件
+          </p>
+          <div className="flex gap-1">
+            <button
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              className={`rounded-[6px] px-3 py-1.5 ${page <= 1 ? "cursor-not-allowed text-[#D1D5DB]" : "text-[#374151] hover:bg-[#F3F4F6]"}`}
+            >
+              前へ
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+              .reduce<(number | "...")[]>((acc, p, i, arr) => {
+                if (i > 0 && p - (arr[i - 1] ?? 0) > 1) acc.push("...");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                p === "..." ? (
+                  <span key={`e${i}`} className="px-2 py-1.5 text-[#9CA3AF]">...</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p as number)}
+                    className={`rounded-[6px] px-3 py-1.5 ${page === p ? "bg-[#2563EB] text-white" : "text-[#374151] hover:bg-[#F3F4F6]"}`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className={`rounded-[6px] px-3 py-1.5 ${page >= totalPages ? "cursor-not-allowed text-[#D1D5DB]" : "text-[#374151] hover:bg-[#F3F4F6]"}`}
+            >
+              次へ
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,59 +1,75 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
+type Option = { id: string; label: string; value: string };
+type FieldValue = {
+  field: { id: string; label: string; fieldType: string; sortOrder: number; options: Option[] };
+  value: string;
+};
 type Task = {
   id: string;
   title: string;
   description: string | null;
   status: string;
-  priority: string;
+  priority: string | null;
   dueDate: string | null;
   createdAt: string;
-  category: { name: string } | null;
+  createdByUserId: string;
+  category: { id: string; name: string } | null;
   candidate: { name: string; candidateNumber: string } | null;
-  createdByUser: { name: string } | null;
-  assignees: { employee: { name: string } }[];
-  fieldValues: { field: { label: string; fieldType: string }; value: string }[];
+  createdByUser: { id: string; name: string } | null;
+  assignees: { employee: { id: string; name: string } }[];
+  fieldValues: FieldValue[];
+  attachments: unknown[];
+  comments: unknown[];
 };
+type UserMe = { id: string; name: string; role: string };
 
 const STATUS_LABEL: Record<string, string> = {
   NOT_STARTED: "未着手",
-  IN_PROGRESS: "進行中",
+  IN_PROGRESS: "対応中",
   COMPLETED: "完了",
 };
-
-const PRIORITY_LABEL: Record<string, string> = {
-  HIGH: "高",
-  MEDIUM: "中",
-  LOW: "低",
-};
-
-const PRIORITY_COLOR: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-700",
-  MEDIUM: "bg-yellow-100 text-yellow-700",
-  LOW: "bg-gray-100 text-gray-600",
-};
-
 const STATUS_COLOR: Record<string, string> = {
   NOT_STARTED: "bg-gray-100 text-gray-600",
   IN_PROGRESS: "bg-blue-100 text-blue-700",
   COMPLETED: "bg-green-100 text-green-700",
 };
+const PRIORITY_LABEL: Record<string, string> = {
+  HIGH: "高",
+  MEDIUM: "中",
+  LOW: "低",
+};
+const PRIORITY_COLOR: Record<string, string> = {
+  HIGH: "bg-red-100 text-red-700",
+  MEDIUM: "bg-yellow-100 text-yellow-700",
+  LOW: "bg-gray-100 text-gray-600",
+};
+const STATUS_OPTIONS = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] as const;
 
 export default function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
+  const router = useRouter();
   const [task, setTask] = useState<Task | null>(null);
+  const [user, setUser] = useState<UserMe | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchTask = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}`);
+      const [res, userRes] = await Promise.all([
+        fetch(`/api/tasks/${taskId}`),
+        fetch("/api/users/me"),
+      ]);
       if (!res.ok) throw new Error();
       const data = await res.json();
+      const userData = await userRes.json();
       setTask(data.task);
+      setUser(userData);
     } catch {
       alert("タスクの取得に失敗しました");
     } finally {
@@ -64,6 +80,56 @@ export default function TaskDetailPage() {
   useEffect(() => {
     fetchTask();
   }, [fetchTask]);
+
+  const canEdit = user && task && (task.createdByUserId === user.id || user.role === "admin");
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (statusUpdating || !task) return;
+    setStatusUpdating(true);
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "ステータス更新に失敗しました");
+        return;
+      }
+      setTask((prev) => (prev ? { ...prev, status: newStatus } : prev));
+    } catch {
+      alert("ステータス更新に失敗しました");
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm("このタスクを削除しますか？この操作は取り消せません。")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "削除に失敗しました");
+        return;
+      }
+      router.push("/tasks");
+    } catch {
+      alert("削除に失敗しました");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const formatDate = (d: string | null) => {
+    if (!d) return "-";
+    return new Date(d).toLocaleDateString("ja-JP");
+  };
+
+  const isOverdue = task && task.dueDate && task.status !== "COMPLETED" &&
+    new Date(task.dueDate) < new Date(new Date().toDateString());
 
   if (loading) {
     return (
@@ -78,116 +144,187 @@ export default function TaskDetailPage() {
       <div className="py-20 text-center">
         <p className="text-[14px] text-[#6B7280]">タスクが見つかりません</p>
         <Link href="/tasks" className="mt-2 inline-block text-[14px] text-[#2563EB] hover:underline">
-          タスク管理に戻る
+          タスク一覧に戻る
         </Link>
       </div>
     );
   }
 
+  // Sort field values by field sortOrder
+  const sortedFieldValues = [...task.fieldValues].sort(
+    (a, b) => a.field.sortOrder - b.field.sortOrder
+  );
+
   return (
     <div className="mx-auto max-w-3xl">
+      {/* back link */}
       <div className="mb-6 flex items-center gap-3">
-        <Link
-          href="/tasks"
-          className="text-[14px] text-[#6B7280] hover:text-[#374151]"
-        >
-          &larr; タスク管理
+        <Link href="/tasks" className="text-[14px] text-[#6B7280] hover:text-[#374151]">
+          &larr; タスク一覧に戻る
         </Link>
       </div>
 
+      {/* header card */}
       <div className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
-        {/* header */}
+        {/* status + priority badges + actions */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${STATUS_COLOR[task.status] ?? ""}`}
+          {/* status dropdown */}
+          <select
+            value={task.status}
+            disabled={statusUpdating}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            className={`rounded-full border-0 px-3 py-1 text-[12px] font-medium outline-none ${STATUS_COLOR[task.status] ?? ""}`}
           >
-            {STATUS_LABEL[task.status] ?? task.status}
-          </span>
-          <span
-            className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${PRIORITY_COLOR[task.priority] ?? ""}`}
-          >
-            優先度: {PRIORITY_LABEL[task.priority] ?? task.priority}
-          </span>
-        </div>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+            ))}
+          </select>
 
-        <h1 className="mb-4 text-[20px] font-bold text-[#1E3A8A]">
-          {task.title}
-        </h1>
+          {task.priority && (
+            <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${PRIORITY_COLOR[task.priority] ?? ""}`}>
+              優先度: {PRIORITY_LABEL[task.priority] ?? task.priority}
+            </span>
+          )}
 
-        <dl className="space-y-3 text-[14px]">
-          {task.category && (
-            <Row label="カテゴリ" value={task.category.name} />
-          )}
-          {task.candidate && (
-            <Row
-              label="求職者"
-              value={`${task.candidate.name}（${task.candidate.candidateNumber}）`}
-            />
-          )}
-          <Row
-            label="担当者"
-            value={
-              task.assignees.map((a) => a.employee.name).join("、") || "-"
-            }
-          />
-          {task.dueDate && (
-            <Row label="期限" value={new Date(task.dueDate).toLocaleDateString("ja-JP")} />
-          )}
-          <Row
-            label="作成日"
-            value={new Date(task.createdAt).toLocaleDateString("ja-JP")}
-          />
-          {task.createdByUser && <Row label="作成者" value={task.createdByUser.name} />}
-          {task.description && (
-            <div>
-              <dt className="text-[12px] font-medium text-[#6B7280]">
-                詳細メモ
-              </dt>
-              <dd className="mt-0.5 whitespace-pre-wrap text-[14px] text-[#374151]">
-                {task.description}
-              </dd>
+          {/* spacer */}
+          <div className="flex-1" />
+
+          {/* edit / delete buttons */}
+          {canEdit && (
+            <div className="flex gap-2">
+              <Link
+                href={`/tasks/${taskId}/edit`}
+                className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#374151] transition-colors hover:bg-[#F3F4F6]"
+              >
+                編集
+              </Link>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDelete}
+                className="rounded-[6px] border border-red-200 px-3 py-1.5 text-[13px] font-medium text-red-600 transition-colors hover:bg-red-50"
+              >
+                {deleting ? "削除中..." : "削除"}
+              </button>
             </div>
           )}
-        </dl>
+        </div>
+
+        {/* title */}
+        <h1 className="mb-6 text-[20px] font-bold text-[#1E3A8A]">{task.title}</h1>
+
+        {/* basic info */}
+        <div className="space-y-3">
+          <h2 className="text-[14px] font-bold text-[#374151]">基本情報</h2>
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {task.category && <InfoCell label="カテゴリ" value={task.category.name} />}
+            <InfoCell
+              label="求職者"
+              value={
+                task.candidate
+                  ? `${task.candidate.name}（${task.candidate.candidateNumber}）`
+                  : "-"
+              }
+            />
+            <InfoCell
+              label="担当者"
+              value={task.assignees.map((a) => a.employee.name).join("、") || "-"}
+            />
+            <InfoCell
+              label="期限"
+              value={formatDate(task.dueDate)}
+              className={isOverdue ? "text-red-600 font-medium" : undefined}
+            />
+            {task.createdByUser && <InfoCell label="作成者" value={task.createdByUser.name} />}
+            <InfoCell label="作成日" value={formatDate(task.createdAt)} />
+          </dl>
+        </div>
 
         {/* field values */}
-        {task.fieldValues.length > 0 && (
+        {sortedFieldValues.length > 0 && (
           <div className="mt-6 border-t border-[#F3F4F6] pt-4">
-            <h2 className="mb-3 text-[14px] font-bold text-[#374151]">
-              テンプレート項目
-            </h2>
-            <dl className="space-y-2">
-              {task.fieldValues.map((fv, i) => {
-                let display = fv.value;
-                if (
-                  fv.field.fieldType === "MULTI_SELECT" &&
-                  fv.value.startsWith("[")
-                ) {
-                  try {
-                    display = (JSON.parse(fv.value) as string[]).join("、");
-                  } catch {
-                    /* keep raw */
-                  }
-                } else if (fv.field.fieldType === "CHECKBOX") {
-                  display = fv.value === "true" ? "はい" : "いいえ";
+            <h2 className="mb-3 text-[14px] font-bold text-[#374151]">テンプレート項目</h2>
+            <dl className="space-y-3">
+              {sortedFieldValues.map((fv, i) => {
+                const { field, value } = fv;
+
+                if (field.fieldType === "MULTI_SELECT" && value.startsWith("[")) {
+                  let items: string[] = [];
+                  try { items = JSON.parse(value) as string[]; } catch { /* keep empty */ }
+                  if (items.length === 0) return null;
+                  const labels = items.map((v) => field.options.find((o) => o.value === v)?.label ?? v);
+                  return (
+                    <div key={i}>
+                      <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
+                      <dd className="mt-1 flex flex-wrap gap-1">
+                        {labels.map((l) => (
+                          <span
+                            key={l}
+                            className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                          >
+                            {l}
+                          </span>
+                        ))}
+                      </dd>
+                    </div>
+                  );
                 }
+
+                let display = value;
+                if (field.fieldType === "SELECT") {
+                  display = field.options.find((o) => o.value === value)?.label ?? value;
+                } else if (field.fieldType === "CHECKBOX") {
+                  display = value === "true" ? "はい" : "いいえ";
+                }
+
                 return (
-                  <Row key={i} label={fv.field.label} value={display} />
+                  <div key={i}>
+                    <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
+                    <dd className="mt-0.5 whitespace-pre-wrap text-[14px] text-[#374151]">{display}</dd>
+                  </div>
                 );
               })}
             </dl>
           </div>
         )}
+
+        {/* description */}
+        {task.description && (
+          <div className="mt-6 border-t border-[#F3F4F6] pt-4">
+            <h2 className="mb-3 text-[14px] font-bold text-[#374151]">詳細メモ</h2>
+            <p className="whitespace-pre-wrap text-[14px] text-[#374151]">{task.description}</p>
+          </div>
+        )}
+
+        {/* attachments placeholder */}
+        <div className="mt-6 border-t border-[#F3F4F6] pt-4">
+          <h2 className="mb-3 text-[14px] font-bold text-[#374151]">添付ファイル</h2>
+          <p className="text-[13px] text-[#9CA3AF]">この機能は準備中です</p>
+        </div>
+
+        {/* comments placeholder */}
+        <div className="mt-6 border-t border-[#F3F4F6] pt-4">
+          <h2 className="mb-3 text-[14px] font-bold text-[#374151]">コメント</h2>
+          <p className="text-[13px] text-[#9CA3AF]">この機能は準備中です</p>
+        </div>
       </div>
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function InfoCell({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
   return (
     <div>
       <dt className="text-[12px] font-medium text-[#6B7280]">{label}</dt>
-      <dd className="mt-0.5 text-[14px] text-[#374151]">{value}</dd>
+      <dd className={`mt-0.5 text-[14px] ${className ?? "text-[#374151]"}`}>{value}</dd>
     </div>
   );
 }
