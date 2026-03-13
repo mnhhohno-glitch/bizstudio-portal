@@ -139,6 +139,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "/admin/users", label: "社員管理", icon: "👤" },
     { href: "/admin/announcements", label: "お知らせ管理", icon: "📢" },
     { href: "/admin/documents", label: "資料管理", icon: "📄" },
+    { href: "/admin/task-master", label: "タスクマスター", icon: "📋" },
     { href: "/admin/audit", label: "監査ログ", icon: "📄" },
   ];
 

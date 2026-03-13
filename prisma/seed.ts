@@ -222,6 +222,165 @@ async function main() {
   }
 
   console.log("Seed completed: users, employees, and system links created");
+
+  // ========== タスクマスター初期データ ==========
+  console.log("\n=== タスクマスター初期データ投入 ===");
+
+  async function upsertCategory(name: string, sortOrder: number) {
+    const existing = await prisma.taskCategory.findFirst({ where: { name } });
+    if (existing) {
+      console.log(`  [skip] カテゴリ "${name}" は既に存在します`);
+      return existing;
+    }
+    const cat = await prisma.taskCategory.create({ data: { name, sortOrder } });
+    console.log(`  [create] カテゴリ "${name}"`);
+    return cat;
+  }
+
+  async function upsertField(
+    categoryId: string,
+    label: string,
+    fieldType: "TEXT" | "TEXTAREA" | "SELECT" | "MULTI_SELECT" | "DATE" | "CHECKBOX",
+    isRequired: boolean,
+    sortOrder: number,
+    placeholder?: string
+  ) {
+    const existing = await prisma.taskTemplateField.findFirst({ where: { categoryId, label } });
+    if (existing) {
+      console.log(`    [skip] 項目 "${label}" は既に存在します`);
+      return existing;
+    }
+    const field = await prisma.taskTemplateField.create({
+      data: { categoryId, label, fieldType, isRequired, sortOrder, placeholder },
+    });
+    console.log(`    [create] 項目 "${label}"`);
+    return field;
+  }
+
+  async function upsertOption(fieldId: string, label: string, sortOrder: number) {
+    const existing = await prisma.taskTemplateOption.findFirst({ where: { fieldId, sortOrder } });
+    if (existing) return existing;
+    return prisma.taskTemplateOption.create({
+      data: { fieldId, label, value: label, sortOrder },
+    });
+  }
+
+  // カテゴリ1: 履歴書作成
+  const cat1 = await upsertCategory("履歴書作成", 1);
+
+  const f1_1 = await upsertField(cat1.id, "志望動機カテゴリ", "SELECT", true, 1);
+  for (const [i, label] of [
+    "未経験から営業へ",
+    "経験者としてのステップアップ",
+    "成長志向を強調",
+  ].entries()) {
+    await upsertOption(f1_1.id, label, i + 1);
+  }
+
+  const f1_2 = await upsertField(cat1.id, "志望動機の詳細", "SELECT", true, 2);
+  for (const [i, label] of [
+    "接客・販売経験あり → 未経験だが接客販売で培ったコミュニケーション力や販売スキルを活かし、営業職として活躍していきたい。",
+    "事務経験あり → 未経験ながら事務職で培った正確性や調整力、社内外の調整経験を活かし、営業職としてお客様に信頼される対応をしたい。",
+    "サービス業経験（ホテル・飲食など） → お客様のニーズをくみ取り満足度を高める経験を積んできた。営業でも相手の立場を理解した提案で成果を上げていきたい。",
+    '教育/保育/医療系など「人を支える」職種経験 → 人を支える中で培った傾聴力や信頼関係構築力を武器に、営業として顧客の課題解決をしたい。',
+    "経験を活かす → 営業職としての経験を活かしつつ、より大きな規模の案件や裁量のある仕事に挑戦し、キャリアアップを図りたい。",
+    "個人営業→法人営業 → これまで培った営業経験をもとに、法人営業へステップアップし、より幅広い顧客に価値提供を行いたい。",
+    "新規開拓→既存顧客対応 → 新規営業で培った開拓力を活かし、既存顧客との長期的な信頼関係を構築していきたい。",
+    "既存顧客対応→新規開拓 → 既存顧客対応で培った課題把握力や提案力を、新規開拓営業に活かし、より多くの顧客へアプローチしていきたい。",
+    "成長環境で挑戦 → 早い段階から成果を求められる環境で自分を鍛え、営業として成長し続けたい。",
+    "キャリアアップ・収入向上 → 成果が正当に評価される環境でスキルを磨き、収入やキャリアアップを実現したい。",
+    "英語を活かす → 英語力を活かして業務の幅を広げ、国際的なビジネスシーンでも成果を出せる人材として成長したい。",
+    "中国語を活かす → 中国語を強みに、アジア圏との取引やグローバルな環境で活躍し、自身のキャリアを広げていきたい。",
+    "資格を活かす → 資格を実務に活かし、専門性を高めることで成果を上げ、さらなるキャリアアップにつなげたい。",
+  ].entries()) {
+    await upsertOption(f1_2.id, label, i + 1);
+  }
+
+  await upsertField(cat1.id, "追加メモ", "TEXTAREA", false, 3, "補足情報があれば入力してください");
+
+  // カテゴリ2: 職務経歴書作成
+  const cat2 = await upsertCategory("職務経歴書作成", 2);
+
+  await upsertField(cat2.id, "応募職種", "TEXT", true, 1, "例: 営業職");
+  await upsertField(cat2.id, "作成ポイント・指示", "TEXTAREA", false, 2, "例: 営業向けの書類を作成してほしい");
+  await upsertField(cat2.id, "提示できる実績や数字がない（「数字実績なしで構いません」と記載する）", "CHECKBOX", false, 3);
+  await upsertField(cat2.id, "営業実績", "TEXTAREA", false, 4, "直近3年の目標/実績（目標:○○万円/実績:○○万円/達成率:○○%）");
+  await upsertField(cat2.id, "その他実績", "TEXTAREA", false, 5, "例: 20○○年度新規契約件数において全社○名中○位の実績により表彰される");
+  await upsertField(cat2.id, "自己PR参考情報", "TEXTAREA", false, 6, "追加メモやマイナビ転職のレジュメを参考に作成ください");
+
+  // カテゴリ3: 推薦状作成
+  const cat3 = await upsertCategory("推薦状作成", 3);
+
+  const f3_1 = await upsertField(cat3.id, "在籍状況", "SELECT", true, 1);
+  await upsertOption(f3_1.id, "在職中", 1);
+  await upsertOption(f3_1.id, "退職済", 2);
+
+  await upsertField(cat3.id, "入社時期", "TEXT", false, 2, "例: 2026年4月1日以降");
+  await upsertField(cat3.id, "年収情報", "TEXT", false, 3, "現在（前職）●●●万円 / 希望●●●万円〜●●●万円");
+
+  const f3_4 = await upsertField(cat3.id, "人物像", "MULTI_SELECT", true, 4);
+  for (const [i, label] of [
+    "コミュニケーション力",
+    "協調性/チームワーク",
+    "誠実さ/信頼感",
+    "責任感/真面目さ",
+    "柔軟性/適応力",
+    "向上心/成長意欲",
+    "ポジティブ思考",
+    "忍耐力/粘り強さ",
+    "リーダーシップ/主体性",
+    "ホスピタリティ精神（気配り・思いやり）",
+    "学習意欲/吸収力",
+    "実務経験/専門知識",
+    "問題解決力/分析力",
+    "プレゼンテーション力/説得力",
+    "調整力/コーディネーション力",
+    "マネジメント経験（後輩指導・育成）",
+    "PCスキル/ITリテラシー",
+    "語学力/国際感覚",
+  ].entries()) {
+    await upsertOption(f3_4.id, label, i + 1);
+  }
+
+  await upsertField(cat3.id, "人物像補足", "TEXTAREA", false, 5, "上記をベースに人物像紹介文についての追加指示があれば入力");
+
+  const f3_6 = await upsertField(cat3.id, "転職理由", "MULTI_SELECT", true, 6);
+  for (const [i, label] of [
+    "これまでの経験を活かしつつ、新しい業務領域に挑戦したい",
+    "より専門性を高めて市場価値を上げたい",
+    "成長スピードの速い環境でスキルを磨きたい",
+    "幅広い業務を経験してキャリアの選択肢を広げたい",
+    "将来のキャリアビジョンに沿った経験を積みたい",
+    "営業としてのキャリアをより明確にしたい",
+    "長期的に腰を据えて働ける環境を求めたい",
+    "成果が正当に評価される環境で働きたい",
+    "チームワークを重視する社風で力を発揮したい",
+    "社会貢献性の高い事業に携わりたい",
+    "グローバル環境/新しい業界で経験を積みたい",
+    "安定した基盤のある企業で長期的に成長したい",
+    "ワークライフバランスを確保しつつ成果を出したい",
+    "自分の強みを最大限に活かせる職場で働きたい",
+    "お客様に直接価値を届けられる環境を求めたい",
+    "サポート体制の整った環境で力を発揮したい",
+  ].entries()) {
+    await upsertOption(f3_6.id, label, i + 1);
+  }
+
+  await upsertField(cat3.id, "転職理由コメント", "TEXTAREA", false, 7, "転職理由の補足コメント");
+
+  // カテゴリ4: エントリー対応
+  const cat4 = await upsertCategory("エントリー対応", 4);
+
+  await upsertField(cat4.id, "エントリー先企業名", "TEXT", true, 1, "例: 株式会社○○");
+  await upsertField(cat4.id, "求人名/ポジション", "TEXT", false, 2, "例: 法人営業");
+  await upsertField(cat4.id, "エントリー指示・メモ", "TEXTAREA", false, 3, "エントリーに関する指示や補足事項");
+
+  // カテゴリ5: その他
+  const cat5 = await upsertCategory("その他", 5);
+
+  await upsertField(cat5.id, "タスク内容", "TEXTAREA", true, 1, "タスクの内容を入力してください");
+
+  console.log("タスクマスター初期データ投入完了");
 }
 
 main()
