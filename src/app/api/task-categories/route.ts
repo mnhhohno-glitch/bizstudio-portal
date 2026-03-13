@@ -2,15 +2,27 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: Request) {
   const actor = await getSessionUser();
-  if (!actor || actor.role !== "admin") {
+  if (!actor) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const includeFields = searchParams.get("includeFields") === "true";
+
   const categories = await prisma.taskCategory.findMany({
+    where: actor.role !== "admin" ? { isActive: true } : undefined,
     orderBy: { sortOrder: "asc" },
-    include: { _count: { select: { fields: true } } },
+    include: includeFields
+      ? {
+          fields: {
+            orderBy: { sortOrder: "asc" },
+            include: { options: { orderBy: { sortOrder: "asc" } } },
+          },
+          _count: { select: { fields: true } },
+        }
+      : { _count: { select: { fields: true } } },
   });
 
   return NextResponse.json({ categories });
