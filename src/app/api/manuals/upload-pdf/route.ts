@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { uploadPdfToDrive } from "@/lib/google-drive";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -24,9 +25,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "ファイルサイズは20MB以下にしてください" }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const base64 = buffer.toString("base64");
-  const pdfData = `data:application/pdf;base64,${base64}`;
+  try {
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const fileName = `manual_${Date.now()}.pdf`;
 
-  return NextResponse.json({ pdfData });
+    const { fileId, webViewLink } = await uploadPdfToDrive(fileName, fileBuffer);
+
+    return NextResponse.json({
+      driveFileId: fileId,
+      driveViewUrl: webViewLink,
+    });
+  } catch (error) {
+    console.error("PDF upload to Google Drive failed:", error);
+    return NextResponse.json(
+      { error: "Google Driveへのアップロードに失敗しました" },
+      { status: 500 }
+    );
+  }
 }

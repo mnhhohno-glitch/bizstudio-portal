@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { deletePdfFromDrive } from "@/lib/google-drive";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -19,6 +20,10 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const existing = await prisma.manual.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "マニュアルが見つかりません" }, { status: 404 });
+  }
+
+  if (existing.driveFileId) {
+    await deletePdfFromDrive(existing.driveFileId);
   }
 
   await prisma.manual.delete({ where: { id } });

@@ -309,6 +309,8 @@ model Manual {
   videoUrl        String?            @map("video_url")
   pdfPath         String?            @map("pdf_path")
   pdfData         String?            @map("pdf_data") @db.Text
+  driveFileId     String?            @map("drive_file_id")
+  driveViewUrl    String?            @map("drive_view_url")
   externalUrl     String?            @map("external_url")
   markdownContent String?            @map("markdown_content") @db.Text
   description     String?            @db.Text

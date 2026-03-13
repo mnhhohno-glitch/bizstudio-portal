@@ -17,6 +17,8 @@ type Manual = {
   videoUrl: string | null;
   pdfPath: string | null;
   pdfData: string | null;
+  driveFileId: string | null;
+  driveViewUrl: string | null;
   externalUrl: string | null;
   markdownContent: string | null;
   description: string | null;
@@ -54,8 +56,9 @@ export default function ManualEditPage() {
   const [subCategory, setSubCategory] = useState("");
   const [contentType, setContentType] = useState<ManualContentType | "">("");
   const [videoUrl, setVideoUrl] = useState("");
-  const [pdfData, setPdfData] = useState("");
-  const [pdfPath, setPdfPath] = useState("");
+  const [driveFileId, setDriveFileId] = useState("");
+  const [driveViewUrl, setDriveViewUrl] = useState("");
+  const [pdfHasData, setPdfHasData] = useState(false);
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfFileSize, setPdfFileSize] = useState(0);
   const [externalUrl, setExternalUrl] = useState("");
@@ -105,13 +108,14 @@ export default function ManualEditPage() {
         setMarkdownContent(manual.markdownContent || "");
         setDescription(manual.description || "");
 
-        if (manual.pdfData) {
-          setPdfData(manual.pdfData);
-          setPdfPath(manual.pdfData);
-          setPdfFileName("アップロード済みPDF");
-        } else if (manual.pdfPath) {
-          setPdfPath(manual.pdfPath);
-          setPdfFileName(manual.pdfPath.split("/").pop() || "uploaded.pdf");
+        if (manual.driveFileId) {
+          setDriveFileId(manual.driveFileId);
+          setDriveViewUrl(manual.driveViewUrl || "");
+          setPdfHasData(true);
+          setPdfFileName("Google Drive にアップロード済み");
+        } else if (manual.pdfData) {
+          setPdfHasData(true);
+          setPdfFileName("アップロード済みPDF（DB保存）");
         }
       } catch {
         router.push("/manuals");
@@ -147,8 +151,9 @@ export default function ManualEditPage() {
         return;
       }
       const data = await res.json();
-      setPdfData(data.pdfData);
-      setPdfPath(data.pdfData);
+      setDriveFileId(data.driveFileId);
+      setDriveViewUrl(data.driveViewUrl);
+      setPdfHasData(true);
       setPdfFileName(file.name);
       setPdfFileSize(file.size);
     } catch {
@@ -189,7 +194,7 @@ export default function ManualEditPage() {
       setError("Loom URLを入力してください");
       return;
     }
-    if (contentType === "PDF" && !pdfData) {
+    if (contentType === "PDF" && !driveFileId && !pdfHasData) {
       setError("PDFファイルをアップロードしてください");
       return;
     }
@@ -210,7 +215,9 @@ export default function ManualEditPage() {
         subCategory: subCategory || null,
         contentType,
         videoUrl: contentType === "VIDEO" ? videoUrl.trim() : null,
-        pdfData: contentType === "PDF" ? pdfData : null,
+        driveFileId: contentType === "PDF" ? (driveFileId || null) : null,
+        driveViewUrl: contentType === "PDF" ? (driveViewUrl || null) : null,
+        pdfData: null,
         pdfPath: null,
         externalUrl: contentType === "URL" ? externalUrl.trim() : null,
         markdownContent: contentType === "MARKDOWN" ? markdownContent : null,
@@ -365,7 +372,7 @@ export default function ManualEditPage() {
                 <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
                   PDFファイル <span className="text-red-500">*</span>
                 </label>
-                {pdfData ? (
+                {pdfHasData ? (
                   <div className="flex items-center gap-3 rounded-md border border-[#E5E7EB] px-4 py-3">
                     <span className="text-[20px]">📄</span>
                     <div className="flex-1 min-w-0">
@@ -377,8 +384,9 @@ export default function ManualEditPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setPdfData("");
-                        setPdfPath("");
+                        setDriveFileId("");
+                        setDriveViewUrl("");
+                        setPdfHasData(false);
                         setPdfFileName("");
                         setPdfFileSize(0);
                         if (fileInputRef.current) fileInputRef.current.value = "";

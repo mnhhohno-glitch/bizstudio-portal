@@ -29,8 +29,8 @@ export default function ManualCreatePage() {
   const [subCategory, setSubCategory] = useState("");
   const [contentType, setContentType] = useState<ManualContentType | "">("");
   const [videoUrl, setVideoUrl] = useState("");
-  const [pdfData, setPdfData] = useState("");
-  const [pdfPath, setPdfPath] = useState("");
+  const [driveFileId, setDriveFileId] = useState("");
+  const [driveViewUrl, setDriveViewUrl] = useState("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [pdfFileSize, setPdfFileSize] = useState(0);
   const [externalUrl, setExternalUrl] = useState("");
@@ -68,8 +68,8 @@ export default function ManualCreatePage() {
         return;
       }
       const data = await res.json();
-      setPdfData(data.pdfData);
-      setPdfPath(data.pdfData);
+      setDriveFileId(data.driveFileId);
+      setDriveViewUrl(data.driveViewUrl);
       setPdfFileName(file.name);
       setPdfFileSize(file.size);
     } catch {
@@ -110,7 +110,7 @@ export default function ManualCreatePage() {
       setError("Loom URLを入力してください");
       return;
     }
-    if (contentType === "PDF" && !pdfData) {
+    if (contentType === "PDF" && !driveFileId) {
       setError("PDFファイルをアップロードしてください");
       return;
     }
@@ -132,7 +132,10 @@ export default function ManualCreatePage() {
       };
       if (subCategory) body.subCategory = subCategory;
       if (contentType === "VIDEO") body.videoUrl = videoUrl.trim();
-      if (contentType === "PDF") body.pdfData = pdfData;
+      if (contentType === "PDF") {
+        body.driveFileId = driveFileId;
+        body.driveViewUrl = driveViewUrl;
+      }
       if (contentType === "URL") body.externalUrl = externalUrl.trim();
       if (contentType === "MARKDOWN") body.markdownContent = markdownContent;
       if (description.trim()) body.description = description.trim();
@@ -282,7 +285,7 @@ export default function ManualCreatePage() {
                 <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
                   PDFファイル <span className="text-red-500">*</span>
                 </label>
-                {pdfData ? (
+                {driveFileId ? (
                   <div className="flex items-center gap-3 rounded-md border border-[#E5E7EB] px-4 py-3">
                     <span className="text-[20px]">📄</span>
                     <div className="flex-1 min-w-0">
@@ -292,8 +295,8 @@ export default function ManualCreatePage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setPdfData("");
-                        setPdfPath("");
+                        setDriveFileId("");
+                        setDriveViewUrl("");
                         setPdfFileName("");
                         setPdfFileSize(0);
                         if (fileInputRef.current) fileInputRef.current.value = "";

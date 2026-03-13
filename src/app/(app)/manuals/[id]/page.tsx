@@ -16,6 +16,8 @@ type Manual = {
   videoUrl: string | null;
   pdfPath: string | null;
   pdfData: string | null;
+  driveFileId: string | null;
+  driveViewUrl: string | null;
   externalUrl: string | null;
   markdownContent: string | null;
   description: string | null;
@@ -158,7 +160,17 @@ export default function ManualDetailPage() {
           </div>
         )}
 
-        {manual.contentType === "PDF" && manual.pdfData && (
+        {manual.contentType === "PDF" && manual.driveViewUrl && (
+          <iframe
+            src={manual.driveViewUrl.replace("/view", "/preview")}
+            className="w-full border border-[#E5E7EB] rounded-[8px]"
+            style={{ height: "calc(100vh - 300px)" }}
+            title={manual.title}
+            allow="autoplay"
+          />
+        )}
+
+        {manual.contentType === "PDF" && !manual.driveViewUrl && manual.pdfData && (
           <embed
             src={manual.pdfData}
             type="application/pdf"

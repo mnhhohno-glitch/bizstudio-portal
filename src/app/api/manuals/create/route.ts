@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { title, category, subCategory, contentType, videoUrl, pdfPath, pdfData, externalUrl, markdownContent, description } = body;
+  const { title, category, subCategory, contentType, videoUrl, pdfPath, pdfData, driveFileId, driveViewUrl, externalUrl, markdownContent, description } = body;
 
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return NextResponse.json({ error: "タイトルは必須です" }, { status: 400 });
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (contentType === "PDF") {
-    if (!pdfData || typeof pdfData !== "string") {
+    if (!driveFileId && !pdfData) {
       return NextResponse.json({ error: "PDFデータは必須です" }, { status: 400 });
     }
   }
@@ -62,7 +62,9 @@ export async function POST(request: NextRequest) {
       contentType,
       videoUrl: videoUrl?.trim() || null,
       pdfPath: pdfPath?.trim() || null,
-      pdfData: pdfData || null,
+      pdfData: driveFileId ? null : (pdfData || null),
+      driveFileId: driveFileId || null,
+      driveViewUrl: driveViewUrl || null,
       externalUrl: externalUrl?.trim() || null,
       markdownContent: markdownContent || null,
       description: description?.trim() || null,

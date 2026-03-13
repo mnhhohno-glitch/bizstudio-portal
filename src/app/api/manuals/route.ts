@@ -52,6 +52,8 @@ export async function GET(request: NextRequest) {
         contentType: true,
         videoUrl: true,
         pdfPath: true,
+        driveFileId: true,
+        driveViewUrl: true,
         externalUrl: true,
         markdownContent: true,
         description: true,

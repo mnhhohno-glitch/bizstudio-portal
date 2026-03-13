@@ -26,7 +26,7 @@ export async function PATCH(_request: NextRequest, context: RouteContext) {
   }
 
   const body = await _request.json();
-  const { title, category, subCategory, contentType, videoUrl, pdfPath, pdfData, externalUrl, markdownContent, description } = body;
+  const { title, category, subCategory, contentType, videoUrl, pdfPath, pdfData, driveFileId, driveViewUrl, externalUrl, markdownContent, description } = body;
 
   if (category !== undefined && !VALID_CATEGORIES.includes(category)) {
     return NextResponse.json({ error: "カテゴリが無効です" }, { status: 400 });
@@ -52,6 +52,8 @@ export async function PATCH(_request: NextRequest, context: RouteContext) {
   if (videoUrl !== undefined) data.videoUrl = videoUrl?.trim() || null;
   if (pdfPath !== undefined) data.pdfPath = pdfPath?.trim() || null;
   if (pdfData !== undefined) data.pdfData = pdfData || null;
+  if (driveFileId !== undefined) data.driveFileId = driveFileId || null;
+  if (driveViewUrl !== undefined) data.driveViewUrl = driveViewUrl || null;
   if (externalUrl !== undefined) data.externalUrl = externalUrl?.trim() || null;
   if (markdownContent !== undefined) data.markdownContent = markdownContent || null;
   if (description !== undefined) data.description = description?.trim() || null;
