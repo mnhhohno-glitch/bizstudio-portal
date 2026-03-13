@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
+import { notifyTaskCreated } from "@/lib/task-notification";
 
 export async function GET(request: Request) {
   const actor = await getSessionUser();
@@ -133,7 +134,28 @@ export async function POST(request: Request) {
           ),
         },
       },
+      include: {
+        category: { select: { name: true } },
+        candidate: { select: { name: true } },
+        assignees: { include: { employee: { select: { name: true } } } },
+      },
     });
+
+    // LINE WORKS通知（失敗してもタスク作成には影響させない）
+    try {
+      await notifyTaskCreated({
+        taskId: task.id,
+        title: task.title,
+        categoryName: task.category?.name ?? null,
+        candidateName: task.candidate?.name ?? null,
+        assigneeNames: task.assignees.map((a) => a.employee.name),
+        priority: priority || null,
+        dueDate: task.dueDate,
+        creatorName: actor.name,
+      });
+    } catch (notifyError) {
+      console.error("LINE WORKS通知の送信に失敗:", notifyError);
+    }
 
     return NextResponse.json({ id: task.id }, { status: 201 });
   } catch (error) {
