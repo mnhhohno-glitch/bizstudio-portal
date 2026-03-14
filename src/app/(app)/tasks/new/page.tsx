@@ -38,7 +38,7 @@ const STEPS = [
   "確認・作成",
 ];
 
-/** 履歴書作成カテゴリ名 */
+/** カテゴリ名定数 */
 const RIREKISHO_CATEGORY = "履歴書作成";
 
 /** 数字実績ありと判定する大分類 */
@@ -54,6 +54,44 @@ const NON_SALES_HIDDEN_LABELS = [
   "営業実績",
   "その他実績",
 ];
+
+const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
+const MENSETSU_TAISAKU_CATEGORY = "面接対策依頼";
+const NAITEI_CATEGORY = "内定承諾報告";
+const NYUSHA_CATEGORY = "入社報告";
+const RA_ENTRY_CATEGORY = "RAエントリーのFM登録";
+const FM_TOUROKU_CATEGORY = "求職者紹介のFM登録依頼";
+
+/** テンプレートにファイル添付があるため追加情報ステップの添付を非表示にするカテゴリ */
+const HIDE_STEP5_ATTACHMENT_CATEGORIES = [
+  MENSETSU_TAISAKU_CATEGORY,
+  NAITEI_CATEGORY,
+  NYUSHA_CATEGORY,
+  FM_TOUROKU_CATEGORY,
+];
+
+/** 時刻オプション（9:00〜21:00、15分刻み） */
+const TIME_OPTIONS: string[] = [];
+for (let h = 9; h <= 21; h++) {
+  for (let m = 0; m < 60; m += 15) {
+    if (h === 21 && m > 0) break;
+    TIME_OPTIONS.push(`${h}:${String(m).padStart(2, "0")}`);
+  }
+}
+
+/** 地域・都道府県 */
+const REGIONS = [
+  { name: "北海道・東北", prefectures: ["北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"] },
+  { name: "関東", prefectures: ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県", "山梨県"] },
+  { name: "北信越", prefectures: ["新潟県", "富山県", "石川県", "福井県", "長野県"] },
+  { name: "東海", prefectures: ["岐阜県", "静岡県", "愛知県", "三重県"] },
+  { name: "関西", prefectures: ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"] },
+  { name: "中国・四国", prefectures: ["鳥取県", "島根県", "岡山県", "広島県", "山口県", "徳島県", "香川県", "愛媛県", "高知県"] },
+  { name: "九州・沖縄", prefectures: ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"] },
+  { name: "海外", prefectures: ["海外"] },
+];
+
+const EMPLOYMENT_TYPES = ["正社員", "契約社員", "派遣社員", "アルバイト", "業務委託"];
 
 /* ========================================================== */
 
@@ -105,6 +143,30 @@ export default function TaskNewPage() {
   // step 2 - 職務経歴書: 非営業用の経歴概要
   const [careerSummary, setCareerSummary] = useState("");
 
+  // step 2 - カテゴリ固有: 面接対策依頼
+  const [mensetsuInfoType, setMensetsuInfoType] = useState<"url" | "pdf">("url");
+  const [mensetsuPdfFile, setMensetsuPdfFile] = useState<File | null>(null);
+
+  // step 2 - カテゴリ固有: 内定承諾報告
+  const [naiteiIndustryMajors, setNaiteiIndustryMajors] = useState<{ id: string; name: string; sortOrder: number }[]>([]);
+  const [naiteiIndustryMiddles, setNaiteiIndustryMiddles] = useState<{ id: string; name: string; sortOrder: number }[]>([]);
+  const [naiteiIndustryMinors, setNaiteiIndustryMinors] = useState<{ id: string; name: string; sortOrder: number }[]>([]);
+  const [naiteiIndMajorId, setNaiteiIndMajorId] = useState("");
+  const [naiteiIndMajorName, setNaiteiIndMajorName] = useState("");
+  const [naiteiIndMiddleId, setNaiteiIndMiddleId] = useState("");
+  const [naiteiIndMiddleName, setNaiteiIndMiddleName] = useState("");
+  const [naiteiIndMinorName, setNaiteiIndMinorName] = useState("");
+  const [naiteiRegion, setNaiteiRegion] = useState("");
+  const [naiteiPrefecture, setNaiteiPrefecture] = useState("");
+  const [naiteiEmploymentType, setNaiteiEmploymentType] = useState("");
+  const [naiteiCandidateSearch, setNaiteiCandidateSearch] = useState("");
+
+  // step 2 - カテゴリ固有: テンプレート添付ファイル
+  const [templateAttachFiles, setTemplateAttachFiles] = useState<File[]>([]);
+  const [templateAttachError, setTemplateAttachError] = useState<string | null>(null);
+  const [templateDragOver, setTemplateDragOver] = useState(false);
+  const templateFileInputRef = useRef<HTMLInputElement>(null);
+
   // step 3
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -138,6 +200,13 @@ export default function TaskNewPage() {
   const isRirekisho = selectedCategory?.name === RIREKISHO_CATEGORY;
   const isShokumu = selectedCategory?.name === SHOKUMU_CATEGORY;
   const isSalesJob = SALES_MAJORS.includes(selectedMajorName);
+  const isMendanFusanka = selectedCategory?.name === MENDAN_FUSANKA_CATEGORY;
+  const isMensetsuTaisaku = selectedCategory?.name === MENSETSU_TAISAKU_CATEGORY;
+  const isNaitei = selectedCategory?.name === NAITEI_CATEGORY;
+  const isNyusha = selectedCategory?.name === NYUSHA_CATEGORY;
+  const isRAEntry = selectedCategory?.name === RA_ENTRY_CATEGORY;
+  const isFmTouroku = selectedCategory?.name === FM_TOUROKU_CATEGORY;
+  const hideStep5Attachment = HIDE_STEP5_ATTACHMENT_CATEGORIES.includes(selectedCategory?.name ?? "");
 
   /** 職務経歴書: 「実績なし」チェックがONか */
   const noNumbersChecked = useMemo(() => {
@@ -255,6 +324,48 @@ export default function TaskNewPage() {
       });
   }, [motivMiddleId]);
 
+  /* ----- industry category cascading (内定承諾報告) ----- */
+  useEffect(() => {
+    if (!isNaitei) return;
+    fetch("/api/industry-categories")
+      .then((r) => r.json())
+      .then((data) => setNaiteiIndustryMajors(Array.isArray(data) ? data : []));
+  }, [isNaitei]);
+
+  useEffect(() => {
+    if (!naiteiIndMajorId) {
+      setNaiteiIndustryMiddles([]);
+      setNaiteiIndMiddleId("");
+      setNaiteiIndMiddleName("");
+      setNaiteiIndustryMinors([]);
+      setNaiteiIndMinorName("");
+      return;
+    }
+    fetch(`/api/industry-categories/${naiteiIndMajorId}/middles`)
+      .then((r) => r.json())
+      .then((data) => {
+        setNaiteiIndustryMiddles(Array.isArray(data) ? data : []);
+        setNaiteiIndMiddleId("");
+        setNaiteiIndMiddleName("");
+        setNaiteiIndustryMinors([]);
+        setNaiteiIndMinorName("");
+      });
+  }, [naiteiIndMajorId]);
+
+  useEffect(() => {
+    if (!naiteiIndMiddleId) {
+      setNaiteiIndustryMinors([]);
+      setNaiteiIndMinorName("");
+      return;
+    }
+    fetch(`/api/industry-categories/middles/${naiteiIndMiddleId}/minors`)
+      .then((r) => r.json())
+      .then((data) => {
+        setNaiteiIndustryMinors(Array.isArray(data) ? data : []);
+        setNaiteiIndMinorName("");
+      });
+  }, [naiteiIndMiddleId]);
+
   /* ----- auto title ----- */
   useEffect(() => {
     if (step === 4) {
@@ -314,22 +425,40 @@ export default function TaskNewPage() {
       );
     }
 
+    // 内定承諾報告: カスタムUIで代替するフィールドを非表示
+    if (isNaitei) {
+      const hiddenLabels = ["対象者フルネーム", "内定した職種", "内定した業種", "内定した勤務地（都道府県）", "雇用形態"];
+      return selectedCategory.fields.filter((f) => !hiddenLabels.includes(f.label));
+    }
+
+    // 面接対策依頼: 選考求人URLをカスタムUIで代替
+    if (isMensetsuTaisaku) {
+      return selectedCategory.fields.filter((f) => f.label !== "選考求人URL");
+    }
+
+    // RAエントリー: エリアをカスタムUIで代替
+    if (isRAEntry) {
+      return selectedCategory.fields.filter((f) => f.label !== "エリア");
+    }
+
+    // FM登録依頼: カスタムUIで代替するフィールドを非表示
+    if (isFmTouroku) {
+      const hiddenLabels = ["フルネーム", "ふりがな", "郵便番号＆住所"];
+      return selectedCategory.fields.filter((f) => !hiddenLabels.includes(f.label));
+    }
+
     if (!isShokumu) return selectedCategory.fields;
 
     return selectedCategory.fields.filter((f) => {
-      // 応募職種は職種カスケードで代替
       if (f.label === "応募職種") return false;
-      // 営業系の場合
       if (isSalesJob) {
-        // 「実績なし」チェック時は営業実績を非表示
         if (noNumbersChecked && SALES_ONLY_LABELS.includes(f.label)) return false;
         return true;
       }
-      // 非営業系の場合
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
     });
-  }, [selectedCategory, isRirekisho, isShokumu, isSalesJob, noNumbersChecked]);
+  }, [selectedCategory, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku]);
 
   /* ----- submit ----- */
   const handleSubmit = async () => {
@@ -369,9 +498,33 @@ export default function TaskNewPage() {
         }
       }
 
-      // 通常のfieldValues
+      // 内定承諾報告: カスタムフィールドをセット
+      if (isNaitei && selectedCategory) {
+        const nameField = selectedCategory.fields.find((f) => f.label === "対象者フルネーム");
+        if (nameField && naiteiCandidateSearch) extraFieldValues.push({ fieldId: nameField.id, value: naiteiCandidateSearch });
+        const jobField = selectedCategory.fields.find((f) => f.label === "内定した職種");
+        if (jobField && selectedMajorName) extraFieldValues.push({ fieldId: jobField.id, value: [selectedMajorName, selectedMiddleName, selectedMinorName].filter(Boolean).join(" > ") });
+        const indField = selectedCategory.fields.find((f) => f.label === "内定した業種");
+        if (indField && naiteiIndMajorName) extraFieldValues.push({ fieldId: indField.id, value: [naiteiIndMajorName, naiteiIndMiddleName, naiteiIndMinorName].filter(Boolean).join(" > ") });
+        const locField = selectedCategory.fields.find((f) => f.label === "内定した勤務地（都道府県）");
+        if (locField && naiteiPrefecture) extraFieldValues.push({ fieldId: locField.id, value: `${naiteiRegion} ${naiteiPrefecture}` });
+        const empField = selectedCategory.fields.find((f) => f.label === "雇用形態");
+        if (empField && naiteiEmploymentType) extraFieldValues.push({ fieldId: empField.id, value: naiteiEmploymentType });
+      }
+
+      // FM登録依頼: カスタムフィールドをセット
+      if (isFmTouroku && selectedCategory) {
+        const nameField = selectedCategory.fields.find((f) => f.label === "フルネーム");
+        if (nameField) extraFieldValues.push({ fieldId: nameField.id, value: `${fieldValues["__fm_sei"] ?? ""} ${fieldValues["__fm_mei"] ?? ""}`.trim() });
+        const kanaField = selectedCategory.fields.find((f) => f.label === "ふりがな");
+        if (kanaField) extraFieldValues.push({ fieldId: kanaField.id, value: `${fieldValues["__fm_sei_kana"] ?? ""} ${fieldValues["__fm_mei_kana"] ?? ""}`.trim() });
+        const addrField = selectedCategory.fields.find((f) => f.label === "郵便番号＆住所");
+        if (addrField) extraFieldValues.push({ fieldId: addrField.id, value: `${fieldValues["__fm_zip"] ?? ""} ${fieldValues["__fm_address"] ?? ""}`.trim() });
+      }
+
+      // 通常のfieldValues（内部キー __で始まるものを除外）
       const normalFieldValues = Object.entries(fieldValues)
-        .filter(([, v]) => v !== "")
+        .filter(([k, v]) => v !== "" && !k.startsWith("__"))
         .map(([fieldId, value]) => ({ fieldId, value }));
 
       // 非営業の経歴概要 → 「その他実績」フィールドに保存
@@ -410,10 +563,15 @@ export default function TaskNewPage() {
 
       const { id } = await res.json();
 
-      // 添付ファイルのアップロード
-      if (attachmentFiles.length > 0) {
+      // 添付ファイルのアップロード（ステップ5 + テンプレート + 面接対策PDF）
+      const allFiles = [
+        ...attachmentFiles,
+        ...templateAttachFiles,
+        ...(mensetsuPdfFile ? [mensetsuPdfFile] : []),
+      ];
+      if (allFiles.length > 0) {
         const failedFiles: string[] = [];
-        for (const file of attachmentFiles) {
+        for (const file of allFiles) {
           try {
             const formData = new FormData();
             formData.append("file", file);
@@ -1005,6 +1163,264 @@ export default function TaskNewPage() {
                       />
                     </div>
                   )}
+
+                  {/* ===== 面接対策依頼: 選考求人情報（URL/PDF切替） ===== */}
+                  {isMensetsuTaisaku && (
+                    <div>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        選考求人情報<span className="ml-1 text-red-500">*</span>
+                      </label>
+                      <div className="flex gap-4 mb-2">
+                        {(["url", "pdf"] as const).map((t) => (
+                          <label key={t} className="flex cursor-pointer items-center gap-2">
+                            <input type="radio" name="mensetsuInfoType" checked={mensetsuInfoType === t} onChange={() => setMensetsuInfoType(t)} className="accent-[#2563EB]" />
+                            <span className="text-[14px] text-[#374151]">{t === "url" ? "URL" : "PDF"}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {mensetsuInfoType === "url" ? (
+                        <input
+                          type="text"
+                          value={fieldValues[selectedCategory?.fields.find((f) => f.label === "選考求人URL")?.id ?? ""] ?? ""}
+                          onChange={(e) => {
+                            const fld = selectedCategory?.fields.find((f) => f.label === "選考求人URL");
+                            if (fld) setFieldValue(fld.id, e.target.value);
+                          }}
+                          placeholder="https://..."
+                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                        />
+                      ) : (
+                        <div>
+                          <div
+                            onDragOver={(e) => { e.preventDefault(); setTemplateDragOver(true); }}
+                            onDragLeave={() => setTemplateDragOver(false)}
+                            onDrop={(e) => { e.preventDefault(); setTemplateDragOver(false); if (e.dataTransfer.files[0]) setMensetsuPdfFile(e.dataTransfer.files[0]); }}
+                            className={`flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed px-4 py-4 transition-colors ${templateDragOver ? "border-[#2563EB] bg-[#EEF2FF]" : "border-[#D1D5DB] bg-[#F9FAFB]"}`}
+                          >
+                            <p className="text-[13px] text-[#6B7280]">PDFをドラッグ＆ドロップ、または</p>
+                            <button type="button" onClick={() => templateFileInputRef.current?.click()} className="mt-1 text-[13px] font-medium text-[#2563EB] hover:underline">ファイルを選択</button>
+                            <input ref={templateFileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setMensetsuPdfFile(e.target.files[0]); }} />
+                          </div>
+                          {mensetsuPdfFile && (
+                            <div className="mt-2 flex items-center gap-2 rounded-[6px] border border-[#E5E7EB] px-3 py-2">
+                              <span className="flex-1 truncate text-[13px] text-[#374151]">{mensetsuPdfFile.name}</span>
+                              <button type="button" onClick={() => setMensetsuPdfFile(null)} className="text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ===== 内定承諾報告: カスタムフィールド ===== */}
+                  {isNaitei && (
+                    <>
+                      {/* 対象者（候補者検索） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          対象者<span className="ml-1 text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={naiteiCandidateSearch}
+                          onChange={(e) => {
+                            setNaiteiCandidateSearch(e.target.value);
+                            const fld = selectedCategory?.fields.find((f) => f.label === "対象者フルネーム");
+                            if (fld) setFieldValue(fld.id, e.target.value);
+                          }}
+                          placeholder="候補者名を入力"
+                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                          list="naitei-candidate-list"
+                        />
+                        <datalist id="naitei-candidate-list">
+                          {candidates.filter((c) => naiteiCandidateSearch && c.name.includes(naiteiCandidateSearch)).slice(0, 10).map((c) => (
+                            <option key={c.id} value={c.name}>{c.name}（{c.candidateNo}）</option>
+                          ))}
+                        </datalist>
+                      </div>
+
+                      {/* 内定した職種（3階層） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">内定した職種<span className="ml-1 text-red-500">*</span></p>
+                        <select value={selectedMajorId} onChange={(e) => { const id = e.target.value; setSelectedMajorId(id); setSelectedMajorName(jobMajors.find((m) => m.id === id)?.name ?? ""); }} className={selectCls}>
+                          <option value="">大分類を選択</option>
+                          {jobMajors.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                        {selectedMajorId && (
+                          <select value={selectedMiddleId} onChange={(e) => { const id = e.target.value; setSelectedMiddleId(id); setSelectedMiddleName(jobMiddles.find((m) => m.id === id)?.name ?? ""); }} className={selectCls}>
+                            <option value="">中分類を選択</option>
+                            {jobMiddles.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                          </select>
+                        )}
+                        {selectedMiddleId && jobMinors.length > 0 && (
+                          <select value={selectedMinorId} onChange={(e) => { const id = e.target.value; setSelectedMinorId(id); setSelectedMinorName(jobMinors.find((m) => m.id === id)?.name ?? ""); }} className={selectCls}>
+                            <option value="">小分類を選択</option>
+                            {jobMinors.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                          </select>
+                        )}
+                        {selectedMajorName && <p className="text-[12px] text-[#2563EB]">選択中: {[selectedMajorName, selectedMiddleName, selectedMinorName].filter(Boolean).join(" > ")}</p>}
+                      </div>
+
+                      {/* 内定した業種（3階層） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">内定した業種<span className="ml-1 text-red-500">*</span></p>
+                        <select value={naiteiIndMajorId} onChange={(e) => { const id = e.target.value; setNaiteiIndMajorId(id); setNaiteiIndMajorName(naiteiIndustryMajors.find((m) => m.id === id)?.name ?? ""); }} className={selectCls}>
+                          <option value="">大分類を選択</option>
+                          {naiteiIndustryMajors.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                        {naiteiIndMajorId && (
+                          <select value={naiteiIndMiddleId} onChange={(e) => { const id = e.target.value; setNaiteiIndMiddleId(id); setNaiteiIndMiddleName(naiteiIndustryMiddles.find((m) => m.id === id)?.name ?? ""); }} className={selectCls}>
+                            <option value="">中分類を選択</option>
+                            {naiteiIndustryMiddles.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                          </select>
+                        )}
+                        {naiteiIndMiddleId && naiteiIndustryMinors.length > 0 && (
+                          <select onChange={(e) => setNaiteiIndMinorName(e.target.value)} value={naiteiIndMinorName} className={selectCls}>
+                            <option value="">小分類を選択</option>
+                            {naiteiIndustryMinors.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                          </select>
+                        )}
+                        {naiteiIndMajorName && <p className="text-[12px] text-[#2563EB]">選択中: {[naiteiIndMajorName, naiteiIndMiddleName, naiteiIndMinorName].filter(Boolean).join(" > ")}</p>}
+                      </div>
+
+                      {/* 勤務地（地域→都道府県） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">内定した勤務地<span className="ml-1 text-red-500">*</span></p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-[12px] text-[#6B7280]">地域</label>
+                            <select value={naiteiRegion} onChange={(e) => { setNaiteiRegion(e.target.value); setNaiteiPrefecture(""); }} className={selectCls}>
+                              <option value="">選択してください</option>
+                              {REGIONS.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[12px] text-[#6B7280]">都道府県</label>
+                            <select value={naiteiPrefecture} onChange={(e) => setNaiteiPrefecture(e.target.value)} className={selectCls}>
+                              <option value="">選択してください</option>
+                              {(REGIONS.find((r) => r.name === naiteiRegion)?.prefectures ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 雇用形態 */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          雇用形態<span className="ml-1 text-red-500">*</span>
+                        </label>
+                        <select value={naiteiEmploymentType} onChange={(e) => setNaiteiEmploymentType(e.target.value)} className={selectCls}>
+                          <option value="">選択してください</option>
+                          {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ===== RAエントリー: エリア（地域→都道府県） ===== */}
+                  {isRAEntry && (
+                    <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                      <p className="text-[13px] font-bold text-[#374151]">エリア<span className="ml-1 text-red-500">*</span></p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-[12px] text-[#6B7280]">地域</label>
+                          <select
+                            value={fieldValues["__ra_region"] ?? ""}
+                            onChange={(e) => { setFieldValue("__ra_region", e.target.value); setFieldValue("__ra_pref", ""); }}
+                            className={selectCls}
+                          >
+                            <option value="">選択してください</option>
+                            {REGIONS.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[12px] text-[#6B7280]">都道府県</label>
+                          <select
+                            value={fieldValues["__ra_pref"] ?? ""}
+                            onChange={(e) => {
+                              setFieldValue("__ra_pref", e.target.value);
+                              const fld = selectedCategory?.fields.find((f) => f.label === "エリア");
+                              if (fld) setFieldValue(fld.id, `${fieldValues["__ra_region"] ?? ""} ${e.target.value}`);
+                            }}
+                            className={selectCls}
+                          >
+                            <option value="">選択してください</option>
+                            {(REGIONS.find((r) => r.name === (fieldValues["__ra_region"] ?? ""))?.prefectures ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ===== FM登録依頼: カスタムフィールド ===== */}
+                  {isFmTouroku && (
+                    <>
+                      {/* 氏名（姓・名分割） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          氏名<span className="ml-1 text-red-500">*</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input type="text" placeholder="姓" value={fieldValues["__fm_sei"] ?? ""} onChange={(e) => setFieldValue("__fm_sei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          <input type="text" placeholder="名" value={fieldValues["__fm_mei"] ?? ""} onChange={(e) => setFieldValue("__fm_mei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                        </div>
+                      </div>
+
+                      {/* フリガナ（セイ・メイ分割） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          フリガナ<span className="ml-1 text-red-500">*</span>
+                          <span className="ml-2 text-[12px] font-normal text-[#9CA3AF]">※カタカナで入力してください</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input type="text" placeholder="セイ" value={fieldValues["__fm_sei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_sei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          <input type="text" placeholder="メイ" value={fieldValues["__fm_mei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_mei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                        </div>
+                      </div>
+
+                      {/* 郵便番号＆住所（分割） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">郵便番号</label>
+                        <input type="text" placeholder="000-0000" value={fieldValues["__fm_zip"] ?? ""} onChange={(e) => setFieldValue("__fm_zip", e.target.value)} className="max-w-[160px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">住所</label>
+                        <input type="text" value={fieldValues["__fm_address"] ?? ""} onChange={(e) => setFieldValue("__fm_address", e.target.value)} className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                      </div>
+                    </>
+                  )}
+
+                  {/* ===== テンプレート添付ファイル（対象カテゴリのみ） ===== */}
+                  {(isMensetsuTaisaku || isNaitei || isNyusha || isFmTouroku) && !isMensetsuTaisaku && (
+                    <div>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">添付ファイル（任意）</label>
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); setTemplateDragOver(true); }}
+                        onDragLeave={() => setTemplateDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault(); setTemplateDragOver(false);
+                          if (e.dataTransfer.files) {
+                            setTemplateAttachFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+                          }
+                        }}
+                        className={`flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed px-4 py-4 transition-colors ${templateDragOver ? "border-[#2563EB] bg-[#EEF2FF]" : "border-[#D1D5DB] bg-[#F9FAFB]"}`}
+                      >
+                        <p className="text-[13px] text-[#6B7280]">ファイルをドラッグ＆ドロップ、または</p>
+                        <button type="button" onClick={() => { const input = document.createElement("input"); input.type = "file"; input.multiple = true; input.accept = ".pdf,.jpg,.jpeg,.png,.gif,.docx,.xlsx,.csv,.txt"; input.onchange = (ev) => { const files = (ev.target as HTMLInputElement).files; if (files) setTemplateAttachFiles((prev) => [...prev, ...Array.from(files)]); }; input.click(); }} className="mt-1 text-[13px] font-medium text-[#2563EB] hover:underline">ファイルを選択</button>
+                        <p className="mt-1 text-[11px] text-[#9CA3AF]">PDF, 画像, Word, Excel, CSV, テキスト（最大10MB）</p>
+                      </div>
+                      {templateAttachFiles.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {templateAttachFiles.map((f, i) => (
+                            <div key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-[6px] border border-[#E5E7EB] px-3 py-2">
+                              <span className="flex-1 truncate text-[13px] text-[#374151]">{f.name}</span>
+                              <button type="button" onClick={() => setTemplateAttachFiles((prev) => prev.filter((_, j) => j !== i))} className="text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -1123,7 +1539,8 @@ export default function TaskNewPage() {
                 </div>
               </div>
 
-              {/* 添付ファイル */}
+              {/* 添付ファイル（カテゴリによって非表示） */}
+              {!hideStep5Attachment && (
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                   添付ファイル（任意）
@@ -1195,6 +1612,7 @@ export default function TaskNewPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -1515,7 +1933,53 @@ function renderField(
         </div>
       );
     }
-    case "DATE":
+    case "DATE": {
+      const needsTime = ["面談日", "面談予定日"].includes(field.label);
+      const needsTimeRange = field.label.startsWith("候補日");
+      const dateVal = value.split(" ")[0] ?? "";
+      const timeVal = value.split(" ")[1] ?? "";
+      const timeEndVal = value.split(" ")[2] ?? "";
+
+      if (needsTimeRange) {
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input type="date" value={dateVal} onChange={(e) => setFieldValue(field.id, `${e.target.value} ${timeVal} ${timeEndVal}`.trim())} className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+            <select value={timeVal} onChange={(e) => setFieldValue(field.id, `${dateVal} ${e.target.value} ${timeEndVal}`.trim())} className="rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]">
+              <option value="">開始</option>
+              {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <span className="text-[14px] text-[#6B7280]">〜</span>
+            <select value={timeEndVal} onChange={(e) => setFieldValue(field.id, `${dateVal} ${timeVal} ${e.target.value}`.trim())} className="rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]">
+              <option value="">終了</option>
+              {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        );
+      }
+
+      if (needsTime) {
+        return (
+          <div className="flex items-center gap-2">
+            <input type="date" value={dateVal} onChange={(e) => setFieldValue(field.id, `${e.target.value} ${timeVal}`.trim())} className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+            <select value={timeVal} onChange={(e) => setFieldValue(field.id, `${dateVal} ${e.target.value}`.trim())} className="rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]">
+              <option value="">時刻</option>
+              {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        );
+      }
+
+      // 生年月日: 年齢自動表示
+      if (field.label === "生年月日") {
+        const age = value ? Math.floor((Date.now() - new Date(value).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
+        return (
+          <div className="flex items-center gap-2">
+            <input type="date" value={value} onChange={(e) => setFieldValue(field.id, e.target.value)} className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+            {age !== null && age >= 0 && <span className="text-[14px] text-[#6B7280]">（{age}歳）</span>}
+          </div>
+        );
+      }
+
       return (
         <input
           type="date"
@@ -1524,6 +1988,7 @@ function renderField(
           className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
         />
       );
+    }
     case "CHECKBOX": {
       // オプションがある場合は複数選択チェックボックスリスト
       if (field.options.length > 0) {

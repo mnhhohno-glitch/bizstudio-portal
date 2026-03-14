@@ -408,8 +408,12 @@ export default function TasksPage() {
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("title")}>
                 タスクタイトル{sortIcon("title")}
               </th>
-              <th className="whitespace-nowrap px-4 py-3">大カテゴリ</th>
-              <th className="whitespace-nowrap px-4 py-3">カテゴリ</th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("categoryGroup")}>
+                大カテゴリ<SortIcons field="categoryGroup" />
+              </th>
+              <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("categoryName")}>
+                カテゴリ<SortIcons field="categoryName" />
+              </th>
               <th className="whitespace-nowrap px-4 py-3">求職者</th>
               <th className="whitespace-nowrap px-4 py-3">担当者</th>
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("priority")}>

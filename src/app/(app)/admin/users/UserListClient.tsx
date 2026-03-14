@@ -140,7 +140,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
               <tr key={u.id} className={u.status === "disabled" ? "opacity-50" : ""}>
                 <Td>
                   <span className="font-mono text-[13px]">
-                    {u.employeeNumber != null ? `BS${u.employeeNumber}` : <span className="text-[#9CA3AF]">-</span>}
+                    {u.employeeNumber != null ? `${u.employeeNumber}` : <span className="text-[#9CA3AF]">-</span>}
                   </span>
                 </Td>
                 <Td>{u.name}</Td>

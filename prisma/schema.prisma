@@ -582,3 +582,39 @@ model JobCategoryMinor {
 
   @@map("job_category_minors")
 }
+
+// 業種マスター（大分類）
+model IndustryCategoryMajor {
+  id        String                   @id @default(cuid())
+  name      String                   @unique
+  sortOrder Int                      @default(0) @map("sort_order")
+  middles   IndustryCategoryMiddle[]
+  createdAt DateTime                 @default(now()) @map("created_at")
+
+  @@map("industry_category_majors")
+}
+
+// 業種マスター（中分類）
+model IndustryCategoryMiddle {
+  id        String                  @id @default(cuid())
+  name      String
+  majorId   String                  @map("major_id")
+  major     IndustryCategoryMajor   @relation(fields: [majorId], references: [id], onDelete: Cascade)
+  sortOrder Int                     @default(0) @map("sort_order")
+  minors    IndustryCategoryMinor[]
+  createdAt DateTime                @default(now()) @map("created_at")
+
+  @@map("industry_category_middles")
+}
+
+// 業種マスター（小分類）
+model IndustryCategoryMinor {
+  id        String                 @id @default(cuid())
+  name      String
+  middleId  String                 @map("middle_id")
+  middle    IndustryCategoryMiddle @relation(fields: [middleId], references: [id], onDelete: Cascade)
+  sortOrder Int                    @default(0) @map("sort_order")
+  createdAt DateTime               @default(now()) @map("created_at")
+
+  @@map("industry_category_minors")
+}

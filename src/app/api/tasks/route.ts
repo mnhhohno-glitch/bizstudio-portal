@@ -63,8 +63,15 @@ export async function GET(request: Request) {
 
     // ソート
     const validSortFields = ["createdAt", "dueDate", "title", "status", "priority"];
-    const orderField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
-    const orderBy: Prisma.TaskOrderByWithRelationInput = { [orderField]: sortOrder };
+    let orderBy: Prisma.TaskOrderByWithRelationInput;
+    if (sortBy === "categoryName") {
+      orderBy = { category: { name: sortOrder } };
+    } else if (sortBy === "categoryGroup") {
+      orderBy = { category: { group: { sortOrder: sortOrder } } };
+    } else {
+      const orderField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
+      orderBy = { [orderField]: sortOrder };
+    }
 
     const [tasks, total] = await Promise.all([
       prisma.task.findMany({
