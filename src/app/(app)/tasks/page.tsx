@@ -138,6 +138,14 @@ export default function TasksPage() {
     } catch { /* ignore */ }
   };
 
+  const handleSingleDelete = async (id: string) => {
+    if (!confirm("このタスクを削除しますか？この操作は取り消せません。")) return;
+    try {
+      await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+      await fetchTasks();
+    } catch { /* ignore */ }
+  };
+
   // fetch user & master data
   useEffect(() => {
     Promise.all([
@@ -431,16 +439,26 @@ export default function TasksPage() {
                     {formatDate(t.createdAt)}
                   </td>
                   <td className="px-3 py-3">
-                    {t.status !== "COMPLETED" && (
+                    <div className="flex items-center gap-1">
+                      {t.status !== "COMPLETED" && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
+                          className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
+                          title="完了にする"
+                        >
+                          ✓
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
-                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
-                        title="完了にする"
+                        onClick={(e) => { e.stopPropagation(); handleSingleDelete(t.id); }}
+                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-red-50 hover:text-red-600"
+                        title="削除"
                       >
-                        ✓
+                        🗑
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))

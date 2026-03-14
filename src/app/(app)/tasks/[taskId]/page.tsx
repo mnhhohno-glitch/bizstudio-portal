@@ -200,6 +200,25 @@ export default function TaskDetailPage() {
               >
                 編集
               </Link>
+              {task.status !== "COMPLETED" ? (
+                <button
+                  type="button"
+                  disabled={statusUpdating}
+                  onClick={() => handleStatusChange("COMPLETED")}
+                  className="rounded-[6px] border border-green-200 px-3 py-1.5 text-[13px] font-medium text-green-600 transition-colors hover:bg-green-50"
+                >
+                  完了
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={statusUpdating}
+                  onClick={() => handleStatusChange("NOT_STARTED")}
+                  className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6]"
+                >
+                  未完了に戻す
+                </button>
+              )}
               <button
                 type="button"
                 disabled={deleting}
