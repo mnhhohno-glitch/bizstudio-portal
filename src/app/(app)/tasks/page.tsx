@@ -209,6 +209,16 @@ export default function TasksPage() {
     return sortOrder === "asc" ? " ▲" : " ▼";
   };
 
+  const SortIcons = ({ field }: { field: string }) => {
+    const active = sortBy === field;
+    return (
+      <span className="ml-1 inline-flex flex-col text-[9px] leading-[10px]">
+        <span className={active && sortOrder === "asc" ? "text-[#374151]" : "text-[#D1D5DB]"}>▲</span>
+        <span className={active && sortOrder === "desc" ? "text-[#374151]" : "text-[#D1D5DB]"}>▼</span>
+      </span>
+    );
+  };
+
   const formatDate = (d: string | null) => {
     if (!d) return "-";
     return new Date(d).toLocaleDateString("ja-JP");
@@ -371,13 +381,13 @@ export default function TasksPage() {
               <th className="whitespace-nowrap px-4 py-3">求職者</th>
               <th className="whitespace-nowrap px-4 py-3">担当者</th>
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("priority")}>
-                優先度{sortIcon("priority")}
+                優先度<SortIcons field="priority" />
               </th>
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("dueDate")}>
-                期限{sortIcon("dueDate")}
+                期限<SortIcons field="dueDate" />
               </th>
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("createdAt")}>
-                作成日{sortIcon("createdAt")}
+                作成日<SortIcons field="createdAt" />
               </th>
               <th className="w-10 px-3 py-3"></th>
             </tr>
