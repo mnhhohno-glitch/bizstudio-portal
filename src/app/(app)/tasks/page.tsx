@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { PageTitle } from "@/components/ui/PageTitle";
 
@@ -61,6 +61,83 @@ export default function TasksPage() {
   const [sortBy, setSortBy] = useState("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
+  // selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const headerCheckRef = useRef<HTMLInputElement>(null);
+
+  // update indeterminate state
+  useEffect(() => {
+    if (headerCheckRef.current) {
+      const count = selectedIds.size;
+      const total = tasks.length;
+      headerCheckRef.current.indeterminate = count > 0 && count < total;
+    }
+  }, [selectedIds, tasks]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === tasks.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(tasks.map((t) => t.id)));
+    }
+  };
+
+  const handleBulkComplete = async () => {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    setBulkLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/tasks/${id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "COMPLETED" }),
+          })
+        )
+      );
+      setSelectedIds(new Set());
+      await fetchTasks();
+    } catch { /* ignore */ }
+    finally { setBulkLoading(false); }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0 || bulkLoading) return;
+    if (!confirm(`選択した${selectedIds.size}件のタスクを削除しますか？この操作は取り消せません。`)) return;
+    setBulkLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/tasks/${id}`, { method: "DELETE" })
+        )
+      );
+      setSelectedIds(new Set());
+      await fetchTasks();
+    } catch { /* ignore */ }
+    finally { setBulkLoading(false); }
+  };
+
+  const handleSingleComplete = async (id: string) => {
+    try {
+      await fetch(`/api/tasks/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "COMPLETED" }),
+      });
+      await fetchTasks();
+    } catch { /* ignore */ }
+  };
+
   // fetch user & master data
   useEffect(() => {
     Promise.all([
@@ -95,6 +172,7 @@ export default function TasksPage() {
       setTasks(data.tasks ?? []);
       setTotal(data.total ?? 0);
       setTotalPages(data.totalPages ?? 1);
+      setSelectedIds(new Set());
     } catch {
       /* ignore */
     } finally {
@@ -120,7 +198,7 @@ export default function TasksPage() {
 
   const sortIcon = (field: string) => {
     if (sortBy !== field) return "";
-    return sortOrder === "asc" ? " ↑" : " ↓";
+    return sortOrder === "asc" ? " ▲" : " ▼";
   };
 
   const formatDate = (d: string | null) => {
@@ -236,11 +314,45 @@ export default function TasksPage() {
         </div>
       </div>
 
+      {/* bulk actions */}
+      {selectedIds.size > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-[8px] border border-[#BFDBFE] bg-[#EEF2FF] px-4 py-2.5">
+          <span className="text-[13px] font-medium text-[#2563EB]">
+            {selectedIds.size}件選択中
+          </span>
+          <button
+            type="button"
+            disabled={bulkLoading}
+            onClick={handleBulkComplete}
+            className="rounded-[6px] bg-[#2563EB] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-50"
+          >
+            {bulkLoading ? "処理中..." : "一括完了"}
+          </button>
+          <button
+            type="button"
+            disabled={bulkLoading}
+            onClick={handleBulkDelete}
+            className="rounded-[6px] bg-red-600 px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+          >
+            {bulkLoading ? "処理中..." : "一括削除"}
+          </button>
+        </div>
+      )}
+
       {/* table */}
       <div className="overflow-x-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-[12px] font-medium text-[#6B7280]">
+              <th className="w-10 px-3 py-3">
+                <input
+                  ref={headerCheckRef}
+                  type="checkbox"
+                  checked={tasks.length > 0 && selectedIds.size === tasks.length}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 accent-[#2563EB]"
+                />
+              </th>
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("status")}>
                 ステータス{sortIcon("status")}
               </th>
@@ -259,24 +371,33 @@ export default function TasksPage() {
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("createdAt")}>
                 作成日{sortIcon("createdAt")}
               </th>
+              <th className="w-10 px-3 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={10} className="px-4 py-12 text-center text-[#6B7280]">
                   読み込み中...
                 </td>
               </tr>
             ) : tasks.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={10} className="px-4 py-12 text-center text-[#6B7280]">
                   タスクがありません
                 </td>
               </tr>
             ) : (
               tasks.map((t) => (
                 <tr key={t.id} className={`border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB] ${t.status === "COMPLETED" ? "opacity-50" : ""}`}>
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(t.id)}
+                      onChange={() => toggleSelect(t.id)}
+                      className="h-4 w-4 accent-[#2563EB]"
+                    />
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
                       {STATUS_LABEL[t.status] ?? t.status}
@@ -308,6 +429,18 @@ export default function TasksPage() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
                     {formatDate(t.createdAt)}
+                  </td>
+                  <td className="px-3 py-3">
+                    {t.status !== "COMPLETED" && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
+                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
+                        title="完了にする"
+                      >
+                        ✓
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))
