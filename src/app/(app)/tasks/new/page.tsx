@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -110,6 +110,10 @@ export default function TaskNewPage() {
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [priority, setPriority] = useState<"HIGH" | "MEDIUM" | "LOW">("MEDIUM");
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // step 5
   const [submitting, setSubmitting] = useState(false);
@@ -397,7 +401,36 @@ export default function TaskNewPage() {
       }
 
       const { id } = await res.json();
-      alert("タスクを作成しました");
+
+      // 添付ファイルのアップロード
+      if (attachmentFiles.length > 0) {
+        const failedFiles: string[] = [];
+        for (const file of attachmentFiles) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            const uploadRes = await fetch(`/api/tasks/${id}/attachments`, {
+              method: "POST",
+              body: formData,
+            });
+            if (!uploadRes.ok) {
+              failedFiles.push(file.name);
+            }
+          } catch {
+            failedFiles.push(file.name);
+          }
+        }
+        if (failedFiles.length > 0) {
+          alert(
+            `タスクを作成しました。\n\n一部のファイルのアップロードに失敗しました。タスク詳細画面から再度アップロードしてください。\n\n失敗: ${failedFiles.join("、")}`
+          );
+        } else {
+          alert("タスクを作成しました");
+        }
+      } else {
+        alert("タスクを作成しました");
+      }
+
       router.push(`/tasks/${id}`);
     } catch {
       alert("タスク作成に失敗しました");
@@ -449,6 +482,47 @@ export default function TaskNewPage() {
 
   const priorityLabel = (p: string) =>
     p === "HIGH" ? "高" : p === "MEDIUM" ? "中" : "低";
+
+  const ALLOWED_TYPES = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv",
+    "text/plain",
+  ];
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+  const handleFilesSelected = (files: FileList | null) => {
+    if (!files) return;
+    setAttachmentError(null);
+    const newFiles: File[] = [];
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_FILE_SIZE) {
+        setAttachmentError(`「${file.name}」はファイルサイズが10MBを超えています`);
+        continue;
+      }
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setAttachmentError(`「${file.name}」は許可されていないファイル形式です`);
+        continue;
+      }
+      newFiles.push(file);
+    }
+    setAttachmentFiles((prev) => [...prev, ...newFiles]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeAttachmentFile = (index: number) => {
+    setAttachmentFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const selectCls =
     "w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
@@ -987,6 +1061,79 @@ export default function TaskNewPage() {
                   ))}
                 </div>
               </div>
+
+              {/* 添付ファイル */}
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                  添付ファイル（任意）
+                </label>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    handleFilesSelected(e.dataTransfer.files);
+                  }}
+                  className={[
+                    "flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed px-4 py-6 transition-colors",
+                    dragOver ? "border-[#2563EB] bg-[#EEF2FF]" : "border-[#D1D5DB] bg-[#F9FAFB]",
+                  ].join(" ")}
+                >
+                  <p className="text-[13px] text-[#6B7280]">
+                    ファイルをドラッグ＆ドロップ、または
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mt-1 text-[13px] font-medium text-[#2563EB] hover:underline"
+                  >
+                    ファイルを選択
+                  </button>
+                  <p className="mt-1 text-[11px] text-[#9CA3AF]">
+                    PDF, 画像, Word, Excel, CSV, テキスト（最大10MB）
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.gif,.docx,.xlsx,.csv,.txt"
+                    onChange={(e) => handleFilesSelected(e.target.files)}
+                  />
+                </div>
+
+                {attachmentError && (
+                  <p className="mt-2 text-[13px] text-red-600">{attachmentError}</p>
+                )}
+
+                {attachmentFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {attachmentFiles.map((file, idx) => (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        className="flex items-center gap-3 rounded-[6px] border border-[#E5E7EB] px-3 py-2.5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium text-[#374151]">
+                            {file.name}
+                          </p>
+                          <p className="text-[11px] text-[#9CA3AF]">
+                            {formatFileSize(file.size)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachmentFile(idx)}
+                          className="shrink-0 rounded-[4px] px-2 py-1 text-[12px] text-[#9CA3AF] transition-colors hover:bg-red-50 hover:text-red-600"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1120,6 +1267,24 @@ export default function TaskNewPage() {
                     </dd>
                   </div>
                 )}
+              {/* 添付ファイル */}
+              <div>
+                <dt className="text-[12px] font-medium text-[#6B7280]">添付ファイル</dt>
+                <dd className="mt-1">
+                  {attachmentFiles.length === 0 ? (
+                    <p className="text-[13px] text-[#9CA3AF]">添付ファイルなし</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {attachmentFiles.map((file, idx) => (
+                        <p key={`${file.name}-${idx}`} className="text-[13px] text-[#374151]">
+                          {file.name}
+                          <span className="ml-2 text-[#9CA3AF]">({formatFileSize(file.size)})</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </dd>
+              </div>
             </dl>
           </div>
         )}
@@ -1166,7 +1331,7 @@ export default function TaskNewPage() {
                   : "bg-[#2563EB] hover:bg-[#1D4ED8]",
               ].join(" ")}
             >
-              {submitting ? "作成中..." : "タスクを作成"}
+              {submitting ? "タスクを作成中..." : "タスクを作成"}
             </button>
           )}
         </div>
