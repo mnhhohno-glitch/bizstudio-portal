@@ -74,7 +74,7 @@ export async function GET(request: Request) {
         take: perPage,
         include: {
           category: { select: { id: true, name: true } },
-          candidate: { select: { name: true } },
+          candidate: { select: { name: true, candidateNumber: true } },
           createdByUser: { select: { name: true } },
           assignees: {
             include: { employee: { select: { name: true } } },
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
       },
       include: {
         category: { select: { name: true } },
-        candidate: { select: { name: true } },
+        candidate: { select: { name: true, candidateNumber: true } },
         assignees: { include: { employee: { select: { name: true } } } },
       },
     });

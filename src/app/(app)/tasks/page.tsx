@@ -12,7 +12,7 @@ type Task = {
   dueDate: string | null;
   createdAt: string;
   category: { id: string; name: string } | null;
-  candidate: { name: string } | null;
+  candidate: { name: string; candidateNumber: string } | null;
   assignees: { employee: { name: string } }[];
 };
 type Category = { id: string; name: string; group: { id: string; name: string; sortOrder: number } | null };
@@ -465,7 +465,12 @@ export default function TasksPage() {
                     {t.category?.name ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
-                    {t.candidate?.name ?? "-"}
+                    {t.candidate ? (
+                      <>
+                        {t.candidate.name}
+                        <span className="ml-1 text-[11px] text-[#9CA3AF]">（{t.candidate.candidateNumber}）</span>
+                      </>
+                    ) : "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
                     {t.assignees.map((a) => a.employee.name).join("、") || "-"}
