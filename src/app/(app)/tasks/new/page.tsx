@@ -1220,7 +1220,7 @@ export default function TaskNewPage() {
                         if (!raw) return null;
 
                         if (
-                          f.fieldType === "MULTI_SELECT" &&
+                          (f.fieldType === "MULTI_SELECT" || (f.fieldType === "CHECKBOX" && f.options.length > 0)) &&
                           raw.startsWith("[")
                         ) {
                           let labels: string[] = [];
@@ -1251,10 +1251,10 @@ export default function TaskNewPage() {
                         }
 
                         let display = raw;
-                        if (f.fieldType === "SELECT") {
+                        if (f.fieldType === "SELECT" || f.fieldType === "RADIO") {
                           display =
                             f.options.find((o) => o.value === raw)?.label ?? raw;
-                        } else if (f.fieldType === "CHECKBOX") {
+                        } else if (f.fieldType === "CHECKBOX" && f.options.length === 0) {
                           display = raw === "true" ? "はい" : "いいえ";
                         }
                         return (
@@ -1463,7 +1463,29 @@ function renderField(
           className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
         />
       );
-    case "CHECKBOX":
+    case "CHECKBOX": {
+      // オプションがある場合は複数選択チェックボックスリスト
+      if (field.options.length > 0) {
+        const selected: string[] = (() => {
+          try { return JSON.parse(value || "[]"); } catch { return []; }
+        })();
+        return (
+          <div className="space-y-2">
+            {field.options.map((opt) => (
+              <label key={opt.id} className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt.value)}
+                  onChange={() => toggleMultiSelect(field.id, opt.value)}
+                  className="h-4 w-4 shrink-0 accent-[#2563EB]"
+                />
+                <span className="text-[14px] text-[#374151]">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        );
+      }
+      // オプションなしの場合は従来の単一チェックボックス
       return (
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -1476,6 +1498,24 @@ function renderField(
           />
           <span className="text-[14px] text-[#374151]">はい</span>
         </label>
+      );
+    }
+    case "RADIO":
+      return (
+        <div className="space-y-2">
+          {field.options.map((opt) => (
+            <label key={opt.id} className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name={`radio-${field.id}`}
+                checked={value === opt.value}
+                onChange={() => setFieldValue(field.id, opt.value)}
+                className="h-4 w-4 accent-[#2563EB]"
+              />
+              <span className="text-[14px] text-[#374151]">{opt.label}</span>
+            </label>
+          ))}
+        </div>
       );
     default:
       return (

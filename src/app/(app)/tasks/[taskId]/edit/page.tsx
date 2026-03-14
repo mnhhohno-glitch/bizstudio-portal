@@ -447,7 +447,27 @@ function renderEditField(
           className={base}
         />
       );
-    case "CHECKBOX":
+    case "CHECKBOX": {
+      if (field.options.length > 0) {
+        const selected: string[] = (() => {
+          try { return JSON.parse(value || "[]"); } catch { return []; }
+        })();
+        return (
+          <div className="space-y-2">
+            {field.options.map((opt) => (
+              <label key={opt.id} className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt.value)}
+                  onChange={() => toggleMultiSelect(field.id, opt.value)}
+                  className="h-4 w-4 shrink-0 accent-[#2563EB]"
+                />
+                <span className="text-[14px] text-[#374151]">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        );
+      }
       return (
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -458,6 +478,24 @@ function renderEditField(
           />
           <span className="text-[14px] text-[#374151]">はい</span>
         </label>
+      );
+    }
+    case "RADIO":
+      return (
+        <div className="space-y-2">
+          {field.options.map((opt) => (
+            <label key={opt.id} className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name={`radio-${field.id}`}
+                checked={value === opt.value}
+                onChange={() => setFieldValue(field.id, opt.value)}
+                className="h-4 w-4 accent-[#2563EB]"
+              />
+              <span className="text-[14px] text-[#374151]">{opt.label}</span>
+            </label>
+          ))}
+        </div>
       );
     default:
       return (

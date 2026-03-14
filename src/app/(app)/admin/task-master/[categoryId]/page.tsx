@@ -11,9 +11,10 @@ const FIELD_TYPE_LABELS: Record<string, string> = {
   MULTI_SELECT: "マルチセレクト",
   DATE: "日付",
   CHECKBOX: "チェックボックス",
+  RADIO: "ラジオボタン",
 };
 
-const FIELD_TYPES = ["TEXT", "TEXTAREA", "SELECT", "MULTI_SELECT", "DATE", "CHECKBOX"] as const;
+const FIELD_TYPES = ["TEXT", "TEXTAREA", "SELECT", "MULTI_SELECT", "DATE", "CHECKBOX", "RADIO"] as const;
 
 type Option = {
   id: string;
@@ -217,7 +218,7 @@ export default function TaskFieldsPage() {
     );
   }
 
-  const hasOptions = (type: string) => type === "SELECT" || type === "MULTI_SELECT";
+  const hasOptions = (type: string) => type === "SELECT" || type === "MULTI_SELECT" || type === "CHECKBOX" || type === "RADIO";
 
   return (
     <div>

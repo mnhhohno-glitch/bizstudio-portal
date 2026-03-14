@@ -269,7 +269,8 @@ export default function TaskDetailPage() {
               {sortedFieldValues.map((fv, i) => {
                 const { field, value } = fv;
 
-                if (field.fieldType === "MULTI_SELECT" && value.startsWith("[")) {
+                // MULTI_SELECT or CHECKBOX with options (JSON array)
+                if ((field.fieldType === "MULTI_SELECT" || (field.fieldType === "CHECKBOX" && field.options.length > 0)) && value.startsWith("[")) {
                   let items: string[] = [];
                   try { items = JSON.parse(value) as string[]; } catch { /* keep empty */ }
                   if (items.length === 0) return null;
@@ -292,9 +293,9 @@ export default function TaskDetailPage() {
                 }
 
                 let display = value;
-                if (field.fieldType === "SELECT") {
+                if (field.fieldType === "SELECT" || field.fieldType === "RADIO") {
                   display = field.options.find((o) => o.value === value)?.label ?? value;
-                } else if (field.fieldType === "CHECKBOX") {
+                } else if (field.fieldType === "CHECKBOX" && field.options.length === 0) {
                   display = value === "true" ? "はい" : "いいえ";
                 }
 
