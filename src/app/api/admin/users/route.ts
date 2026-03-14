@@ -10,13 +10,17 @@ export async function GET() {
   }
 
   const users = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
+    orderBy: [
+      { employeeNumber: { sort: "asc", nulls: "last" } },
+      { createdAt: "desc" },
+    ],
     select: {
       id: true,
       name: true,
       email: true,
       role: true,
       status: true,
+      employeeNumber: true,
       lineworksId: true,
       createdAt: true,
       manusApiKeyEncrypted: true,
@@ -41,6 +45,7 @@ export async function GET() {
       email: u.email,
       role: u.role,
       status: u.status,
+      employeeNumber: u.employeeNumber,
       lineworksId: u.lineworksId,
       createdAt: u.createdAt,
       has_manus_key: !!u.manusApiKeyEncrypted,

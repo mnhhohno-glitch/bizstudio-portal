@@ -3,11 +3,8 @@ import { getSessionUser } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 import InviteForm from "./InviteForm";
-import UserStatusButton from "./UserStatusButton";
-import ManusKeyButton from "./ManusKeyButton";
-import LineworksIdButton from "./LineworksIdButton";
+import UserListClient from "./UserListClient";
 
 export default async function AdminUsersPage() {
   const user = await getSessionUser();
@@ -23,10 +20,13 @@ export default async function AdminUsersPage() {
   }
 
   const users = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
+    orderBy: [
+      { employeeNumber: { sort: "asc", nulls: "last" } },
+      { createdAt: "desc" },
+    ],
   });
 
-  const usersWithManusInfo = users.map((u) => {
+  const usersData = users.map((u) => {
     let manusLast4: string | null = null;
     if (u.manusApiKeyEncrypted) {
       try {
@@ -37,7 +37,14 @@ export default async function AdminUsersPage() {
       }
     }
     return {
-      ...u,
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role as string,
+      status: u.status as string,
+      employeeNumber: u.employeeNumber,
+      lineworksId: u.lineworksId,
+      manusApiKeyEncrypted: !!u.manusApiKeyEncrypted,
       manusLast4,
       manusSetAt: u.manusApiKeySetAt?.toISOString() ?? null,
     };
@@ -67,91 +74,7 @@ export default async function AdminUsersPage() {
         <Card>
           <CardHeader title="社員一覧" />
           <CardBody>
-            <TableWrap>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>名前</Th>
-                    <Th>メール</Th>
-                    <Th>権限</Th>
-                    <Th>LINE WORKS ID</Th>
-                    <Th>Manus連携</Th>
-                    <Th>状態</Th>
-                    <Th>操作</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersWithManusInfo.map((u) => (
-                    <tr key={u.id}>
-                      <Td>{u.name}</Td>
-                      <Td><span className="font-mono">{u.email}</span></Td>
-                      <Td>{u.role}</Td>
-                      <Td>
-                        <span className="font-mono text-xs">
-                          {u.lineworksId || <span className="text-[#6B7280]/60">未設定</span>}
-                        </span>
-                      </Td>
-                      <Td>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
-                            u.manusApiKeyEncrypted
-                              ? "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]"
-                              : "border-[#6B7280]/30 bg-[#6B7280]/10 text-[#6B7280]"
-                          }`}
-                        >
-                          {u.manusApiKeyEncrypted ? "設定済み" : "未設定"}
-                        </span>
-                      </Td>
-                      <Td>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
-                            u.status === "active"
-                              ? "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]"
-                              : "border-[#6B7280]/30 bg-[#6B7280]/10 text-[#6B7280]"
-                          }`}
-                        >
-                          {u.status}
-                        </span>
-                      </Td>
-                      <Td>
-                        <div className="flex gap-2">
-                          <LineworksIdButton
-                            userId={u.id}
-                            userName={u.name}
-                            currentId={u.lineworksId}
-                          />
-                          <ManusKeyButton
-                            userId={u.id}
-                            userName={u.name}
-                            hasKey={!!u.manusApiKeyEncrypted}
-                            last4={u.manusLast4}
-                            setAt={u.manusSetAt}
-                          />
-                          <UserStatusButton
-                            userId={u.id}
-                            email={u.email}
-                            currentStatus={u.status}
-                          />
-                        </div>
-                      </Td>
-                    </tr>
-                  ))}
-                  {usersWithManusInfo.length === 0 && (
-                    <tr>
-                      <Td>
-                        <span className="text-[#374151]/60">社員がいません</span>
-                      </Td>
-                      <Td></Td>
-                      <Td></Td>
-                      <Td></Td>
-                      <Td></Td>
-                      <Td></Td>
-                      <Td></Td>
-                    </tr>
-                  )}
-                </tbody>
-              </Table>
-            </TableWrap>
+            <UserListClient users={usersData} />
           </CardBody>
         </Card>
       </div>
