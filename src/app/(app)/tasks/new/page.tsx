@@ -23,7 +23,9 @@ type Category = {
   name: string;
   description: string | null;
   fields: Field[];
+  group: { id: string; name: string; sortOrder: number } | null;
 };
+type CatGroup = { id: string; name: string; sortOrder: number };
 type JobCatItem = { id: string; name: string; sortOrder: number };
 
 const STEPS = [
@@ -59,6 +61,7 @@ export default function TaskNewPage() {
 
   /* ----- master data ----- */
   const [categories, setCategories] = useState<Category[]>([]);
+  const [catGroups, setCatGroups] = useState<CatGroup[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,6 +161,7 @@ export default function TaskNewPage() {
       const jobJson = await jobRes.json();
       const motivJson = await motivRes.json();
       setCategories(catJson.categories ?? []);
+      setCatGroups(catJson.groups ?? []);
       setEmployees(Array.isArray(empJson) ? empJson : []);
       setCandidates(Array.isArray(canJson) ? canJson : []);
       setJobMajors(Array.isArray(jobJson) ? jobJson : []);
@@ -646,27 +650,29 @@ export default function TaskNewPage() {
             <h2 className="mb-4 text-[16px] font-bold text-[#374151]">
               タスクカテゴリ選択
             </h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {categories.map((cat) => (
+            {(() => {
+              const selectCategory = (id: string) => {
+                setCategoryId(id);
+                setFieldValues({});
+                setSelectedMajorId("");
+                setSelectedMajorName("");
+                setSelectedMiddleId("");
+                setSelectedMiddleName("");
+                setSelectedMinorId("");
+                setSelectedMinorName("");
+                setCareerSummary("");
+                setMotivMajorId("");
+                setMotivMajorName("");
+                setMotivMiddleId("");
+                setMotivMiddleName("");
+                setSelectedMotivMinors([]);
+              };
+
+              const renderCatButton = (cat: Category) => (
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() => {
-                    setCategoryId(cat.id);
-                    setFieldValues({});
-                    setSelectedMajorId("");
-                    setSelectedMajorName("");
-                    setSelectedMiddleId("");
-                    setSelectedMiddleName("");
-                    setSelectedMinorId("");
-                    setSelectedMinorName("");
-                    setCareerSummary("");
-                    setMotivMajorId("");
-                    setMotivMajorName("");
-                    setMotivMiddleId("");
-                    setMotivMiddleName("");
-                    setSelectedMotivMinors([]);
-                  }}
+                  onClick={() => selectCategory(cat.id)}
                   className={[
                     "rounded-[8px] border-2 p-4 text-left transition-colors",
                     categoryId === cat.id
@@ -674,17 +680,42 @@ export default function TaskNewPage() {
                       : "border-[#E5E7EB] hover:border-[#93C5FD] hover:bg-[#F9FAFB]",
                   ].join(" ")}
                 >
-                  <p className="text-[14px] font-bold text-[#374151]">
-                    {cat.name}
-                  </p>
+                  <p className="text-[14px] font-bold text-[#374151]">{cat.name}</p>
                   {cat.description && (
-                    <p className="mt-1 text-[12px] text-[#6B7280]">
-                      {cat.description}
-                    </p>
+                    <p className="mt-1 text-[12px] text-[#6B7280]">{cat.description}</p>
                   )}
                 </button>
-              ))}
-            </div>
+              );
+
+              if (catGroups.length === 0) {
+                return (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {categories.map(renderCatButton)}
+                  </div>
+                );
+              }
+
+              const sections: { label: string; cats: Category[] }[] = [];
+              for (const g of catGroups) {
+                const cats = categories.filter((c) => c.group?.id === g.id);
+                if (cats.length > 0) sections.push({ label: g.name, cats });
+              }
+              const ungrouped = categories.filter((c) => !c.group);
+              if (ungrouped.length > 0) sections.push({ label: "未分類", cats: ungrouped });
+
+              return (
+                <div className="space-y-5">
+                  {sections.map((sec) => (
+                    <div key={sec.label}>
+                      <p className="mb-2 text-[13px] font-bold text-[#6B7280]">{sec.label}</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {sec.cats.map(renderCatButton)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 

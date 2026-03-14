@@ -355,6 +355,18 @@ model Manual {
   @@map("manuals")
 }
 
+// タスクカテゴリグループ
+model TaskCategoryGroup {
+  id         String         @id @default(cuid())
+  name       String         @unique
+  sortOrder  Int            @default(0) @map("sort_order")
+  categories TaskCategory[]
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  @@map("task_category_groups")
+}
+
 // タスクカテゴリマスター（大分類）
 model TaskCategory {
   id          String   @id @default(cuid())
@@ -362,6 +374,9 @@ model TaskCategory {
   description String?  @db.Text
   sortOrder   Int      @default(0) @map("sort_order")
   isActive    Boolean  @default(true) @map("is_active")
+
+  groupId     String?             @map("group_id")
+  group       TaskCategoryGroup?  @relation(fields: [groupId], references: [id])
 
   fields      TaskTemplateField[]
   tasks       Task[]

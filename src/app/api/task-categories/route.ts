@@ -20,12 +20,20 @@ export async function GET(request: Request) {
             orderBy: { sortOrder: "asc" },
             include: { options: { orderBy: { sortOrder: "asc" } } },
           },
+          group: { select: { id: true, name: true, sortOrder: true } },
           _count: { select: { fields: true } },
         }
-      : { _count: { select: { fields: true } } },
+      : {
+          group: { select: { id: true, name: true, sortOrder: true } },
+          _count: { select: { fields: true } },
+        },
   });
 
-  return NextResponse.json({ categories });
+  const groups = await prisma.taskCategoryGroup.findMany({
+    orderBy: { sortOrder: "asc" },
+  });
+
+  return NextResponse.json({ categories, groups });
 }
 
 export async function POST(request: Request) {
@@ -36,16 +44,24 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { name, description, sortOrder } = body;
+    const { name, description, sortOrder, groupId } = body;
     if (!name?.trim()) {
       return NextResponse.json({ error: "名前は必須です" }, { status: 400 });
+    }
+
+    // デフォルトは末尾
+    let finalSortOrder = sortOrder;
+    if (finalSortOrder === undefined || finalSortOrder === null) {
+      const max = await prisma.taskCategory.aggregate({ _max: { sortOrder: true } });
+      finalSortOrder = (max._max.sortOrder ?? 0) + 1;
     }
 
     const category = await prisma.taskCategory.create({
       data: {
         name: name.trim(),
         description: description?.trim() || null,
-        sortOrder: sortOrder ?? 0,
+        sortOrder: finalSortOrder,
+        groupId: groupId || null,
       },
     });
 

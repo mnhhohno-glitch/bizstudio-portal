@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { reorderCategories } from "@/lib/reorder-categories";
 
 export async function PUT(
   request: Request,
-  { params }: { params: Promise<{ categoryId: string }> }
+  { params }: { params: Promise<{ groupId: string }> }
 ) {
   const actor = await getSessionUser();
   if (!actor || actor.role !== "admin") {
@@ -13,26 +12,19 @@ export async function PUT(
   }
 
   try {
-    const { categoryId } = await params;
+    const { groupId } = await params;
     const body = await request.json();
-    const { name, description, sortOrder, isActive, groupId } = body;
+    const { name, sortOrder } = body;
 
-    const category = await prisma.taskCategory.update({
-      where: { id: categoryId },
+    const group = await prisma.taskCategoryGroup.update({
+      where: { id: groupId },
       data: {
         ...(name !== undefined && { name: name.trim() }),
-        ...(description !== undefined && { description: description?.trim() || null }),
         ...(sortOrder !== undefined && { sortOrder }),
-        ...(isActive !== undefined && { isActive }),
-        ...(groupId !== undefined && { groupId: groupId || null }),
       },
     });
 
-    if (sortOrder !== undefined) {
-      await reorderCategories();
-    }
-
-    return NextResponse.json({ category });
+    return NextResponse.json({ group });
   } catch {
     return NextResponse.json({ error: "更新に失敗しました" }, { status: 500 });
   }
@@ -40,7 +32,7 @@ export async function PUT(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: Promise<{ categoryId: string }> }
+  { params }: { params: Promise<{ groupId: string }> }
 ) {
   const actor = await getSessionUser();
   if (!actor || actor.role !== "admin") {
@@ -48,9 +40,15 @@ export async function DELETE(
   }
 
   try {
-    const { categoryId } = await params;
-    await prisma.taskCategory.delete({ where: { id: categoryId } });
-    await reorderCategories();
+    const { groupId } = await params;
+
+    // グループ内のカテゴリを未分類に移動
+    await prisma.taskCategory.updateMany({
+      where: { groupId },
+      data: { groupId: null },
+    });
+
+    await prisma.taskCategoryGroup.delete({ where: { id: groupId } });
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "削除に失敗しました" }, { status: 500 });
