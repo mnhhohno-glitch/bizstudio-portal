@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskAttachments from "@/components/tasks/TaskAttachments";
+import TaskComments from "@/components/tasks/TaskComments";
 
 type Option = { id: string; label: string; value: string };
 type FieldValue = {
@@ -306,11 +307,14 @@ export default function TaskDetailPage() {
           />
         )}
 
-        {/* comments placeholder */}
-        <div className="mt-6 border-t border-[#F3F4F6] pt-4">
-          <h2 className="mb-3 text-[14px] font-bold text-[#374151]">コメント</h2>
-          <p className="text-[13px] text-[#9CA3AF]">この機能は準備中です</p>
-        </div>
+        {/* comments */}
+        {user && (
+          <TaskComments
+            taskId={taskId}
+            currentUserId={user.id}
+            currentUserRole={user.role}
+          />
+        )}
       </div>
     </div>
   );
