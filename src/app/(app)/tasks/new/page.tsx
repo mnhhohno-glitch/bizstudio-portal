@@ -1460,7 +1460,7 @@ function renderField(
           type="date"
           value={value}
           onChange={(e) => setFieldValue(field.id, e.target.value)}
-          className={base}
+          className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
         />
       );
     case "CHECKBOX":
