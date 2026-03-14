@@ -1008,6 +1008,160 @@ function ScheduleTab({
 }
 
 /* ================================================================== */
+/*  Candidate Tasks Tab                                                 */
+/* ================================================================== */
+const TASK_STATUS_LABEL: Record<string, string> = {
+  NOT_STARTED: "未着手",
+  IN_PROGRESS: "対応中",
+  COMPLETED: "完了",
+};
+const TASK_STATUS_COLOR: Record<string, string> = {
+  NOT_STARTED: "bg-gray-100 text-gray-600",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  COMPLETED: "bg-green-100 text-green-700",
+};
+const TASK_PRIORITY_LABEL: Record<string, string> = {
+  HIGH: "高",
+  MEDIUM: "中",
+  LOW: "低",
+};
+const TASK_PRIORITY_COLOR: Record<string, string> = {
+  HIGH: "bg-red-100 text-red-700",
+  MEDIUM: "bg-yellow-100 text-yellow-700",
+  LOW: "bg-gray-100 text-gray-600",
+};
+
+type CandidateTask = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string | null;
+  dueDate: string | null;
+  createdAt: string;
+  category: { id: string; name: string } | null;
+  assignees: { employee: { name: string } }[];
+};
+
+function CandidateTasksTab({ candidateId }: { candidateId: string }) {
+  const [tasks, setTasks] = useState<CandidateTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
+
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (includeCompleted) params.set("includeCompleted", "true");
+      const res = await fetch(`/api/candidates/${candidateId}/tasks?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks ?? []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [candidateId, includeCompleted]);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  const fmtDate = (d: string | null) => {
+    if (!d) return "-";
+    return new Date(d).toLocaleDateString("ja-JP");
+  };
+
+  const isOverdue = (d: string | null, status: string) => {
+    if (!d || status === "COMPLETED") return false;
+    return new Date(d) < new Date(new Date().toDateString());
+  };
+
+  return (
+    <div>
+      {/* toggle */}
+      <div className="mb-4 flex justify-end">
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
+          <input
+            type="checkbox"
+            checked={includeCompleted}
+            onChange={(e) => setIncludeCompleted(e.target.checked)}
+            className="h-4 w-4 accent-[#2563EB]"
+          />
+          完了タスクを表示
+        </label>
+      </div>
+
+      {/* table */}
+      <div className="overflow-x-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-[12px] font-medium text-[#6B7280]">
+              <th className="whitespace-nowrap px-4 py-3">ステータス</th>
+              <th className="whitespace-nowrap px-4 py-3">タスクタイトル</th>
+              <th className="whitespace-nowrap px-4 py-3">カテゴリ</th>
+              <th className="whitespace-nowrap px-4 py-3">担当者</th>
+              <th className="whitespace-nowrap px-4 py-3">優先度</th>
+              <th className="whitespace-nowrap px-4 py-3">期限</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-[#6B7280]">
+                  読み込み中...
+                </td>
+              </tr>
+            ) : tasks.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-[#6B7280]">
+                  この求職者に紐づくタスクはありません
+                </td>
+              </tr>
+            ) : (
+              tasks.map((t) => (
+                <tr
+                  key={t.id}
+                  className={`border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB] ${t.status === "COMPLETED" ? "opacity-50" : ""}`}
+                >
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${TASK_STATUS_COLOR[t.status] ?? ""}`}>
+                      {TASK_STATUS_LABEL[t.status] ?? t.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <a href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
+                      {t.title}
+                    </a>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+                    {t.category?.name ?? "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
+                    {t.assignees.map((a) => a.employee.name).join("、") || "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {t.priority ? (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${TASK_PRIORITY_COLOR[t.priority] ?? ""}`}>
+                        {TASK_PRIORITY_LABEL[t.priority] ?? t.priority}
+                      </span>
+                    ) : "-"}
+                  </td>
+                  <td className={`whitespace-nowrap px-4 py-3 ${isOverdue(t.dueDate, t.status) ? "font-medium text-red-600" : "text-[#374151]"}`}>
+                    {fmtDate(t.dueDate)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  Placeholder tabs                                                    */
 /* ================================================================== */
 function PlaceholderTab({
@@ -1250,7 +1404,7 @@ export default function CandidateDetailPage() {
           />
         )}
         {activeTab === "tasks" && (
-          <PlaceholderTab icon="📋" label="タスク機能" />
+          <CandidateTasksTab candidateId={candidateId} />
         )}
         {activeTab === "documents" && (
           <PlaceholderTab icon="📁" label="書類管理機能" />

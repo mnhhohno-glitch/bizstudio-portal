@@ -18,6 +18,7 @@ export async function GET(request: Request) {
     const candidateName = searchParams.get("candidateName");
     const assigneeId = searchParams.get("assigneeId");
     const showAll = searchParams.get("showAll") === "true";
+    const includeCompleted = searchParams.get("includeCompleted") === "true";
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const sortBy = searchParams.get("sortBy") || "createdAt";
     const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
@@ -37,6 +38,10 @@ export async function GET(request: Request) {
       // 一致する社員がない場合は全タスク表示（仕様通り）
     }
 
+    // 完了タスクの表示制御
+    if (!includeCompleted && !status) {
+      where.status = { not: "COMPLETED" };
+    }
     if (status) where.status = status as Prisma.EnumTaskStatusFilter;
     if (categoryId) where.categoryId = categoryId;
     if (priority) where.priority = priority as Prisma.EnumTaskPriorityNullableFilter;
@@ -143,12 +148,22 @@ export async function POST(request: Request) {
 
     // LINE WORKS通知（失敗してもタスク作成には影響させない）
     try {
+      // 担当者名からUserのemailを取得（メンション用）
+      const assigneeNames = task.assignees.map((a) => a.employee.name);
+      const assigneeUsers = assigneeNames.length > 0
+        ? await prisma.user.findMany({
+            where: { name: { in: assigneeNames }, status: "active" },
+            select: { email: true },
+          })
+        : [];
+
       await notifyTaskCreated({
         taskId: task.id,
         title: task.title,
         categoryName: task.category?.name ?? null,
         candidateName: task.candidate?.name ?? null,
-        assigneeNames: task.assignees.map((a) => a.employee.name),
+        assigneeNames,
+        assigneeEmails: assigneeUsers.map((u) => u.email),
         priority: priority || null,
         dueDate: task.dueDate,
         creatorName: actor.name,

@@ -56,6 +56,7 @@ export default function TasksPage() {
   const [filterCandidateName, setFilterCandidateName] = useState("");
   const [filterAssigneeId, setFilterAssigneeId] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -84,6 +85,7 @@ export default function TasksPage() {
       if (filterCandidateName.trim()) params.set("candidateName", filterCandidateName.trim());
       if (filterAssigneeId) params.set("assigneeId", filterAssigneeId);
       if (showAll) params.set("showAll", "true");
+      if (includeCompleted) params.set("includeCompleted", "true");
       params.set("page", String(page));
       params.set("sortBy", sortBy);
       params.set("sortOrder", sortOrder);
@@ -98,7 +100,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, page, sortBy, sortOrder]);
+  }, [filterStatus, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, includeCompleted, page, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchTasks();
@@ -154,9 +156,9 @@ export default function TasksPage() {
         </Link>
       </div>
 
-      {/* admin toggle */}
-      {user?.role === "admin" && (
-        <div className="mb-4">
+      {/* toggles */}
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        {user?.role === "admin" && (
           <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
             <input
               type="checkbox"
@@ -169,8 +171,20 @@ export default function TasksPage() {
             />
             全タスクを表示
           </label>
-        </div>
-      )}
+        )}
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
+          <input
+            type="checkbox"
+            checked={includeCompleted}
+            onChange={(e) => {
+              setIncludeCompleted(e.target.checked);
+              resetPage();
+            }}
+            className="h-4 w-4 accent-[#2563EB]"
+          />
+          完了タスクを表示
+        </label>
+      </div>
 
       {/* filters */}
       <div className="mb-4 flex flex-wrap items-end gap-3 rounded-[8px] border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
@@ -262,7 +276,7 @@ export default function TasksPage() {
               </tr>
             ) : (
               tasks.map((t) => (
-                <tr key={t.id} className="border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB]">
+                <tr key={t.id} className={`border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB] ${t.status === "COMPLETED" ? "opacity-50" : ""}`}>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
                       {STATUS_LABEL[t.status] ?? t.status}

@@ -6,6 +6,7 @@ type TaskNotificationParams = {
   categoryName: string | null;
   candidateName: string | null;
   assigneeNames: string[];
+  assigneeEmails: string[];
   priority: string | null;
   dueDate: Date | null;
   creatorName: string;
@@ -38,8 +39,14 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
       })
     : "未設定";
 
+  // 担当者のメンション行を生成
+  const mentionLines = params.assigneeEmails
+    .filter((email) => email)
+    .map((email) => `<m userId="${email}">`);
+
   const lines = [
-    "📋 タスクが作成されました",
+    ...mentionLines,
+    mentionLines.length > 0 ? "新しいタスクが割り当てられました" : "📋 タスクが作成されました",
     "",
     "■ タスク",
     params.title,
