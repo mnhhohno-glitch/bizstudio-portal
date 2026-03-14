@@ -15,6 +15,7 @@ type Field = {
   fieldType: string;
   isRequired: boolean;
   placeholder: string | null;
+  description: string | null;
   sortOrder: number;
   options: Option[];
 };
@@ -956,6 +957,9 @@ export default function TaskNewPage() {
                           <span className="ml-1 text-red-500">*</span>
                         )}
                       </label>
+                      {field.description && (
+                        <p className="mb-1 text-[12px] text-[#9CA3AF]">{field.description}</p>
+                      )}
                       {renderField(field, fieldValues, setFieldValue, toggleMultiSelect)}
                     </div>
                   ))}

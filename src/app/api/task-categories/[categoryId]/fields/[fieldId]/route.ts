@@ -14,7 +14,7 @@ export async function PUT(
   try {
     const { fieldId } = await params;
     const body = await request.json();
-    const { label, fieldType, isRequired, placeholder, sortOrder } = body;
+    const { label, fieldType, isRequired, placeholder, description, sortOrder } = body;
 
     const field = await prisma.taskTemplateField.update({
       where: { id: fieldId },
@@ -23,6 +23,7 @@ export async function PUT(
         ...(fieldType !== undefined && { fieldType }),
         ...(isRequired !== undefined && { isRequired }),
         ...(placeholder !== undefined && { placeholder: placeholder?.trim() || null }),
+        ...(description !== undefined && { description: description?.trim() || null }),
         ...(sortOrder !== undefined && { sortOrder }),
       },
       include: { options: { orderBy: { sortOrder: "asc" } } },

@@ -398,6 +398,7 @@ model TaskTemplateField {
   fieldType     TaskFieldType @map("field_type")
   isRequired    Boolean       @default(false) @map("is_required")
   placeholder   String?
+  description   String?       @db.Text  // ヘルプテキスト・注釈
   sortOrder     Int           @default(0) @map("sort_order")
 
   options       TaskTemplateOption[]

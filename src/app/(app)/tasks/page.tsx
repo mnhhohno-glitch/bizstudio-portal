@@ -15,7 +15,8 @@ type Task = {
   candidate: { name: string } | null;
   assignees: { employee: { name: string } }[];
 };
-type Category = { id: string; name: string };
+type Category = { id: string; name: string; group: { id: string; name: string; sortOrder: number } | null };
+type CatGroup = { id: string; name: string; sortOrder: number };
 type Employee = { id: string; name: string; employeeNo: string };
 type UserMe = { id: string; name: string; role: string };
 
@@ -47,7 +48,10 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserMe | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [catGroups, setCatGroups] = useState<CatGroup[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
+  const [catFilterLabel, setCatFilterLabel] = useState("全て");
 
   // filters
   const [filterStatus, setFilterStatus] = useState("");
@@ -155,6 +159,7 @@ export default function TasksPage() {
     ]).then(([u, catJson, empJson]) => {
       setUser(u);
       setCategories(catJson.categories ?? []);
+      setCatGroups(catJson.groups ?? []);
       setEmployees(Array.isArray(empJson) ? empJson : []);
     });
   }, []);
@@ -293,14 +298,72 @@ export default function TasksPage() {
             <option value="COMPLETED">完了</option>
           </select>
         </div>
-        <div>
+        <div className="relative">
           <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">カテゴリ</label>
-          <select value={filterCategoryId} onChange={(e) => { setFilterCategoryId(e.target.value); resetPage(); }} className={selectCls}>
-            <option value="">全て</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <button
+            type="button"
+            onClick={() => setCatDropdownOpen((v) => !v)}
+            className={`${selectCls} flex items-center gap-1 min-w-[160px] text-left`}
+          >
+            <span className="flex-1 truncate">{catFilterLabel}</span>
+            <span className="text-[10px] text-[#9CA3AF]">▼</span>
+          </button>
+          {catDropdownOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setCatDropdownOpen(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 max-h-[360px] w-[280px] overflow-y-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setFilterCategoryId(""); setCatFilterLabel("全て"); setCatDropdownOpen(false); resetPage(); }}
+                  className={`w-full px-3 py-2 text-left text-[13px] hover:bg-[#F3F4F6] ${!filterCategoryId ? "font-bold text-[#2563EB]" : "text-[#374151]"}`}
+                >
+                  全て
+                </button>
+                {(() => {
+                  const sections: { label: string; cats: Category[] }[] = [];
+                  for (const g of catGroups) {
+                    const cats = categories.filter((c) => c.group?.id === g.id);
+                    if (cats.length > 0) sections.push({ label: g.name, cats });
+                  }
+                  const ungrouped = categories.filter((c) => !c.group);
+                  if (ungrouped.length > 0) sections.push({ label: "未分類", cats: ungrouped });
+
+                  return sections.map((sec) => (
+                    <div key={sec.label}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ids = sec.cats.map((c) => c.id).join(",");
+                          setFilterCategoryId(ids);
+                          setCatFilterLabel(sec.label);
+                          setCatDropdownOpen(false);
+                          resetPage();
+                        }}
+                        className="w-full border-t border-[#F3F4F6] bg-[#F9FAFB] px-3 py-1.5 text-left text-[12px] font-bold text-[#6B7280] hover:bg-[#EEF2FF] hover:text-[#2563EB]"
+                      >
+                        {sec.label}
+                      </button>
+                      {sec.cats.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setFilterCategoryId(c.id);
+                            setCatFilterLabel(c.name);
+                            setCatDropdownOpen(false);
+                            resetPage();
+                          }}
+                          className={`w-full px-3 py-1.5 pl-6 text-left text-[13px] hover:bg-[#F3F4F6] ${filterCategoryId === c.id ? "font-bold text-[#2563EB]" : "text-[#374151]"}`}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  ));
+                })()}
+              </div>
+            </>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">優先度</label>

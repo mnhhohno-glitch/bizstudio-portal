@@ -43,7 +43,7 @@ export async function POST(
   try {
     const { categoryId } = await params;
     const body = await request.json();
-    const { label, fieldType, isRequired, placeholder, sortOrder } = body;
+    const { label, fieldType, isRequired, placeholder, description, sortOrder } = body;
 
     if (!label?.trim() || !fieldType) {
       return NextResponse.json({ error: "ラベルと項目タイプは必須です" }, { status: 400 });
@@ -56,6 +56,7 @@ export async function POST(
         fieldType,
         isRequired: isRequired ?? false,
         placeholder: placeholder?.trim() || null,
+        description: description?.trim() || null,
         sortOrder: sortOrder ?? 0,
       },
       include: { options: true },

@@ -43,7 +43,13 @@ export async function GET(request: Request) {
       where.status = { not: "COMPLETED" };
     }
     if (status) where.status = status as Prisma.EnumTaskStatusFilter;
-    if (categoryId) where.categoryId = categoryId;
+    if (categoryId) {
+      if (categoryId.includes(",")) {
+        where.categoryId = { in: categoryId.split(",") };
+      } else {
+        where.categoryId = categoryId;
+      }
+    }
     if (priority) where.priority = priority as Prisma.EnumTaskPriorityNullableFilter;
     if (candidateName) {
       where.candidate = { name: { contains: candidateName, mode: "insensitive" } };

@@ -29,6 +29,7 @@ type Field = {
   fieldType: string;
   isRequired: boolean;
   placeholder: string | null;
+  description: string | null;
   sortOrder: number;
   options: Option[];
 };
@@ -44,6 +45,7 @@ type FieldForm = {
   fieldType: string;
   isRequired: boolean;
   placeholder: string;
+  description: string;
   sortOrder: number;
 };
 
@@ -63,7 +65,7 @@ export default function TaskFieldsPage() {
   const [fieldModalOpen, setFieldModalOpen] = useState(false);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [fieldForm, setFieldForm] = useState<FieldForm>({
-    label: "", fieldType: "TEXT", isRequired: false, placeholder: "", sortOrder: 0,
+    label: "", fieldType: "TEXT", isRequired: false, placeholder: "", description: "", sortOrder: 0,
   });
   const [fieldSaving, setFieldSaving] = useState(false);
   const [deleteFieldConfirm, setDeleteFieldConfirm] = useState<string | null>(null);
@@ -100,7 +102,7 @@ export default function TaskFieldsPage() {
   const openCreateField = () => {
     setEditingFieldId(null);
     const maxSort = fields.length > 0 ? Math.max(...fields.map((f) => f.sortOrder)) : 0;
-    setFieldForm({ label: "", fieldType: "TEXT", isRequired: false, placeholder: "", sortOrder: maxSort + 1 });
+    setFieldForm({ label: "", fieldType: "TEXT", isRequired: false, placeholder: "", description: "", sortOrder: maxSort + 1 });
     setFieldModalOpen(true);
   };
 
@@ -111,6 +113,7 @@ export default function TaskFieldsPage() {
       fieldType: f.fieldType,
       isRequired: f.isRequired,
       placeholder: f.placeholder || "",
+      description: f.description || "",
       sortOrder: f.sortOrder,
     });
     setFieldModalOpen(true);
@@ -395,6 +398,16 @@ export default function TaskFieldsPage() {
                   type="text"
                   value={fieldForm.placeholder}
                   onChange={(e) => setFieldForm({ ...fieldForm, placeholder: e.target.value })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">説明文（注釈）</label>
+                <input
+                  type="text"
+                  value={fieldForm.description}
+                  onChange={(e) => setFieldForm({ ...fieldForm, description: e.target.value })}
+                  placeholder="入力欄の上に表示される補足テキスト"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
                 />
               </div>
