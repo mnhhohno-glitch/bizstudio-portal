@@ -39,14 +39,9 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
       })
     : "未設定";
 
-  // 担当者のメンション行を生成
-  const mentionLines = params.assigneeEmails
-    .filter((email) => email)
-    .map((email) => `<m userId="${email}">`);
-
-  const lines = [
-    ...mentionLines,
-    mentionLines.length > 0 ? "新しいタスクが割り当てられました" : "📋 タスクが作成されました",
+  // メンションなしの基本メッセージ行
+  const baseLines = [
+    "📋 タスクが作成されました",
     "",
     "■ タスク",
     params.title,
@@ -73,5 +68,25 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     `${baseUrl}/tasks/${params.taskId}`,
   ];
 
-  await sendBotMessage(botId, channelId, lines.join("\n"));
+  // メンション付きで送信を試み、失敗したらメンションなしで再送
+  const mentionLines = params.assigneeEmails
+    .filter((email) => email)
+    .map((email) => `<m userId="${email}">`);
+
+  if (mentionLines.length > 0) {
+    const mentionedLines = [
+      ...mentionLines,
+      "新しいタスクが割り当てられました",
+      "",
+      ...baseLines.slice(2), // "📋 タスクが作成されました" と空行をスキップ
+    ];
+    try {
+      await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      return;
+    } catch (e) {
+      console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
