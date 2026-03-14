@@ -50,11 +50,10 @@ export default function TasksPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [catGroups, setCatGroups] = useState<CatGroup[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
-  const [catFilterLabel, setCatFilterLabel] = useState("全て");
 
   // filters
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterGroupId, setFilterGroupId] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
   const [filterCandidateName, setFilterCandidateName] = useState("");
@@ -170,7 +169,12 @@ export default function TasksPage() {
     try {
       const params = new URLSearchParams();
       if (filterStatus) params.set("status", filterStatus);
-      if (filterCategoryId) params.set("categoryId", filterCategoryId);
+      if (filterCategoryId) {
+        params.set("categoryId", filterCategoryId);
+      } else if (filterGroupId) {
+        const groupCatIds = categories.filter((c) => c.group?.id === filterGroupId).map((c) => c.id);
+        if (groupCatIds.length > 0) params.set("categoryId", groupCatIds.join(","));
+      }
       if (filterPriority) params.set("priority", filterPriority);
       if (filterCandidateName.trim()) params.set("candidateName", filterCandidateName.trim());
       if (filterAssigneeId) params.set("assigneeId", filterAssigneeId);
@@ -191,7 +195,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, includeCompleted, page, sortBy, sortOrder]);
+  }, [filterStatus, filterGroupId, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, includeCompleted, page, sortBy, sortOrder, categories]);
 
   useEffect(() => {
     fetchTasks();
@@ -240,6 +244,19 @@ export default function TasksPage() {
     if (debounceRef.timer) clearTimeout(debounceRef.timer);
     debounceRef.timer = setTimeout(() => resetPage(), 400);
   };
+
+  // category group helper
+  const getGroupName = (categoryId: string | undefined) => {
+    if (!categoryId) return "-";
+    const cat = categories.find((c) => c.id === categoryId);
+    return cat?.group?.name ?? "未分類";
+  };
+
+  // filtered categories based on selected group
+  const filteredCategories = useMemo(() => {
+    if (!filterGroupId) return categories;
+    return categories.filter((c) => c.group?.id === filterGroupId);
+  }, [categories, filterGroupId]);
 
   const selectCls =
     "rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
@@ -298,72 +315,23 @@ export default function TasksPage() {
             <option value="COMPLETED">完了</option>
           </select>
         </div>
-        <div className="relative">
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">大カテゴリ</label>
+          <select value={filterGroupId} onChange={(e) => { setFilterGroupId(e.target.value); setFilterCategoryId(""); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            {catGroups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">カテゴリ</label>
-          <button
-            type="button"
-            onClick={() => setCatDropdownOpen((v) => !v)}
-            className={`${selectCls} flex items-center gap-1 min-w-[160px] text-left`}
-          >
-            <span className="flex-1 truncate">{catFilterLabel}</span>
-            <span className="text-[10px] text-[#9CA3AF]">▼</span>
-          </button>
-          {catDropdownOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setCatDropdownOpen(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 max-h-[360px] w-[280px] overflow-y-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => { setFilterCategoryId(""); setCatFilterLabel("全て"); setCatDropdownOpen(false); resetPage(); }}
-                  className={`w-full px-3 py-2 text-left text-[13px] hover:bg-[#F3F4F6] ${!filterCategoryId ? "font-bold text-[#2563EB]" : "text-[#374151]"}`}
-                >
-                  全て
-                </button>
-                {(() => {
-                  const sections: { label: string; cats: Category[] }[] = [];
-                  for (const g of catGroups) {
-                    const cats = categories.filter((c) => c.group?.id === g.id);
-                    if (cats.length > 0) sections.push({ label: g.name, cats });
-                  }
-                  const ungrouped = categories.filter((c) => !c.group);
-                  if (ungrouped.length > 0) sections.push({ label: "未分類", cats: ungrouped });
-
-                  return sections.map((sec) => (
-                    <div key={sec.label}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ids = sec.cats.map((c) => c.id).join(",");
-                          setFilterCategoryId(ids);
-                          setCatFilterLabel(sec.label);
-                          setCatDropdownOpen(false);
-                          resetPage();
-                        }}
-                        className="w-full border-t border-[#F3F4F6] bg-[#F9FAFB] px-3 py-1.5 text-left text-[12px] font-bold text-[#6B7280] hover:bg-[#EEF2FF] hover:text-[#2563EB]"
-                      >
-                        {sec.label}
-                      </button>
-                      {sec.cats.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setFilterCategoryId(c.id);
-                            setCatFilterLabel(c.name);
-                            setCatDropdownOpen(false);
-                            resetPage();
-                          }}
-                          className={`w-full px-3 py-1.5 pl-6 text-left text-[13px] hover:bg-[#F3F4F6] ${filterCategoryId === c.id ? "font-bold text-[#2563EB]" : "text-[#374151]"}`}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
-                  ));
-                })()}
-              </div>
-            </>
-          )}
+          <select value={filterCategoryId} onChange={(e) => { setFilterCategoryId(e.target.value); resetPage(); }} className={selectCls}>
+            <option value="">全て</option>
+            {filteredCategories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">優先度</label>
@@ -440,6 +408,7 @@ export default function TasksPage() {
               <th className="cursor-pointer whitespace-nowrap px-4 py-3 hover:text-[#374151]" onClick={() => handleSort("title")}>
                 タスクタイトル{sortIcon("title")}
               </th>
+              <th className="whitespace-nowrap px-4 py-3">大カテゴリ</th>
               <th className="whitespace-nowrap px-4 py-3">カテゴリ</th>
               <th className="whitespace-nowrap px-4 py-3">求職者</th>
               <th className="whitespace-nowrap px-4 py-3">担当者</th>
@@ -458,13 +427,13 @@ export default function TasksPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={11} className="px-4 py-12 text-center text-[#6B7280]">
                   読み込み中...
                 </td>
               </tr>
             ) : tasks.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={11} className="px-4 py-12 text-center text-[#6B7280]">
                   タスクがありません
                 </td>
               </tr>
@@ -488,6 +457,9 @@ export default function TasksPage() {
                     <Link href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
                       {t.title}
                     </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+                    {getGroupName(t.category?.id)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
                     {t.category?.name ?? "-"}

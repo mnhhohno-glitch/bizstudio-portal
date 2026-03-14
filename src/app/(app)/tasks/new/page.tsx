@@ -119,6 +119,9 @@ export default function TaskNewPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // step 1 - accordion
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+
   // step 5
   const [submitting, setSubmitting] = useState(false);
 
@@ -704,14 +707,37 @@ export default function TaskNewPage() {
               const ungrouped = categories.filter((c) => !c.group);
               if (ungrouped.length > 0) sections.push({ label: "未分類", cats: ungrouped });
 
+              const toggleGroup = (label: string) => {
+                setOpenGroups((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(label)) next.delete(label);
+                  else next.add(label);
+                  return next;
+                });
+              };
+
               return (
-                <div className="space-y-5">
+                <div className="space-y-2">
                   {sections.map((sec) => (
-                    <div key={sec.label}>
-                      <p className="mb-2 text-[13px] font-bold text-[#6B7280]">{sec.label}</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {sec.cats.map(renderCatButton)}
-                      </div>
+                    <div key={sec.label} className="rounded-[8px] border border-[#E5E7EB] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(sec.label)}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-[#F9FAFB] hover:bg-[#F3F4F6] transition-colors text-left"
+                      >
+                        <span className="text-[14px] font-bold text-[#374151]">
+                          {sec.label}
+                          <span className="ml-1 text-[12px] font-normal text-[#9CA3AF]">（{sec.cats.length}）</span>
+                        </span>
+                        <span className="text-[12px] text-[#9CA3AF]">
+                          {openGroups.has(sec.label) ? "▼" : "▶"}
+                        </span>
+                      </button>
+                      {openGroups.has(sec.label) && (
+                        <div className="p-3 grid gap-3 sm:grid-cols-2">
+                          {sec.cats.map(renderCatButton)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
