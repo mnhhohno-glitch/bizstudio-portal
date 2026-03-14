@@ -87,6 +87,9 @@ model User {
   role         UserRole   @default(member)
   status       UserStatus @default(active)
 
+  // LINE WORKS アカウントID（例: "masayuki_oono@bizstudio.co.jp"）
+  lineworksId          String?   @map("lineworks_id")
+
   // ManusAPIキー（AES-256-GCM暗号化済み）
   manusApiKeyEncrypted String?   @map("manus_api_key_encrypted")
   manusApiKeySetAt     DateTime? @map("manus_api_key_set_at")

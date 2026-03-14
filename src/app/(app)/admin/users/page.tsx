@@ -7,6 +7,7 @@ import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 import InviteForm from "./InviteForm";
 import UserStatusButton from "./UserStatusButton";
 import ManusKeyButton from "./ManusKeyButton";
+import LineworksIdButton from "./LineworksIdButton";
 
 export default async function AdminUsersPage() {
   const user = await getSessionUser();
@@ -73,6 +74,7 @@ export default async function AdminUsersPage() {
                     <Th>名前</Th>
                     <Th>メール</Th>
                     <Th>権限</Th>
+                    <Th>LINE WORKS ID</Th>
                     <Th>Manus連携</Th>
                     <Th>状態</Th>
                     <Th>操作</Th>
@@ -84,6 +86,11 @@ export default async function AdminUsersPage() {
                       <Td>{u.name}</Td>
                       <Td><span className="font-mono">{u.email}</span></Td>
                       <Td>{u.role}</Td>
+                      <Td>
+                        <span className="font-mono text-xs">
+                          {u.lineworksId || <span className="text-[#6B7280]/60">未設定</span>}
+                        </span>
+                      </Td>
                       <Td>
                         <span
                           className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
@@ -108,6 +115,11 @@ export default async function AdminUsersPage() {
                       </Td>
                       <Td>
                         <div className="flex gap-2">
+                          <LineworksIdButton
+                            userId={u.id}
+                            userName={u.name}
+                            currentId={u.lineworksId}
+                          />
                           <ManusKeyButton
                             userId={u.id}
                             userName={u.name}
@@ -129,6 +141,7 @@ export default async function AdminUsersPage() {
                       <Td>
                         <span className="text-[#374151]/60">社員がいません</span>
                       </Td>
+                      <Td></Td>
                       <Td></Td>
                       <Td></Td>
                       <Td></Td>

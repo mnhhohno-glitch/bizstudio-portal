@@ -6,7 +6,7 @@ type TaskNotificationParams = {
   categoryName: string | null;
   candidateName: string | null;
   assigneeNames: string[];
-  assigneeEmails: string[];
+  assigneeLineworksIds: (string | null)[];
   priority: string | null;
   dueDate: Date | null;
   creatorName: string;
@@ -68,15 +68,15 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     `${baseUrl}/tasks/${params.taskId}`,
   ];
 
-  // メンション付きで送信を試み、失敗したらメンションなしで再送
-  const mentionLines = params.assigneeEmails
-    .filter((email) => email)
-    .map((email) => `<m userId="${email}">`);
+  // lineworksIdが登録されている担当者のメンション行を作成
+  const mentionLines = params.assigneeLineworksIds
+    .filter((id): id is string => !!id)
+    .map((id) => `<m userId="${id}">`);
 
   if (mentionLines.length > 0) {
     const mentionedLines = [
       ...mentionLines,
-      "新しいタスクが割り当てられました",
+      " 新しいタスクが割り当てられました",
       "",
       ...baseLines.slice(2), // "📋 タスクが作成されました" と空行をスキップ
     ];
@@ -86,6 +86,19 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     } catch (e) {
       console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
     }
+  }
+
+  // メンションなし（lineworksId未登録 or メンション送信失敗時）
+  // 担当者名を先頭に付ける
+  if (params.assigneeNames.length > 0) {
+    const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
+    const fallbackLines = [
+      `${namePrefix} 新しいタスクが割り当てられました`,
+      "",
+      ...baseLines.slice(2),
+    ];
+    await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+    return;
   }
 
   await sendBotMessage(botId, channelId, baseLines.join("\n"));

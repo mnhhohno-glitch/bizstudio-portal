@@ -148,14 +148,20 @@ export async function POST(request: Request) {
 
     // LINE WORKS通知（失敗してもタスク作成には影響させない）
     try {
-      // 担当者名からUserのemailを取得（メンション用）
+      // 担当者名からUserのlineworksIdを取得（メンション用）
       const assigneeNames = task.assignees.map((a) => a.employee.name);
       const assigneeUsers = assigneeNames.length > 0
         ? await prisma.user.findMany({
             where: { name: { in: assigneeNames }, status: "active" },
-            select: { email: true },
+            select: { name: true, lineworksId: true },
           })
         : [];
+
+      // 担当者名の順序に合わせてlineworksIdを対応付け
+      const assigneeLineworksIds = assigneeNames.map((name) => {
+        const user = assigneeUsers.find((u) => u.name === name);
+        return user?.lineworksId ?? null;
+      });
 
       await notifyTaskCreated({
         taskId: task.id,
@@ -163,7 +169,7 @@ export async function POST(request: Request) {
         categoryName: task.category?.name ?? null,
         candidateName: task.candidate?.name ?? null,
         assigneeNames,
-        assigneeEmails: assigneeUsers.map((u) => u.email),
+        assigneeLineworksIds,
         priority: priority || null,
         dueDate: task.dueDate,
         creatorName: actor.name,
