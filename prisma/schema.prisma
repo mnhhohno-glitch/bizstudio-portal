@@ -29,6 +29,8 @@ enum AuditTargetType {
   CANDIDATE
   ANNOUNCEMENT
   DOCUMENT
+  ATTENDANCE
+  LEAVE
 }
 
 enum AnnouncementCategory {
@@ -111,6 +113,14 @@ model User {
   tasksCreated      Task[]            @relation("TaskCreator")
   taskComments      TaskComment[]     @relation("TaskComments")
   taskAttachments   TaskAttachment[]  @relation("UploadedAttachments")
+
+  // 勤怠管理
+  attendanceRecords AttendanceRecord[] @relation("UserAttendance")
+  leaveRequests     LeaveRequest[]     @relation("UserLeaveRequests")
+  leaveBalances     LeaveBalance[]     @relation("UserLeaveBalances")
+  attendanceModRequestsMade AttendanceModRequest[] @relation("ModRequestor")
+  attendanceModRequestsReviewed AttendanceModRequest[] @relation("ModReviewer")
+  leaveRequestsReviewed LeaveRequest[] @relation("LeaveReviewer")
 
   @@map("users")
 }
@@ -617,4 +627,157 @@ model IndustryCategoryMinor {
   createdAt DateTime               @default(now()) @map("created_at")
 
   @@map("industry_category_minors")
+}
+
+// ========================================
+// 勤怠管理
+// ========================================
+
+enum AttendanceStatus {
+  NOT_STARTED   // 未出勤
+  WORKING       // 勤務中
+  ON_BREAK      // 休憩中
+  SUSPENDED     // 中断中
+  COMPLETED     // 退勤済み（確定）
+}
+
+enum PunchType {
+  CLOCK_IN       // 出勤
+  BREAK_START    // 休憩開始
+  BREAK_END      // 休憩終了
+  SUSPEND_START  // 中断開始
+  SUSPEND_END    // 中断終了
+  CLOCK_OUT      // 退勤
+}
+
+enum ModRequestStatus {
+  PENDING   // 申請中
+  APPROVED  // 承認済み
+  REJECTED  // 差し戻し
+}
+
+enum LeaveType {
+  PAID        // 有給休暇
+  HALF_PAID   // 有給（半日）
+  SICK        // 病欠
+  SPECIAL     // 特別休暇
+  OTHER       // その他
+}
+
+enum LeaveRequestStatus {
+  PENDING   // 申請中
+  APPROVED  // 承認済み
+  REJECTED  // 差し戻し
+}
+
+// 勤怠レコード（1日1ユーザー1レコード）
+model AttendanceRecord {
+  id            String           @id @default(cuid())
+  userId        String           @map("user_id")
+  user          User             @relation("UserAttendance", fields: [userId], references: [id])
+  date          DateTime         @db.Date  // 勤務日（日付のみ）
+  status        AttendanceStatus @default(NOT_STARTED)
+
+  clockIn       DateTime?        @map("clock_in")
+  clockOut      DateTime?        @map("clock_out")
+
+  // 計算済み時間（分単位で保存）
+  totalWorkMinutes    Int?       @map("total_work_minutes")
+  totalBreakMinutes   Int?       @map("total_break_minutes")
+  totalSuspendMinutes Int?       @map("total_suspend_minutes")
+  overtimeMinutes     Int?       @map("overtime_minutes")
+  nightMinutes        Int?       @map("night_minutes")    // 深夜時間（22:00〜翌5:00）
+
+  note          String?          @db.Text  // 備考
+
+  punches       AttendancePunch[]
+  modRequests   AttendanceModRequest[]
+
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("attendance_records")
+}
+
+// 打刻エントリ（1日に複数）
+model AttendancePunch {
+  id                 String           @id @default(cuid())
+  attendanceRecordId String           @map("attendance_record_id")
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  type               PunchType
+  punchedAt          DateTime         @map("punched_at")
+  isManual           Boolean          @default(false) @map("is_manual")  // 手動修正か
+
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  @@index([attendanceRecordId, type])
+  @@map("attendance_punches")
+}
+
+// 打刻修正申請（退勤後の修正）
+model AttendanceModRequest {
+  id                 String           @id @default(cuid())
+  attendanceRecordId String           @map("attendance_record_id")
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  requestedByUserId  String           @map("requested_by_user_id")
+  requestedBy        User             @relation("ModRequestor", fields: [requestedByUserId], references: [id])
+
+  status             ModRequestStatus @default(PENDING)
+  changes            Json             // { field: "clockIn", before: "...", after: "..." } 等
+  reason             String           @db.Text  // 申請理由
+
+  reviewedByUserId   String?          @map("reviewed_by_user_id")
+  reviewedBy         User?            @relation("ModReviewer", fields: [reviewedByUserId], references: [id])
+  reviewedAt         DateTime?        @map("reviewed_at")
+  adminComment       String?          @map("admin_comment") @db.Text  // 差し戻し理由
+
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  @@index([attendanceRecordId])
+  @@index([status])
+  @@map("attendance_mod_requests")
+}
+
+// 有給・休暇申請
+model LeaveRequest {
+  id              String             @id @default(cuid())
+  userId          String             @map("user_id")
+  user            User               @relation("UserLeaveRequests", fields: [userId], references: [id])
+  date            DateTime           @db.Date  // 休暇日
+  leaveType       LeaveType          @map("leave_type")
+  status          LeaveRequestStatus @default(PENDING)
+  reason          String?            @db.Text  // 申請理由
+
+  reviewedByUserId String?           @map("reviewed_by_user_id")
+  reviewedBy       User?             @relation("LeaveReviewer", fields: [reviewedByUserId], references: [id])
+  reviewedAt       DateTime?         @map("reviewed_at")
+  adminComment     String?           @map("admin_comment") @db.Text
+
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@index([status])
+  @@map("leave_requests")
+}
+
+// 有給残日数管理
+model LeaveBalance {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  user        User     @relation("UserLeaveBalances", fields: [userId], references: [id])
+  fiscalYear  Int      @map("fiscal_year")  // 年度（例: 2026）
+  totalDays   Float    @map("total_days")   // 付与日数（半日単位のためFloat）
+  usedDays    Float    @default(0) @map("used_days")  // 使用日数
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, fiscalYear])
+  @@map("leave_balances")
 }
