@@ -33,7 +33,7 @@ export default async function DashboardPage() {
     prisma.announcement.findMany({
       where: { status: "PUBLISHED" },
       orderBy: { publishedAt: "desc" },
-      take: 3,
+      take: 5,
       include: { author: { select: { name: true } } },
     }),
     user
@@ -80,9 +80,9 @@ export default async function DashboardPage() {
     <div>
       <PageTitle>ダッシュボード</PageTitle>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
-        {/* Left column (60%) */}
-        <div className="md:col-span-3 space-y-3">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Left column */}
+        <div className="space-y-3">
           {/* Attendance Mini Card */}
           <AttendanceMiniCard
             status={todayAttendance?.status ?? null}
@@ -145,8 +145,8 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Right column (40%) */}
-        <div className="md:col-span-2">
+        {/* Right column */}
+        <div>
           <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
               <h2 className="text-[14px] font-medium text-[#374151]">お知らせ</h2>
