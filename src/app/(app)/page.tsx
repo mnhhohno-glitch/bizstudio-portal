@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { ANNOUNCEMENT_CATEGORIES, AnnouncementCategoryKey } from "@/lib/constants/announcement";
+import AttendanceAlertBanner from "@/components/attendance/AlertBanner";
 
 const STATUS_LABEL: Record<string, string> = {
   NOT_STARTED: "未着手",
@@ -78,6 +79,11 @@ export default async function DashboardPage() {
   return (
     <div>
       <PageTitle>ダッシュボード</PageTitle>
+
+      {/* 未打刻アラート */}
+      <div className="mt-4">
+        <AttendanceAlertBanner />
+      </div>
 
       {/* マイタスク */}
       {employee && (
