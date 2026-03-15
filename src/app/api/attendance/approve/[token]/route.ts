@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { approveModificationRequest, approveLeaveRequest, rejectRequest } from "@/lib/attendance/approval";
-import { notifyEmployeeApprovalResult } from "@/lib/line/notify";
+import { notifyEmployeeApprovalResult } from "@/lib/line-works/notify";
 
 export async function GET(
   _request: Request,

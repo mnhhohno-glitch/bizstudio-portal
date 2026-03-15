@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { ModReqType } from "@prisma/client";
-import { notifyAdminModificationRequest } from "@/lib/line/notify";
+import { notifyAdminModificationRequest } from "@/lib/line-works/notify";
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
