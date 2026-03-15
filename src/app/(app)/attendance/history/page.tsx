@@ -131,11 +131,12 @@ export default function AttendanceHistoryPage() {
                 <th className="px-3 py-2">退勤</th>
                 <th className="px-3 py-2">実労働</th>
                 <th className="px-3 py-2">備考</th>
+                <th className="px-3 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
               {records.length === 0 && leaves.length === 0 ? (
-                <tr><td colSpan={6} className="py-12 text-center text-[#6B7280]">データがありません</td></tr>
+                <tr><td colSpan={7} className="py-12 text-center text-[#6B7280]">データがありません</td></tr>
               ) : (
                 records.map((r) => {
                   const dateStr = new Date(r.date).toISOString().split("T")[0];
@@ -172,6 +173,11 @@ export default function AttendanceHistoryPage() {
                       <td className="px-3 py-2.5 tabular-nums">{formatTime(r.clockOut)}</td>
                       <td className="px-3 py-2.5 tabular-nums">{r.totalWork > 0 ? formatSec(r.totalWork) : "-"}</td>
                       <td className="px-3 py-2.5 text-[#6B7280]">{r.note ?? ""}</td>
+                      <td className="px-3 py-2.5">
+                        {r.isFinalized && (
+                          <Link href={`/attendance/correction/${dateStr}`} className="text-[13px] text-[#2563EB] hover:underline">修正</Link>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
