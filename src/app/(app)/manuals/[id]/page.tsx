@@ -247,6 +247,23 @@ export default function ManualDetailPage() {
           </div>
         )}
 
+        {/* 添付PDF（コンテンツタイプがPDF以外で、PDFが添付されている場合） */}
+        {manual.contentType !== "PDF" && manual.driveViewUrl && (
+          <>
+            <hr className="my-6 border-[#E5E7EB]" />
+            <div>
+              <h2 className="text-[16px] font-semibold text-[#374151] mb-3">添付資料（PDF）</h2>
+              <iframe
+                src={manual.driveViewUrl.replace("/view", "/preview")}
+                className="w-full border border-[#E5E7EB] rounded-[8px]"
+                style={{ height: "500px" }}
+                title={`${manual.title} - 添付PDF`}
+                allow="autoplay"
+              />
+            </div>
+          </>
+        )}
+
         {manual.description && (
           <>
             <hr className="my-6 border-[#E5E7EB]" />

@@ -132,12 +132,13 @@ export default function ManualCreatePage() {
       };
       if (subCategory) body.subCategory = subCategory;
       if (contentType === "VIDEO") body.videoUrl = videoUrl.trim();
-      if (contentType === "PDF") {
+      if (contentType === "URL") body.externalUrl = externalUrl.trim();
+      if (contentType === "MARKDOWN") body.markdownContent = markdownContent;
+      // PDF添付（コンテンツタイプがPDFの場合 or 他タイプでも添付がある場合）
+      if (driveFileId) {
         body.driveFileId = driveFileId;
         body.driveViewUrl = driveViewUrl;
       }
-      if (contentType === "URL") body.externalUrl = externalUrl.trim();
-      if (contentType === "MARKDOWN") body.markdownContent = markdownContent;
       if (description.trim()) body.description = description.trim();
 
       const res = await fetch("/api/manuals/create", {
@@ -374,6 +375,69 @@ export default function ManualCreatePage() {
                   rows={15}
                   placeholder="Markdown形式で入力..."
                   className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+              </div>
+            )}
+
+            {/* 資料添付（PDF） — コンテンツタイプがPDF以外の場合 */}
+            {contentType && contentType !== "PDF" && (
+              <div>
+                <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
+                  資料添付（PDF・任意）
+                </label>
+                {driveFileId ? (
+                  <div className="flex items-center gap-3 rounded-md border border-[#E5E7EB] px-4 py-3">
+                    <span className="text-[20px]">📄</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-medium text-[#374151] truncate">{pdfFileName}</p>
+                      <p className="text-[12px] text-[#6B7280]">{formatFileSize(pdfFileSize)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDriveFileId("");
+                        setDriveViewUrl("");
+                        setPdfFileName("");
+                        setPdfFileSize(0);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                      className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-3 py-1.5 text-[13px] hover:bg-[#F9FAFB]"
+                    >
+                      削除
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`flex flex-col items-center justify-center rounded-md py-6 cursor-pointer transition-colors ${
+                      dragging
+                        ? "border-dashed border-2 border-[#2563EB] bg-[#F0F7FF]"
+                        : "border-dashed border-2 border-gray-300 hover:border-[#2563EB] hover:bg-[#F9FAFB]"
+                    }`}
+                  >
+                    {uploading ? (
+                      <p className="text-[14px] text-[#6B7280]">アップロード中...</p>
+                    ) : (
+                      <>
+                        <span className="text-[24px] mb-1">📄</span>
+                        <p className="text-[13px] text-[#6B7280]">PDFをドラッグ＆ドロップ または クリックして選択</p>
+                        <p className="text-[12px] text-[#9CA3AF] mt-1">最大20MB</p>
+                      </>
+                    )}
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handlePdfUpload(file);
+                  }}
                 />
               </div>
             )}

@@ -36,10 +36,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (contentType === "PDF") {
-    if (!driveFileId && !pdfData) {
-      return NextResponse.json({ error: "PDFデータは必須です" }, { status: 400 });
-    }
+  if (contentType === "PDF" && !driveFileId && !pdfData) {
+    return NextResponse.json({ error: "PDFデータは必須です" }, { status: 400 });
   }
 
   if (contentType === "URL") {
