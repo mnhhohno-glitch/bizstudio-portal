@@ -103,17 +103,16 @@ export async function importAttendanceFromExcel(buffer: Buffer): Promise<ImportR
     empSummaryMap.set(normalizedNo, summary);
 
     try {
-      // Find Employee by normalized number
-      let employee = await prisma.employee.findUnique({ where: { employeeNumber: normalizedNo } });
+      // Find Employee by normalized number (既存のみ。見つからなければスキップ)
+      const employee = await prisma.employee.findUnique({ where: { employeeNumber: normalizedNo } });
 
       if (!employee) {
-        result.debug.push(`Employee "${normalizedNo}" が見つかりません。作成します。`);
-        employee = await prisma.employee.create({
-          data: { employeeNumber: normalizedNo, name: group.name, status: "active" },
-        });
-      } else {
-        result.debug.push(`Employee "${normalizedNo}" → ${employee.name} (id: ${employee.id})`);
+        result.debug.push(`⚠ Employee "${normalizedNo}" が見つかりません（スキップ）`);
+        summary.skipped += group.rows.length;
+        result.skipped += group.rows.length;
+        continue;
       }
+      result.debug.push(`Employee "${normalizedNo}" → ${employee.name} (id: ${employee.id})`);
 
       for (const row of group.rows) {
         try {
