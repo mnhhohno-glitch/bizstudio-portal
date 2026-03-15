@@ -107,7 +107,7 @@ export default function ManualCreatePage() {
     }
 
     if (contentType === "VIDEO" && !videoUrl.trim()) {
-      setError("Loom URLを入力してください");
+      setError("動画URLを入力してください");
       return;
     }
     if (contentType === "PDF" && !driveFileId) {
@@ -267,16 +267,16 @@ export default function ManualCreatePage() {
             {contentType === "VIDEO" && (
               <div>
                 <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
-                  Loom URL <span className="text-red-500">*</span>
+                  動画URL <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="https://www.loom.com/share/..."
+                  placeholder="https://..."
                   className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
                 />
-                <p className="mt-1.5 text-[12px] text-[#6B7280]">※ LoomのURLを貼り付けてください</p>
+                <p className="mt-1.5 text-[12px] text-[#6B7280]">※ 動画のURLを貼り付けてください（Loom, YouTube等）</p>
               </div>
             )}
 

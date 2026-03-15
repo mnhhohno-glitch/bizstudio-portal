@@ -39,8 +39,8 @@ export async function PATCH(_request: NextRequest, context: RouteContext) {
   const effectiveContentType = contentType ?? existing.contentType;
 
   if (effectiveContentType === "VIDEO" && videoUrl !== undefined) {
-    if (typeof videoUrl !== "string" || !videoUrl.startsWith("https://www.loom.com/")) {
-      return NextResponse.json({ error: "動画URLはLoomのURLである必要があります" }, { status: 400 });
+    if (typeof videoUrl !== "string" || !videoUrl.startsWith("https://")) {
+      return NextResponse.json({ error: "動画URLはhttps://で始まる必要があります" }, { status: 400 });
     }
   }
 

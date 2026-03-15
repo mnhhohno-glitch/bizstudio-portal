@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
     if (!videoUrl || typeof videoUrl !== "string") {
       return NextResponse.json({ error: "動画URLは必須です" }, { status: 400 });
     }
-    if (!videoUrl.startsWith("https://www.loom.com/")) {
-      return NextResponse.json({ error: "動画URLはLoomのURLである必要があります" }, { status: 400 });
+    if (!videoUrl.startsWith("https://")) {
+      return NextResponse.json({ error: "動画URLはhttps://で始まる必要があります" }, { status: 400 });
     }
   }
 

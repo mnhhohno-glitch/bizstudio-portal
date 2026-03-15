@@ -82,8 +82,13 @@ export default function ManualDetailPage() {
     return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   };
 
-  const toLoomEmbed = (url: string) => {
-    return url.replace("/share/", "/embed/");
+  const toEmbedUrl = (url: string) => {
+    // Loom
+    if (url.includes("loom.com/share/")) return url.replace("/share/", "/embed/");
+    // YouTube
+    if (url.includes("youtube.com/watch?v=")) return url.replace("youtube.com/watch?v=", "youtube.com/embed/");
+    if (url.includes("youtu.be/")) return url.replace("youtu.be/", "youtube.com/embed/");
+    return url;
   };
 
   const handleDelete = async () => {
@@ -152,7 +157,7 @@ export default function ManualDetailPage() {
         {manual.contentType === "VIDEO" && manual.videoUrl && (
           <div className="aspect-video">
             <iframe
-              src={toLoomEmbed(manual.videoUrl)}
+              src={toEmbedUrl(manual.videoUrl)}
               className="w-full h-full rounded-[8px] border border-[#E5E7EB]"
               allowFullScreen
               title={manual.title}
