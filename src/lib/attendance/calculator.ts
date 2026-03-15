@@ -1,11 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
 import type { DailyTotals } from "./types";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { toJST, dayjs } from "./timezone";
 
 type TimeRange = { start: number; end: number }; // Unix秒
 
@@ -40,8 +35,8 @@ export async function calculateDailyTotals(
   }
 
   const punches: { type: string; timestamp: Date }[] = attendance.punchEvents;
-  const clockInTs = dayjs(attendance.clockIn).tz("Asia/Tokyo");
-  const clockOutTs = dayjs(attendance.clockOut).tz("Asia/Tokyo");
+  const clockInTs = toJST(attendance.clockIn);
+  const clockOutTs = toJST(attendance.clockOut);
 
   // 休憩ペア集計
   const breakStarts = punches.filter((p) => p.type === "BREAK_START");

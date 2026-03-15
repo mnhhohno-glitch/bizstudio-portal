@@ -1,11 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
 import type { ValidationResult } from "./types";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { nowJST, toJST } from "./timezone";
 
 /**
  * 退勤時バリデーション
@@ -26,8 +21,8 @@ export async function validateClockOut(
   }
 
   const punches = attendance.punchEvents;
-  const now = dayjs().tz("Asia/Tokyo");
-  const clockIn = dayjs(attendance.clockIn).tz("Asia/Tokyo");
+  const now = nowJST();
+  const clockIn = toJST(attendance.clockIn);
 
   // 1. 休憩終了の押し忘れ
   const breakStarts = punches.filter((p) => p.type === "BREAK_START").length;
@@ -45,12 +40,11 @@ export async function validateClockOut(
 
   // 3. 6時間超勤務で休憩未登録
   if (breakStarts === 0) {
-    // 中断時間を差し引いた実質勤務時間を計算
     let interruptSeconds = 0;
     const intStartPunches = punches.filter((p) => p.type === "INTERRUPT_START");
     const intEndPunches = punches.filter((p) => p.type === "INTERRUPT_END");
     for (let i = 0; i < Math.min(intStartPunches.length, intEndPunches.length); i++) {
-      interruptSeconds += dayjs(intEndPunches[i].timestamp).diff(dayjs(intStartPunches[i].timestamp), "second");
+      interruptSeconds += toJST(intEndPunches[i].timestamp).diff(toJST(intStartPunches[i].timestamp), "second");
     }
 
     const totalElapsed = now.diff(clockIn, "second");

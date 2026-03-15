@@ -1,12 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getLineClient } from "./client";
 import { buildModificationRequestMessage, buildLeaveRequestMessage, buildApprovalResultMessage } from "./templates";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { toJST } from "@/lib/attendance/timezone";
 
 const MOD_TYPE_LABEL: Record<string, string> = {
   CLOCK_IN_EDIT: "出勤時刻修正", CLOCK_OUT_EDIT: "退勤時刻修正",
@@ -17,14 +12,14 @@ const MOD_TYPE_LABEL: Record<string, string> = {
 const LEAVE_LABEL: Record<string, string> = { PAID_FULL: "有給（全日）", PAID_HALF: "有給（半日）", OTHER: "その他休暇" };
 
 function formatDate(d: Date): string {
-  const dt = dayjs(d).tz("Asia/Tokyo");
+  const dt = toJST(d);
   const days = ["日", "月", "火", "水", "木", "金", "土"];
   return `${dt.month() + 1}月${dt.date()}日（${days[dt.day()]}）`;
 }
 
 function formatTime(d: Date | null): string {
   if (!d) return "-";
-  return dayjs(d).tz("Asia/Tokyo").format("HH:mm:ss");
+  return toJST(d).format("HH:mm:ss");
 }
 
 /**

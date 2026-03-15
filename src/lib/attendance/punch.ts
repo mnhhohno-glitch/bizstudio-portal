@@ -1,16 +1,11 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
 import type { PunchType } from "@prisma/client";
 import { getAvailableActions, getNextStatus } from "./state";
 import { validateClockOut } from "./validation";
 import { calculateDailyTotals } from "./calculator";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { nowJST, todayForDB } from "./timezone";
 
 type PunchResult = {
   success: boolean;
@@ -25,8 +20,8 @@ export async function executePunch(
   employeeId: string,
   punchType: PunchType
 ): Promise<PunchResult> {
-  const now = dayjs().tz("Asia/Tokyo");
-  const todayDate = now.startOf("day").toDate();
+  const now = nowJST();
+  const todayDate = todayForDB();
 
   try {
     return await prisma.$transaction(async (tx) => {

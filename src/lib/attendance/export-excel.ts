@@ -1,18 +1,13 @@
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { toJST, dayjs, TZ } from "./timezone";
 
 function secondsToExcelTime(seconds: number): number {
   return seconds / 86400;
 }
 
 function dateTimeToExcelTime(dt: Date): number {
-  const d = dayjs(dt).tz("Asia/Tokyo");
+  const d = toJST(dt);
   return (d.hour() * 3600 + d.minute() * 60 + d.second()) / 86400;
 }
 
@@ -26,7 +21,7 @@ export async function generateMonthlyExcel(year: number, month: number): Promise
     orderBy: { employeeNumber: "asc" },
   });
 
-  const monthStart = dayjs.tz(`${year}-${String(month).padStart(2, "0")}-01`, "Asia/Tokyo").startOf("month");
+  const monthStart = dayjs.tz(`${year}-${String(month).padStart(2, "0")}-01`, TZ).startOf("month");
   const monthEnd = monthStart.endOf("month");
   const daysInMonth = monthEnd.date();
 
@@ -69,13 +64,16 @@ export async function generateMonthlyExcel(year: number, month: number): Promise
     const attendances = await prisma.dailyAttendance.findMany({
       where: {
         employeeId: emp.id,
-        date: { gte: monthStart.toDate(), lte: monthEnd.toDate() },
+        date: {
+          gte: new Date(monthStart.format("YYYY-MM-DD") + "T00:00:00.000Z"),
+          lte: new Date(monthEnd.format("YYYY-MM-DD") + "T00:00:00.000Z"),
+        },
       },
       include: { punchEvents: { orderBy: { timestamp: "asc" } } },
     });
 
     const attMap = new Map(
-      attendances.map((a) => [dayjs(a.date).format("YYYY-MM-DD"), a])
+      attendances.map((a) => [toJST(a.date).format("YYYY-MM-DD"), a])
     );
 
     for (let d = 1; d <= daysInMonth; d++) {

@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { todayForDB } from "@/lib/attendance/timezone";
 
 export async function GET() {
   const user = await getSessionUser();
@@ -17,7 +12,7 @@ export async function GET() {
   });
   if (!employee) return NextResponse.json({ employee: null, attendance: null, punches: [], userRole: user.role });
 
-  const today = dayjs().tz("Asia/Tokyo").startOf("day").toDate();
+  const today = todayForDB();
 
   const attendance = await prisma.dailyAttendance.findUnique({
     where: { employeeId_date: { employeeId: employee.id, date: today } },

@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import dayjs from "dayjs";
-import timezone from "dayjs/plugin/timezone";
-import utc from "dayjs/plugin/utc";
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
+import { nowJST, dayjs, TZ } from "@/lib/attendance/timezone";
 
 export async function GET(request: Request) {
   const user = await getSessionUser();
@@ -20,10 +15,10 @@ export async function GET(request: Request) {
   });
   if (!employee) return NextResponse.json({ records: [], leaves: [] });
 
-  const now = dayjs().tz("Asia/Tokyo");
-  const target = yearMonth ? dayjs(yearMonth + "-01").tz("Asia/Tokyo") : now;
-  const monthStart = target.startOf("month").toDate();
-  const monthEnd = target.endOf("month").toDate();
+  const now = nowJST();
+  const target = yearMonth ? dayjs.tz(yearMonth + "-01", TZ) : now;
+  const monthStart = new Date(target.startOf("month").format("YYYY-MM-DD") + "T00:00:00.000Z");
+  const monthEnd = new Date(target.endOf("month").format("YYYY-MM-DD") + "T00:00:00.000Z");
 
   const [records, leaves] = await Promise.all([
     prisma.dailyAttendance.findMany({
