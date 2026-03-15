@@ -214,12 +214,12 @@ export default function ManualEditPage() {
         category,
         subCategory: subCategory || null,
         contentType,
-        videoUrl: contentType === "VIDEO" ? videoUrl.trim() : null,
+        videoUrl: videoUrl.trim() || null,
         driveFileId: driveFileId || null,
         driveViewUrl: driveViewUrl || null,
         pdfData: null,
         pdfPath: null,
-        externalUrl: contentType === "URL" ? externalUrl.trim() : null,
+        externalUrl: externalUrl.trim() || null,
         markdownContent: contentType === "MARKDOWN" ? markdownContent : null,
         description: description.trim() || null,
       };
@@ -465,6 +465,40 @@ export default function ManualEditPage() {
                   placeholder="Markdown形式で入力..."
                   className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
                 />
+              </div>
+            )}
+
+            {/* 追加URL — コンテンツタイプがURL以外の場合 */}
+            {contentType && contentType !== "URL" && (
+              <div>
+                <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
+                  参考URL（任意）
+                </label>
+                <input
+                  type="text"
+                  value={externalUrl}
+                  onChange={(e) => setExternalUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+                <p className="mt-1.5 text-[12px] text-[#6B7280]">※ 資料や参考サイトのURLがあれば入力してください</p>
+              </div>
+            )}
+
+            {/* 追加動画URL — コンテンツタイプがURLの場合 */}
+            {contentType === "URL" && (
+              <div>
+                <label className="block text-[14px] font-medium text-[#374151] mb-1.5">
+                  動画URL（任意）
+                </label>
+                <input
+                  type="text"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full rounded-md border border-[#E5E7EB] px-3 py-2.5 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+                <p className="mt-1.5 text-[12px] text-[#6B7280]">※ 関連する動画があれば入力してください（Loom, YouTube等）</p>
               </div>
             )}
 

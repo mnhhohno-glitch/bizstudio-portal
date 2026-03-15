@@ -247,6 +247,42 @@ export default function ManualDetailPage() {
           </div>
         )}
 
+        {/* 参考URL（コンテンツタイプがURL以外で、URLが設定されている場合） */}
+        {manual.contentType !== "URL" && manual.externalUrl && (
+          <>
+            <hr className="my-6 border-[#E5E7EB]" />
+            <div>
+              <h2 className="text-[16px] font-semibold text-[#374151] mb-2">参考URL</h2>
+              <a
+                href={manual.externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-[14px] text-[#2563EB] hover:underline"
+              >
+                🔗 {manual.externalUrl}
+              </a>
+            </div>
+          </>
+        )}
+
+        {/* 追加動画（コンテンツタイプがVIDEO以外で、動画URLが設定されている場合） */}
+        {manual.contentType !== "VIDEO" && manual.videoUrl && (
+          <>
+            <hr className="my-6 border-[#E5E7EB]" />
+            <div>
+              <h2 className="text-[16px] font-semibold text-[#374151] mb-3">関連動画</h2>
+              <div className="aspect-video">
+                <iframe
+                  src={toEmbedUrl(manual.videoUrl)}
+                  className="w-full h-full rounded-[8px] border border-[#E5E7EB]"
+                  allowFullScreen
+                  title={`${manual.title} - 関連動画`}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
         {/* 添付PDF（コンテンツタイプがPDF以外で、PDFが添付されている場合） */}
         {manual.contentType !== "PDF" && manual.driveViewUrl && (
           <>
