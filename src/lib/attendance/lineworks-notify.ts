@@ -3,8 +3,8 @@ import { sendBotMessage } from "@/lib/lineworks";
 import { toJST } from "./timezone";
 import type { PunchType } from "@prisma/client";
 
-const BOT_ID = () => process.env.LINEWORKS_TASK_BOT_ID ?? "";
-const CHANNEL_ID = () => process.env.LINEWORKS_ATTENDANCE_CHANNEL_ID ?? process.env.LINEWORKS_TASK_CHANNEL_ID ?? "";
+const BOT_ID = () => process.env.LINEWORKS_ATTENDANCE_BOT_ID ?? "";
+const CHANNEL_ID = () => process.env.LINEWORKS_ATTENDANCE_CHANNEL_ID ?? "";
 
 async function sendToChannel(text: string): Promise<void> {
   const botId = BOT_ID();
