@@ -34,6 +34,17 @@ export default function AttendanceAdminPage() {
           </div>
         </Link>
 
+        <Link href="/attendance/admin/records"
+          className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:border-[#2563EB]/30 transition-colors">
+          <div className="flex items-center gap-3">
+            <span className="text-[24px]">📊</span>
+            <div>
+              <p className="text-[14px] font-bold text-[#374151]">勤怠一覧</p>
+              <p className="text-[13px] text-[#6B7280]">社員別月次データ閲覧</p>
+            </div>
+          </div>
+        </Link>
+
         <Link href="/attendance/admin/employees"
           className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:border-[#2563EB]/30 transition-colors">
           <div className="flex items-center gap-3">
