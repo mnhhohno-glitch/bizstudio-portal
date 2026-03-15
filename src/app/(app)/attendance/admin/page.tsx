@@ -55,6 +55,16 @@ export default function AttendanceAdminPage() {
             </div>
           </div>
         </Link>
+        <Link href="/attendance/admin/import"
+          className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:border-[#2563EB]/30 transition-colors">
+          <div className="flex items-center gap-3">
+            <span className="text-[24px]">📥</span>
+            <div>
+              <p className="text-[14px] font-bold text-[#374151]">データインポート</p>
+              <p className="text-[13px] text-[#6B7280]">過去データの一括取込</p>
+            </div>
+          </div>
+        </Link>
       </div>
     </div>
   );
