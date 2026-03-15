@@ -61,6 +61,10 @@ export default function AttendancePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState("");
   const [saving, setSaving] = useState(false);
+  const [interruptModalOpen, setInterruptModalOpen] = useState(false);
+  const [interruptHours, setInterruptHours] = useState(0);
+  const [interruptMins, setInterruptMins] = useState(30);
+  const [interruptUndecided, setInterruptUndecided] = useState(false);
 
   const fetchData = useCallback(() => {
     fetch("/api/attendance/status")
@@ -72,10 +76,16 @@ export default function AttendancePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handlePunch = async (punchType: PunchType) => {
+  const handlePunch = async (punchType: PunchType, estimatedMinutes?: number | null) => {
+    // 中断開始はモーダルで処理
+    if (punchType === "INTERRUPT_START" && estimatedMinutes === undefined) {
+      setInterruptModalOpen(true);
+      return;
+    }
+
     const now = new Date().toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
     const label = PUNCH_CONFIG[punchType]?.label ?? punchType;
-    if (!confirm(`${now} に${label}を打刻しますか？`)) return;
+    if (punchType !== "INTERRUPT_START" && !confirm(`${now} に${label}を打刻しますか？`)) return;
 
     setPunching(true);
     setValidationErrors(null);
@@ -83,7 +93,7 @@ export default function AttendancePage() {
       const res = await fetch("/api/attendance/punch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ punchType }),
+        body: JSON.stringify({ punchType, estimatedMinutes }),
       });
       const d = await res.json();
       if (!res.ok) {
@@ -294,6 +304,45 @@ export default function AttendancePage() {
           </div>
         </div>
       </div>
+
+      {/* Interrupt Modal */}
+      {interruptModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-4 text-[16px] font-bold text-[#374151]">中断開始</h3>
+            <p className="mb-3 text-[13px] text-[#6B7280]">想定中断時間</p>
+            <div className="flex items-center gap-2 mb-3">
+              <input type="number" min={0} max={8} value={interruptHours} disabled={interruptUndecided}
+                onChange={(e) => setInterruptHours(Number(e.target.value))}
+                className="w-16 rounded-lg border border-[#D1D5DB] px-3 py-2 text-center text-[15px] disabled:bg-gray-100 disabled:text-gray-400" />
+              <span className="text-[14px] text-[#374151]">時間</span>
+              <input type="number" min={0} max={59} step={5} value={interruptMins} disabled={interruptUndecided}
+                onChange={(e) => setInterruptMins(Number(e.target.value))}
+                className="w-16 rounded-lg border border-[#D1D5DB] px-3 py-2 text-center text-[15px] disabled:bg-gray-100 disabled:text-gray-400" />
+              <span className="text-[14px] text-[#374151]">分</span>
+            </div>
+            <label className="flex items-center gap-2 mb-4 cursor-pointer">
+              <input type="checkbox" checked={interruptUndecided} onChange={(e) => setInterruptUndecided(e.target.checked)}
+                className="h-4 w-4 accent-[#2563EB]" />
+              <span className="text-[14px] text-[#374151]">未定</span>
+            </label>
+            <div className="flex gap-2">
+              <button onClick={() => setInterruptModalOpen(false)}
+                className="flex-1 h-11 rounded-lg border border-[#D1D5DB] text-[14px] text-[#374151] hover:bg-[#F3F4F6]">キャンセル</button>
+              <button
+                disabled={punching || (!interruptUndecided && interruptHours === 0 && interruptMins === 0)}
+                onClick={() => {
+                  const mins = interruptUndecided ? null : (interruptHours * 60 + interruptMins);
+                  setInterruptModalOpen(false);
+                  handlePunch("INTERRUPT_START", mins);
+                }}
+                className="flex-1 h-11 rounded-lg bg-amber-500 text-[14px] font-bold text-white hover:bg-amber-600 disabled:opacity-50">
+                中断開始
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Validation Error Modal */}
       {validationErrors && validationErrors.length > 0 && (

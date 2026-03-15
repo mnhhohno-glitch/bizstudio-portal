@@ -723,6 +723,7 @@ model PunchEvent {
   type                PunchType
   timestamp           DateTime
   isManualEdit        Boolean         @default(false) @map("is_manual_edit")
+  estimatedMinutes    Int?            @map("estimated_minutes")  // 想定中断時間（分）INTERRUPT_START用
 
   employee            Employee        @relation(fields: [employeeId], references: [id])
   dailyAttendance     DailyAttendance @relation(fields: [dailyAttendanceId], references: [id])

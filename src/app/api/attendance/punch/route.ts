@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { punchType } = body;
+    const { punchType, estimatedMinutes } = body;
 
     if (!punchType || !VALID_PUNCH_TYPES.includes(punchType)) {
       return NextResponse.json({ error: "不正な打刻タイプです" }, { status: 400 });
@@ -32,7 +32,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "社員情報が見つかりません" }, { status: 404 });
     }
 
-    const result = await executePunch(employee.id, punchType);
+    const result = await executePunch(employee.id, punchType, {
+      estimatedMinutes: punchType === "INTERRUPT_START" ? (estimatedMinutes ?? null) : undefined,
+    });
 
     if (!result.success) {
       return NextResponse.json(

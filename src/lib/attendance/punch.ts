@@ -6,6 +6,7 @@ import { getAvailableActions, getNextStatus } from "./state";
 import { validateClockOut } from "./validation";
 import { calculateDailyTotals } from "./calculator";
 import { nowJST, todayForDB } from "./timezone";
+import { notifyPunchAction } from "./lineworks-notify";
 
 type PunchResult = {
   success: boolean;
@@ -13,18 +14,23 @@ type PunchResult = {
   validationErrors?: { code: string; message: string }[];
 };
 
+type PunchOptions = {
+  estimatedMinutes?: number | null;
+};
+
 /**
  * 打刻実行
  */
 export async function executePunch(
   employeeId: string,
-  punchType: PunchType
+  punchType: PunchType,
+  options?: PunchOptions
 ): Promise<PunchResult> {
   const now = nowJST();
   const todayDate = todayForDB();
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // 1. 当日のDailyAttendanceを取得 or 作成
       let attendance = await tx.dailyAttendance.findUnique({
         where: { employeeId_date: { employeeId, date: todayDate } },
@@ -75,6 +81,7 @@ export async function executePunch(
           dailyAttendanceId: attendance.id,
           type: punchType,
           timestamp: now.toDate(),
+          estimatedMinutes: punchType === "INTERRUPT_START" ? (options?.estimatedMinutes ?? null) : null,
         },
       });
 
@@ -117,6 +124,14 @@ export async function executePunch(
 
       return { success: true };
     });
+
+    // トランザクション成功後にBot通知（非同期、失敗してもブロックしない）
+    if (result.success) {
+      notifyPunchAction(employeeId, punchType, now.toDate(), options?.estimatedMinutes)
+        .catch((err) => console.error("打刻Bot通知失敗:", err));
+    }
+
+    return result;
   } catch (e) {
     console.error("打刻エラー:", e);
     return { success: false, error: "打刻処理に失敗しました" };
