@@ -13,6 +13,7 @@ import AlertBanner from "@/components/attendance/AlertBanner";
 
 type AttendanceData = {
   employee: { id: string; name: string } | null;
+  userRole?: string;
   attendance: {
     id: string;
     status: string;
@@ -78,6 +79,14 @@ export default function AttendancePage() {
           >
             休暇申請
           </Link>
+          {data?.userRole === "admin" && (
+            <Link
+              href="/attendance/admin"
+              className="rounded-[6px] bg-[#2563EB] px-3 py-1.5 text-[13px] text-white hover:bg-[#1D4ED8]"
+            >
+              管理者
+            </Link>
+          )}
         </div>
       </div>
 

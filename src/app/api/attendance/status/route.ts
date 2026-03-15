@@ -15,7 +15,7 @@ export async function GET() {
   const employee = await prisma.employee.findFirst({
     where: { name: user.name, status: "active" },
   });
-  if (!employee) return NextResponse.json({ employee: null, attendance: null, punches: [] });
+  if (!employee) return NextResponse.json({ employee: null, attendance: null, punches: [], userRole: user.role });
 
   const today = dayjs().tz("Asia/Tokyo").startOf("day").toDate();
 
@@ -25,6 +25,7 @@ export async function GET() {
   });
 
   return NextResponse.json({
+    userRole: user.role,
     employee: { id: employee.id, name: employee.name },
     attendance: attendance
       ? {
