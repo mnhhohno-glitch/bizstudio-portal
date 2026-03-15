@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { approveModificationRequest, approveLeaveRequest, rejectRequest } from "@/lib/attendance/approval";
+import { notifyEmployeeApprovalResult } from "@/lib/line/notify";
 
 export async function GET(
   _request: Request,
@@ -78,6 +79,8 @@ export async function POST(
     }
     const result = await rejectRequest(token, user.id, rejectionReason.trim(), type);
     if (!result.success) return NextResponse.json({ error: result.error }, { status: 400 });
+    const reqId = modReq?.id ?? leaveReq?.id ?? "";
+    notifyEmployeeApprovalResult(type, reqId, false, rejectionReason.trim()).catch((e) => console.error("LINE通知エラー:", e));
     return NextResponse.json({ success: true });
   }
 
@@ -87,5 +90,7 @@ export async function POST(
     : await approveLeaveRequest(token, user.id);
 
   if (!result.success) return NextResponse.json({ error: result.error }, { status: 400 });
+  const reqId = modReq?.id ?? leaveReq?.id ?? "";
+  notifyEmployeeApprovalResult(type, reqId, true).catch((e) => console.error("LINE通知エラー:", e));
   return NextResponse.json({ success: true });
 }

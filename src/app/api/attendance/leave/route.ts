@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { LeaveType, HalfDayType } from "@prisma/client";
+import { notifyAdminLeaveRequest } from "@/lib/line/notify";
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -36,6 +37,9 @@ export async function POST(request: Request) {
       reason: reason?.trim() || null,
     },
   });
+
+  // LINE通知（非同期）
+  notifyAdminLeaveRequest(leaveReq.id).catch((e) => console.error("LINE通知エラー:", e));
 
   return NextResponse.json({ id: leaveReq.id }, { status: 201 });
 }

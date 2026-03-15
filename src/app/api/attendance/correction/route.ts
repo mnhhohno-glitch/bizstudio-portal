@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { ModReqType } from "@prisma/client";
+import { notifyAdminModificationRequest } from "@/lib/line/notify";
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -29,6 +30,9 @@ export async function POST(request: Request) {
       reason: reason.trim(),
     },
   });
+
+  // LINE通知（非同期、失敗しても申請は成功）
+  notifyAdminModificationRequest(modReq.id).catch((e) => console.error("LINE通知エラー:", e));
 
   return NextResponse.json({ id: modReq.id }, { status: 201 });
 }
