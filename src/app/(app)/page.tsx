@@ -4,6 +4,8 @@ import { PageTitle } from "@/components/ui/PageTitle";
 import Link from "next/link";
 import { ANNOUNCEMENT_CATEGORIES, AnnouncementCategoryKey } from "@/lib/constants/announcement";
 import AttendanceAlertBanner from "@/components/attendance/AlertBanner";
+import AttendanceMiniCard from "@/components/attendance/AttendanceMiniCard";
+import { todayForDB } from "@/lib/attendance/timezone";
 
 const STATUS_LABEL: Record<string, string> = {
   NOT_STARTED: "未着手",
@@ -42,29 +44,27 @@ export default async function DashboardPage() {
       : null,
   ]);
 
-  const myTasks = employee
-    ? await prisma.task.findMany({
-        where: {
-          assignees: { some: { employeeId: employee.id } },
-          status: { not: "COMPLETED" },
-        },
-        orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
-        take: 5,
-        include: {
-          category: { select: { name: true } },
-          candidate: { select: { name: true } },
-        },
-      })
-    : [];
-
-  const myTaskCount = employee
-    ? await prisma.task.count({
-        where: {
-          assignees: { some: { employeeId: employee.id } },
-          status: { not: "COMPLETED" },
-        },
-      })
-    : 0;
+  // Fetch tasks and attendance in parallel
+  const [myTasks, myTaskCount, todayAttendance] = await Promise.all([
+    employee
+      ? prisma.task.findMany({
+          where: { assignees: { some: { employeeId: employee.id } }, status: { not: "COMPLETED" } },
+          orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+          take: 5,
+          include: { category: { select: { name: true } }, candidate: { select: { name: true } } },
+        })
+      : [],
+    employee
+      ? prisma.task.count({
+          where: { assignees: { some: { employeeId: employee.id } }, status: { not: "COMPLETED" } },
+        })
+      : 0,
+    employee
+      ? prisma.dailyAttendance.findUnique({
+          where: { employeeId_date: { employeeId: employee.id, date: todayForDB() } },
+        })
+      : null,
+  ]);
 
   const formatDate = (date: Date | null) => {
     if (!date) return "";
@@ -80,45 +80,38 @@ export default async function DashboardPage() {
     <div>
       <PageTitle>ダッシュボード</PageTitle>
 
-      {/* 未打刻アラート */}
-      <div className="mt-4">
-        <AttendanceAlertBanner />
-      </div>
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
+        {/* Left column (60%) */}
+        <div className="md:col-span-3 space-y-3">
+          {/* Attendance Mini Card */}
+          <AttendanceMiniCard
+            status={todayAttendance?.status ?? null}
+            clockIn={todayAttendance?.clockIn?.toISOString() ?? null}
+            clockOut={todayAttendance?.clockOut?.toISOString() ?? null}
+            totalWork={todayAttendance?.totalWork ?? 0}
+            totalBreak={todayAttendance?.totalBreak ?? 0}
+          />
 
-      {/* マイタスク */}
-      {employee && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[16px] font-semibold text-[#374151] flex items-center gap-2">
-              📋 マイタスク
-              {myTaskCount > 0 && (
-                <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#2563EB] px-1.5 text-[11px] font-medium text-white">
-                  {myTaskCount}
-                </span>
-              )}
-            </h2>
-            <Link
-              href="/tasks"
-              className="text-[14px] text-[#2563EB] hover:underline"
-            >
-              すべて見る →
-            </Link>
-          </div>
+          {/* Alert Banner */}
+          <AttendanceAlertBanner />
 
-          {myTasks.length === 0 ? (
-            <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-6">
-              <p className="text-[14px] text-[#6B7280]">残タスクはありません</p>
+          {/* My Tasks */}
+          <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
+              <h2 className="text-[14px] font-medium text-[#374151] flex items-center gap-2">
+                マイタスク
+                {myTaskCount > 0 && (
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#2563EB] px-1.5 text-[11px] font-medium text-white">
+                    {myTaskCount}
+                  </span>
+                )}
+              </h2>
+              <Link href="/tasks" className="text-[13px] text-[#2563EB] hover:underline">すべて見る →</Link>
             </div>
-          ) : (
-            <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
-              <div className="px-4 py-3 bg-[#F9FAFB] border-b border-[#E5E7EB]">
-                <p className="text-[13px] font-medium text-[#6B7280]">
-                  残タスク <span className="text-[#374151] font-bold">{myTaskCount}件</span>
-                  {myTaskCount > 5 && (
-                    <span className="ml-1 text-[#9CA3AF]">（直近5件を表示）</span>
-                  )}
-                </p>
-              </div>
+
+            {myTasks.length === 0 ? (
+              <p className="text-[13px] text-[#9CA3AF] text-center py-6">タスクはありません</p>
+            ) : (
               <div className="divide-y divide-[#F3F4F6]">
                 {myTasks.map((t) => {
                   const overdue = t.dueDate && new Date(t.dueDate) < new Date(new Date().toDateString());
@@ -126,7 +119,7 @@ export default async function DashboardPage() {
                     <Link
                       key={t.id}
                       href={`/tasks/${t.id}`}
-                      className="flex items-center gap-3 px-4 py-3 hover:bg-[#F9FAFB] transition-colors"
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#F9FAFB] transition-colors"
                     >
                       <span className={`shrink-0 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
                         {STATUS_LABEL[t.status] ?? t.status}
@@ -148,57 +141,50 @@ export default async function DashboardPage() {
                   );
                 })}
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right column (40%) */}
+        <div className="md:col-span-2">
+          <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB]">
+              <h2 className="text-[14px] font-medium text-[#374151]">お知らせ</h2>
+              <Link href="/announcements" className="text-[13px] text-[#2563EB] hover:underline">すべて見る →</Link>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* お知らせ */}
-      <div className="mt-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[16px] font-semibold text-[#374151] flex items-center gap-2">
-            📢 お知らせ
-          </h2>
-          <Link
-            href="/announcements"
-            className="text-[14px] text-[#2563EB] hover:underline"
-          >
-            すべて見る →
-          </Link>
+            {recentAnnouncements.length === 0 ? (
+              <p className="text-[13px] text-[#9CA3AF] text-center py-6">お知らせはまだありません</p>
+            ) : (
+              <div className="divide-y divide-[#F3F4F6]">
+                {recentAnnouncements.map((announcement) => {
+                  const cat = ANNOUNCEMENT_CATEGORIES[announcement.category as AnnouncementCategoryKey];
+                  return (
+                    <Link
+                      key={announcement.id}
+                      href={`/announcements/${announcement.id}`}
+                      className="block px-4 py-3 hover:bg-[#F9FAFB] transition-colors"
+                    >
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] mb-1"
+                        style={{ backgroundColor: cat.bgColor, color: cat.color }}
+                      >
+                        {cat.icon} {cat.label}
+                      </span>
+                      <h3 className="text-[14px] font-medium text-[#374151] line-clamp-1">{announcement.title}</h3>
+                      <p className="text-[11px] text-[#9CA3AF] mt-0.5">
+                        {formatDate(announcement.publishedAt)}
+                      </p>
+                      <p className="text-[13px] text-[#6B7280] mt-1 line-clamp-2">
+                        {truncateContent(announcement.content)}
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-
-        {recentAnnouncements.length === 0 ? (
-          <div className="bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-6">
-            <p className="text-[14px] text-[#6B7280]">お知らせはまだありません</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {recentAnnouncements.map((announcement) => {
-              const cat = ANNOUNCEMENT_CATEGORIES[announcement.category as AnnouncementCategoryKey];
-              return (
-                <Link
-                  key={announcement.id}
-                  href={`/announcements/${announcement.id}`}
-                  className="block bg-white rounded-[8px] border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] p-4 hover:border-[#2563EB]/30 transition-colors"
-                >
-                  <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] mb-2"
-                    style={{ backgroundColor: cat.bgColor, color: cat.color }}
-                  >
-                    {cat.icon} {cat.label}
-                  </span>
-                  <h3 className="text-[16px] font-semibold text-[#374151]">{announcement.title}</h3>
-                  <p className="text-[12px] text-[#6B7280] mt-1">
-                    {formatDate(announcement.publishedAt)}
-                  </p>
-                  <p className="text-[14px] text-[#6B7280] mt-2">
-                    {truncateContent(announcement.content)}
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
