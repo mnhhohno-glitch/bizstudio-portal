@@ -60,7 +60,7 @@ export async function approveModificationRequest(
             }
 
             // 集計値を再計算
-            const totals = await calculateDailyTotals(attendance.id);
+            const totals = await calculateDailyTotals(attendance.id, tx);
             await tx.dailyAttendance.update({
               where: { id: attendance.id },
               data: {

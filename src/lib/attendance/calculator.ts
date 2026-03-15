@@ -9,6 +9,9 @@ dayjs.extend(timezone);
 
 type TimeRange = { start: number; end: number }; // Unix秒
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PrismaLike = { dailyAttendance: any; };
+
 /**
  * 2つの時間区間の重複秒数を計算
  */
@@ -20,11 +23,14 @@ function overlapSeconds(a: TimeRange, b: TimeRange): number {
 
 /**
  * 退勤確定時に呼び出す日次集計計算
+ * @param db - Prismaクライアントまたはトランザクション
  */
 export async function calculateDailyTotals(
-  dailyAttendanceId: string
+  dailyAttendanceId: string,
+  db?: PrismaLike
 ): Promise<DailyTotals> {
-  const attendance = await prisma.dailyAttendance.findUnique({
+  const client = db ?? prisma;
+  const attendance = await client.dailyAttendance.findUnique({
     where: { id: dailyAttendanceId },
     include: { punchEvents: { orderBy: { timestamp: "asc" } } },
   });
@@ -33,7 +39,7 @@ export async function calculateDailyTotals(
     throw new Error("出退勤データが不完全です");
   }
 
-  const punches = attendance.punchEvents;
+  const punches: { type: string; timestamp: Date }[] = attendance.punchEvents;
   const clockInTs = dayjs(attendance.clockIn).tz("Asia/Tokyo");
   const clockOutTs = dayjs(attendance.clockOut).tz("Asia/Tokyo");
 

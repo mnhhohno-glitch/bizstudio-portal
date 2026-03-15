@@ -103,9 +103,9 @@ export async function executePunch(
         data: updateData,
       });
 
-      // 7. 退勤時は集計計算
+      // 7. 退勤時は集計計算（トランザクション内のクライアントを渡す）
       if (punchType === "CLOCK_OUT") {
-        const totals = await calculateDailyTotals(attendance.id);
+        const totals = await calculateDailyTotals(attendance.id, tx);
         await tx.dailyAttendance.update({
           where: { id: attendance.id },
           data: {
