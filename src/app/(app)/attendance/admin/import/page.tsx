@@ -10,6 +10,7 @@ type ImportResult = {
   skipped: number;
   errors: string[];
   employeeSummary: { empNo: string; name: string; imported: number; skipped: number }[];
+  debug: string[];
 };
 
 export default function ImportPage() {
@@ -140,6 +141,15 @@ export default function ImportPage() {
               <h3 className="mb-1 text-[13px] font-medium text-red-700">エラー詳細</h3>
               <div className="max-h-[200px] overflow-y-auto rounded-lg bg-red-50 p-3 text-[12px] text-red-800">
                 {result.errors.map((e, i) => <p key={i}>{e}</p>)}
+              </div>
+            </div>
+          )}
+
+          {result.debug.length > 0 && (
+            <div className="mt-3">
+              <h3 className="mb-1 text-[13px] font-medium text-[#6B7280]">デバッグ情報</h3>
+              <div className="max-h-[200px] overflow-y-auto rounded-lg bg-gray-50 p-3 text-[12px] text-[#374151] font-mono">
+                {result.debug.map((d, i) => <p key={i}>{d}</p>)}
               </div>
             </div>
           )}
