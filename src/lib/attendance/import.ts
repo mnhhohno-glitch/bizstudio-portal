@@ -57,7 +57,6 @@ export async function importAttendanceFromExcel(buffer: Buffer): Promise<ImportR
   const ws = wb.getWorksheet(1);
   if (!ws) throw new Error("Sheet1 が見つかりません");
 
-  const cutoffDate = new Date("2026-03-01T00:00:00+09:00");
   const result: ImportResult = { totalRows: 0, imported: 0, skipped: 0, errors: [], employeeSummary: [], debug: [] };
   const empSummaryMap = new Map<string, { name: string; imported: number; skipped: number }>();
 
@@ -88,10 +87,7 @@ export async function importAttendanceFromExcel(buffer: Buffer): Promise<ImportR
       continue;
     }
 
-    // Skip 2026/03+
     const dateVal = row.getCell(3).value;
-    if (dateVal instanceof Date && dateVal >= cutoffDate) { result.skipped++; continue; }
-
     const name = String(row.getCell(2).value ?? "").trim();
     if (!rowsByEmp.has(normalizedNo)) rowsByEmp.set(normalizedNo, { normalizedNo, rawNo, name, rows: [] });
     rowsByEmp.get(normalizedNo)!.rows.push(row);
