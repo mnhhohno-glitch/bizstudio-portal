@@ -79,6 +79,15 @@ for (let h = 9; h <= 21; h++) {
   }
 }
 
+/** 時刻オプション（30分刻み） */
+const TIME_OPTIONS_30: string[] = [];
+for (let h = 9; h <= 21; h++) {
+  for (let m = 0; m < 60; m += 30) {
+    if (h === 21 && m > 0) break;
+    TIME_OPTIONS_30.push(`${h}:${String(m).padStart(2, "0")}`);
+  }
+}
+
 /** 地域・都道府県 */
 const REGIONS = [
   { name: "北海道・東北", prefectures: ["北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"] },
@@ -431,9 +440,9 @@ export default function TaskNewPage() {
       return selectedCategory.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
-    // 面接対策依頼: 選考求人URLをカスタムUIで代替
+    // 面接対策依頼: 選考求人情報をカスタムUIで代替（インラインで表示）
     if (isMensetsuTaisaku) {
-      return selectedCategory.fields.filter((f) => f.label !== "選考求人URL");
+      return selectedCategory.fields.filter((f) => f.label !== "選考求人情報" && f.label !== "選考求人URL");
     }
 
     // RAエントリー: エリアをカスタムUIで代替
@@ -1133,6 +1142,34 @@ export default function TaskNewPage() {
               }
               return (
                 <div className="space-y-5">
+                  {/* FM登録依頼: カスタムフィールド（先頭に表示） */}
+                  {isFmTouroku && (
+                    <>
+                      {/* 氏名（姓・名分割） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          氏名<span className="ml-1 text-red-500">*</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input type="text" placeholder="姓" value={fieldValues["__fm_sei"] ?? ""} onChange={(e) => setFieldValue("__fm_sei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          <input type="text" placeholder="名" value={fieldValues["__fm_mei"] ?? ""} onChange={(e) => setFieldValue("__fm_mei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                        </div>
+                      </div>
+
+                      {/* フリガナ（セイ・メイ分割） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                          フリガナ<span className="ml-1 text-red-500">*</span>
+                          <span className="ml-2 text-[12px] font-normal text-[#9CA3AF]">※カタカナで入力してください</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input type="text" placeholder="セイ" value={fieldValues["__fm_sei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_sei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          <input type="text" placeholder="メイ" value={fieldValues["__fm_mei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_mei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   {visibleFields.map((field) => (
                     <div key={field.id}>
                       <label className="mb-1 block text-[13px] font-medium text-[#374151]">
@@ -1145,6 +1182,68 @@ export default function TaskNewPage() {
                         <p className="mb-1 text-[12px] text-[#9CA3AF]">{field.description}</p>
                       )}
                       {renderField(field, fieldValues, setFieldValue, toggleMultiSelect)}
+
+                      {/* FM登録: メールアドレスの直下に郵便番号・住所を挿入 */}
+                      {isFmTouroku && field.label === "メールアドレス" && (
+                        <>
+                          <div className="mt-5">
+                            <label className="mb-1 block text-[13px] font-medium text-[#374151]">郵便番号</label>
+                            <input type="text" placeholder="000-0000" value={fieldValues["__fm_zip"] ?? ""} onChange={(e) => setFieldValue("__fm_zip", e.target.value)} className="max-w-[160px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          </div>
+                          <div className="mt-5">
+                            <label className="mb-1 block text-[13px] font-medium text-[#374151]">住所</label>
+                            <input type="text" value={fieldValues["__fm_address"] ?? ""} onChange={(e) => setFieldValue("__fm_address", e.target.value)} className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
+                          </div>
+                        </>
+                      )}
+
+                      {/* 面接対策: 選考企業名の直下に選考求人情報を挿入 */}
+                      {isMensetsuTaisaku && field.label === "選考企業名" && (
+                        <div className="mt-5">
+                          <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                            選考求人情報<span className="ml-1 text-red-500">*</span>
+                          </label>
+                          <div className="flex gap-4 mb-2">
+                            {(["url", "pdf"] as const).map((t) => (
+                              <label key={t} className="flex cursor-pointer items-center gap-2">
+                                <input type="radio" name="mensetsuInfoType" checked={mensetsuInfoType === t} onChange={() => setMensetsuInfoType(t)} className="accent-[#2563EB]" />
+                                <span className="text-[14px] text-[#374151]">{t === "url" ? "URL" : "PDF"}</span>
+                              </label>
+                            ))}
+                          </div>
+                          {mensetsuInfoType === "url" ? (
+                            <input
+                              type="text"
+                              value={fieldValues[selectedCategory?.fields.find((f) => f.label === "選考求人情報")?.id ?? ""] ?? ""}
+                              onChange={(e) => {
+                                const fld = selectedCategory?.fields.find((f) => f.label === "選考求人情報");
+                                if (fld) setFieldValue(fld.id, e.target.value);
+                              }}
+                              placeholder="https://..."
+                              className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                            />
+                          ) : (
+                            <div>
+                              <div
+                                onDragOver={(e) => { e.preventDefault(); setTemplateDragOver(true); }}
+                                onDragLeave={() => setTemplateDragOver(false)}
+                                onDrop={(e) => { e.preventDefault(); setTemplateDragOver(false); if (e.dataTransfer.files[0]) setMensetsuPdfFile(e.dataTransfer.files[0]); }}
+                                className={`flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed px-4 py-4 transition-colors ${templateDragOver ? "border-[#2563EB] bg-[#EEF2FF]" : "border-[#D1D5DB] bg-[#F9FAFB]"}`}
+                              >
+                                <p className="text-[13px] text-[#6B7280]">PDFをドラッグ＆ドロップ、または</p>
+                                <button type="button" onClick={() => templateFileInputRef.current?.click()} className="mt-1 text-[13px] font-medium text-[#2563EB] hover:underline">ファイルを選択</button>
+                                <input ref={templateFileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setMensetsuPdfFile(e.target.files[0]); }} />
+                              </div>
+                              {mensetsuPdfFile && (
+                                <div className="mt-2 flex items-center gap-2 rounded-[6px] border border-[#E5E7EB] px-3 py-2">
+                                  <span className="flex-1 truncate text-[13px] text-[#374151]">{mensetsuPdfFile.name}</span>
+                                  <button type="button" onClick={() => setMensetsuPdfFile(null)} className="text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
 
@@ -1161,54 +1260,6 @@ export default function TaskNewPage() {
                         onChange={(e) => setCareerSummary(e.target.value)}
                         className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
                       />
-                    </div>
-                  )}
-
-                  {/* ===== 面接対策依頼: 選考求人情報（URL/PDF切替） ===== */}
-                  {isMensetsuTaisaku && (
-                    <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
-                        選考求人情報<span className="ml-1 text-red-500">*</span>
-                      </label>
-                      <div className="flex gap-4 mb-2">
-                        {(["url", "pdf"] as const).map((t) => (
-                          <label key={t} className="flex cursor-pointer items-center gap-2">
-                            <input type="radio" name="mensetsuInfoType" checked={mensetsuInfoType === t} onChange={() => setMensetsuInfoType(t)} className="accent-[#2563EB]" />
-                            <span className="text-[14px] text-[#374151]">{t === "url" ? "URL" : "PDF"}</span>
-                          </label>
-                        ))}
-                      </div>
-                      {mensetsuInfoType === "url" ? (
-                        <input
-                          type="text"
-                          value={fieldValues[selectedCategory?.fields.find((f) => f.label === "選考求人URL")?.id ?? ""] ?? ""}
-                          onChange={(e) => {
-                            const fld = selectedCategory?.fields.find((f) => f.label === "選考求人URL");
-                            if (fld) setFieldValue(fld.id, e.target.value);
-                          }}
-                          placeholder="https://..."
-                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                        />
-                      ) : (
-                        <div>
-                          <div
-                            onDragOver={(e) => { e.preventDefault(); setTemplateDragOver(true); }}
-                            onDragLeave={() => setTemplateDragOver(false)}
-                            onDrop={(e) => { e.preventDefault(); setTemplateDragOver(false); if (e.dataTransfer.files[0]) setMensetsuPdfFile(e.dataTransfer.files[0]); }}
-                            className={`flex flex-col items-center justify-center rounded-[8px] border-2 border-dashed px-4 py-4 transition-colors ${templateDragOver ? "border-[#2563EB] bg-[#EEF2FF]" : "border-[#D1D5DB] bg-[#F9FAFB]"}`}
-                          >
-                            <p className="text-[13px] text-[#6B7280]">PDFをドラッグ＆ドロップ、または</p>
-                            <button type="button" onClick={() => templateFileInputRef.current?.click()} className="mt-1 text-[13px] font-medium text-[#2563EB] hover:underline">ファイルを選択</button>
-                            <input ref={templateFileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setMensetsuPdfFile(e.target.files[0]); }} />
-                          </div>
-                          {mensetsuPdfFile && (
-                            <div className="mt-2 flex items-center gap-2 rounded-[6px] border border-[#E5E7EB] px-3 py-2">
-                              <span className="flex-1 truncate text-[13px] text-[#374151]">{mensetsuPdfFile.name}</span>
-                              <button type="button" onClick={() => setMensetsuPdfFile(null)} className="text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -1350,44 +1401,6 @@ export default function TaskNewPage() {
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* ===== FM登録依頼: カスタムフィールド ===== */}
-                  {isFmTouroku && (
-                    <>
-                      {/* 氏名（姓・名分割） */}
-                      <div>
-                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
-                          氏名<span className="ml-1 text-red-500">*</span>
-                        </label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <input type="text" placeholder="姓" value={fieldValues["__fm_sei"] ?? ""} onChange={(e) => setFieldValue("__fm_sei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                          <input type="text" placeholder="名" value={fieldValues["__fm_mei"] ?? ""} onChange={(e) => setFieldValue("__fm_mei", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                        </div>
-                      </div>
-
-                      {/* フリガナ（セイ・メイ分割） */}
-                      <div>
-                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">
-                          フリガナ<span className="ml-1 text-red-500">*</span>
-                          <span className="ml-2 text-[12px] font-normal text-[#9CA3AF]">※カタカナで入力してください</span>
-                        </label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <input type="text" placeholder="セイ" value={fieldValues["__fm_sei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_sei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                          <input type="text" placeholder="メイ" value={fieldValues["__fm_mei_kana"] ?? ""} onChange={(e) => setFieldValue("__fm_mei_kana", e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                        </div>
-                      </div>
-
-                      {/* 郵便番号＆住所（分割） */}
-                      <div>
-                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">郵便番号</label>
-                        <input type="text" placeholder="000-0000" value={fieldValues["__fm_zip"] ?? ""} onChange={(e) => setFieldValue("__fm_zip", e.target.value)} className="max-w-[160px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">住所</label>
-                        <input type="text" value={fieldValues["__fm_address"] ?? ""} onChange={(e) => setFieldValue("__fm_address", e.target.value)} className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-                      </div>
-                    </>
                   )}
 
                   {/* ===== テンプレート添付ファイル（対象カテゴリのみ） ===== */}
@@ -1961,10 +1974,17 @@ function renderField(
         return (
           <div className="flex items-center gap-2">
             <input type="date" value={dateVal} onChange={(e) => setFieldValue(field.id, `${e.target.value} ${timeVal}`.trim())} className="max-w-[180px] rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]" />
-            <select value={timeVal} onChange={(e) => setFieldValue(field.id, `${dateVal} ${e.target.value}`.trim())} className="rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]">
-              <option value="">時刻</option>
-              {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <input
+              type="text"
+              list={`time-list-${field.id}`}
+              value={timeVal}
+              onChange={(e) => setFieldValue(field.id, `${dateVal} ${e.target.value}`.trim())}
+              placeholder="時刻"
+              className="w-[100px] rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <datalist id={`time-list-${field.id}`}>
+              {TIME_OPTIONS_30.map((t) => <option key={t} value={t} />)}
+            </datalist>
           </div>
         );
       }
