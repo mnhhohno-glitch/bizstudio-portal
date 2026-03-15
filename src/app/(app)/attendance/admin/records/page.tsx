@@ -111,6 +111,33 @@ export default function RecordsPage() {
         </a>
       </div>
 
+      {/* Monthly Summary Card */}
+      {summary && !loading && (
+        <div className="mb-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+          <div className="grid grid-cols-5 gap-3 mb-3">
+            {[
+              { label: "休憩", value: fmtTotal(summary.totalBreak) },
+              { label: "中断", value: fmtTotal(summary.totalInterrupt) },
+              { label: "残業", value: fmtTotal(summary.totalOvertime) },
+              { label: "実働", value: fmtTotal(summary.totalWork) },
+              { label: "深夜", value: fmtTotal(summary.totalNightTime) },
+            ].map((item) => (
+              <div key={item.label}>
+                <p className="text-[11px] text-[#9CA3AF]">{item.label}</p>
+                <p className="text-[15px] font-medium tabular-nums text-[#374151]">{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[13px] text-[#6B7280]">
+            出勤: <span className="font-medium text-[#374151]">{summary.workDays}日</span>
+            <span className="mx-2">／</span>
+            有給: <span className="font-medium text-purple-700">{summary.paidLeaveDays}日</span>
+            <span className="mx-2">／</span>
+            公休: <span className="font-medium text-[#374151]">{summary.offDays}日</span>
+          </p>
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-x-auto">
         <table className="w-full text-[13px]" style={{ minWidth: 800 }}>
@@ -163,28 +190,6 @@ export default function RecordsPage() {
                   );
                 })}
 
-                {/* Summary rows */}
-                {summary && (
-                  <>
-                    <tr className="border-t-2 border-[#D1D5DB] bg-[#F9FAFB] font-medium">
-                      <td colSpan={7} className="px-2 py-2 text-right text-[12px] text-[#6B7280]">月合計</td>
-                      <td className="px-2 py-2 tabular-nums">{fmtTotal(summary.totalBreak)}</td>
-                      <td className="px-2 py-2 tabular-nums">{fmtTotal(summary.totalInterrupt)}</td>
-                      <td className="px-2 py-2 tabular-nums">{fmtTotal(summary.totalOvertime)}</td>
-                      <td className="px-2 py-2 tabular-nums font-bold">{fmtTotal(summary.totalWork)}</td>
-                      <td className="px-2 py-2 tabular-nums">{fmtTotal(summary.totalNightTime)}</td>
-                    </tr>
-                    <tr className="bg-[#F9FAFB]">
-                      <td colSpan={12} className="px-2 py-2 text-[12px] text-[#6B7280]">
-                        出勤日数: <span className="font-medium text-[#374151]">{summary.workDays}日</span>
-                        <span className="mx-2">／</span>
-                        有給: <span className="font-medium text-purple-700">{summary.paidLeaveDays}日</span>
-                        <span className="mx-2">／</span>
-                        公休: <span className="font-medium text-[#374151]">{summary.offDays}日</span>
-                      </td>
-                    </tr>
-                  </>
-                )}
               </>
             )}
           </tbody>
