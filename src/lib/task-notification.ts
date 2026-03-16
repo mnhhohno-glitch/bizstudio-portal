@@ -103,3 +103,75 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
 
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
+
+type TaskCompletedParams = {
+  taskId: string;
+  title: string;
+  categoryName: string | null;
+  candidateName: string | null;
+  candidateNumber: string | null;
+  completedByName: string;
+  creatorLineworksId: string | null;
+  creatorName: string;
+};
+
+/**
+ * タスク完了時にLINE WORKSのタスク通知トークルームにメッセージを送信
+ */
+export async function notifyTaskCompleted(params: TaskCompletedParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) return;
+
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const candidateStr = params.candidateName
+    ? `${params.candidateName}${params.candidateNumber ? `（${params.candidateNumber}）` : ""}`
+    : "なし";
+
+  const baseLines = [
+    "✅ タスクが完了しました",
+    "",
+    "■ タスク",
+    params.title,
+    "",
+    "■ カテゴリ",
+    params.categoryName ?? "未設定",
+    "",
+    "■ 求職者",
+    candidateStr,
+    "",
+    "■ 完了者",
+    params.completedByName,
+    "",
+    "■ 完了日時",
+    now,
+    "",
+    "🔗 詳細はこちら",
+    `${baseUrl}/tasks/${params.taskId}`,
+  ];
+
+  // 作成者にメンション
+  if (params.creatorLineworksId) {
+    const mentionedLines = [
+      `<m userId="${params.creatorLineworksId}"> タスクが完了しました`,
+      "",
+      ...baseLines.slice(2),
+    ];
+    try {
+      await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      return;
+    } catch {
+      // fallback
+    }
+  }
+
+  // メンションなし
+  const fallbackLines = [
+    `${params.creatorName}さん タスクが完了しました`,
+    "",
+    ...baseLines.slice(2),
+  ];
+  await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { notifyTaskCompleted } from "@/lib/task-notification";
 
 export async function PATCH(
   request: Request,
@@ -65,6 +66,8 @@ export async function PATCH(
       if (completedCount >= totalAssignees) {
         // 全員完了 → タスク全体を完了
         await prisma.task.update({ where: { id: taskId }, data: { status: "COMPLETED" } });
+        // 完了通知
+        sendCompletionNotification(task, actor).catch((e) => console.error("完了通知エラー:", e));
       } else {
         // 一部完了 → 対応中に設定（未着手から変更）
         if (task.status === "NOT_STARTED") {
@@ -83,9 +86,38 @@ export async function PATCH(
     // 通常の完了処理（any or 単一担当者）
     await prisma.task.update({ where: { id: taskId }, data: { status } });
 
+    // 完了通知（作成者≠完了者の場合のみ）
+    if (status === "COMPLETED" && task.createdByUserId !== actor.id) {
+      sendCompletionNotification(task, actor).catch((e) => console.error("完了通知エラー:", e));
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to update status:", error);
     return NextResponse.json({ error: "ステータス更新に失敗しました" }, { status: 500 });
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendCompletionNotification(task: any, actor: { id: string; name: string }) {
+  const fullTask = await prisma.task.findUnique({
+    where: { id: task.id },
+    include: {
+      category: { select: { name: true } },
+      candidate: { select: { name: true, candidateNumber: true } },
+      createdByUser: { select: { id: true, name: true, lineworksId: true } },
+    },
+  });
+  if (!fullTask || fullTask.createdByUserId === actor.id) return;
+
+  await notifyTaskCompleted({
+    taskId: fullTask.id,
+    title: fullTask.title,
+    categoryName: fullTask.category?.name ?? null,
+    candidateName: fullTask.candidate?.name ?? null,
+    candidateNumber: fullTask.candidate?.candidateNumber ?? null,
+    completedByName: actor.name,
+    creatorLineworksId: fullTask.createdByUser?.lineworksId ?? null,
+    creatorName: fullTask.createdByUser?.name ?? "",
+  });
 }
