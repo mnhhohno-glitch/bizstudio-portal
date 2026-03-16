@@ -149,6 +149,15 @@ export default function TasksPage() {
     } catch { /* ignore */ }
   };
 
+  const handleClone = async (id: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${id}/clone`, { method: "POST" });
+      if (!res.ok) return;
+      const { id: newId } = await res.json();
+      window.location.href = `/tasks/${newId}/edit`;
+    } catch { /* ignore */ }
+  };
+
   // fetch user & master data
   useEffect(() => {
     Promise.all([
@@ -507,6 +516,14 @@ export default function TasksPage() {
                           ✓
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleClone(t.id); }}
+                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-blue-50 hover:text-blue-600"
+                        title="複製"
+                      >
+                        📋
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleSingleDelete(t.id); }}

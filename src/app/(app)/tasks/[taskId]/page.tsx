@@ -125,6 +125,15 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleClone = async () => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/clone`, { method: "POST" });
+      if (!res.ok) { alert("複製に失敗しました"); return; }
+      const { id } = await res.json();
+      router.push(`/tasks/${id}/edit`);
+    } catch { alert("複製に失敗しました"); }
+  };
+
   const formatDate = (d: string | null) => {
     if (!d) return "-";
     return new Date(d).toLocaleDateString("ja-JP");
@@ -200,6 +209,13 @@ export default function TaskDetailPage() {
               >
                 編集
               </Link>
+              <button
+                type="button"
+                onClick={handleClone}
+                className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#374151] transition-colors hover:bg-[#F3F4F6]"
+              >
+                複製
+              </button>
               {task.status !== "COMPLETED" ? (
                 <button
                   type="button"
