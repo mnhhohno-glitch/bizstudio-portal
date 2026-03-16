@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Toaster, toast } from "sonner";
 
-type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number };
+type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number; isExemptFromAttendance: boolean };
 
 export default function AttendanceEmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -55,6 +55,7 @@ export default function AttendanceEmployeesPage() {
                 <th className="px-4 py-3">社員NO</th>
                 <th className="px-4 py-3">氏名</th>
                 <th className="px-4 py-3">有給残日数</th>
+                <th className="px-4 py-3">打刻</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
@@ -75,6 +76,23 @@ export default function AttendanceEmployeesPage() {
                     ) : (
                       <span className="font-medium">{emp.paidLeave}日</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch("/api/attendance/admin/employees", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ employeeId: emp.id, isExemptFromAttendance: !emp.isExemptFromAttendance }),
+                          });
+                          fetchData();
+                        } catch { toast.error("更新に失敗しました"); }
+                      }}
+                      className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${emp.isExemptFromAttendance ? "bg-gray-100 text-gray-500" : "bg-green-100 text-green-700"}`}
+                    >
+                      {emp.isExemptFromAttendance ? "不要" : "必要"}
+                    </button>
                   </td>
                   <td className="px-4 py-3">
                     {editingId !== emp.id && (

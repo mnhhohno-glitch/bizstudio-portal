@@ -39,7 +39,7 @@ export default async function DashboardPage() {
     user
       ? prisma.employee.findFirst({
           where: { name: user.name, status: "active" },
-          select: { id: true },
+          select: { id: true, isExemptFromAttendance: true },
         })
       : null,
   ]);
@@ -83,17 +83,21 @@ export default async function DashboardPage() {
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Left column */}
         <div className="space-y-3">
-          {/* Attendance Mini Card */}
-          <AttendanceMiniCard
-            status={todayAttendance?.status ?? null}
-            clockIn={todayAttendance?.clockIn?.toISOString() ?? null}
-            clockOut={todayAttendance?.clockOut?.toISOString() ?? null}
-            totalWork={todayAttendance?.totalWork ?? 0}
-            totalBreak={todayAttendance?.totalBreak ?? 0}
-          />
+          {/* Attendance Mini Card (打刻不要の社員は非表示) */}
+          {!employee?.isExemptFromAttendance && (
+            <AttendanceMiniCard
+              status={todayAttendance?.status ?? null}
+              clockIn={todayAttendance?.clockIn?.toISOString() ?? null}
+              clockOut={todayAttendance?.clockOut?.toISOString() ?? null}
+              totalWork={todayAttendance?.totalWork ?? 0}
+              totalBreak={todayAttendance?.totalBreak ?? 0}
+            />
+          )}
 
-          {/* Alert Banner */}
+          {/* Alert Banner (打刻不要の社員は非表示) */}
+          {!employee?.isExemptFromAttendance && (
           <AttendanceAlertBanner />
+          )}
 
           {/* My Tasks */}
           <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">

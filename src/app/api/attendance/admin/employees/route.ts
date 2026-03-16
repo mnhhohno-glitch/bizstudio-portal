@@ -11,7 +11,7 @@ export async function GET() {
   const employees = await prisma.employee.findMany({
     where: { status: "active" },
     orderBy: { employeeNumber: "asc" },
-    select: { id: true, employeeNumber: true, name: true, paidLeave: true, userId: true },
+    select: { id: true, employeeNumber: true, name: true, paidLeave: true, userId: true, isExemptFromAttendance: true },
   });
 
   return NextResponse.json({ employees });
@@ -24,16 +24,17 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json();
-  const { employeeId, paidLeave } = body;
+  const { employeeId, paidLeave, isExemptFromAttendance } = body;
 
-  if (!employeeId || paidLeave === undefined) {
+  if (!employeeId) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
   }
 
-  await prisma.employee.update({
-    where: { id: employeeId },
-    data: { paidLeave: Number(paidLeave) },
-  });
+  const data: Record<string, unknown> = {};
+  if (paidLeave !== undefined) data.paidLeave = Number(paidLeave);
+  if (isExemptFromAttendance !== undefined) data.isExemptFromAttendance = Boolean(isExemptFromAttendance);
+
+  await prisma.employee.update({ where: { id: employeeId }, data });
 
   return NextResponse.json({ success: true });
 }

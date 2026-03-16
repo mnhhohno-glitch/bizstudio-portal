@@ -6,6 +6,10 @@ import { nowJST, toJST, dateForDB } from "./timezone";
  * 当月分の未打刻アラートを検知して返す
  */
 export async function getAlerts(employeeId: string): Promise<Alert[]> {
+  // 打刻不要フラグチェック
+  const emp = await prisma.employee.findUnique({ where: { id: employeeId }, select: { isExemptFromAttendance: true } });
+  if (emp?.isExemptFromAttendance) return [];
+
   const now = nowJST();
   const monthStart = now.startOf("month");
   const yesterday = now.subtract(1, "day").startOf("day");
