@@ -5,7 +5,7 @@ import { generateToken, hashToken } from "@/lib/encryption";
 
 // 環境変数が未設定の場合の本番URLフォールバック
 const APP_URL_FALLBACKS: Record<string, string> = {
-  material_creator: "https://tender-reverence-production.up.railway.app",
+  material_creator: "",
   job_analyzer: "https://web-production-95808.up.railway.app",
   candidate_intake: "https://candidate-intake-production.up.railway.app",
   "ai-resume-generator": "https://ai-resume-generator-production-66cb.up.railway.app",

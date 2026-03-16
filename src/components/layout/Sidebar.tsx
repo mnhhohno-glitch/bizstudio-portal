@@ -89,8 +89,7 @@ function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
 }
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
-  const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL
-    || "https://tender-reverence-production.up.railway.app";
+  const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL || "";
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
     || "https://web-production-95808.up.railway.app";
   const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
