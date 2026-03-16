@@ -185,6 +185,7 @@ export default function TaskNewPage() {
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [priority, setPriority] = useState<"HIGH" | "MEDIUM" | "LOW">("MEDIUM");
+  const [completionType, setCompletionType] = useState<"any" | "all">("any");
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -560,6 +561,7 @@ export default function TaskNewPage() {
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           assigneeIds,
+          completionType: assigneeIds.length > 1 ? completionType : "any",
           fieldValues: allFieldValues,
         }),
       });
@@ -1551,6 +1553,27 @@ export default function TaskNewPage() {
                   ))}
                 </div>
               </div>
+
+              {/* 完了条件（担当者2名以上の場合） */}
+              {assigneeIds.length > 1 && (
+                <div>
+                  <label className="mb-1 block text-[13px] font-medium text-[#374151]">完了条件</label>
+                  <div className="space-y-2">
+                    {[
+                      { value: "any" as const, label: "誰か1人で完了", desc: "担当者の誰か1人が完了すればタスク全体が完了" },
+                      { value: "all" as const, label: "全員完了で完了", desc: "担当者全員が完了しないとタスクは完了にならない" },
+                    ].map((opt) => (
+                      <label key={opt.value} className="flex cursor-pointer items-start gap-2">
+                        <input type="radio" name="completionType" checked={completionType === opt.value} onChange={() => setCompletionType(opt.value)} className="mt-0.5 accent-[#2563EB]" />
+                        <div>
+                          <span className="text-[14px] text-[#374151] font-medium">{opt.label}</span>
+                          <p className="text-[12px] text-[#9CA3AF]">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* 添付ファイル（カテゴリによって非表示） */}
               {!hideStep5Attachment && (

@@ -114,6 +114,8 @@ model User {
   taskComments      TaskComment[]     @relation("TaskComments")
   taskAttachments   TaskAttachment[]  @relation("UploadedAttachments")
 
+  taskAssigneeStatuses TaskAssigneeStatus[] @relation("UserAssigneeStatuses")
+
   // 勤怠管理
   employee          Employee?          @relation("EmployeeUser")
 
@@ -454,7 +456,10 @@ model Task {
   createdByUserId String       @map("created_by_user_id")
   createdByUser   User         @relation("TaskCreator", fields: [createdByUserId], references: [id])
 
+  completionType  String       @default("any") @map("completion_type")  // "any" or "all"
+
   assignees       TaskAssignee[]
+  assigneeStatuses TaskAssigneeStatus[]
   fieldValues     TaskFieldValue[]
   attachments     TaskAttachment[]
   comments        TaskComment[]
@@ -477,6 +482,23 @@ model TaskAssignee {
 
   @@unique([taskId, employeeId])
   @@map("task_assignees")
+}
+
+// タスク担当者ごとの完了状態（completionType="all"用）
+model TaskAssigneeStatus {
+  id          String    @id @default(cuid())
+  taskId      String    @map("task_id")
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId      String    @map("user_id")
+  user        User      @relation("UserAssigneeStatuses", fields: [userId], references: [id])
+  isCompleted Boolean   @default(false) @map("is_completed")
+  completedAt DateTime? @map("completed_at")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@map("task_assignee_statuses")
 }
 
 // タスクに入力されたテンプレート値

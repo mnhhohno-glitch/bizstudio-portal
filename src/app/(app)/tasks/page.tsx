@@ -58,7 +58,7 @@ export default function TasksPage() {
   const [filterPriority, setFilterPriority] = useState("");
   const [filterCandidateName, setFilterCandidateName] = useState("");
   const [filterAssigneeId, setFilterAssigneeId] = useState("");
-  const [showAll, setShowAll] = useState(false);
+  const [viewMode, setViewMode] = useState<"mine" | "requested" | "all">("mine");
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("createdAt");
@@ -169,6 +169,7 @@ export default function TasksPage() {
     try {
       const params = new URLSearchParams();
       if (filterStatus) params.set("status", filterStatus);
+      params.set("view", viewMode);
       if (filterCategoryId) {
         params.set("categoryId", filterCategoryId);
       } else if (filterGroupId) {
@@ -178,7 +179,6 @@ export default function TasksPage() {
       if (filterPriority) params.set("priority", filterPriority);
       if (filterCandidateName.trim()) params.set("candidateName", filterCandidateName.trim());
       if (filterAssigneeId) params.set("assigneeId", filterAssigneeId);
-      if (showAll) params.set("showAll", "true");
       if (includeCompleted) params.set("includeCompleted", "true");
       params.set("page", String(page));
       params.set("sortBy", sortBy);
@@ -195,7 +195,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterGroupId, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, showAll, includeCompleted, page, sortBy, sortOrder, categories]);
+  }, [filterStatus, filterGroupId, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, viewMode, includeCompleted, page, sortBy, sortOrder, categories]);
 
   useEffect(() => {
     fetchTasks();
@@ -274,30 +274,33 @@ export default function TasksPage() {
         </Link>
       </div>
 
-      {/* toggles */}
+      {/* view toggle + completed checkbox */}
       <div className="mb-4 flex flex-wrap items-center gap-4">
-        {user?.role === "admin" && (
-          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
-            <input
-              type="checkbox"
-              checked={showAll}
-              onChange={(e) => {
-                setShowAll(e.target.checked);
-                resetPage();
-              }}
-              className="h-4 w-4 accent-[#2563EB]"
-            />
-            全タスクを表示
-          </label>
-        )}
+        <div className="flex rounded-lg border border-[#E5E7EB] overflow-hidden">
+          {([
+            { value: "mine" as const, label: "自分のタスク" },
+            { value: "requested" as const, label: "依頼中" },
+            { value: "all" as const, label: "すべて" },
+          ]).map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => { setViewMode(tab.value); resetPage(); }}
+              className={`px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                viewMode === tab.value
+                  ? "bg-[#2563EB] text-white"
+                  : "bg-white text-[#374151] hover:bg-[#F3F4F6]"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
           <input
             type="checkbox"
             checked={includeCompleted}
-            onChange={(e) => {
-              setIncludeCompleted(e.target.checked);
-              resetPage();
-            }}
+            onChange={(e) => { setIncludeCompleted(e.target.checked); resetPage(); }}
             className="h-4 w-4 accent-[#2563EB]"
           />
           完了タスクを表示

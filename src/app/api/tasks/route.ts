@@ -24,19 +24,23 @@ export async function GET(request: Request) {
     const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
     const perPage = 20;
 
+    const view = searchParams.get("view") || "mine"; // mine, requested, all
     const where: Prisma.TaskWhereInput = {};
 
-    // フィルター: 担当者ベース（非admin or showAll=false）
-    if (actor.role !== "admin" || !showAll) {
-      // ログインユーザー名で社員を検索
-      const employee = await prisma.employee.findFirst({
-        where: { name: actor.name, status: "active" },
-      });
+    // 表示モードに応じたフィルター
+    const employee = await prisma.employee.findFirst({
+      where: { name: actor.name, status: "active" },
+    });
+
+    if (view === "mine" && employee) {
+      where.assignees = { some: { employeeId: employee.id } };
+    } else if (view === "requested") {
+      where.createdByUserId = actor.id;
       if (employee) {
-        where.assignees = { some: { employeeId: employee.id } };
+        where.assignees = { none: { employeeId: employee.id } };
       }
-      // 一致する社員がない場合は全タスク表示（仕様通り）
     }
+    // view === "all" → フィルターなし（全タスク）
 
     // 完了タスクの表示制御
     if (!includeCompleted && !status) {
@@ -121,6 +125,7 @@ export async function POST(request: Request) {
       dueDate,
       assigneeIds,
       fieldValues,
+      completionType,
     } = body;
 
     if (!title?.trim()) {
@@ -140,6 +145,7 @@ export async function POST(request: Request) {
         priority: priority || "MEDIUM",
         dueDate: dueDate ? new Date(dueDate) : null,
         createdByUserId: actor.id,
+        completionType: completionType || "any",
         assignees: {
           create: assigneeIds.map((employeeId: string) => ({ employeeId })),
         },
