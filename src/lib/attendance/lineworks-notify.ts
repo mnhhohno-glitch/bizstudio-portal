@@ -95,16 +95,15 @@ export async function notifyPunchAction(
 }
 
 /**
- * 打刻修正申請の通知（管理者へ）
+ * 打刻修正申請の通知（管理者へ、複数項目対応）
  */
 export async function notifyAdminModificationRequest(requestId: string): Promise<void> {
   const req = await prisma.modificationRequest.findUnique({
     where: { id: requestId },
-    include: { employee: true },
+    include: { employee: true, items: true },
   });
   if (!req) return;
 
-  // 管理者のlineworksIdを取得
   const admins = await prisma.user.findMany({
     where: { role: "admin", status: "active", lineworksId: { not: null } },
     select: { lineworksId: true },
@@ -118,6 +117,22 @@ export async function notifyAdminModificationRequest(requestId: string): Promise
   const days = ["日", "月", "火", "水", "木", "金", "土"];
   const dt = toJST(req.targetDate);
 
+  // 修正項目の一覧を構築（新items or 旧カラム）
+  const itemLines: string[] = [];
+  if (req.items.length > 0) {
+    for (const item of req.items) {
+      const label = MOD_LABEL[item.requestType] ?? item.requestType;
+      const before = item.beforeValue ? toJST(item.beforeValue).format("H:mm") : "(なし)";
+      const after = toJST(item.afterValue).format("H:mm");
+      itemLines.push(`  ・${label}: ${before} → ${after}`);
+    }
+  } else if (req.requestType) {
+    const label = MOD_LABEL[req.requestType] ?? req.requestType;
+    const before = req.beforeValue ? toJST(req.beforeValue).format("H:mm") : "-";
+    const after = req.afterValue ? toJST(req.afterValue).format("H:mm") : "-";
+    itemLines.push(`  ・${label}: ${before} → ${after}`);
+  }
+
   const text = [
     "📋 打刻修正申請",
     "",
@@ -125,9 +140,8 @@ export async function notifyAdminModificationRequest(requestId: string): Promise
     "",
     `■ 申請者: ${req.employee.name}`,
     `■ 対象日: ${dt.month() + 1}月${dt.date()}日（${days[dt.day()]}）`,
-    `■ 種別: ${MOD_LABEL[req.requestType] ?? req.requestType}`,
-    `■ 修正前: ${req.beforeValue ? toJST(req.beforeValue).format("H:mm") : "-"}`,
-    `■ 修正後: ${req.afterValue ? toJST(req.afterValue).format("H:mm") : "-"}`,
+    `■ 修正内容:`,
+    ...itemLines,
     `■ 理由: ${req.reason}`,
     "",
     `▶ 確認・承認: ${approvalUrl}`,

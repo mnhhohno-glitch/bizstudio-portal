@@ -8,21 +8,13 @@ import { Toaster, toast } from "sonner";
 type Punch = { id: string; type: string; timestamp: string; isManualEdit: boolean };
 type Attendance = { id: string; status: string; clockIn: string | null; clockOut: string | null; isFinalized: boolean };
 
-const TYPE_LABEL: Record<string, string> = {
-  CLOCK_IN: "出勤", CLOCK_OUT: "退勤",
-  BREAK_START: "休憩開始", BREAK_END: "休憩終了",
-  INTERRUPT_START: "中断開始", INTERRUPT_END: "中断終了",
-};
-
-const MOD_TYPES = [
-  { value: "CLOCK_IN_EDIT", label: "出勤時刻の修正" },
-  { value: "CLOCK_OUT_EDIT", label: "退勤時刻の修正" },
-  { value: "BREAK_START_EDIT", label: "休憩開始時刻の修正" },
-  { value: "BREAK_END_EDIT", label: "休憩終了時刻の修正" },
-  { value: "INTERRUPT_START_EDIT", label: "中断開始時刻の修正" },
-  { value: "INTERRUPT_END_EDIT", label: "中断終了時刻の修正" },
-  { value: "ADD_BREAK", label: "休憩の追加" },
-  { value: "ADD_INTERRUPT", label: "中断の追加" },
+const PUNCH_TYPES = [
+  { type: "CLOCK_IN", reqType: "CLOCK_IN_EDIT", label: "出勤" },
+  { type: "BREAK_START", reqType: "BREAK_START_EDIT", label: "休憩開始" },
+  { type: "BREAK_END", reqType: "BREAK_END_EDIT", label: "休憩終了" },
+  { type: "INTERRUPT_START", reqType: "INTERRUPT_START_EDIT", label: "中断開始" },
+  { type: "INTERRUPT_END", reqType: "INTERRUPT_END_EDIT", label: "中断終了" },
+  { type: "CLOCK_OUT", reqType: "CLOCK_OUT_EDIT", label: "退勤" },
 ];
 
 function formatTime(ts: string): string {
@@ -36,53 +28,34 @@ export default function CorrectionPage() {
   const [punches, setPunches] = useState<Punch[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Correction form state
-  const [requestType, setRequestType] = useState("");
-  const [afterTime, setAfterTime] = useState("");
+  // Multi-item correction form
+  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [times, setTimes] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline edit state (for pre-finalized)
+  // Pre-finalize inline edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/attendance/status")
+    fetch(`/api/attendance/correction/${date}`)
       .then((r) => r.json())
-      .then(() => {
-        // Fetch specific date data
-        return fetch(`/api/attendance/history?month=${date?.substring(0, 7)}`);
-      })
-      .then((r) => r.json())
-      .then((data) => {
-        const record = data.records?.find((r: { date: string }) =>
-          new Date(r.date).toISOString().split("T")[0] === date
-        );
-        if (record) {
-          setAttendance(record);
-          // Need to fetch punches for this specific date
-          return fetch("/api/attendance/status").then((r) => r.json());
-        }
+      .then((d) => {
+        if (d.attendance) setAttendance(d.attendance);
+        if (d.punches) setPunches(d.punches);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-
-    // Fetch punches via dedicated endpoint
-    fetch(`/api/attendance/correction/${date}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.attendance) setAttendance(data.attendance);
-        if (data.punches) setPunches(data.punches);
-      })
-      .catch(() => {});
   }, [date]);
 
-  const handleInlineEdit = (punch: Punch) => {
-    const d = new Date(punch.timestamp);
-    setEditTime(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
-    setEditingId(punch.id);
-  };
+  // Get current time for each punch type
+  const currentTimes: Record<string, string | null> = {};
+  for (const pt of PUNCH_TYPES) {
+    const punch = punches.find((p) => p.type === pt.type);
+    currentTimes[pt.type] = punch ? formatTime(punch.timestamp) : null;
+  }
 
   const handleInlineSave = async (punchId: string, originalTs: string) => {
     if (!editTime) return;
@@ -92,7 +65,6 @@ export default function CorrectionPage() {
       const [h, m] = editTime.split(":").map(Number);
       const newTs = new Date(orig);
       newTs.setHours(h, m, 0, 0);
-
       const res = await fetch("/api/attendance/punch/edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,17 +80,30 @@ export default function CorrectionPage() {
 
   const handleSubmitCorrection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requestType || !reason.trim()) {
-      toast.error("修正種別と理由を入力してください");
-      return;
+    const checkedTypes = PUNCH_TYPES.filter((pt) => checks[pt.type]);
+    if (checkedTypes.length === 0) { toast.error("修正する項目にチェックを入れてください"); return; }
+    if (!reason.trim()) { toast.error("修正理由を入力してください"); return; }
+
+    // Validate all checked items have times
+    for (const pt of checkedTypes) {
+      if (!times[pt.type]) { toast.error(`${pt.label}の修正後の時刻を入力してください`); return; }
     }
+
     setSubmitting(true);
     try {
-      const afterValue = afterTime ? new Date(`${date}T${afterTime}:00+09:00`).toISOString() : null;
+      const items = checkedTypes.map((pt) => ({
+        requestType: currentTimes[pt.type] ? pt.reqType : (pt.type.includes("BREAK") ? "ADD_BREAK" : pt.type.includes("INTERRUPT") ? "ADD_INTERRUPT" : pt.reqType),
+        beforeValue: currentTimes[pt.type] ? (() => {
+          const punch = punches.find((p) => p.type === pt.type);
+          return punch ? punch.timestamp : null;
+        })() : null,
+        afterTime: times[pt.type],
+      }));
+
       const res = await fetch("/api/attendance/correction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetDate: date, requestType, afterValue, reason }),
+        body: JSON.stringify({ targetDate: date, items, reason: reason.trim() }),
       });
       if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
       toast.success("修正申請を送信しました");
@@ -127,9 +112,7 @@ export default function CorrectionPage() {
     finally { setSubmitting(false); }
   };
 
-  if (loading) {
-    return <div className="py-20 text-center text-[14px] text-[#6B7280]">読み込み中...</div>;
-  }
+  if (loading) return <div className="py-20 text-center text-[14px] text-[#6B7280]">読み込み中...</div>;
 
   const d = new Date(date + "T00:00:00");
   const dateLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${["日", "月", "火", "水", "木", "金", "土"][d.getDay()]}）`;
@@ -144,59 +127,93 @@ export default function CorrectionPage() {
         <h1 className="mt-2 text-[18px] font-bold text-[#1E3A8A]">打刻修正 - {dateLabel}</h1>
       </div>
 
-      {/* Punch timeline */}
-      {punches.length > 0 && (
-        <div className="mb-6 rounded-[8px] border border-[#E5E7EB] bg-white">
+      {/* Pre-finalize: inline edit */}
+      {!isFinalized && punches.length > 0 && (
+        <div className="mb-6 rounded-xl border border-[#E5E7EB] bg-white">
           <div className="border-b border-[#E5E7EB] px-4 py-3">
-            <h3 className="text-[14px] font-bold text-[#374151]">打刻記録</h3>
+            <h3 className="text-[14px] font-bold text-[#374151]">打刻記録（確定前 - 直接編集可能）</h3>
           </div>
           <div className="divide-y divide-[#F3F4F6]">
-            {punches.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-                <span className="text-[13px] text-[#374151]">{TYPE_LABEL[p.type] ?? p.type}</span>
-                <div className="flex-1">
-                  {editingId === p.id ? (
-                    <div className="flex items-center gap-2">
-                      <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} className="rounded border border-[#D1D5DB] px-2 py-1 text-[14px]" />
-                      <button onClick={() => handleInlineSave(p.id, p.timestamp)} disabled={saving} className="rounded bg-[#2563EB] px-3 py-1 text-[12px] text-white">保存</button>
-                      <button onClick={() => setEditingId(null)} className="text-[12px] text-[#6B7280]">取消</button>
-                    </div>
-                  ) : (
-                    <span className="text-[14px] font-medium tabular-nums">{formatTime(p.timestamp)}</span>
+            {punches.map((p) => {
+              const label = PUNCH_TYPES.find((pt) => pt.type === p.type)?.label ?? p.type;
+              return (
+                <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+                  <span className="text-[13px] text-[#374151] w-20">{label}</span>
+                  <div className="flex-1">
+                    {editingId === p.id ? (
+                      <div className="flex items-center gap-2">
+                        <input type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)}
+                          className="rounded border border-[#D1D5DB] px-2 py-1 text-[14px]" />
+                        <button onClick={() => handleInlineSave(p.id, p.timestamp)} disabled={saving}
+                          className="rounded bg-[#2563EB] px-3 py-1 text-[12px] text-white">保存</button>
+                        <button onClick={() => setEditingId(null)} className="text-[12px] text-[#6B7280]">取消</button>
+                      </div>
+                    ) : (
+                      <span className="text-[14px] font-medium tabular-nums">{formatTime(p.timestamp)}</span>
+                    )}
+                  </div>
+                  {editingId !== p.id && (
+                    <button onClick={() => { setEditTime(formatTime(p.timestamp)); setEditingId(p.id); }}
+                      className="text-[12px] text-[#9CA3AF] hover:text-[#2563EB]">編集</button>
                   )}
                 </div>
-                {!isFinalized && editingId !== p.id && (
-                  <button onClick={() => handleInlineEdit(p)} className="text-[12px] text-[#9CA3AF] hover:text-[#2563EB]">編集</button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Correction form (for finalized records) */}
+      {/* Post-finalize: multi-item correction form */}
       {isFinalized && (
-        <div className="rounded-[8px] border border-[#E5E7EB] bg-white p-6">
-          <h3 className="mb-4 text-[15px] font-bold text-[#374151]">修正申請</h3>
-          <p className="mb-4 text-[13px] text-[#6B7280]">確定済みの勤怠を修正するには、管理者の承認が必要です。</p>
+        <div className="rounded-xl border border-[#E5E7EB] bg-white p-6">
+          <h3 className="mb-2 text-[15px] font-bold text-[#374151]">修正申請</h3>
+          <p className="mb-4 text-[13px] text-[#6B7280]">修正する項目にチェックを入れ、修正後の時刻を入力してください。</p>
 
-          <form onSubmit={handleSubmitCorrection} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-[13px] font-medium text-[#374151]">修正種別 *</label>
-              <select value={requestType} onChange={(e) => setRequestType(e.target.value)} className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px]">
-                <option value="">選択してください</option>
-                {MOD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+          <form onSubmit={handleSubmitCorrection}>
+            <div className="rounded-lg border border-[#E5E7EB] overflow-hidden mb-4">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="bg-[#F9FAFB] text-left text-[11px] font-medium text-[#6B7280]">
+                    <th className="px-3 py-2 w-8">修正</th>
+                    <th className="px-3 py-2">項目</th>
+                    <th className="px-3 py-2">現在の値</th>
+                    <th className="px-3 py-2">修正後</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {PUNCH_TYPES.map((pt) => {
+                    const current = currentTimes[pt.type];
+                    const checked = checks[pt.type] ?? false;
+                    return (
+                      <tr key={pt.type} className="border-t border-[#F3F4F6]">
+                        <td className="px-3 py-2">
+                          <input type="checkbox" checked={checked}
+                            onChange={(e) => setChecks({ ...checks, [pt.type]: e.target.checked })}
+                            className="h-4 w-4 accent-[#2563EB]" />
+                        </td>
+                        <td className="px-3 py-2 font-medium">{pt.label}</td>
+                        <td className="px-3 py-2 tabular-nums text-[#6B7280]">{current ?? "-"}</td>
+                        <td className="px-3 py-2">
+                          <input type="time" value={times[pt.type] ?? ""} disabled={!checked}
+                            onChange={(e) => setTimes({ ...times, [pt.type]: e.target.value })}
+                            className="rounded border border-[#D1D5DB] px-2 py-1 text-[13px] disabled:bg-gray-100 disabled:text-gray-400" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <div>
-              <label className="mb-1 block text-[13px] font-medium text-[#374151]">修正後の時刻</label>
-              <input type="time" value={afterTime} onChange={(e) => setAfterTime(e.target.value)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px]" />
-            </div>
-            <div>
+
+            <div className="mb-4">
               <label className="mb-1 block text-[13px] font-medium text-[#374151]">修正理由 *</label>
-              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="修正理由を入力してください" className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px]" />
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+                placeholder="修正理由を入力してください"
+                className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px]" />
             </div>
-            <button type="submit" disabled={submitting} className="w-full rounded-[8px] bg-[#2563EB] py-2.5 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">
+
+            <button type="submit" disabled={submitting || !Object.values(checks).some(Boolean)}
+              className="w-full rounded-lg bg-[#2563EB] py-2.5 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">
               {submitting ? "送信中..." : "修正申請を送信"}
             </button>
           </form>
@@ -204,9 +221,7 @@ export default function CorrectionPage() {
       )}
 
       {!isFinalized && punches.length > 0 && (
-        <p className="mt-4 text-center text-[13px] text-[#6B7280]">
-          確定前の打刻は上の「編集」ボタンから直接修正できます
-        </p>
+        <p className="mt-4 text-center text-[13px] text-[#6B7280]">確定前の打刻は上の「編集」ボタンから直接修正できます</p>
       )}
     </div>
   );

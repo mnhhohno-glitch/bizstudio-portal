@@ -734,27 +734,43 @@ model PunchEvent {
   @@map("punch_events")
 }
 
-// 打刻修正申請（退勤確定後の修正）
+// 打刻修正申請（退勤確定後の修正、複数項目対応）
 model ModificationRequest {
   id              String         @id @default(cuid())
   employeeId      String         @map("employee_id")
   targetDate      DateTime       @db.Date @map("target_date")
-  requestType     ModReqType     @map("request_type")
-  beforeValue     DateTime?      @map("before_value")
-  afterValue      DateTime?      @map("after_value")
   reason          String         @db.Text
   status          ApprovalStatus @default(PENDING)
   approvalToken   String         @unique @default(cuid()) @map("approval_token")
   approvedBy      String?        @map("approved_by")
   rejectionReason String?        @map("rejection_reason") @db.Text
 
+  // 旧カラム（互換性維持、新規では使わない）
+  requestType     ModReqType?    @map("request_type")
+  beforeValue     DateTime?      @map("before_value")
+  afterValue      DateTime?      @map("after_value")
+
   employee        Employee       @relation(fields: [employeeId], references: [id])
+  items           ModificationItem[]
 
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
   @@index([status])
   @@map("modification_requests")
+}
+
+// 打刻修正の個別項目
+model ModificationItem {
+  id                    String              @id @default(cuid())
+  modificationRequestId String              @map("modification_request_id")
+  requestType           ModReqType          @map("request_type")
+  beforeValue           DateTime?           @map("before_value")
+  afterValue            DateTime            @map("after_value")
+
+  modificationRequest   ModificationRequest @relation(fields: [modificationRequestId], references: [id], onDelete: Cascade)
+
+  @@map("modification_items")
 }
 
 // 有給・休暇申請

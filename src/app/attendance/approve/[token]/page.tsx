@@ -22,11 +22,14 @@ function formatTime(d: string | null): string {
   return new Date(d).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+type ModItem = { requestType: string; beforeValue: string | null; afterValue: string };
+
 type RequestData = {
   type: "modification" | "leave";
   status: string;
   employee: { name: string; paidLeave?: number };
   targetDate: string;
+  items?: ModItem[];
   requestType?: string;
   beforeValue?: string | null;
   afterValue?: string | null;
@@ -104,9 +107,27 @@ export default function ApprovePage() {
 
           {data.type === "modification" && (
             <>
-              <div><span className="text-[#6B7280]">修正種別:</span> <span className="font-medium">{MOD_TYPE_LABEL[data.requestType ?? ""] ?? data.requestType}</span></div>
-              {data.beforeValue && <div><span className="text-[#6B7280]">修正前:</span> <span className="font-medium">{formatTime(data.beforeValue)}</span></div>}
-              {data.afterValue && <div><span className="text-[#6B7280]">修正後:</span> <span className="font-medium text-[#2563EB]">{formatTime(data.afterValue)}</span></div>}
+              {data.items && data.items.length > 0 ? (
+                <div>
+                  <span className="text-[#6B7280]">修正内容:</span>
+                  <div className="mt-1 rounded-lg bg-[#F9FAFB] p-3 space-y-1">
+                    {data.items.map((item, i) => (
+                      <div key={i} className="text-[14px]">
+                        <span className="font-medium">{MOD_TYPE_LABEL[item.requestType] ?? item.requestType}</span>
+                        <span className="ml-2 text-[#6B7280]">{item.beforeValue ? formatTime(item.beforeValue) : "(なし)"}</span>
+                        <span className="mx-1">→</span>
+                        <span className="text-[#2563EB] font-medium">{formatTime(item.afterValue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : data.requestType ? (
+                <>
+                  <div><span className="text-[#6B7280]">修正種別:</span> <span className="font-medium">{MOD_TYPE_LABEL[data.requestType] ?? data.requestType}</span></div>
+                  {data.beforeValue && <div><span className="text-[#6B7280]">修正前:</span> <span className="font-medium">{formatTime(data.beforeValue)}</span></div>}
+                  {data.afterValue && <div><span className="text-[#6B7280]">修正後:</span> <span className="font-medium text-[#2563EB]">{formatTime(data.afterValue)}</span></div>}
+                </>
+              ) : null}
               {data.reason && <div><span className="text-[#6B7280]">理由:</span> <span>{data.reason}</span></div>}
             </>
           )}

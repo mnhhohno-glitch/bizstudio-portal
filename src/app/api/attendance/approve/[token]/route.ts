@@ -13,7 +13,7 @@ export async function GET(
   // Try modification request first, then leave request
   const modReq = await prisma.modificationRequest.findUnique({
     where: { approvalToken: token },
-    include: { employee: true },
+    include: { employee: true, items: true },
   });
   if (modReq) {
     return NextResponse.json({
@@ -22,6 +22,12 @@ export async function GET(
       status: modReq.status,
       employee: { name: modReq.employee.name },
       targetDate: modReq.targetDate,
+      items: modReq.items.map((item) => ({
+        requestType: item.requestType,
+        beforeValue: item.beforeValue,
+        afterValue: item.afterValue,
+      })),
+      // Fallback for old data
       requestType: modReq.requestType,
       beforeValue: modReq.beforeValue,
       afterValue: modReq.afterValue,
