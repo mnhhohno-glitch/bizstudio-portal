@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { notifyTaskCreated } from "@/lib/task-notification";
 
 export async function GET(
   _request: Request,
@@ -67,7 +68,7 @@ export async function PUT(
     const { taskId } = await params;
     const task = await prisma.task.findUnique({
       where: { id: taskId },
-      select: { createdByUserId: true },
+      select: { createdByUserId: true, notificationPending: true },
     });
 
     if (!task) {
@@ -78,6 +79,8 @@ export async function PUT(
     if (task.createdByUserId !== actor.id && actor.role !== "admin") {
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
     }
+
+    const isNotificationPending = task.notificationPending;
 
     const body = await request.json();
     const { title, description, status, priority, dueDate, assigneeIds, fieldValues } = body;
@@ -116,6 +119,18 @@ export async function PUT(
           })),
         });
       }
+    }
+
+    // 複製タスクの初回保存時に通知を送信
+    if (isNotificationPending) {
+      await prisma.task.update({
+        where: { id: taskId },
+        data: { notificationPending: false },
+      });
+
+      sendCloneNotification(taskId, actor).catch((e) =>
+        console.error("複製タスク通知エラー:", e)
+      );
     }
 
     return NextResponse.json({ success: true });
@@ -172,4 +187,53 @@ export async function DELETE(
     console.error("Failed to delete task:", error);
     return NextResponse.json({ error: "削除に失敗しました" }, { status: 500 });
   }
+}
+
+async function sendCloneNotification(
+  taskId: string,
+  actor: { id: string; name: string }
+) {
+  const saved = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      category: { select: { name: true } },
+      candidate: { select: { name: true } },
+      assignees: { include: { employee: { select: { name: true } } } },
+    },
+  });
+  if (!saved) return;
+
+  const assigneeNames = saved.assignees.map((a) => a.employee.name);
+
+  // 複製者自身のみが担当者の場合は通知不要
+  const assigneeUsers =
+    assigneeNames.length > 0
+      ? await prisma.user.findMany({
+          where: { name: { in: assigneeNames }, status: "active" },
+          select: { id: true, name: true, lineworksId: true },
+        })
+      : [];
+
+  // 複製者（作成者）以外の担当者がいなければ通知しない
+  const otherAssignees = assigneeUsers.filter((u) => u.id !== actor.id);
+  if (otherAssignees.length === 0) return;
+
+  const assigneeLineworksIds = assigneeNames.map((name) => {
+    const user = assigneeUsers.find((u) => u.name === name);
+    // 複製者自身のlineworksIdは除外（自分には通知しない）
+    if (user && user.id === actor.id) return null;
+    return user?.lineworksId ?? null;
+  });
+
+  await notifyTaskCreated({
+    taskId: saved.id,
+    title: saved.title,
+    categoryName: saved.category?.name ?? null,
+    candidateName: saved.candidate?.name ?? null,
+    assigneeNames,
+    assigneeLineworksIds,
+    priority: saved.priority ?? null,
+    dueDate: saved.dueDate,
+    creatorName: actor.name,
+  });
 }

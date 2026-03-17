@@ -457,7 +457,8 @@ model Task {
   createdByUserId String       @map("created_by_user_id")
   createdByUser   User         @relation("TaskCreator", fields: [createdByUserId], references: [id])
 
-  completionType  String       @default("any") @map("completion_type")  // "any" or "all"
+  completionType      String   @default("any") @map("completion_type")  // "any" or "all"
+  notificationPending Boolean  @default(false) @map("notification_pending")
 
   assignees       TaskAssignee[]
   assigneeStatuses TaskAssigneeStatus[]
