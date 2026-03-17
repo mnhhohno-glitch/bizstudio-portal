@@ -68,6 +68,8 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     `${baseUrl}/tasks/${params.taskId}`,
   ];
 
+  const assignHeader = `${params.creatorName}から新しいタスクが割り当てられました`;
+
   // lineworksIdが登録されている担当者のメンション行を作成
   const mentionLines = params.assigneeLineworksIds
     .filter((id): id is string => !!id)
@@ -76,7 +78,7 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
   if (mentionLines.length > 0) {
     const mentionedLines = [
       ...mentionLines,
-      " 新しいタスクが割り当てられました",
+      ` ${assignHeader}`,
       "",
       ...baseLines.slice(2), // "📋 タスクが作成されました" と空行をスキップ
     ];
@@ -93,7 +95,7 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
   if (params.assigneeNames.length > 0) {
     const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
     const fallbackLines = [
-      `${namePrefix} 新しいタスクが割り当てられました`,
+      `${namePrefix} ${assignHeader}`,
       "",
       ...baseLines.slice(2),
     ];
@@ -174,4 +176,93 @@ export async function notifyTaskCompleted(params: TaskCompletedParams): Promise<
     ...baseLines.slice(2),
   ];
   await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+}
+
+type TaskCommentParams = {
+  taskId: string;
+  title: string;
+  categoryName: string | null;
+  candidateName: string | null;
+  commentContent: string;
+  commentedAt: Date;
+  commenterName: string;
+  commenterId: string;
+  recipientLineworksIds: (string | null)[];
+  recipientNames: string[];
+};
+
+/**
+ * タスクコメント投稿時にLINE WORKSのタスク通知トークルームにメッセージを送信
+ */
+export async function notifyTaskComment(params: TaskCommentParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) return;
+
+  const commentDisplay =
+    params.commentContent.length > 200
+      ? params.commentContent.slice(0, 200) + "..."
+      : params.commentContent;
+
+  const commentedAtStr = new Date(params.commentedAt).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+  });
+
+  const baseLines = [
+    `💬 ${params.commenterName}がタスクにコメントしました`,
+    "",
+    "■ タスク",
+    params.title,
+    "",
+    "■ カテゴリ",
+    params.categoryName ?? "未設定",
+    "",
+    "■ 求職者",
+    params.candidateName ? `${params.candidateName} 様` : "なし",
+    "",
+    "■ コメント",
+    commentDisplay,
+    "",
+    "■ 投稿日時",
+    commentedAtStr,
+    "",
+    "🔗 詳細はこちら",
+    `${baseUrl}/tasks/${params.taskId}`,
+  ];
+
+  // メンション対象（投稿者自身は除外済みの前提）
+  const mentionLines = params.recipientLineworksIds
+    .filter((id): id is string => !!id)
+    .map((id) => `<m userId="${id}">`);
+
+  if (mentionLines.length > 0) {
+    const mentionedLines = [
+      ...mentionLines,
+      ` ${params.commenterName}がタスクにコメントしました`,
+      "",
+      ...baseLines.slice(2),
+    ];
+    try {
+      await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      return;
+    } catch (e) {
+      console.warn("コメント通知のメンションに失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // メンションなし
+  if (params.recipientNames.length > 0) {
+    const namePrefix = params.recipientNames.map((n) => `${n}さん`).join("、");
+    const fallbackLines = [
+      `${namePrefix} ${params.commenterName}がタスクにコメントしました`,
+      "",
+      ...baseLines.slice(2),
+    ];
+    await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+    return;
+  }
+
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
