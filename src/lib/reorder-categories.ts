@@ -1,10 +1,12 @@
 import { prisma } from "./prisma";
 
 /**
- * 全カテゴリのsortOrderを1から連番に振り直す
+ * 指定グループ内のカテゴリのsortOrderを1から連番に振り直す
+ * groupId が null の場合は未分類カテゴリを振り直す
  */
-export async function reorderCategories(): Promise<void> {
+export async function reorderCategoriesInGroup(groupId: string | null): Promise<void> {
   const categories = await prisma.taskCategory.findMany({
+    where: { groupId },
     orderBy: { sortOrder: "asc" },
     select: { id: true },
   });
@@ -17,4 +19,21 @@ export async function reorderCategories(): Promise<void> {
       })
     )
   );
+}
+
+/**
+ * 全グループのカテゴリのsortOrderをグループ内で1から連番に振り直す
+ */
+export async function reorderAllCategories(): Promise<void> {
+  const groups = await prisma.taskCategoryGroup.findMany({
+    select: { id: true },
+  });
+
+  // 各グループ内を振り直す
+  for (const group of groups) {
+    await reorderCategoriesInGroup(group.id);
+  }
+
+  // 未分類も振り直す
+  await reorderCategoriesInGroup(null);
 }

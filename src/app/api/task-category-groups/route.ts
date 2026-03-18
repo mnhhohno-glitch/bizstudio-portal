@@ -29,6 +29,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "名前は必須です" }, { status: 400 });
     }
 
+    const dup = await prisma.taskCategoryGroup.findFirst({
+      where: { name: name.trim() },
+    });
+    if (dup) {
+      return NextResponse.json({ error: "同じ名前のグループが既に存在します" }, { status: 400 });
+    }
+
     let finalSortOrder = sortOrder;
     if (finalSortOrder === undefined || finalSortOrder === null) {
       const max = await prisma.taskCategoryGroup.aggregate({ _max: { sortOrder: true } });

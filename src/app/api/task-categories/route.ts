@@ -49,10 +49,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "名前は必須です" }, { status: 400 });
     }
 
-    // デフォルトは末尾
+    // デフォルトはグループ内末尾
     let finalSortOrder = sortOrder;
     if (finalSortOrder === undefined || finalSortOrder === null) {
-      const max = await prisma.taskCategory.aggregate({ _max: { sortOrder: true } });
+      const max = await prisma.taskCategory.aggregate({
+        where: { groupId: groupId || null },
+        _max: { sortOrder: true },
+      });
       finalSortOrder = (max._max.sortOrder ?? 0) + 1;
     }
 

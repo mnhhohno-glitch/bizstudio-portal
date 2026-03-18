@@ -54,6 +54,12 @@ export default function TaskMasterPage() {
   const [groupForm, setGroupForm] = useState<GroupForm>({ name: "", sortOrder: 0 });
   const [groupSaving, setGroupSaving] = useState(false);
 
+  // Group inline editing
+  const [inlineEditGroupId, setInlineEditGroupId] = useState<string | null>(null);
+  const [inlineEditName, setInlineEditName] = useState("");
+  const [inlineEditError, setInlineEditError] = useState("");
+  const [inlineEditSaving, setInlineEditSaving] = useState(false);
+
   // Collapsed groups
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -87,10 +93,7 @@ export default function TaskMasterPage() {
   /* ---------- Category CRUD ---------- */
   const openCreateModal = () => {
     setEditingId(null);
-    const maxSort = categories.length > 0
-      ? Math.max(...categories.map((c) => c.sortOrder))
-      : 0;
-    setFormData({ name: "", description: "", sortOrder: maxSort + 1, groupId: "" });
+    setFormData({ name: "", description: "", sortOrder: 0, groupId: "" });
     setModalOpen(true);
   };
 
@@ -166,12 +169,6 @@ export default function TaskMasterPage() {
     setGroupModalOpen(true);
   };
 
-  const openGroupEdit = (g: Group) => {
-    setGroupEditId(g.id);
-    setGroupForm({ name: g.name, sortOrder: g.sortOrder });
-    setGroupModalOpen(true);
-  };
-
   const handleGroupSave = async () => {
     if (!groupForm.name.trim()) return;
     setGroupSaving(true);
@@ -185,7 +182,11 @@ export default function TaskMasterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(groupForm),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "保存に失敗しました");
+        return;
+      }
       setGroupModalOpen(false);
       setGroupEditId(null);
       fetchData();
@@ -204,6 +205,52 @@ export default function TaskMasterPage() {
       fetchData();
     } catch {
       alert("削除に失敗しました");
+    }
+  };
+
+  /* ---------- Inline group name editing ---------- */
+  const startInlineEdit = (g: Group) => {
+    setInlineEditGroupId(g.id);
+    setInlineEditName(g.name);
+    setInlineEditError("");
+  };
+
+  const cancelInlineEdit = () => {
+    setInlineEditGroupId(null);
+    setInlineEditName("");
+    setInlineEditError("");
+  };
+
+  const saveInlineEdit = async () => {
+    const trimmed = inlineEditName.trim();
+    if (!trimmed) {
+      setInlineEditError("グループ名は必須です");
+      return;
+    }
+    // ローカルで重複チェック
+    if (groups.some((g) => g.id !== inlineEditGroupId && g.name === trimmed)) {
+      setInlineEditError("同じ名前のグループが既に存在します");
+      return;
+    }
+
+    setInlineEditSaving(true);
+    try {
+      const res = await fetch(`/api/task-category-groups/${inlineEditGroupId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        setInlineEditError(err.error || "保存に失敗しました");
+        return;
+      }
+      cancelInlineEdit();
+      fetchData();
+    } catch {
+      setInlineEditError("保存に失敗しました");
+    } finally {
+      setInlineEditSaving(false);
     }
   };
 
@@ -247,11 +294,9 @@ export default function TaskMasterPage() {
         <div className="flex gap-2">
           <button
             onClick={() => {
-              setGroupEditId(null);
-              setGroupModalOpen(false);
-              // Open inline group management
-              setGroupModalOpen(true);
               setGroupEditId("__list__");
+              setGroupModalOpen(true);
+              cancelInlineEdit();
             }}
             className="border border-[#E5E7EB] bg-white text-[#374151] rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#F9FAFB] transition-colors"
           >
@@ -445,11 +490,11 @@ export default function TaskMasterPage() {
 
       {/* グループ管理モーダル */}
       {groupModalOpen && groupEditId === "__list__" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setGroupModalOpen(false); setGroupEditId(null); }}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setGroupModalOpen(false); setGroupEditId(null); cancelInlineEdit(); }}>
           <div className="bg-white rounded-[8px] w-full max-w-[520px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">グループ管理</h2>
-              <button onClick={() => { setGroupModalOpen(false); setGroupEditId(null); }} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
+              <button onClick={() => { setGroupModalOpen(false); setGroupEditId(null); cancelInlineEdit(); }} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
             </div>
             <div className="p-6">
               <div className="space-y-2 mb-4">
@@ -457,25 +502,66 @@ export default function TaskMasterPage() {
                   <p className="text-[13px] text-gray-400 text-center py-4">グループがありません</p>
                 ) : (
                   groups.map((g) => (
-                    <div key={g.id} className="flex items-center justify-between rounded-[6px] border border-[#E5E7EB] px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] text-gray-400 w-5 text-center">{g.sortOrder}</span>
-                        <span className="text-[13px] font-medium text-[#374151]">{g.name}</span>
-                      </div>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => openGroupEdit(g)}
-                          className="text-[12px] text-[#6B7280] hover:text-[#2563EB] px-2 py-1"
-                        >
-                          編集
-                        </button>
-                        <button
-                          onClick={() => handleGroupDelete(g.id)}
-                          className="text-[12px] text-[#6B7280] hover:text-red-500 px-2 py-1"
-                        >
-                          削除
-                        </button>
-                      </div>
+                    <div key={g.id} className="rounded-[6px] border border-[#E5E7EB] px-3 py-2.5">
+                      {inlineEditGroupId === g.id ? (
+                        /* インライン編集モード */
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={inlineEditName}
+                              onChange={(e) => { setInlineEditName(e.target.value); setInlineEditError(""); }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveInlineEdit();
+                                if (e.key === "Escape") cancelInlineEdit();
+                              }}
+                              autoFocus
+                              className="flex-1 border border-[#2563EB] rounded-md px-2 py-1 text-[13px] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                            />
+                            <button
+                              onClick={saveInlineEdit}
+                              disabled={inlineEditSaving}
+                              className="text-[12px] text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-md px-2.5 py-1 transition-colors disabled:opacity-50"
+                            >
+                              {inlineEditSaving ? "..." : "保存"}
+                            </button>
+                            <button
+                              onClick={cancelInlineEdit}
+                              className="text-[12px] text-[#6B7280] hover:text-[#374151] px-2 py-1"
+                            >
+                              キャンセル
+                            </button>
+                          </div>
+                          {inlineEditError && (
+                            <p className="mt-1 text-[11px] text-red-500">{inlineEditError}</p>
+                          )}
+                        </div>
+                      ) : (
+                        /* 通常表示モード */
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] text-gray-400 w-5 text-center">{g.sortOrder}</span>
+                            <span className="text-[13px] font-medium text-[#374151]">{g.name}</span>
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => startInlineEdit(g)}
+                              className="text-[#6B7280] hover:text-[#2563EB] px-1.5 py-1 transition-colors"
+                              title="グループ名を編集"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleGroupDelete(g.id)}
+                              className="text-[12px] text-[#6B7280] hover:text-red-500 px-2 py-1"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -486,53 +572,6 @@ export default function TaskMasterPage() {
               >
                 + グループを追加
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* グループ作成・編集モーダル */}
-      {groupModalOpen && groupEditId !== "__list__" && groupEditId !== null && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setGroupModalOpen(false); setGroupEditId(null); }}>
-          <div className="bg-white rounded-[8px] w-full max-w-[400px] shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
-              <h2 className="text-[15px] font-bold text-[#374151]">グループを編集</h2>
-              <button onClick={() => { setGroupModalOpen(false); setGroupEditId(null); }} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">グループ名 <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={groupForm.name}
-                  onChange={(e) => setGroupForm({ ...groupForm, name: e.target.value })}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">並び順</label>
-                <input
-                  type="number"
-                  value={groupForm.sortOrder}
-                  onChange={(e) => setGroupForm({ ...groupForm, sortOrder: parseInt(e.target.value) || 0 })}
-                  className="w-24 border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => { setGroupModalOpen(false); setGroupEditId(null); }}
-                  className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-[13px] hover:bg-gray-50 transition-colors"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={handleGroupSave}
-                  disabled={groupSaving || !groupForm.name.trim()}
-                  className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-                >
-                  {groupSaving ? "保存中..." : "保存する"}
-                </button>
-              </div>
             </div>
           </div>
         </div>
