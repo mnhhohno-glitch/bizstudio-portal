@@ -6,8 +6,6 @@ import Link from "next/link";
 import TaskAttachments from "@/components/tasks/TaskAttachments";
 import TaskComments from "@/components/tasks/TaskComments";
 import { JobCategoryDisplay } from "@/components/tasks/JobCategorySelector";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import PointsModal from "@/components/tasks/PointsModal";
 
 type Option = { id: string; label: string; value: string };
@@ -337,10 +335,8 @@ export default function TaskDetailPage() {
                           全体表示
                         </button>
                       </dt>
-                      <dd className="mt-1 prose prose-sm max-w-none text-[14px] text-[#374151]">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {value}
-                        </ReactMarkdown>
+                      <dd className="mt-1 whitespace-pre-wrap text-[14px] text-[#374151]">
+                        {value}
                       </dd>
                     </div>
                   );

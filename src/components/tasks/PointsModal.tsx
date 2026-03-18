@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 type Props = {
   value: string;
@@ -86,10 +84,8 @@ export default function PointsModal({ value, onChange, readOnly, onClose }: Prop
         {/* body */}
         <div className="flex-1 overflow-auto p-6">
           {tab === "preview" ? (
-            <div className="prose prose-sm max-w-none text-[14px] text-[#374151]">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {readOnly ? value : draft}
-              </ReactMarkdown>
+            <div className="whitespace-pre-wrap text-[14px] text-[#374151]">
+              {readOnly ? value : draft}
             </div>
           ) : (
             <div className="h-full flex flex-col">
