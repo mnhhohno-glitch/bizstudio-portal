@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
+import PointsModal from "@/components/tasks/PointsModal";
 
 type Option = { id: string; label: string; value: string };
 type Field = {
@@ -73,6 +74,8 @@ export default function TaskEditPage() {
   const [categoryFields, setCategoryFields] = useState<Field[]>([]);
   const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [aiOrganizing, setAiOrganizing] = useState(false);
+  const [pointsModalOpen, setPointsModalOpen] = useState(false);
+  const [pointsModalFieldId, setPointsModalFieldId] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -371,6 +374,13 @@ export default function TaskEditPage() {
                         >
                           {aiOrganizing ? "整理中..." : "✨ AI整理"}
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => { setPointsModalFieldId(field.id); setPointsModalOpen(true); }}
+                          className="ml-1 inline-flex items-center gap-1 rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#2563EB]"
+                        >
+                          全体表示
+                        </button>
                       </label>
                       <textarea
                         rows={6}
@@ -417,6 +427,15 @@ export default function TaskEditPage() {
           </button>
         </div>
       </div>
+
+      {/* 求人ポイント全体表示モーダル */}
+      {pointsModalOpen && pointsModalFieldId && (
+        <PointsModal
+          value={fieldValues[pointsModalFieldId] ?? ""}
+          onChange={(v) => setFieldValue(pointsModalFieldId, v)}
+          onClose={() => setPointsModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

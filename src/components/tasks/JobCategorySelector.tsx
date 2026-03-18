@@ -146,7 +146,8 @@ function AxisRow({
     onUpdate({ middle: name || null, minor: null });
   };
 
-  const handleMinorChange = (name: string) => {
+  const handleMinorChange = (id: string) => {
+    const name = minors.find((m) => m.id === id)?.name ?? "";
     onUpdate({ minor: name || null });
   };
 
@@ -190,7 +191,7 @@ function AxisRow({
           ))}
         </select>
         <select
-          value={axis.minor ?? ""}
+          value={minors.find((m) => m.name === axis.minor)?.id ?? ""}
           onChange={(e) => handleMinorChange(e.target.value)}
           className={selectCls}
           disabled={!middleId}

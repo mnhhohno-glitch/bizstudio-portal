@@ -8,6 +8,7 @@ import TaskComments from "@/components/tasks/TaskComments";
 import { JobCategoryDisplay } from "@/components/tasks/JobCategorySelector";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import PointsModal from "@/components/tasks/PointsModal";
 
 type Option = { id: string; label: string; value: string };
 type FieldValue = {
@@ -62,6 +63,7 @@ export default function TaskDetailPage() {
   const [user, setUser] = useState<UserMe | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [pointsModalValue, setPointsModalValue] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const fetchTask = useCallback(async () => {
@@ -325,7 +327,16 @@ export default function TaskDetailPage() {
                 if (field.label === "求人のポイント・条件" && value) {
                   return (
                     <div key={i}>
-                      <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
+                      <dt className="text-[12px] font-medium text-[#6B7280]">
+                        {field.label}
+                        <button
+                          type="button"
+                          onClick={() => setPointsModalValue(value)}
+                          className="ml-2 inline-flex items-center gap-1 rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#2563EB]"
+                        >
+                          全体表示
+                        </button>
+                      </dt>
                       <dd className="mt-1 prose prose-sm max-w-none text-[14px] text-[#374151]">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {value}
@@ -379,6 +390,15 @@ export default function TaskDetailPage() {
           />
         )}
       </div>
+
+      {/* 求人ポイント全体表示モーダル（閲覧専用） */}
+      {pointsModalValue !== null && (
+        <PointsModal
+          value={pointsModalValue}
+          readOnly
+          onClose={() => setPointsModalValue(null)}
+        />
+      )}
     </div>
   );
 }
