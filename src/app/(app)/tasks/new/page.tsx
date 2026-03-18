@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 
@@ -108,6 +108,8 @@ const EMPLOYMENT_TYPES = ["正社員", "契約社員", "派遣社員", "アル�
 
 export default function TaskNewPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const presetCandidateId = searchParams.get("candidateId");
 
   /* ----- master data ----- */
   const [categories, setCategories] = useState<Category[]>([]);
@@ -266,6 +268,19 @@ export default function TaskNewPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // クエリパラメータで求職者をプリセット
+  const presetApplied = useRef(false);
+  useEffect(() => {
+    if (presetApplied.current || !presetCandidateId || candidates.length === 0) return;
+    const found = candidates.find((c) => c.id === presetCandidateId);
+    if (found) {
+      setWithCandidate(true);
+      setCandidateId(found.id);
+      setCandidateSearch(found.name);
+      presetApplied.current = true;
+    }
+  }, [presetCandidateId, candidates]);
 
   /* ----- job category cascading ----- */
   useEffect(() => {

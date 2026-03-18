@@ -1080,8 +1080,14 @@ function CandidateTasksTab({ candidateId }: { candidateId: string }) {
 
   return (
     <div>
-      {/* toggle */}
-      <div className="mb-4 flex justify-end">
+      {/* header: create button + toggle */}
+      <div className="mb-4 flex items-center justify-between">
+        <a
+          href={`/tasks/new?candidateId=${candidateId}`}
+          className="rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
+        >
+          タスクを作成
+        </a>
         <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
           <input
             type="checkbox"
@@ -1115,8 +1121,14 @@ function CandidateTasksTab({ candidateId }: { candidateId: string }) {
               </tr>
             ) : tasks.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-[#6B7280]">
-                  この求職者に紐づくタスクはありません
+                <td colSpan={6} className="px-4 py-12 text-center">
+                  <p className="text-[#6B7280]">この求職者に紐づくタスクはありません</p>
+                  <a
+                    href={`/tasks/new?candidateId=${candidateId}`}
+                    className="mt-3 inline-block rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#1D4ED8]"
+                  >
+                    タスクを作成
+                  </a>
                 </td>
               </tr>
             ) : (
