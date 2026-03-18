@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 
 type Option = { id: string; label: string; value: string };
 type Field = {
@@ -70,6 +71,8 @@ export default function TaskEditPage() {
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [categoryFields, setCategoryFields] = useState<Field[]>([]);
+  const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
+  const [aiOrganizing, setAiOrganizing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -123,6 +126,10 @@ export default function TaskEditPage() {
       const fvMap: Record<string, string> = {};
       for (const fv of t.fieldValues) {
         fvMap[fv.field.id] = fv.value;
+        // 求人検索: 職種フィールドのJSONを復元
+        if (fv.field.label === "職種" && fv.value.startsWith("[")) {
+          try { setKyujinJobAxes(JSON.parse(fv.value)); } catch { /* ignore */ }
+        }
       }
       setFieldValues(fvMap);
     } catch {
@@ -316,7 +323,66 @@ export default function TaskEditPage() {
               テンプレート項目（{task.category?.name}）
             </h2>
             <div className="space-y-4">
-              {categoryFields.map((field) => (
+              {categoryFields.map((field) => {
+                // 求人検索: 職種はカスタムUI
+                if (field.label === "職種" && task.category?.name === "求人検索") {
+                  return (
+                    <div key={field.id}>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        {field.label}
+                        {field.isRequired && <span className="ml-1 text-red-500">*</span>}
+                      </label>
+                      <JobCategorySelector
+                        value={kyujinJobAxes}
+                        onChange={(axes) => {
+                          setKyujinJobAxes(axes);
+                          setFieldValue(field.id, JSON.stringify(axes));
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                // 求人検索: AI整理ボタン付きテキストエリア
+                if (field.label === "求人のポイント・条件" && task.category?.name === "求人検索") {
+                  return (
+                    <div key={field.id}>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        {field.label}
+                        <button
+                          type="button"
+                          disabled={aiOrganizing || !(fieldValues[field.id] ?? "").trim()}
+                          onClick={async () => {
+                            const text = (fieldValues[field.id] ?? "").trim();
+                            if (!text) return;
+                            setAiOrganizing(true);
+                            try {
+                              const res = await fetch("/api/tasks/ai-organize", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ text }),
+                              });
+                              if (!res.ok) { alert("整理に失敗しました"); return; }
+                              const data = await res.json();
+                              if (data.organized) setFieldValue(field.id, data.organized);
+                            } catch { alert("整理に失敗しました"); }
+                            finally { setAiOrganizing(false); }
+                          }}
+                          className="ml-3 inline-flex items-center gap-1 rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#2563EB] disabled:opacity-40"
+                        >
+                          {aiOrganizing ? "整理中..." : "✨ AI整理"}
+                        </button>
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={fieldValues[field.id] ?? ""}
+                        placeholder={field.placeholder ?? ""}
+                        onChange={(e) => setFieldValue(field.id, e.target.value)}
+                        className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      />
+                    </div>
+                  );
+                }
+                return (
                 <div key={field.id}>
                   <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                     {field.label}
@@ -324,7 +390,8 @@ export default function TaskEditPage() {
                   </label>
                   {renderEditField(field, fieldValues, setFieldValue, toggleMultiSelect)}
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
         )}

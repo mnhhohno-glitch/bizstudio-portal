@@ -5,6 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import TaskAttachments from "@/components/tasks/TaskAttachments";
 import TaskComments from "@/components/tasks/TaskComments";
+import { JobCategoryDisplay } from "@/components/tasks/JobCategorySelector";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Option = { id: string; label: string; value: string };
 type FieldValue = {
@@ -303,6 +306,30 @@ export default function TaskDetailPage() {
                             {l}
                           </span>
                         ))}
+                      </dd>
+                    </div>
+                  );
+                }
+
+                // 職種: パンくず表示
+                if (field.label === "職種" && value.startsWith("[")) {
+                  return (
+                    <div key={i}>
+                      <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
+                      <dd className="mt-1"><JobCategoryDisplay value={value} /></dd>
+                    </div>
+                  );
+                }
+
+                // 求人のポイント・条件: マークダウン表示
+                if (field.label === "求人のポイント・条件" && value) {
+                  return (
+                    <div key={i}>
+                      <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
+                      <dd className="mt-1 prose prose-sm max-w-none text-[14px] text-[#374151]">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {value}
+                        </ReactMarkdown>
                       </dd>
                     </div>
                   );

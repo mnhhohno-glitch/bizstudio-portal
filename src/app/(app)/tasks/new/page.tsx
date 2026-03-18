@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 
 /* ---------- types ---------- */
 
@@ -61,6 +62,7 @@ const NAITEI_CATEGORY = "内定承諾報告";
 const NYUSHA_CATEGORY = "入社報告";
 const RA_ENTRY_CATEGORY = "RAエントリーのFM登録";
 const FM_TOUROKU_CATEGORY = "求職者紹介のFM登録依頼";
+const KYUJIN_KENSAKU_CATEGORY = "求人検索";
 
 /** テンプレートにファイル添付があるため追加情報ステップの添付を非表示にするカテゴリ */
 const HIDE_STEP5_ATTACHMENT_CATEGORIES = [
@@ -176,6 +178,10 @@ export default function TaskNewPage() {
   const [templateDragOver, setTemplateDragOver] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement>(null);
 
+  // step 2 - カテゴリ固有: 求人検索
+  const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
+  const [aiOrganizing, setAiOrganizing] = useState(false);
+
   // step 3
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -216,6 +222,7 @@ export default function TaskNewPage() {
   const isNyusha = selectedCategory?.name === NYUSHA_CATEGORY;
   const isRAEntry = selectedCategory?.name === RA_ENTRY_CATEGORY;
   const isFmTouroku = selectedCategory?.name === FM_TOUROKU_CATEGORY;
+  const isKyujinKensaku = selectedCategory?.name === KYUJIN_KENSAKU_CATEGORY;
   const hideStep5Attachment = HIDE_STEP5_ATTACHMENT_CATEGORIES.includes(selectedCategory?.name ?? "");
 
   /** 職務経歴書: 「実績なし」チェックがONか */
@@ -400,6 +407,8 @@ export default function TaskNewPage() {
         }
         // 職務経歴書: 職種大分類は必須
         if (isShokumu && !selectedMajorName) return false;
+        // 求人検索: 第1軸の大項目は必須
+        if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
         // テンプレート必須フィールドのバリデーション
         const visibleFields = getVisibleFields();
         return visibleFields
@@ -409,6 +418,8 @@ export default function TaskNewPage() {
             if (f.label === "応募職種") return true;
             // 志望動機フィールドはカスケードUIで代替するのでスキップ
             if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return true;
+            // 求人検索: 職種はカスタムUIで代替
+            if (isKyujinKensaku && f.label === "職種") return true;
             const v = fieldValues[f.id];
             return v !== undefined && v !== "";
           });
@@ -1135,7 +1146,7 @@ export default function TaskNewPage() {
             {/* テンプレートフィールド */}
             {(() => {
               const visibleFields = getVisibleFields();
-              if (visibleFields.length === 0 && !isShokumu) {
+              if (visibleFields.length === 0 && !isShokumu && !isKyujinKensaku) {
                 return (
                   <p className="text-[14px] text-[#6B7280]">
                     テンプレート項目はありません。次へ進んでください。
@@ -1172,12 +1183,60 @@ export default function TaskNewPage() {
                     </>
                   )}
 
-                  {visibleFields.map((field) => (
+                  {/* 求人検索: 職種選択UI */}
+                  {isKyujinKensaku && (
+                    <div>
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        職種<span className="ml-1 text-red-500">*</span>
+                      </label>
+                      <JobCategorySelector
+                        value={kyujinJobAxes}
+                        onChange={(axes) => {
+                          setKyujinJobAxes(axes);
+                          // 職種フィールドにJSON保存
+                          const jobField = selectedCategory?.fields.find((f) => f.label === "職種");
+                          if (jobField) setFieldValue(jobField.id, JSON.stringify(axes));
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {visibleFields.map((field) => {
+                    // 求人検索: 職種フィールドはカスタムUIで表示済み
+                    if (isKyujinKensaku && field.label === "職種") return null;
+
+                    return (
                     <div key={field.id}>
                       <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                         {field.label}
                         {field.isRequired && (
                           <span className="ml-1 text-red-500">*</span>
+                        )}
+                        {/* 求人検索: AI整理ボタン */}
+                        {isKyujinKensaku && field.label === "求人のポイント・条件" && (
+                          <button
+                            type="button"
+                            disabled={aiOrganizing || !(fieldValues[field.id] ?? "").trim()}
+                            onClick={async () => {
+                              const text = (fieldValues[field.id] ?? "").trim();
+                              if (!text) return;
+                              setAiOrganizing(true);
+                              try {
+                                const res = await fetch("/api/tasks/ai-organize", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ text }),
+                                });
+                                if (!res.ok) { alert("整理に失敗しました"); return; }
+                                const data = await res.json();
+                                if (data.organized) setFieldValue(field.id, data.organized);
+                              } catch { alert("整理に失敗しました"); }
+                              finally { setAiOrganizing(false); }
+                            }}
+                            className="ml-3 inline-flex items-center gap-1 rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#2563EB] disabled:opacity-40"
+                          >
+                            {aiOrganizing ? "整理中..." : "✨ AI整理"}
+                          </button>
                         )}
                       </label>
                       {field.description && (
@@ -1247,7 +1306,8 @@ export default function TaskNewPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  );
+                  })}
 
                   {/* 非営業: 経歴・実績の概要 */}
                   {isShokumu && selectedMajorName && !isSalesJob && (
@@ -1731,6 +1791,19 @@ export default function TaskNewPage() {
                         if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return null;
                         // 応募職種は上で表示済み
                         if (f.label === "応募職種" && isShokumu) return null;
+                        // 求人検索: 職種はパンくず形式で表示
+                        if (isKyujinKensaku && f.label === "職種") {
+                          return (
+                            <div key={f.id} className="flex gap-2 text-[13px]">
+                              <span className="shrink-0 text-[#6B7280]">{f.label}:</span>
+                              <div className="text-[#374151]">
+                                {kyujinJobAxes.filter(a => a.major).map((a) => (
+                                  <div key={a.axis}>第{a.axis}軸: {[a.major, a.middle, a.minor].filter(Boolean).join(" > ")}</div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
                         const raw = fieldValues[f.id] ?? "";
                         if (!raw) return null;
 
