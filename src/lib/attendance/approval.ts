@@ -87,12 +87,40 @@ export async function approveModificationRequest(
         }
       }
 
-      // 集計値を再計算
+      // status と clockIn/clockOut を PunchEvent から再計算し、集計値も再計算
       if (items.length > 0) {
+        const allEvents = await tx.punchEvent.findMany({
+          where: { dailyAttendanceId: attendance.id },
+          orderBy: { timestamp: "asc" },
+        });
+
+        const clockInEvent = allEvents.find((e) => e.type === "CLOCK_IN");
+        const clockOutEvent = allEvents.find((e) => e.type === "CLOCK_OUT");
+
+        let newStatus: "NOT_STARTED" | "WORKING" | "ON_BREAK" | "INTERRUPTED" | "FINISHED";
+        if (!clockInEvent) {
+          newStatus = "NOT_STARTED";
+        } else if (clockOutEvent) {
+          newStatus = "FINISHED";
+        } else {
+          const lastEvent = allEvents[allEvents.length - 1];
+          if (lastEvent.type === "BREAK_START") {
+            newStatus = "ON_BREAK";
+          } else if (lastEvent.type === "INTERRUPT_START") {
+            newStatus = "INTERRUPTED";
+          } else {
+            newStatus = "WORKING";
+          }
+        }
+
         const totals = await calculateDailyTotals(attendance.id, tx);
         await tx.dailyAttendance.update({
           where: { id: attendance.id },
           data: {
+            status: newStatus,
+            clockIn: clockInEvent?.timestamp ?? null,
+            clockOut: clockOutEvent?.timestamp ?? null,
+            isFinalized: newStatus === "FINISHED",
             totalBreak: totals.totalBreak,
             totalInterrupt: totals.totalInterrupt,
             totalWork: totals.totalWork,
