@@ -468,6 +468,13 @@ async function main() {
 
   await upsertField(cat5.id, "タスク内容", "TEXTAREA", true, 1, "タスクの内容を入力してください");
 
+  // カテゴリ6: 日程調整
+  const cat6 = await upsertCategory("日程調整", 6);
+
+  await upsertField(cat6.id, "希望日時", "TEXTAREA", true, 1, "例: 3/20 10:00〜、3/21 14:00〜");
+  await upsertField(cat6.id, "面談形式", "TEXT", true, 2, "電話/オンライン/どちらでも可");
+  await upsertField(cat6.id, "備考", "TEXTAREA", false, 3, "補足事項があれば入力してください");
+
   console.log("タスクマスター初期データ投入完了");
 }
 
