@@ -13,6 +13,13 @@ interface CreateScheduleTaskRequest {
   candidateId?: string;
 }
 
+type AssigneeInfo = {
+  userId: string;
+  employeeId: string;
+  name: string;
+  lineworksId: string | null;
+};
+
 export async function POST(request: Request) {
   // 1. 認証チェック
   const apiSecret = request.headers.get("x-api-secret");
@@ -64,41 +71,47 @@ export async function POST(request: Request) {
     }
 
     // 3. 担当者決定
-    let assigneeUserId: string | null = null;
-    let assigneeEmployeeId: string | null = null;
+    const assignees: AssigneeInfo[] = [];
 
     if (type !== "mynavi_new" && advisorName) {
       // advisorName から User を検索
       const advisorUser = await prisma.user.findFirst({
         where: { name: advisorName, status: "active" },
-        include: { employee: { select: { id: true } } },
+        include: { employee: { select: { id: true, name: true } } },
       });
-      if (advisorUser) {
-        assigneeUserId = advisorUser.id;
-        assigneeEmployeeId = advisorUser.employee?.id ?? null;
-      }
-    }
-
-    // フォールバック: デフォルト担当者
-    if (!assigneeUserId) {
-      const defaultSetting = await prisma.systemSetting.findUnique({
-        where: { key: "default_mynavi_assignee_id" },
-      });
-      if (defaultSetting?.value) {
-        assigneeUserId = defaultSetting.value;
-        const defaultUser = await prisma.user.findUnique({
-          where: { id: defaultSetting.value },
-          include: { employee: { select: { id: true } } },
+      if (advisorUser?.employee) {
+        assignees.push({
+          userId: advisorUser.id,
+          employeeId: advisorUser.employee.id,
+          name: advisorUser.employee.name,
+          lineworksId: advisorUser.lineworksId,
         });
-        assigneeEmployeeId = defaultUser?.employee?.id ?? null;
       }
     }
 
-    if (!assigneeEmployeeId) {
+    // mynavi_new の場合、または advisorName が見つからなかった場合 → マイナビ管理担当全員
+    if (assignees.length === 0) {
+      const mynaviUsers = await prisma.user.findMany({
+        where: { isMynaviAssignee: true, status: "active" },
+        include: { employee: { select: { id: true, name: true } } },
+      });
+      for (const u of mynaviUsers) {
+        if (u.employee) {
+          assignees.push({
+            userId: u.id,
+            employeeId: u.employee.id,
+            name: u.employee.name,
+            lineworksId: u.lineworksId,
+          });
+        }
+      }
+    }
+
+    if (assignees.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          error: "担当者を特定できません。管理者設定でデフォルト担当者を設定してください",
+          error: "マイナビ管理担当が設定されていません。社員管理画面で設定してください。",
         },
         { status: 400 }
       );
@@ -135,10 +148,9 @@ export async function POST(request: Request) {
         value: fieldMap[f.label],
       }));
 
-    // 6. createdByUserId の決定（担当者 or システムユーザー）
-    const createdByUserId = assigneeUserId!;
+    // 6. Task作成（completionType: "any" = 誰か1人が完了したらタスク完了）
+    const createdByUserId = assignees[0].userId;
 
-    // 7. Task作成
     const task = await prisma.task.create({
       data: {
         title: taskTitle,
@@ -148,65 +160,59 @@ export async function POST(request: Request) {
         createdByUserId,
         completionType: "any",
         assignees: {
-          create: [{ employeeId: assigneeEmployeeId }],
+          create: assignees.map((a) => ({ employeeId: a.employeeId })),
         },
         fieldValues: {
           create: fieldValuesData,
         },
       },
-      include: {
-        assignees: {
-          include: { employee: { select: { name: true } } },
-        },
-      },
     });
 
-    // 8. LINE WORKS通知
+    // 7. LINE WORKS通知
     try {
       const botId = process.env.LINEWORKS_TASK_BOT_ID;
       const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
       const baseUrl = process.env.PORTAL_BASE_URL;
 
       if (botId && channelId) {
-        const assigneeName = task.assignees[0]?.employee.name ?? "未設定";
+        const assigneeNamesStr = assignees.map((a) => a.name).join("、");
 
         const lines = [
           "📋 タスクが自動生成されました",
           "",
-          `■ タイトル`,
+          "■ タイトル",
           taskTitle,
           "",
-          `■ カテゴリ`,
+          "■ カテゴリ",
           "日程調整",
           "",
-          `■ 担当者`,
-          assigneeName,
+          "■ 担当者",
+          assigneeNamesStr,
           "",
-          `■ ステータス`,
+          "■ ステータス",
           "未着手",
           "",
-          `■ 希望日時`,
+          "■ 希望日時",
           preferredDates,
           "",
-          `■ 面談形式`,
+          "■ 面談形式",
           meetingFormat,
         ];
 
         if (notes) {
-          lines.push("", `■ 備考`, notes);
+          lines.push("", "■ 備考", notes);
         }
 
         lines.push("", "🔗 タスク詳細", `${baseUrl}/tasks/${task.id}`);
 
         // メンション付き通知を試行
-        const assigneeUser = await prisma.user.findFirst({
-          where: { name: task.assignees[0]?.employee.name, status: "active" },
-          select: { lineworksId: true },
-        });
+        const mentionLines = assignees
+          .filter((a) => a.lineworksId)
+          .map((a) => `<m userId="${a.lineworksId}">`);
 
-        if (assigneeUser?.lineworksId) {
+        if (mentionLines.length > 0) {
           const mentionedLines = [
-            `<m userId="${assigneeUser.lineworksId}">`,
+            ...mentionLines,
             " タスクが自動生成されました",
             "",
             ...lines.slice(2),
@@ -214,7 +220,6 @@ export async function POST(request: Request) {
           try {
             await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
           } catch {
-            // メンション失敗時はメンションなしで送信
             await sendBotMessage(botId, channelId, lines.join("\n"));
           }
         } else {
@@ -223,10 +228,9 @@ export async function POST(request: Request) {
       }
     } catch (notifyError) {
       console.error("LINE WORKS通知の送信に失敗:", notifyError);
-      // 通知失敗でもタスク自体は作成済みなので200を返す
     }
 
-    // 9. レスポンス
+    // 8. レスポンス
     return NextResponse.json({
       success: true,
       taskId: task.id,

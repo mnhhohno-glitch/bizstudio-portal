@@ -22,6 +22,7 @@ export async function GET() {
       status: true,
       employeeNumber: true,
       lineworksId: true,
+      isMynaviAssignee: true,
       createdAt: true,
       manusApiKeyEncrypted: true,
       manusApiKeySetAt: true,
@@ -51,6 +52,7 @@ export async function GET() {
       has_manus_key: !!u.manusApiKeyEncrypted,
       manus_key_last4,
       manus_key_set_at: u.manusApiKeySetAt?.toISOString() ?? null,
+      isMynaviAssignee: u.isMynaviAssignee,
     };
   });
 

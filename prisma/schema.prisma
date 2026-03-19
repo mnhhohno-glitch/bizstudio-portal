@@ -99,6 +99,9 @@ model User {
   manusApiKeyEncrypted String?   @map("manus_api_key_encrypted")
   manusApiKeySetAt     DateTime? @map("manus_api_key_set_at")
 
+  // マイナビ管理担当フラグ
+  isMynaviAssignee     Boolean   @default(false) @map("is_mynavi_assignee")
+
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt      @map("updated_at")
 

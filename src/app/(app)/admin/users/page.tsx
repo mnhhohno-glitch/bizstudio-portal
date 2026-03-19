@@ -47,6 +47,7 @@ export default async function AdminUsersPage() {
       manusApiKeyEncrypted: !!u.manusApiKeyEncrypted,
       manusLast4,
       manusSetAt: u.manusApiKeySetAt?.toISOString() ?? null,
+      isMynaviAssignee: u.isMynaviAssignee,
     };
   });
 

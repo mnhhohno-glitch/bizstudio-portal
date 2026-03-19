@@ -17,6 +17,7 @@ type UserData = {
   manusApiKeyEncrypted: boolean;
   manusLast4: string | null;
   manusSetAt: string | null;
+  isMynaviAssignee: boolean;
 };
 
 type EditForm = {
@@ -31,6 +32,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
   const router = useRouter();
   const [showDisabled, setShowDisabled] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [togglingMynavi, setTogglingMynavi] = useState<string | null>(null);
 
   // Edit modal
   const [editUserId, setEditUserId] = useState<string | null>(null);
@@ -52,6 +54,24 @@ export default function UserListClient({ users }: { users: UserData[] }) {
   }, [users, showDisabled, sortOrder]);
 
   const toggleSort = () => setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+
+  const toggleMynaviAssignee = async (u: UserData) => {
+    setTogglingMynavi(u.id);
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}/mynavi-assignee`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isMynaviAssignee: !u.isMynaviAssignee }),
+      });
+      if (res.ok) {
+        router.refresh();
+      }
+    } catch {
+      // silent fail
+    } finally {
+      setTogglingMynavi(null);
+    }
+  };
 
   const openEdit = (u: UserData) => {
     setEditUserId(u.id);
@@ -131,6 +151,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
               <Th>権限</Th>
               <Th>LINE WORKS ID</Th>
               <Th>Manus連携</Th>
+              <Th>マイナビ担当</Th>
               <Th>状態</Th>
               <Th>操作</Th>
             </tr>
@@ -161,6 +182,22 @@ export default function UserListClient({ users }: { users: UserData[] }) {
                   >
                     {u.manusApiKeyEncrypted ? "設定済み" : "未設定"}
                   </span>
+                </Td>
+                <Td>
+                  <button
+                    type="button"
+                    disabled={togglingMynavi === u.id}
+                    onClick={() => toggleMynaviAssignee(u)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      u.isMynaviAssignee ? "bg-[#2563EB]" : "bg-[#D1D5DB]"
+                    } ${togglingMynavi === u.id ? "opacity-50" : "cursor-pointer"}`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                        u.isMynaviAssignee ? "translate-x-[18px]" : "translate-x-[3px]"
+                      }`}
+                    />
+                  </button>
                 </Td>
                 <Td>
                   <span
@@ -200,7 +237,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
             {filtered.length === 0 && (
               <tr>
                 <Td><span className="text-[#374151]/60">社員がいません</span></Td>
-                <Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td>
+                <Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td>
               </tr>
             )}
           </tbody>
