@@ -113,12 +113,14 @@ type TaskCompletedParams = {
   candidateName: string | null;
   candidateNumber: string | null;
   completedByName: string;
-  creatorLineworksId: string | null;
-  creatorName: string;
+  // 通知先（完了者以外の担当者 + 作成者）
+  recipientNames: string[];
+  recipientLineworksIds: (string | null)[];
 };
 
 /**
  * タスク完了時にLINE WORKSのタスク通知トークルームにメッセージを送信
+ * メンション先: 完了者以外の担当者 + 作成者（重複排除済み）
  */
 export async function notifyTaskCompleted(params: TaskCompletedParams): Promise<void> {
   const botId = process.env.LINEWORKS_TASK_BOT_ID;
@@ -154,10 +156,15 @@ export async function notifyTaskCompleted(params: TaskCompletedParams): Promise<
     `${baseUrl}/tasks/${params.taskId}`,
   ];
 
-  // 作成者にメンション
-  if (params.creatorLineworksId) {
+  // メンション付き通知
+  const mentionLines = params.recipientLineworksIds
+    .filter((id): id is string => !!id)
+    .map((id) => `<m userId="${id}">`);
+
+  if (mentionLines.length > 0) {
     const mentionedLines = [
-      `<m userId="${params.creatorLineworksId}"> タスクが完了しました`,
+      ...mentionLines,
+      ` ${params.completedByName}がタスクを完了しました`,
       "",
       ...baseLines.slice(2),
     ];
@@ -170,12 +177,18 @@ export async function notifyTaskCompleted(params: TaskCompletedParams): Promise<
   }
 
   // メンションなし
-  const fallbackLines = [
-    `${params.creatorName}さん タスクが完了しました`,
-    "",
-    ...baseLines.slice(2),
-  ];
-  await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+  if (params.recipientNames.length > 0) {
+    const namePrefix = params.recipientNames.map((n) => `${n}さん`).join("、");
+    const fallbackLines = [
+      `${namePrefix} ${params.completedByName}がタスクを完了しました`,
+      "",
+      ...baseLines.slice(2),
+    ];
+    await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+    return;
+  }
+
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
 
 type TaskCommentParams = {

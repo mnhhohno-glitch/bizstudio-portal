@@ -86,8 +86,8 @@ export async function PATCH(
     // 通常の完了処理（any or 単一担当者）
     await prisma.task.update({ where: { id: taskId }, data: { status } });
 
-    // 完了通知（作成者≠完了者の場合のみ）
-    if (status === "COMPLETED" && task.createdByUserId !== actor.id) {
+    // 完了通知
+    if (status === "COMPLETED") {
       sendCompletionNotification(task, actor).catch((e) => console.error("完了通知エラー:", e));
     }
 
@@ -106,9 +106,42 @@ async function sendCompletionNotification(task: any, actor: { id: string; name: 
       category: { select: { name: true } },
       candidate: { select: { name: true, candidateNumber: true } },
       createdByUser: { select: { id: true, name: true, lineworksId: true } },
+      assignees: { include: { employee: { select: { name: true } } } },
     },
   });
-  if (!fullTask || fullTask.createdByUserId === actor.id) return;
+  if (!fullTask) return;
+
+  // 通知先: 担当者 + 作成者のうち、完了操作者（actor）以外
+  const recipientNameSet = new Set<string>();
+
+  // 担当者（完了者以外）
+  for (const a of fullTask.assignees) {
+    if (a.employee.name !== actor.name) {
+      recipientNameSet.add(a.employee.name);
+    }
+  }
+  // 作成者（完了者以外）
+  if (fullTask.createdByUser && fullTask.createdByUser.name !== actor.name) {
+    recipientNameSet.add(fullTask.createdByUser.name);
+  }
+
+  const recipientNames = Array.from(recipientNameSet);
+
+  // 担当者が1人だけ（=完了者本人のみ）で作成者も本人の場合は通知不要
+  if (recipientNames.length === 0) return;
+
+  // lineworksId を取得
+  const recipientUsers = recipientNames.length > 0
+    ? await prisma.user.findMany({
+        where: { name: { in: recipientNames }, status: "active" },
+        select: { name: true, lineworksId: true },
+      })
+    : [];
+
+  const recipientLineworksIds = recipientNames.map((name) => {
+    const user = recipientUsers.find((u) => u.name === name);
+    return user?.lineworksId ?? null;
+  });
 
   await notifyTaskCompleted({
     taskId: fullTask.id,
@@ -117,7 +150,7 @@ async function sendCompletionNotification(task: any, actor: { id: string; name: 
     candidateName: fullTask.candidate?.name ?? null,
     candidateNumber: fullTask.candidate?.candidateNumber ?? null,
     completedByName: actor.name,
-    creatorLineworksId: fullTask.createdByUser?.lineworksId ?? null,
-    creatorName: fullTask.createdByUser?.name ?? "",
+    recipientNames,
+    recipientLineworksIds,
   });
 }
