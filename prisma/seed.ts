@@ -47,10 +47,10 @@ async function main() {
 
   // 社員マスターデータ
   const employees = [
-    { employeeNumber: "BS1000001", name: "大野 将幸" },
-    { employeeNumber: "BS1000007", name: "岡田 愛子" },
-    { employeeNumber: "BS1000008", name: "安藤 嘉富" },
-    { employeeNumber: "BS1000009", name: "南條 雄三" },
+    { employeeNumber: "1000001", name: "大野 将幸" },
+    { employeeNumber: "1000007", name: "岡田 愛子" },
+    { employeeNumber: "1000008", name: "安藤 嘉富" },
+    { employeeNumber: "1000009", name: "南條 雄三" },
   ];
 
   for (const emp of employees) {
