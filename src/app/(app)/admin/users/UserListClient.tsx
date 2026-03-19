@@ -33,6 +33,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
   const [showDisabled, setShowDisabled] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [togglingMynavi, setTogglingMynavi] = useState<string | null>(null);
+  const [mynaviError, setMynaviError] = useState<string | null>(null);
 
   // Edit modal
   const [editUserId, setEditUserId] = useState<string | null>(null);
@@ -57,6 +58,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
 
   const toggleMynaviAssignee = async (u: UserData) => {
     setTogglingMynavi(u.id);
+    setMynaviError(null);
     try {
       const res = await fetch(`/api/admin/users/${u.id}/mynavi-assignee`, {
         method: "PATCH",
@@ -65,9 +67,12 @@ export default function UserListClient({ users }: { users: UserData[] }) {
       });
       if (res.ok) {
         router.refresh();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMynaviError(`${u.name}: ${data.error || `エラー ${res.status}`}`);
       }
-    } catch {
-      // silent fail
+    } catch (e) {
+      setMynaviError(`${u.name}: 通信エラー - ${e}`);
     } finally {
       setTogglingMynavi(null);
     }
@@ -128,6 +133,12 @@ export default function UserListClient({ users }: { users: UserData[] }) {
           無効な社員を表示
         </label>
       </div>
+
+      {mynaviError && (
+        <div className="mb-3 rounded bg-red-50 border border-red-200 text-red-700 px-4 py-2 text-sm">
+          {mynaviError}
+        </div>
+      )}
 
       <TableWrap>
         <Table>

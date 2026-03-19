@@ -79,13 +79,24 @@ export async function POST(request: Request) {
         where: { name: advisorName, status: "active" },
         include: { employee: { select: { id: true, name: true } } },
       });
-      if (advisorUser?.employee) {
-        assignees.push({
-          userId: advisorUser.id,
-          employeeId: advisorUser.employee.id,
-          name: advisorUser.employee.name,
-          lineworksId: advisorUser.lineworksId,
-        });
+      if (advisorUser) {
+        let employeeId = advisorUser.employee?.id;
+        // User→Employee リレーション未リンク時は名前でフォールバック
+        if (!employeeId) {
+          const emp = await prisma.employee.findFirst({
+            where: { name: advisorName, status: "active" },
+            select: { id: true },
+          });
+          employeeId = emp?.id;
+        }
+        if (employeeId) {
+          assignees.push({
+            userId: advisorUser.id,
+            employeeId,
+            name: advisorUser.employee?.name ?? advisorUser.name,
+            lineworksId: advisorUser.lineworksId,
+          });
+        }
       }
     }
 
@@ -96,11 +107,26 @@ export async function POST(request: Request) {
         include: { employee: { select: { id: true, name: true } } },
       });
       for (const u of mynaviUsers) {
-        if (u.employee) {
+        let employeeId = u.employee?.id;
+        let employeeName = u.employee?.name ?? u.name;
+
+        // User→Employee リレーションが未リンクの場合、名前でEmployee検索
+        if (!employeeId) {
+          const emp = await prisma.employee.findFirst({
+            where: { name: u.name, status: "active" },
+            select: { id: true, name: true },
+          });
+          if (emp) {
+            employeeId = emp.id;
+            employeeName = emp.name;
+          }
+        }
+
+        if (employeeId) {
           assignees.push({
             userId: u.id,
-            employeeId: u.employee.id,
-            name: u.employee.name,
+            employeeId,
+            name: employeeName,
             lineworksId: u.lineworksId,
           });
         }
