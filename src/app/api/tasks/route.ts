@@ -28,16 +28,19 @@ export async function GET(request: Request) {
     const where: Prisma.TaskWhereInput = {};
 
     // 表示モードに応じたフィルター
-    const employee = await prisma.employee.findFirst({
+    // 同名の Employee レコードが複数存在する場合に備え、全件取得する
+    const employees = await prisma.employee.findMany({
       where: { name: actor.name, status: "active" },
+      select: { id: true },
     });
+    const employeeIds = employees.map((e) => e.id);
 
-    if (view === "mine" && employee) {
-      where.assignees = { some: { employeeId: employee.id } };
+    if (view === "mine" && employeeIds.length > 0) {
+      where.assignees = { some: { employeeId: { in: employeeIds } } };
     } else if (view === "requested") {
       where.createdByUserId = actor.id;
-      if (employee) {
-        where.assignees = { none: { employeeId: employee.id } };
+      if (employeeIds.length > 0) {
+        where.assignees = { none: { employeeId: { in: employeeIds } } };
       }
     }
     // view === "all" → フィルターなし（全タスク）
