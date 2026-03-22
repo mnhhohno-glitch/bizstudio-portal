@@ -122,6 +122,11 @@ model User {
   // 勤怠管理
   employee          Employee?          @relation("EmployeeUser")
 
+  // RPAエラー管理
+  rpaErrorChats     RpaErrorChat[]     @relation("RpaErrorChatUser")
+  rpaErrorLogs      RpaErrorLog[]      @relation("RpaErrorLogUser")
+  rpaErrorNotes     RpaErrorNote[]     @relation("RpaErrorNoteUser")
+
   @@map("users")
 }
 
@@ -831,4 +836,83 @@ model LeaveRequest {
 
   @@index([status])
   @@map("leave_requests")
+}
+
+// ========================================
+// RPAエラー管理
+// ========================================
+
+// RPAエラー相談チャット（セッション単位）
+model RpaErrorChat {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation("RpaErrorChatUser", fields: [userId], references: [id])
+  messages  RpaErrorChatMessage[]
+  errorLog  RpaErrorLog?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("rpa_error_chats")
+}
+
+// チャットメッセージ
+model RpaErrorChatMessage {
+  id        String       @id @default(cuid())
+  chatId    String       @map("chat_id")
+  chat      RpaErrorChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      String       // "user" | "assistant"
+  content   String       @db.Text
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  @@map("rpa_error_chat_messages")
+}
+
+// エラーログ
+model RpaErrorLog {
+  id            String          @id @default(cuid())
+  machineNumber Int             @map("machine_number")
+  flowName      String          @map("flow_name")
+  errorSummary  String          @map("error_summary") @db.Text
+  status        String          @default("未対応")
+  severity      String?
+  occurredAt    DateTime        @map("occurred_at")
+  chatId        String?         @unique @map("chat_id")
+  chat          RpaErrorChat?   @relation(fields: [chatId], references: [id])
+  knownErrorId  String?         @map("known_error_id")
+  knownError    RpaKnownError?  @relation(fields: [knownErrorId], references: [id])
+  notes         RpaErrorNote[]
+  registeredBy  String          @map("registered_by")
+  registeredUser User           @relation("RpaErrorLogUser", fields: [registeredBy], references: [id])
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@map("rpa_error_logs")
+}
+
+// エラー対応メモ
+model RpaErrorNote {
+  id         String      @id @default(cuid())
+  errorLogId String      @map("error_log_id")
+  errorLog   RpaErrorLog @relation(fields: [errorLogId], references: [id], onDelete: Cascade)
+  content    String      @db.Text
+  createdBy  String      @map("created_by")
+  user       User        @relation("RpaErrorNoteUser", fields: [createdBy], references: [id])
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  @@map("rpa_error_notes")
+}
+
+// 既知エラーパターンDB
+model RpaKnownError {
+  id          String   @id @default(cuid())
+  patternName String   @map("pattern_name")
+  keywords    String[]
+  solution    String   @db.Text
+  solutionUrl String?  @map("solution_url")
+  severity    String
+  errorLogs   RpaErrorLog[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("rpa_known_errors")
 }
