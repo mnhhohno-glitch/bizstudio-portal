@@ -128,6 +128,7 @@ model User {
   rpaErrorNotes     RpaErrorNote[]     @relation("RpaErrorNoteUser")
   rpaErrorAssignments RpaErrorLog[]  @relation("RpaErrorAssignee")
   candidateFiles    CandidateFile[]  @relation("UserCandidateFiles")
+  advisorSessions   AdvisorChatSession[] @relation("UserAdvisorSessions")
 
   @@map("users")
 }
@@ -228,6 +229,7 @@ model Candidate {
   jimuSessions    JimuSession[]
   tasks           Task[]
   files           CandidateFile[]
+  advisorSessions AdvisorChatSession[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -953,4 +955,33 @@ model CandidateFile {
   updatedAt        DateTime              @updatedAt @map("updated_at")
 
   @@map("candidate_files")
+}
+
+// ========================================
+// AIアドバイザーチャット
+// ========================================
+
+model AdvisorChatSession {
+  id              String               @id @default(cuid())
+  candidateId     String               @map("candidate_id")
+  candidate       Candidate            @relation(fields: [candidateId], references: [id])
+  title           String               @default("新しいチャット")
+  createdByUserId String               @map("created_by_user_id")
+  createdBy       User                 @relation("UserAdvisorSessions", fields: [createdByUserId], references: [id])
+  messages        AdvisorChatMessage[]
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  @@map("advisor_chat_sessions")
+}
+
+model AdvisorChatMessage {
+  id        String             @id @default(cuid())
+  sessionId String             @map("session_id")
+  session   AdvisorChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String             @db.Text
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  @@map("advisor_chat_messages")
 }

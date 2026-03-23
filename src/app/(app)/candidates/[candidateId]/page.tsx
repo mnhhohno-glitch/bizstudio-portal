@@ -79,6 +79,7 @@ const TABS = [
   { key: "overview", label: "概要" },
   { key: "documents", label: "書類" },
   { key: "support", label: "対策・サポート" },
+  { key: "advisor", label: "AIアドバイザー" },
   { key: "tasks", label: "タスク" },
   { key: "history", label: "履歴" },
 ] as const;
@@ -1551,6 +1552,9 @@ export default function CandidateDetailPage() {
             jimuSessions={jimuSessions}
             onJimuCreated={fetchJimuSessions}
           />
+        )}
+        {activeTab === "advisor" && (
+          <PlaceholderTab icon="🤖" label="AIアドバイザーチャット" />
         )}
         {activeTab === "tasks" && (
           <CandidateTasksTab candidateId={candidateId} />
