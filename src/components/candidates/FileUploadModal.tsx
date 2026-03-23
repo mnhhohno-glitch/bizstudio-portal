@@ -44,24 +44,47 @@ export default function FileUploadModal({
   onSuccess: () => void;
 }) {
   const [category, setCategory] = useState(defaultCategory);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [memo, setMemo] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validateAndSetFile = (file: File) => {
-    if (!ALLOWED_TYPES.has(file.type)) {
-      setError("この形式のファイルはアップロードできません");
-      return;
+  const validateAndAddFiles = (files: FileList | File[]) => {
+    const newFiles: File[] = [];
+    const errors: string[] = [];
+
+    for (const file of Array.from(files)) {
+      if (!ALLOWED_TYPES.has(file.type)) {
+        errors.push(`${file.name}: この形式はアップロードできません`);
+        continue;
+      }
+      if (file.size > MAX_SIZE) {
+        errors.push(`${file.name}: 20MBを超えています`);
+        continue;
+      }
+      // 重複チェック
+      if (selectedFiles.some((f) => f.name === file.name && f.size === file.size)) {
+        continue;
+      }
+      newFiles.push(file);
     }
-    if (file.size > MAX_SIZE) {
-      setError("ファイルサイズは20MB以下にしてください");
-      return;
+
+    if (errors.length > 0) {
+      setError(errors.join("\n"));
+    } else {
+      setError("");
     }
-    setSelectedFile(file);
-    setError("");
+
+    if (newFiles.length > 0) {
+      setSelectedFiles((prev) => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
@@ -69,36 +92,47 @@ export default function FileUploadModal({
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation(); setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) validateAndSetFile(file);
+    if (e.dataTransfer.files?.length) {
+      validateAndAddFiles(e.dataTransfer.files);
+    }
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
     setIsUploading(true);
     setError("");
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("category", category);
-      if (memo.trim()) formData.append("memo", memo.trim());
+    let successCount = 0;
+    let errorCount = 0;
 
-      const res = await fetch(`/api/candidates/${candidateId}/files/upload`, {
-        method: "POST",
-        body: formData,
-      });
+    for (let i = 0; i < selectedFiles.length; i++) {
+      setUploadProgress({ current: i + 1, total: selectedFiles.length });
+      try {
+        const formData = new FormData();
+        formData.append("file", selectedFiles[i]);
+        formData.append("category", category);
+        if (memo.trim()) formData.append("memo", memo.trim());
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "アップロードに失敗しました");
+        const res = await fetch(`/api/candidates/${candidateId}/files/upload`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) throw new Error();
+        successCount++;
+      } catch {
+        errorCount++;
       }
+    }
 
-      onClose();
+    setIsUploading(false);
+
+    if (errorCount > 0) {
+      setError(`${successCount}件アップロード成功、${errorCount}件失敗`);
+    }
+
+    if (successCount > 0) {
       onSuccess();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "アップロードに失敗しました");
-    } finally {
-      setIsUploading(false);
+      if (errorCount === 0) onClose();
     }
   };
 
@@ -111,7 +145,7 @@ export default function FileUploadModal({
         </div>
 
         {error && (
-          <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">{error}</div>
+          <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm whitespace-pre-wrap">{error}</div>
         )}
 
         <div className="space-y-4">
@@ -129,50 +163,59 @@ export default function FileUploadModal({
             </select>
           </div>
 
-          {/* ドロップエリア */}
-          {!selectedFile ? (
-            <div
-              onDragOver={handleDragOver}
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-                isDragging ? "border-[#2563EB] bg-[#F4F7F9]" : "border-gray-300"
-              }`}
+          {/* ドロップエリア（常時表示） */}
+          <div
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+              isDragging ? "border-[#2563EB] bg-[#F4F7F9]" : "border-gray-300"
+            }`}
+          >
+            <p className="text-sm text-gray-500 mb-2">ファイルをドラッグ＆ドロップ</p>
+            <p className="text-xs text-gray-400 mb-3">または</p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
-              <p className="text-sm text-gray-500 mb-2">ファイルをドラッグ＆ドロップ</p>
-              <p className="text-xs text-gray-400 mb-3">または</p>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                📎 ファイルを選択
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) validateAndSetFile(file);
-                }}
-              />
-              <p className="text-xs text-gray-400 mt-3">PDF, Word, Excel, PowerPoint, 画像 ・ 最大20MB</p>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
-              <span className="text-lg">{getIcon(selectedFile.type)}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{selectedFile.name}</p>
-                <p className="text-xs text-gray-500">{formatSize(selectedFile.size)}</p>
-              </div>
-              <button
-                onClick={() => setSelectedFile(null)}
-                className="text-gray-400 hover:text-gray-600 text-sm"
-              >
-                ✕ 取り消し
-              </button>
+              📎 ファイルを選択
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  validateAndAddFiles(e.target.files);
+                }
+                e.target.value = "";
+              }}
+            />
+            <p className="text-xs text-gray-400 mt-3">PDF, Word, Excel, PowerPoint, 画像 ・ 最大20MB ・ 複数選択可</p>
+          </div>
+
+          {/* 選択済みファイル一覧 */}
+          {selectedFiles.length > 0 && (
+            <div className="space-y-2">
+              {selectedFiles.map((file, i) => (
+                <div key={`${file.name}-${i}`} className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
+                  <span className="text-lg">{getIcon(file.type)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
+                    <p className="text-xs text-gray-500">{formatSize(file.size)}</p>
+                  </div>
+                  <button
+                    onClick={() => removeFile(i)}
+                    className="text-gray-400 hover:text-gray-600 text-sm shrink-0"
+                  >
+                    ✕ 取り消し
+                  </button>
+                </div>
+              ))}
+              <p className="text-xs text-gray-500">{selectedFiles.length}件のファイルを選択中</p>
             </div>
           )}
 
@@ -195,10 +238,14 @@ export default function FileUploadModal({
           </button>
           <button
             onClick={handleUpload}
-            disabled={!selectedFile || isUploading}
+            disabled={selectedFiles.length === 0 || isUploading}
             className={`flex-1 bg-[#2563EB] text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed ${isUploading ? "animate-pulse" : ""}`}
           >
-            {isUploading ? "アップロード中..." : "アップロード"}
+            {isUploading
+              ? `アップロード中... (${uploadProgress.current}/${uploadProgress.total})`
+              : selectedFiles.length > 1
+                ? `${selectedFiles.length}件をアップロード`
+                : "アップロード"}
           </button>
         </div>
       </div>
