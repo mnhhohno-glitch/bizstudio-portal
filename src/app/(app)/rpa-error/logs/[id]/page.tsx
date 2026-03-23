@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 
 type Note = { id: string; content: string; createdAt: string; user: { name: string } };
 type ChatMessage = { id: string; role: string; content: string; createdAt: string };
@@ -62,6 +63,7 @@ export default function RpaErrorLogDetailPage() {
 
   return (
     <div className="max-w-4xl">
+      <RpaErrorNav />
       <a href="/rpa-error/logs" className="text-[13px] text-[#2563EB] hover:underline">&larr; エラー一覧に戻る</a>
 
       {/* エラー情報 */}

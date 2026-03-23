@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 
 type KnownError = {
   id: string;
@@ -94,6 +95,7 @@ export default function RpaKnownErrorsPage() {
 
   return (
     <div>
+      <RpaErrorNav />
       <div className="flex items-center justify-between">
         <h1 className="text-[20px] font-bold text-[#374151]">既知エラー管理</h1>
         <button onClick={openCreate} className="rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8]">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 
 type StatsData = {
   openCount: number;
@@ -47,6 +48,7 @@ export default function RpaErrorStatsPage() {
 
   return (
     <div>
+      <RpaErrorNav />
       <h1 className="text-[20px] font-bold text-[#374151]">RPAエラー統計</h1>
 
       {/* 期間フィルター */}

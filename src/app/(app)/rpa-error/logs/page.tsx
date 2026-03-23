@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 
 type ErrorLog = {
   id: string;
@@ -66,6 +67,7 @@ export default function RpaErrorLogsPage() {
 
   return (
     <div>
+      <RpaErrorNav />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-[20px] font-bold text-[#374151]">RPAエラー一覧</h1>

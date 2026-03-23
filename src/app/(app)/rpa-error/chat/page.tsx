@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { parseKnownErrorSuggestion, removeJsonBlock } from "@/lib/rpa-error/parseKnownErrorSuggestion";
 import type { KnownErrorSuggestion } from "@/lib/rpa-error/parseKnownErrorSuggestion";
+import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 
 type Message = { id: string; role: string; content: string; createdAt: string };
 type ChatSession = { id: string; createdAt: string; messages: Message[]; errorLog?: { id: string } | null };
@@ -283,7 +284,9 @@ export default function RpaErrorChatPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] gap-4">
+    <div>
+      <RpaErrorNav />
+    <div className="flex h-[calc(100vh-10rem)] gap-4">
       {/* 左: チャット一覧 */}
       <div className="w-64 shrink-0 rounded-lg border border-[#E5E7EB] bg-white flex flex-col">
         <div className="p-3 border-b border-[#E5E7EB]">
@@ -307,11 +310,6 @@ export default function RpaErrorChatPage() {
               </div>
             </button>
           ))}
-        </div>
-        <div className="border-t border-[#E5E7EB] p-2 space-y-1">
-          <a href="/rpa-error/logs" className="block px-3 py-1.5 text-[12px] text-[#6B7280] hover:text-[#374151] hover:bg-[#F3F4F6] rounded">エラー一覧</a>
-          <a href="/rpa-error/known-errors" className="block px-3 py-1.5 text-[12px] text-[#6B7280] hover:text-[#374151] hover:bg-[#F3F4F6] rounded">既知エラー管理</a>
-          <a href="/rpa-error/stats" className="block px-3 py-1.5 text-[12px] text-[#6B7280] hover:text-[#374151] hover:bg-[#F3F4F6] rounded">統計</a>
         </div>
       </div>
 
@@ -489,6 +487,7 @@ export default function RpaErrorChatPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
