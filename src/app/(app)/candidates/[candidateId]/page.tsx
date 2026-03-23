@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 import DocumentsTab from "@/components/candidates/DocumentsTab";
+import AdvisorTab from "@/components/candidates/AdvisorTab";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -1554,7 +1555,9 @@ export default function CandidateDetailPage() {
           />
         )}
         {activeTab === "advisor" && (
-          <PlaceholderTab icon="🤖" label="AIアドバイザーチャット" />
+          <div style={{ height: "calc(100vh - 320px)" }}>
+            <AdvisorTab candidateId={candidateId} candidateName={candidate.name} />
+          </div>
         )}
         {activeTab === "tasks" && (
           <CandidateTasksTab candidateId={candidateId} />
