@@ -33,6 +33,7 @@ export default function RpaErrorChatPage() {
   } | null>(null);
   const [saving, setSaving] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 既知エラー登録
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
@@ -77,6 +78,7 @@ export default function RpaErrorChatPage() {
     if (!input.trim() || !activeChatId || sending) return;
     const userMsg = input.trim();
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "80px";
     setSending(true);
     setMessages((prev) => [...prev, { id: "temp", role: "user", content: userMsg, createdAt: new Date().toISOString() }]);
 
@@ -342,7 +344,20 @@ export default function RpaErrorChatPage() {
         {activeChatId && (
           <div className="border-t border-[#E5E7EB] p-3">
             <div className="flex gap-2">
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="エラー内容を貼り付けてください..." rows={2} className="flex-1 resize-none rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20" />
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  const el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(el.scrollHeight, 300) + "px";
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="エラー内容を貼り付けてください..."
+                style={{ minHeight: "80px", maxHeight: "300px" }}
+                className="flex-1 resize-none overflow-y-auto rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20"
+              />
               <button onClick={sendMessage} disabled={!input.trim() || sending} className="self-end rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">送信</button>
             </div>
           </div>
