@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
+import DocumentsTab from "@/components/candidates/DocumentsTab";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -1541,7 +1542,7 @@ export default function CandidateDetailPage() {
           />
         )}
         {activeTab === "documents" && (
-          <PlaceholderTab icon="📁" label="書類管理機能" />
+          <DocumentsTab candidateId={candidateId} />
         )}
         {activeTab === "support" && (
           <SupportTab
