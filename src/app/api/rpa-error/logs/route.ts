@@ -69,32 +69,34 @@ export async function POST(req: Request) {
     },
   });
 
-  // LINE WORKS通知
-  try {
-    const botId = process.env.LINEWORKS_RPA_BOT_ID;
-    const roomId = process.env.LINEWORKS_RPA_ROOM_ID;
-    const baseUrl = process.env.PORTAL_BASE_URL;
+  // LINE WORKS通知（「要対応」または「緊急」の場合のみ）
+  if (severity === "要対応" || severity === "緊急") {
+    try {
+      const botId = process.env.LINEWORKS_TASK_BOT_ID;
+      const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+      const baseUrl = process.env.PORTAL_BASE_URL;
 
-    if (botId && roomId) {
-      const summaryShort = errorSummary.length > 100
-        ? errorSummary.slice(0, 100) + "..."
-        : errorSummary;
+      if (botId && channelId) {
+        const summaryShort = errorSummary.length > 100
+          ? errorSummary.slice(0, 100) + "..."
+          : errorSummary;
 
-      const message = [
-        "🔴 RPAエラー登録",
-        "",
-        `号機: ${machineNumber}号機`,
-        `フロー: ${flowName}`,
-        `深刻度: ${severity || "未分類"}`,
-        `概要: ${summaryShort}`,
-        "",
-        `▶ 詳細を確認: ${baseUrl}/rpa-error/logs/${log.id}`,
-      ].join("\n");
+        const icon = severity === "緊急" ? "🚨" : "🔴";
+        const message = [
+          `${icon} RPAエラー【${severity}】`,
+          "",
+          `号機: ${machineNumber}号機`,
+          `フロー: ${flowName}`,
+          `概要: ${summaryShort}`,
+          "",
+          `▶ 詳細: ${baseUrl}/rpa-error/logs/${log.id}`,
+        ].join("\n");
 
-      await sendBotMessage(botId, roomId, message);
+        await sendBotMessage(botId, channelId, message);
+      }
+    } catch (e) {
+      console.error("RPA LINE WORKS通知失敗:", e);
     }
-  } catch (e) {
-    console.error("RPA LINE WORKS通知失敗:", e);
   }
 
   return NextResponse.json({ id: log.id }, { status: 201 });
