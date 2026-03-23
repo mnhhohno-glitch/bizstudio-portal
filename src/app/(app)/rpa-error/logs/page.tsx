@@ -14,6 +14,7 @@ type ErrorLog = {
   occurredAt: string;
   registeredUser: { name: string };
   knownError: { patternName: string } | null;
+  assignee: { id: string; name: string } | null;
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -34,8 +35,9 @@ export default function RpaErrorLogsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [filters, setFilters] = useState({ machineNumber: "", status: "" });
+  const [filters, setFilters] = useState({ machineNumber: "", status: "", assigneeId: "" });
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -43,6 +45,7 @@ export default function RpaErrorLogsPage() {
     params.set("page", String(page));
     if (filters.machineNumber) params.set("machineNumber", filters.machineNumber);
     if (filters.status) params.set("status", filters.status);
+    if (filters.assigneeId) params.set("assigneeId", filters.assigneeId);
 
     const res = await fetch(`/api/rpa-error/logs?${params}`);
     if (res.ok) {
@@ -55,6 +58,9 @@ export default function RpaErrorLogsPage() {
   }, [page, filters]);
 
   useEffect(() => { loadLogs(); }, [loadLogs]);
+  useEffect(() => {
+    fetch("/api/rpa-error/users").then((r) => r.ok ? r.json() : { users: [] }).then((d) => setUsers(d.users || []));
+  }, []);
 
   const updateStatus = async (id: string, newStatus: string) => {
     await fetch(`/api/rpa-error/logs/${id}`, {
@@ -98,6 +104,14 @@ export default function RpaErrorLogsPage() {
           <option value="対応中">対応中</option>
           <option value="解決済み">解決済み</option>
         </select>
+        <select
+          value={filters.assigneeId}
+          onChange={(e) => { setFilters({ ...filters, assigneeId: e.target.value }); setPage(1); }}
+          className="rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]"
+        >
+          <option value="">全担当者</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
       </div>
 
       {/* テーブル */}
@@ -109,15 +123,16 @@ export default function RpaErrorLogsPage() {
               <th className="px-4 py-3 text-left font-medium">号機</th>
               <th className="px-4 py-3 text-left font-medium">フロー名</th>
               <th className="px-4 py-3 text-left font-medium">エラー概要</th>
+              <th className="px-4 py-3 text-left font-medium">担当者</th>
               <th className="px-4 py-3 text-left font-medium">深刻度</th>
               <th className="px-4 py-3 text-left font-medium">ステータス</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#9CA3AF]">読み込み中...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-[#9CA3AF]">読み込み中...</td></tr>
             ) : logs.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-[#9CA3AF]">エラーログがありません</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-[#9CA3AF]">エラーログがありません</td></tr>
             ) : logs.map((log) => (
               <tr
                 key={log.id}
@@ -130,6 +145,7 @@ export default function RpaErrorLogsPage() {
                 <td className="px-4 py-3">{log.machineNumber}号機</td>
                 <td className="px-4 py-3 text-[13px]">{log.flowName}</td>
                 <td className="px-4 py-3 max-w-xs truncate">{log.errorSummary}</td>
+                <td className="px-4 py-3 text-[13px] text-[#374151]">{log.assignee?.name || "—"}</td>
                 <td className="px-4 py-3">
                   <span className={SEVERITY_STYLE[log.severity || ""] || "text-[#9CA3AF]"}>
                     {log.severity || "—"}

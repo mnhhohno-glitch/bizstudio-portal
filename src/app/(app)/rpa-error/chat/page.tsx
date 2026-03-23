@@ -8,6 +8,7 @@ import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
 type Message = { id: string; role: string; content: string; createdAt: string };
 type ChatSession = { id: string; createdAt: string; messages: Message[]; errorLog?: { id: string } | null };
 type Duplicate = { id: string; patternName: string; matchedKeywords: string[]; matchCount: number };
+type SimpleUser = { id: string; name: string };
 
 type KnownErrorForm = {
   patternName: string;
@@ -20,6 +21,7 @@ type KnownErrorForm = {
   logFlowName: string;
   logErrorSummary: string;
   logOccurredAt: string;
+  logAssigneeId: string;
 };
 
 export default function RpaErrorChatPage() {
@@ -36,8 +38,10 @@ export default function RpaErrorChatPage() {
     severity: string | null;
     knownErrorId: string | null;
     occurredAt: string;
+    assigneeId: string;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [users, setUsers] = useState<SimpleUser[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -56,7 +60,10 @@ export default function RpaErrorChatPage() {
     }
   }, []);
 
-  useEffect(() => { loadChats(); }, [loadChats]);
+  useEffect(() => {
+    loadChats();
+    fetch("/api/rpa-error/users").then((r) => r.ok ? r.json() : { users: [] }).then((d) => setUsers(d.users || []));
+  }, [loadChats]);
 
   const loadChat = async (chatId: string) => {
     setActiveChatId(chatId);
@@ -122,6 +129,7 @@ export default function RpaErrorChatPage() {
           severity: data.severity || null,
           knownErrorId: data.knownErrorId || null,
           occurredAt: new Date().toISOString().slice(0, 16),
+          assigneeId: "",
         });
       }
     } catch { /* */ }
@@ -135,7 +143,7 @@ export default function RpaErrorChatPage() {
       const res = await fetch("/api/rpa-error/logs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...saveModal, chatId: activeChatId }),
+        body: JSON.stringify({ ...saveModal, chatId: activeChatId, assigneeId: saveModal.assigneeId || undefined }),
       });
       if (res.ok) {
         setSaveModal(null);
@@ -157,6 +165,7 @@ export default function RpaErrorChatPage() {
       logFlowName: "00.スカウトメール送信",
       logErrorSummary: "",
       logOccurredAt: new Date().toISOString().slice(0, 16),
+      logAssigneeId: "",
     };
     setKnownErrorModal(form);
     setKnownErrorKeywordInput("");
@@ -239,6 +248,7 @@ export default function RpaErrorChatPage() {
             occurredAt: knownErrorModal.logOccurredAt,
             chatId: activeChatId,
             knownErrorId: knownErrorId || null,
+            assigneeId: knownErrorModal.logAssigneeId || undefined,
           }),
         });
 
@@ -479,6 +489,13 @@ export default function RpaErrorChatPage() {
                   <input type="datetime-local" value={saveModal.occurredAt} onChange={(e) => setSaveModal({ ...saveModal, occurredAt: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]" />
                 </div>
               </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">担当者</label>
+                <select value={saveModal.assigneeId} onChange={(e) => setSaveModal({ ...saveModal, assigneeId: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]">
+                  <option value="">未指定</option>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
             </div>
             <div className="mt-5 flex gap-2 justify-end">
               <button onClick={() => setSaveModal(null)} className="rounded-md bg-[#F3F4F6] px-4 py-2 text-[14px] font-medium text-[#374151] hover:bg-[#E5E7EB]">キャンセル</button>
@@ -569,6 +586,13 @@ export default function RpaErrorChatPage() {
                     <label className="block text-[13px] font-medium text-[#374151] mb-1">発生日時</label>
                     <input type="datetime-local" value={knownErrorModal.logOccurredAt} onChange={(e) => setKnownErrorModal({ ...knownErrorModal, logOccurredAt: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">担当者</label>
+                  <select value={knownErrorModal.logAssigneeId} onChange={(e) => setKnownErrorModal({ ...knownErrorModal, logAssigneeId: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]">
+                    <option value="">未指定</option>
+                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">フロー名</label>

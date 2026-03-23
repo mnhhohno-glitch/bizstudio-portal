@@ -18,9 +18,11 @@ export async function GET(req: Request) {
   const limit = Math.min(100, parseInt(searchParams.get("limit") || "20", 10));
 
   const where: Prisma.RpaErrorLogWhereInput = {};
+  const assigneeId = searchParams.get("assigneeId");
   if (machineNumber) where.machineNumber = parseInt(machineNumber, 10);
   if (flowName) where.flowName = flowName;
   if (status) where.status = status;
+  if (assigneeId) where.assigneeId = assigneeId;
   if (from || to) {
     where.occurredAt = {};
     if (from) where.occurredAt.gte = new Date(from);
@@ -36,6 +38,7 @@ export async function GET(req: Request) {
       include: {
         knownError: { select: { patternName: true } },
         registeredUser: { select: { name: true } },
+        assignee: { select: { id: true, name: true } },
       },
     }),
     prisma.rpaErrorLog.count({ where }),
@@ -49,7 +52,7 @@ export async function POST(req: Request) {
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { machineNumber, flowName, errorSummary, status, severity, occurredAt, chatId, knownErrorId } = body;
+  const { machineNumber, flowName, errorSummary, status, severity, occurredAt, chatId, knownErrorId, assigneeId: bodyAssigneeId } = body;
 
   if (!machineNumber || !flowName || !errorSummary || !occurredAt) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
@@ -65,7 +68,11 @@ export async function POST(req: Request) {
       occurredAt: new Date(occurredAt),
       chatId: chatId || null,
       knownErrorId: knownErrorId || null,
+      assigneeId: bodyAssigneeId || null,
       registeredBy: actor.id,
+    },
+    include: {
+      assignee: { select: { name: true } },
     },
   });
 
@@ -87,6 +94,7 @@ export async function POST(req: Request) {
           "",
           `号機: ${machineNumber}号機`,
           `フロー: ${flowName}`,
+          `担当: ${log.assignee?.name || "未指定"}`,
           `概要: ${summaryShort}`,
           "",
           `▶ 詳細: ${baseUrl}/rpa-error/logs/${log.id}`,

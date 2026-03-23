@@ -126,6 +126,7 @@ model User {
   rpaErrorChats     RpaErrorChat[]     @relation("RpaErrorChatUser")
   rpaErrorLogs      RpaErrorLog[]      @relation("RpaErrorLogUser")
   rpaErrorNotes     RpaErrorNote[]     @relation("RpaErrorNoteUser")
+  rpaErrorAssignments RpaErrorLog[]  @relation("RpaErrorAssignee")
 
   @@map("users")
 }
@@ -883,6 +884,8 @@ model RpaErrorLog {
   notes         RpaErrorNote[]
   registeredBy  String          @map("registered_by")
   registeredUser User           @relation("RpaErrorLogUser", fields: [registeredBy], references: [id])
+  assigneeId    String?         @map("assignee_id")
+  assignee      User?           @relation("RpaErrorAssignee", fields: [assigneeId], references: [id])
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 

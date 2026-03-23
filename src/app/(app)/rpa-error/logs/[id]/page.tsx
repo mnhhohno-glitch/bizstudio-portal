@@ -16,6 +16,7 @@ type ErrorLogDetail = {
   occurredAt: string;
   createdAt: string;
   registeredUser: { name: string };
+  assignee: { id: string; name: string } | null;
   knownError: { patternName: string; solution: string; solutionUrl: string | null; severity: string } | null;
   notes: Note[];
   chat: { messages: ChatMessage[] } | null;
@@ -26,6 +27,7 @@ export default function RpaErrorLogDetailPage() {
   const [log, setLog] = useState<ErrorLogDetail | null>(null);
   const [noteContent, setNoteContent] = useState("");
   const [posting, setPosting] = useState(false);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
 
   const loadLog = useCallback(async () => {
     const res = await fetch(`/api/rpa-error/logs/${id}`);
@@ -36,6 +38,9 @@ export default function RpaErrorLogDetailPage() {
   }, [id]);
 
   useEffect(() => { loadLog(); }, [loadLog]);
+  useEffect(() => {
+    fetch("/api/rpa-error/users").then((r) => r.ok ? r.json() : { users: [] }).then((d) => setUsers(d.users || []));
+  }, []);
 
   const postNote = async () => {
     if (!noteContent.trim() || posting) return;
@@ -47,6 +52,15 @@ export default function RpaErrorLogDetailPage() {
     });
     setNoteContent("");
     setPosting(false);
+    loadLog();
+  };
+
+  const updateAssignee = async (assigneeId: string) => {
+    await fetch(`/api/rpa-error/logs/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assigneeId: assigneeId || null }),
+    });
     loadLog();
   };
 
@@ -89,6 +103,13 @@ export default function RpaErrorLogDetailPage() {
           <div><span className="text-[#6B7280]">深刻度:</span> <span className={log.severity === "緊急" ? "text-[#DC2626] font-semibold" : log.severity === "要対応" ? "text-[#D97706]" : "text-[#9CA3AF]"}>{log.severity || "未分類"}</span></div>
           <div><span className="text-[#6B7280]">発生日時:</span> {new Date(log.occurredAt).toLocaleString("ja-JP")}</div>
           <div><span className="text-[#6B7280]">登録者:</span> {log.registeredUser.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-[#6B7280]">担当者:</span>
+            <select value={log.assignee?.id || ""} onChange={(e) => updateAssignee(e.target.value)} className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[14px]">
+              <option value="">未指定</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
           <div><span className="text-[#6B7280]">登録日:</span> {new Date(log.createdAt).toLocaleString("ja-JP")}</div>
         </div>
 
