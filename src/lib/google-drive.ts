@@ -15,25 +15,30 @@ function getAuth() {
   });
 }
 
-export async function uploadPdfToDrive(
+/**
+ * Google Drive にファイルをアップロード（汎用）
+ */
+export async function uploadFileToDrive(
   fileName: string,
-  fileBuffer: Buffer
+  fileBuffer: Buffer,
+  folderId?: string,
+  mimeType: string = "application/pdf"
 ): Promise<{ fileId: string; webViewLink: string }> {
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
 
-  const folderId = process.env.GOOGLE_DRIVE_MANUAL_FOLDER_ID;
-  if (!folderId) {
-    throw new Error("GOOGLE_DRIVE_MANUAL_FOLDER_ID が設定されていません");
+  const targetFolderId = folderId || process.env.GOOGLE_DRIVE_MANUAL_FOLDER_ID;
+  if (!targetFolderId) {
+    throw new Error("アップロード先フォルダが指定されていません");
   }
 
   const response = await drive.files.create({
     requestBody: {
       name: fileName,
-      parents: [folderId],
+      parents: [targetFolderId],
     },
     media: {
-      mimeType: "application/pdf",
+      mimeType,
       body: Readable.from(fileBuffer),
     },
     fields: "id, webViewLink",
@@ -63,6 +68,48 @@ export async function uploadPdfToDrive(
       fileInfo.data.webViewLink ||
       `https://drive.google.com/file/d/${fileId}/view`,
   };
+}
+
+/** 後方互換: PDF専用アップロード */
+export async function uploadPdfToDrive(
+  fileName: string,
+  fileBuffer: Buffer
+): Promise<{ fileId: string; webViewLink: string }> {
+  return uploadFileToDrive(fileName, fileBuffer);
+}
+
+/**
+ * 指定した親フォルダ内に子フォルダを作成（または既存のものを取得）
+ */
+export async function getOrCreateFolder(
+  folderName: string,
+  parentFolderId: string
+): Promise<string> {
+  const auth = getAuth();
+  const drive = google.drive({ version: "v3", auth });
+
+  const searchResponse = await drive.files.list({
+    q: `name='${folderName.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: "files(id)",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+    return searchResponse.data.files[0].id!;
+  }
+
+  const createResponse = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id",
+    supportsAllDrives: true,
+  });
+
+  return createResponse.data.id!;
 }
 
 export async function deletePdfFromDrive(fileId: string): Promise<void> {

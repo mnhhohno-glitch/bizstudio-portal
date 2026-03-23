@@ -127,6 +127,7 @@ model User {
   rpaErrorLogs      RpaErrorLog[]      @relation("RpaErrorLogUser")
   rpaErrorNotes     RpaErrorNote[]     @relation("RpaErrorNoteUser")
   rpaErrorAssignments RpaErrorLog[]  @relation("RpaErrorAssignee")
+  candidateFiles    CandidateFile[]  @relation("UserCandidateFiles")
 
   @@map("users")
 }
@@ -226,6 +227,7 @@ model Candidate {
   notes           CandidateNote[]
   jimuSessions    JimuSession[]
   tasks           Task[]
+  files           CandidateFile[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -918,4 +920,37 @@ model RpaKnownError {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("rpa_known_errors")
+}
+
+// ========================================
+// 求職者書類管理
+// ========================================
+
+enum CandidateFileCategory {
+  ORIGINAL
+  JOB_POSTING
+  BS_DOCUMENT
+  APPLICATION
+  INTERVIEW_PREP
+  MEETING
+}
+
+model CandidateFile {
+  id               String                @id @default(cuid())
+  candidateId      String                @map("candidate_id")
+  candidate        Candidate             @relation(fields: [candidateId], references: [id])
+  category         CandidateFileCategory
+  fileName         String                @map("file_name")
+  fileSize         Int                   @map("file_size")
+  mimeType         String                @map("mime_type")
+  driveFileId      String                @map("drive_file_id")
+  driveViewUrl     String                @map("drive_view_url")
+  driveFolderId    String?               @map("drive_folder_id")
+  memo             String?               @db.Text
+  uploadedByUserId String                @map("uploaded_by_user_id")
+  uploadedBy       User                  @relation("UserCandidateFiles", fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  @@map("candidate_files")
 }
