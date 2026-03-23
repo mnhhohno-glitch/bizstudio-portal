@@ -1328,6 +1328,11 @@ export default function CandidateDetailPage() {
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleMethod, setScheduleMethod] = useState("");
+  const [scheduleGenerating, setScheduleGenerating] = useState(false);
+  const [scheduleCopiedType, setScheduleCopiedType] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState("");
 
   const fetchCandidate = useCallback(async () => {
     try {
@@ -1495,9 +1500,15 @@ export default function CandidateDetailPage() {
               }}
               className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
-              {urlCopied ? "✅ コピーしました" : "🔗 求職者用URL"}
+              {urlCopied ? "✅ コピーしました" : "🔗 ガイドURL"}
             </button>
           )}
+          <button
+            onClick={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
+            className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            📅 日程調整URL
+          </button>
         </div>
       </div>
 
@@ -1556,6 +1567,124 @@ export default function CandidateDetailPage() {
           onClose={() => setEditModalOpen(false)}
           onSaved={fetchCandidate}
         />
+      )}
+
+      {/* 日程調整URLモーダル */}
+      {scheduleModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setScheduleModalOpen(false)}>
+          <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-[15px] font-bold text-[#374151]">📅 日程調整URLを生成</h2>
+              <button onClick={() => setScheduleModalOpen(false)} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
+            </div>
+
+            {scheduleError && (
+              <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">{scheduleError}</div>
+            )}
+
+            {/* 面接希望日の回収 */}
+            <div>
+              <h3 className="font-bold text-[#003366] text-base mb-2">面接希望日の回収</h3>
+              <p className="text-sm text-gray-500 mb-3">求職者に面接の希望日時を提出してもらいます。</p>
+
+              <label className="block text-sm font-medium text-[#374151] mb-2">面接方式 <span className="text-red-500">*</span></label>
+              <div className="flex gap-4 mb-4">
+                {[
+                  { value: "対面", label: "対面" },
+                  { value: "オンライン", label: "オンライン" },
+                  { value: "どちらでも可", label: "どちらでも可" },
+                ].map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="interviewMethod"
+                      value={opt.value}
+                      checked={scheduleMethod === opt.value}
+                      onChange={(e) => setScheduleMethod(e.target.value)}
+                      className="accent-[#2563EB]"
+                    />
+                    {opt.label}
+                  </label>
+                ))}
+              </div>
+
+              <button
+                onClick={async () => {
+                  if (!scheduleMethod || scheduleGenerating || !currentUser) return;
+                  setScheduleGenerating(true);
+                  setScheduleError("");
+                  try {
+                    const res = await fetch("/api/schedule-links", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        type: "interview",
+                        candidateName: candidate.name,
+                        advisorName: currentUser.name,
+                        interviewMethod: scheduleMethod,
+                      }),
+                    });
+                    if (!res.ok) throw new Error();
+                    const data = await res.json();
+                    await navigator.clipboard.writeText(data.url);
+                    setScheduleCopiedType("interview");
+                    setTimeout(() => setScheduleCopiedType(null), 2000);
+                  } catch {
+                    setScheduleError("URL生成に失敗しました");
+                  } finally {
+                    setScheduleGenerating(false);
+                  }
+                }}
+                disabled={!scheduleMethod || scheduleGenerating}
+                className="bg-[#2563EB] text-white rounded-lg px-4 py-2.5 text-sm font-medium w-full hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {scheduleCopiedType === "interview" ? "✅ URLをコピーしました" : scheduleGenerating ? "生成中..." : "面接希望日の回収URLを生成"}
+              </button>
+            </div>
+
+            <div className="border-t border-gray-200 my-6" />
+
+            {/* 面談調整 */}
+            <div>
+              <h3 className="font-bold text-[#003366] text-base mb-2">面談調整</h3>
+              <p className="text-sm text-gray-500 mb-3">求職者に面談の希望日時を提出してもらいます。</p>
+              <p className="text-xs text-gray-400 mb-4">※ 面談形式（電話/オンライン）は求職者が選択します。</p>
+
+              <button
+                onClick={async () => {
+                  if (scheduleGenerating || !currentUser) return;
+                  setScheduleGenerating(true);
+                  setScheduleError("");
+                  try {
+                    const res = await fetch("/api/schedule-links", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        type: "consultation",
+                        candidateName: candidate.name,
+                        advisorName: currentUser.name,
+                        interviewMethod: "",
+                      }),
+                    });
+                    if (!res.ok) throw new Error();
+                    const data = await res.json();
+                    await navigator.clipboard.writeText(data.url);
+                    setScheduleCopiedType("consultation");
+                    setTimeout(() => setScheduleCopiedType(null), 2000);
+                  } catch {
+                    setScheduleError("URL生成に失敗しました");
+                  } finally {
+                    setScheduleGenerating(false);
+                  }
+                }}
+                disabled={scheduleGenerating}
+                className="bg-[#2563EB] text-white rounded-lg px-4 py-2.5 text-sm font-medium w-full hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors"
+              >
+                {scheduleCopiedType === "consultation" ? "✅ URLをコピーしました" : scheduleGenerating ? "生成中..." : "面談調整URLを生成"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
