@@ -106,7 +106,7 @@ export default function RpaErrorLogDetailPage() {
           <div className="flex items-center gap-2">
             <span className="text-[#6B7280]">担当者:</span>
             <select value={log.assignee?.id || ""} onChange={(e) => updateAssignee(e.target.value)} className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[14px]">
-              <option value="">未指定</option>
+              {!log.assignee && <option value="">担当者を選択</option>}
               {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </div>

@@ -492,14 +492,15 @@ export default function RpaErrorChatPage() {
               <div>
                 <label className="block text-[13px] font-medium text-[#374151] mb-1">担当者</label>
                 <select value={saveModal.assigneeId} onChange={(e) => setSaveModal({ ...saveModal, assigneeId: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]">
-                  <option value="">未指定</option>
+                  <option value="">担当者を選択</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
+                <p className="mt-1 text-[12px] text-[#9CA3AF]">※ 担当者が不明な場合は「大野 将幸」を選択してください</p>
               </div>
             </div>
             <div className="mt-5 flex gap-2 justify-end">
               <button onClick={() => setSaveModal(null)} className="rounded-md bg-[#F3F4F6] px-4 py-2 text-[14px] font-medium text-[#374151] hover:bg-[#E5E7EB]">キャンセル</button>
-              <button onClick={handleSaveLog} disabled={saving || !saveModal.errorSummary} className="rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">{saving ? "保存中..." : "保存"}</button>
+              <button onClick={handleSaveLog} disabled={saving || !saveModal.errorSummary || !saveModal.assigneeId} className="rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">{saving ? "保存中..." : "保存"}</button>
             </div>
           </div>
         </div>
@@ -590,9 +591,10 @@ export default function RpaErrorChatPage() {
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">担当者</label>
                   <select value={knownErrorModal.logAssigneeId} onChange={(e) => setKnownErrorModal({ ...knownErrorModal, logAssigneeId: e.target.value })} className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px]">
-                    <option value="">未指定</option>
+                    <option value="">担当者を選択</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
+                  <p className="mt-1 text-[12px] text-[#9CA3AF]">※ 担当者が不明な場合は「大野 将幸」を選択してください</p>
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">フロー名</label>
@@ -609,7 +611,7 @@ export default function RpaErrorChatPage() {
               <button onClick={() => setKnownErrorModal(null)} className="rounded-md bg-[#F3F4F6] px-4 py-2 text-[14px] font-medium text-[#374151] hover:bg-[#E5E7EB]">キャンセル</button>
               <button
                 onClick={handleSaveKnownError}
-                disabled={knownErrorSaving || !knownErrorModal.patternName || !knownErrorModal.keywords.length || !knownErrorModal.solution || !knownErrorModal.logErrorSummary}
+                disabled={knownErrorSaving || !knownErrorModal.patternName || !knownErrorModal.keywords.length || !knownErrorModal.solution || !knownErrorModal.logErrorSummary || !knownErrorModal.logAssigneeId}
                 className="rounded-md bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
               >
                 {knownErrorSaving ? "保存中..." : "パターン登録 + ログ保存"}

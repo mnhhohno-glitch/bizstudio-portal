@@ -54,8 +54,8 @@ export async function POST(req: Request) {
   const body = await req.json();
   const { machineNumber, flowName, errorSummary, status, severity, occurredAt, chatId, knownErrorId, assigneeId: bodyAssigneeId } = body;
 
-  if (!machineNumber || !flowName || !errorSummary || !occurredAt) {
-    return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
+  if (!machineNumber || !flowName || !errorSummary || !occurredAt || !bodyAssigneeId) {
+    return NextResponse.json({ error: "必須項目が不足しています（担当者を選択してください）" }, { status: 400 });
   }
 
   const log = await prisma.rpaErrorLog.create({
