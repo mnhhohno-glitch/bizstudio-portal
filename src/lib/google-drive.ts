@@ -154,14 +154,27 @@ export async function convertDocxToPdf({
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
 
-  // 1. docxをPDF形式でエクスポート
+  // 1. docxをGoogle Docs形式にコピー（files.exportはGoogle Docs形式のみ対応）
+  const copyRes = await drive.files.copy({
+    fileId: driveFileId,
+    requestBody: {
+      name: "temp_for_pdf_conversion",
+      mimeType: "application/vnd.google-apps.document",
+      parents: [folderId],
+    },
+    supportsAllDrives: true,
+  });
+  const tempDocId = copyRes.data.id!;
+
+  try {
+  // 2. Google DocsからPDFにエクスポート
   const pdfResponse = await drive.files.export(
-    { fileId: driveFileId, mimeType: "application/pdf" },
+    { fileId: tempDocId, mimeType: "application/pdf" },
     { responseType: "arraybuffer" }
   );
   const pdfBuffer = Buffer.from(pdfResponse.data as ArrayBuffer);
 
-  // 2. PDFをGoogle Driveにアップロード
+  // 3. PDFをGoogle Driveにアップロード
   const uploadResponse = await drive.files.create({
     requestBody: {
       name: pdfFileName,
@@ -198,6 +211,10 @@ export async function convertDocxToPdf({
       fileInfo.data.webViewLink ||
       `https://drive.google.com/file/d/${newFileId}/view`,
   };
+  } finally {
+    // 4. 一時的なGoogle Docsファイルを削除
+    await drive.files.delete({ fileId: tempDocId, supportsAllDrives: true }).catch(() => {});
+  }
 }
 
 export async function deletePdfFromDrive(fileId: string): Promise<void> {
