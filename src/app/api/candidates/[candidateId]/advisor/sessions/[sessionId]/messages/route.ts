@@ -61,6 +61,13 @@ export async function POST(
   const { candidateId, sessionId } = await params;
   const { content, file } = await req.json();
 
+  console.log("Advisor message received:", {
+    content: content?.substring(0, 50),
+    hasFile: !!file,
+    fileName: file?.name,
+    fileSize: file?.size,
+  });
+
   if (!content?.trim() && !file) {
     return NextResponse.json({ error: "メッセージまたはファイルが必要です" }, { status: 400 });
   }

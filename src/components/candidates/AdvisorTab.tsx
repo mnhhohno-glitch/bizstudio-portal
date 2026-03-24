@@ -110,24 +110,18 @@ export default function AdvisorTab({
 
   const handleSend = async () => {
     if ((!inputValue.trim() && !attachedFile) || !activeSessionId || isSending) return;
+
     const userMessage = inputValue.trim();
     const currentFile = attachedFile;
+
     setInputValue("");
-    setAttachedFile(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsSending(true);
 
-    const displayContent = userMessage || (currentFile ? `📎 ${currentFile.name}` : "");
-
-    setMessages((prev) => [
-      ...prev,
-      { id: "temp-user", role: "user", content: displayContent, createdAt: new Date().toISOString() },
-      { id: "temp-ai", role: "assistant", content: "", createdAt: new Date().toISOString(), isLoading: true },
-    ]);
-
-    try {
-      let fileData = null;
-      if (currentFile) {
+    // Base64エンコード（API呼び出し前に確実に完了させる）
+    let fileData = null;
+    if (currentFile) {
+      try {
         const buffer = await currentFile.arrayBuffer();
         const base64 = btoa(
           new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
@@ -138,23 +132,41 @@ export default function AdvisorTab({
           base64,
           size: currentFile.size,
         };
+      } catch (err) {
+        console.error("File encode error:", err);
       }
+    }
 
+    const displayContent = userMessage || (currentFile ? `📎 ${currentFile.name}` : "");
+
+    setMessages((prev) => [
+      ...prev,
+      { id: "temp-user", role: "user", content: displayContent, createdAt: new Date().toISOString() },
+      { id: "temp-ai", role: "assistant", content: "", createdAt: new Date().toISOString(), isLoading: true },
+    ]);
+
+    try {
       const res = await fetch(
         `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: userMessage, file: fileData }),
+          body: JSON.stringify({
+            content: userMessage || (currentFile ? `添付ファイル: ${currentFile.name}` : ""),
+            file: fileData,
+          }),
         }
       );
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "エラーが発生しました");
       }
+      // 成功後にファイルをクリア
+      setAttachedFile(null);
       await fetchMessages(activeSessionId);
       fetchSessions();
     } catch (err) {
+      // エラー時はファイルを残す（再送信できるように）
       setMessages((prev) => prev.filter((m) => m.id !== "temp-ai"));
       alert(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
