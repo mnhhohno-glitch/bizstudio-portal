@@ -77,11 +77,10 @@ type SessionUser = {
 
 /* ---------- Constants ---------- */
 const TABS = [
-  { key: "overview", label: "概要" },
   { key: "documents", label: "書類" },
-  { key: "support", label: "対策・サポート" },
   { key: "advisor", label: "AIアドバイザー" },
   { key: "tasks", label: "タスク" },
+  { key: "support", label: "対策・サポート" },
   { key: "history", label: "履歴" },
 ] as const;
 
@@ -262,188 +261,6 @@ function EditModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ================================================================== */
-/*  Tab: Overview                                                       */
-/* ================================================================== */
-function OverviewTab({
-  candidate,
-  guideData,
-  currentUser,
-  onRefresh,
-  onTabChange,
-}: {
-  candidate: Candidate;
-  guideData: Record<string, unknown> | null;
-  currentUser: SessionUser | null;
-  onRefresh: () => void;
-  onTabChange: (tab: TabKey) => void;
-}) {
-  const interviewGuide = candidate.guideEntries.find(
-    (e) => e.guideType === "INTERVIEW"
-  );
-  const notesCount = candidate.notes.length;
-  const aiAxis = guideData?.ai_generated_axis ?? null;
-
-  const [content, setContent] = useState("");
-  const [posting, setPosting] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const handlePost = async () => {
-    if (!content.trim() || posting) return;
-    setPosting(true);
-    try {
-      const res = await fetch(`/api/candidates/${candidate.id}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      if (!res.ok) throw new Error();
-      setContent("");
-      onRefresh();
-    } catch {
-      alert("メモの投稿に失敗しました");
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  const handleDelete = async (noteId: string) => {
-    if (!confirm("このメモを削除しますか？")) return;
-    setDeletingId(noteId);
-    try {
-      const res = await fetch(`/api/candidates/${candidate.id}/notes/${noteId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
-      onRefresh();
-    } catch {
-      alert("メモの削除に失敗しました");
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const canDelete = (note: Note) => {
-    if (!currentUser) return false;
-    return currentUser.id === note.authorUserId || currentUser.role === "admin";
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* ステータスカード */}
-      <div>
-        <h3 className="text-[14px] font-semibold text-[#374151] mb-3">
-          📊 ステータス
-        </h3>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-            <div className="text-2xl font-bold text-[#003366]">
-              {interviewGuide ? "✅" : "⚠️"}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">面接対策</div>
-            <div className="text-xs text-gray-400 mt-0.5">
-              {interviewGuide ? "作成済み" : "未作成"}
-            </div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-            <div className="text-2xl font-bold text-[#003366]">
-              {notesCount}件
-            </div>
-            <div className="text-xs text-gray-500 mt-1">メモ</div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-            <div className="text-2xl font-bold text-[#003366]">0件</div>
-            <div className="text-xs text-gray-500 mt-1">タスク</div>
-          </div>
-        </div>
-      </div>
-
-      {/* 転職軸プレビュー */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[14px] font-semibold text-[#374151]">
-            🎯 転職軸プレビュー
-          </h3>
-          {aiAxis ? (
-            <button
-              onClick={() => onTabChange("support")}
-              className="text-[12px] text-[#2563EB] hover:underline"
-            >
-              詳しく見る →
-            </button>
-          ) : null}
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          {aiAxis ? (
-            <p className="text-[13px] text-gray-700 whitespace-pre-wrap">
-              {String(aiAxis).slice(0, 200)}
-              {String(aiAxis).length > 200 ? "..." : ""}
-            </p>
-          ) : (
-            <p className="text-[13px] text-gray-400 text-center">
-              まだ生成されていません
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* メモ */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[14px] font-semibold text-[#374151]">📝 メモ</h3>
-          <span className="text-[12px] text-gray-500">({notesCount}件)</span>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
-          <textarea
-            rows={3}
-            placeholder="メモを入力..."
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none resize-none"
-          />
-          <div className="flex justify-end mt-2">
-            <button
-              onClick={handlePost}
-              disabled={!content.trim() || posting}
-              className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {posting ? "投稿中..." : "📝 投稿する"}
-            </button>
-          </div>
-        </div>
-
-        {candidate.notes.length > 0 ? (
-          <div className="space-y-3">
-            {candidate.notes.map((note) => (
-              <div key={note.id} className="bg-white rounded-lg border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[13px] font-medium text-[#374151]">{note.author.name}</span>
-                  <span className="text-[12px] text-gray-500">{formatDateTime(note.createdAt)}</span>
-                </div>
-                <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{note.content}</p>
-                {canDelete(note) && (
-                  <div className="flex justify-end mt-3">
-                    <button
-                      onClick={() => handleDelete(note.id)}
-                      disabled={deletingId === note.id}
-                      className="text-red-400 hover:text-red-600 text-sm transition-colors disabled:opacity-50"
-                    >
-                      🗑 削除
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-[13px] text-gray-400">
-            メモはまだありません
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1316,7 +1133,7 @@ export default function CandidateDetailPage() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "overview";
+  const activeTab = (searchParams.get("tab") as TabKey) || "documents";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -1534,15 +1351,6 @@ export default function CandidateDetailPage() {
 
       {/* タブコンテンツ */}
       <div className="mt-6">
-        {activeTab === "overview" && (
-          <OverviewTab
-            candidate={candidate}
-            guideData={guideData}
-            currentUser={currentUser}
-            onRefresh={fetchCandidate}
-            onTabChange={handleTabChange}
-          />
-        )}
         {activeTab === "documents" && (
           <DocumentsTab candidateId={candidateId} />
         )}
