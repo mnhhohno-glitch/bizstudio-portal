@@ -34,7 +34,7 @@ const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
     className: "bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full",
   },
   assigned: {
-    label: "配分",
+    label: "-",
     className: "bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full",
   },
 };
