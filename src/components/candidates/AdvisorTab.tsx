@@ -1,15 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-
-type Session = {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  _count: { messages: number };
-};
 
 type Message = {
   id: string;
@@ -24,11 +16,6 @@ function formatTime(iso: string) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${formatTime(iso)}`;
-}
-
 export default function AdvisorTab({
   candidateId,
   candidateName,
@@ -36,14 +23,13 @@ export default function AdvisorTab({
   candidateId: string;
   candidateName: string;
 }) {
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,16 +43,6 @@ export default function AdvisorTab({
     setAttachedFile(file);
   };
 
-  const fetchSessions = useCallback(async () => {
-    const res = await fetch(`/api/candidates/${candidateId}/advisor/sessions`);
-    if (res.ok) {
-      const data = await res.json();
-      setSessions(data.sessions || []);
-    }
-  }, [candidateId]);
-
-  useEffect(() => { fetchSessions(); }, [fetchSessions]);
-
   const fetchMessages = async (sessionId: string) => {
     const res = await fetch(
       `/api/candidates/${candidateId}/advisor/sessions/${sessionId}/messages`
@@ -77,35 +53,60 @@ export default function AdvisorTab({
     }
   };
 
-  const selectSession = (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    fetchMessages(sessionId);
-  };
+  // セッション自動作成・自動選択
+  useEffect(() => {
+    const initSession = async () => {
+      setIsInitializing(true);
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/advisor/sessions`);
+        const data = await res.json();
+        const sessions = data.sessions || [];
 
-  const createSession = async () => {
-    const res = await fetch(`/api/candidates/${candidateId}/advisor/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setActiveSessionId(data.session.id);
-      setMessages([]);
-      fetchSessions();
-    }
-  };
+        if (sessions.length > 0) {
+          setActiveSessionId(sessions[0].id);
+          await fetchMessages(sessions[0].id);
+        } else {
+          const createRes = await fetch(`/api/candidates/${candidateId}/advisor/sessions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: `${candidateName}さんのアドバイザーチャット` }),
+          });
+          if (createRes.ok) {
+            const newSession = await createRes.json();
+            setActiveSessionId(newSession.session.id);
+          }
+        }
+      } catch {
+        // silent
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    initSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidateId]);
 
-  const deleteSession = async (sessionId: string) => {
-    if (!confirm("このチャットを削除しますか？")) return;
-    await fetch(`/api/candidates/${candidateId}/advisor/sessions/${sessionId}`, {
-      method: "DELETE",
-    });
-    if (activeSessionId === sessionId) {
-      setActiveSessionId(null);
-      setMessages([]);
+  const handleClearHistory = async () => {
+    if (!activeSessionId) return;
+    if (!confirm("チャット履歴をすべて削除します。よろしいですか？")) return;
+
+    try {
+      await fetch(`/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}`, {
+        method: "DELETE",
+      });
+      const createRes = await fetch(`/api/candidates/${candidateId}/advisor/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: `${candidateName}さんのアドバイザーチャット` }),
+      });
+      if (createRes.ok) {
+        const newSession = await createRes.json();
+        setActiveSessionId(newSession.session.id);
+        setMessages([]);
+      }
+    } catch {
+      alert("履歴のクリアに失敗しました");
     }
-    fetchSessions();
   };
 
   const handleSend = async () => {
@@ -119,7 +120,6 @@ export default function AdvisorTab({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsSending(true);
 
-    // ファイルがあればBase64エンコード
     let fileData: { name: string; mimeType: string; base64: string; size: number } | null = null;
     if (currentFile) {
       try {
@@ -129,14 +129,12 @@ export default function AdvisorTab({
         for (let i = 0; i < uint8Array.length; i++) {
           binaryString += String.fromCharCode(uint8Array[i]);
         }
-        const base64 = btoa(binaryString);
         fileData = {
           name: currentFile.name,
           mimeType: currentFile.type,
-          base64,
+          base64: btoa(binaryString),
           size: currentFile.size,
         };
-        console.log("File encoded:", currentFile.name, "size:", base64.length);
       } catch (err) {
         console.error("File encode error:", err);
       }
@@ -165,34 +163,25 @@ export default function AdvisorTab({
     const timeoutId = setTimeout(() => controller.abort(), 150000);
 
     try {
-      console.log("Sending to API:", { content: displayContent, hasFile: !!fileData });
-
       const res = await fetch(
         `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: displayContent,
-            file: fileData,
-          }),
+          body: JSON.stringify({ content: displayContent, file: fileData }),
           signal: controller.signal,
         }
       );
-
       clearTimeout(timeoutId);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "エラーが発生しました");
 
       setAttachedFile(null);
       await fetchMessages(activeSessionId);
-      fetchSessions();
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === "AbortError") {
-        // タイムアウト — サーバー側でエラーメッセージが保存されている可能性
         await fetchMessages(activeSessionId);
-        fetchSessions();
       } else {
         setMessages((prev) => prev.filter((m) => !m.id?.startsWith("temp-ai-")));
         alert(err instanceof Error ? err.message : "エラーが発生しました");
@@ -213,216 +202,167 @@ export default function AdvisorTab({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  if (isInitializing) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-sm text-gray-400">読み込み中...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full rounded-lg border border-gray-200 overflow-hidden bg-white">
-      {/* 左パネル: セッション一覧 */}
-      <div className="w-64 shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <button
-            onClick={createSession}
-            className="w-full bg-[#003366] text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-[#002244] transition-colors"
-          >
-            + 新しいチャット
-          </button>
+    <div
+      ref={chatAreaRef}
+      className="flex flex-col h-full rounded-lg border border-gray-200 overflow-hidden bg-white relative"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!chatAreaRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) validateAndSetFile(f); }}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 bg-[#2563EB]/10 border-2 border-dashed border-[#2563EB] rounded-xl flex items-center justify-center z-10">
+          <p className="text-[#2563EB] font-bold text-lg">📎 ファイルをドロップして添付</p>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`relative px-4 py-3 cursor-pointer border-b border-gray-100 hover:bg-white transition-colors ${
-                activeSessionId === s.id ? "bg-white border-l-2 border-l-[#2563EB]" : ""
-              }`}
-              onClick={() => selectSession(s.id)}
-              onMouseEnter={() => setHoveredSession(s.id)}
-              onMouseLeave={() => setHoveredSession(null)}
-            >
-              <p className="text-sm font-medium text-gray-800 truncate pr-6">{s.title}</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {formatDate(s.updatedAt)} ・ {s._count.messages}件
-              </p>
-              {hoveredSession === s.id && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
-                  className="absolute top-3 right-3 text-gray-300 hover:text-red-500 text-xs"
-                >
-                  🗑
-                </button>
-              )}
-            </div>
-          ))}
-          {sessions.length === 0 && (
-            <p className="px-4 py-6 text-xs text-gray-400 text-center">チャット履歴はありません</p>
-          )}
+      )}
+
+      {/* ヘッダー */}
+      <div className="bg-[#F4F7F9] px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🤖</span>
+          <div>
+            <span className="font-bold text-[#003366] text-sm">AIアドバイザー</span>
+            <p className="text-xs text-gray-500">{candidateName} さんの情報を踏まえてアドバイスします</p>
+          </div>
         </div>
+        <button
+          onClick={handleClearHistory}
+          className="text-gray-400 hover:text-red-500 text-sm cursor-pointer transition-colors"
+        >
+          🗑 履歴をクリア
+        </button>
       </div>
 
-      {/* 右パネル: チャットエリア */}
-      <div
-        ref={chatAreaRef}
-        className="flex-1 flex flex-col min-w-0 relative"
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!chatAreaRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false); }}
-        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) validateAndSetFile(f); }}
-      >
-        {isDragging && (
-          <div className="absolute inset-0 bg-[#2563EB]/10 border-2 border-dashed border-[#2563EB] rounded-xl flex items-center justify-center z-10">
-            <p className="text-[#2563EB] font-bold text-lg">📎 ファイルをドロップして添付</p>
+      {/* メッセージ表示 */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-sm text-gray-400">
+            メッセージを入力してAIアドバイザーに相談してください
           </div>
         )}
-        {!activeSessionId ? (
-          /* セッション未選択 */
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center py-16">
-              <div className="text-4xl mb-3">🤖</div>
-              <h3 className="text-lg font-semibold text-gray-700">AIアドバイザー</h3>
-              <p className="text-sm text-gray-400 mt-2">
-                {candidateName} さんの情報を<br />踏まえてアドバイスします。
-              </p>
-              <p className="text-xs text-gray-400 mt-4">
-                左のメニューからチャットを選択するか、<br />新しいチャットを始めてください。
-              </p>
-              <button
-                onClick={createSession}
-                className="mt-6 bg-[#003366] text-white rounded-lg px-6 py-2.5 text-sm font-medium hover:bg-[#002244] transition-colors"
-              >
-                + 新しいチャットを始める
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* メッセージ表示 */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center py-12 text-sm text-gray-400">
-                  メッセージを入力してAIアドバイザーに相談してください
-                </div>
-              )}
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-3"}`}>
-                  {msg.role === "assistant" && (
-                    <div className="w-8 h-8 bg-[#F4F7F9] rounded-full flex items-center justify-center text-sm shrink-0">
-                      🤖
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed ${
-                      msg.role === "user"
-                        ? "bg-[#003366] text-white rounded-2xl rounded-br-sm"
-                        : "bg-[#F4F7F9] text-gray-800 rounded-2xl rounded-bl-sm"
-                    }`}
-                  >
-                    {msg.isLoading ? (
-                      <div className="flex gap-1 py-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                      </div>
-                    ) : msg.role === "assistant" ? (
-                      <div className="text-sm leading-relaxed">
-                      <ReactMarkdown
-                        components={{
-                          p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                          h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
-                          h3: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
-                          ul: ({ children }) => <ul className="ml-4 mb-3 space-y-1">{children}</ul>,
-                          ol: ({ children }) => <ol className="ml-4 mb-3 space-y-1 list-decimal">{children}</ol>,
-                          li: ({ children }) => <li className="text-sm">{children}</li>,
-                          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                          code: ({ children }) => <code className="bg-gray-200 rounded px-1 py-0.5 text-xs">{children}</code>,
-                          hr: () => <hr className="my-3 border-gray-300" />,
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                      </div>
-                    ) : (() => {
-                      const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
-                      const attachName = attachMatch ? attachMatch[1] : null;
-                      const displayText = msg.content.replace(/\n\n---\n添付ファイル「.+?」の内容:[\s\S]*$/, "").trim();
-                      return (
-                        <>
-                          {attachName && (
-                            <div className="text-xs bg-white/20 rounded px-2 py-1 mb-1 inline-block">📎 {attachName}</div>
-                          )}
-                          <span className="whitespace-pre-wrap">{displayText || `📎 ${attachName}`}</span>
-                        </>
-                      );
-                    })()}
-                    <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
-                      {!msg.isLoading && formatTime(msg.createdAt)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* 入力エリア */}
-            <div className="border-t border-gray-200 bg-white">
-              {/* 添付ファイルプレビュー */}
-              {attachedFile && (
-                <div className="mx-4 mt-2 bg-[#F4F7F9] rounded-lg px-3 py-2 flex items-center justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm">📎</span>
-                    <span className="text-sm text-gray-700 truncate">{attachedFile.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">
-                      {attachedFile.size < 1024 * 1024
-                        ? `${(attachedFile.size / 1024).toFixed(1)}KB`
-                        : `${(attachedFile.size / (1024 * 1024)).toFixed(1)}MB`}
-                    </span>
-                  </div>
-                  <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-red-500 text-sm shrink-0 ml-2">
-                    ✕
-                  </button>
-                </div>
-              )}
-              <div className="px-4 py-3 flex items-end gap-2">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isSending}
-                  className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xl text-gray-600 hover:text-[#2563EB] transition-colors flex-shrink-0 disabled:opacity-50"
-                >
-                  ＋
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt,.csv"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) validateAndSetFile(f);
-                    e.target.value = "";
-                  }}
-                />
-                <textarea
-                  ref={textareaRef}
-                  value={inputValue}
-                  onChange={(e) => {
-                    setInputValue(e.target.value);
-                    const el = e.target;
-                    el.style.height = "auto";
-                    el.style.height = Math.min(el.scrollHeight, 120) + "px";
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder="メッセージを入力..."
-                  rows={1}
-                  className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-                  style={{ maxHeight: "120px" }}
-                />
-                <button
-                  onClick={handleSend}
-                  disabled={(!inputValue.trim() && !attachedFile) || isSending}
-                  className={`bg-[#2563EB] text-white rounded-xl px-4 py-3 font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isSending ? "animate-pulse" : ""}`}
-                >
-                  {isSending ? "⏳" : "送信"}
-                </button>
+        {messages.map((msg) => (
+          <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-3"}`}>
+            {msg.role === "assistant" && (
+              <div className="w-8 h-8 bg-[#F4F7F9] rounded-full flex items-center justify-center text-sm shrink-0">
+                🤖
               </div>
+            )}
+            <div
+              className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-[#003366] text-white rounded-2xl rounded-br-sm"
+                  : "bg-[#F4F7F9] text-gray-800 rounded-2xl rounded-bl-sm"
+              }`}
+            >
+              {msg.isLoading ? (
+                <div className="flex gap-1 py-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              ) : msg.role === "assistant" ? (
+                <div className="text-sm leading-relaxed">
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                      h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
+                      h3: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
+                      ul: ({ children }) => <ul className="ml-4 mb-3 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="ml-4 mb-3 space-y-1 list-decimal">{children}</ol>,
+                      li: ({ children }) => <li className="text-sm">{children}</li>,
+                      strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                      code: ({ children }) => <code className="bg-gray-200 rounded px-1 py-0.5 text-xs">{children}</code>,
+                      hr: () => <hr className="my-3 border-gray-300" />,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (() => {
+                const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
+                const attachName = attachMatch ? attachMatch[1] : null;
+                const displayText = msg.content.replace(/\n\n---\n添付ファイル「.+?」の内容:[\s\S]*$/, "").trim();
+                return (
+                  <>
+                    {attachName && (
+                      <div className="text-xs bg-white/20 rounded px-2 py-1 mb-1 inline-block">📎 {attachName}</div>
+                    )}
+                    <span className="whitespace-pre-wrap">{displayText || `📎 ${attachName}`}</span>
+                  </>
+                );
+              })()}
+              <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
+                {!msg.isLoading && formatTime(msg.createdAt)}
+              </p>
             </div>
-          </>
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* 入力エリア */}
+      <div className="border-t border-gray-200 bg-white">
+        {attachedFile && (
+          <div className="mx-4 mt-2 bg-[#F4F7F9] rounded-lg px-3 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm">📎</span>
+              <span className="text-sm text-gray-700 truncate">{attachedFile.name}</span>
+              <span className="text-xs text-gray-400 shrink-0">
+                {attachedFile.size < 1024 * 1024
+                  ? `${(attachedFile.size / 1024).toFixed(1)}KB`
+                  : `${(attachedFile.size / (1024 * 1024)).toFixed(1)}MB`}
+              </span>
+            </div>
+            <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-red-500 text-sm shrink-0 ml-2">✕</button>
+          </div>
         )}
+        <div className="px-4 py-3 flex items-end gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isSending}
+            className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xl text-gray-600 hover:text-[#2563EB] transition-colors flex-shrink-0 disabled:opacity-50"
+          >
+            ＋
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt,.csv"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) validateAndSetFile(f); e.target.value = ""; }}
+          />
+          <textarea
+            ref={textareaRef}
+            value={inputValue}
+            onChange={(e) => {
+              setInputValue(e.target.value);
+              const el = e.target;
+              el.style.height = "auto";
+              el.style.height = Math.min(el.scrollHeight, 120) + "px";
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="メッセージを入力..."
+            rows={1}
+            className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            style={{ maxHeight: "120px" }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={(!inputValue.trim() && !attachedFile) || isSending}
+            className={`bg-[#2563EB] text-white rounded-xl px-4 py-3 font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isSending ? "animate-pulse" : ""}`}
+          >
+            {isSending ? "⏳" : "送信"}
+          </button>
+        </div>
       </div>
     </div>
   );
