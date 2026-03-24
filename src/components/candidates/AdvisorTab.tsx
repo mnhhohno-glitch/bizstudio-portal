@@ -109,65 +109,81 @@ export default function AdvisorTab({
   };
 
   const handleSend = async () => {
-    if ((!inputValue.trim() && !attachedFile) || !activeSessionId || isSending) return;
-
     const userMessage = inputValue.trim();
     const currentFile = attachedFile;
+
+    if (!userMessage && !currentFile) return;
+    if (!activeSessionId || isSending) return;
 
     setInputValue("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsSending(true);
 
-    // Base64エンコード（API呼び出し前に確実に完了させる）
-    let fileData = null;
+    // ファイルがあればBase64エンコード
+    let fileData: { name: string; mimeType: string; base64: string; size: number } | null = null;
     if (currentFile) {
       try {
-        const buffer = await currentFile.arrayBuffer();
-        const base64 = btoa(
-          new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
-        );
+        const arrayBuffer = await currentFile.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        let binaryString = "";
+        for (let i = 0; i < uint8Array.length; i++) {
+          binaryString += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binaryString);
         fileData = {
           name: currentFile.name,
           mimeType: currentFile.type,
           base64,
           size: currentFile.size,
         };
+        console.log("File encoded:", currentFile.name, "size:", base64.length);
       } catch (err) {
         console.error("File encode error:", err);
       }
     }
 
-    const displayContent = userMessage || (currentFile ? `📎 ${currentFile.name}` : "");
+    const displayContent = userMessage || `添付ファイル: ${currentFile?.name}`;
 
     setMessages((prev) => [
       ...prev,
-      { id: "temp-user", role: "user", content: displayContent, createdAt: new Date().toISOString() },
-      { id: "temp-ai", role: "assistant", content: "", createdAt: new Date().toISOString(), isLoading: true },
+      {
+        id: "temp-user-" + Date.now(),
+        role: "user",
+        content: displayContent + (currentFile ? `\n\n---\n添付ファイル「${currentFile.name}」` : ""),
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "temp-ai-" + Date.now(),
+        role: "assistant",
+        content: "",
+        createdAt: new Date().toISOString(),
+        isLoading: true,
+      },
     ]);
 
     try {
+      console.log("Sending to API:", { content: displayContent, hasFile: !!fileData });
+
       const res = await fetch(
         `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            content: userMessage || (currentFile ? `添付ファイル: ${currentFile.name}` : ""),
+            content: displayContent,
             file: fileData,
           }),
         }
       );
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "エラーが発生しました");
-      }
-      // 成功後にファイルをクリア
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "エラーが発生しました");
+
       setAttachedFile(null);
       await fetchMessages(activeSessionId);
       fetchSessions();
     } catch (err) {
-      // エラー時はファイルを残す（再送信できるように）
-      setMessages((prev) => prev.filter((m) => m.id !== "temp-ai"));
+      setMessages((prev) => prev.filter((m) => !m.id?.startsWith("temp-ai-")));
       alert(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
       setIsSending(false);

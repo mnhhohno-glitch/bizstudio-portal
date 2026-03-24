@@ -13,7 +13,7 @@ async function callOpenAIWithFile(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-5",
+      model: "gpt-5.4",
       messages: [
         {
           role: "user",
@@ -31,7 +31,7 @@ async function callOpenAIWithFile(
           ],
         },
       ],
-      max_completion_tokens: 3000,
+      max_completion_tokens: 2000,
     }),
   });
 
