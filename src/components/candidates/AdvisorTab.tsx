@@ -43,9 +43,19 @@ export default function AdvisorTab({
   const [isSending, setIsSending] = useState(false);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+
+  const validateAndSetFile = (file: File) => {
+    if (file.size > 20 * 1024 * 1024) {
+      alert("ファイルサイズは20MB以下にしてください");
+      return;
+    }
+    setAttachedFile(file);
+  };
 
   const fetchSessions = useCallback(async () => {
     const res = await fetch(`/api/candidates/${candidateId}/advisor/sessions`);
@@ -207,7 +217,19 @@ export default function AdvisorTab({
       </div>
 
       {/* 右パネル: チャットエリア */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div
+        ref={chatAreaRef}
+        className="flex-1 flex flex-col min-w-0 relative"
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!chatAreaRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) validateAndSetFile(f); }}
+      >
+        {isDragging && (
+          <div className="absolute inset-0 bg-[#2563EB]/10 border-2 border-dashed border-[#2563EB] rounded-xl flex items-center justify-center z-10">
+            <p className="text-[#2563EB] font-bold text-lg">📎 ファイルをドロップして添付</p>
+          </div>
+        )}
         {!activeSessionId ? (
           /* セッション未選択 */
           <div className="flex-1 flex items-center justify-center">
@@ -303,13 +325,12 @@ export default function AdvisorTab({
                 </div>
               )}
               <div className="px-4 py-3 flex items-end gap-2">
-                {/* 📎ボタン */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isSending}
-                  className="text-gray-400 hover:text-[#2563EB] p-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                  className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xl text-gray-600 hover:text-[#2563EB] transition-colors flex-shrink-0 disabled:opacity-50"
                 >
-                  📎
+                  ＋
                 </button>
                 <input
                   ref={fileInputRef}
@@ -318,13 +339,7 @@ export default function AdvisorTab({
                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) {
-                      if (f.size > 20 * 1024 * 1024) {
-                        alert("ファイルサイズは20MB以下にしてください");
-                      } else {
-                        setAttachedFile(f);
-                      }
-                    }
+                    if (f) validateAndSetFile(f);
                     e.target.value = "";
                   }}
                 />
