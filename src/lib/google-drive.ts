@@ -141,6 +141,7 @@ export async function downloadFileFromDrive(
 
 /**
  * Google Drive上のdocxファイルをPDFに変換して同フォルダに保存する
+ * pdf-text-extractor（LibreOffice headless）を使用
  */
 export async function convertDocxToPdf({
   driveFileId,
@@ -154,25 +155,36 @@ export async function convertDocxToPdf({
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
 
-  // 1. docxをGoogle Docs形式にコピー（files.exportはGoogle Docs形式のみ対応）
-  const copyRes = await drive.files.copy({
-    fileId: driveFileId,
-    requestBody: {
-      name: "temp_for_pdf_conversion",
-      mimeType: "application/vnd.google-apps.document",
-      parents: [folderId],
-    },
-    supportsAllDrives: true,
-  });
-  const tempDocId = copyRes.data.id!;
-
-  try {
-  // 2. Google DocsからPDFにエクスポート
-  const pdfResponse = await drive.files.export(
-    { fileId: tempDocId, mimeType: "application/pdf" },
+  // 1. Google Driveからdocxファイルをダウンロード
+  const docxResponse = await drive.files.get(
+    { fileId: driveFileId, alt: "media", supportsAllDrives: true },
     { responseType: "arraybuffer" }
   );
-  const pdfBuffer = Buffer.from(pdfResponse.data as ArrayBuffer);
+  const docxBuffer = Buffer.from(docxResponse.data as ArrayBuffer);
+
+  // 2. pdf-text-extractorの /convert-pdf エンドポイントに送信
+  const extractorUrl = process.env.PDF_EXTRACTOR_URL;
+  if (!extractorUrl) {
+    throw new Error("PDF_EXTRACTOR_URL is not configured");
+  }
+
+  const formData = new FormData();
+  const docxBlob = new Blob([new Uint8Array(docxBuffer)], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+  formData.append("file", docxBlob, pdfFileName.replace(/\.pdf$/i, ".docx"));
+
+  const pdfResponse = await fetch(`${extractorUrl}/convert-pdf`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!pdfResponse.ok) {
+    const errorText = await pdfResponse.text();
+    throw new Error(`PDF conversion failed: ${pdfResponse.status} ${errorText}`);
+  }
+
+  const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
 
   // 3. PDFをGoogle Driveにアップロード
   const uploadResponse = await drive.files.create({
@@ -190,7 +202,7 @@ export async function convertDocxToPdf({
 
   const newFileId = uploadResponse.data.id!;
 
-  // 3. 公開読み取り権限を設定
+  // 4. 公開読み取り権限を設定
   await drive.permissions.create({
     fileId: newFileId,
     requestBody: { role: "reader", type: "anyone" },
@@ -211,10 +223,6 @@ export async function convertDocxToPdf({
       fileInfo.data.webViewLink ||
       `https://drive.google.com/file/d/${newFileId}/view`,
   };
-  } finally {
-    // 4. 一時的なGoogle Docsファイルを削除
-    await drive.files.delete({ fileId: tempDocId, supportsAllDrives: true }).catch(() => {});
-  }
 }
 
 export async function deletePdfFromDrive(fileId: string): Promise<void> {
