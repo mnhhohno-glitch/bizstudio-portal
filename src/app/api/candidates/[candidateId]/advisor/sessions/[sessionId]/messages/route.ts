@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import {
+  parsePdfWithGemini,
+  parseImageWithGemini,
+  parseDocWithGemini,
+} from "@/lib/file-parser";
 
 const SYSTEM_PROMPT_TEMPLATE = `# Role & Persona
 
@@ -27,6 +32,8 @@ const SYSTEM_PROMPT_TEMPLATE = `# Role & Persona
 
 `;
 
+const CACHE_TTL = 30 * 60 * 1000; // 30分
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ candidateId: string; sessionId: string }> }
@@ -52,17 +59,48 @@ export async function POST(
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { candidateId, sessionId } = await params;
-  const { content } = await req.json();
+  const { content, file } = await req.json();
 
-  if (!content?.trim()) {
-    return NextResponse.json({ error: "メッセージは必須です" }, { status: 400 });
+  if (!content?.trim() && !file) {
+    return NextResponse.json({ error: "メッセージまたはファイルが必要です" }, { status: 400 });
   }
 
-  const userMessage = content.trim();
+  // 添付ファイル解析
+  let fileContext = "";
+  if (file?.base64) {
+    try {
+      const mt = file.mimeType || "";
+      if (mt === "application/pdf") {
+        fileContext = await parsePdfWithGemini(file.base64);
+      } else if (mt.startsWith("image/")) {
+        fileContext = await parseImageWithGemini(file.base64, mt);
+      } else if (mt.includes("word") || mt.includes("document") || mt.includes("excel") || mt.includes("spreadsheet") || mt.includes("powerpoint") || mt.includes("presentation")) {
+        fileContext = await parseDocWithGemini(file.base64, mt);
+      }
+    } catch (e) {
+      console.error("File parse error:", e);
+      fileContext = "（ファイルの読み取りに失敗しました）";
+    }
+  }
+
+  // メッセージ本文を組み立て
+  let fullContent = (content || "").trim();
+  if (fileContext) {
+    const fileName = file?.name || "添付ファイル";
+    if (fullContent) {
+      fullContent = `${fullContent}\n\n---\n添付ファイル「${fileName}」の内容:\n${fileContext}`;
+    } else {
+      fullContent = `添付ファイル「${fileName}」の内容:\n${fileContext}`;
+    }
+  }
+
+  if (!fullContent) {
+    return NextResponse.json({ error: "メッセージが空です" }, { status: 400 });
+  }
 
   // ユーザーメッセージ保存
   await prisma.advisorChatMessage.create({
-    data: { sessionId, role: "user", content: userMessage },
+    data: { sessionId, role: "user", content: fullContent },
   });
 
   // 過去メッセージ取得
@@ -72,26 +110,41 @@ export async function POST(
   });
 
   // セッションタイトル自動更新（初回メッセージ時）
-  if (pastMessages.length === 1) {
+  const displayTitle = (content || file?.name || "").trim();
+  if (pastMessages.length === 1 && displayTitle) {
     await prisma.advisorChatSession.update({
       where: { id: sessionId },
-      data: { title: userMessage.substring(0, 30) + (userMessage.length > 30 ? "..." : "") },
+      data: { title: displayTitle.substring(0, 30) + (displayTitle.length > 30 ? "..." : "") },
     });
   }
 
-  // コンテキスト取得
-  let context = "";
-  try {
-    const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
-    const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
-      headers: { cookie: req.headers.get("cookie") || "" },
-    });
-    if (contextRes.ok) {
-      const contextData = await contextRes.json();
-      context = contextData.context || "";
+  // コンテキスト取得（キャッシュ対応）
+  const session = await prisma.advisorChatSession.findUnique({
+    where: { id: sessionId },
+    select: { contextCache: true, contextCachedAt: true },
+  });
+
+  let context = session?.contextCache || "";
+  const cacheExpired = !session?.contextCachedAt ||
+    Date.now() - new Date(session.contextCachedAt).getTime() > CACHE_TTL;
+
+  if (!context || cacheExpired) {
+    try {
+      const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
+      const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
+        headers: { cookie: req.headers.get("cookie") || "" },
+      });
+      if (contextRes.ok) {
+        const contextData = await contextRes.json();
+        context = contextData.context || "";
+        await prisma.advisorChatSession.update({
+          where: { id: sessionId },
+          data: { contextCache: context, contextCachedAt: new Date() },
+        });
+      }
+    } catch (e) {
+      console.error("Context fetch error:", e);
     }
-  } catch (e) {
-    console.error("Context fetch error:", e);
   }
 
   // OpenAI API呼び出し
@@ -130,12 +183,10 @@ export async function POST(
     const data = await response.json();
     const aiContent = data.choices?.[0]?.message?.content || "応答を取得できませんでした";
 
-    // AI応答保存
     const saved = await prisma.advisorChatMessage.create({
       data: { sessionId, role: "assistant", content: aiContent },
     });
 
-    // セッション更新日時を更新
     await prisma.advisorChatSession.update({
       where: { id: sessionId },
       data: { updatedAt: new Date() },

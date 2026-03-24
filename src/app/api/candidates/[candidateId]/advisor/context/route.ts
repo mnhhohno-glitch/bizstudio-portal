@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
+import { downloadFileFromDrive } from "@/lib/google-drive";
+import { parsePdfWithGemini } from "@/lib/file-parser";
 
 export async function GET(
   _req: Request,
@@ -101,6 +103,34 @@ export async function GET(
       context += `- [${getCategoryLabel(file.category)}] ${file.fileName}\n`;
     }
     context += "\n";
+  }
+
+  // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDFのみ、最大4件）
+  const keyFiles = await prisma.candidateFile.findMany({
+    where: {
+      candidateId,
+      category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
+      mimeType: "application/pdf",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 4,
+    select: { driveFileId: true, fileName: true, category: true },
+  });
+
+  if (keyFiles.length > 0) {
+    context += `## 主要書類の内容\n\n`;
+    for (const file of keyFiles) {
+      try {
+        const { base64 } = await downloadFileFromDrive(file.driveFileId);
+        const parsedText = await parsePdfWithGemini(base64);
+        context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
+        context += `${parsedText}\n\n`;
+      } catch (error) {
+        console.error(`File parse error: ${file.fileName}`, error);
+        context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
+        context += `（読み取りに失敗しました）\n\n`;
+      }
+    }
   }
 
   return NextResponse.json({ context });

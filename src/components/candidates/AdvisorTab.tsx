@@ -42,8 +42,10 @@ export default function AdvisorTab({
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSessions = useCallback(async () => {
     const res = await fetch(`/api/candidates/${candidateId}/advisor/sessions`);
@@ -97,25 +99,43 @@ export default function AdvisorTab({
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim() || !activeSessionId || isSending) return;
+    if ((!inputValue.trim() && !attachedFile) || !activeSessionId || isSending) return;
     const userMessage = inputValue.trim();
+    const currentFile = attachedFile;
     setInputValue("");
+    setAttachedFile(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsSending(true);
 
+    const displayContent = userMessage || (currentFile ? `📎 ${currentFile.name}` : "");
+
     setMessages((prev) => [
       ...prev,
-      { id: "temp-user", role: "user", content: userMessage, createdAt: new Date().toISOString() },
+      { id: "temp-user", role: "user", content: displayContent, createdAt: new Date().toISOString() },
       { id: "temp-ai", role: "assistant", content: "", createdAt: new Date().toISOString(), isLoading: true },
     ]);
 
     try {
+      let fileData = null;
+      if (currentFile) {
+        const buffer = await currentFile.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+        );
+        fileData = {
+          name: currentFile.name,
+          mimeType: currentFile.type,
+          base64,
+          size: currentFile.size,
+        };
+      }
+
       const res = await fetch(
         `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: userMessage }),
+          body: JSON.stringify({ content: userMessage, file: fileData }),
         }
       );
       if (!res.ok) {
@@ -241,9 +261,19 @@ export default function AdvisorTab({
                       <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
                       </div>
-                    ) : (
-                      <span className="whitespace-pre-wrap">{msg.content}</span>
-                    )}
+                    ) : (() => {
+                      const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
+                      const attachName = attachMatch ? attachMatch[1] : null;
+                      const displayText = msg.content.replace(/\n\n---\n添付ファイル「.+?」の内容:[\s\S]*$/, "").trim();
+                      return (
+                        <>
+                          {attachName && (
+                            <div className="text-xs bg-white/20 rounded px-2 py-1 mb-1 inline-block">📎 {attachName}</div>
+                          )}
+                          <span className="whitespace-pre-wrap">{displayText || `📎 ${attachName}`}</span>
+                        </>
+                      );
+                    })()}
                     <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
                       {!msg.isLoading && formatTime(msg.createdAt)}
                     </p>
@@ -254,8 +284,50 @@ export default function AdvisorTab({
             </div>
 
             {/* 入力エリア */}
-            <div className="px-4 py-3 border-t border-gray-200 bg-white">
-              <div className="flex items-end gap-2">
+            <div className="border-t border-gray-200 bg-white">
+              {/* 添付ファイルプレビュー */}
+              {attachedFile && (
+                <div className="mx-4 mt-2 bg-[#F4F7F9] rounded-lg px-3 py-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm">📎</span>
+                    <span className="text-sm text-gray-700 truncate">{attachedFile.name}</span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {attachedFile.size < 1024 * 1024
+                        ? `${(attachedFile.size / 1024).toFixed(1)}KB`
+                        : `${(attachedFile.size / (1024 * 1024)).toFixed(1)}MB`}
+                    </span>
+                  </div>
+                  <button onClick={() => setAttachedFile(null)} className="text-gray-400 hover:text-red-500 text-sm shrink-0 ml-2">
+                    ✕
+                  </button>
+                </div>
+              )}
+              <div className="px-4 py-3 flex items-end gap-2">
+                {/* 📎ボタン */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isSending}
+                  className="text-gray-400 hover:text-[#2563EB] p-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                >
+                  📎
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      if (f.size > 20 * 1024 * 1024) {
+                        alert("ファイルサイズは20MB以下にしてください");
+                      } else {
+                        setAttachedFile(f);
+                      }
+                    }
+                    e.target.value = "";
+                  }}
+                />
                 <textarea
                   ref={textareaRef}
                   value={inputValue}
@@ -273,7 +345,7 @@ export default function AdvisorTab({
                 />
                 <button
                   onClick={handleSend}
-                  disabled={!inputValue.trim() || isSending}
+                  disabled={(!inputValue.trim() && !attachedFile) || isSending}
                   className={`bg-[#2563EB] text-white rounded-xl px-4 py-3 font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isSending ? "animate-pulse" : ""}`}
                 >
                   {isSending ? "⏳" : "送信"}

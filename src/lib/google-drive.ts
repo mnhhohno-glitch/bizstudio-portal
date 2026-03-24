@@ -112,6 +112,33 @@ export async function getOrCreateFolder(
   return createResponse.data.id!;
 }
 
+/**
+ * Google Driveからファイルの中身をダウンロード（Base64）
+ */
+export async function downloadFileFromDrive(
+  fileId: string
+): Promise<{ base64: string; mimeType: string }> {
+  const auth = getAuth();
+  const drive = google.drive({ version: "v3", auth });
+
+  const metaResponse = await drive.files.get({
+    fileId,
+    fields: "mimeType",
+    supportsAllDrives: true,
+  });
+  const mimeType = metaResponse.data.mimeType || "application/octet-stream";
+
+  const contentResponse = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "arraybuffer" }
+  );
+
+  const buffer = Buffer.from(contentResponse.data as ArrayBuffer);
+  const base64 = buffer.toString("base64");
+
+  return { base64, mimeType };
+}
+
 export async function deletePdfFromDrive(fileId: string): Promise<void> {
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
