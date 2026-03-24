@@ -82,6 +82,7 @@ const TABS = [
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
   { key: "history", label: "履歴" },
+  { key: "notes", label: "メモ" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -1108,6 +1109,121 @@ function SupportTab({
 /* ================================================================== */
 /*  Placeholder tabs                                                    */
 /* ================================================================== */
+/* ================================================================== */
+/*  Tab: Notes (メモ)                                                    */
+/* ================================================================== */
+function NotesTab({
+  candidate,
+  currentUser,
+  onRefresh,
+}: {
+  candidate: Candidate;
+  currentUser: SessionUser | null;
+  onRefresh: () => void;
+}) {
+  const [content, setContent] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handlePost = async () => {
+    if (!content.trim() || posting) return;
+    setPosting(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content.trim() }),
+      });
+      if (!res.ok) throw new Error();
+      setContent("");
+      onRefresh();
+    } catch {
+      alert("メモの投稿に失敗しました");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleDelete = async (noteId: string) => {
+    if (!confirm("このメモを削除しますか？")) return;
+    setDeletingId(noteId);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/notes/${noteId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      onRefresh();
+    } catch {
+      alert("メモの削除に失敗しました");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const canDelete = (note: Note) => {
+    if (!currentUser) return false;
+    return currentUser.id === note.authorUserId || currentUser.role === "admin";
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[14px] font-semibold text-[#374151]">📝 メモ</h3>
+        <span className="text-[12px] text-gray-500">({candidate.notes.length}件)</span>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+        <textarea
+          rows={3}
+          placeholder="メモを入力..."
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none resize-none"
+        />
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={handlePost}
+            disabled={!content.trim() || posting}
+            className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {posting ? "投稿中..." : "📝 投稿する"}
+          </button>
+        </div>
+      </div>
+
+      {candidate.notes.length > 0 ? (
+        <div className="space-y-3">
+          {candidate.notes.map((note) => (
+            <div key={note.id} className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[13px] font-medium text-[#374151]">{note.author.name}</span>
+                <span className="text-[12px] text-gray-500">{formatDateTime(note.createdAt)}</span>
+              </div>
+              <p className="text-[13px] text-gray-700 whitespace-pre-wrap">{note.content}</p>
+              {canDelete(note) && (
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => handleDelete(note.id)}
+                    disabled={deletingId === note.id}
+                    className="text-red-400 hover:text-red-600 text-sm transition-colors disabled:opacity-50"
+                  >
+                    🗑 削除
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 p-6 text-center text-[13px] text-gray-400">
+          メモはまだありません
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Placeholder tabs                                                    */
+/* ================================================================== */
 function PlaceholderTab({
   icon,
   label,
@@ -1372,6 +1488,13 @@ export default function CandidateDetailPage() {
         )}
         {activeTab === "history" && (
           <PlaceholderTab icon="📜" label="対応履歴機能" />
+        )}
+        {activeTab === "notes" && (
+          <NotesTab
+            candidate={candidate}
+            currentUser={currentUser}
+            onRefresh={fetchCandidate}
+          />
         )}
       </div>
 
