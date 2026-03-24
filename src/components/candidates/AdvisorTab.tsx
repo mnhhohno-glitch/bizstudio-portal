@@ -320,8 +320,22 @@ export default function AdvisorTab({
                         <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
                     ) : msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      <div className="text-sm leading-relaxed">
+                      <ReactMarkdown
+                        components={{
+                          p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                          h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
+                          h3: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
+                          ul: ({ children }) => <ul className="ml-4 mb-3 space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="ml-4 mb-3 space-y-1 list-decimal">{children}</ol>,
+                          li: ({ children }) => <li className="text-sm">{children}</li>,
+                          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                          code: ({ children }) => <code className="bg-gray-200 rounded px-1 py-0.5 text-xs">{children}</code>,
+                          hr: () => <hr className="my-3 border-gray-300" />,
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
                       </div>
                     ) : (() => {
                       const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
