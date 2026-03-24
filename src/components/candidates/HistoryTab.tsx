@@ -83,7 +83,7 @@ function todayString(): string {
 
 function SkeletonCards() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3">
       {[1, 2, 3, 4].map((i) => (
         <div key={i} className="rounded-lg border border-gray-200 p-3 animate-pulse">
           <div className="flex items-center gap-2 mb-2">
@@ -444,7 +444,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               className="overflow-y-auto"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 {jobs.map((job) => {
                   const isEntered = enteredJobIds.has(job.id);
                   const isSelected = selectedJobIds.has(job.id);
@@ -546,7 +546,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               className="overflow-y-auto"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 {filteredEntries.map((entry) => (
                   <div
                     key={entry.id}
