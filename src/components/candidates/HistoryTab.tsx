@@ -484,14 +484,15 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                           {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
                         </span>
                       </div>
-                      {/* 2行目: 求人タイトル */}
-                      <p className="text-sm text-gray-700 mt-1 line-clamp-2 ml-6">
-                        {job.job_title}
-                      </p>
-                      {/* 3行目: 紹介日 */}
-                      <p className="text-xs text-gray-400 mt-1 ml-6">
-                        紹介日: {formatDateJST(job.created_at)}
-                      </p>
+                      {/* 2行目: 求人タイトル + 紹介日 */}
+                      <div className="flex items-start justify-between gap-3 mt-1 ml-6">
+                        <p className="text-sm text-gray-700 line-clamp-2 min-w-0">
+                          {job.job_title}
+                        </p>
+                        <span className="shrink-0 text-xs text-gray-400 pt-0.5">
+                          紹介日: {formatDateJST(job.created_at)}
+                        </span>
+                      </div>
                     </div>
                   );
                 })}
@@ -566,72 +567,73 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                         {[entry.jobDb, entry.jobType].filter(Boolean).join(" / ")}
                       </span>
                     </div>
-                    {/* 2行目: 求人タイトル */}
-                    <p className="text-sm text-gray-700 mt-1 line-clamp-2">
-                      {entry.jobTitle}
-                    </p>
-                    {/* 3行目: エントリー日 + 紹介日 + 削除 */}
-                    <div className="flex items-center gap-3 mt-1 min-w-0">
-                      <span className="text-xs font-medium text-[#374151]">
-                        エントリー日:{" "}
-                        {editingEntryId === entry.id ? (
-                          <input
-                            type="date"
-                            value={editingDate}
-                            onChange={(e) => setEditingDate(e.target.value)}
-                            onBlur={() => {
-                              if (editingDate && editingDate !== toInputDate(entry.entryDate)) {
-                                handleUpdateEntryDate(entry.id, editingDate);
-                              } else {
-                                setEditingEntryId(null);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && editingDate) {
-                                handleUpdateEntryDate(entry.id, editingDate);
-                              } else if (e.key === "Escape") {
-                                setEditingEntryId(null);
-                              }
-                            }}
-                            autoFocus
-                            className="border border-gray-300 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                          />
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setEditingEntryId(entry.id);
-                              setEditingDate(toInputDate(entry.entryDate));
-                            }}
-                            className="hover:text-[#2563EB] hover:underline transition-colors"
-                          >
-                            {formatDateJST(entry.entryDate)}
-                          </button>
-                        )}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        (紹介日: {formatDateJST(entry.introducedAt)})
-                      </span>
-                      <button
-                        onClick={() => handleDeleteEntry(entry.id)}
-                        disabled={deletingId === entry.id}
-                        className="shrink-0 ml-auto text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                        title="削除"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-4 w-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
+                    {/* 2行目: 求人タイトル + エントリー日/紹介日 + 削除 */}
+                    <div className="flex items-start justify-between gap-3 mt-1">
+                      <p className="text-sm text-gray-700 line-clamp-2 min-w-0">
+                        {entry.jobTitle}
+                      </p>
+                      <div className="shrink-0 flex items-center gap-2 pt-0.5">
+                        <span className="text-xs font-medium text-[#374151]">
+                          エントリー日:{" "}
+                          {editingEntryId === entry.id ? (
+                            <input
+                              type="date"
+                              value={editingDate}
+                              onChange={(e) => setEditingDate(e.target.value)}
+                              onBlur={() => {
+                                if (editingDate && editingDate !== toInputDate(entry.entryDate)) {
+                                  handleUpdateEntryDate(entry.id, editingDate);
+                                } else {
+                                  setEditingEntryId(null);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && editingDate) {
+                                  handleUpdateEntryDate(entry.id, editingDate);
+                                } else if (e.key === "Escape") {
+                                  setEditingEntryId(null);
+                                }
+                              }}
+                              autoFocus
+                              className="border border-gray-300 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEditingEntryId(entry.id);
+                                setEditingDate(toInputDate(entry.entryDate));
+                              }}
+                              className="hover:text-[#2563EB] hover:underline transition-colors"
+                            >
+                              {formatDateJST(entry.entryDate)}
+                            </button>
+                          )}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          (紹介日: {formatDateJST(entry.introducedAt)})
+                        </span>
+                        <button
+                          onClick={() => handleDeleteEntry(entry.id)}
+                          disabled={deletingId === entry.id}
+                          className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                          title="削除"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
