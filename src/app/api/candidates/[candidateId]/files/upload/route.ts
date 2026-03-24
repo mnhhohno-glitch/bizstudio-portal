@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { hashToken } from "@/lib/encryption";
-import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
+import { uploadFileToDrive, getOrCreateFolder, convertDocxToPdf } from "@/lib/google-drive";
 import { handleCorsOptions, withCors } from "@/lib/cors";
 import { CandidateFileCategory } from "@prisma/client";
 
@@ -138,6 +138,43 @@ export async function POST(
       },
       include: { uploadedBy: { select: { id: true, name: true } } },
     });
+
+    // docxの場合はPDFも自動生成
+    const isDocx =
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.name.toLowerCase().endsWith(".docx");
+
+    if (isDocx) {
+      try {
+        const pdfFileName = file.name.replace(/\.docx$/i, ".pdf");
+        console.log("[Upload] Converting docx to PDF:", pdfFileName);
+
+        const pdfResult = await convertDocxToPdf({
+          driveFileId: fileId,
+          pdfFileName,
+          folderId: candidateFolderId,
+        });
+
+        await prisma.candidateFile.create({
+          data: {
+            candidateId,
+            category: category as CandidateFileCategory,
+            fileName: pdfFileName,
+            fileSize: pdfResult.fileSize,
+            mimeType: "application/pdf",
+            driveFileId: pdfResult.fileId,
+            driveViewUrl: pdfResult.webViewLink,
+            driveFolderId: candidateFolderId,
+            memo: ((memo?.trim() || "") + "（PDF自動変換）").replace(/^（/, "（"),
+            uploadedByUserId: userId,
+          },
+        });
+
+        console.log("[Upload] PDF created:", pdfFileName);
+      } catch (pdfError) {
+        console.error("[Upload] PDF conversion failed:", pdfError);
+      }
+    }
 
     return withCors(
       NextResponse.json({ file: record }, { status: 201 }),

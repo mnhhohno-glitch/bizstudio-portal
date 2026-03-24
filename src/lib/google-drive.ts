@@ -139,6 +139,67 @@ export async function downloadFileFromDrive(
   return { base64, mimeType };
 }
 
+/**
+ * Google Drive上のdocxファイルをPDFに変換して同フォルダに保存する
+ */
+export async function convertDocxToPdf({
+  driveFileId,
+  pdfFileName,
+  folderId,
+}: {
+  driveFileId: string;
+  pdfFileName: string;
+  folderId: string;
+}): Promise<{ fileId: string; fileName: string; fileSize: number; webViewLink: string }> {
+  const auth = getAuth();
+  const drive = google.drive({ version: "v3", auth });
+
+  // 1. docxをPDF形式でエクスポート
+  const pdfResponse = await drive.files.export(
+    { fileId: driveFileId, mimeType: "application/pdf" },
+    { responseType: "arraybuffer" }
+  );
+  const pdfBuffer = Buffer.from(pdfResponse.data as ArrayBuffer);
+
+  // 2. PDFをGoogle Driveにアップロード
+  const uploadResponse = await drive.files.create({
+    requestBody: {
+      name: pdfFileName,
+      parents: [folderId],
+    },
+    media: {
+      mimeType: "application/pdf",
+      body: Readable.from(pdfBuffer),
+    },
+    fields: "id, name, size, webViewLink",
+    supportsAllDrives: true,
+  });
+
+  const newFileId = uploadResponse.data.id!;
+
+  // 3. 公開読み取り権限を設定
+  await drive.permissions.create({
+    fileId: newFileId,
+    requestBody: { role: "reader", type: "anyone" },
+    supportsAllDrives: true,
+  });
+
+  const fileInfo = await drive.files.get({
+    fileId: newFileId,
+    fields: "webViewLink",
+    supportsAllDrives: true,
+  });
+
+  return {
+    fileId: newFileId,
+    fileName: pdfFileName,
+    fileSize: pdfBuffer.length,
+    webViewLink:
+      fileInfo.data.webViewLink ||
+      `https://drive.google.com/file/d/${newFileId}/view`,
+  };
+}
+
 export async function deletePdfFromDrive(fileId: string): Promise<void> {
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
