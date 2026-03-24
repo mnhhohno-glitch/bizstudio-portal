@@ -117,12 +117,16 @@ export async function GET(
     select: { driveFileId: true, fileName: true, category: true },
   });
 
+  console.log("=== Context API: Reading candidate files ===");
+  console.log("Files found:", keyFiles.length, keyFiles.map((f) => f.fileName));
+
   if (keyFiles.length > 0) {
     context += `## 主要書類の内容\n\n`;
     for (const file of keyFiles) {
       try {
         const { base64 } = await downloadFileFromDrive(file.driveFileId);
         const parsedText = await parsePdfWithAI(base64);
+        console.log("File parsed successfully:", file.fileName, "length:", parsedText.length);
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;
       } catch (error) {
