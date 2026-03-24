@@ -52,6 +52,12 @@ type Entry = {
 };
 
 /* ---------- Helpers ---------- */
+function normalize(s: string): string {
+  return s
+    .normalize("NFKC")
+    .toLowerCase();
+}
+
 function formatDateJST(iso: string): string {
   const d = new Date(iso);
   const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
@@ -170,6 +176,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [jobSearch, setJobSearch] = useState("");
 
   // Entries state
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -178,6 +185,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingDate, setEditingDate] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [entrySearch, setEntrySearch] = useState("");
 
   // Derive entered external job ids for cross-referencing
   const enteredJobIds = new Set(entries.map((e) => e.externalJobId));
@@ -334,8 +342,14 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   };
 
   /* ---------- Render ---------- */
-  const jobs = jobsData?.jobs || [];
+  const allJobs = jobsData?.jobs || [];
   const totalJobs = jobsData?.total_jobs ?? 0;
+  const jobs = jobSearch
+    ? allJobs.filter((j) => normalize(j.company_name).includes(normalize(jobSearch)))
+    : allJobs;
+  const filteredEntries = entrySearch
+    ? entries.filter((e) => normalize(e.companyName).includes(normalize(entrySearch)))
+    : entries;
 
   return (
     <div>
@@ -373,10 +387,27 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
       {activeSubTab === "jobs" && (
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           {/* ヘッダー */}
-          <div className="flex items-center gap-3 mb-4">
-            <h3 className="text-[14px] font-semibold text-[#374151]">
-              抽出結果（{totalJobs}件）
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <h3 className="text-[14px] font-semibold text-[#374151] shrink-0">
+              抽出結果（{jobSearch ? `${jobs.length}件 / ${totalJobs}件` : `${totalJobs}件`}）
             </h3>
+            <div className="relative">
+              <input
+                type="text"
+                value={jobSearch}
+                onChange={(e) => setJobSearch(e.target.value)}
+                placeholder="🔍 会社名で検索..."
+                className="border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[13px] w-48 focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+              />
+              {jobSearch && (
+                <button
+                  onClick={() => setJobSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
             {selectableJobIds.length > 0 && (
               <button
                 onClick={handleToggleAll}
@@ -400,9 +431,13 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
             <SkeletonCards />
           ) : jobsError ? (
             <div className="py-8 text-center text-[13px] text-red-500">{jobsError}</div>
-          ) : jobs.length === 0 ? (
+          ) : allJobs.length === 0 ? (
             <div className="py-8 text-center text-[13px] text-gray-400">
               この求職者の求人紹介データはまだありません
+            </div>
+          ) : jobs.length === 0 ? (
+            <div className="py-8 text-center text-[13px] text-gray-400">
+              該当する求人が見つかりません
             </div>
           ) : (
             <div
@@ -470,10 +505,27 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
       {activeSubTab === "entries" && (
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           {/* ヘッダー */}
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[14px] font-semibold text-[#374151]">
-              エントリー一覧（{entries.length}件）
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <h3 className="text-[14px] font-semibold text-[#374151] shrink-0">
+              エントリー一覧（{entrySearch ? `${filteredEntries.length}件 / ${entries.length}件` : `${entries.length}件`}）
             </h3>
+            <div className="relative">
+              <input
+                type="text"
+                value={entrySearch}
+                onChange={(e) => setEntrySearch(e.target.value)}
+                placeholder="🔍 会社名で検索..."
+                className="border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[13px] w-48 focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+              />
+              {entrySearch && (
+                <button
+                  onClick={() => setEntrySearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* コンテンツ */}
@@ -485,13 +537,17 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
             <div className="py-8 text-center text-[13px] text-gray-400">
               エントリーはまだありません。求人紹介タブから求人を選択してエントリーできます。
             </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="py-8 text-center text-[13px] text-gray-400">
+              該当するエントリーが見つかりません
+            </div>
           ) : (
             <div
               className="overflow-y-auto"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {entries.map((entry) => (
+                {filteredEntries.map((entry) => (
                   <div
                     key={entry.id}
                     className="rounded-lg border border-gray-200 p-3 hover:shadow-sm transition-shadow"
