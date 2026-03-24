@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { toast } from "sonner";
 import FileUploadModal from "./FileUploadModal";
 
 type CandidateFile = {
@@ -62,14 +61,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [selectedDocxIds, setSelectedDocxIds] = useState<Set<string>>(new Set());
-  const [showPdfModal, setShowPdfModal] = useState(false);
-  const [pdfDate, setPdfDate] = useState(() => {
-    const now = new Date();
-    const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    return jst.toISOString().slice(0, 10);
-  });
-  const [isConverting, setIsConverting] = useState(false);
 
   const fetchFiles = useCallback(async () => {
     setIsLoading(true);
@@ -117,47 +108,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     fetchCounts();
   };
 
-  const toggleDocxSelection = (driveFileId: string) => {
-    setSelectedDocxIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(driveFileId)) next.delete(driveFileId);
-      else next.add(driveFileId);
-      return next;
-    });
-  };
-
-  const handleConvertPdf = async () => {
-    if (selectedDocxIds.size === 0) return;
-    setIsConverting(true);
-    try {
-      const res = await fetch(`/api/candidates/${candidateId}/files/convert-pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileIds: Array.from(selectedDocxIds), date: pdfDate }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "PDF変換に失敗しました");
-      }
-      const data = await res.json();
-      toast.success(data.message);
-      setSelectedDocxIds(new Set());
-      setShowPdfModal(false);
-      fetchFiles();
-      fetchCounts();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "PDF変換に失敗しました");
-    } finally {
-      setIsConverting(false);
-    }
-  };
-
-  const selectedDocxFiles = files.filter(
-    (f) => selectedDocxIds.has(f.driveFileId) && f.fileName.toLowerCase().endsWith(".docx")
-  );
-
-  const isBsDocument = activeSubTab === "BS_DOCUMENT";
-
   const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
 
   return (
@@ -188,23 +138,12 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           <h3 className="text-[14px] font-semibold text-[#374151]">
             📁 {SUB_TABS.find((t) => t.key === activeSubTab)?.label}
           </h3>
-          <div className="flex gap-2">
-            {isBsDocument && (
-              <button
-                onClick={() => setShowPdfModal(true)}
-                disabled={selectedDocxIds.size === 0}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                PDF作成{selectedDocxIds.size > 0 && ` (${selectedDocxIds.size})`}
-              </button>
-            )}
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
-            >
-              + アップロード
-            </button>
-          </div>
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
+          >
+            + アップロード
+          </button>
         </div>
         <p className="text-sm text-gray-500 mb-4">{DESCRIPTIONS[activeSubTab]}</p>
 
@@ -219,14 +158,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
               <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
                 {/* ファイル名 */}
                 <div className="flex items-center gap-2">
-                  {isBsDocument && file.fileName.toLowerCase().endsWith(".docx") && (
-                    <input
-                      type="checkbox"
-                      checked={selectedDocxIds.has(file.driveFileId)}
-                      onChange={() => toggleDocxSelection(file.driveFileId)}
-                      className="w-4 h-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                    />
-                  )}
                   <span className="text-lg">{getFileIcon(file.mimeType)}</span>
                   <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
                 </div>
@@ -268,73 +199,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           </div>
         )}
       </div>
-
-      {/* PDF作成モーダル */}
-      {showPdfModal && (
-        <div
-          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-          onClick={() => !isConverting && setShowPdfModal(false)}
-        >
-          <div
-            className="bg-white rounded-xl max-w-md w-full mx-4 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[15px] font-bold text-[#374151]">
-                PDF作成（日付更新）
-              </h2>
-              <button
-                onClick={() => setShowPdfModal(false)}
-                disabled={isConverting}
-                className="text-[#6B7280] hover:text-[#374151] text-xl leading-none disabled:opacity-50"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm text-gray-600 mb-1">作成日</label>
-              <input
-                type="date"
-                value={pdfDate}
-                onChange={(e) => setPdfDate(e.target.value)}
-                disabled={isConverting}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]/30 focus:border-[#2563EB]"
-              />
-            </div>
-
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-2">対象ファイル:</p>
-              <ul className="text-sm text-[#374151] space-y-1">
-                {selectedDocxFiles.map((f) => (
-                  <li key={f.id}>・{f.fileName}</li>
-                ))}
-              </ul>
-            </div>
-
-            <p className="text-xs text-gray-400 mb-6">
-              ※ docx内の日付を指定日に更新しPDFに変換します
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowPdfModal(false)}
-                disabled={isConverting}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleConvertPdf}
-                disabled={isConverting || !pdfDate}
-                className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-              >
-                {isConverting ? "PDF作成中..." : "PDF作成"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* アップロードモーダル */}
       {showUploadModal && (
