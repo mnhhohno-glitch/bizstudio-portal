@@ -73,68 +73,22 @@ function todayString(): string {
   return jst.toISOString().slice(0, 10);
 }
 
-function areaMatchColor(value: string | null): string {
-  if (!value) return "text-gray-500";
-  if (value === "該当") return "text-green-600 font-medium";
-  if (value === "近隣") return "text-blue-600 font-medium";
-  if (value === "非該当") return "text-red-600 font-medium";
-  return "text-gray-700";
-}
-
 /* ---------- Sub-components ---------- */
 
 function SkeletonCards() {
   return (
-    <div className="space-y-3">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="rounded-lg border border-gray-200 p-4 animate-pulse">
-          <div className="flex items-center gap-3 mb-3">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="rounded-lg border border-gray-200 p-3 animate-pulse">
+          <div className="flex items-center gap-2 mb-2">
             <div className="h-4 w-4 bg-gray-200 rounded" />
-            <div className="h-4 w-10 bg-gray-200 rounded" />
-            <div className="h-4 w-32 bg-gray-200 rounded" />
-            <div className="ml-auto h-4 w-24 bg-gray-200 rounded" />
+            <div className="h-4 w-28 bg-gray-200 rounded" />
+            <div className="ml-auto h-4 w-20 bg-gray-200 rounded" />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="h-4 w-full bg-gray-200 rounded" />
-            <div className="h-4 w-3/4 bg-gray-200 rounded" />
-            <div className="h-4 w-1/2 bg-gray-200 rounded" />
-            <div className="h-4 w-2/3 bg-gray-200 rounded" />
-          </div>
+          <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+          <div className="h-3 w-24 bg-gray-200 rounded" />
         </div>
       ))}
-    </div>
-  );
-}
-
-function JobCardFields({
-  label1,
-  value1,
-  label2,
-  value2,
-  value1Class,
-  value2Class,
-}: {
-  label1: string;
-  value1: string | null;
-  label2: string;
-  value2: string | null;
-  value1Class?: string;
-  value2Class?: string;
-}) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
-      <div>
-        <span className="text-xs text-gray-400">{label1}</span>
-        <p className={`text-sm ${value1Class || "text-gray-700"} whitespace-pre-wrap`}>
-          {value1 || "—"}
-        </p>
-      </div>
-      <div>
-        <span className="text-xs text-gray-400">{label2}</span>
-        <p className={`text-sm ${value2Class || "text-gray-700"} whitespace-pre-wrap`}>
-          {value2 || "—"}
-        </p>
-      </div>
     </div>
   );
 }
@@ -277,6 +231,22 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
     });
   };
 
+  const selectableJobIds = (jobsData?.jobs || [])
+    .filter((j) => !enteredJobIds.has(j.id))
+    .map((j) => j.id);
+
+  const allSelectableChecked =
+    selectableJobIds.length > 0 &&
+    selectableJobIds.every((id) => selectedJobIds.has(id));
+
+  const handleToggleAll = () => {
+    if (allSelectableChecked) {
+      setSelectedJobIds(new Set());
+    } else {
+      setSelectedJobIds(new Set(selectableJobIds));
+    }
+  };
+
   const handleEntrySubmit = async (entryDate: string) => {
     if (!jobsData) return;
     setSubmitting(true);
@@ -403,14 +373,22 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
       {activeSubTab === "jobs" && (
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           {/* ヘッダー */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <h3 className="text-[14px] font-semibold text-[#374151]">
               抽出結果（{totalJobs}件）
             </h3>
+            {selectableJobIds.length > 0 && (
+              <button
+                onClick={handleToggleAll}
+                className="text-[13px] text-gray-500 hover:text-[#2563EB] transition-colors"
+              >
+                {allSelectableChecked ? "☑ 全解除" : "☐ 全選択"}
+              </button>
+            )}
             <button
               onClick={() => setShowEntryModal(true)}
               disabled={selectedJobIds.size === 0 || submitting}
-              className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="ml-auto bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ☑ 選択してエントリー
               {selectedJobIds.size > 0 && ` (${selectedJobIds.size})`}
@@ -427,78 +405,62 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               この求職者の求人紹介データはまだありません
             </div>
           ) : (
-            <div className="space-y-3">
-              {jobs.map((job, idx) => {
-                const isEntered = enteredJobIds.has(job.id);
-                const isSelected = selectedJobIds.has(job.id);
+            <div
+              className="overflow-y-auto"
+              style={{ maxHeight: "calc(100vh - 400px)" }}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {jobs.map((job) => {
+                  const isEntered = enteredJobIds.has(job.id);
+                  const isSelected = selectedJobIds.has(job.id);
 
-                return (
-                  <div
-                    key={job.id}
-                    className={`rounded-lg border p-4 transition-shadow ${
-                      isSelected
-                        ? "border-[#2563EB] bg-blue-50/30"
-                        : "border-gray-200 hover:shadow-sm"
-                    }`}
-                  >
-                    {/* カードヘッダー */}
-                    <div className="flex items-center gap-3 mb-3 flex-wrap">
-                      {isEntered ? (
-                        <span className="text-xs text-gray-400 bg-gray-100 rounded px-2 py-0.5">
-                          エントリー済み
+                  return (
+                    <div
+                      key={job.id}
+                      className={`rounded-lg border p-3 transition-shadow ${
+                        isSelected
+                          ? "border-[#2563EB] bg-blue-50/30"
+                          : "border-gray-200 hover:shadow-sm"
+                      }`}
+                    >
+                      {/* 1行目: チェック + 会社名 + バッジ + DB/タイプ */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isEntered ? (
+                          <span className="shrink-0 text-xs text-gray-400 bg-gray-100 rounded px-2 py-0.5">
+                            済
+                          </span>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleJobSelection(job.id)}
+                            className="shrink-0 w-4 h-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                          />
+                        )}
+                        <span className="font-semibold text-sm text-[#374151] truncate">
+                          {job.company_name}
                         </span>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleJobSelection(job.id)}
-                          className="w-4 h-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                        />
-                      )}
-                      <span className="text-xs text-gray-400">#{idx + 1}</span>
-                      <span className="font-semibold text-sm text-[#374151]">
-                        {job.company_name}
-                      </span>
-                      {job.job_category && (
-                        <span className="text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
-                          {job.job_category}
-                        </span>
-                      )}
-                      <span className="ml-auto text-xs text-gray-400">
-                        {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
-                      </span>
-                    </div>
-
-                    {/* カード詳細 */}
-                    <div className="space-y-2 ml-7">
-                      <JobCardFields
-                        label1="求人タイトル"
-                        value1={job.job_title}
-                        label2="勤務地"
-                        value2={job.work_location}
-                      />
-                      <JobCardFields
-                        label1="年収"
-                        value1={job.salary}
-                        label2="残業"
-                        value2={job.overtime}
-                      />
-                      <JobCardFields
-                        label1="エリア判定"
-                        value1={job.area_match}
-                        label2="転勤"
-                        value2={job.transfer}
-                        value1Class={areaMatchColor(job.area_match)}
-                      />
-                      <div className="pt-1">
-                        <span className="text-xs text-gray-400">
-                          紹介日: {formatDateJST(job.created_at)}
+                        {job.job_category && (
+                          <span className="shrink-0 text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
+                            {job.job_category}
+                          </span>
+                        )}
+                        <span className="shrink-0 ml-auto text-xs text-gray-400">
+                          {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
                         </span>
                       </div>
+                      {/* 2行目: 求人タイトル */}
+                      <p className="text-sm text-gray-700 mt-1 line-clamp-2 ml-6">
+                        {job.job_title}
+                      </p>
+                      {/* 3行目: 紹介日 */}
+                      <p className="text-xs text-gray-400 mt-1 ml-6">
+                        紹介日: {formatDateJST(job.created_at)}
+                      </p>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -524,73 +486,36 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               エントリーはまだありません。求人紹介タブから求人を選択してエントリーできます。
             </div>
           ) : (
-            <div className="space-y-3">
-              {entries.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow"
-                >
-                  {/* カードヘッダー */}
-                  <div className="flex items-center gap-3 mb-3 flex-wrap">
-                    <span className="font-semibold text-sm text-[#374151]">
-                      {entry.companyName}
-                    </span>
-                    {entry.jobCategory && (
-                      <span className="text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
-                        {entry.jobCategory}
+            <div
+              className="overflow-y-auto"
+              style={{ maxHeight: "calc(100vh - 400px)" }}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {entries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-lg border border-gray-200 p-3 hover:shadow-sm transition-shadow"
+                  >
+                    {/* 1行目: 会社名 + バッジ + DB/タイプ */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-semibold text-sm text-[#374151] truncate">
+                        {entry.companyName}
                       </span>
-                    )}
-                    <span className="ml-auto text-xs text-gray-400">
-                      {[entry.jobDb, entry.jobType].filter(Boolean).join(" / ")}
-                    </span>
-                    <button
-                      onClick={() => handleDeleteEntry(entry.id)}
-                      disabled={deletingId === entry.id}
-                      className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                      title="削除"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* カード詳細 */}
-                  <div className="space-y-2">
-                    <JobCardFields
-                      label1="求人タイトル"
-                      value1={entry.jobTitle}
-                      label2="勤務地"
-                      value2={entry.workLocation}
-                    />
-                    <JobCardFields
-                      label1="年収"
-                      value1={entry.salary}
-                      label2="残業"
-                      value2={entry.overtime}
-                    />
-                    <JobCardFields
-                      label1="エリア判定"
-                      value1={entry.areaMatch}
-                      label2="転勤"
-                      value2={entry.transfer}
-                      value1Class={areaMatchColor(entry.areaMatch)}
-                    />
-                    <div className="flex items-center gap-4 pt-1 flex-wrap">
-                      <span className="text-xs text-gray-400">
-                        紹介日: {formatDateJST(entry.introducedAt)}
+                      {entry.jobCategory && (
+                        <span className="shrink-0 text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
+                          {entry.jobCategory}
+                        </span>
+                      )}
+                      <span className="shrink-0 ml-auto text-xs text-gray-400">
+                        {[entry.jobDb, entry.jobType].filter(Boolean).join(" / ")}
                       </span>
+                    </div>
+                    {/* 2行目: 求人タイトル */}
+                    <p className="text-sm text-gray-700 mt-1 line-clamp-2">
+                      {entry.jobTitle}
+                    </p>
+                    {/* 3行目: エントリー日 + 紹介日 + 削除 */}
+                    <div className="flex items-center gap-3 mt-1 min-w-0">
                       <span className="text-xs font-medium text-[#374151]">
                         エントリー日:{" "}
                         {editingEntryId === entry.id ? (
@@ -627,10 +552,34 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                           </button>
                         )}
                       </span>
+                      <span className="text-xs text-gray-400">
+                        (紹介日: {formatDateJST(entry.introducedAt)})
+                      </span>
+                      <button
+                        onClick={() => handleDeleteEntry(entry.id)}
+                        disabled={deletingId === entry.id}
+                        className="shrink-0 ml-auto text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                        title="削除"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>
