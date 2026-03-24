@@ -32,23 +32,31 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
+  console.log("[Upload] resolveUserId called");
+
   // 1. Cookie-based session
   const sessionUser = await getSessionUser();
+  console.log("[Upload] Cookie auth result:", sessionUser?.id);
   if (sessionUser) return sessionUser.id;
 
   // 2. Bearer token (AppSession for external apps)
   const authHeader = req.headers.get("authorization");
+  console.log("[Upload] Auth header:", authHeader?.substring(0, 20));
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
     const sessionTokenHash = hashToken(token);
     const appSession = await prisma.appSession.findFirst({
       where: { sessionTokenHash },
     });
+    console.log("[Upload] Token lookup result:", appSession ? "found" : "not found");
+    console.log("[Upload] Token expires:", appSession?.expiresAt);
     if (appSession && appSession.expiresAt > new Date()) {
+      console.log("[Upload] Resolved userId:", appSession.userId);
       return appSession.userId;
     }
   }
 
+  console.log("[Upload] Resolved userId:", null);
   return null;
 }
 
@@ -59,6 +67,7 @@ export async function POST(
   const origin = req.headers.get("origin");
   const userId = await resolveUserId(req);
   if (!userId) {
+    console.log("[Upload] Returning 403 - userId is null");
     return withCors(
       NextResponse.json({ error: "forbidden" }, { status: 403 }),
       origin
