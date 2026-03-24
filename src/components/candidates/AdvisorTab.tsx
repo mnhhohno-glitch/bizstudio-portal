@@ -348,7 +348,7 @@ export default function AdvisorTab({
                   ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt,.csv"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) validateAndSetFile(f);

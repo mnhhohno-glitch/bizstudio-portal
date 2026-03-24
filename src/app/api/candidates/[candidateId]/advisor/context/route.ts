@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { downloadFileFromDrive } from "@/lib/google-drive";
-import { parsePdfWithGemini } from "@/lib/file-parser";
+import { parsePdfWithAI } from "@/lib/file-parser";
 
 export async function GET(
   _req: Request,
@@ -122,7 +122,7 @@ export async function GET(
     for (const file of keyFiles) {
       try {
         const { base64 } = await downloadFileFromDrive(file.driveFileId);
-        const parsedText = await parsePdfWithGemini(base64);
+        const parsedText = await parsePdfWithAI(base64);
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;
       } catch (error) {

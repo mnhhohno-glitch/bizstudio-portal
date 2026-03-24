@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import {
-  parsePdfWithGemini,
-  parseImageWithGemini,
-  parseDocWithGemini,
+  parsePdfWithAI,
+  parseImageWithAI,
+  parseDocWithAI,
+  parseTextFile,
 } from "@/lib/file-parser";
 
 const SYSTEM_PROMPT_TEMPLATE = `# Role & Persona
@@ -78,11 +79,13 @@ export async function POST(
     try {
       const mt = file.mimeType || "";
       if (mt === "application/pdf") {
-        fileContext = await parsePdfWithGemini(file.base64);
+        fileContext = await parsePdfWithAI(file.base64);
       } else if (mt.startsWith("image/")) {
-        fileContext = await parseImageWithGemini(file.base64, mt);
+        fileContext = await parseImageWithAI(file.base64, mt);
+      } else if (mt === "text/plain" || mt === "text/csv") {
+        fileContext = parseTextFile(file.base64);
       } else if (mt.includes("word") || mt.includes("document") || mt.includes("excel") || mt.includes("spreadsheet") || mt.includes("powerpoint") || mt.includes("presentation")) {
-        fileContext = await parseDocWithGemini(file.base64, mt);
+        fileContext = await parseDocWithAI(file.base64, mt);
       }
     } catch (e) {
       console.error("File parse error:", e);
