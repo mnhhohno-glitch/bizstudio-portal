@@ -6,6 +6,7 @@ import Link from "next/link";
 import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 import DocumentsTab from "@/components/candidates/DocumentsTab";
 import AdvisorTab from "@/components/candidates/AdvisorTab";
+import HistoryTab from "@/components/candidates/HistoryTab";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -1487,7 +1488,7 @@ export default function CandidateDetailPage() {
           <CandidateTasksTab candidateId={candidateId} />
         )}
         {activeTab === "history" && (
-          <PlaceholderTab icon="📜" label="対応履歴機能" />
+          <HistoryTab candidateId={candidateId} />
         )}
         {activeTab === "notes" && (
           <NotesTab
