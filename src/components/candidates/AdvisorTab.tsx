@@ -161,6 +161,9 @@ export default function AdvisorTab({
       },
     ]);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 150000);
+
     try {
       console.log("Sending to API:", { content: displayContent, hasFile: !!fileData });
 
@@ -173,18 +176,27 @@ export default function AdvisorTab({
             content: displayContent,
             file: fileData,
           }),
+          signal: controller.signal,
         }
       );
 
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "エラーが発生しました");
 
       setAttachedFile(null);
       await fetchMessages(activeSessionId);
       fetchSessions();
-    } catch (err) {
-      setMessages((prev) => prev.filter((m) => !m.id?.startsWith("temp-ai-")));
-      alert(err instanceof Error ? err.message : "エラーが発生しました");
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === "AbortError") {
+        // タイムアウト — サーバー側でエラーメッセージが保存されている可能性
+        await fetchMessages(activeSessionId);
+        fetchSessions();
+      } else {
+        setMessages((prev) => prev.filter((m) => !m.id?.startsWith("temp-ai-")));
+        alert(err instanceof Error ? err.message : "エラーが発生しました");
+      }
     } finally {
       setIsSending(false);
     }

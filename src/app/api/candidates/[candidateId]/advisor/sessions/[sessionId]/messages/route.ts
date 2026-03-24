@@ -33,7 +33,11 @@ const SYSTEM_PROMPT_TEMPLATE = `# Role & Persona
 
 `;
 
-const CACHE_TTL = 30 * 60 * 1000; // 30分
+const CACHE_TTL = 30 * 60 * 1000;
+const MAX_CONTEXT_CHARS = 20000;
+const MAX_PAST_MESSAGES = 20;
+const MAX_TEXT_FILE_CHARS = 8000;
+const API_TIMEOUT_MS = 120000; // 2分
 
 export async function GET(
   _req: Request,
@@ -80,7 +84,10 @@ export async function POST(
       } else if (mt.startsWith("image/")) {
         fileContext = await parseImageWithAI(file.base64, mt);
       } else if (mt === "text/plain" || mt === "text/csv") {
-        fileContext = parseTextFile(file.base64);
+        const fullText = parseTextFile(file.base64);
+        fileContext = fullText.length > MAX_TEXT_FILE_CHARS
+          ? fullText.substring(0, MAX_TEXT_FILE_CHARS) + `\n\n...（以下省略、全${fullText.length}文字）`
+          : fullText;
       } else if (mt.includes("word") || mt.includes("document") || mt.includes("excel") || mt.includes("spreadsheet") || mt.includes("powerpoint") || mt.includes("presentation")) {
         fileContext = await parseDocWithAI(file.base64, mt);
       }
@@ -110,15 +117,16 @@ export async function POST(
     data: { sessionId, role: "user", content: fullContent },
   });
 
-  // 過去メッセージ取得
-  const pastMessages = await prisma.advisorChatMessage.findMany({
+  // 過去メッセージ取得（直近20件に制限）
+  const allMessages = await prisma.advisorChatMessage.findMany({
     where: { sessionId },
     orderBy: { createdAt: "asc" },
   });
+  const pastMessages = allMessages.slice(-MAX_PAST_MESSAGES);
 
   // セッションタイトル自動更新（初回メッセージ時）
   const displayTitle = (content || file?.name || "").trim();
-  if (pastMessages.length === 1 && displayTitle) {
+  if (allMessages.length === 1 && displayTitle) {
     await prisma.advisorChatSession.update({
       where: { id: sessionId },
       data: { title: displayTitle.substring(0, 30) + (displayTitle.length > 30 ? "..." : "") },
@@ -154,11 +162,19 @@ export async function POST(
     }
   }
 
+  // コンテキストが長すぎる場合は切り詰め
+  if (context && context.length > MAX_CONTEXT_CHARS) {
+    context = context.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
+  }
+
   // OpenAI API呼び出し
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
   }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -179,7 +195,10 @@ export async function POST(
         temperature: 0.7,
         max_completion_tokens: 2000,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text();
@@ -200,7 +219,21 @@ export async function POST(
     });
 
     return NextResponse.json({ message: saved });
-  } catch (e) {
+  } catch (e: unknown) {
+    clearTimeout(timeoutId);
+
+    if (e instanceof Error && e.name === "AbortError") {
+      console.error("OpenAI API timeout after", API_TIMEOUT_MS, "ms");
+      await prisma.advisorChatMessage.create({
+        data: {
+          sessionId,
+          role: "assistant",
+          content: "すみません、応答の生成に時間がかかりすぎました。ファイルの内容が大きい場合は、要点を絞ってご質問ください。",
+        },
+      });
+      return NextResponse.json({ error: "タイムアウトしました" }, { status: 504 });
+    }
+
     console.error("OpenAI API call error:", e);
     return NextResponse.json({ error: "AI応答の取得に失敗しました" }, { status: 500 });
   }
