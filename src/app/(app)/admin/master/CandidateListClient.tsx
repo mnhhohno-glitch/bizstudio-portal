@@ -11,8 +11,6 @@ type Employee = {
   name: string;
 };
 
-type JobStatus = "entry" | "introduced" | "assigned";
-
 type CandidateRow = {
   id: string;
   candidateNumber: string;
@@ -21,22 +19,7 @@ type CandidateRow = {
   gender: string | null;
   employee: { id: string; name: string } | null;
   createdAt: string;
-  jobStatus?: JobStatus;
-};
-
-const STATUS_BADGE: Record<JobStatus, { label: string; className: string }> = {
-  entry: {
-    label: "エントリー",
-    className: "bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full",
-  },
-  introduced: {
-    label: "求人紹介",
-    className: "bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full",
-  },
-  assigned: {
-    label: "-",
-    className: "bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full",
-  },
+  jobStatus?: "entry" | null;
 };
 
 interface CandidateListClientProps {
@@ -213,9 +196,9 @@ export default function CandidateListClient({
                       </span>
                     </Td>
                     <Td>
-                      {cand.jobStatus && (
-                        <span className={STATUS_BADGE[cand.jobStatus].className}>
-                          {STATUS_BADGE[cand.jobStatus].label}
+                      {cand.jobStatus === "entry" && (
+                        <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
+                          エントリー
                         </span>
                       )}
                     </Td>

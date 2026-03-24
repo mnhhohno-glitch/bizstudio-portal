@@ -14,7 +14,7 @@ export default async function CandidateMasterPage() {
     }),
   ]);
 
-  // Job status determination
+  // Job status determination (entry only)
   const candidateIds = candidates.map((c) => c.id);
   const entryCounts = await prisma.jobEntry.groupBy({
     by: ["candidateId"],
@@ -25,59 +25,16 @@ export default async function CandidateMasterPage() {
     entryCounts.map((e) => [e.candidateId, e._count.id])
   );
 
-  const KYUUJIN_PDF_TOOL_URL = process.env.KYUUJIN_PDF_TOOL_URL;
-  const candidatesWithoutEntry = candidates.filter(
-    (c) => !entryCountMap.has(c.id) && c.candidateNumber
-  );
-
-  const jobCheckMap = new Map<string, boolean>();
-  if (KYUUJIN_PDF_TOOL_URL && candidatesWithoutEntry.length > 0) {
-    const results = await Promise.allSettled(
-      candidatesWithoutEntry.map(async (c) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        try {
-          const res = await fetch(
-            `${KYUUJIN_PDF_TOOL_URL}/api/projects/by-job-seeker-id/${c.candidateNumber}/jobs`,
-            { signal: controller.signal }
-          );
-          if (!res.ok) return { candidateId: c.id, hasJobs: false };
-          const data = await res.json();
-          return { candidateId: c.id, hasJobs: data.total_jobs > 0 };
-        } catch {
-          return { candidateId: c.id, hasJobs: false };
-        } finally {
-          clearTimeout(timeout);
-        }
-      })
-    );
-    for (const r of results) {
-      if (r.status === "fulfilled") {
-        jobCheckMap.set(r.value.candidateId, r.value.hasJobs);
-      }
-    }
-  }
-
-  const serialized = candidates.map((c) => {
-    let jobStatus: "entry" | "introduced" | "assigned";
-    if (entryCountMap.has(c.id)) {
-      jobStatus = "entry";
-    } else if (jobCheckMap.get(c.id)) {
-      jobStatus = "introduced";
-    } else {
-      jobStatus = "assigned";
-    }
-    return {
-      id: c.id,
-      candidateNumber: c.candidateNumber,
-      name: c.name,
-      nameKana: c.nameKana,
-      gender: c.gender,
-      employee: c.employee,
-      createdAt: c.createdAt.toISOString(),
-      jobStatus,
-    };
-  });
+  const serialized = candidates.map((c) => ({
+    id: c.id,
+    candidateNumber: c.candidateNumber,
+    name: c.name,
+    nameKana: c.nameKana,
+    gender: c.gender,
+    employee: c.employee,
+    createdAt: c.createdAt.toISOString(),
+    jobStatus: entryCountMap.has(c.id) ? ("entry" as const) : null,
+  }));
 
   return (
     <div>
