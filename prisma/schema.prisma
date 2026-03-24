@@ -230,6 +230,7 @@ model Candidate {
   tasks           Task[]
   files           CandidateFile[]
   advisorSessions AdvisorChatSession[]
+  jobEntries      JobEntry[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -986,4 +987,38 @@ model AdvisorChatMessage {
   createdAt DateTime           @default(now()) @map("created_at")
 
   @@map("advisor_chat_messages")
+}
+
+// ========================================
+// エントリー履歴
+// ========================================
+
+model JobEntry {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  externalJobId   Int       @map("external_job_id")
+  companyName     String    @map("company_name")
+  jobTitle        String    @map("job_title")
+  jobDb           String?   @map("job_db")
+  jobType         String?   @map("job_type")
+  jobCategory     String?   @map("job_category")
+  workLocation    String?   @map("work_location")
+  salary          String?
+  overtime        String?
+  areaMatch       String?   @map("area_match")
+  transfer        String?
+  originalUrl     String?   @map("original_url")
+
+  entryDate       DateTime  @map("entry_date")
+  introducedAt    DateTime  @map("introduced_at")
+
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([candidateId])
+  @@index([externalJobId])
+  @@map("job_entries")
 }
