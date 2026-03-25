@@ -16,6 +16,14 @@ function formatTime(iso: string) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function isGreetingMessage(content: string): { isGreeting: boolean; label: string; body: string } {
+  const match = content.match(/^(【(?:LINE|メール)向け挨拶文】)\n\n([\s\S]*)$/);
+  if (match) {
+    return { isGreeting: true, label: match[1], body: match[2] };
+  }
+  return { isGreeting: false, label: "", body: content };
+}
+
 export default function AdvisorTab({
   candidateId,
   candidateName,
@@ -34,6 +42,11 @@ export default function AdvisorTab({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
+
+  // Greeting state
+  const [showGreetingOptions, setShowGreetingOptions] = useState(false);
+  const [isGeneratingGreeting, setIsGeneratingGreeting] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   const validateAndSetFile = (file: File) => {
     if (file.size > 20 * 1024 * 1024) {
@@ -106,6 +119,50 @@ export default function AdvisorTab({
       }
     } catch {
       alert("履歴のクリアに失敗しました");
+    }
+  };
+
+  const handleGenerateGreeting = async (format: "line" | "email") => {
+    if (!activeSessionId || isGeneratingGreeting) return;
+    setIsGeneratingGreeting(true);
+    setShowGreetingOptions(false);
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: "temp-greeting-" + Date.now(),
+        role: "assistant",
+        content: "",
+        createdAt: new Date().toISOString(),
+        isLoading: true,
+      },
+    ]);
+
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/advisor/greeting`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ format, sessionId: activeSessionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "挨拶文の生成に失敗しました");
+
+      await fetchMessages(activeSessionId);
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => !m.id?.startsWith("temp-greeting-")));
+      alert(err instanceof Error ? err.message : "挨拶文の生成に失敗しました");
+    } finally {
+      setIsGeneratingGreeting(false);
+    }
+  };
+
+  const handleCopyGreeting = async (messageId: string, body: string) => {
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch {
+      // fallback
     }
   };
 
@@ -242,6 +299,42 @@ export default function AdvisorTab({
         </button>
       </div>
 
+      {/* 挨拶文生成ボタン */}
+      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3">
+        <button
+          onClick={() => setShowGreetingOptions(!showGreetingOptions)}
+          disabled={!activeSessionId || isGeneratingGreeting}
+          className="text-[13px] font-medium text-[#2563EB] hover:text-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          ✉ 挨拶文生成
+        </button>
+        {showGreetingOptions && !isGeneratingGreeting && (
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 cursor-pointer text-[13px] text-gray-700">
+              <input
+                type="radio"
+                name="greetingFormat"
+                className="accent-[#2563EB]"
+                onChange={() => handleGenerateGreeting("line")}
+              />
+              LINE
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-[13px] text-gray-700">
+              <input
+                type="radio"
+                name="greetingFormat"
+                className="accent-[#2563EB]"
+                onChange={() => handleGenerateGreeting("email")}
+              />
+              メール
+            </label>
+          </div>
+        )}
+        {isGeneratingGreeting && (
+          <span className="text-[13px] text-gray-400 animate-pulse">挨拶文を生成中...</span>
+        )}
+      </div>
+
       {/* メッセージ表示 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && (
@@ -249,63 +342,80 @@ export default function AdvisorTab({
             メッセージを入力してAIアドバイザーに相談してください
           </div>
         )}
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-3"}`}>
-            {msg.role === "assistant" && (
-              <div className="w-8 h-8 bg-[#F4F7F9] rounded-full flex items-center justify-center text-sm shrink-0">
-                🤖
-              </div>
-            )}
-            <div
-              className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-[#003366] text-white rounded-2xl rounded-br-sm"
-                  : "bg-[#F4F7F9] text-gray-800 rounded-2xl rounded-bl-sm"
-              }`}
-            >
-              {msg.isLoading ? (
-                <div className="flex gap-1 py-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+        {messages.map((msg) => {
+          const greeting = msg.role === "assistant" ? isGreetingMessage(msg.content) : null;
+
+          return (
+            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-3"}`}>
+              {msg.role === "assistant" && (
+                <div className="w-8 h-8 bg-[#F4F7F9] rounded-full flex items-center justify-center text-sm shrink-0">
+                  🤖
                 </div>
-              ) : msg.role === "assistant" ? (
-                <div className="text-sm leading-relaxed">
-                  <ReactMarkdown
-                    components={{
-                      p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                      h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
-                      h3: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
-                      ul: ({ children }) => <ul className="ml-4 mb-3 space-y-1">{children}</ul>,
-                      ol: ({ children }) => <ol className="ml-4 mb-3 space-y-1 list-decimal">{children}</ol>,
-                      li: ({ children }) => <li className="text-sm">{children}</li>,
-                      strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                      code: ({ children }) => <code className="bg-gray-200 rounded px-1 py-0.5 text-xs">{children}</code>,
-                      hr: () => <hr className="my-3 border-gray-300" />,
-                    }}
+              )}
+              <div
+                className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed relative ${
+                  msg.role === "user"
+                    ? "bg-[#003366] text-white rounded-2xl rounded-br-sm"
+                    : "bg-[#F4F7F9] text-gray-800 rounded-2xl rounded-bl-sm"
+                }`}
+              >
+                {/* Copy button for greeting messages */}
+                {greeting?.isGreeting && !msg.isLoading && (
+                  <button
+                    onClick={() => handleCopyGreeting(msg.id, greeting.body)}
+                    className="absolute top-2 right-2 text-[12px] text-gray-400 hover:text-[#2563EB] transition-colors"
                   >
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
-              ) : (() => {
-                const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
-                const attachName = attachMatch ? attachMatch[1] : null;
-                const displayText = msg.content.replace(/\n\n---\n添付ファイル「.+?」の内容:[\s\S]*$/, "").trim();
-                return (
-                  <>
-                    {attachName && (
-                      <div className="text-xs bg-white/20 rounded px-2 py-1 mb-1 inline-block">📎 {attachName}</div>
+                    {copiedMessageId === msg.id ? "✓ コピーしました" : "📋 コピー"}
+                  </button>
+                )}
+
+                {msg.isLoading ? (
+                  <div className="flex gap-1 py-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                ) : msg.role === "assistant" ? (
+                  <div className="text-sm leading-relaxed">
+                    {greeting?.isGreeting && (
+                      <div className="text-[12px] font-semibold text-[#2563EB] mb-2">{greeting.label}</div>
                     )}
-                    <span className="whitespace-pre-wrap">{displayText || `📎 ${attachName}`}</span>
-                  </>
-                );
-              })()}
-              <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
-                {!msg.isLoading && formatTime(msg.createdAt)}
-              </p>
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                        h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
+                        h3: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
+                        ul: ({ children }) => <ul className="ml-4 mb-3 space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="ml-4 mb-3 space-y-1 list-decimal">{children}</ol>,
+                        li: ({ children }) => <li className="text-sm">{children}</li>,
+                        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                        code: ({ children }) => <code className="bg-gray-200 rounded px-1 py-0.5 text-xs">{children}</code>,
+                        hr: () => <hr className="my-3 border-gray-300" />,
+                      }}
+                    >
+                      {greeting?.isGreeting ? greeting.body : msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (() => {
+                  const attachMatch = msg.content.match(/添付ファイル「(.+?)」の内容:/);
+                  const attachName = attachMatch ? attachMatch[1] : null;
+                  const displayText = msg.content.replace(/\n\n---\n添付ファイル「.+?」の内容:[\s\S]*$/, "").trim();
+                  return (
+                    <>
+                      {attachName && (
+                        <div className="text-xs bg-white/20 rounded px-2 py-1 mb-1 inline-block">📎 {attachName}</div>
+                      )}
+                      <span className="whitespace-pre-wrap">{displayText || `📎 ${attachName}`}</span>
+                    </>
+                  );
+                })()}
+                <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
+                  {!msg.isLoading && formatTime(msg.createdAt)}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
