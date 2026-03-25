@@ -177,8 +177,6 @@ export async function POST(
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
-    const systemMessage = SYSTEM_PROMPT_TEMPLATE + context;
-    console.log("[Advisor] Calling OpenAI API...", { model: "gpt-5.4", contextLength: systemMessage?.length, messageCount: pastMessages?.length });
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -195,13 +193,12 @@ export async function POST(
           })),
         ],
         temperature: 0.7,
-        max_completion_tokens: 2000,
+        max_completion_tokens: 16000,
       }),
       signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
-    console.log("[Advisor] OpenAI response received:", { status: response.status });
 
     if (!response.ok) {
       const errText = await response.text();
@@ -210,19 +207,10 @@ export async function POST(
     }
 
     const data = await response.json();
-    console.log("[Advisor] OpenAI response full structure:", JSON.stringify({
-      id: data?.id,
-      model: data?.model,
-      choicesCount: data?.choices?.length,
-      finishReason: data?.choices?.[0]?.finish_reason,
-      messageRole: data?.choices?.[0]?.message?.role,
-      contentLength: data?.choices?.[0]?.message?.content?.length || 0,
-      contentPreview: data?.choices?.[0]?.message?.content?.substring(0, 100),
-      hasRefusal: !!data?.choices?.[0]?.message?.refusal,
-      hasToolCalls: !!data?.choices?.[0]?.message?.tool_calls,
-      usage: data?.usage,
-    }));
-    const aiContent = data.choices?.[0]?.message?.content || "応答を取得できませんでした";
+    const rawContent = data.choices?.[0]?.message?.content;
+    const aiContent = rawContent && rawContent.trim() !== ""
+      ? rawContent
+      : "応答の生成に失敗しました。もう一度お試しください。";
 
     const saved = await prisma.advisorChatMessage.create({
       data: { sessionId, role: "assistant", content: aiContent },
