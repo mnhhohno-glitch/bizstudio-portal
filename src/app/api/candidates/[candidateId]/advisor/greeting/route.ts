@@ -6,7 +6,7 @@ import { parsePdfWithAI, parseDocWithAI, parseTextFile } from "@/lib/file-parser
 
 const API_TIMEOUT_MS = 120000;
 
-function buildSystemPrompt(format: "line" | "email"): string {
+function buildSystemPrompt(format: "line" | "email", advisorName: string): string {
   const formatInstructions =
     format === "line"
       ? `LINE向けの挨拶文を作成してください。
@@ -56,9 +56,9 @@ function buildSystemPrompt(format: "line" | "email"): string {
    ${formatInstructions}
 
 6. 【署名】
-   文末に以下の署名を入れてください:
+   文末に以下の署名を必ずそのまま入れてください。担当者名は必ず「${advisorName}」を使用し、面談ログやPDF内に記載されている他の担当者名は無視してください:
    株式会社ビズスタジオ
-   担当: [担当CA名]`;
+   担当: ${advisorName}`;
 }
 
 async function parseMeetingFile(file: { driveFileId: string; fileName: string; mimeType: string }): Promise<string> {
@@ -95,6 +95,13 @@ export async function POST(
   if (!sessionId) {
     return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
   }
+
+  // Get advisor name from DB
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: candidateId },
+    select: { employee: { select: { name: true } } },
+  });
+  const advisorName = candidate?.employee?.name || "担当者";
 
   // Get chat history
   const chatMessages = await prisma.advisorChatMessage.findMany({
@@ -150,7 +157,7 @@ export async function POST(
     return NextResponse.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
   }
 
-  const systemPrompt = buildSystemPrompt(format as "line" | "email");
+  const systemPrompt = buildSystemPrompt(format as "line" | "email", advisorName);
 
   let userContent = `## 求職者情報\n${contextData}\n\n`;
   if (meetingFilesContent) {
