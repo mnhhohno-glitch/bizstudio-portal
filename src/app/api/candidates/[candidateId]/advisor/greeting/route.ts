@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { downloadFileFromDrive } from "@/lib/google-drive";
+import { parsePdfWithAI, parseDocWithAI, parseTextFile } from "@/lib/file-parser";
 
 const API_TIMEOUT_MS = 120000;
 
@@ -23,8 +25,10 @@ function buildSystemPrompt(format: "line" | "email"): string {
 
 ## 挨拶文の作成ルール
 
-1. 【会話内容の理解】
-   以下のチャット履歴と面談ログを確認し、面談で話された内容を正確に把握してください。
+1. 【面談内容の理解】
+   以下の面談ログ、チャット履歴、求職者情報を確認し、面談で実際に話された内容を正確に把握してください。
+   面談ログがある場合は、そこに記載された具体的な会話内容・求職者の発言・志向性を最優先で参考にしてください。
+   面談ログに記載されている具体的なエピソードや発言を挨拶文に反映してください。
 
 2. 【次回面談日の確認】
    - チャット履歴や面談ログに次回面談日の記載がある場合は、挨拶文に日時を明記してください
@@ -43,6 +47,23 @@ function buildSystemPrompt(format: "line" | "email"): string {
    文末に以下の署名を入れてください:
    株式会社ビズスタジオ
    担当: [担当CA名]`;
+}
+
+async function parseMeetingFile(file: { driveFileId: string; fileName: string; mimeType: string }): Promise<string> {
+  const ext = file.fileName.split(".").pop()?.toLowerCase() || "";
+  const { base64 } = await downloadFileFromDrive(file.driveFileId);
+
+  if (ext === "txt") {
+    return parseTextFile(base64);
+  }
+  if (ext === "pdf") {
+    return await parsePdfWithAI(base64);
+  }
+  if (["docx", "doc", "xlsx", "xls", "pptx", "ppt"].includes(ext)) {
+    return await parseDocWithAI(base64, file.mimeType);
+  }
+
+  return `（${ext}形式のファイルは読み取り非対応です）`;
 }
 
 export async function POST(
@@ -90,13 +111,41 @@ export async function POST(
     console.error("Greeting context fetch error:", e);
   }
 
+  // Read meeting log files (MEETING category)
+  let meetingFilesContent = "";
+  try {
+    const meetingFiles = await prisma.candidateFile.findMany({
+      where: { candidateId, category: "MEETING" },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { driveFileId: true, fileName: true, mimeType: true },
+    });
+
+    for (const file of meetingFiles) {
+      try {
+        const parsed = await parseMeetingFile(file);
+        meetingFilesContent += `--- ファイル名: ${file.fileName} ---\n${parsed}\n\n`;
+      } catch (e) {
+        console.error(`Greeting meeting file parse error: ${file.fileName}`, e);
+      }
+    }
+  } catch (e) {
+    console.error("Greeting meeting files fetch error:", e);
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
   }
 
   const systemPrompt = buildSystemPrompt(format as "line" | "email");
-  const userContent = `## 求職者情報\n${contextData}\n\n## これまでのチャット履歴\n${chatHistory}\n\n上記の情報をもとに、${format === "line" ? "LINE" : "メール"}向けの面談後挨拶文を作成してください。`;
+
+  let userContent = `## 求職者情報\n${contextData}\n\n`;
+  if (meetingFilesContent) {
+    userContent += `## 面談ログ・面談資料\n${meetingFilesContent}\n`;
+  }
+  userContent += `## これまでのチャット履歴\n${chatHistory}\n\n`;
+  userContent += `上記の情報をもとに、${format === "line" ? "LINE" : "メール"}向けの面談後挨拶文を作成してください。`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
