@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
+import { formatDateJST } from "@/lib/rpa-error/formatDate";
 
 type ErrorLog = {
   id: string;
@@ -140,7 +141,7 @@ export default function RpaErrorLogsPage() {
                 onClick={() => router.push(`/rpa-error/logs/${log.id}`)}
               >
                 <td className="px-4 py-3 text-[#6B7280] whitespace-nowrap">
-                  {new Date(log.occurredAt).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {formatDateJST(log.occurredAt)}
                 </td>
                 <td className="px-4 py-3">{log.machineNumber}号機</td>
                 <td className="px-4 py-3 text-[13px]">{log.flowName}</td>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { parseKnownErrorSuggestion, removeJsonBlock } from "@/lib/rpa-error/parseKnownErrorSuggestion";
 import type { KnownErrorSuggestion } from "@/lib/rpa-error/parseKnownErrorSuggestion";
 import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
+import { formatDateOnlyJST } from "@/lib/rpa-error/formatDate";
 
 type Message = { id: string; role: string; content: string; createdAt: string };
 type ChatSession = { id: string; createdAt: string; messages: Message[]; errorLog?: { id: string } | null };
@@ -390,7 +391,7 @@ export default function RpaErrorChatPage() {
                 {c.messages[0]?.content.slice(0, 30) || "新規チャット"}
               </div>
               <div className="text-[11px] text-[#9CA3AF] mt-0.5">
-                {new Date(c.createdAt).toLocaleDateString("ja-JP")}
+                {formatDateOnlyJST(c.createdAt)}
                 {c.errorLog && <span className="ml-1 text-[#16A34A]">保存済</span>}
               </div>
             </button>

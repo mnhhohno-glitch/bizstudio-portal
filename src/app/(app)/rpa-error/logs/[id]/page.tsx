@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import RpaErrorNav from "@/components/rpa-error/RpaErrorNav";
+import { formatDateTimeJST } from "@/lib/rpa-error/formatDate";
 
 type Note = { id: string; content: string; createdAt: string; user: { name: string } };
 type ChatMessage = { id: string; role: string; content: string; createdAt: string };
@@ -101,7 +102,7 @@ export default function RpaErrorLogDetailPage() {
 
         <div className="mt-4 grid grid-cols-2 gap-4 text-[14px]">
           <div><span className="text-[#6B7280]">深刻度:</span> <span className={log.severity === "緊急" ? "text-[#DC2626] font-semibold" : log.severity === "要対応" ? "text-[#D97706]" : "text-[#9CA3AF]"}>{log.severity || "未分類"}</span></div>
-          <div><span className="text-[#6B7280]">発生日時:</span> {new Date(log.occurredAt).toLocaleString("ja-JP")}</div>
+          <div><span className="text-[#6B7280]">発生日時:</span> {formatDateTimeJST(log.occurredAt)}</div>
           <div><span className="text-[#6B7280]">登録者:</span> {log.registeredUser.name}</div>
           <div className="flex items-center gap-2">
             <span className="text-[#6B7280]">担当者:</span>
@@ -110,7 +111,7 @@ export default function RpaErrorLogDetailPage() {
               {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </div>
-          <div><span className="text-[#6B7280]">登録日:</span> {new Date(log.createdAt).toLocaleString("ja-JP")}</div>
+          <div><span className="text-[#6B7280]">登録日:</span> {formatDateTimeJST(log.createdAt)}</div>
         </div>
 
         <div className="mt-4">
@@ -155,7 +156,7 @@ export default function RpaErrorLogDetailPage() {
           <div className="space-y-3 mb-4">
             {log.notes.map((n) => (
               <div key={n.id} className="border-l-2 border-[#2563EB] pl-3">
-                <div className="text-[12px] text-[#9CA3AF]">{n.user.name} - {new Date(n.createdAt).toLocaleString("ja-JP")}</div>
+                <div className="text-[12px] text-[#9CA3AF]">{n.user.name} - {formatDateTimeJST(n.createdAt)}</div>
                 <p className="text-[14px] text-[#374151] whitespace-pre-wrap">{n.content}</p>
               </div>
             ))}
