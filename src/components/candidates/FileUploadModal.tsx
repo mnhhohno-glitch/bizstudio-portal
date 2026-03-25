@@ -14,6 +14,7 @@ const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "text/plain",
 ]);
 
 const MAX_SIZE = 20 * 1024 * 1024;
@@ -186,7 +187,7 @@ export default function FileUploadModal({
               type="file"
               multiple
               className="hidden"
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
               onChange={(e) => {
                 if (e.target.files?.length) {
                   validateAndAddFiles(e.target.files);
@@ -194,7 +195,7 @@ export default function FileUploadModal({
                 e.target.value = "";
               }}
             />
-            <p className="text-xs text-gray-400 mt-3">PDF, Word, Excel, PowerPoint, 画像 ・ 最大20MB ・ 複数選択可</p>
+            <p className="text-xs text-gray-400 mt-3">PDF, Word, Excel, PowerPoint, 画像, テキスト ・ 最大20MB ・ 複数選択可</p>
           </div>
 
           {/* 選択済みファイル一覧 */}

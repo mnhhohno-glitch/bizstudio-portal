@@ -79,10 +79,10 @@ type SessionUser = {
 /* ---------- Constants ---------- */
 const TABS = [
   { key: "documents", label: "書類" },
+  { key: "history", label: "紹介履歴" },
   { key: "advisor", label: "AIアドバイザー" },
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
-  { key: "history", label: "履歴" },
   { key: "notes", label: "メモ" },
 ] as const;
 

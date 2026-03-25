@@ -19,11 +19,13 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "text/plain",
 ]);
 
 const ALLOWED_EXTENSIONS = new Set([
   ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
   ".jpg", ".jpeg", ".png", ".webp",
+  ".txt",
 ]);
 
 export async function OPTIONS(request: NextRequest) {
