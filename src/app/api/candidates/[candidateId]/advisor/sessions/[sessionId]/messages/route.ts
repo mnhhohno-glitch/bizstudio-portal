@@ -210,7 +210,18 @@ export async function POST(
     }
 
     const data = await response.json();
-    console.log("[Advisor] OpenAI response parsed, content length:", data?.choices?.[0]?.message?.content?.length);
+    console.log("[Advisor] OpenAI response full structure:", JSON.stringify({
+      id: data?.id,
+      model: data?.model,
+      choicesCount: data?.choices?.length,
+      finishReason: data?.choices?.[0]?.finish_reason,
+      messageRole: data?.choices?.[0]?.message?.role,
+      contentLength: data?.choices?.[0]?.message?.content?.length || 0,
+      contentPreview: data?.choices?.[0]?.message?.content?.substring(0, 100),
+      hasRefusal: !!data?.choices?.[0]?.message?.refusal,
+      hasToolCalls: !!data?.choices?.[0]?.message?.tool_calls,
+      usage: data?.usage,
+    }));
     const aiContent = data.choices?.[0]?.message?.content || "応答を取得できませんでした";
 
     const saved = await prisma.advisorChatMessage.create({
