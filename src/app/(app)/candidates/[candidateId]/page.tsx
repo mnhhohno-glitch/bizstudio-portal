@@ -1270,6 +1270,26 @@ export default function CandidateDetailPage() {
   const [scheduleGenerating, setScheduleGenerating] = useState(false);
   const [scheduleCopiedType, setScheduleCopiedType] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState("");
+  const [jobOutputLoading, setJobOutputLoading] = useState(false);
+
+  const handleOpenJobOutput = async () => {
+    if (jobOutputLoading) return;
+    setJobOutputLoading(true);
+    const fallbackUrl = "https://web-production-95808.up.railway.app/projects";
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/jobs`);
+      const data = await res.json();
+      if (data.project_id) {
+        window.open(`https://web-production-95808.up.railway.app/projects/${data.project_id}`, "_blank");
+      } else {
+        window.open(fallbackUrl, "_blank");
+      }
+    } catch {
+      window.open(fallbackUrl, "_blank");
+    } finally {
+      setJobOutputLoading(false);
+    }
+  };
 
   const fetchCandidate = useCallback(async () => {
     try {
@@ -1445,6 +1465,13 @@ export default function CandidateDetailPage() {
             className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
           >
             📅 日程調整URL
+          </button>
+          <button
+            onClick={handleOpenJobOutput}
+            disabled={jobOutputLoading}
+            className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            {jobOutputLoading ? "読み込み中..." : "📄 求人出力"}
           </button>
         </div>
       </div>
