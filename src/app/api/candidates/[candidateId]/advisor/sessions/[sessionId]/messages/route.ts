@@ -177,6 +177,8 @@ export async function POST(
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
+    const systemMessage = SYSTEM_PROMPT_TEMPLATE + context;
+    console.log("[Advisor] Calling OpenAI API...", { model: "gpt-5.4", contextLength: systemMessage?.length, messageCount: pastMessages?.length });
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -199,6 +201,7 @@ export async function POST(
     });
 
     clearTimeout(timeoutId);
+    console.log("[Advisor] OpenAI response received:", { status: response.status });
 
     if (!response.ok) {
       const errText = await response.text();
@@ -207,6 +210,7 @@ export async function POST(
     }
 
     const data = await response.json();
+    console.log("[Advisor] OpenAI response parsed, content length:", data?.choices?.[0]?.message?.content?.length);
     const aiContent = data.choices?.[0]?.message?.content || "応答を取得できませんでした";
 
     const saved = await prisma.advisorChatMessage.create({
