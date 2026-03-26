@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import DailyTimeline from "./DailyTimeline";
 import ScheduleEntryFormModal from "./ScheduleEntryFormModal";
 import ScheduleChatDrawer from "./ScheduleChatDrawer";
+import CalendarConnectButton from "./CalendarConnectButton";
 import type { EntryFormData } from "./ScheduleEntryFormModal";
 
 type ScheduleEntry = {
@@ -67,6 +68,19 @@ export default function SchedulePanel() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showChatDrawer, setShowChatDrawer] = useState(false);
+  const [isCalendarConnected, setIsCalendarConnected] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
+
+  const fetchCalendarEvents = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/calendar/events?date=${toDateString(currentDate)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setIsCalendarConnected(data.connected);
+        setCalendarEvents(data.events || []);
+      }
+    } catch { /* */ }
+  }, [currentDate]);
 
   const fetchSchedule = useCallback(async () => {
     setLoading(true);
@@ -81,6 +95,7 @@ export default function SchedulePanel() {
   }, [currentDate]);
 
   useEffect(() => { fetchSchedule(); }, [fetchSchedule]);
+  useEffect(() => { fetchCalendarEvents(); }, [fetchCalendarEvents]);
 
   const goToday = () => setCurrentDate(new Date());
   const goTomorrow = () => {
@@ -242,6 +257,22 @@ export default function SchedulePanel() {
             <button onClick={goNext} className="text-[#6B7280] hover:text-[#374151] text-[14px]">▶</button>
           </div>
         </div>
+        <div className="mt-2">
+          <CalendarConnectButton
+            isConnected={isCalendarConnected}
+            onConnect={async () => {
+              try {
+                const res = await fetch("/api/calendar/auth");
+                const data = await res.json();
+                if (data.authUrl) window.location.href = data.authUrl;
+              } catch { /* */ }
+            }}
+            onDisconnect={() => {
+              setIsCalendarConnected(false);
+              setCalendarEvents([]);
+            }}
+          />
+        </div>
       </div>
 
       {/* Content */}
@@ -329,7 +360,7 @@ export default function SchedulePanel() {
           tagColor: e.tagColor,
           sortOrder: e.sortOrder,
         }))}
-        calendarEvents={[]}
+        calendarEvents={calendarEvents}
         onSave={handleAiSave}
       />
     </div>

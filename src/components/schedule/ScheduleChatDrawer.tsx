@@ -64,8 +64,10 @@ export default function ScheduleChatDrawer({
       setCurrentEntries(existingEntries);
       const welcomeParts: string[] = [];
 
+      welcomeParts.push("スケジュールを作りましょう。");
+
       if (calendarEvents.length > 0) {
-        welcomeParts.push("以下のGoogleカレンダー予定が入っています:");
+        welcomeParts.push("Googleカレンダーから以下の予定を取得しました：");
         calendarEvents.forEach((e) => {
           welcomeParts.push(`・${e.start}〜${e.end} ${e.summary}`);
         });
@@ -80,7 +82,7 @@ export default function ScheduleChatDrawer({
         welcomeParts.push("");
         welcomeParts.push("変更したい内容を教えてください。");
       } else {
-        welcomeParts.push("今日のスケジュールを作りましょう。予定を教えてください。");
+        welcomeParts.push(calendarEvents.length > 0 ? "これ以外の予定を教えてください。" : "予定を教えてください。");
       }
 
       setMessages([{
