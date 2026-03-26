@@ -340,7 +340,7 @@ export default function SchedulePanel() {
               />
             )}
             <DailyTimeline
-              entries={(schedule?.entries || []).map((e) => ({
+              entries={[...(schedule?.entries || [])].sort((a, b) => a.startTime.localeCompare(b.startTime)).map((e) => ({
                 startTime: e.startTime,
                 endTime: e.endTime,
                 title: e.title,

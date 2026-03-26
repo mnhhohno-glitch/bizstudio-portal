@@ -75,7 +75,7 @@ export async function PUT(
 
     return tx.dailySchedule.findUnique({
       where: { id },
-      include: { entries: { orderBy: { sortOrder: "asc" } } },
+      include: { entries: { orderBy: { startTime: "asc" } } },
     });
   });
 

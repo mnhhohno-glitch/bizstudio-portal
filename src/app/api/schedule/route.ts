@@ -17,7 +17,7 @@ export async function GET(req: Request) {
   const schedule = await prisma.dailySchedule.findUnique({
     where: { userId_date: { userId: user.id, date } },
     include: {
-      entries: { orderBy: { sortOrder: "asc" } },
+      entries: { orderBy: { startTime: "asc" } },
     },
   });
 
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
 
     return tx.dailySchedule.findUnique({
       where: { id: created.id },
-      include: { entries: { orderBy: { sortOrder: "asc" } } },
+      include: { entries: { orderBy: { startTime: "asc" } } },
     });
   });
 

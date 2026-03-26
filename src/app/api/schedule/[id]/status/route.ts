@@ -38,7 +38,7 @@ export async function PATCH(
   const updated = await prisma.dailySchedule.update({
     where: { id },
     data: { status: status as "DRAFT" | "CONFIRMED" | "COMPLETED" },
-    include: { entries: { orderBy: { sortOrder: "asc" } } },
+    include: { entries: { orderBy: { startTime: "asc" } } },
   });
 
   return NextResponse.json({ schedule: updated });
