@@ -1046,15 +1046,28 @@ enum ChatRole {
   ASSISTANT
 }
 
+enum ReviewStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ScheduleChatType {
+  PLANNING
+  REVIEW
+}
+
 model DailySchedule {
   id        String         @id @default(cuid())
   userId    String
   user      User           @relation(fields: [userId], references: [id])
   date      DateTime       @db.Date
-  summary   String?
-  status    ScheduleStatus @default(DRAFT)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  summary      String?
+  status       ScheduleStatus @default(DRAFT)
+  review       String?        @db.Text
+  reviewStatus ReviewStatus   @default(NOT_STARTED)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   entries     ScheduleEntry[]
   chatHistory ScheduleChat[]
@@ -1078,6 +1091,8 @@ model ScheduleEntry {
   entryType       EntryType     @default(MANUAL)
   calendarEventId String?
   sortOrder       Int
+  isCompleted     Boolean   @default(false)
+  completedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1090,8 +1105,9 @@ model ScheduleChat {
   dailyScheduleId String
   dailySchedule   DailySchedule @relation(fields: [dailyScheduleId], references: [id], onDelete: Cascade)
 
-  role    ChatRole
-  content String   @db.Text
+  role     ChatRole
+  content  String           @db.Text
+  chatType ScheduleChatType @default(PLANNING)
   createdAt DateTime @default(now())
 
   @@index([dailyScheduleId])
