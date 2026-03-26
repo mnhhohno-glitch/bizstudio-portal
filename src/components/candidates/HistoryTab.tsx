@@ -213,7 +213,7 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId }: { candidateId: string }) {
+function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; onCountChange?: (count: number) => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -222,6 +222,8 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterDate, setFilterDate] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
@@ -230,11 +232,13 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
       const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
       if (res.ok) {
         const data = await res.json();
-        setFiles(data.files || []);
+        const f = data.files || [];
+        setFiles(f);
+        onCountChange?.(f.length);
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [candidateId]);
+  }, [candidateId, onCountChange]);
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
@@ -295,18 +299,33 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
     });
   };
 
+  // Filtered files
+  const filteredFiles = files.filter((f) => {
+    if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (filterDate) {
+      const fileDate = new Date(f.createdAt).toISOString().slice(0, 10);
+      if (fileDate !== filterDate) return false;
+    }
+    return true;
+  });
+
   const toggleAll = () => {
-    if (selectedIds.size === files.length) {
+    const ids = filteredFiles.map((f) => f.id);
+    if (ids.every((id) => selectedIds.has(id))) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(files.map((f) => f.id)));
+      setSelectedIds(new Set(ids));
     }
   };
+
+  const allChecked = filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.has(f.id));
 
   const shortDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
+
+  const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
 
   return (
     <div
@@ -347,7 +366,7 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
             <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
               <input
                 type="checkbox"
-                checked={files.length > 0 && selectedIds.size === files.length}
+                checked={allChecked}
                 onChange={toggleAll}
                 className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
               />
@@ -362,6 +381,35 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
                 🗑️ 選択を削除（{selectedIds.size}件）
               </button>
             )}
+          </div>
+        )}
+
+        {/* Search + date filter */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="🔍 ファイル名で検索..."
+                className="w-full border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+              )}
+            </div>
+            <div className="relative">
+              <input
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                className="border border-gray-300 rounded-md px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+              />
+              {filterDate && (
+                <button onClick={() => setFilterDate("")} className="absolute -right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -383,7 +431,9 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {files.map((file) => (
+            {filteredFiles.length === 0 ? (
+              <div className="py-6 text-center text-[13px] text-gray-400">該当するファイルが見つかりません</div>
+            ) : filteredFiles.map((file) => (
               <div key={file.id} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors">
                 <input
                   type="checkbox"
@@ -396,6 +446,12 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
                 <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
                 <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
+                <button
+                  onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
+                  className="shrink-0 text-[#2563EB] hover:text-[#1D4ED8] text-[12px] font-medium"
+                >
+                  👁
+                </button>
                 <a
                   href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
                   download
@@ -424,6 +480,7 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
 /* ================================================================== */
 export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries">("bookmark");
+  const [bookmarkCount, setBookmarkCount] = useState(0);
 
   // Jobs state
   const [jobsData, setJobsData] = useState<JobsResponse | null>(null);
@@ -620,6 +677,9 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
           }`}
         >
           ブックマーク
+          {bookmarkCount > 0 && (
+            <span className="ml-1.5 text-xs text-gray-400">({bookmarkCount})</span>
+          )}
         </button>
         <button
           onClick={() => setActiveSubTab("jobs")}
@@ -651,7 +711,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} />
+        <BookmarkSection candidateId={candidateId} onCountChange={setBookmarkCount} />
       )}
 
       {/* ===== 求人紹介サブタブ ===== */}
