@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import DailyTimeline from "./DailyTimeline";
 import ScheduleEntryFormModal from "./ScheduleEntryFormModal";
 import ScheduleChatDrawer from "./ScheduleChatDrawer";
+import ScheduleReviewDrawer from "./ScheduleReviewDrawer";
+import ScheduleProgressBar from "./ScheduleProgressBar";
 import CalendarConnectButton from "./CalendarConnectButton";
 import type { EntryFormData } from "./ScheduleEntryFormModal";
 
@@ -17,6 +19,8 @@ type ScheduleEntry = {
   tagColor: string;
   entryType: string;
   sortOrder: number;
+  isCompleted: boolean;
+  completedAt: string | null;
 };
 
 type Schedule = {
@@ -68,6 +72,8 @@ export default function SchedulePanel() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showChatDrawer, setShowChatDrawer] = useState(false);
+  const [showReviewDrawer, setShowReviewDrawer] = useState(false);
+  const [tomorrowCalendarEvents, setTomorrowCalendarEvents] = useState<{ summary: string; start: string; end: string }[]>([]);
   const [isCalendarConnected, setIsCalendarConnected] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
 
@@ -222,6 +228,69 @@ export default function SchedulePanel() {
     } catch { /* */ }
   };
 
+  const handleToggleComplete = async (entryId: string) => {
+    if (!schedule) return;
+    const entry = schedule.entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    // Optimistic update
+    setSchedule({
+      ...schedule,
+      entries: schedule.entries.map((e) =>
+        e.id === entryId ? { ...e, isCompleted: !e.isCompleted } : e
+      ),
+    });
+    try {
+      await fetch(`/api/schedule/entry/${entryId}/complete`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isCompleted: !entry.isCompleted }),
+      });
+    } catch {
+      // Rollback
+      setSchedule((prev) => prev ? {
+        ...prev,
+        entries: prev.entries.map((e) =>
+          e.id === entryId ? { ...e, isCompleted: entry.isCompleted } : e
+        ),
+      } : prev);
+    }
+  };
+
+  const handleOpenReview = async () => {
+    // Fetch tomorrow's calendar events
+    const tomorrow = new Date(currentDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    try {
+      const res = await fetch(`/api/calendar/events?date=${toDateString(tomorrow)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTomorrowCalendarEvents(data.events || []);
+      }
+    } catch { /* */ }
+    setShowReviewDrawer(true);
+  };
+
+  const handleReviewSave = async (review: string, tomorrowEntries: { startTime: string; endTime: string; title: string; note?: string | null; tag: string; tagColor: string; sortOrder: number }[], tomorrowSummary: string) => {
+    if (!schedule) return;
+    const tomorrow = new Date(currentDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    try {
+      await fetch("/api/schedule/review/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          todayScheduleId: schedule.id,
+          review,
+          tomorrowDate: tomorrowEntries.length > 0 ? toDateString(tomorrow) : undefined,
+          tomorrowSummary: tomorrowEntries.length > 0 ? tomorrowSummary : undefined,
+          tomorrowEntries: tomorrowEntries.length > 0 ? tomorrowEntries : undefined,
+        }),
+      });
+      setShowReviewDrawer(false);
+      fetchSchedule();
+    } catch { /* */ }
+  };
+
   const handleStatusChange = async () => {
     if (!schedule) return;
     const nextStatus = schedule.status === "DRAFT" ? "CONFIRMED" : schedule.status === "CONFIRMED" ? "COMPLETED" : null;
@@ -281,6 +350,12 @@ export default function SchedulePanel() {
           <div className="py-8 text-center text-[13px] text-[#9CA3AF]">読み込み中...</div>
         ) : (
           <>
+            {schedule && schedule.status === "CONFIRMED" && (
+              <ScheduleProgressBar
+                completed={schedule.entries.filter((e) => e.isCompleted).length}
+                total={schedule.entries.length}
+              />
+            )}
             <DailyTimeline
               entries={(schedule?.entries || []).map((e) => ({
                 startTime: e.startTime,
@@ -289,8 +364,12 @@ export default function SchedulePanel() {
                 note: e.note,
                 tag: e.tag,
                 tagColor: e.tagColor,
+                isCompleted: e.isCompleted,
+                entryId: e.id,
+                canComplete: schedule?.status === "CONFIRMED",
+                onToggleComplete: handleToggleComplete,
               }))}
-              summary={schedule?.summary}
+              isToday={isToday(currentDate)}
             />
 
             {/* Status + actions */}
@@ -336,6 +415,14 @@ export default function SchedulePanel() {
         >
           + エントリを追加
         </button>
+        {schedule && schedule.status === "CONFIRMED" && (
+          <button
+            onClick={handleOpenReview}
+            className="w-full rounded-md bg-[#374151] text-white px-3 py-2 text-[13px] font-medium hover:bg-[#1F2937] transition-colors"
+          >
+            🌙 1日を振り返る
+          </button>
+        )}
       </div>
 
       {showAddModal && (
@@ -363,6 +450,26 @@ export default function SchedulePanel() {
         calendarEvents={calendarEvents}
         onSave={handleAiSave}
       />
+
+      {schedule && (
+        <ScheduleReviewDrawer
+          isOpen={showReviewDrawer}
+          onClose={() => setShowReviewDrawer(false)}
+          date={toDateString(currentDate)}
+          scheduleId={schedule.id}
+          todayEntries={schedule.entries.map((e) => ({
+            id: e.id,
+            title: e.title,
+            isCompleted: e.isCompleted,
+            startTime: e.startTime,
+            endTime: e.endTime,
+            tag: e.tag,
+            tagColor: e.tagColor,
+          }))}
+          tomorrowCalendarEvents={tomorrowCalendarEvents}
+          onSave={handleReviewSave}
+        />
+      )}
     </div>
   );
 }
