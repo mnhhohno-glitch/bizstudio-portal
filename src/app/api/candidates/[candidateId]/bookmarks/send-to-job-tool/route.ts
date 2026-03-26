@@ -58,6 +58,7 @@ export async function POST(
     console.log("[SendToJobTool] Step 1: Checking existing project...", { candidateNumber: candidate.candidateNumber });
     let projectId: number;
     let processingUnitId: number;
+    let recordKey: string = "";
 
     const existingRes = await fetchWithTimeout(
       `${KYUUJIN_PDF_TOOL_URL}/api/projects/by-job-seeker-id/${candidate.candidateNumber}/jobs`
@@ -79,16 +80,19 @@ export async function POST(
         );
         const unitData = await unitRes.json();
         processingUnitId = unitData.id;
+        recordKey = unitData.record_key || "";
       } else {
         // No project — create new
         const result = await createProject(KYUUJIN_PDF_TOOL_URL, candidate, advisorName, targetAreas, dbType);
         projectId = result.projectId;
         processingUnitId = result.processingUnitId;
+        recordKey = result.recordKey;
       }
     } else if (existingRes.status === 404) {
       const result = await createProject(KYUUJIN_PDF_TOOL_URL, candidate, advisorName, targetAreas, dbType);
       projectId = result.projectId;
       processingUnitId = result.processingUnitId;
+      recordKey = result.recordKey;
     } else {
       return NextResponse.json({ error: "kyuujin-pdf-toolとの通信に失敗しました" }, { status: 502 });
     }
@@ -194,13 +198,18 @@ export async function POST(
     }
     console.log("[SendToJobTool] Step 6 complete: Extraction started");
 
+    const memoUrl = recordKey
+      ? `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}&key=${recordKey}`
+      : `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}`;
+
     return NextResponse.json({
       success: true,
       projectId,
       processingUnitId,
+      recordKey,
       uploadedCount,
       failedCount,
-      projectUrl: `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}`,
+      projectUrl: memoUrl,
       message: `${uploadedCount}件のPDFを送信し、抽出処理を開始しました`,
     });
   } catch (e) {
@@ -218,7 +227,7 @@ async function createProject(
   advisorName: string,
   targetAreas: string[],
   dbType: string
-): Promise<{ projectId: number; processingUnitId: number }> {
+): Promise<{ projectId: number; processingUnitId: number; recordKey: string }> {
   const createRes = await fetchWithTimeout(`${baseUrl}/api/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -241,7 +250,7 @@ async function createProject(
       body: JSON.stringify({ target_areas: targetAreas }),
     });
     const unitData = await unitRes.json();
-    return { projectId, processingUnitId: unitData.id };
+    return { projectId, processingUnitId: unitData.id, recordKey: unitData.record_key || "" };
   }
 
   if (!createRes.ok) {
@@ -249,5 +258,5 @@ async function createProject(
   }
 
   const projectData = await createRes.json();
-  return { projectId: projectData.id, processingUnitId: projectData.initial_unit_id };
+  return { projectId: projectData.id, processingUnitId: projectData.initial_unit_id, recordKey: projectData.initial_record_key || "" };
 }

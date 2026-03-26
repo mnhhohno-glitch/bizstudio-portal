@@ -565,7 +565,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                     <p className="text-green-600 font-medium mb-3">✅ {sendResult.message}</p>
                     {sendResult.projectUrl && (
                       <a href={sendResult.projectUrl} target="_blank" rel="noopener noreferrer" className="text-[#2563EB] hover:underline text-sm font-medium">
-                        求人出力ツールで確認する →
+                        メモ編集・抽出へ進む →
                       </a>
                     )}
                   </div>
@@ -576,11 +576,31 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
               </div>
             ) : sending ? (
               <div className="py-4 space-y-2 text-[13px]">
-                <p className="font-medium text-[#374151] mb-3">📤 処理中...</p>
-                <p>{sendStep >= 1 ? "✅" : "⬜"} プロジェクト確認</p>
-                <p>{sendStep >= 2 ? "✅" : sendStep === 1 ? "⏳" : "⬜"} PDFアップロード中...</p>
-                <p>{sendStep >= 3 ? "✅" : sendStep === 2 ? "⏳" : "⬜"} メモ作成</p>
-                <p>{sendStep >= 4 ? "✅" : sendStep === 3 ? "⏳" : "⬜"} 抽出開始</p>
+                <p className="animate-pulse text-blue-600 font-semibold mb-3">📤 処理中...</p>
+                {[
+                  { step: 1, label: "プロジェクト確認" },
+                  { step: 2, label: "PDFアップロード" },
+                  { step: 3, label: "メモ作成" },
+                  { step: 4, label: "抽出開始" },
+                ].map(({ step, label }) => {
+                  const done = sendStep >= step;
+                  const active = !done && sendStep === step - 1;
+                  return (
+                    <div key={step} className="flex items-center gap-2">
+                      {done ? (
+                        <span className="text-green-500">✅</span>
+                      ) : active ? (
+                        <svg className="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      ) : (
+                        <span className="text-gray-300">⬜</span>
+                      )}
+                      <span className={active ? "text-blue-600 font-medium" : done ? "text-gray-700" : "text-gray-400"}>{label}{active ? "..." : ""}</span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="space-y-4">
