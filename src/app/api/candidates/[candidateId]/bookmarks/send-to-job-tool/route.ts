@@ -136,18 +136,20 @@ export async function POST(
     }
 
     const uploadData = await uploadRes.json();
-    console.log("[SendToJobTool] Step 3 complete:", { processed: uploadData.processed?.length || 0 });
+    console.log("[SendToJobTool] Step 3 complete - upload response:", JSON.stringify(uploadData));
 
     // 4. Import memos
-    console.log("[SendToJobTool] Step 4: Importing memos...");
     const processed = uploadData.processed || [];
     if (processed.length > 0) {
       const memoContent = processed
         .map((p: { company_name?: string; share_url?: string }) => `${p.company_name || ""}\n${p.share_url || ""}`)
         .join("\n");
 
+      console.log("[SendToJobTool] Step 4: Importing memos - content:", memoContent);
+      console.log("[SendToJobTool] Step 4: Importing memos - processingUnitId:", processingUnitId);
+
       try {
-        await fetchWithTimeout(
+        const memoImportRes = await fetchWithTimeout(
           `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/memos/import`,
           {
             method: "POST",
@@ -158,12 +160,14 @@ export async function POST(
             }),
           }
         );
+        const memoImportData = await memoImportRes.json();
+        console.log("[SendToJobTool] Step 4 complete:", JSON.stringify(memoImportData));
       } catch (e) {
         console.error("Memo import failed:", e);
       }
+    } else {
+      console.log("[SendToJobTool] Step 4: No processed files, skipping memo import");
     }
-
-    console.log("[SendToJobTool] Step 4 complete");
 
     // 5. Mark files received
     console.log("[SendToJobTool] Step 5: Marking files complete...");
