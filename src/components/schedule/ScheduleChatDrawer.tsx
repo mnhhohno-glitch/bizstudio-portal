@@ -50,6 +50,7 @@ export default function ScheduleChatDrawer({
   const [currentEntries, setCurrentEntries] = useState<Entry[]>(existingEntries);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hasAiEntries, setHasAiEntries] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -62,6 +63,7 @@ export default function ScheduleChatDrawer({
   useEffect(() => {
     if (isOpen) {
       setCurrentEntries(existingEntries);
+      setHasAiEntries(false);
       const welcomeParts: string[] = [];
 
       welcomeParts.push("スケジュールを作りましょう。");
@@ -157,6 +159,7 @@ export default function ScheduleChatDrawer({
 
       if (data.entries && Array.isArray(data.entries)) {
         setCurrentEntries(data.entries);
+        if (data.entries.length > 0) setHasAiEntries(true);
       }
     } catch {
       setMessages((prev) => [
@@ -171,6 +174,11 @@ export default function ScheduleChatDrawer({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleClose = () => {
+    if (hasAiEntries && !confirm("スケジュールが保存されていません。閉じてもよろしいですか？")) return;
+    onClose();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -195,7 +203,7 @@ export default function ScheduleChatDrawer({
     <>
       {/* Overlay */}
       {isOpen && (
-        <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+        <div className="fixed inset-0 bg-black/30 z-40" onClick={handleClose} />
       )}
 
       {/* Drawer */}
@@ -206,7 +214,7 @@ export default function ScheduleChatDrawer({
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 shrink-0">
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+          <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
           <h2 className="text-[14px] font-semibold text-[#374151]">
             📅 {dateLabel}のスケジュールを作成
           </h2>
@@ -307,7 +315,7 @@ export default function ScheduleChatDrawer({
               💾 このスケジュールで確定
             </button>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50"
             >
               キャンセル
