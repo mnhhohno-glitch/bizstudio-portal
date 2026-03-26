@@ -36,6 +36,8 @@ export async function POST(
   const body = await req.json();
   const { fileIds } = body as { fileIds: string[] };
 
+  console.log("[ExtractText] API called with fileIds:", fileIds);
+
   if (!fileIds?.length) {
     return NextResponse.json({ error: "fileIds is required" }, { status: 400 });
   }
@@ -54,6 +56,8 @@ export async function POST(
   const skipped = candidateFiles.length - filesToExtract.length;
   let extracted = 0;
   let failed = 0;
+
+  console.log(`[ExtractText] Found ${candidateFiles.length} files, ${filesToExtract.length} need extraction, ${skipped} skipped`);
 
   const drive = getDrive();
 

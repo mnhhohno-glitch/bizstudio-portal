@@ -238,11 +238,23 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
   const triggerExtraction = (fileIds: string[]) => {
     if (fileIds.length === 0) return;
+    console.log("[ExtractText] Triggering extraction for", fileIds.length, "files:", fileIds);
     fetch(`/api/candidates/${candidateId}/bookmarks/extract-text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileIds }),
-    }).catch(() => {});
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          console.error("[ExtractText] API error:", res.status, data);
+        } else {
+          console.log("[ExtractText] API result:", data);
+        }
+      })
+      .catch((err) => {
+        console.error("[ExtractText] Fetch failed:", err);
+      });
   };
 
   const fetchFiles = useCallback(async () => {
