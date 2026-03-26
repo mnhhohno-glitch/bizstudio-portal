@@ -21,11 +21,11 @@ export default function ScheduleEntryCard({
     <div className="flex bg-[#F9FAFB] rounded-lg overflow-hidden">
       {/* Time column + color bar */}
       <div
-        className="w-[60px] shrink-0 flex flex-col items-center justify-center py-2 text-[12px] text-[#6B7280] border-r-[3px]"
+        className="shrink-0 flex items-center justify-center px-2 py-1.5 text-[11px] text-[#6B7280] border-r-[3px] whitespace-nowrap"
         style={{ borderRightColor: tagColor }}
       >
         <span className="font-medium">{startTime}</span>
-        <span className="text-[10px]">↓</span>
+        <span className="mx-0.5">→</span>
         <span className="font-medium">{endTime}</span>
       </div>
 

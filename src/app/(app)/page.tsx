@@ -83,7 +83,7 @@ export default async function DashboardPage() {
 
       <div className="mt-4 flex gap-6">
         {/* Schedule Panel (left) */}
-        <div className="w-[380px] flex-shrink-0 hidden lg:block">
+        <div className="w-[440px] flex-shrink-0 hidden lg:block">
           <SchedulePanel />
         </div>
 

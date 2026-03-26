@@ -19,11 +19,6 @@ export default function DailyTimeline({ entries, summary }: DailyTimelineProps) 
 
   return (
     <div>
-      {summary && (
-        <p className="text-[12px] text-[#6B7280] mb-3 bg-[#F3F4F6] rounded-md px-3 py-2">
-          {summary}
-        </p>
-      )}
       <div className="space-y-1">
         {entries.map((entry, i) => (
           <ScheduleEntryCard key={i} {...entry} />
