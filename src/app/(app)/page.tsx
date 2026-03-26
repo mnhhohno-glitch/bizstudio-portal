@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ANNOUNCEMENT_CATEGORIES, AnnouncementCategoryKey } from "@/lib/constants/announcement";
 import AttendanceAlertBanner from "@/components/attendance/AlertBanner";
 import AttendanceMiniCard from "@/components/attendance/AttendanceMiniCard";
+import SchedulePanel from "@/components/schedule/SchedulePanel";
 import { todayForDB } from "@/lib/attendance/timezone";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -80,7 +81,14 @@ export default async function DashboardPage() {
     <div>
       <PageTitle>ダッシュボード</PageTitle>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="mt-4 flex gap-6">
+        {/* Schedule Panel (left) */}
+        <div className="w-[380px] flex-shrink-0 hidden lg:block">
+          <SchedulePanel />
+        </div>
+
+        {/* Main content (right) */}
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Left column */}
         <div className="space-y-3">
           {/* Attendance Mini Card (打刻不要の社員は非表示) */}
@@ -188,6 +196,7 @@ export default async function DashboardPage() {
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
     </div>
