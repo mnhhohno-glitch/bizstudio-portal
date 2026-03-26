@@ -6,10 +6,12 @@ import { downloadFileFromDrive } from "@/lib/google-drive";
 export const maxDuration = 300; // 5 minutes
 
 const API_TIMEOUT_MS = 120000; // 2 minutes
+const BATCH_UPLOAD_TIMEOUT_MS = 180000; // 3 minutes for auto-process/batch
+const DOWNLOAD_BATCH_SIZE = 5; // parallel download concurrency
 
-function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = API_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
@@ -69,7 +71,6 @@ export async function POST(
       if (existingData.project_id) {
         projectId = existingData.project_id;
 
-        // Create new ProcessingUnit
         const unitRes = await fetchWithTimeout(
           `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/processing-units`,
           {
@@ -82,7 +83,6 @@ export async function POST(
         processingUnitId = unitData.id;
         recordKey = unitData.record_key || "";
       } else {
-        // No project — create new
         const result = await createProject(KYUUJIN_PDF_TOOL_URL, candidate, advisorName, targetAreas, dbType);
         projectId = result.projectId;
         processingUnitId = result.processingUnitId;
@@ -98,40 +98,57 @@ export async function POST(
     }
     console.log("[SendToJobTool] Step 1 complete:", { projectId, processingUnitId });
 
-    // 2. Download bookmark PDFs from Google Drive
+    // 2. Download bookmark PDFs from Google Drive (parallel, batched)
     console.log("[SendToJobTool] Step 2: Downloading PDFs from Google Drive...", { fileCount: fileIds.length });
     const bookmarkFiles = await prisma.candidateFile.findMany({
       where: { id: { in: fileIds }, category: "BOOKMARK" },
     });
 
-    // 3. Upload to kyuujin-pdf-tool
-    const formData = new FormData();
-    let uploadedCount = 0;
+    const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string }[] = [];
     let failedCount = 0;
 
-    for (const file of bookmarkFiles) {
-      try {
-        const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
-        const buffer = Buffer.from(base64, "base64");
-        const blob = new Blob([buffer], { type: mimeType });
-        formData.append("files", blob, file.fileName);
-        uploadedCount++;
-      } catch (e) {
-        console.error(`Failed to download file ${file.fileName}:`, e);
-        failedCount++;
+    for (let i = 0; i < bookmarkFiles.length; i += DOWNLOAD_BATCH_SIZE) {
+      const batch = bookmarkFiles.slice(i, i + DOWNLOAD_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (file) => {
+          const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
+          return {
+            fileName: file.fileName,
+            buffer: Buffer.from(base64, "base64"),
+            mimeType,
+          };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          downloadedFiles.push(result.value);
+        } else {
+          console.error("[SendToJobTool] Download failed:", result.reason);
+          failedCount++;
+        }
       }
     }
 
-    console.log("[SendToJobTool] Step 2 complete:", { uploadedCount, failedCount });
+    console.log("[SendToJobTool] Step 2 complete:", { downloaded: downloadedFiles.length, failed: failedCount });
 
-    if (uploadedCount === 0) {
+    if (downloadedFiles.length === 0) {
       return NextResponse.json({ error: "ファイルのダウンロードにすべて失敗しました" }, { status: 500 });
     }
 
-    console.log("[SendToJobTool] Step 3: Uploading to kyuujin-pdf-tool...", { fileCount: uploadedCount });
+    // 3. Upload to kyuujin-pdf-tool (extended timeout for large batches)
+    console.log("[SendToJobTool] Step 3: Uploading to kyuujin-pdf-tool...", { fileCount: downloadedFiles.length });
+    const formData = new FormData();
+    for (const file of downloadedFiles) {
+      const uint8 = new Uint8Array(file.buffer);
+      const blob = new Blob([uint8], { type: file.mimeType });
+      formData.append("files", blob, file.fileName);
+    }
+
     const uploadRes = await fetchWithTimeout(
       `${KYUUJIN_PDF_TOOL_URL}/api/drive/upload/auto-process/batch`,
-      { method: "POST", body: formData }
+      { method: "POST", body: formData },
+      BATCH_UPLOAD_TIMEOUT_MS
     );
 
     if (!uploadRes.ok) {
@@ -140,20 +157,18 @@ export async function POST(
     }
 
     const uploadData = await uploadRes.json();
-    console.log("[SendToJobTool] Step 3 complete - upload response:", JSON.stringify(uploadData));
+    console.log("[SendToJobTool] Step 3 complete:", { processed: uploadData.processed?.length || 0 });
 
     // 4. Import memos
+    console.log("[SendToJobTool] Step 4: Importing memos...");
     const processed = uploadData.processed || [];
     if (processed.length > 0) {
       const memoContent = processed
         .map((p: { company_name?: string; share_url?: string }) => `${p.company_name || ""}\n${p.share_url || ""}`)
         .join("\n");
 
-      console.log("[SendToJobTool] Step 4: Importing memos - content:", memoContent);
-      console.log("[SendToJobTool] Step 4: Importing memos - processingUnitId:", processingUnitId);
-
       try {
-        const memoImportRes = await fetchWithTimeout(
+        await fetchWithTimeout(
           `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/memos/import`,
           {
             method: "POST",
@@ -164,14 +179,11 @@ export async function POST(
             }),
           }
         );
-        const memoImportData = await memoImportRes.json();
-        console.log("[SendToJobTool] Step 4 complete:", JSON.stringify(memoImportData));
       } catch (e) {
         console.error("Memo import failed:", e);
       }
-    } else {
-      console.log("[SendToJobTool] Step 4: No processed files, skipping memo import");
     }
+    console.log("[SendToJobTool] Step 4 complete");
 
     // 5. Mark files received
     console.log("[SendToJobTool] Step 5: Marking files complete...");
@@ -183,7 +195,6 @@ export async function POST(
     } catch (e) {
       console.error("Complete files failed:", e);
     }
-
     console.log("[SendToJobTool] Step 5 complete");
 
     // 6. Start extraction (async)
@@ -207,10 +218,10 @@ export async function POST(
       projectId,
       processingUnitId,
       recordKey,
-      uploadedCount,
+      uploadedCount: downloadedFiles.length,
       failedCount,
       projectUrl: memoUrl,
-      message: `${uploadedCount}件のPDFを送信し、抽出処理を開始しました`,
+      message: `${downloadedFiles.length}件のPDFを送信し、抽出処理を開始しました`,
     });
   } catch (e) {
     console.error("Send to job tool error:", e);
