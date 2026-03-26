@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 /* ---------- Types ---------- */
@@ -166,8 +166,196 @@ function EntryDateModal({
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
+/* ---------- Bookmark Section ---------- */
+type BookmarkFile = {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  driveFileId: string;
+  driveViewUrl: string;
+  memo: string | null;
+  uploadedBy: { id: string; name: string };
+  createdAt: string;
+};
+
+const ALLOWED_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
+
+function getFileIcon(mimeType: string): string {
+  if (mimeType === "application/pdf") return "📄";
+  if (mimeType.startsWith("image/")) return "🖼";
+  if (mimeType.includes("word") || mimeType.includes("document")) return "📝";
+  if (mimeType.includes("excel") || mimeType.includes("spreadsheet")) return "📊";
+  if (mimeType === "text/plain") return "📝";
+  return "📎";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function formatFileDate(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function BookmarkSection({ candidateId }: { candidateId: string }) {
+  const [files, setFiles] = useState<BookmarkFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchFiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
+      if (res.ok) {
+        const data = await res.json();
+        setFiles(data.files || []);
+      }
+    } catch { /* */ }
+    finally { setLoading(false); }
+  }, [candidateId]);
+
+  useEffect(() => { fetchFiles(); }, [fetchFiles]);
+
+  const uploadFiles = async (fileList: File[]) => {
+    const valid = fileList.filter((f) => ALLOWED_TYPES.has(f.type) && f.size <= 20 * 1024 * 1024);
+    if (valid.length === 0) return;
+
+    setUploading(true);
+    setUploadProgress({ current: 0, total: valid.length });
+
+    for (let i = 0; i < valid.length; i++) {
+      setUploadProgress({ current: i + 1, total: valid.length });
+      try {
+        const formData = new FormData();
+        formData.append("file", valid[i]);
+        formData.append("category", "BOOKMARK");
+        await fetch(`/api/candidates/${candidateId}/files/upload`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch { /* */ }
+    }
+
+    setUploading(false);
+    fetchFiles();
+  };
+
+  const handleDelete = async (fileId: string) => {
+    if (!confirm("このファイルを削除します。よろしいですか？")) return;
+    setDeletingId(fileId);
+    try {
+      await fetch(`/api/candidates/${candidateId}/files/${fileId}`, { method: "DELETE" });
+      fetchFiles();
+    } catch { /* */ }
+    finally { setDeletingId(null); }
+  };
+
+  return (
+    <div
+      className="bg-white rounded-lg border border-gray-200 p-6"
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsDragging(false); }}
+      onDrop={(e) => {
+        e.preventDefault(); e.stopPropagation(); setIsDragging(false);
+        if (e.dataTransfer.files?.length) uploadFiles(Array.from(e.dataTransfer.files));
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[14px] font-semibold text-[#374151]">📁 ブックマーク</h3>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
+        >
+          {uploading ? `アップロード中 (${uploadProgress.current}/${uploadProgress.total})` : "+ アップロード"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
+          onChange={(e) => { if (e.target.files?.length) uploadFiles(Array.from(e.target.files)); e.target.value = ""; }}
+        />
+      </div>
+      <p className="text-sm text-gray-500 mb-4">求人票PDFを保管します</p>
+
+      {/* Drop zone hint */}
+      {isDragging && (
+        <div className="border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-8 text-center mb-4">
+          <p className="text-[#2563EB] font-medium text-sm">ここにファイルをドロップしてアップロード</p>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
+      ) : files.length === 0 && !isDragging ? (
+        <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
+          <p className="text-sm text-gray-400">ファイルをドラッグ＆ドロップ、または「アップロード」ボタンをクリック</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {files.map((file) => (
+            <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">{getFileIcon(file.mimeType)}</span>
+                <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {formatFileSize(file.fileSize)} ・ {file.uploadedBy.name} ・ {formatFileDate(file.createdAt)}
+              </p>
+              <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
+                <div className="ml-auto flex gap-2">
+                  <a
+                    href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+                    download
+                    className="text-gray-500 hover:text-gray-700 text-sm font-medium"
+                  >
+                    ⬇ DL
+                  </a>
+                  <button
+                    onClick={() => handleDelete(file.id)}
+                    disabled={deletingId === file.id}
+                    className="text-red-400 hover:text-red-600 text-sm font-medium disabled:opacity-50"
+                  >
+                    🗑 削除
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Main Component                                                      */
+/* ================================================================== */
 export default function HistoryTab({ candidateId }: { candidateId: string }) {
-  const [activeSubTab, setActiveSubTab] = useState<"jobs" | "entries">("jobs");
+  const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries">("bookmark");
 
   // Jobs state
   const [jobsData, setJobsData] = useState<JobsResponse | null>(null);
@@ -356,6 +544,16 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
       {/* サブタブバー */}
       <div className="bg-gray-50 rounded-lg p-1 inline-flex gap-1 mb-6">
         <button
+          onClick={() => setActiveSubTab("bookmark")}
+          className={`px-4 py-2 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+            activeSubTab === "bookmark"
+              ? "bg-white text-[#2563EB] shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          ブックマーク
+        </button>
+        <button
           onClick={() => setActiveSubTab("jobs")}
           className={`px-4 py-2 text-sm font-medium rounded-md cursor-pointer transition-colors ${
             activeSubTab === "jobs"
@@ -382,6 +580,11 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
           )}
         </button>
       </div>
+
+      {/* ===== ブックマークサブタブ ===== */}
+      {activeSubTab === "bookmark" && (
+        <BookmarkSection candidateId={candidateId} />
+      )}
 
       {/* ===== 求人紹介サブタブ ===== */}
       {activeSubTab === "jobs" && (

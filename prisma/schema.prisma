@@ -938,6 +938,7 @@ enum CandidateFileCategory {
   APPLICATION
   INTERVIEW_PREP
   MEETING
+  BOOKMARK
 }
 
 model CandidateFile {

@@ -10,6 +10,7 @@ export const CANDIDATE_FILE_CATEGORIES: FileCategory[] = [
   { value: "APPLICATION", label: "応募企業", description: "応募先企業の関連資料" },
   { value: "INTERVIEW_PREP", label: "面接対策", description: "面接対策で使用したファイル" },
   { value: "MEETING", label: "面談", description: "面談ログ、マイナビからのDL資料" },
+  { value: "BOOKMARK", label: "ブックマーク", description: "求人票PDF" },
 ];
 
 export const getCategoryLabel = (value: string): string => {
