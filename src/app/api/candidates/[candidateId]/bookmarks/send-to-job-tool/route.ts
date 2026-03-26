@@ -3,11 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 
-const TIMEOUT_MS = 30000;
+export const maxDuration = 300; // 5 minutes
+
+const API_TIMEOUT_MS = 120000; // 2 minutes
 
 function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
@@ -53,6 +55,7 @@ export async function POST(
 
   try {
     // 1. Check existing project
+    console.log("[SendToJobTool] Step 1: Checking existing project...", { candidateNumber: candidate.candidateNumber });
     let projectId: number;
     let processingUnitId: number;
 
@@ -89,8 +92,10 @@ export async function POST(
     } else {
       return NextResponse.json({ error: "kyuujin-pdf-toolとの通信に失敗しました" }, { status: 502 });
     }
+    console.log("[SendToJobTool] Step 1 complete:", { projectId, processingUnitId });
 
     // 2. Download bookmark PDFs from Google Drive
+    console.log("[SendToJobTool] Step 2: Downloading PDFs from Google Drive...", { fileCount: fileIds.length });
     const bookmarkFiles = await prisma.candidateFile.findMany({
       where: { id: { in: fileIds }, category: "BOOKMARK" },
     });
@@ -113,10 +118,13 @@ export async function POST(
       }
     }
 
+    console.log("[SendToJobTool] Step 2 complete:", { uploadedCount, failedCount });
+
     if (uploadedCount === 0) {
       return NextResponse.json({ error: "ファイルのダウンロードにすべて失敗しました" }, { status: 500 });
     }
 
+    console.log("[SendToJobTool] Step 3: Uploading to kyuujin-pdf-tool...", { fileCount: uploadedCount });
     const uploadRes = await fetchWithTimeout(
       `${KYUUJIN_PDF_TOOL_URL}/api/drive/upload/auto-process/batch`,
       { method: "POST", body: formData }
@@ -128,8 +136,10 @@ export async function POST(
     }
 
     const uploadData = await uploadRes.json();
+    console.log("[SendToJobTool] Step 3 complete:", { processed: uploadData.processed?.length || 0 });
 
     // 4. Import memos
+    console.log("[SendToJobTool] Step 4: Importing memos...");
     const processed = uploadData.processed || [];
     if (processed.length > 0) {
       const memoContent = processed
@@ -153,7 +163,10 @@ export async function POST(
       }
     }
 
+    console.log("[SendToJobTool] Step 4 complete");
+
     // 5. Mark files received
+    console.log("[SendToJobTool] Step 5: Marking files complete...");
     try {
       await fetchWithTimeout(
         `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/complete-files`,
@@ -163,7 +176,10 @@ export async function POST(
       console.error("Complete files failed:", e);
     }
 
+    console.log("[SendToJobTool] Step 5 complete");
+
     // 6. Start extraction (async)
+    console.log("[SendToJobTool] Step 6: Starting extraction...");
     try {
       await fetchWithTimeout(
         `${KYUUJIN_PDF_TOOL_URL}/api/extraction/projects/${projectId}/extract?processing_unit_id=${processingUnitId}`,
@@ -172,6 +188,7 @@ export async function POST(
     } catch (e) {
       console.error("Extraction start failed:", e);
     }
+    console.log("[SendToJobTool] Step 6 complete: Extraction started");
 
     return NextResponse.json({
       success: true,
