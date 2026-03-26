@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { TARGET_AREAS } from "@/lib/constants/target-areas";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -224,6 +225,13 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendDbType, setSendDbType] = useState("hito_mynavi");
+  const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
+  const [sendCustomArea, setSendCustomArea] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<{ success: boolean; projectUrl?: string; message?: string } | null>(null);
+  const [sendStep, setSendStep] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
@@ -327,6 +335,67 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
   const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
 
+  const handleSendToJobTool = async () => {
+    const areas = [...sendAreas];
+    if (sendCustomArea.trim()) areas.push(sendCustomArea.trim());
+    if (areas.length === 0) return;
+
+    setSending(true);
+    setSendResult(null);
+    setSendStep(1);
+
+    try {
+      // Simulate step progress during API call
+      const stepTimer = setInterval(() => {
+        setSendStep((prev) => Math.min(prev + 1, 3));
+      }, 2000);
+
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileIds: Array.from(selectedIds),
+          dbType: sendDbType,
+          targetAreas: areas,
+        }),
+      });
+
+      clearInterval(stepTimer);
+      setSendStep(4);
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSendResult({ success: true, projectUrl: data.projectUrl, message: data.message });
+        toast.success(data.message);
+      } else {
+        setSendResult({ success: false, message: data.error || "送信に失敗しました" });
+        toast.error(data.error || "送信に失敗しました");
+      }
+    } catch {
+      setSendResult({ success: false, message: "通信エラーが発生しました" });
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleCloseSendModal = () => {
+    setShowSendModal(false);
+    setSendResult(null);
+    setSendStep(0);
+    if (sendResult?.success) {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const toggleArea = (area: string) => {
+    setSendAreas((prev) => {
+      const n = new Set(prev);
+      if (n.has(area)) n.delete(area); else if (n.size < 5) n.add(area);
+      return n;
+    });
+  };
+
   return (
     <div
       className="bg-white rounded-lg border border-gray-200"
@@ -373,13 +442,21 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
               全選択
             </label>
             {selectedIds.size > 0 && (
-              <button
-                onClick={handleBulkDelete}
-                disabled={bulkDeleting}
-                className="text-[12px] text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
-              >
-                🗑️ 選択を削除（{selectedIds.size}件）
-              </button>
+              <>
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="text-[12px] text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+                >
+                  🗑️ 選択を削除（{selectedIds.size}件）
+                </button>
+                <button
+                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setSendCustomArea(""); setShowSendModal(true); }}
+                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+                >
+                  📤 求人出力へ送信（{selectedIds.size}件）
+                </button>
+              </>
             )}
           </div>
         )}
@@ -471,6 +548,80 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
           </div>
         )}
       </div>
+
+      {/* Send to job tool modal */}
+      {showSendModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleCloseSendModal}>
+          <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[15px] font-bold text-[#374151]">📤 求人出力へ送信</h2>
+              <button onClick={handleCloseSendModal} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
+            </div>
+
+            {sendResult ? (
+              <div>
+                {sendResult.success ? (
+                  <div className="text-center py-4">
+                    <p className="text-green-600 font-medium mb-3">✅ {sendResult.message}</p>
+                    {sendResult.projectUrl && (
+                      <a href={sendResult.projectUrl} target="_blank" rel="noopener noreferrer" className="text-[#2563EB] hover:underline text-sm font-medium">
+                        求人出力ツールで確認する →
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-red-600 text-sm py-4 text-center">{sendResult.message}</p>
+                )}
+                <button onClick={handleCloseSendModal} className="w-full mt-4 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50">閉じる</button>
+              </div>
+            ) : sending ? (
+              <div className="py-4 space-y-2 text-[13px]">
+                <p className="font-medium text-[#374151] mb-3">📤 処理中...</p>
+                <p>{sendStep >= 1 ? "✅" : "⬜"} プロジェクト確認</p>
+                <p>{sendStep >= 2 ? "✅" : sendStep === 1 ? "⏳" : "⬜"} PDFアップロード中...</p>
+                <p>{sendStep >= 3 ? "✅" : sendStep === 2 ? "⏳" : "⬜"} メモ作成</p>
+                <p>{sendStep >= 4 ? "✅" : sendStep === 3 ? "⏳" : "⬜"} 抽出開始</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">選択したPDF: {selectedIds.size}件</p>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-2">データベースタイプ</label>
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                      <input type="radio" name="dbType" value="hito_mynavi" checked={sendDbType === "hito_mynavi"} onChange={() => setSendDbType("hito_mynavi")} className="accent-[#2563EB]" />
+                      HITO-Link / マイナビ（自動処理）
+                    </label>
+                    <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                      <input type="radio" name="dbType" value="circus" checked={sendDbType === "circus"} onChange={() => setSendDbType("circus")} className="accent-[#2563EB]" />
+                      Circus（手動処理）
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-2">対象エリア（1〜5件選択）</label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-[200px] overflow-y-auto">
+                    {TARGET_AREAS.map((area) => (
+                      <label key={area} className="flex items-center gap-1.5 text-[13px] cursor-pointer">
+                        <input type="checkbox" checked={sendAreas.has(area)} onChange={() => toggleArea(area)} disabled={!sendAreas.has(area) && sendAreas.size >= 5} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer disabled:opacity-50" />
+                        {area}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[12px] text-gray-500">その他:</span>
+                    <input value={sendCustomArea} onChange={(e) => setSendCustomArea(e.target.value)} placeholder="エリア名を入力" className="flex-1 border border-gray-300 rounded-md px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={handleCloseSendModal} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50">キャンセル</button>
+                  <button onClick={handleSendToJobTool} disabled={sendAreas.size === 0 && !sendCustomArea.trim()} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
