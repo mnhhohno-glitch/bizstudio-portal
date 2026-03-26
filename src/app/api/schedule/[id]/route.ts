@@ -41,20 +41,34 @@ export async function PUT(
     });
 
     if (entries) {
+      // Preserve isCompleted/completedAt by matching startTime + title
+      const oldEntries = await tx.scheduleEntry.findMany({
+        where: { dailyScheduleId: id },
+        select: { startTime: true, title: true, isCompleted: true, completedAt: true },
+      });
+      const completionMap = new Map(
+        oldEntries.map((e) => [`${e.startTime}|${e.title}`, { isCompleted: e.isCompleted, completedAt: e.completedAt }])
+      );
+
       await tx.scheduleEntry.deleteMany({ where: { dailyScheduleId: id } });
       if (entries.length > 0) {
         await tx.scheduleEntry.createMany({
-          data: entries.map((e) => ({
-            dailyScheduleId: id,
-            startTime: e.startTime,
-            endTime: e.endTime,
-            title: e.title,
-            note: e.note || null,
-            tag: e.tag,
-            tagColor: e.tagColor,
-            entryType: (e.entryType as "MANUAL" | "CALENDAR_SYNC" | "AI_GENERATED") || "MANUAL",
-            sortOrder: e.sortOrder,
-          })),
+          data: entries.map((e) => {
+            const prev = completionMap.get(`${e.startTime}|${e.title}`);
+            return {
+              dailyScheduleId: id,
+              startTime: e.startTime,
+              endTime: e.endTime,
+              title: e.title,
+              note: e.note || null,
+              tag: e.tag,
+              tagColor: e.tagColor,
+              entryType: (e.entryType as "MANUAL" | "CALENDAR_SYNC" | "AI_GENERATED") || "MANUAL",
+              sortOrder: e.sortOrder,
+              isCompleted: prev?.isCompleted ?? false,
+              completedAt: prev?.completedAt ?? null,
+            };
+          }),
         });
       }
     }

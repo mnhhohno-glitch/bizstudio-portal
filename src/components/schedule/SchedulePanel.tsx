@@ -7,7 +7,7 @@ import ScheduleChatDrawer from "./ScheduleChatDrawer";
 import ScheduleReviewDrawer from "./ScheduleReviewDrawer";
 import ScheduleProgressBar from "./ScheduleProgressBar";
 import CalendarConnectButton from "./CalendarConnectButton";
-import type { EntryFormData } from "./ScheduleEntryFormModal";
+import type { EditEntryData } from "./ScheduleEntryFormModal";
 
 type ScheduleEntry = {
   id: string;
@@ -68,8 +68,8 @@ export default function SchedulePanel() {
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<EditEntryData | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showChatDrawer, setShowChatDrawer] = useState(false);
   const [showReviewDrawer, setShowReviewDrawer] = useState(false);
@@ -120,66 +120,49 @@ export default function SchedulePanel() {
     setCurrentDate(d);
   };
 
-  const handleAddEntry = async (data: EntryFormData) => {
-    setSaving(true);
-    try {
-      if (schedule) {
-        // Add to existing schedule
-        const newEntries = [
-          ...schedule.entries.map((e, i) => ({
-            startTime: e.startTime,
-            endTime: e.endTime,
-            title: e.title,
-            note: e.note,
-            tag: e.tag,
-            tagColor: e.tagColor,
-            entryType: e.entryType,
-            sortOrder: i,
-          })),
-          {
-            startTime: data.startTime,
-            endTime: data.endTime,
-            title: data.title,
-            note: data.note || null,
-            tag: data.tag,
-            tagColor: data.tagColor,
-            entryType: "MANUAL",
-            sortOrder: schedule.entries.length,
-          },
-        ];
-        // Sort by startTime
-        newEntries.sort((a, b) => a.startTime.localeCompare(b.startTime));
-        newEntries.forEach((e, i) => (e.sortOrder = i));
+  const handleEntrySaved = () => {
+    fetchSchedule();
+  };
 
-        await fetch(`/api/schedule/${schedule.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries: newEntries }),
-        });
-      } else {
-        // Create new schedule
-        await fetch("/api/schedule", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: toDateString(currentDate),
-            entries: [{
-              startTime: data.startTime,
-              endTime: data.endTime,
-              title: data.title,
-              note: data.note || null,
-              tag: data.tag,
-              tagColor: data.tagColor,
-              entryType: "MANUAL",
-              sortOrder: 0,
-            }],
-          }),
-        });
-      }
-      setShowAddModal(false);
+  const handleEditEntry = (entryId: string) => {
+    const entry = schedule?.entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    setEditingEntry({
+      id: entry.id,
+      startTime: entry.startTime,
+      endTime: entry.endTime,
+      title: entry.title,
+      note: entry.note,
+      tag: entry.tag,
+      tagColor: entry.tagColor,
+    });
+    setShowEntryModal(true);
+  };
+
+  const handleDeleteEntry = async (entryId: string) => {
+    if (!confirm("このエントリを削除しますか？")) return;
+    try {
+      await fetch(`/api/schedule/entry/${entryId}`, { method: "DELETE" });
       fetchSchedule();
     } catch { /* */ }
-    finally { setSaving(false); }
+  };
+
+  const handleOpenAddModal = async () => {
+    if (!schedule) {
+      // Create schedule first if it doesn't exist
+      try {
+        const res = await fetch("/api/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: toDateString(currentDate), entries: [] }),
+        });
+        if (res.ok) {
+          await fetchSchedule();
+        }
+      } catch { /* */ }
+    }
+    setEditingEntry(null);
+    setShowEntryModal(true);
   };
 
   const handleDelete = async () => {
@@ -367,7 +350,10 @@ export default function SchedulePanel() {
                 isCompleted: e.isCompleted,
                 entryId: e.id,
                 canComplete: schedule?.status === "CONFIRMED",
+                canEdit: schedule?.status === "CONFIRMED" || schedule?.status === "DRAFT",
                 onToggleComplete: handleToggleComplete,
+                onEdit: handleEditEntry,
+                onDelete: handleDeleteEntry,
               }))}
               isToday={isToday(currentDate)}
             />
@@ -410,7 +396,7 @@ export default function SchedulePanel() {
           ✏️ AIでスケジュール作成
         </button>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           className="w-full rounded-md border border-[#2563EB] text-[#2563EB] px-3 py-2 text-[13px] font-medium hover:bg-blue-50 transition-colors"
         >
           + エントリを追加
@@ -425,11 +411,12 @@ export default function SchedulePanel() {
         )}
       </div>
 
-      {showAddModal && (
+      {showEntryModal && schedule && (
         <ScheduleEntryFormModal
-          onClose={() => setShowAddModal(false)}
-          onSave={handleAddEntry}
-          saving={saving}
+          onClose={() => { setShowEntryModal(false); setEditingEntry(null); }}
+          onSaved={handleEntrySaved}
+          scheduleId={schedule.id}
+          editEntry={editingEntry}
         />
       )}
 
