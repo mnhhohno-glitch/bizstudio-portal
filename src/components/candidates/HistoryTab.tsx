@@ -220,6 +220,8 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
@@ -265,14 +267,50 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
     setDeletingId(fileId);
     try {
       await fetch(`/api/candidates/${candidateId}/files/${fileId}`, { method: "DELETE" });
+      setSelectedIds((prev) => { const n = new Set(prev); n.delete(fileId); return n; });
       fetchFiles();
     } catch { /* */ }
     finally { setDeletingId(null); }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`選択した ${selectedIds.size} 件のファイルを削除しますか？`)) return;
+    setBulkDeleting(true);
+    try {
+      for (const fileId of selectedIds) {
+        await fetch(`/api/candidates/${candidateId}/files/${fileId}`, { method: "DELETE" });
+      }
+      setSelectedIds(new Set());
+      fetchFiles();
+    } catch { /* */ }
+    finally { setBulkDeleting(false); }
+  };
+
+  const toggleSelect = (fileId: string) => {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(fileId)) n.delete(fileId); else n.add(fileId);
+      return n;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === files.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(files.map((f) => f.id)));
+    }
+  };
+
+  const shortDate = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
   return (
     <div
-      className="bg-white rounded-lg border border-gray-200 p-6"
+      className="bg-white rounded-lg border border-gray-200"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
       onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsDragging(false); }}
@@ -281,72 +319,102 @@ function BookmarkSection({ candidateId }: { candidateId: string }) {
         if (e.dataTransfer.files?.length) uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[14px] font-semibold text-[#374151]">📁 ブックマーク</h3>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-        >
-          {uploading ? `アップロード中 (${uploadProgress.current}/${uploadProgress.total})` : "+ アップロード"}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
-          onChange={(e) => { if (e.target.files?.length) uploadFiles(Array.from(e.target.files)); e.target.value = ""; }}
-        />
+      {/* Fixed header */}
+      <div className="px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[14px] font-semibold text-[#374151]">📁 ブックマーク</h3>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
+          >
+            {uploading ? `アップロード中 (${uploadProgress.current}/${uploadProgress.total})` : "+ アップロード"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
+            onChange={(e) => { if (e.target.files?.length) uploadFiles(Array.from(e.target.files)); e.target.value = ""; }}
+          />
+        </div>
+        <p className="text-[12px] text-gray-500">求人票PDFを保管します</p>
+
+        {/* Select all + bulk delete */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-3 mt-2">
+            <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={files.length > 0 && selectedIds.size === files.length}
+                onChange={toggleAll}
+                className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+              />
+              全選択
+            </label>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="text-[12px] text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+              >
+                🗑️ 選択を削除（{selectedIds.size}件）
+              </button>
+            )}
+          </div>
+        )}
       </div>
-      <p className="text-sm text-gray-500 mb-4">求人票PDFを保管します</p>
 
       {/* Drop zone hint */}
       {isDragging && (
-        <div className="border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-8 text-center mb-4">
+        <div className="mx-4 my-3 border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-6 text-center">
           <p className="text-[#2563EB] font-medium text-sm">ここにファイルをドロップしてアップロード</p>
         </div>
       )}
 
-      {loading ? (
-        <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
-      ) : files.length === 0 && !isDragging ? (
-        <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
-          <p className="text-sm text-gray-400">ファイルをドラッグ＆ドロップ、または「アップロード」ボタンをクリック</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {files.map((file) => (
-            <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">{getFileIcon(file.mimeType)}</span>
-                <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
+      {/* Scrollable file list */}
+      <div className="max-h-[500px] overflow-y-auto">
+        {loading ? (
+          <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
+        ) : files.length === 0 && !isDragging ? (
+          <div className="mx-4 my-4 border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
+            <p className="text-sm text-gray-400">ファイルをドラッグ＆ドロップ、または「アップロード」ボタンをクリック</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {files.map((file) => (
+              <div key={file.id} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(file.id)}
+                  onChange={() => toggleSelect(file.id)}
+                  className="w-3.5 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                />
+                <span className="shrink-0 text-base">{getFileIcon(file.mimeType)}</span>
+                <span className="min-w-0 flex-1 text-[13px] font-medium text-gray-800 truncate">{file.fileName}</span>
+                <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
+                <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
+                <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
+                <a
+                  href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+                  download
+                  className="shrink-0 text-gray-400 hover:text-gray-700 text-[12px] font-medium"
+                >
+                  ⬇DL
+                </a>
+                <button
+                  onClick={() => handleDelete(file.id)}
+                  disabled={deletingId === file.id}
+                  className="shrink-0 text-gray-400 hover:text-red-500 text-[12px] font-medium disabled:opacity-50"
+                >
+                  🗑
+                </button>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {formatFileSize(file.fileSize)} ・ {file.uploadedBy.name} ・ {formatFileDate(file.createdAt)}
-              </p>
-              <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
-                <div className="ml-auto flex gap-2">
-                  <a
-                    href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
-                    download
-                    className="text-gray-500 hover:text-gray-700 text-sm font-medium"
-                  >
-                    ⬇ DL
-                  </a>
-                  <button
-                    onClick={() => handleDelete(file.id)}
-                    disabled={deletingId === file.id}
-                    className="text-red-400 hover:text-red-600 text-sm font-medium disabled:opacity-50"
-                  >
-                    🗑 削除
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
