@@ -129,6 +129,8 @@ model User {
   rpaErrorAssignments RpaErrorLog[]  @relation("RpaErrorAssignee")
   candidateFiles    CandidateFile[]  @relation("UserCandidateFiles")
   advisorSessions   AdvisorChatSession[] @relation("UserAdvisorSessions")
+  dailySchedules           DailySchedule[]
+  googleCalendarConnection GoogleCalendarConnection?
 
   @@map("users")
 }
@@ -1021,4 +1023,88 @@ model JobEntry {
   @@index([candidateId])
   @@index([externalJobId])
   @@map("job_entries")
+}
+
+// =============================================
+// デイリースケジュール
+// =============================================
+
+enum ScheduleStatus {
+  DRAFT
+  CONFIRMED
+  COMPLETED
+}
+
+enum EntryType {
+  MANUAL
+  CALENDAR_SYNC
+  AI_GENERATED
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model DailySchedule {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  date      DateTime       @db.Date
+  summary   String?
+  status    ScheduleStatus @default(DRAFT)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  entries     ScheduleEntry[]
+  chatHistory ScheduleChat[]
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+}
+
+model ScheduleEntry {
+  id              String        @id @default(cuid())
+  dailyScheduleId String
+  dailySchedule   DailySchedule @relation(fields: [dailyScheduleId], references: [id], onDelete: Cascade)
+
+  startTime       String
+  endTime         String
+  title           String
+  note            String?
+  tag             String
+  tagColor        String
+  entryType       EntryType     @default(MANUAL)
+  calendarEventId String?
+  sortOrder       Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dailyScheduleId])
+}
+
+model ScheduleChat {
+  id              String        @id @default(cuid())
+  dailyScheduleId String
+  dailySchedule   DailySchedule @relation(fields: [dailyScheduleId], references: [id], onDelete: Cascade)
+
+  role    ChatRole
+  content String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([dailyScheduleId])
+}
+
+model GoogleCalendarConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  tokenExpiry  DateTime
+  calendarId   String   @default("primary")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
