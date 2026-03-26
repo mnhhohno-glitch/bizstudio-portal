@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import DailyTimeline from "./DailyTimeline";
 import ScheduleEntryFormModal from "./ScheduleEntryFormModal";
+import ScheduleChatDrawer from "./ScheduleChatDrawer";
 import type { EntryFormData } from "./ScheduleEntryFormModal";
 
 type ScheduleEntry = {
@@ -65,6 +66,7 @@ export default function SchedulePanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showChatDrawer, setShowChatDrawer] = useState(false);
 
   const fetchSchedule = useCallback(async () => {
     setLoading(true);
@@ -170,6 +172,41 @@ export default function SchedulePanel() {
     finally { setDeleting(false); }
   };
 
+  const handleAiSave = async (entries: { startTime: string; endTime: string; title: string; note?: string | null; tag: string; tagColor: string; sortOrder: number }[], summary: string) => {
+    try {
+      const formattedEntries = entries.map((e, i) => ({
+        startTime: e.startTime,
+        endTime: e.endTime,
+        title: e.title,
+        note: e.note || null,
+        tag: e.tag,
+        tagColor: e.tagColor,
+        entryType: "AI_GENERATED",
+        sortOrder: e.sortOrder ?? i,
+      }));
+
+      if (schedule) {
+        await fetch(`/api/schedule/${schedule.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ summary, entries: formattedEntries }),
+        });
+      } else {
+        await fetch("/api/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: toDateString(currentDate),
+            summary,
+            entries: formattedEntries,
+          }),
+        });
+      }
+      setShowChatDrawer(false);
+      fetchSchedule();
+    } catch { /* */ }
+  };
+
   const handleStatusChange = async () => {
     if (!schedule) return;
     const nextStatus = schedule.status === "DRAFT" ? "CONFIRMED" : schedule.status === "CONFIRMED" ? "COMPLETED" : null;
@@ -257,9 +294,8 @@ export default function SchedulePanel() {
       {/* Footer actions */}
       <div className="px-4 py-3 border-t border-[#E5E7EB] space-y-2">
         <button
-          disabled
-          title="Phase 2 で有効化予定"
-          className="w-full rounded-md bg-gray-100 px-3 py-2 text-[13px] font-medium text-gray-400 cursor-not-allowed"
+          onClick={() => setShowChatDrawer(true)}
+          className="w-full rounded-md bg-[#2563EB] text-white px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
         >
           ✏️ AIでスケジュール作成
         </button>
@@ -278,6 +314,24 @@ export default function SchedulePanel() {
           saving={saving}
         />
       )}
+
+      <ScheduleChatDrawer
+        isOpen={showChatDrawer}
+        onClose={() => setShowChatDrawer(false)}
+        date={toDateString(currentDate)}
+        scheduleId={schedule?.id || null}
+        existingEntries={(schedule?.entries || []).map((e) => ({
+          startTime: e.startTime,
+          endTime: e.endTime,
+          title: e.title,
+          note: e.note,
+          tag: e.tag,
+          tagColor: e.tagColor,
+          sortOrder: e.sortOrder,
+        }))}
+        calendarEvents={[]}
+        onSave={handleAiSave}
+      />
     </div>
   );
 }
