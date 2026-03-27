@@ -137,5 +137,31 @@ export async function GET(
     }
   }
 
+  // ブックマーク求人票テキスト（最新5件のみ、コンテキスト肥大化防止）
+  const bookmarkFiles = await prisma.candidateFile.findMany({
+    where: {
+      candidateId,
+      category: "BOOKMARK",
+      extractedText: { not: null },
+    },
+    select: {
+      fileName: true,
+      extractedText: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+
+  if (bookmarkFiles.length > 0) {
+    const bookmarkTexts = bookmarkFiles
+      .map((f, i) => {
+        const truncatedText = f.extractedText!.substring(0, 1500);
+        return `### 求人票${i + 1}: ${f.fileName}\n${truncatedText}`;
+      })
+      .join("\n\n---\n\n");
+
+    context += `\n\n## ブックマーク求人票（最新${bookmarkFiles.length}件）\n${bookmarkTexts}`;
+  }
+
   return NextResponse.json({ context });
 }

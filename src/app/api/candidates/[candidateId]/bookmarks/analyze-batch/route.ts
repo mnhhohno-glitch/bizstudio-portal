@@ -21,25 +21,32 @@ export async function POST(
 
   const { candidateId } = await params;
   const body = await req.json();
-  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch } = body as {
+  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate } = body as {
     sessionId: string;
     batchIndex: number;
     batchSize: number;
     totalFiles: number;
     isLastBatch: boolean;
+    sinceDate?: string;
   };
 
   if (!sessionId || batchIndex == null || !batchSize || !totalFiles) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  // 1. Fetch all bookmark files with extracted text
+  // 1. Fetch bookmark files with extracted text (optionally filtered by date)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const whereClause: any = {
+    candidateId,
+    category: "BOOKMARK",
+    extractedText: { not: null },
+  };
+  if (sinceDate) {
+    whereClause.createdAt = { gt: new Date(sinceDate) };
+  }
+
   const allBookmarks = await prisma.candidateFile.findMany({
-    where: {
-      candidateId,
-      category: "BOOKMARK",
-      extractedText: { not: null },
-    },
+    where: whereClause,
     select: {
       id: true,
       fileName: true,
