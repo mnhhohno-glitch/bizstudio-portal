@@ -138,6 +138,8 @@ export async function GET(
   }
 
   // ブックマークの求人票テキストを取得
+  console.log("[Context] Fetching bookmark texts for candidateId:", candidateId);
+
   const bookmarkFiles = await prisma.candidateFile.findMany({
     where: {
       candidateId,
@@ -151,6 +153,9 @@ export async function GET(
     orderBy: { createdAt: "desc" },
   });
 
+  console.log("[Context] Bookmark files found:", bookmarkFiles.length);
+  console.log("[Context] Bookmark files with text:", bookmarkFiles.filter((f) => f.extractedText).length);
+
   if (bookmarkFiles.length > 0) {
     const maxFiles = 10;
     const maxTextLength = 5000;
@@ -163,8 +168,12 @@ export async function GET(
       })
       .join("\n\n---\n\n");
 
-    context += `\n## ブックマーク求人票（${bookmarkFiles.length}件${bookmarkFiles.length > maxFiles ? `、上位${maxFiles}件を表示` : ""}）\n${bookmarkTexts}\n\n`;
+    const bookmarkSection = `\n## ブックマーク求人票（${bookmarkFiles.length}件${bookmarkFiles.length > maxFiles ? `、上位${maxFiles}件を表示` : ""}）\n${bookmarkTexts}\n\n`;
+    console.log("[Context] Adding bookmark section to context, total chars:", bookmarkSection.length);
+    context += bookmarkSection;
   }
+
+  console.log("[Context] Total context length:", context.length);
 
   return NextResponse.json({ context });
 }
