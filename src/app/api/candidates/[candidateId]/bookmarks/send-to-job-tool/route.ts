@@ -24,10 +24,11 @@ export async function POST(
 
   const { candidateId } = await params;
   const body = await req.json();
-  const { fileIds, dbType, targetAreas } = body as {
+  const { fileIds, dbType, targetAreas, memoContent } = body as {
     fileIds: string[];
     dbType: string;
     targetAreas: string[];
+    memoContent?: string | null;
   };
 
   if (!fileIds?.length || !dbType || !targetAreas?.length) {
@@ -161,12 +162,8 @@ export async function POST(
 
     // 4. Import memos
     console.log("[SendToJobTool] Step 4: Importing memos...");
-    const processed = uploadData.processed || [];
-    if (processed.length > 0) {
-      const memoContent = processed
-        .map((p: { company_name?: string; share_url?: string }) => `${p.company_name || ""}\n${p.share_url || ""}`)
-        .join("\n");
-
+    if (dbType === "circus" && memoContent) {
+      // Circus: use user-provided memo file content
       try {
         await fetchWithTimeout(
           `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/memos/import`,
@@ -181,6 +178,32 @@ export async function POST(
         );
       } catch (e) {
         console.error("Memo import failed:", e);
+      }
+    } else {
+      // HITO-Link/マイナビ: auto-generate from upload response
+      const processed = uploadData.processed || [];
+      if (processed.length > 0) {
+        const autoMemoContent = processed
+          .map((p: { company_name?: string; share_url?: string }) => `${p.company_name || ""}\n${p.share_url || ""}`)
+          .join("\n");
+
+        if (autoMemoContent.trim()) {
+          try {
+            await fetchWithTimeout(
+              `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/memos/import`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  content: autoMemoContent,
+                  processing_unit_id: processingUnitId,
+                }),
+              }
+            );
+          } catch (e) {
+            console.error("Memo import failed:", e);
+          }
+        }
       }
     }
     console.log("[SendToJobTool] Step 4 complete");
