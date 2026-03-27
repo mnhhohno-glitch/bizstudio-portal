@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 import DocumentsTab from "@/components/candidates/DocumentsTab";
-import AdvisorTab from "@/components/candidates/AdvisorTab";
+import AdvisorFloatingPanel from "@/components/candidates/AdvisorFloatingPanel";
 import HistoryTab from "@/components/candidates/HistoryTab";
 
 /* ---------- Types ---------- */
@@ -80,7 +80,6 @@ type SessionUser = {
 const TABS = [
   { key: "documents", label: "書類" },
   { key: "history", label: "紹介履歴" },
-  { key: "advisor", label: "AIアドバイザー" },
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
   { key: "notes", label: "メモ" },
@@ -1271,6 +1270,7 @@ export default function CandidateDetailPage() {
   const [scheduleCopiedType, setScheduleCopiedType] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState("");
   const [jobOutputLoading, setJobOutputLoading] = useState(false);
+  const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
 
   const handleOpenJobOutput = async () => {
     if (jobOutputLoading) return;
@@ -1506,11 +1506,6 @@ export default function CandidateDetailPage() {
             onJimuCreated={fetchJimuSessions}
           />
         )}
-        {activeTab === "advisor" && (
-          <div style={{ height: "calc(100vh - 320px)" }}>
-            <AdvisorTab candidateId={candidateId} candidateName={candidate.name} />
-          </div>
-        )}
         {activeTab === "tasks" && (
           <CandidateTasksTab candidateId={candidateId} />
         )}
@@ -1654,6 +1649,23 @@ export default function CandidateDetailPage() {
         </div>
       )}
 
+      {/* AI Advisor floating button */}
+      {!isAdvisorOpen && (
+        <button
+          onClick={() => setIsAdvisorOpen(true)}
+          className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg w-14 h-14 flex items-center justify-center transition-all hover:scale-105"
+        >
+          <span className="text-2xl">🤖</span>
+        </button>
+      )}
+
+      {/* AI Advisor floating panel */}
+      <AdvisorFloatingPanel
+        candidateId={candidateId}
+        candidateName={candidate.name}
+        isOpen={isAdvisorOpen}
+        onClose={() => setIsAdvisorOpen(false)}
+      />
     </div>
   );
 }
