@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import { toast } from "sonner";
 
 type Message = {
   id: string;
@@ -52,6 +53,8 @@ export default function AdvisorFloatingPanel({
   const [showGreetingOptions, setShowGreetingOptions] = useState(false);
   const [isGeneratingGreeting, setIsGeneratingGreeting] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
 
   const validateAndSetFile = (file: File) => {
     if (file.size > 20 * 1024 * 1024) {
@@ -167,6 +170,71 @@ export default function AdvisorFloatingPanel({
       setTimeout(() => setCopiedMessageId(null), 2000);
     } catch {
       // fallback
+    }
+  };
+
+  const handleFullAnalysis = async () => {
+    if (!activeSessionId || isAnalyzing) return;
+    setIsAnalyzing(true);
+
+    try {
+      // Get bookmark file count (with extracted text)
+      const filesRes = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
+      const filesData = await filesRes.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const totalFiles = filesData.files?.filter((f: any) => f.extractedAt).length || 0;
+
+      if (totalFiles === 0) {
+        toast.error("テキスト化済みのブックマークがありません");
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const batchSize = 5;
+      const totalBatches = Math.ceil(totalFiles / batchSize);
+
+      for (let i = 0; i < totalBatches; i++) {
+        setAnalysisProgress(`分析中... (${i + 1}/${totalBatches}バッチ)`);
+
+        try {
+          const res = await fetch(`/api/candidates/${candidateId}/bookmarks/analyze-batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: activeSessionId,
+              batchIndex: i,
+              batchSize,
+              totalFiles,
+              isLastBatch: i === totalBatches - 1,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            throw new Error(err?.error || `バッチ${i + 1}の分析に失敗しました`);
+          }
+
+          // Refresh messages to show new results
+          await fetchMessages(activeSessionId);
+
+          // Wait between batches (rate limit)
+          if (i < totalBatches - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        } catch (error) {
+          console.error(`[FullAnalysis] Batch ${i + 1} failed:`, error);
+          toast.error(`バッチ${i + 1}の分析に失敗しました`);
+          break;
+        }
+      }
+
+      toast.success(`全${totalFiles}件の分析が完了しました`);
+    } catch (error) {
+      console.error("[FullAnalysis] Error:", error);
+      toast.error("分析の開始に失敗しました");
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProgress(null);
     }
   };
 
@@ -318,11 +386,11 @@ export default function AdvisorFloatingPanel({
             </div>
           </div>
 
-          {/* Greeting buttons */}
-          <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-end gap-3 shrink-0">
+          {/* Action buttons */}
+          <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 shrink-0 flex-wrap">
             <button
               onClick={() => setShowGreetingOptions(!showGreetingOptions)}
-              disabled={!activeSessionId || isGeneratingGreeting}
+              disabled={!activeSessionId || isGeneratingGreeting || isAnalyzing}
               className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ✉ 挨拶文生成
@@ -352,6 +420,18 @@ export default function AdvisorFloatingPanel({
             {isGeneratingGreeting && (
               <span className="text-[13px] text-gray-400 animate-pulse">挨拶文を生成中...</span>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={handleFullAnalysis}
+                disabled={!activeSessionId || isAnalyzing || isGeneratingGreeting}
+                className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isAnalyzing ? "⏳ 分析中..." : "📊 全件分析"}
+              </button>
+              {analysisProgress && (
+                <span className="text-[12px] text-green-600 animate-pulse">{analysisProgress}</span>
+              )}
+            </div>
           </div>
 
           {/* Messages */}
@@ -461,7 +541,7 @@ export default function AdvisorFloatingPanel({
             <div className="px-4 py-3 flex items-end gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isSending}
+                disabled={isSending || isAnalyzing}
                 className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xl text-gray-600 hover:text-[#2563EB] transition-colors flex-shrink-0 disabled:opacity-50"
               >
                 ＋
@@ -483,14 +563,15 @@ export default function AdvisorFloatingPanel({
                   el.style.height = Math.min(el.scrollHeight, 120) + "px";
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="メッセージを入力..."
+                placeholder={isAnalyzing ? "分析中はメッセージを送信できません" : "メッセージを入力..."}
+                disabled={isAnalyzing}
                 rows={1}
-                className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                 style={{ maxHeight: "120px" }}
               />
               <button
                 onClick={handleSend}
-                disabled={(!inputValue.trim() && !attachedFile) || isSending}
+                disabled={(!inputValue.trim() && !attachedFile) || isSending || isAnalyzing}
                 className={`bg-[#2563EB] text-white rounded-xl px-4 py-3 font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isSending ? "animate-pulse" : ""}`}
               >
                 {isSending ? "⏳" : "送信"}
