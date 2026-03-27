@@ -233,6 +233,8 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; projectUrl?: string; message?: string } | null>(null);
   const [sendStep, setSendStep] = useState(0);
+  const [memoFile, setMemoFile] = useState<File | null>(null);
+  const [isMemoDropping, setIsMemoDropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
@@ -383,12 +385,19 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     const areas = [...sendAreas];
     if (sendCustomArea.trim()) areas.push(sendCustomArea.trim());
     if (areas.length === 0) return;
+    if (sendDbType === "circus" && !memoFile) return;
 
     setSending(true);
     setSendResult(null);
     setSendStep(1);
 
     try {
+      // Read memo file content if Circus
+      let memoContent: string | null = null;
+      if (sendDbType === "circus" && memoFile) {
+        memoContent = await memoFile.text();
+      }
+
       // Simulate step progress during API call
       const stepTimer = setInterval(() => {
         setSendStep((prev) => Math.min(prev + 1, 3));
@@ -401,6 +410,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
           fileIds: Array.from(selectedIds),
           dbType: sendDbType,
           targetAreas: areas,
+          memoContent,
         }),
       });
 
@@ -495,7 +505,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   🗑️ 選択を削除（{selectedIds.size}件）
                 </button>
                 <button
-                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setSendCustomArea(""); setShowSendModal(true); }}
+                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setSendCustomArea(""); setMemoFile(null); setShowSendModal(true); }}
                   className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
                 >
                   📤 求人出力へ送信（{selectedIds.size}件）
@@ -654,15 +664,62 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   <label className="block text-[13px] font-medium text-[#374151] mb-2">データベースタイプ</label>
                   <div className="space-y-1.5">
                     <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                      <input type="radio" name="dbType" value="hito_mynavi" checked={sendDbType === "hito_mynavi"} onChange={() => setSendDbType("hito_mynavi")} className="accent-[#2563EB]" />
+                      <input type="radio" name="dbType" value="hito_mynavi" checked={sendDbType === "hito_mynavi"} onChange={() => { setSendDbType("hito_mynavi"); setMemoFile(null); }} className="accent-[#2563EB]" />
                       HITO-Link / マイナビ（自動処理）
                     </label>
                     <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                      <input type="radio" name="dbType" value="circus" checked={sendDbType === "circus"} onChange={() => setSendDbType("circus")} className="accent-[#2563EB]" />
+                      <input type="radio" name="dbType" value="circus" checked={sendDbType === "circus"} onChange={() => { setSendDbType("circus"); setMemoFile(null); }} className="accent-[#2563EB]" />
                       Circus（手動処理）
                     </label>
                   </div>
                 </div>
+                {sendDbType === "circus" && (
+                  <div>
+                    <label className="block text-[13px] font-medium text-[#374151] mb-2">メモ帳ファイル（必須）</label>
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setIsMemoDropping(true); }}
+                      onDragLeave={() => setIsMemoDropping(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsMemoDropping(false);
+                        const file = e.dataTransfer.files[0];
+                        if (file && file.name.endsWith(".txt")) {
+                          setMemoFile(file);
+                        } else {
+                          toast.error(".txtファイルのみ添付可能です");
+                        }
+                      }}
+                      className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                        isMemoDropping ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
+                      }`}
+                    >
+                      {memoFile ? (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px]">✅ {memoFile.name} ({(memoFile.size / 1024).toFixed(1)}KB)</span>
+                          <button onClick={() => setMemoFile(null)} className="text-gray-400 hover:text-red-500 text-sm">✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-[13px] text-gray-500">メモ帳ファイル（.txt）をドラッグ＆ドロップ</p>
+                          <p className="text-[11px] text-gray-400 mt-1">または</p>
+                          <label className="inline-block mt-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer text-[12px]">
+                            ファイルを選択
+                            <input
+                              type="file"
+                              accept=".txt"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) setMemoFile(file);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-2">対象エリア（1〜5件選択）</label>
                   <div className="grid grid-cols-2 gap-1.5 max-h-[200px] overflow-y-auto">
@@ -680,7 +737,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleCloseSendModal} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50">キャンセル</button>
-                  <button onClick={handleSendToJobTool} disabled={sendAreas.size === 0 && !sendCustomArea.trim()} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
+                  <button onClick={handleSendToJobTool} disabled={(sendAreas.size === 0 && !sendCustomArea.trim()) || (sendDbType === "circus" && !memoFile)} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
                 </div>
               </div>
             )}
