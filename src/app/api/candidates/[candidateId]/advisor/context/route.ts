@@ -153,7 +153,7 @@ export async function GET(
 
   if (bookmarkFiles.length > 0) {
     const maxFiles = 10;
-    const maxTextLength = 2000;
+    const maxTextLength = 5000;
 
     const bookmarkTexts = bookmarkFiles
       .slice(0, maxFiles)
