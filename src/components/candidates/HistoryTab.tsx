@@ -236,9 +236,9 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
-  const triggerExtraction = (fileIds: string[]) => {
+  const triggerExtraction = (fileIds: string[], label = "") => {
     if (fileIds.length === 0) return;
-    console.log("[ExtractText] Triggering extraction for", fileIds.length, "files:", fileIds);
+    console.log(`[ExtractText${label}] Triggering extraction for`, fileIds.length, "files:", fileIds);
     fetch(`/api/candidates/${candidateId}/bookmarks/extract-text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -247,13 +247,16 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
       .then(async (res) => {
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          console.error("[ExtractText] API error:", res.status, data);
+          console.error(`[ExtractText${label}] API error:`, res.status, data);
         } else {
-          console.log("[ExtractText] API result:", data);
+          console.log(`[ExtractText${label}] Result:`, data);
+          if (data?.extracted > 0) {
+            fetchFiles(); // refresh to show ✅ icons
+          }
         }
       })
       .catch((err) => {
-        console.error("[ExtractText] Fetch failed:", err);
+        console.error(`[ExtractText${label}] Fetch failed:`, err);
       });
   };
 
@@ -279,7 +282,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     const filesWithoutText = files.filter((f) => !f.extractedAt);
     if (filesWithoutText.length > 0) {
       extractTriggered.current = true;
-      triggerExtraction(filesWithoutText.map((f) => f.id));
+      triggerExtraction(filesWithoutText.map((f) => f.id), ":auto");
     }
   }, [files, loading]);
 
@@ -312,7 +315,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     fetchFiles();
 
     // Background text extraction for uploaded files
-    triggerExtraction(uploadedFileIds);
+    triggerExtraction(uploadedFileIds, ":upload");
   };
 
   const handleDelete = async (fileId: string) => {
