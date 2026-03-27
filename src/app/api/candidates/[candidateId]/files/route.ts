@@ -56,7 +56,23 @@ export async function GET(
   const files = await prisma.candidateFile.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: { uploadedBy: { select: { id: true, name: true } } },
+    select: {
+      id: true,
+      candidateId: true,
+      category: true,
+      fileName: true,
+      fileSize: true,
+      mimeType: true,
+      driveFileId: true,
+      driveViewUrl: true,
+      driveFolderId: true,
+      memo: true,
+      uploadedByUserId: true,
+      createdAt: true,
+      updatedAt: true,
+      extractedAt: true,
+      uploadedBy: { select: { id: true, name: true } },
+    },
   });
 
   return withCors(NextResponse.json({ files }), origin);

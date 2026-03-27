@@ -176,6 +176,7 @@ type BookmarkFile = {
   driveFileId: string;
   driveViewUrl: string;
   memo: string | null;
+  extractedAt: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
 };
@@ -233,6 +234,31 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [sendResult, setSendResult] = useState<{ success: boolean; projectUrl?: string; message?: string } | null>(null);
   const [sendStep, setSendStep] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const extractTriggered = useRef(false);
+
+  const triggerExtraction = (fileIds: string[], label = "") => {
+    if (fileIds.length === 0) return;
+    console.log(`[ExtractText${label}] Triggering extraction for`, fileIds.length, "files:", fileIds);
+    fetch(`/api/candidates/${candidateId}/bookmarks/extract-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileIds }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          console.error(`[ExtractText${label}] API error:`, res.status, data);
+        } else {
+          console.log(`[ExtractText${label}] Result:`, data);
+          if (data?.extracted > 0) {
+            fetchFiles(); // refresh to show ✅ icons
+          }
+        }
+      })
+      .catch((err) => {
+        console.error(`[ExtractText${label}] Fetch failed:`, err);
+      });
+  };
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -250,6 +276,16 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
+  // Auto-extract text for existing files without extraction (run once)
+  useEffect(() => {
+    if (extractTriggered.current || loading || files.length === 0) return;
+    const filesWithoutText = files.filter((f) => !f.extractedAt);
+    if (filesWithoutText.length > 0) {
+      extractTriggered.current = true;
+      triggerExtraction(filesWithoutText.map((f) => f.id), ":auto");
+    }
+  }, [files, loading]);
+
   const uploadFiles = async (fileList: File[]) => {
     const valid = fileList.filter((f) => ALLOWED_TYPES.has(f.type) && f.size <= 20 * 1024 * 1024);
     if (valid.length === 0) return;
@@ -257,21 +293,29 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     setUploading(true);
     setUploadProgress({ current: 0, total: valid.length });
 
+    const uploadedFileIds: string[] = [];
     for (let i = 0; i < valid.length; i++) {
       setUploadProgress({ current: i + 1, total: valid.length });
       try {
         const formData = new FormData();
         formData.append("file", valid[i]);
         formData.append("category", "BOOKMARK");
-        await fetch(`/api/candidates/${candidateId}/files/upload`, {
+        const res = await fetch(`/api/candidates/${candidateId}/files/upload`, {
           method: "POST",
           body: formData,
         });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.file?.id) uploadedFileIds.push(data.file.id);
+        }
       } catch { /* */ }
     }
 
     setUploading(false);
     fetchFiles();
+
+    // Background text extraction for uploaded files
+    triggerExtraction(uploadedFileIds, ":upload");
   };
 
   const handleDelete = async (fileId: string) => {
@@ -521,6 +565,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 <span className="shrink-0 text-base">{getFileIcon(file.mimeType)}</span>
                 <span className="min-w-0 flex-1 text-[13px] font-medium text-gray-800 truncate">{file.fileName}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
+                {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                 <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
                 <button

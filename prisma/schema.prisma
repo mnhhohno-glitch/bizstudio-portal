@@ -953,6 +953,8 @@ model CandidateFile {
   driveViewUrl     String                @map("drive_view_url")
   driveFolderId    String?               @map("drive_folder_id")
   memo             String?               @db.Text
+  extractedText    String?               @db.Text @map("extracted_text")
+  extractedAt      DateTime?             @map("extracted_at")
   uploadedByUserId String                @map("uploaded_by_user_id")
   uploadedBy       User                  @relation("UserCandidateFiles", fields: [uploadedByUserId], references: [id])
   createdAt        DateTime              @default(now()) @map("created_at")
