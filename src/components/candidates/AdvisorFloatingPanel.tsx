@@ -238,6 +238,86 @@ export default function AdvisorFloatingPanel({
     }
   };
 
+  const handleAdditionalAnalysis = async () => {
+    if (!activeSessionId || isAnalyzing) return;
+
+    // Find the latest analysis message to determine sinceDate
+    const lastAnalysis = [...messages]
+      .filter((m) => m.role === "assistant" && m.content.includes("【求人分析"))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+    if (!lastAnalysis) {
+      toast.error("まず全件分析を実行してください");
+      return;
+    }
+
+    const sinceDate = lastAnalysis.createdAt;
+
+    // Check how many new files exist since last analysis
+    const filesRes = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
+    const filesData = await filesRes.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const newFiles = filesData.files?.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f: any) => f.extractedAt && new Date(f.createdAt) > new Date(sinceDate)
+    ) || [];
+
+    if (newFiles.length === 0) {
+      toast.info("前回の分析以降に追加されたブックマークはありません");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    const totalFiles = newFiles.length;
+    const batchSize = 5;
+    const totalBatches = Math.ceil(totalFiles / batchSize);
+
+    try {
+      for (let i = 0; i < totalBatches; i++) {
+        setAnalysisProgress(`追加分析中... (${i + 1}/${totalBatches}バッチ)`);
+
+        try {
+          const res = await fetch(`/api/candidates/${candidateId}/bookmarks/analyze-batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: activeSessionId,
+              batchIndex: i,
+              batchSize,
+              totalFiles,
+              isLastBatch: i === totalBatches - 1,
+              sinceDate,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            throw new Error(err?.error || `追加分析バッチ${i + 1}に失敗しました`);
+          }
+
+          await fetchMessages(activeSessionId);
+
+          if (i < totalBatches - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        } catch (error) {
+          console.error(`[AdditionalAnalysis] Batch ${i + 1} failed:`, error);
+          toast.error(`追加分析バッチ${i + 1}に失敗しました`);
+          break;
+        }
+      }
+
+      toast.success(`追加${totalFiles}件の分析が完了しました`);
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProgress(null);
+    }
+  };
+
+  const hasAnalysisHistory = messages.some(
+    (m) => m.role === "assistant" && m.content.includes("【求人分析")
+  );
+
   const handleSend = async () => {
     const userMessage = inputValue.trim();
     const currentFile = attachedFile;
@@ -424,10 +504,19 @@ export default function AdvisorFloatingPanel({
               <button
                 onClick={handleFullAnalysis}
                 disabled={!activeSessionId || isAnalyzing || isGeneratingGreeting}
-                className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isAnalyzing ? "⏳ 分析中..." : "📊 全件分析"}
               </button>
+              {hasAnalysisHistory && (
+                <button
+                  onClick={handleAdditionalAnalysis}
+                  disabled={!activeSessionId || isAnalyzing || isGeneratingGreeting}
+                  className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  📊 追加のみ
+                </button>
+              )}
               {analysisProgress && (
                 <span className="text-[12px] text-green-600 animate-pulse">{analysisProgress}</span>
               )}
