@@ -1023,9 +1023,61 @@ model JobEntry {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
+  // === Phase 1: エントリーボード拡張フィールド ===
+  status              String?   @default("有効")
+  externalJobNo       String?   @map("external_job_no")
+  prefecture          String?
+
+  entryFlag           String?   @default("求人紹介") @map("entry_flag")
+  entryFlagDetail     String?   @default("検討中") @map("entry_flag_detail")
+  companyFlag         String?   @map("company_flag")
+  personFlag          String?   @map("person_flag")
+
+  hasJobPosting       Boolean   @default(false) @map("has_job_posting")
+  hasEntry            Boolean   @default(false) @map("has_entry")
+  hasJoined           Boolean   @default(false) @map("has_joined")
+
+  firstMeetingDate    DateTime? @map("first_meeting_date")
+  jobMeetingDate      DateTime? @map("job_meeting_date")
+  jobIntroDate        DateTime? @map("job_intro_date")
+  documentSubmitDate  DateTime? @map("document_submit_date")
+  documentPassDate    DateTime? @map("document_pass_date")
+  aptitudeTestExists  Boolean   @default(false) @map("aptitude_test_exists")
+  aptitudeTestDeadline DateTime? @map("aptitude_test_deadline")
+  interviewPrepDate   DateTime? @map("interview_prep_date")
+  interviewPrepTime   String?   @map("interview_prep_time")
+  firstInterviewDate  DateTime? @map("first_interview_date")
+  firstInterviewTime  String?   @map("first_interview_time")
+  finalInterviewDate  DateTime? @map("final_interview_date")
+  finalInterviewTime  String?   @map("final_interview_time")
+  offerDate           DateTime? @map("offer_date")
+  offerDeadline       DateTime? @map("offer_deadline")
+  offerMeetingDate    DateTime? @map("offer_meeting_date")
+  offerMeetingTime    String?   @map("offer_meeting_time")
+  acceptanceDate      DateTime? @map("acceptance_date")
+  joinDate            DateTime? @map("join_date")
+
+  memo                String?   @db.Text
+  isActive            Boolean   @default(true) @map("is_active")
+  careerAdvisorId     String?   @map("career_advisor_id")
+
   @@index([candidateId])
   @@index([externalJobId])
+  @@index([entryFlag])
+  @@index([isActive])
   @@map("job_entries")
+}
+
+model EntryFlagMaster {
+  id          String  @id @default(cuid())
+  flagType    String  @map("flag_type")
+  parentFlag  String? @map("parent_flag")
+  value       String
+  sortOrder   Int     @map("sort_order")
+  isActive    Boolean @default(true) @map("is_active")
+
+  @@index([flagType])
+  @@map("entry_flag_masters")
 }
 
 // =============================================
