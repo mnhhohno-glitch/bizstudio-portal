@@ -9,7 +9,7 @@ import EntryCreateModal from "./EntryCreateModal";
 export type Entry = {
   id: string;
   candidateId: string;
-  candidate: { id: string; name: string; candidateNumber: string; employeeId?: string };
+  candidate: { id: string; name: string; candidateNumber: string; employeeId?: string; employee?: { name: string } | null };
   companyName: string;
   jobTitle: string;
   externalJobNo: string | null;
@@ -61,7 +61,6 @@ export type FlagData = {
 
 const TABS = [
   { key: "求人紹介", label: "求人紹介" },
-  { key: "応募", label: "応募" },
   { key: "エントリー", label: "エントリー" },
   { key: "書類選考", label: "書類選考" },
   { key: "面接", label: "面接" },
@@ -144,20 +143,6 @@ export default function EntryBoard() {
     } catch {
       toast.error("更新に失敗しました");
     }
-  };
-
-  const handleCheckUpdate = async (entryId: string, field: string, value: boolean) => {
-    try {
-      const res = await fetch(`/api/entries/${entryId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
-      }
-    } catch { /* */ }
   };
 
   const handleExport = () => {
@@ -250,7 +235,6 @@ export default function EntryBoard() {
           entries={entries}
           flagData={flagData}
           onFlagUpdate={handleFlagUpdate}
-          onCheckUpdate={handleCheckUpdate}
           onRowClick={(id) => setDetailEntryId(id)}
         />
       )}

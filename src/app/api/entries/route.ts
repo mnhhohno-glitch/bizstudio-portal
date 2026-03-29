@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     prisma.jobEntry.findMany({
       where,
       include: {
-        candidate: { select: { id: true, name: true, candidateNumber: true, employeeId: true } },
+        candidate: { select: { id: true, name: true, candidateNumber: true, employeeId: true, employee: { select: { name: true } } } },
       },
       orderBy: { [sortBy]: sortOrder },
       skip: (page - 1) * limit,
