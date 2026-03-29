@@ -88,6 +88,46 @@ function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
   );
 }
 
+function FinanceNavItem() {
+  const [loading, setLoading] = useState(false);
+  const financeUrl = process.env.NEXT_PUBLIC_FINANCE_URL || "https://bizstudio-finance-production.up.railway.app";
+
+  const handleClick = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/sso-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        alert("トークン取得に失敗しました");
+        return;
+      }
+      const { token } = await res.json();
+      window.open(`${financeUrl}/api/auth/sso?token=${token}`, "_blank");
+    } catch {
+      alert("トークン取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className={[
+        "relative flex h-12 w-full items-center gap-3 px-4 text-[14px] transition-colors text-white/90",
+        loading ? "opacity-50 cursor-wait" : "hover:bg-white/10",
+      ].join(" ")}
+    >
+      <span className="text-[16px]">{loading ? "⏳" : "💰"}</span>
+      <span className="font-medium">経理管理</span>
+      <span className="ml-auto text-[12px] opacity-60">↗</span>
+    </button>
+  );
+}
+
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL || "";
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
@@ -167,6 +207,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
           {common.map((it) => (
             <NavItem key={it.href} {...it} />
           ))}
+          {isAdmin && <FinanceNavItem />}
           {isAdmin && adminOnly.map((it) => (
             <NavItem key={it.href} {...it} />
           ))}
