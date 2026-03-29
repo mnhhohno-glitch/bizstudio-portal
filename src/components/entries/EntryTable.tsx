@@ -21,23 +21,38 @@ function getRowClass(entry: Entry) {
   return "bg-white";
 }
 
+const COL = {
+  candidate: { width: 120, label: "求職者" },
+  ca: { width: 80, label: "担当CA" },
+  company: { width: 160, label: "紹介先企業" },
+  jobDb: { width: 80, label: "求人DB" },
+  entryFlag: { width: 110, label: "エントリーフラグ" },
+  flagDetail: { width: 110, label: "フラグ詳細" },
+  companyFlag: { width: 110, label: "企業対応" },
+  personFlag: { width: 110, label: "本人対応" },
+  entryDate: { width: 80, label: "エントリー日" },
+  docSubmit: { width: 80, label: "書類提出" },
+  docPass: { width: 80, label: "書類通過" },
+} as const;
+
 export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick }: Props) {
+  const entryFlagOptions = flagData?.entryFlags.filter((f) => f !== "応募") || [];
+
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
-      <table className="w-full text-[12px]">
+      <table className="text-[12px] border-collapse" style={{ minWidth: 1120 }}>
+        <colgroup>
+          {Object.values(COL).map((c, i) => (
+            <col key={i} style={{ width: c.width, minWidth: c.width }} />
+          ))}
+        </colgroup>
         <thead>
           <tr className="bg-[#1E3A8A] text-white">
-            <th className="px-2 py-1.5 text-left whitespace-nowrap">求職者</th>
-            <th className="px-2 py-1.5 text-left whitespace-nowrap">担当CA</th>
-            <th className="px-2 py-1.5 text-left whitespace-nowrap">紹介先企業</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">求人DB</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">エントリーフラグ</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">フラグ詳細</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">企業対応</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">本人対応</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">エントリー日</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">書類提出</th>
-            <th className="px-2 py-1.5 text-center whitespace-nowrap">書類通過</th>
+            {Object.values(COL).map((c, i) => (
+              <th key={i} className="px-2 py-1.5 text-left whitespace-nowrap text-[11px] font-semibold">
+                {c.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -48,89 +63,84 @@ export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick
             const personOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
 
             return (
-              <tbody key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30`}>
-                {/* Data row 1 */}
-                <tr className={inactive ? "line-through" : ""}>
-                  <td
-                    className="px-2 py-1.5 whitespace-nowrap cursor-pointer hover:text-[#2563EB]"
-                    onClick={() => onRowClick(entry.id)}
+              <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30 ${inactive ? "line-through" : ""}`}>
+                {/* 求職者 */}
+                <td className="px-2 py-1.5 whitespace-nowrap cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)}>
+                  <div className="font-medium">{entry.candidate.name}</div>
+                  <div className="text-gray-400 text-[10px]">{entry.candidate.candidateNumber}</div>
+                </td>
+                {/* 担当CA */}
+                <td className="px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-600">
+                  {entry.candidate.employee?.name || "-"}
+                </td>
+                {/* 紹介先企業 + 求人タイトル */}
+                <td className="px-2 py-1.5 cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)} title={entry.companyName}>
+                  <div className="whitespace-nowrap truncate max-w-[160px]">{entry.companyName}</div>
+                  {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[160px]">{entry.jobTitle}</div>}
+                </td>
+                {/* 求人DB + 外部求人NO */}
+                <td className="px-2 py-1.5 text-center">
+                  <div className="text-[11px]">{entry.jobDb || "-"}</div>
+                  {entry.externalJobNo && <div className="text-[10px] text-gray-400">{entry.externalJobNo}</div>}
+                </td>
+                {/* エントリーフラグ */}
+                <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    value={entry.entryFlag || ""}
+                    onChange={(e) => onFlagUpdate(entry.id, { entryFlag: e.target.value, entryFlagDetail: null, companyFlag: null, personFlag: null })}
+                    className="w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
                   >
-                    <span className="font-medium">{entry.candidate.name}</span>
-                    <span className="text-gray-400 ml-1 text-[10px]">{entry.candidate.candidateNumber}</span>
-                  </td>
-                  <td className="px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-600">
-                    {entry.candidate.employee?.name || "-"}
-                  </td>
-                  <td
-                    className="px-2 py-1.5 whitespace-nowrap max-w-[160px] truncate cursor-pointer hover:text-[#2563EB]"
-                    onClick={() => onRowClick(entry.id)}
-                    title={entry.companyName}
+                    {entryFlagOptions.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </td>
+                {/* フラグ詳細 */}
+                <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    value={entry.entryFlagDetail || ""}
+                    onChange={(e) => onFlagUpdate(entry.id, { entryFlagDetail: e.target.value })}
+                    className="w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
                   >
-                    {entry.companyName}
-                  </td>
-                  <td className="px-2 py-1.5 whitespace-nowrap text-center text-[11px]">{entry.jobDb || "-"}</td>
-                  <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                    <option value="">-</option>
+                    {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </td>
+                {/* 企業対応 */}
+                <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  {companyOptions.length > 0 ? (
                     <select
-                      value={entry.entryFlag || ""}
-                      onChange={(e) => onFlagUpdate(entry.id, { entryFlag: e.target.value, entryFlagDetail: null, companyFlag: null, personFlag: null })}
-                      className="text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
+                      value={entry.companyFlag || ""}
+                      onChange={(e) => onFlagUpdate(entry.id, { companyFlag: e.target.value || null })}
+                      className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.companyFlag ? "text-gray-400" : ""}`}
                     >
-                      {flagData?.entryFlags.map((f) => <option key={f} value={f}>{f}</option>)}
+                      <option value="" className="text-gray-400">企業対応</option>
+                      {companyOptions.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
-                  </td>
-                  <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  ) : (
+                    <span className="text-gray-300 text-[11px]">-</span>
+                  )}
+                </td>
+                {/* 本人対応 */}
+                <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  {personOptions.length > 0 ? (
                     <select
-                      value={entry.entryFlagDetail || ""}
-                      onChange={(e) => onFlagUpdate(entry.id, { entryFlagDetail: e.target.value })}
-                      className="text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
+                      value={entry.personFlag || ""}
+                      onChange={(e) => onFlagUpdate(entry.id, { personFlag: e.target.value || null })}
+                      className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.personFlag ? "text-gray-400" : ""}`}
                     >
-                      <option value="">-</option>
-                      {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
+                      <option value="" className="text-gray-400">本人対応</option>
+                      {personOptions.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
-                  </td>
-                  <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
-                    {companyOptions.length > 0 ? (
-                      <select
-                        value={entry.companyFlag || ""}
-                        onChange={(e) => onFlagUpdate(entry.id, { companyFlag: e.target.value || null })}
-                        className={`text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.companyFlag ? "text-gray-400" : ""}`}
-                      >
-                        <option value="" className="text-gray-400">企業対応</option>
-                        {companyOptions.map((f) => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                    ) : (
-                      <span className="text-gray-300 text-[11px]">-</span>
-                    )}
-                  </td>
-                  <td className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
-                    {personOptions.length > 0 ? (
-                      <select
-                        value={entry.personFlag || ""}
-                        onChange={(e) => onFlagUpdate(entry.id, { personFlag: e.target.value || null })}
-                        className={`text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.personFlag ? "text-gray-400" : ""}`}
-                      >
-                        <option value="" className="text-gray-400">本人対応</option>
-                        {personOptions.map((f) => <option key={f} value={f}>{f}</option>)}
-                      </select>
-                    ) : (
-                      <span className="text-gray-300 text-[11px]">-</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.entryDate)}</td>
-                  <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.documentSubmitDate)}</td>
-                  <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.documentPassDate)}</td>
-                </tr>
-                {/* Data row 2: sub-info */}
-                <tr className={`text-[11px] text-gray-500 ${inactive ? "line-through" : ""}`}>
-                  <td className="px-2 py-0.5" />
-                  <td className="px-2 py-0.5" />
-                  <td className="px-2 py-0.5 whitespace-nowrap max-w-[160px] truncate" title={entry.jobTitle}>
-                    {entry.jobTitle || ""}
-                  </td>
-                  <td className="px-2 py-0.5 text-center whitespace-nowrap">{entry.externalJobNo || ""}</td>
-                  <td className="px-2 py-0.5" colSpan={7} />
-                </tr>
-              </tbody>
+                  ) : (
+                    <span className="text-gray-300 text-[11px]">-</span>
+                  )}
+                </td>
+                {/* エントリー日 */}
+                <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.entryDate)}</td>
+                {/* 書類提出 */}
+                <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.documentSubmitDate)}</td>
+                {/* 書類通過 */}
+                <td className="px-2 py-1.5 text-center text-[11px]">{fmtDate(entry.documentPassDate)}</td>
+              </tr>
             );
           })}
         </tbody>

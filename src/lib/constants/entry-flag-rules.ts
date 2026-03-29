@@ -1,6 +1,5 @@
 export const PERSON_FLAG_RULES: Record<string, string[]> = {
   "求人紹介": ["辞退受付済"],
-  "応募": ["見送り通知未送信", "見送り通知送信済"],
   "エントリー": ["辞退受付済"],
   "書類選考": ["辞退受付済", "見送り通知未送信", "見送り通知送信済", "選考通過連絡前"],
   "面接": [
@@ -18,7 +17,6 @@ export const PERSON_FLAG_RULES: Record<string, string[]> = {
 
 export const COMPANY_FLAG_RULES: Record<string, string[]> = {
   "求人紹介": [],
-  "応募": [],
   "エントリー": [],
   "書類選考": ["辞退報告前", "辞退報告済"],
   "面接": [
