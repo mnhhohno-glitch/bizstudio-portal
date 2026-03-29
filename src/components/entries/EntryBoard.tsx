@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import EntryTable from "./EntryTable";
 import EntryDetailModal from "./EntryDetailModal";
 import EntryCreateModal from "./EntryCreateModal";
+import BulkFlagChangeModal from "./BulkFlagChangeModal";
 
 export type Entry = {
   id: string;
@@ -83,9 +84,13 @@ export default function EntryBoard() {
   const [companyName, setCompanyName] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
 
+  // Selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   // Modals
   const [detailEntryId, setDetailEntryId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showBulkFlags, setShowBulkFlags] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -225,6 +230,25 @@ export default function EntryBoard() {
         </label>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md">
+          <span className="text-sm font-medium text-[#2563EB]">✓ {selectedIds.size}件選択中</span>
+          <button
+            onClick={() => setShowBulkFlags(true)}
+            className="bg-[#2563EB] text-white rounded-md px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8]"
+          >
+            一括フラグ変更
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            選択解除
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       {loading ? (
         <div className="text-center py-12 text-gray-400 text-sm">読み込み中...</div>
@@ -236,6 +260,10 @@ export default function EntryBoard() {
           flagData={flagData}
           onFlagUpdate={handleFlagUpdate}
           onRowClick={(id) => setDetailEntryId(id)}
+          selectedIds={selectedIds}
+          onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+          onSelectAll={(ids) => setSelectedIds(new Set(ids))}
+          onDeselectAll={() => setSelectedIds(new Set())}
         />
       )}
 
@@ -278,6 +306,17 @@ export default function EntryBoard() {
           flagData={flagData}
           onClose={() => setShowCreate(false)}
           onCreated={fetchEntries}
+        />
+      )}
+
+      {/* Bulk Flag Change Modal */}
+      {showBulkFlags && flagData && (
+        <BulkFlagChangeModal
+          selectedCount={selectedIds.size}
+          selectedIds={Array.from(selectedIds)}
+          flagData={flagData}
+          onClose={() => setShowBulkFlags(false)}
+          onDone={() => { setShowBulkFlags(false); setSelectedIds(new Set()); fetchEntries(); }}
         />
       )}
     </div>

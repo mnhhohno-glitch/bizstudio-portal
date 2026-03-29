@@ -8,6 +8,10 @@ type Props = {
   flagData: FlagData | null;
   onFlagUpdate: (entryId: string, flags: Record<string, string | null>) => void;
   onRowClick: (entryId: string) => void;
+  selectedIds: Set<string>;
+  onSelectToggle: (id: string) => void;
+  onSelectAll: (ids: string[]) => void;
+  onDeselectAll: () => void;
 };
 
 function fmtDate(iso: string | null) {
@@ -35,19 +39,30 @@ const COL = {
   docPass: { width: 80, label: "書類通過" },
 } as const;
 
-export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick }: Props) {
+export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick, selectedIds, onSelectToggle, onSelectAll, onDeselectAll }: Props) {
   const entryFlagOptions = flagData?.entryFlags.filter((f) => f !== "応募") || [];
+  const allIds = entries.map((e) => e.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
 
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
-      <table className="text-[12px] border-collapse" style={{ minWidth: 1120 }}>
+      <table className="text-[12px] border-collapse" style={{ minWidth: 1160 }}>
         <colgroup>
+          <col style={{ width: 36, minWidth: 36 }} />
           {Object.values(COL).map((c, i) => (
             <col key={i} style={{ width: c.width, minWidth: c.width }} />
           ))}
         </colgroup>
         <thead>
           <tr className="bg-[#1E3A8A] text-white">
+            <th className="px-1 py-1.5 text-center">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => allSelected ? onDeselectAll() : onSelectAll(allIds)}
+                className="w-3.5 h-3.5 rounded border-white/50 text-[#2563EB]"
+              />
+            </th>
             {Object.values(COL).map((c, i) => (
               <th key={i} className="px-2 py-1.5 text-left whitespace-nowrap text-[11px] font-semibold">
                 {c.label}
@@ -64,6 +79,15 @@ export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick
 
             return (
               <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30 ${inactive ? "line-through" : ""}`}>
+                {/* Checkbox */}
+                <td className="px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(entry.id)}
+                    onChange={() => onSelectToggle(entry.id)}
+                    className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]"
+                  />
+                </td>
                 {/* 求職者 */}
                 <td className="px-2 py-1.5 whitespace-nowrap cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)}>
                   <div className="font-medium">{entry.candidate.name}</div>
