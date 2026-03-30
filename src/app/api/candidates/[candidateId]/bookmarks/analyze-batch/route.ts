@@ -10,60 +10,124 @@ function extractRatings(
 ): Map<string, string> {
   const ratings = new Map<string, string>();
 
-  const ratingPatterns = [
-    /[■●]\s*相性[：:]\s*([ABCD])/,
-    /相性[：:]\s*([ABCD])/,
-    /評価[：:]\s*([ABCD])/,
-    /【([ABCD])】/,
-    /マッチ度[：:]\s*([ABCD])/,
-    /一致度[：:]\s*([ABCD])/,
-  ];
+  // === Method 1: Extract from summary section ===
+  const summaryMatch = analysisText.match(/【総合優先順位[^】]*】([\s\S]*?)(?:$|\n\n\n)/);
+  const summarySection = summaryMatch ? summaryMatch[1] : "";
 
+  if (summarySection) {
+    const summaryRatings = new Map<string, string>();
+    let currentRating = "";
+
+    for (const line of summarySection.split("\n")) {
+      const trimmed = line.trim();
+      if (/^[ABCD]$/.test(trimmed)) {
+        currentRating = trimmed;
+        continue;
+      }
+      if (trimmed === "該当なし" || trimmed === "") continue;
+      if (trimmed.startsWith("*")) {
+        const companyName = trimmed.replace(/^\*\s*/, "").trim();
+        if (companyName && companyName !== "該当なし" && currentRating) {
+          summaryRatings.set(companyName, currentRating);
+        }
+        continue;
+      }
+      if (currentRating && trimmed.length > 1 && !trimmed.startsWith("【")) {
+        summaryRatings.set(trimmed, currentRating);
+      }
+    }
+
+    for (const file of batchFiles) {
+      if (ratings.has(file.id)) continue;
+      const searchNames = extractSearchNames(file.fileName);
+      for (const [summaryCompany, rating] of summaryRatings) {
+        for (const name of searchNames) {
+          if (
+            summaryCompany.includes(name) ||
+            name.includes(summaryCompany) ||
+            normalizeCompanyName(summaryCompany) === normalizeCompanyName(name)
+          ) {
+            ratings.set(file.id, rating);
+            break;
+          }
+        }
+        if (ratings.has(file.id)) break;
+      }
+    }
+  }
+
+  // === Method 2: Extract from individual sections ===
   for (const file of batchFiles) {
-    // Extract company name from filename pattern: 求人票_会社名_日付.pdf
-    const companyMatch = file.fileName.match(/求人票[_]?(.+?)(?:_\d{8,})?\.pdf/i);
-    const companyName = companyMatch ? companyMatch[1] : file.fileName;
-    const searchKeys = [file.fileName, companyName];
+    if (ratings.has(file.id)) continue;
+    const searchNames = extractSearchNames(file.fileName);
 
-    for (const key of searchKeys) {
-      if (ratings.has(file.id)) break;
-      const keyIndex = analysisText.indexOf(key);
-      if (keyIndex === -1) continue;
+    for (const name of searchNames) {
+      const nameIndex = analysisText.indexOf(name);
+      if (nameIndex === -1) continue;
 
-      const searchStart = Math.max(0, keyIndex - 200);
-      const searchEnd = Math.min(analysisText.length, keyIndex + 600);
+      const searchStart = Math.max(0, nameIndex - 100);
+      const searchEnd = Math.min(analysisText.length, nameIndex + 600);
       const searchArea = analysisText.substring(searchStart, searchEnd);
 
-      for (const pattern of ratingPatterns) {
+      const patterns = [
+        /■\s*相性[：:]\s*([ABCD])/,
+        /相性[：:]\s*([ABCD])/,
+        /評価[：:]\s*([ABCD])/,
+        /【([ABCD])】/,
+        /マッチ度[：:]\s*([ABCD])/,
+      ];
+
+      for (const pattern of patterns) {
         const match = searchArea.match(pattern);
         if (match) {
           ratings.set(file.id, match[1]);
           break;
         }
       }
-    }
-
-    // Fallback: search in summary section by company name
-    if (!ratings.has(file.id)) {
-      const stripped = companyName.replace(/株式会社|有限会社|合同会社/g, "").trim();
-      if (stripped.length >= 2) {
-        const escaped = stripped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const summaryPatterns = [
-          new RegExp(`([ABCD])\\s*[\\n\\r]+[\\s]*[^\\n]*${escaped}`),
-          new RegExp(`([ABCD])[：:]?[^\\n]*${escaped}`),
-        ];
-        for (const pattern of summaryPatterns) {
-          const match = analysisText.match(pattern);
-          if (match) {
-            ratings.set(file.id, match[1]);
-            break;
-          }
-        }
-      }
+      if (ratings.has(file.id)) break;
     }
   }
 
   return ratings;
+}
+
+function extractSearchNames(fileName: string): string[] {
+  const names: string[] = [];
+  let name = fileName.replace(/\.pdf$/i, "");
+
+  const p1 = name.match(/^求人票[_]?(.+?)(?:_\d{10,})?$/);
+  if (p1) names.push(p1[1]);
+
+  const p2 = name.match(/^\d+[_](.+?)(?:_\d{10,})?$/);
+  if (p2) names.push(p2[1]);
+
+  const p3 = name.match(/^(.+?)_No\d+$/i);
+  if (p3) names.push(p3[1]);
+
+  const p4 = name.match(/^求人票[_]?(.+)$/);
+  if (p4 && !names.includes(p4[1])) names.push(p4[1]);
+
+  if (names.length === 0) names.push(name);
+
+  const expanded: string[] = [...names];
+  for (const n of names) {
+    const stripped = n
+      .replace(/株式会社|有限会社|合同会社|一般財団法人|公益財団法人|一般社団法人|合資会社/g, "")
+      .trim();
+    if (stripped.length >= 2 && !expanded.includes(stripped)) {
+      expanded.push(stripped);
+    }
+  }
+  return expanded;
+}
+
+function normalizeCompanyName(name: string): string {
+  return name
+    .replace(/株式会社|有限会社|合同会社|一般財団法人|公益財団法人|一般社団法人|合資会社/g, "")
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[\s　]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 const API_TIMEOUT_MS = 120000;
