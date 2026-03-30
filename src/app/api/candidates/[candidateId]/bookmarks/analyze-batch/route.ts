@@ -117,6 +117,13 @@ function extractSearchNames(fileName: string): string[] {
     if (stripped.length >= 2 && !expanded.includes(stripped)) {
       expanded.push(stripped);
     }
+    // Fullwidth → halfwidth version
+    const normalized = n
+      .replace(/[Ａ-Ｚａ-ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    if (normalized !== n && !expanded.includes(normalized)) {
+      expanded.push(normalized);
+    }
   }
   return expanded;
 }
@@ -124,7 +131,9 @@ function extractSearchNames(fileName: string): string[] {
 function normalizeCompanyName(name: string): string {
   return name
     .replace(/株式会社|有限会社|合同会社|一般財団法人|公益財団法人|一般社団法人|合資会社/g, "")
-    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[Ａ-Ｚａ-ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(/[・]/g, "")
     .replace(/[\s　]/g, "")
     .trim()
     .toLowerCase();

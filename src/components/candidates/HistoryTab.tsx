@@ -591,7 +591,13 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   className="w-3.5 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                 />
                 <span className="shrink-0 text-base">{getFileIcon(file.mimeType)}</span>
-                <span className="min-w-0 flex-1 text-[13px] font-medium text-gray-800 truncate">{file.fileName}</span>
+                <a
+                  href={getPreviewUrl(file.driveViewUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 flex-1 text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate"
+                  title="クリックでPDFをプレビュー"
+                >{file.fileName}</a>
                 <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
                 {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                 {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] && (
@@ -601,12 +607,6 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 )}
                 <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
-                <button
-                  onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
-                  className="shrink-0 text-[#2563EB] hover:text-[#1D4ED8] text-[12px] font-medium"
-                >
-                  👁
-                </button>
                 <a
                   href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
                   download
