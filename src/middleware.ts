@@ -9,7 +9,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/g/") ||
     pathname.startsWith("/api/guides/") ||
     pathname.startsWith("/j/") ||
-    pathname.startsWith("/api/jimu/")
+    pathname.startsWith("/api/jimu/") ||
+    pathname.startsWith("/share/") ||
+    pathname.startsWith("/api/share/")
   ) {
     return NextResponse.next();
   }
