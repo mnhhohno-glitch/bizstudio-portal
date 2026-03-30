@@ -290,6 +290,13 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
+  // Refresh when AI analysis completes (ratings updated)
+  useEffect(() => {
+    const handler = () => fetchFiles();
+    window.addEventListener("bookmark-ratings-updated", handler);
+    return () => window.removeEventListener("bookmark-ratings-updated", handler);
+  }, [fetchFiles]);
+
   // Auto-extract text for existing files without extraction (run once)
   useEffect(() => {
     if (extractTriggered.current || loading || files.length === 0) return;
