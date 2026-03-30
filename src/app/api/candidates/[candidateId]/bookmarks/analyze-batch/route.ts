@@ -4,17 +4,65 @@ import { getSessionUser } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes
 
-function extractRatings(analysisText: string, batchFiles: { id: string; fileName: string }[]): Map<string, string> {
+function extractRatings(
+  analysisText: string,
+  batchFiles: { id: string; fileName: string }[]
+): Map<string, string> {
   const ratings = new Map<string, string>();
+
+  const ratingPatterns = [
+    /[■●]\s*相性[：:]\s*([ABCD])/,
+    /相性[：:]\s*([ABCD])/,
+    /評価[：:]\s*([ABCD])/,
+    /【([ABCD])】/,
+    /マッチ度[：:]\s*([ABCD])/,
+    /一致度[：:]\s*([ABCD])/,
+  ];
+
   for (const file of batchFiles) {
-    const fileIndex = analysisText.indexOf(file.fileName);
-    if (fileIndex === -1) continue;
-    const searchArea = analysisText.substring(fileIndex, fileIndex + 500);
-    const ratingMatch = searchArea.match(/相性[：:]\s*([ABCD])/);
-    if (ratingMatch) {
-      ratings.set(file.id, ratingMatch[1]);
+    // Extract company name from filename pattern: 求人票_会社名_日付.pdf
+    const companyMatch = file.fileName.match(/求人票[_]?(.+?)(?:_\d{8,})?\.pdf/i);
+    const companyName = companyMatch ? companyMatch[1] : file.fileName;
+    const searchKeys = [file.fileName, companyName];
+
+    for (const key of searchKeys) {
+      if (ratings.has(file.id)) break;
+      const keyIndex = analysisText.indexOf(key);
+      if (keyIndex === -1) continue;
+
+      const searchStart = Math.max(0, keyIndex - 200);
+      const searchEnd = Math.min(analysisText.length, keyIndex + 600);
+      const searchArea = analysisText.substring(searchStart, searchEnd);
+
+      for (const pattern of ratingPatterns) {
+        const match = searchArea.match(pattern);
+        if (match) {
+          ratings.set(file.id, match[1]);
+          break;
+        }
+      }
+    }
+
+    // Fallback: search in summary section by company name
+    if (!ratings.has(file.id)) {
+      const stripped = companyName.replace(/株式会社|有限会社|合同会社/g, "").trim();
+      if (stripped.length >= 2) {
+        const escaped = stripped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const summaryPatterns = [
+          new RegExp(`([ABCD])\\s*[\\n\\r]+[\\s]*[^\\n]*${escaped}`),
+          new RegExp(`([ABCD])[：:]?[^\\n]*${escaped}`),
+        ];
+        for (const pattern of summaryPatterns) {
+          const match = analysisText.match(pattern);
+          if (match) {
+            ratings.set(file.id, match[1]);
+            break;
+          }
+        }
+      }
     }
   }
+
   return ratings;
 }
 
@@ -120,6 +168,12 @@ export async function POST(
 - 評価の根拠を具体的に述べる（経験・スキル・志向性のマッチ度）
 - 面接で聞かれそうなポイントがあれば記載
 - 各求人の分析は200〜300文字程度に収める
+- 各求人の評価は必ず「■ 相性: A」「■ 相性: B」「■ 相性: C」「■ 相性: D」の形式で記載してください（バッジ表示のため）
+
+## 重要
+- 候補者の経歴情報（職務経歴書、履歴書、面談ログなど）が不足している場合は、正確な相性判定はできない旨を明記してください
+- 情報が不足している場合でも、求人票の内容は分析し、「候補者情報が不足しているため、求人内容のみの評価です」と前置きしてください
+- 推測や仮定で候補者のスキルや経験を補完しないでください
 
 ## このバッチの分析後、以下の総合まとめを必ず出力すること
 最後に「【総合優先順位（全${totalFiles}件）】」というセクションを追加し、
@@ -137,7 +191,13 @@ A/B/C/Dのランク別に会社名を一覧化してください。
 - 評価の根拠を具体的に述べる（経験・スキル・志向性のマッチ度）
 - 面接で聞かれそうなポイントがあれば記載
 - 各求人の分析は200〜300文字程度に収める
-- このバッチの分析のみ行い、総合まとめは最終バッチで行います`;
+- 各求人の評価は必ず「■ 相性: A」「■ 相性: B」「■ 相性: C」「■ 相性: D」の形式で記載してください（バッジ表示のため）
+- このバッチの分析のみ行い、総合まとめは最終バッチで行います
+
+## 重要
+- 候補者の経歴情報（職務経歴書、履歴書、面談ログなど）が不足している場合は、正確な相性判定はできない旨を明記してください
+- 情報が不足している場合でも、求人票の内容は分析し、「候補者情報が不足しているため、求人内容のみの評価です」と前置きしてください
+- 推測や仮定で候補者のスキルや経験を補完しないでください`;
   }
 
   // 6. Fetch chat history (for last batch to reference previous analysis)
@@ -221,7 +281,11 @@ A/B/C/Dのランク別に会社名を一覧化してください。
         data: { aiMatchRating: rating, aiAnalyzedAt: new Date() },
       });
     }
-    console.log("[AnalyzeBatch] Ratings saved:", Object.fromEntries(ratings));
+    console.log("[AnalyzeBatch] Extracted ratings:", {
+      totalFiles: batchFiles.length,
+      extractedCount: ratings.size,
+      ratings: Object.fromEntries(ratings),
+    });
 
     return NextResponse.json({
       batchIndex,
