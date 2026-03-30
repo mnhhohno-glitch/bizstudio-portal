@@ -71,6 +71,8 @@ export async function GET(
       createdAt: true,
       updatedAt: true,
       extractedAt: true,
+      aiMatchRating: true,
+      aiAnalyzedAt: true,
       uploadedBy: { select: { id: true, name: true } },
     },
   });
