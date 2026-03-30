@@ -4,13 +4,13 @@ import { getSessionUser } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes
 
-function extractRatings(
+function extractRatingsAndComments(
   analysisText: string,
   batchFiles: { id: string; fileName: string }[]
-): Map<string, string> {
-  const ratings = new Map<string, string>();
+): Map<string, { rating: string; comment: string }> {
+  const results = new Map<string, { rating: string; comment: string }>();
 
-  // === Method 1: Extract from summary section ===
+  // === Phase 1: Extract ratings from summary section ===
   const summaryMatch = analysisText.match(/【総合優先順位[^】]*】([\s\S]*?)(?:$|\n\n\n)/);
   const summarySection = summaryMatch ? summaryMatch[1] : "";
 
@@ -20,16 +20,11 @@ function extractRatings(
 
     for (const line of summarySection.split("\n")) {
       const trimmed = line.trim();
-      if (/^[ABCD]$/.test(trimmed)) {
-        currentRating = trimmed;
-        continue;
-      }
+      if (/^[ABCD]$/.test(trimmed)) { currentRating = trimmed; continue; }
       if (trimmed === "該当なし" || trimmed === "") continue;
       if (trimmed.startsWith("*")) {
-        const companyName = trimmed.replace(/^\*\s*/, "").trim();
-        if (companyName && companyName !== "該当なし" && currentRating) {
-          summaryRatings.set(companyName, currentRating);
-        }
+        const cn = trimmed.replace(/^\*\s*/, "").trim();
+        if (cn && cn !== "該当なし" && currentRating) summaryRatings.set(cn, currentRating);
         continue;
       }
       if (currentRating && trimmed.length > 1 && !trimmed.startsWith("【")) {
@@ -38,7 +33,7 @@ function extractRatings(
     }
 
     for (const file of batchFiles) {
-      if (ratings.has(file.id)) continue;
+      if (results.has(file.id)) continue;
       const searchNames = extractSearchNames(file.fileName);
       for (const [summaryCompany, rating] of summaryRatings) {
         for (const name of searchNames) {
@@ -47,48 +42,84 @@ function extractRatings(
             name.includes(summaryCompany) ||
             normalizeCompanyName(summaryCompany) === normalizeCompanyName(name)
           ) {
-            ratings.set(file.id, rating);
+            results.set(file.id, { rating, comment: "" });
             break;
           }
         }
-        if (ratings.has(file.id)) break;
+        if (results.has(file.id)) break;
       }
     }
   }
 
-  // === Method 2: Extract from individual sections ===
+  // === Phase 2: Extract individual section comments + fallback ratings ===
   for (const file of batchFiles) {
-    if (ratings.has(file.id)) continue;
     const searchNames = extractSearchNames(file.fileName);
 
     for (const name of searchNames) {
-      const nameIndex = analysisText.indexOf(name);
-      if (nameIndex === -1) continue;
+      // Find section start: "### 求人N: filename" or "求人N: companyname"
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const sectionPattern = new RegExp(`(?:###?\\s*)?求人\\d+[：:]\\s*[^\\n]*${escaped}`, "i");
+      const sectionMatch = analysisText.match(sectionPattern);
+      if (!sectionMatch) continue;
 
-      const searchStart = Math.max(0, nameIndex - 100);
-      const searchEnd = Math.min(analysisText.length, nameIndex + 600);
-      const searchArea = analysisText.substring(searchStart, searchEnd);
+      const startIndex = analysisText.indexOf(sectionMatch[0]);
+      if (startIndex === -1) continue;
 
-      const patterns = [
-        /■\s*相性[：:]\s*([ABCD])/,
-        /相性[：:]\s*([ABCD])/,
-        /評価[：:]\s*([ABCD])/,
-        /【([ABCD])】/,
-        /マッチ度[：:]\s*([ABCD])/,
-      ];
+      // Find section end
+      const afterStart = analysisText.substring(startIndex);
+      const nextSection = afterStart.match(/\n(?:###?\s*求人\d|---|\n【総合)/);
+      const endIndex = nextSection
+        ? startIndex + (nextSection.index || afterStart.length)
+        : startIndex + Math.min(afterStart.length, 800);
 
-      for (const pattern of patterns) {
-        const match = searchArea.match(pattern);
-        if (match) {
-          ratings.set(file.id, match[1]);
-          break;
+      const comment = analysisText.substring(startIndex, endIndex).trim();
+
+      if (comment.length > 10) {
+        const existing = results.get(file.id);
+        if (existing) {
+          existing.comment = comment;
+        } else {
+          // Extract rating from comment
+          const ratingMatch = comment.match(/■\s*相性[：:]\s*([ABCD])/) || comment.match(/相性[：:]\s*([ABCD])/);
+          results.set(file.id, { rating: ratingMatch ? ratingMatch[1] : "", comment });
         }
+        break;
       }
-      if (ratings.has(file.id)) break;
+    }
+
+    // Fallback: rating from nearby text if still no rating
+    const entry = results.get(file.id);
+    if (entry && !entry.rating) {
+      for (const name of searchNames) {
+        const idx = analysisText.indexOf(name);
+        if (idx === -1) continue;
+        const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
+        const patterns = [/■\s*相性[：:]\s*([ABCD])/, /相性[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
+        for (const p of patterns) {
+          const m = area.match(p);
+          if (m) { entry.rating = m[1]; break; }
+        }
+        if (entry.rating) break;
+      }
+    }
+
+    // Fallback: if no results at all, try simple text search for rating
+    if (!results.has(file.id)) {
+      for (const name of searchNames) {
+        const idx = analysisText.indexOf(name);
+        if (idx === -1) continue;
+        const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
+        const patterns = [/■\s*相性[：:]\s*([ABCD])/, /相性[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
+        for (const p of patterns) {
+          const m = area.match(p);
+          if (m) { results.set(file.id, { rating: m[1], comment: "" }); break; }
+        }
+        if (results.has(file.id)) break;
+      }
     }
   }
 
-  return ratings;
+  return results;
 }
 
 function extractSearchNames(fileName: string): string[] {
@@ -346,18 +377,19 @@ A/B/C/Dのランク別に会社名を一覧化してください。
       },
     });
 
-    // 9. Extract A/B/C/D ratings and save to CandidateFile
-    const ratings = extractRatings(analysisText, batchFiles);
-    for (const [fileId, rating] of ratings) {
-      await prisma.candidateFile.update({
-        where: { id: fileId },
-        data: { aiMatchRating: rating, aiAnalyzedAt: new Date() },
-      });
+    // 9. Extract ratings + comments and save to CandidateFile
+    const ratingsAndComments = extractRatingsAndComments(analysisText, batchFiles);
+    for (const [fileId, { rating, comment }] of ratingsAndComments) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateData: Record<string, any> = { aiAnalyzedAt: new Date() };
+      if (rating) updateData.aiMatchRating = rating;
+      if (comment) updateData.aiAnalysisComment = comment;
+      await prisma.candidateFile.update({ where: { id: fileId }, data: updateData });
     }
     console.log("[AnalyzeBatch] Extracted ratings:", {
       totalFiles: batchFiles.length,
-      extractedCount: ratings.size,
-      ratings: Object.fromEntries(ratings),
+      extractedCount: ratingsAndComments.size,
+      ratings: Object.fromEntries([...ratingsAndComments].map(([id, { rating }]) => [id, rating])),
     });
 
     return NextResponse.json({

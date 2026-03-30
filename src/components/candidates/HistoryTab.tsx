@@ -178,6 +178,7 @@ type BookmarkFile = {
   memo: string | null;
   extractedAt: string | null;
   aiMatchRating: string | null;
+  aiAnalysisComment: string | null;
   aiAnalyzedAt: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
@@ -247,6 +248,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [sendStep, setSendStep] = useState(0);
   const [memoFile, setMemoFile] = useState<File | null>(null);
   const [isMemoDropping, setIsMemoDropping] = useState(false);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileName: string; rating: string; comment: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
@@ -601,9 +603,19 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
                 {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                 {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] && (
-                  <span className={`shrink-0 inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border ${RATING_STYLES[file.aiMatchRating]}`}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedAnalysis({
+                        fileName: file.fileName,
+                        rating: file.aiMatchRating!,
+                        comment: file.aiAnalysisComment || "分析コメントがありません",
+                      });
+                    }}
+                    className={`shrink-0 inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border cursor-pointer hover:opacity-80 transition-opacity ${RATING_STYLES[file.aiMatchRating]}`}
+                  >
                     {RATING_LABELS[file.aiMatchRating]}
-                  </span>
+                  </button>
                 )}
                 <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
@@ -764,6 +776,39 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Analysis comment modal */}
+      {selectedAnalysis && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setSelectedAnalysis(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[70vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${RATING_STYLES[selectedAnalysis.rating]}`}>
+                  {RATING_LABELS[selectedAnalysis.rating]}
+                </span>
+                <h3 className="font-semibold text-sm truncate">{selectedAnalysis.fileName}</h3>
+              </div>
+              <button onClick={() => setSelectedAnalysis(null)} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[55vh]">
+              <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {selectedAnalysis.comment}
+              </div>
+            </div>
+            <div className="p-3 border-t flex justify-end">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(selectedAnalysis.comment);
+                  toast.success("コピーしました");
+                }}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                📋 コピー
+              </button>
+            </div>
           </div>
         </div>
       )}
