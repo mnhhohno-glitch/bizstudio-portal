@@ -61,6 +61,7 @@ type Candidate = {
   nameKana: string | null;
   gender: string | null;
   email: string | null;
+  birthday: string | null;
   employeeId: string | null;
   employee: Employee | null;
   guideEntries: GuideEntry[];
@@ -130,6 +131,7 @@ function EditModal({
   const [furigana, setFurigana] = useState(candidate.nameKana || "");
   const [email, setEmail] = useState(candidate.email || "");
   const [gender, setGender] = useState(candidate.gender || "");
+  const [birthday, setBirthday] = useState(candidate.birthday ? new Date(candidate.birthday).toISOString().slice(0, 10) : "");
   const [assignedEmployeeId, setAssignedEmployeeId] = useState(
     candidate.employeeId || ""
   );
@@ -147,6 +149,7 @@ function EditModal({
           furigana: furigana.trim(),
           email: email.trim(),
           gender: gender || null,
+          birthday: birthday || null,
           assignedEmployeeId: assignedEmployeeId || null,
         }),
       });
@@ -211,6 +214,17 @@ function EditModal({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">
+              生年月日
+            </label>
+            <input
+              type="date"
+              value={birthday}
+              onChange={(e) => setBirthday(e.target.value)}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
             />
           </div>

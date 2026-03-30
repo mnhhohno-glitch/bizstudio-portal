@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import FileUploadModal from "./FileUploadModal";
 
 type CandidateFile = {
@@ -68,6 +69,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   // Template state
   const [templates, setTemplates] = useState<TemplateFile[]>([]);
@@ -138,6 +141,27 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const handleUploadSuccess = () => {
     fetchFiles();
     fetchCounts();
+  };
+
+  const handleShareUrl = async (fileIds: string[]) => {
+    setSharing(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/share-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "URL発行に失敗しました");
+        return;
+      }
+      setShareResult({ url: data.url, files: data.files, expiresAt: data.expiresAt });
+    } catch {
+      toast.error("URL発行に失敗しました");
+    } finally {
+      setSharing(false);
+    }
   };
 
   const handleTemplateDownload = async (template: TemplateFile) => {
@@ -227,12 +251,23 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           <h3 className="text-[14px] font-semibold text-[#374151]">
             📁 {activeSubTab === "ORIGINAL" ? "原本（この求職者のファイル）" : SUB_TABS.find((t) => t.key === activeSubTab)?.label}
           </h3>
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
-          >
-            + アップロード
-          </button>
+          <div className="flex items-center gap-2">
+            {activeSubTab === "BS_DOCUMENT" && files.length > 0 && (
+              <button
+                onClick={() => handleShareUrl(files.map((f) => f.id))}
+                disabled={sharing}
+                className="border border-blue-200 bg-blue-50 text-[#2563EB] rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-blue-100 transition-colors disabled:opacity-50"
+              >
+                {sharing ? "発行中..." : "🔗 一括URL発行"}
+              </button>
+            )}
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
+            >
+              + アップロード
+            </button>
+          </div>
         </div>
         <p className="text-sm text-gray-500 mb-4">{DESCRIPTIONS[activeSubTab]}</p>
 
@@ -261,6 +296,15 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {/* アクション */}
                 <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
                   <div className="ml-auto flex gap-2">
+                    {activeSubTab === "BS_DOCUMENT" && (
+                      <button
+                        onClick={() => handleShareUrl([file.id])}
+                        disabled={sharing}
+                        className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium disabled:opacity-50"
+                      >
+                        🔗 URL発行
+                      </button>
+                    )}
                     <button
                       onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
                       className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium"
@@ -297,6 +341,50 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           onClose={() => setShowUploadModal(false)}
           onSuccess={handleUploadSuccess}
         />
+      )}
+
+      {/* 共有URL発行結果モーダル */}
+      {shareResult && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShareResult(null)}>
+          <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[15px] font-bold text-[#374151]">🔗 共有URL発行完了</h2>
+              <button onClick={() => setShareResult(null)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[13px] font-medium text-gray-600 mb-1">URL</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={shareResult.url}
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50"
+                  />
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(shareResult.url); toast.success("URLをコピーしました"); }}
+                    className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium whitespace-nowrap"
+                  >
+                    📋 コピー
+                  </button>
+                </div>
+              </div>
+              <div>
+                <p className="text-[13px] text-gray-600">パスワード: <span className="font-medium">生年月日8桁（YYYYMMDD）</span></p>
+              </div>
+              <div>
+                <p className="text-[13px] text-gray-600">有効期限: <span className="font-medium">{new Date(shareResult.expiresAt).toLocaleDateString("ja-JP")}</span></p>
+              </div>
+              <div>
+                <p className="text-[13px] text-gray-600 mb-1">対象ファイル:</p>
+                <ul className="text-[13px] text-gray-700">
+                  {shareResult.files.map((f, i) => <li key={i}>・{f}</li>)}
+                </ul>
+              </div>
+            </div>
+            <button onClick={() => setShareResult(null)} className="w-full mt-4 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50">閉じる</button>
+          </div>
+        </div>
       )}
     </div>
   );

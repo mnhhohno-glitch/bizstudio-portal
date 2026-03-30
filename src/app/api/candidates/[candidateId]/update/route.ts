@@ -45,6 +45,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.assignedEmployeeId !== undefined) {
     updateData.employeeId = body.assignedEmployeeId || null;
   }
+  if (body.birthday !== undefined) {
+    updateData.birthday = body.birthday ? new Date(body.birthday) : null;
+  }
 
   const updated = await prisma.candidate.update({
     where: { id: candidateId },

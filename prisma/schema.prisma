@@ -221,6 +221,7 @@ model Candidate {
   nameKana        String?  @map("name_kana")
   gender          String?  // "male" | "female" | "other"
   email           String?
+  birthday        DateTime?
 
   // 担当キャリアアドバイザー
   employeeId      String?  @map("employee_id")
@@ -233,11 +234,28 @@ model Candidate {
   files           CandidateFile[]
   advisorSessions AdvisorChatSession[]
   jobEntries      JobEntry[]
+  shareLinks      FileShareLink[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
 
   @@map("candidates")
+}
+
+model FileShareLink {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  candidateId   String    @map("candidate_id")
+  candidate     Candidate @relation(fields: [candidateId], references: [id])
+  fileIds       String    @map("file_ids")
+  passwordHash  String    @map("password_hash")
+  expiresAt     DateTime  @map("expires_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  downloadCount Int       @default(0) @map("download_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdBy     String?   @map("created_by")
+
+  @@map("file_share_links")
 }
 
 model CandidateNote {
