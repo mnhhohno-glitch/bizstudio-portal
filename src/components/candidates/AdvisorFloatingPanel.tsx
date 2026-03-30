@@ -229,6 +229,7 @@ export default function AdvisorFloatingPanel({
       }
 
       toast.success(`全${totalFiles}件の分析が完了しました`);
+      window.dispatchEvent(new Event("bookmark-ratings-updated"));
     } catch (error) {
       console.error("[FullAnalysis] Error:", error);
       toast.error("分析の開始に失敗しました");
@@ -308,6 +309,7 @@ export default function AdvisorFloatingPanel({
       }
 
       toast.success(`追加${totalFiles}件の分析が完了しました`);
+      window.dispatchEvent(new Event("bookmark-ratings-updated"));
     } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(null);
