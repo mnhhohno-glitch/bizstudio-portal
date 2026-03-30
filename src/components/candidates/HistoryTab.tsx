@@ -249,6 +249,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [memoFile, setMemoFile] = useState<File | null>(null);
   const [isMemoDropping, setIsMemoDropping] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileName: string; rating: string; comment: string } | null>(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
@@ -364,6 +365,30 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
       fetchFiles();
     } catch { /* */ }
     finally { setBulkDeleting(false); }
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDownloading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/bulk-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: Array.from(selectedIds) }),
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bookmarks_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("一括ダウンロードに失敗しました");
+    } finally {
+      setBulkDownloading(false);
+    }
   };
 
   const toggleSelect = (fileId: string) => {
@@ -523,6 +548,13 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   className="text-[12px] text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
                 >
                   🗑️ 選択を削除（{selectedIds.size}件）
+                </button>
+                <button
+                  onClick={handleBulkDownload}
+                  disabled={bulkDownloading}
+                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
+                >
+                  {bulkDownloading ? "⬇ ダウンロード中..." : `⬇ 一括DL（${selectedIds.size}件）`}
                 </button>
                 <button
                   onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setSendCustomArea(""); setMemoFile(null); setShowSendModal(true); }}
