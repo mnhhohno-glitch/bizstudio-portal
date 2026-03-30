@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { getCandidateContext } from "@/lib/advisor-context";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -230,24 +231,17 @@ export async function POST(
     return NextResponse.json({ error: "No files in this batch" }, { status: 400 });
   }
 
-  // 3. Fetch candidate context (without bookmark texts)
-  const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
+  // 3. Get candidate context directly (no HTTP fetch needed)
   let candidateContext = "";
   try {
-    const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
-      headers: { cookie: req.headers.get("cookie") || "" },
-    });
-    if (contextRes.ok) {
-      const contextData = await contextRes.json();
-      candidateContext = contextData.context || "";
-      // Strip bookmark section if present
-      const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
-      if (bookmarkIdx !== -1) {
-        candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
-      }
+    candidateContext = await getCandidateContext(candidateId);
+    // Strip bookmark section (we send job postings separately)
+    const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
+    if (bookmarkIdx !== -1) {
+      candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
     }
   } catch (e) {
-    console.error("[AnalyzeBatch] Context fetch error:", e);
+    console.error("[AnalyzeBatch] Context error:", e);
   }
 
   // 4. Build job posting section for this batch
