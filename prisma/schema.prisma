@@ -955,6 +955,8 @@ model CandidateFile {
   memo             String?               @db.Text
   extractedText    String?               @db.Text @map("extracted_text")
   extractedAt      DateTime?             @map("extracted_at")
+  aiMatchRating    String?               @map("ai_match_rating")
+  aiAnalyzedAt     DateTime?             @map("ai_analyzed_at")
   uploadedByUserId String                @map("uploaded_by_user_id")
   uploadedBy       User                  @relation("UserCandidateFiles", fields: [uploadedByUserId], references: [id])
   createdAt        DateTime              @default(now()) @map("created_at")

@@ -177,8 +177,20 @@ type BookmarkFile = {
   driveViewUrl: string;
   memo: string | null;
   extractedAt: string | null;
+  aiMatchRating: string | null;
+  aiAnalyzedAt: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
+};
+
+const RATING_STYLES: Record<string, string> = {
+  A: "bg-green-100 text-green-800 border-green-300",
+  B: "bg-blue-100 text-blue-800 border-blue-300",
+  C: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  D: "bg-red-100 text-red-800 border-red-300",
+};
+const RATING_LABELS: Record<string, string> = {
+  A: "A 非常に良い", B: "B 良い", C: "C 要検討", D: "D 合わない",
 };
 
 const ALLOWED_TYPES = new Set([
@@ -575,6 +587,11 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 <span className="min-w-0 flex-1 text-[13px] font-medium text-gray-800 truncate">{file.fileName}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
                 {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
+                {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] && (
+                  <span className={`shrink-0 inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border ${RATING_STYLES[file.aiMatchRating]}`}>
+                    {RATING_LABELS[file.aiMatchRating]}
+                  </span>
+                )}
                 <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
                 <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
                 <button

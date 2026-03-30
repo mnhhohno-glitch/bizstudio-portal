@@ -4,6 +4,20 @@ import { getSessionUser } from "@/lib/auth";
 
 export const maxDuration = 300; // 5 minutes
 
+function extractRatings(analysisText: string, batchFiles: { id: string; fileName: string }[]): Map<string, string> {
+  const ratings = new Map<string, string>();
+  for (const file of batchFiles) {
+    const fileIndex = analysisText.indexOf(file.fileName);
+    if (fileIndex === -1) continue;
+    const searchArea = analysisText.substring(fileIndex, fileIndex + 500);
+    const ratingMatch = searchArea.match(/相性[：:]\s*([ABCD])/);
+    if (ratingMatch) {
+      ratings.set(file.id, ratingMatch[1]);
+    }
+  }
+  return ratings;
+}
+
 const API_TIMEOUT_MS = 120000;
 const MAX_PAST_MESSAGES = 30;
 
@@ -198,6 +212,16 @@ A/B/C/Dのランク別に会社名を一覧化してください。
         content: `${label}\n\n${analysisText}`,
       },
     });
+
+    // 9. Extract A/B/C/D ratings and save to CandidateFile
+    const ratings = extractRatings(analysisText, batchFiles);
+    for (const [fileId, rating] of ratings) {
+      await prisma.candidateFile.update({
+        where: { id: fileId },
+        data: { aiMatchRating: rating, aiAnalyzedAt: new Date() },
+      });
+    }
+    console.log("[AnalyzeBatch] Ratings saved:", Object.fromEntries(ratings));
 
     return NextResponse.json({
       batchIndex,
