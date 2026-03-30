@@ -11,6 +11,7 @@ interface CreateScheduleTaskRequest {
   notes?: string;
   advisorName?: string;
   candidateId?: string;
+  source?: string;
 }
 
 type AssigneeInfo = {
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
       notes,
       advisorName,
       candidateId,
+      source,
     } = body;
 
     if (!candidateName || !preferredDates || !meetingFormat) {
@@ -55,7 +57,9 @@ export async function POST(request: Request) {
     let taskTitle: string;
     switch (type) {
       case "mynavi_new":
-        taskTitle = `【新規面談調整】新規応募者 ${candidateName}`;
+        taskTitle = source
+          ? `【${source} 新規面談調整】新規応募者 ${candidateName}`
+          : `【新規面談調整】新規応募者 ${candidateName}`;
         break;
       case "consultation":
         taskTitle = `【面談調整】${candidateName} - 担当:${advisorName ?? "未設定"}`;
