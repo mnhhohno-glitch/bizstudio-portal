@@ -71,6 +71,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
 
   // File selection + bulk ops
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
@@ -446,6 +447,9 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 <>
                   <span className="text-[12px] font-medium text-[#2563EB]">✓ {selectedFileIds.size}件選択</span>
                   <button onClick={handleBulkFileDownload} disabled={bulkDLing} className="text-[12px] text-[#2563EB] hover:underline disabled:opacity-50">{bulkDLing ? "DL中..." : "📥 一括DL"}</button>
+                  {activeSubTab === "BS_DOCUMENT" && (
+                    <button onClick={() => handleShareUrl(Array.from(selectedFileIds))} disabled={sharing} className="text-[12px] text-[#2563EB] hover:underline disabled:opacity-50">{sharing ? "発行中..." : "🔗 選択URL発行"}</button>
+                  )}
                   <button onClick={() => { setShowAttachModal(true); setTaskSearch(""); setTaskResults([]); setSelectedTaskId(null); }} className="text-[12px] text-[#2563EB] hover:underline">📎 タスクに添付</button>
                   <button onClick={handleBulkFileDelete} className="text-[12px] text-red-500 hover:underline">🗑 一括削除</button>
                 </>
@@ -537,10 +541,15 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                     className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50"
                   />
                   <button
-                    onClick={() => { navigator.clipboard.writeText(shareResult.url); toast.success("URLをコピーしました"); }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(shareResult.url);
+                      toast.success("URLをコピーしました");
+                      setUrlCopied(true);
+                      setTimeout(() => setUrlCopied(false), 2000);
+                    }}
                     className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium whitespace-nowrap"
                   >
-                    📋 コピー
+                    {urlCopied ? "✅ コピーしました" : "📋 コピー"}
                   </button>
                 </div>
               </div>
