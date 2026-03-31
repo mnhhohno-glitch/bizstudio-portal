@@ -197,12 +197,12 @@ function EditModal({
           </div>
           <div>
             <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              ふりがな <span className="text-red-500">*</span>
+              フリガナ <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               value={furigana}
-              onChange={(e) => setFurigana(e.target.value)}
+              onChange={(e) => setFurigana(e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
             />
           </div>

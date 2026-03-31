@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
 const createSchema = z.object({
   candidateNumber: z.string().min(1, "求職者番号を入力してください"),
   name: z.string().min(1, "氏名を入力してください"),
-  nameKana: z.string().min(1, "ふりがなを入力してください"),
+  nameKana: z.string().min(1, "フリガナを入力してください"),
   gender: z.enum(["male", "female", "other"], {
     message: "性別を選択してください",
   }),
