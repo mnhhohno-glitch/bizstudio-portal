@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { createCalendarEvent } from "@/lib/googleCalendar";
 
 export async function PUT(
   req: Request,
@@ -78,6 +79,31 @@ export async function PUT(
       include: { entries: { orderBy: { startTime: "asc" } } },
     });
   });
+
+  // Sync new entries to Google Calendar (best effort, sequential)
+  if (schedule && entries && entries.length > 0) {
+    const dateStr = existing.date.toISOString().slice(0, 10);
+    const newEntries = await prisma.scheduleEntry.findMany({
+      where: { dailyScheduleId: id, calendarEventId: null },
+      select: { id: true, startTime: true, endTime: true, title: true, note: true },
+    });
+    for (const entry of newEntries) {
+      try {
+        const eventId = await createCalendarEvent(user.id, dateStr, {
+          summary: entry.title,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          description: entry.note || undefined,
+        });
+        if (eventId) {
+          await prisma.scheduleEntry.update({ where: { id: entry.id }, data: { calendarEventId: eventId } });
+        }
+        await new Promise((r) => setTimeout(r, 100)); // Rate limit
+      } catch (e) {
+        console.error(`[GCal] Sync failed for entry ${entry.title}:`, e);
+      }
+    }
+  }
 
   return NextResponse.json({ schedule });
 }

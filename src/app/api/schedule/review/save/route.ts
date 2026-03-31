@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { createCalendarEvent } from "@/lib/googleCalendar";
 
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -92,6 +93,32 @@ export async function POST(req: Request) {
         }
       }
     });
+
+    // Sync tomorrow's entries to Google Calendar (best effort)
+    if (tomorrowDate && tomorrowEntries && tomorrowEntries.length > 0) {
+      const tomorrowSchedule = await prisma.dailySchedule.findUnique({
+        where: { userId_date: { userId: user.id, date: new Date(tomorrowDate + "T00:00:00.000Z") } },
+        include: { entries: { where: { calendarEventId: null }, select: { id: true, startTime: true, endTime: true, title: true, note: true } } },
+      });
+      if (tomorrowSchedule) {
+        for (const entry of tomorrowSchedule.entries) {
+          try {
+            const eventId = await createCalendarEvent(user.id, tomorrowDate, {
+              summary: entry.title,
+              startTime: entry.startTime,
+              endTime: entry.endTime,
+              description: entry.note || undefined,
+            });
+            if (eventId) {
+              await prisma.scheduleEntry.update({ where: { id: entry.id }, data: { calendarEventId: eventId } });
+            }
+            await new Promise((r) => setTimeout(r, 100));
+          } catch (e) {
+            console.error(`[GCal] Review sync failed for ${entry.title}:`, e);
+          }
+        }
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (e) {
