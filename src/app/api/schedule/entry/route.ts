@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { createCalendarEvent } from "@/lib/googleCalendar";
 
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -42,5 +43,20 @@ export async function POST(req: Request) {
     },
   });
 
-  return NextResponse.json({ entry }, { status: 201 });
+  // Sync to Google Calendar (best effort)
+  const dateStr = schedule.date.toISOString().slice(0, 10);
+  const calendarEventId = await createCalendarEvent(user.id, dateStr, {
+    summary: title,
+    startTime,
+    endTime,
+    description: note || undefined,
+  });
+  if (calendarEventId) {
+    await prisma.scheduleEntry.update({
+      where: { id: entry.id },
+      data: { calendarEventId },
+    });
+  }
+
+  return NextResponse.json({ entry: { ...entry, calendarEventId } }, { status: 201 });
 }
