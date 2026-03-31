@@ -28,6 +28,7 @@ export default function CandidateRegistrationModal({
   const [candidateNumber, setCandidateNumber] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [nameKana, setNameKana] = useState("");
+  const [isKanaComposing, setIsKanaComposing] = useState(false);
   const [gender, setGender] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -204,7 +205,9 @@ export default function CandidateRegistrationModal({
               type="text"
               placeholder="例: ヤマダ タロウ"
               value={nameKana}
-              onChange={(e) => setNameKana(e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
+              onCompositionStart={() => setIsKanaComposing(true)}
+              onCompositionEnd={(e) => { setIsKanaComposing(false); setNameKana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+              onChange={(e) => setNameKana(isKanaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
               className={errors.nameKana ? errorInputClass : inputClass}
             />
             {errors.nameKana && (
