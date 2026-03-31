@@ -200,6 +200,11 @@ export default function TaskNewPage() {
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [showCandidateFilePicker, setShowCandidateFilePicker] = useState(false);
+  const [candidateFilesForPicker, setCandidateFilesForPicker] = useState<{ id: string; fileName: string; fileSize: number; mimeType: string; driveFileId: string; category: string }[]>([]);
+  const [pickerSelectedIds, setPickerSelectedIds] = useState<Set<string>>(new Set());
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerAttaching, setPickerAttaching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // step 1 - accordion
@@ -728,6 +733,45 @@ export default function TaskNewPage() {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const openCandidateFilePicker = async () => {
+    if (!candidateId) return;
+    setShowCandidateFilePicker(true);
+    setPickerLoading(true);
+    setPickerSelectedIds(new Set());
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files`);
+      if (res.ok) {
+        const data = await res.json();
+        setCandidateFilesForPicker(data.files || []);
+      }
+    } catch { /* */ }
+    finally { setPickerLoading(false); }
+  };
+
+  const handlePickerAttach = async () => {
+    if (pickerSelectedIds.size === 0 || !candidateId) return;
+    setPickerAttaching(true);
+    try {
+      const selected = candidateFilesForPicker.filter((f) => pickerSelectedIds.has(f.id));
+      for (const f of selected) {
+        const res = await fetch(`/api/candidates/${candidateId}/files/${f.id}?download=true`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const buffer = Uint8Array.from(atob(data.base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([buffer], { type: data.mimeType || f.mimeType });
+        const file = new File([blob], f.fileName, { type: data.mimeType || f.mimeType });
+        setAttachmentFiles((prev) => [...prev, file]);
+      }
+      setShowCandidateFilePicker(false);
+    } catch { /* */ }
+    finally { setPickerAttaching(false); }
+  };
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    ORIGINAL: "原本", BS_DOCUMENT: "BS作成書類", APPLICATION: "応募企業",
+    INTERVIEW_PREP: "面接対策", MEETING: "面談", BOOKMARK: "ブックマーク",
   };
 
   const selectCls =
@@ -1704,6 +1748,16 @@ export default function TaskNewPage() {
                   />
                 </div>
 
+                {candidateId && (
+                  <button
+                    type="button"
+                    onClick={openCandidateFilePicker}
+                    className="mt-2 text-[13px] font-medium text-[#2563EB] hover:underline"
+                  >
+                    📁 求職者ファイルから選択
+                  </button>
+                )}
+
                 {attachmentError && (
                   <p className="mt-2 text-[13px] text-red-600">{attachmentError}</p>
                 )}
@@ -1958,6 +2012,53 @@ export default function TaskNewPage() {
           onChange={(v) => setFieldValue(pointsModalFieldId, v)}
           onClose={() => setPointsModalOpen(false)}
         />
+      )}
+
+      {/* 求職者ファイル選択モーダル */}
+      {showCandidateFilePicker && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowCandidateFilePicker(false)}>
+          <div className="bg-white rounded-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b px-5 py-3 flex items-center justify-between shrink-0">
+              <h3 className="text-[15px] font-bold text-[#374151]">📁 求職者ファイルから選択</h3>
+              <button onClick={() => setShowCandidateFilePicker(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {pickerLoading ? (
+                <p className="text-center text-sm text-gray-400 py-8">読み込み中...</p>
+              ) : candidateFilesForPicker.length === 0 ? (
+                <p className="text-center text-sm text-gray-400 py-8">ファイルがありません</p>
+              ) : (
+                <div className="space-y-1">
+                  {Object.entries(
+                    candidateFilesForPicker.reduce<Record<string, typeof candidateFilesForPicker>>((acc, f) => {
+                      const cat = f.category || "OTHER";
+                      if (!acc[cat]) acc[cat] = [];
+                      acc[cat].push(f);
+                      return acc;
+                    }, {})
+                  ).map(([cat, catFiles]) => (
+                    <div key={cat} className="mb-3">
+                      <p className="text-[12px] font-semibold text-gray-500 mb-1">{CATEGORY_LABELS[cat] || cat}</p>
+                      {catFiles.map((f) => (
+                        <label key={f.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded px-1">
+                          <input type="checkbox" checked={pickerSelectedIds.has(f.id)} onChange={() => setPickerSelectedIds((prev) => { const n = new Set(prev); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
+                          <span className="text-[13px] text-gray-700 truncate">{f.fileName}</span>
+                          <span className="text-[11px] text-gray-400 shrink-0">{formatFileSize(f.fileSize)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="border-t px-5 py-3 flex gap-2 shrink-0">
+              <button onClick={() => setShowCandidateFilePicker(false)} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-sm hover:bg-gray-50">キャンセル</button>
+              <button onClick={handlePickerAttach} disabled={pickerSelectedIds.size === 0 || pickerAttaching} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50">
+                {pickerAttaching ? "添付中..." : `${pickerSelectedIds.size}件を添付`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

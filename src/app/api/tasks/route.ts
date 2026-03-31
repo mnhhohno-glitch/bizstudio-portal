@@ -68,6 +68,22 @@ export async function GET(request: Request) {
       };
     }
 
+    // Title search
+    const search = searchParams.get("search");
+    if (search) {
+      where.title = { contains: search, mode: "insensitive" };
+    }
+
+    // Filter by candidateId
+    const filterCandidateId = searchParams.get("candidateId");
+    if (filterCandidateId) {
+      where.candidateId = filterCandidateId;
+    }
+
+    // Limit override
+    const limitParam = searchParams.get("limit");
+    const perPageOverride = limitParam ? Math.min(100, parseInt(limitParam)) : undefined;
+
     // ソート
     const validSortFields = ["createdAt", "dueDate", "title", "status", "priority"];
     let orderBy: Prisma.TaskOrderByWithRelationInput;
@@ -84,8 +100,8 @@ export async function GET(request: Request) {
       prisma.task.findMany({
         where,
         orderBy,
-        skip: (page - 1) * perPage,
-        take: perPage,
+        skip: (page - 1) * (perPageOverride || perPage),
+        take: perPageOverride || perPage,
         include: {
           category: { select: { id: true, name: true } },
           candidate: { select: { name: true, candidateNumber: true } },
@@ -102,7 +118,7 @@ export async function GET(request: Request) {
       tasks,
       total,
       page,
-      totalPages: Math.ceil(total / perPage),
+      totalPages: Math.ceil(total / (perPageOverride || perPage)),
     });
   } catch (error) {
     console.error("Failed to fetch tasks:", error);

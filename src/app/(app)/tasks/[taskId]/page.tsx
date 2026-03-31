@@ -23,7 +23,7 @@ type Task = {
   createdAt: string;
   createdByUserId: string;
   category: { id: string; name: string } | null;
-  candidate: { name: string; candidateNumber: string } | null;
+  candidate: { id: string; name: string; candidateNumber: string } | null;
   createdByUser: { id: string; name: string } | null;
   assignees: { employee: { id: string; name: string } }[];
   fieldValues: FieldValue[];
@@ -374,6 +374,8 @@ export default function TaskDetailPage() {
             taskId={taskId}
             currentUserId={user.id}
             currentUserRole={user.role}
+            candidateId={task.candidate?.id}
+            candidateName={task.candidate ? `${task.candidate.name}（${task.candidate.candidateNumber}）` : null}
           />
         )}
 

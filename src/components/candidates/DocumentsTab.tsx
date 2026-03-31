@@ -72,6 +72,15 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
   const [sharing, setSharing] = useState(false);
 
+  // File selection + bulk ops
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [bulkDLing, setBulkDLing] = useState(false);
+  const [showAttachModal, setShowAttachModal] = useState(false);
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskResults, setTaskResults] = useState<{ id: string; title: string }[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
   // D&D for meeting sub-tab file area
   const [isAreaDragging, setIsAreaDragging] = useState(false);
   const [areaUploading, setAreaUploading] = useState(false);
@@ -195,6 +204,75 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     } finally {
       setAreaUploading(false);
     }
+  };
+
+  // Reset selection when switching tabs
+  useEffect(() => { setSelectedFileIds(new Set()); }, [activeSubTab]);
+
+  const toggleFileSelect = (id: string) => setSelectedFileIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const allFilesSelected = files.length > 0 && files.every((f) => selectedFileIds.has(f.id));
+
+  const handleBulkFileDownload = async () => {
+    setBulkDLing(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/bulk-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: Array.from(selectedFileIds) }),
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `files_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("ダウンロードに失敗しました"); }
+    finally { setBulkDLing(false); }
+  };
+
+  const handleBulkFileDelete = async () => {
+    if (!confirm(`選択した${selectedFileIds.size}件のファイルを削除しますか？`)) return;
+    for (const id of selectedFileIds) {
+      await fetch(`/api/candidates/${candidateId}/files/${id}`, { method: "DELETE" }).catch(() => {});
+    }
+    setSelectedFileIds(new Set());
+    fetchFiles();
+    fetchCounts();
+    toast.success("削除しました");
+  };
+
+  const searchTasks = async (q: string) => {
+    setTaskSearch(q);
+    if (q.length < 1) { setTaskResults([]); return; }
+    try {
+      const res = await fetch(`/api/tasks?search=${encodeURIComponent(q)}&limit=10&candidateId=${candidateId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTaskResults((data.tasks || []).map((t: { id: string; title: string }) => ({ id: t.id, title: t.title })));
+      }
+    } catch { /* */ }
+  };
+
+  const handleAttachToTask = async () => {
+    if (!selectedTaskId) return;
+    setAttaching(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/attach-to-task`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: Array.from(selectedFileIds), taskId: selectedTaskId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.message);
+      setShowAttachModal(false);
+      setSelectedFileIds(new Set());
+      setSelectedTaskId(null);
+      setTaskSearch("");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "添付に失敗しました"); }
+    finally { setAttaching(false); }
   };
 
   const handleShareUrl = async (fileIds: string[]) => {
@@ -358,10 +436,26 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           </div>
         ) : (
           <div className="space-y-3">
+            {/* Select all + bulk action bar */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer">
+                <input type="checkbox" checked={allFilesSelected} onChange={() => allFilesSelected ? setSelectedFileIds(new Set()) : setSelectedFileIds(new Set(files.map((f) => f.id)))} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
+                全選択
+              </label>
+              {selectedFileIds.size > 0 && (
+                <>
+                  <span className="text-[12px] font-medium text-[#2563EB]">✓ {selectedFileIds.size}件選択</span>
+                  <button onClick={handleBulkFileDownload} disabled={bulkDLing} className="text-[12px] text-[#2563EB] hover:underline disabled:opacity-50">{bulkDLing ? "DL中..." : "📥 一括DL"}</button>
+                  <button onClick={() => { setShowAttachModal(true); setTaskSearch(""); setTaskResults([]); setSelectedTaskId(null); }} className="text-[12px] text-[#2563EB] hover:underline">📎 タスクに添付</button>
+                  <button onClick={handleBulkFileDelete} className="text-[12px] text-red-500 hover:underline">🗑 一括削除</button>
+                </>
+              )}
+            </div>
             {files.map((file) => (
               <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
-                {/* ファイル名 */}
+                {/* チェックボックス + ファイル名 */}
                 <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={selectedFileIds.has(file.id)} onChange={() => toggleFileSelect(file.id)} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] shrink-0" />
                   <span className="text-lg">{getFileIcon(file.mimeType)}</span>
                   <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
                 </div>
@@ -464,6 +558,53 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
               </div>
             </div>
             <button onClick={() => setShareResult(null)} className="w-full mt-4 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50">閉じる</button>
+          </div>
+        </div>
+      )}
+
+      {/* タスクに添付モーダル */}
+      {showAttachModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAttachModal(false)}>
+          <div className="bg-white rounded-xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b px-5 py-3 flex items-center justify-between">
+              <h3 className="text-[15px] font-bold text-[#374151]">📎 タスクに添付</h3>
+              <button onClick={() => setShowAttachModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-[13px] text-gray-600">{selectedFileIds.size}件のファイルを添付</p>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">タスク検索</label>
+                <input
+                  type="text"
+                  value={taskSearch}
+                  onChange={(e) => searchTasks(e.target.value)}
+                  placeholder="タスク名で検索..."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+              </div>
+              {taskResults.length > 0 && (
+                <div className="border border-gray-200 rounded-md max-h-48 overflow-y-auto">
+                  {taskResults.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelectedTaskId(t.id)}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 ${selectedTaskId === t.id ? "bg-blue-50 text-[#2563EB] font-medium" : ""}`}
+                    >
+                      {t.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedTaskId && (
+                <p className="text-[12px] text-green-600">✓ タスクを選択済み</p>
+              )}
+            </div>
+            <div className="border-t px-5 py-3 flex gap-2">
+              <button onClick={() => setShowAttachModal(false)} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-sm hover:bg-gray-50">キャンセル</button>
+              <button onClick={handleAttachToTask} disabled={!selectedTaskId || attaching} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50">
+                {attaching ? "添付中..." : "添付"}
+              </button>
+            </div>
           </div>
         </div>
       )}
