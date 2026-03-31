@@ -425,7 +425,7 @@ export default function AdvisorFloatingPanel({
 
       {/* Panel */}
       <div
-        className={`fixed top-0 right-0 h-full z-50 bg-white shadow-2xl border-l border-gray-200 transition-transform duration-300 ease-in-out w-full lg:w-[480px] ${
+        className={`fixed top-0 right-0 h-full z-50 bg-white shadow-2xl border-l border-gray-200 transition-transform duration-300 ease-in-out w-full lg:w-[50vw] lg:min-w-[480px] lg:max-w-[800px] ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
