@@ -72,15 +72,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
   const [sharing, setSharing] = useState(false);
 
-  // Meeting registration
-  const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [meetingDate, setMeetingDate] = useState(new Date().toISOString().slice(0, 10));
-  const [meetingType, setMeetingType] = useState("初回面談");
-  const [meetingMemo, setMeetingMemo] = useState("");
-  const [meetingFiles, setMeetingFiles] = useState<File[]>([]);
-  const [meetingSubmitting, setMeetingSubmitting] = useState(false);
-  const [isMeetingDragging, setIsMeetingDragging] = useState(false);
-
   // D&D for meeting sub-tab file area
   const [isAreaDragging, setIsAreaDragging] = useState(false);
   const [areaUploading, setAreaUploading] = useState(false);
@@ -165,54 +156,16 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     "text/plain",
   ]);
 
-  const handleMeetingSubmit = async () => {
-    setMeetingSubmitting(true);
-    try {
-      const memo = [
-        `【面談日】${meetingDate}`,
-        `【種別】${meetingType}`,
-        meetingMemo.trim() ? `【メモ】${meetingMemo.trim()}` : "",
-      ].filter(Boolean).join("\n");
+  const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
+    || "https://candidate-intake-production.up.railway.app";
 
-      // Upload each file with memo
-      if (meetingFiles.length > 0) {
-        for (const file of meetingFiles) {
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append("category", "MEETING");
-          formData.append("memo", memo);
-          await fetch(`/api/candidates/${candidateId}/files/upload`, {
-            method: "POST",
-            body: formData,
-          });
-        }
-      } else {
-        // No files — create a placeholder text file with memo content
-        const blob = new Blob([memo], { type: "text/plain" });
-        const fileName = `面談ログ_${meetingDate.replace(/-/g, "")}_${meetingType}.txt`;
-        const formData = new FormData();
-        formData.append("file", blob, fileName);
-        formData.append("category", "MEETING");
-        formData.append("memo", memo);
-        await fetch(`/api/candidates/${candidateId}/files/upload`, {
-          method: "POST",
-          body: formData,
-        });
-      }
-
-      toast.success("面談を登録しました");
-      setShowMeetingModal(false);
-      setMeetingDate(new Date().toISOString().slice(0, 10));
-      setMeetingType("初回面談");
-      setMeetingMemo("");
-      setMeetingFiles([]);
-      fetchFiles();
-      fetchCounts();
-    } catch {
-      toast.error("面談登録に失敗しました");
-    } finally {
-      setMeetingSubmitting(false);
+  const handleOpenIntake = () => {
+    const driveFileIds = files.map((f) => f.driveFileId).filter(Boolean);
+    let url = `${candidateIntakeUrl}/register?candidateId=${candidateId}`;
+    if (driveFileIds.length > 0) {
+      url += `&files=${driveFileIds.join(",")}`;
     }
+    window.open(url, "_blank");
   };
 
   const handleAreaDrop = async (fileList: FileList) => {
@@ -364,7 +317,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
             )}
             {activeSubTab === "MEETING" && (
               <button
-                onClick={() => setShowMeetingModal(true)}
+                onClick={handleOpenIntake}
                 className="border border-green-200 bg-green-50 text-green-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-green-100 transition-colors"
               >
                 📝 面談登録
@@ -460,107 +413,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         )}
         </div>
       </div>
-
-      {/* 面談登録モーダル */}
-      {showMeetingModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowMeetingModal(false)}>
-          <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="border-b px-5 py-3 flex items-center justify-between">
-              <h2 className="text-[15px] font-bold text-[#374151]">📝 面談登録</h2>
-              <button onClick={() => setShowMeetingModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">面談日</label>
-                <input
-                  type="date"
-                  value={meetingDate}
-                  onChange={(e) => setMeetingDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">面談種別</label>
-                <select
-                  value={meetingType}
-                  onChange={(e) => setMeetingType(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-                >
-                  <option value="初回面談">初回面談</option>
-                  <option value="フォローアップ">フォローアップ</option>
-                  <option value="面接対策">面接対策</option>
-                  <option value="その他">その他</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">面談メモ</label>
-                <textarea
-                  value={meetingMemo}
-                  onChange={(e) => setMeetingMemo(e.target.value)}
-                  rows={4}
-                  placeholder="面談内容を記入してください"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none resize-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">ファイル添付（任意）</label>
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setIsMeetingDragging(true); }}
-                  onDragLeave={() => setIsMeetingDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsMeetingDragging(false);
-                    const valid = Array.from(e.dataTransfer.files).filter(
-                      (f) => (ALLOWED_TYPES_SET.has(f.type) || f.name.endsWith(".txt")) && f.size <= 20 * 1024 * 1024
-                    );
-                    if (valid.length > 0) setMeetingFiles((prev) => [...prev, ...valid]);
-                  }}
-                  className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
-                    isMeetingDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
-                  }`}
-                >
-                  <p className="text-[13px] text-gray-500">ファイルをドラッグ＆ドロップ</p>
-                  <label className="inline-block mt-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer text-[12px]">
-                    ファイルを選択
-                    <input
-                      type="file"
-                      multiple
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files) {
-                          setMeetingFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
-                        }
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                </div>
-                {meetingFiles.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {meetingFiles.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between bg-gray-50 rounded px-3 py-1.5 text-[13px]">
-                        <span className="truncate">{f.name} ({(f.size / 1024).toFixed(1)}KB)</span>
-                        <button onClick={() => setMeetingFiles((prev) => prev.filter((_, idx) => idx !== i))} className="text-gray-400 hover:text-red-500 ml-2">✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="border-t px-5 py-3 flex gap-2">
-              <button onClick={() => setShowMeetingModal(false)} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-sm font-medium hover:bg-gray-50">キャンセル</button>
-              <button
-                onClick={handleMeetingSubmit}
-                disabled={meetingSubmitting || !meetingDate}
-                className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
-              >
-                {meetingSubmitting ? "登録中..." : "登録"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* アップロードモーダル */}
       {showUploadModal && (
