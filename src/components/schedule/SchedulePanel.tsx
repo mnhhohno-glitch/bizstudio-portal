@@ -383,33 +383,31 @@ export default function SchedulePanel() {
 
             {/* Status + actions */}
             {schedule && (
-              <div className="mt-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${STATUS_STYLE[schedule.status] || ""}`}>
-                    {schedule.status === "DRAFT" ? "📝 下書き" : schedule.status === "CONFIRMED" ? "✅ 確定済み" : "🏁 完了"}
-                  </span>
-                  {schedule.status === "DRAFT" && schedule.entries.length > 0 && (
-                    <button
-                      onClick={handleStatusChange}
-                      className="rounded-md bg-[#2563EB] px-3 py-1 text-[12px] font-medium text-white hover:bg-[#1D4ED8]"
-                    >
-                      ✅ 確定する
-                    </button>
-                  )}
-                  {schedule.status === "CONFIRMED" && (
-                    <button
-                      onClick={handleStatusChange}
-                      className="rounded-md bg-green-600 px-3 py-1 text-[12px] font-medium text-white hover:bg-green-700"
-                    >
-                      🏁 完了にする
-                    </button>
-                  )}
-                </div>
+              <div className="mt-3 flex items-center gap-2">
+                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_STYLE[schedule.status] || ""}`}>
+                  {schedule.status === "DRAFT" ? "📝 下書き" : schedule.status === "CONFIRMED" ? "✅ 確定済み" : "🏁 完了"}
+                </span>
+                {schedule.status === "DRAFT" && schedule.entries.length > 0 && (
+                  <button
+                    onClick={handleStatusChange}
+                    className="rounded-full border border-[#2563EB] px-2.5 py-0.5 text-[11px] font-medium text-[#2563EB] hover:bg-blue-50"
+                  >
+                    ✅ 確定する
+                  </button>
+                )}
+                {schedule.status === "CONFIRMED" && (
+                  <button
+                    onClick={handleStatusChange}
+                    className="rounded-full border border-[#2563EB] px-2.5 py-0.5 text-[11px] font-medium text-[#2563EB] hover:bg-blue-50"
+                  >
+                    🏁 完了にする
+                  </button>
+                )}
                 {schedule.status !== "COMPLETED" && (
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="text-[11px] text-red-400 hover:text-red-600 disabled:opacity-50"
+                    className="ml-auto text-[11px] text-red-400 hover:text-red-600 disabled:opacity-50"
                   >
                     🗑 削除
                   </button>
