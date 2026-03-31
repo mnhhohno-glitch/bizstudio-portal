@@ -595,7 +595,7 @@ export default function AdvisorFloatingPanel({
                               hr: () => <hr className="my-3 border-gray-300" />,
                             }}
                           >
-                            {greeting?.isGreeting ? greeting.body : msg.content}
+                            {(greeting?.isGreeting ? greeting.body : msg.content).replace(/\n/g, "  \n")}
                           </ReactMarkdown>
                         </div>
                       ) : (() => {
