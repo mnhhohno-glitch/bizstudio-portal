@@ -111,6 +111,7 @@ export default function TaskNewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetCandidateId = searchParams.get("candidateId");
+  const presetCategoryId = searchParams.get("categoryId");
 
   /* ----- master data ----- */
   const [categories, setCategories] = useState<Category[]>([]);
@@ -289,6 +290,21 @@ export default function TaskNewPage() {
       presetApplied.current = true;
     }
   }, [presetCandidateId, candidates]);
+
+  // クエリパラメータでカテゴリをプリセット
+  const categoryPresetApplied = useRef(false);
+  useEffect(() => {
+    if (categoryPresetApplied.current || !presetCategoryId || categories.length === 0) return;
+    // If candidateId is also preset, wait for candidate preset to apply first
+    if (presetCandidateId && !presetApplied.current && candidates.length > 0) return;
+    const found = categories.find((c) => c.id === presetCategoryId);
+    if (found) {
+      setCategoryId(found.id);
+      categoryPresetApplied.current = true;
+      const hasFields = found.fields && found.fields.length > 0;
+      setStep(hasFields ? 2 : 3);
+    }
+  }, [presetCategoryId, categories, presetCandidateId, candidates]);
 
   /* ----- job category cascading ----- */
   useEffect(() => {
