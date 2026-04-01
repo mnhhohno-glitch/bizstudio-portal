@@ -771,16 +771,20 @@ export default function TaskNewPage() {
     setPickerAttaching(true);
     try {
       const selected = candidateFilesForPicker.filter((f) => pickerSelectedIds.has(f.id));
+      let attached = 0;
       for (const f of selected) {
-        const res = await fetch(`/api/candidates/${candidateId}/files/${f.id}?download=true`);
-        if (!res.ok) continue;
-        const data = await res.json();
-        const buffer = Uint8Array.from(atob(data.base64), (c) => c.charCodeAt(0));
-        const blob = new Blob([buffer], { type: data.mimeType || f.mimeType });
-        const file = new File([blob], f.fileName, { type: data.mimeType || f.mimeType });
-        setAttachmentFiles((prev) => [...prev, file]);
+        try {
+          const res = await fetch(`/api/candidates/${candidateId}/files/${f.id}?download=true`);
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const file = new File([blob], f.fileName, { type: blob.type || f.mimeType });
+          setAttachmentFiles((prev) => [...prev, file]);
+          attached++;
+        } catch (e) {
+          console.error(`Failed to download ${f.fileName}:`, e);
+        }
       }
-      setShowCandidateFilePicker(false);
+      if (attached > 0) setShowCandidateFilePicker(false);
     } catch { /* */ }
     finally { setPickerAttaching(false); }
   };
