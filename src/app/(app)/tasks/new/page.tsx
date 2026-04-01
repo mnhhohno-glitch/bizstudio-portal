@@ -845,6 +845,24 @@ export default function TaskNewPage() {
         ))}
       </div>
 
+      {/* Selection summary bar */}
+      {step > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-gray-50 border border-gray-200 px-4 py-2 text-[12px] text-gray-600">
+          {step > 0 && selectedCandidate && (
+            <span>👤 {selectedCandidate.name}（{selectedCandidate.candidateNo}）</span>
+          )}
+          {step > 0 && !withCandidate && candidateId === null && (
+            <span className="text-gray-400">👤 求職者なし</span>
+          )}
+          {step > 1 && selectedCategory && (
+            <span>📁 {selectedCategory.name}{selectedCategory.group ? `（${selectedCategory.group.name}）` : ""}</span>
+          )}
+          {step > 3 && assigneeIds.length > 0 && (
+            <span>👥 {employees.filter((e) => assigneeIds.includes(e.id)).map((e) => e.name).join("、")}（{assigneeIds.length}名）</span>
+          )}
+        </div>
+      )}
+
       {/* card */}
       <div className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         {/* ----- Step 0: 求職者選択 ----- */}
