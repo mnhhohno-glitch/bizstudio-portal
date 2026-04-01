@@ -28,6 +28,7 @@ export default function CandidateRegistrationModal({
   const [candidateNumber, setCandidateNumber] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [nameKana, setNameKana] = useState("");
+  const [isKanaComposing, setIsKanaComposing] = useState(false);
   const [gender, setGender] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,7 +61,7 @@ export default function CandidateRegistrationModal({
     }
 
     if (!nameKana.trim()) {
-      next.nameKana = "ふりがなを入力してください";
+      next.nameKana = "フリガナを入力してください";
     }
 
     if (!gender) {
@@ -198,13 +199,15 @@ export default function CandidateRegistrationModal({
 
           <div>
             <label className="text-[13px] font-medium text-[#374151]">
-              ふりがな <span className="text-red-500">*</span>
+              フリガナ <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              placeholder="例: やまだ たろう"
+              placeholder="例: ヤマダ タロウ"
               value={nameKana}
-              onChange={(e) => setNameKana(e.target.value)}
+              onCompositionStart={() => setIsKanaComposing(true)}
+              onCompositionEnd={(e) => { setIsKanaComposing(false); setNameKana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+              onChange={(e) => setNameKana(isKanaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
               className={errors.nameKana ? errorInputClass : inputClass}
             />
             {errors.nameKana && (

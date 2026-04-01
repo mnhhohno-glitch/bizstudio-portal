@@ -37,11 +37,13 @@ async function importBirthdays() {
     let birthday: Date | null = null;
     if (birthdayRaw) {
       if (typeof birthdayRaw === "number") {
-        // Excel serial date number
+        // Excel serial date number — use UTC noon to prevent JST timezone shift
         const parsed = XLSX.SSF.parse_date_code(birthdayRaw);
-        birthday = new Date(parsed.y, parsed.m - 1, parsed.d);
+        birthday = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d, 12, 0, 0));
       } else {
-        birthday = new Date(birthdayRaw);
+        const dt = new Date(birthdayRaw);
+        // Re-create at UTC noon to prevent timezone shift
+        birthday = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), 12, 0, 0));
       }
 
       if (isNaN(birthday.getTime())) {

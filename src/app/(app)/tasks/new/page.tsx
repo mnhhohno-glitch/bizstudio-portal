@@ -111,6 +111,7 @@ export default function TaskNewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetCandidateId = searchParams.get("candidateId");
+  const presetCategoryId = searchParams.get("categoryId");
 
   /* ----- master data ----- */
   const [categories, setCategories] = useState<Category[]>([]);
@@ -281,7 +282,7 @@ export default function TaskNewPage() {
   const presetApplied = useRef(false);
   useEffect(() => {
     if (presetApplied.current || !presetCandidateId || candidates.length === 0) return;
-    const found = candidates.find((c) => c.id === presetCandidateId);
+    const found = candidates.find((c) => c.id === presetCandidateId || c.candidateNo === presetCandidateId);
     if (found) {
       setWithCandidate(true);
       setCandidateId(found.id);
@@ -289,6 +290,21 @@ export default function TaskNewPage() {
       presetApplied.current = true;
     }
   }, [presetCandidateId, candidates]);
+
+  // クエリパラメータでカテゴリをプリセット
+  const categoryPresetApplied = useRef(false);
+  useEffect(() => {
+    if (categoryPresetApplied.current || !presetCategoryId || categories.length === 0) return;
+    // If candidateId is also preset, wait for candidate preset to apply first
+    if (presetCandidateId && !presetApplied.current && candidates.length > 0) return;
+    const found = categories.find((c) => c.id === presetCategoryId);
+    if (found) {
+      setCategoryId(found.id);
+      categoryPresetApplied.current = true;
+      const hasFields = found.fields && found.fields.length > 0;
+      setStep(hasFields ? 2 : 3);
+    }
+  }, [presetCategoryId, categories, presetCandidateId, candidates]);
 
   /* ----- job category cascading ----- */
   useEffect(() => {
@@ -828,6 +844,24 @@ export default function TaskNewPage() {
           </div>
         ))}
       </div>
+
+      {/* Selection summary bar */}
+      {step > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-gray-50 border border-gray-200 px-4 py-2 text-[12px] text-gray-600">
+          {step > 0 && selectedCandidate && (
+            <span>👤 {selectedCandidate.name}（{selectedCandidate.candidateNo}）</span>
+          )}
+          {step > 0 && !withCandidate && candidateId === null && (
+            <span className="text-gray-400">👤 求職者なし</span>
+          )}
+          {step > 1 && selectedCategory && (
+            <span>📁 {selectedCategory.name}{selectedCategory.group ? `（${selectedCategory.group.name}）` : ""}</span>
+          )}
+          {step > 3 && assigneeIds.length > 0 && (
+            <span>👥 {employees.filter((e) => assigneeIds.includes(e.id)).map((e) => e.name).join("、")}（{assigneeIds.length}名）</span>
+          )}
+        </div>
+      )}
 
       {/* card */}
       <div className="rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">

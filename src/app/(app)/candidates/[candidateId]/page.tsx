@@ -129,6 +129,7 @@ function EditModal({
 }) {
   const [name, setName] = useState(candidate.name);
   const [furigana, setFurigana] = useState(candidate.nameKana || "");
+  const [isFuriganaComposing, setIsFuriganaComposing] = useState(false);
   const [email, setEmail] = useState(candidate.email || "");
   const [gender, setGender] = useState(candidate.gender || "");
   const [birthday, setBirthday] = useState(candidate.birthday ? new Date(candidate.birthday).toISOString().slice(0, 10) : "");
@@ -197,12 +198,14 @@ function EditModal({
           </div>
           <div>
             <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              ふりがな <span className="text-red-500">*</span>
+              フリガナ <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               value={furigana}
-              onChange={(e) => setFurigana(e.target.value)}
+              onCompositionStart={() => setIsFuriganaComposing(true)}
+              onCompositionEnd={(e) => { setIsFuriganaComposing(false); setFurigana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+              onChange={(e) => setFurigana(isFuriganaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
             />
           </div>

@@ -152,7 +152,7 @@ export default function CandidateListClient({
                 <tr>
                   <Th>求職者番号</Th>
                   <Th>氏名</Th>
-                  <Th>ふりがな</Th>
+                  <Th>フリガナ</Th>
                   <Th>性別</Th>
                   <Th>担当CA</Th>
                   <Th>登録日時</Th>
