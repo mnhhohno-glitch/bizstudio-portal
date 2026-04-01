@@ -282,7 +282,7 @@ export default function TaskNewPage() {
   const presetApplied = useRef(false);
   useEffect(() => {
     if (presetApplied.current || !presetCandidateId || candidates.length === 0) return;
-    const found = candidates.find((c) => c.id === presetCandidateId);
+    const found = candidates.find((c) => c.id === presetCandidateId || c.candidateNo === presetCandidateId);
     if (found) {
       setWithCandidate(true);
       setCandidateId(found.id);
