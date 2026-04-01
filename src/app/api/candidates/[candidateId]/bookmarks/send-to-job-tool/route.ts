@@ -248,17 +248,8 @@ export async function POST(
     }
     console.log("[SendToJobTool] Step 5 complete");
 
-    // 6. Start extraction (async)
-    console.log("[SendToJobTool] Step 6: Starting extraction...");
-    try {
-      await fetchWithTimeout(
-        `${KYUUJIN_PDF_TOOL_URL}/api/extraction/projects/${projectId}/extract?processing_unit_id=${processingUnitId}`,
-        { method: "POST" }
-      );
-    } catch (e) {
-      console.error("Extraction start failed:", e);
-    }
-    console.log("[SendToJobTool] Step 6 complete: Extraction started");
+    // 6. Skip extraction — user starts it manually from kyuujin-pdf-tool after reviewing memos
+    console.log("[SendToJobTool] Step 6: Skipped (extraction will be started manually by user)");
 
     const memoUrl = recordKey
       ? `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}&key=${recordKey}`
@@ -272,7 +263,7 @@ export async function POST(
       uploadedCount: downloadedFiles.length,
       failedCount,
       projectUrl: memoUrl,
-      message: `${downloadedFiles.length}件のPDFを送信し、抽出処理を開始しました`,
+      message: `${downloadedFiles.length}件のPDFを送信しました。メモ一覧で引当てを確認してください`,
     });
   } catch (e) {
     console.error("Send to job tool error:", e);
