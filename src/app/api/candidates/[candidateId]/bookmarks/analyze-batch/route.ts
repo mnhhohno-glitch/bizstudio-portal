@@ -57,21 +57,48 @@ function extractRatingsAndComments(
     const searchNames = extractSearchNames(file.fileName);
 
     for (const name of searchNames) {
-      // Find section start: "### 求人N: filename" or "求人N: companyname"
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const sectionPattern = new RegExp(`(?:###?\\s*)?求人\\d+[：:]\\s*[^\\n]*${escaped}`, "i");
-      const sectionMatch = analysisText.match(sectionPattern);
-      if (!sectionMatch) continue;
 
-      const startIndex = analysisText.indexOf(sectionMatch[0]);
+      // Try multiple section header patterns:
+      // 1. New format: 【会社名】求人タイトル
+      // 2. Old format: 求人N: ファイル名
+      // 3. ### 求人N: ファイル名
+      const sectionPatterns = [
+        new RegExp(`【[^】]*${escaped}[^】]*】`, "i"),
+        new RegExp(`(?:###?\\s*)?求人\\d+[：:]\\s*[^\\n]*${escaped}`, "i"),
+      ];
+
+      let startIndex = -1;
+      for (const pattern of sectionPatterns) {
+        const match = analysisText.match(pattern);
+        if (match) {
+          startIndex = analysisText.indexOf(match[0]);
+          if (startIndex !== -1) break;
+        }
+      }
+
+      // Also try direct name search as fallback
+      if (startIndex === -1) {
+        startIndex = analysisText.indexOf(name);
+        if (startIndex !== -1) {
+          // Walk back to find section start (--- or line start)
+          const before = analysisText.substring(Math.max(0, startIndex - 200), startIndex);
+          const lastSep = before.lastIndexOf("---");
+          if (lastSep !== -1) {
+            startIndex = startIndex - 200 + lastSep + before.length - before.lastIndexOf("---");
+            startIndex = Math.max(0, startIndex - 200) + lastSep + 3;
+          }
+        }
+      }
+
       if (startIndex === -1) continue;
 
-      // Find section end
+      // Find section end: next --- separator, next 【company】, next 求人N:, or summary section
       const afterStart = analysisText.substring(startIndex);
-      const nextSection = afterStart.match(/\n(?:###?\s*求人\d|---|\n【総合)/);
+      const nextSection = afterStart.slice(1).match(/\n---|\n【[^】]+】|\n(?:###?\s*)?求人\d+[：:]|\n━━━|\n\n【総合/);
       const endIndex = nextSection
-        ? startIndex + (nextSection.index || afterStart.length)
-        : startIndex + Math.min(afterStart.length, 800);
+        ? startIndex + 1 + (nextSection.index || afterStart.length)
+        : startIndex + Math.min(afterStart.length, 1000);
 
       const comment = analysisText.substring(startIndex, endIndex).trim();
 
@@ -80,7 +107,6 @@ function extractRatingsAndComments(
         if (existing) {
           existing.comment = comment;
         } else {
-          // Extract rating from comment
           const ratingMatch = comment.match(/■\s*総合[：:]\s*([ABCD])/) || comment.match(/総合[：:]\s*([ABCD])/);
           results.set(file.id, { rating: ratingMatch ? ratingMatch[1] : "", comment });
         }
