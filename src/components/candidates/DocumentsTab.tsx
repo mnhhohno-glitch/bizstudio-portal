@@ -414,7 +414,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
         {/* D&D hint */}
         {isAreaDragging && (
-          <div className="mb-3 border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-6 text-center">
+          <div className="mb-3 border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-12 text-center">
             <p className="text-[#2563EB] font-medium text-sm">ここにファイルをドロップしてアップロード</p>
           </div>
         )}
@@ -432,7 +432,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         {isLoading ? (
           <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
         ) : files.length === 0 ? (
-          <div className="py-8 text-center text-[13px] text-gray-400">
+          <div className="py-16 text-center text-[13px] text-gray-400">
             ファイルをドラッグ＆ドロップ、または「+ アップロード」ボタンをクリック
           </div>
         ) : (
