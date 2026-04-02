@@ -62,6 +62,7 @@ type Candidate = {
   gender: string | null;
   email: string | null;
   birthday: string | null;
+  supportStatus: string;
   employeeId: string | null;
   employee: Employee | null;
   guideEntries: GuideEntry[];
@@ -1432,9 +1433,30 @@ export default function CandidateDetailPage() {
               </p>
             )}
           </div>
-          <span className="text-sm text-gray-500">
-            ID: {candidate.candidateNumber}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">ID: {candidate.candidateNumber}</span>
+            <select
+              value={candidate.supportStatus || "BEFORE"}
+              onChange={async (e) => {
+                const val = e.target.value;
+                await fetch(`/api/candidates/${candidate.id}/update`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ supportStatus: val }),
+                });
+                fetchCandidate();
+              }}
+              className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${
+                candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700" :
+                candidate.supportStatus === "ENDED" ? "bg-red-100 text-red-600" :
+                "bg-gray-100 text-gray-600"
+              }`}
+            >
+              <option value="BEFORE">支援前</option>
+              <option value="ACTIVE">支援中</option>
+              <option value="ENDED">支援終了</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-4 mt-4 text-sm text-gray-600">

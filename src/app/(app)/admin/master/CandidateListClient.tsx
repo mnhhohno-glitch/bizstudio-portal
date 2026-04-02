@@ -3,7 +3,21 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
+import { toast } from "sonner";
 import CandidateRegistrationModal from "./CandidateRegistrationModal";
+
+const SUPPORT_TABS = [
+  { key: "ALL", label: "ALL" },
+  { key: "ACTIVE", label: "支援中" },
+  { key: "ENDED", label: "支援終了" },
+  { key: "BEFORE", label: "支援前" },
+] as const;
+
+const SUPPORT_BADGE: Record<string, { label: string; cls: string }> = {
+  BEFORE: { label: "支援前", cls: "bg-gray-100 text-gray-600" },
+  ACTIVE: { label: "支援中", cls: "bg-blue-100 text-blue-700" },
+  ENDED: { label: "支援終了", cls: "bg-red-100 text-red-600" },
+};
 
 type Employee = {
   id: string;
@@ -19,6 +33,7 @@ type CandidateRow = {
   gender: string | null;
   employee: { id: string; name: string } | null;
   createdAt: string;
+  supportStatus: string;
   jobStatus?: "entry" | null;
 };
 
@@ -59,6 +74,7 @@ export default function CandidateListClient({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [supportTab, setSupportTab] = useState("ALL");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -73,16 +89,42 @@ export default function CandidateListClient({
   }, [search]);
 
   const filtered = useMemo(() => {
-    if (!debouncedSearch.trim()) return candidates;
-    const q = debouncedSearch.trim().toLowerCase();
-    return candidates.filter(
-      (c) =>
-        c.candidateNumber.toLowerCase().includes(q) ||
-        c.name.toLowerCase().includes(q) ||
-        (c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
-        (c.employee?.name && c.employee.name.toLowerCase().includes(q))
-    );
-  }, [candidates, debouncedSearch]);
+    let result = candidates;
+    if (supportTab !== "ALL") {
+      result = result.filter((c) => c.supportStatus === supportTab);
+    }
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.trim().toLowerCase();
+      result = result.filter(
+        (c) =>
+          c.candidateNumber.toLowerCase().includes(q) ||
+          c.name.toLowerCase().includes(q) ||
+          (c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
+          (c.employee?.name && c.employee.name.toLowerCase().includes(q))
+      );
+    }
+    return result;
+  }, [candidates, debouncedSearch, supportTab]);
+
+  const tabCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: candidates.length, BEFORE: 0, ACTIVE: 0, ENDED: 0 };
+    for (const c of candidates) { counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1; }
+    return counts;
+  }, [candidates]);
+
+  const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supportStatus: newStatus }),
+      });
+      if (res.ok) {
+        setCandidates((prev) => prev.map((c) => c.id === candidateId ? { ...c, supportStatus: newStatus } : c));
+        toast.success("更新しました");
+      }
+    } catch { toast.error("更新に失敗しました"); }
+  };
 
   const totalFiltered = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
@@ -127,8 +169,28 @@ export default function CandidateListClient({
         </button>
       </div>
 
+      {/* 支援ステータスタブ */}
+      <div className="mt-4 flex border-b border-gray-200">
+        {SUPPORT_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              supportTab === tab.key
+                ? "text-[#2563EB] border-[#2563EB]"
+                : "text-gray-500 hover:text-gray-700 border-transparent"
+            }`}
+          >
+            {tab.label}
+            <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
+              {tabCounts[tab.key] || 0}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* 検索バー */}
-      <div className="mt-5">
+      <div className="mt-4">
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
             🔍
@@ -156,6 +218,7 @@ export default function CandidateListClient({
                   <Th>性別</Th>
                   <Th>担当CA</Th>
                   <Th>登録日時</Th>
+                  <Th>支援状況</Th>
                   <Th>ステータス</Th>
                 </tr>
               </thead>
@@ -196,6 +259,17 @@ export default function CandidateListClient({
                       </span>
                     </Td>
                     <Td>
+                      <select
+                        value={cand.supportStatus}
+                        onChange={(e) => handleSupportStatusChange(cand.id, e.target.value)}
+                        className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
+                      >
+                        <option value="BEFORE">支援前</option>
+                        <option value="ACTIVE">支援中</option>
+                        <option value="ENDED">支援終了</option>
+                      </select>
+                    </Td>
+                    <Td>
                       {cand.jobStatus === "entry" && (
                         <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
                           エントリー
@@ -207,7 +281,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

@@ -222,6 +222,7 @@ model Candidate {
   gender          String?  // "male" | "female" | "other"
   email           String?
   birthday        DateTime?
+  supportStatus   String    @default("BEFORE") @map("support_status")
 
   // 担当キャリアアドバイザー
   employeeId      String?  @map("employee_id")
