@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import { toast } from "sonner";
 import CandidateRegistrationModal from "./CandidateRegistrationModal";
+import SupportEndModal from "@/components/candidates/SupportEndModal";
+import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 
 const SUPPORT_TABS = [
   { key: "ALL", label: "ALL" },
@@ -34,6 +36,7 @@ type CandidateRow = {
   employee: { id: string; name: string } | null;
   createdAt: string;
   supportStatus: string;
+  supportEndReason: string | null;
   jobStatus?: "entry" | null;
 };
 
@@ -75,6 +78,7 @@ export default function CandidateListClient({
   const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ALL");
+  const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -113,6 +117,10 @@ export default function CandidateListClient({
   }, [candidates]);
 
   const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
+    if (newStatus === "ENDED") {
+      setEndModalCandidateId(candidateId);
+      return;
+    }
     try {
       const res = await fetch(`/api/candidates/${candidateId}/update`, {
         method: "PATCH",
@@ -120,7 +128,7 @@ export default function CandidateListClient({
         body: JSON.stringify({ supportStatus: newStatus }),
       });
       if (res.ok) {
-        setCandidates((prev) => prev.map((c) => c.id === candidateId ? { ...c, supportStatus: newStatus } : c));
+        setCandidates((prev) => prev.map((c) => c.id === candidateId ? { ...c, supportStatus: newStatus, supportEndReason: null } : c));
         toast.success("更新しました");
       }
     } catch { toast.error("更新に失敗しました"); }
@@ -262,11 +270,12 @@ export default function CandidateListClient({
                       <select
                         value={cand.supportStatus}
                         onChange={(e) => handleSupportStatusChange(cand.id, e.target.value)}
+                        title={cand.supportEndReason ? REASON_LABEL_MAP[cand.supportEndReason] || "" : ""}
                         className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
                       >
                         <option value="BEFORE">支援前</option>
                         <option value="ACTIVE">支援中</option>
-                        <option value="ENDED">支援終了</option>
+                        <option value="ENDED">{cand.supportEndReason ? `支援終了（${REASON_LABEL_MAP[cand.supportEndReason] || ""}）` : "支援終了"}</option>
                       </select>
                     </Td>
                     <Td>
@@ -347,6 +356,13 @@ export default function CandidateListClient({
         employees={employees}
         onCreated={refreshCandidates}
       />
+      {endModalCandidateId && (
+        <SupportEndModal
+          candidateId={endModalCandidateId}
+          onClose={() => setEndModalCandidateId(null)}
+          onSaved={() => { setEndModalCandidateId(null); refreshCandidates(); }}
+        />
+      )}
     </>
   );
 }

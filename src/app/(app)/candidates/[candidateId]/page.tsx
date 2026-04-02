@@ -7,6 +7,8 @@ import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 import DocumentsTab from "@/components/candidates/DocumentsTab";
 import AdvisorFloatingPanel from "@/components/candidates/AdvisorFloatingPanel";
 import HistoryTab from "@/components/candidates/HistoryTab";
+import SupportEndModal from "@/components/candidates/SupportEndModal";
+import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -63,6 +65,7 @@ type Candidate = {
   email: string | null;
   birthday: string | null;
   supportStatus: string;
+  supportEndReason: string | null;
   employeeId: string | null;
   employee: Employee | null;
   guideEntries: GuideEntry[];
@@ -1281,6 +1284,7 @@ export default function CandidateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [showEndModal, setShowEndModal] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleMethod, setScheduleMethod] = useState("");
@@ -1458,6 +1462,11 @@ export default function CandidateDetailPage() {
             value={candidate.supportStatus || "BEFORE"}
             onChange={async (e) => {
               const val = e.target.value;
+              if (val === "ENDED") {
+                setShowEndModal(true);
+                e.target.value = candidate.supportStatus || "BEFORE"; // Reset select
+                return;
+              }
               await fetch(`/api/candidates/${candidate.id}/update`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
@@ -1473,7 +1482,7 @@ export default function CandidateDetailPage() {
           >
             <option value="BEFORE">支援前</option>
             <option value="ACTIVE">支援中</option>
-            <option value="ENDED">支援終了</option>
+            <option value="ENDED">{candidate.supportStatus === "ENDED" ? `支援終了${candidate.supportEndReason ? `（${REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason}）` : ""}` : "支援終了"}</option>
           </select>
           <button
             onClick={() => setEditModalOpen(true)}
@@ -1703,6 +1712,14 @@ export default function CandidateDetailPage() {
         isOpen={isAdvisorOpen}
         onClose={() => setIsAdvisorOpen(false)}
       />
+
+      {showEndModal && (
+        <SupportEndModal
+          candidateId={candidateId}
+          onClose={() => setShowEndModal(false)}
+          onSaved={fetchCandidate}
+        />
+      )}
     </div>
   );
 }

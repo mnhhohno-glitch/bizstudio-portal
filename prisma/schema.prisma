@@ -223,6 +223,9 @@ model Candidate {
   email           String?
   birthday        DateTime?
   supportStatus   String    @default("BEFORE") @map("support_status")
+  supportEndReason String?  @map("support_end_reason")
+  supportEndNote  String?   @map("support_end_note")
+  supportEndDate  DateTime? @map("support_end_date")
 
   // 担当キャリアアドバイザー
   employeeId      String?  @map("employee_id")

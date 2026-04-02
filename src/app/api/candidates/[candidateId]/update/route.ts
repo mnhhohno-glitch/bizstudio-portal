@@ -50,6 +50,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   if (body.supportStatus !== undefined) {
     updateData.supportStatus = body.supportStatus;
+    // Clear end reason when moving away from ENDED
+    if (body.supportStatus !== "ENDED") {
+      updateData.supportEndReason = null;
+      updateData.supportEndNote = null;
+      updateData.supportEndDate = null;
+    }
+  }
+  if (body.supportEndReason !== undefined) {
+    updateData.supportEndReason = body.supportEndReason || null;
+  }
+  if (body.supportEndNote !== undefined) {
+    updateData.supportEndNote = body.supportEndNote || null;
+  }
+  if (body.supportEndDate !== undefined) {
+    updateData.supportEndDate = body.supportEndDate ? new Date(body.supportEndDate) : null;
   }
 
   const updated = await prisma.candidate.update({

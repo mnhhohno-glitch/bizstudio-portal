@@ -34,6 +34,7 @@ export default async function CandidateMasterPage() {
     employee: c.employee,
     createdAt: c.createdAt.toISOString(),
     supportStatus: (c.supportStatus as string) || "BEFORE",
+    supportEndReason: (c.supportEndReason as string) || null,
     jobStatus: entryCountMap.has(c.id) ? ("entry" as const) : null,
   }));
 
