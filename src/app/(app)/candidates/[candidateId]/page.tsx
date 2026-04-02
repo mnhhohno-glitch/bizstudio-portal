@@ -1433,30 +1433,7 @@ export default function CandidateDetailPage() {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-500">ID: {candidate.candidateNumber}</span>
-            <select
-              value={candidate.supportStatus || "BEFORE"}
-              onChange={async (e) => {
-                const val = e.target.value;
-                await fetch(`/api/candidates/${candidate.id}/update`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ supportStatus: val }),
-                });
-                fetchCandidate();
-              }}
-              className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${
-                candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700" :
-                candidate.supportStatus === "ENDED" ? "bg-red-100 text-red-600" :
-                "bg-gray-100 text-gray-600"
-              }`}
-            >
-              <option value="BEFORE">支援前</option>
-              <option value="ACTIVE">支援中</option>
-              <option value="ENDED">支援終了</option>
-            </select>
-          </div>
+          <span className="text-sm text-gray-500">ID: {candidate.candidateNumber}</span>
         </div>
 
         <div className="flex flex-wrap gap-4 mt-4 text-sm text-gray-600">
@@ -1477,6 +1454,27 @@ export default function CandidateDetailPage() {
         </div>
 
         <div className="flex gap-3 mt-4">
+          <select
+            value={candidate.supportStatus || "BEFORE"}
+            onChange={async (e) => {
+              const val = e.target.value;
+              await fetch(`/api/candidates/${candidate.id}/update`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ supportStatus: val }),
+              });
+              fetchCandidate();
+            }}
+            className={`rounded-md px-4 py-2 text-sm font-medium border cursor-pointer ${
+              candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700 border-blue-200" :
+              candidate.supportStatus === "ENDED" ? "bg-red-100 text-red-600 border-red-200" :
+              "bg-gray-100 text-gray-600 border-gray-300"
+            }`}
+          >
+            <option value="BEFORE">支援前</option>
+            <option value="ACTIVE">支援中</option>
+            <option value="ENDED">支援終了</option>
+          </select>
           <button
             onClick={() => setEditModalOpen(true)}
             className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
