@@ -191,7 +191,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
       for (const file of valid) {
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("category", "MEETING");
+        formData.append("category", activeSubTab);
         await fetch(`/api/candidates/${candidateId}/files/upload`, {
           method: "POST",
           body: formData,
@@ -412,28 +412,28 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         </div>
         <p className="text-sm text-gray-500 mb-4">{DESCRIPTIONS[activeSubTab]}</p>
 
-        {/* D&D hint for MEETING */}
-        {activeSubTab === "MEETING" && isAreaDragging && (
+        {/* D&D hint */}
+        {isAreaDragging && (
           <div className="mb-3 border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-6 text-center">
             <p className="text-[#2563EB] font-medium text-sm">ここにファイルをドロップしてアップロード</p>
           </div>
         )}
-        {activeSubTab === "MEETING" && areaUploading && (
+        {areaUploading && (
           <div className="mb-3 text-center text-sm text-gray-500 animate-pulse">アップロード中...</div>
         )}
 
         {/* ファイル一覧 */}
         <div
-          onDragOver={activeSubTab === "MEETING" ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}
-          onDragEnter={activeSubTab === "MEETING" ? (e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(true); } : undefined}
-          onDragLeave={activeSubTab === "MEETING" ? (e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsAreaDragging(false); } : undefined}
-          onDrop={activeSubTab === "MEETING" ? (e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(false); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); } : undefined}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(true); }}
+          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsAreaDragging(false); }}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(false); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
         >
         {isLoading ? (
           <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
         ) : files.length === 0 ? (
           <div className="py-8 text-center text-[13px] text-gray-400">
-            {activeSubTab === "MEETING" ? "ファイルをドラッグ＆ドロップ、または「+アップロード」「📝 面談登録」ボタンをクリック" : "ファイルはまだありません"}
+            ファイルをドラッグ＆ドロップ、または「+ アップロード」ボタンをクリック
           </div>
         ) : (
           <div className="space-y-3">
