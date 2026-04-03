@@ -44,6 +44,7 @@ export async function GET(
     return NextResponse.json({
       url: data.url ?? null,
       accessCount: data.access_count ?? null,
+      expiresAt: data.expires_at ?? null,
     });
   } catch {
     return NextResponse.json({ url: null });
