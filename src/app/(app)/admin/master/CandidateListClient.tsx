@@ -6,7 +6,7 @@ import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import { toast } from "sonner";
 import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
-import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
+import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 
 const SUPPORT_TABS = [
   { key: "ALL", label: "ALL" },
@@ -79,6 +79,11 @@ export default function CandidateListClient({
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ALL");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
+  const [caFilter, setCaFilter] = useState("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [genderFilter, setGenderFilter] = useState("ALL");
+  const [endReasonFilter, setEndReasonFilter] = useState("ALL");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -107,8 +112,25 @@ export default function CandidateListClient({
           (c.employee?.name && c.employee.name.toLowerCase().includes(q))
       );
     }
+    if (caFilter !== "ALL") {
+      result = result.filter((c) => c.employee?.id === caFilter);
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      result = result.filter((c) => new Date(c.createdAt) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59");
+      result = result.filter((c) => new Date(c.createdAt) <= to);
+    }
+    if (genderFilter !== "ALL") {
+      result = result.filter((c) => c.gender === genderFilter);
+    }
+    if (endReasonFilter !== "ALL") {
+      result = result.filter((c) => c.supportEndReason === endReasonFilter);
+    }
     return result;
-  }, [candidates, debouncedSearch, supportTab]);
+  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<string, number> = { ALL: candidates.length, BEFORE: 0, ACTIVE: 0, ENDED: 0 };
@@ -182,7 +204,7 @@ export default function CandidateListClient({
         {SUPPORT_TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); }}
+            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               supportTab === tab.key
                 ? "text-[#2563EB] border-[#2563EB]"
@@ -211,6 +233,94 @@ export default function CandidateListClient({
             className="w-full border border-gray-300 rounded-lg pl-9 pr-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
           />
         </div>
+      </div>
+
+      {/* 詳細フィルタ */}
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        {/* 担当CA */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">担当CA</label>
+          <select
+            value={caFilter}
+            onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          >
+            <option value="ALL">ALL</option>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>{emp.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* 登録日（開始） */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">登録日（開始）</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          />
+        </div>
+
+        {/* 登録日（終了） */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">登録日（終了）</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          />
+        </div>
+
+        {/* 性別 */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">性別</label>
+          <select
+            value={genderFilter}
+            onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          >
+            <option value="ALL">ALL</option>
+            <option value="male">男性</option>
+            <option value="female">女性</option>
+          </select>
+        </div>
+
+        {/* 支援終了理由（支援終了タブのみ表示） */}
+        {supportTab === "ENDED" && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">終了理由</label>
+            <select
+              value={endReasonFilter}
+              onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            >
+              <option value="ALL">ALL</option>
+              {SUPPORT_END_REASONS.map((r) => (
+                <option key={r.code} value={r.code}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* クリアボタン */}
+        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL") && (
+          <button
+            onClick={() => {
+              setCaFilter("ALL");
+              setDateFrom("");
+              setDateTo("");
+              setGenderFilter("ALL");
+              setEndReasonFilter("ALL");
+              setCurrentPage(1);
+            }}
+            className="text-sm text-[#2563EB] hover:text-[#1D4ED8] hover:underline py-1.5"
+          >
+            クリア
+          </button>
+        )}
       </div>
 
       {/* テーブル */}
