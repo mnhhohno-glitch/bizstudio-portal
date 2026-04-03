@@ -16,7 +16,7 @@ export async function GET(
 
   const candidate = await prisma.candidate.findUnique({
     where: { candidateNumber: candidateNo },
-    select: { birthday: true },
+    select: { birthday: true, email: true },
   });
 
   if (!candidate) {
@@ -29,5 +29,5 @@ export async function GET(
     birthday = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  return NextResponse.json({ birthday });
+  return NextResponse.json({ birthday, email: candidate.email ?? null });
 }
