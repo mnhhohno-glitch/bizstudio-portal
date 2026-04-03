@@ -1293,6 +1293,10 @@ export default function CandidateDetailPage() {
   const [scheduleError, setScheduleError] = useState("");
   const [jobOutputLoading, setJobOutputLoading] = useState(false);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
+  const [mypageUrl, setMypageUrl] = useState<string | null>(null);
+  const [mypageAccessCount, setMypageAccessCount] = useState<number | null>(null);
+  const [mypageLoading, setMypageLoading] = useState(true);
+  const [mypageCopied, setMypageCopied] = useState(false);
 
   const handleOpenJobOutput = async () => {
     if (jobOutputLoading) return;
@@ -1379,7 +1383,15 @@ export default function CandidateDetailPage() {
         }
       })
       .catch(() => {});
-  }, [fetchCandidate, fetchGuideData, fetchJimuSessions]);
+    fetch(`/api/candidates/${candidateId}/mypage`)
+      .then((r) => r.json())
+      .then((data) => {
+        setMypageUrl(data.url ?? null);
+        setMypageAccessCount(data.accessCount ?? null);
+      })
+      .catch(() => {})
+      .finally(() => setMypageLoading(false));
+  }, [fetchCandidate, fetchGuideData, fetchJimuSessions, candidateId]);
 
   const handleTabChange = (tab: TabKey) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1528,6 +1540,33 @@ export default function CandidateDetailPage() {
           >
             {jobOutputLoading ? "読み込み中..." : "📄 求人出力"}
           </button>
+          {mypageLoading ? (
+            <span className="inline-block border border-gray-200 bg-gray-50 rounded-md px-4 py-2 text-sm text-gray-400 animate-pulse">
+              📱 求人マイページ
+            </span>
+          ) : mypageUrl ? (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(mypageUrl);
+                setMypageCopied(true);
+                setTimeout(() => setMypageCopied(false), 2000);
+              }}
+              className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              {mypageCopied ? "✅ コピーしました" : "📱 求人マイページ"}
+              {mypageAccessCount != null && !mypageCopied && (
+                <span className="ml-1 text-xs text-gray-400">(閲覧: {mypageAccessCount}回)</span>
+              )}
+            </button>
+          ) : (
+            <button
+              disabled
+              className="border border-gray-200 bg-gray-50 text-gray-400 rounded-md px-4 py-2 text-sm font-medium cursor-not-allowed"
+              title="求人処理ツールでURLを生成してください"
+            >
+              📱 求人マイページ
+            </button>
+          )}
         </div>
       </div>
 
