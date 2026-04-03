@@ -29,7 +29,9 @@ export default function CandidateRegistrationModal({
   const [candidateName, setCandidateName] = useState("");
   const [nameKana, setNameKana] = useState("");
   const [isKanaComposing, setIsKanaComposing] = useState(false);
+  const [email, setEmail] = useState("");
   const [gender, setGender] = useState("");
+  const [birthday, setBirthday] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -40,7 +42,9 @@ export default function CandidateRegistrationModal({
     setCandidateNumber("");
     setCandidateName("");
     setNameKana("");
+    setEmail("");
     setGender("");
+    setBirthday("");
     setEmployeeId("");
     setErrors({});
     onClose();
@@ -62,6 +66,10 @@ export default function CandidateRegistrationModal({
 
     if (!nameKana.trim()) {
       next.nameKana = "フリガナを入力してください";
+    }
+
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      next.email = "正しいメールアドレスを入力してください";
     }
 
     if (!gender) {
@@ -90,7 +98,9 @@ export default function CandidateRegistrationModal({
           candidateNumber: candidateNumber.trim(),
           name: normalizeName(candidateName),
           nameKana: normalizeName(nameKana),
+          email: email.trim() || undefined,
           gender,
+          birthday: birthday || undefined,
           employeeId,
         }),
       });
@@ -217,6 +227,22 @@ export default function CandidateRegistrationModal({
 
           <div>
             <label className="text-[13px] font-medium text-[#374151]">
+              メールアドレス
+            </label>
+            <input
+              type="email"
+              placeholder="例: yamada@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={errors.email ? errorInputClass : inputClass}
+            />
+            {errors.email && (
+              <p className="text-red-500 text-xs mt-1">{errors.email}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[13px] font-medium text-[#374151]">
               性別 <span className="text-red-500">*</span>
             </label>
             <select
@@ -232,6 +258,18 @@ export default function CandidateRegistrationModal({
             {errors.gender && (
               <p className="text-red-500 text-xs mt-1">{errors.gender}</p>
             )}
+          </div>
+
+          <div>
+            <label className="text-[13px] font-medium text-[#374151]">
+              生年月日
+            </label>
+            <input
+              type="date"
+              value={birthday}
+              onChange={(e) => setBirthday(e.target.value)}
+              className={inputClass}
+            />
           </div>
 
           <div>
