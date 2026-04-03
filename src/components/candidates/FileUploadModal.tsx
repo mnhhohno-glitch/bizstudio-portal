@@ -139,17 +139,17 @@ export default function FileUploadModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
+      <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-6 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5 shrink-0">
           <h2 className="text-[15px] font-bold text-[#374151]">ファイルをアップロード</h2>
           <button onClick={onClose} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm whitespace-pre-wrap">{error}</div>
+          <div className="mb-4 rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm whitespace-pre-wrap shrink-0">{error}</div>
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto min-h-0 flex-1">
           {/* カテゴリ */}
           <div>
             <label className="block text-sm font-medium text-[#374151] mb-1">カテゴリ</label>
@@ -200,7 +200,7 @@ export default function FileUploadModal({
 
           {/* 選択済みファイル一覧 */}
           {selectedFiles.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto">
               {selectedFiles.map((file, i) => (
                 <div key={`${file.name}-${i}`} className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
                   <span className="text-lg">{getIcon(file.type)}</span>
@@ -233,7 +233,7 @@ export default function FileUploadModal({
           </div>
         </div>
 
-        <div className="mt-5 flex gap-3">
+        <div className="mt-5 flex gap-3 shrink-0">
           <button onClick={onClose} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2.5 text-sm font-medium hover:bg-gray-50">
             キャンセル
           </button>
