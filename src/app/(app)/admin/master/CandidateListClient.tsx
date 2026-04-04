@@ -9,10 +9,10 @@ import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 
 const SUPPORT_TABS = [
-  { key: "ALL", label: "ALL" },
   { key: "ACTIVE", label: "支援中" },
-  { key: "ENDED", label: "支援終了" },
   { key: "BEFORE", label: "支援前" },
+  { key: "ENDED", label: "支援終了" },
+  { key: "ALL", label: "ALL" },
 ] as const;
 
 const SUPPORT_BADGE: Record<string, { label: string; cls: string }> = {
@@ -77,7 +77,7 @@ export default function CandidateListClient({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
-  const [supportTab, setSupportTab] = useState("ALL");
+  const [supportTab, setSupportTab] = useState("ACTIVE");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
   const [caFilter, setCaFilter] = useState("ALL");
   const [dateFrom, setDateFrom] = useState("");
