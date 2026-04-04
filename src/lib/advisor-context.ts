@@ -42,6 +42,13 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
   context += `- 氏名: ${candidate.name}\n`;
   context += `- ID: ${candidate.candidateNumber}\n`;
   if (candidate.email) context += `- メール: ${candidate.email}\n`;
+  if (candidate.birthday) {
+    const age = Math.floor(
+      (Date.now() - new Date(candidate.birthday).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
+    );
+    context += `- 生年月日: ${new Date(candidate.birthday).toISOString().slice(0, 10)}\n`;
+    context += `- 年齢: ${age}歳\n`;
+  }
   if (candidate.gender) context += `- 性別: ${candidate.gender === "male" ? "男性" : candidate.gender === "female" ? "女性" : "その他"}\n`;
   context += `- 担当CA: ${candidate.employee?.name || "未設定"}\n`;
   context += `- 登録日: ${candidate.createdAt.toISOString().slice(0, 10)}\n\n`;
@@ -126,6 +133,46 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
         context += `（読み取りに失敗しました）\n\n`;
       }
     }
+  }
+
+  // 応募履歴
+  const jobEntries = await prisma.jobEntry.findMany({
+    where: { candidateId },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    select: {
+      companyName: true,
+      jobTitle: true,
+      status: true,
+      entryFlag: true,
+      entryFlagDetail: true,
+      documentSubmitDate: true,
+      documentPassDate: true,
+      firstInterviewDate: true,
+      finalInterviewDate: true,
+      offerDate: true,
+      acceptanceDate: true,
+      joinDate: true,
+      createdAt: true,
+    },
+  });
+
+  if (jobEntries.length > 0) {
+    context += `## 応募履歴（直近${jobEntries.length}件）\n`;
+    for (const entry of jobEntries) {
+      const flag = entry.entryFlag || "不明";
+      const detail = entry.entryFlagDetail || "";
+      context += `- ${entry.companyName || "不明"} / ${entry.jobTitle || "不明"} — ${flag}${detail ? `（${detail}）` : ""}`;
+      if (entry.documentSubmitDate) context += ` / 書類提出: ${entry.documentSubmitDate.toISOString().slice(0, 10)}`;
+      if (entry.documentPassDate) context += ` / 書類通過: ${entry.documentPassDate.toISOString().slice(0, 10)}`;
+      if (entry.firstInterviewDate) context += ` / 一次面接: ${entry.firstInterviewDate.toISOString().slice(0, 10)}`;
+      if (entry.finalInterviewDate) context += ` / 最終面接: ${entry.finalInterviewDate.toISOString().slice(0, 10)}`;
+      if (entry.offerDate) context += ` / 内定: ${entry.offerDate.toISOString().slice(0, 10)}`;
+      if (entry.acceptanceDate) context += ` / 承諾: ${entry.acceptanceDate.toISOString().slice(0, 10)}`;
+      if (entry.joinDate) context += ` / 入社: ${entry.joinDate.toISOString().slice(0, 10)}`;
+      context += "\n";
+    }
+    context += "\n";
   }
 
   // ブックマーク求人票テキスト（最新5件のみ、コンテキスト肥大化防止）

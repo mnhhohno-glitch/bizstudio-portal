@@ -57,43 +57,54 @@ export async function parseDocWithAI(
   );
 }
 
-/** 画像解析 — OpenAI GPT-5.4（画像は対応） */
+/** 画像解析 — Anthropic Claude Opus 4.6 */
 export async function parseImageWithAI(
   base64Data: string,
   mimeType: string
 ): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY が未設定です");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY が未設定です");
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "gpt-5.4",
+      model: "claude-opus-4-6",
+      max_tokens: 2000,
       messages: [
         {
           role: "user",
           content: [
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } },
-            { type: "text", text: "この画像の内容を詳しく説明してください。テキストが含まれている場合はすべて書き起こしてください。" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mimeType,
+                data: base64Data,
+              },
+            },
+            {
+              type: "text",
+              text: "この画像の内容を詳しく説明してください。テキストが含まれている場合はすべて書き起こしてください。",
+            },
           ],
         },
       ],
-      max_completion_tokens: 2000,
     }),
   });
 
   const data = await response.json();
 
   if (!response.ok) {
-    console.error("OpenAI image parse error:", JSON.stringify(data));
+    console.error("Anthropic image parse error:", JSON.stringify(data));
     return "（画像の読み取りに失敗しました）";
   }
 
-  return data.choices?.[0]?.message?.content || "（画像の読み取りに失敗しました）";
+  return data.content?.[0]?.text || "（画像の読み取りに失敗しました）";
 }
 
 /** テキストファイル — Base64デコードのみ */
