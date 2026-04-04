@@ -1471,20 +1471,24 @@ export default function CandidateDetailPage() {
           </span>
           <span>性別: {genderLabel(candidate.gender)}</span>
           {candidate.birthday && (
-            <span
-              className="cursor-pointer hover:text-[#2563EB] transition-colors"
-              title="クリックでYYYYMMDD形式をコピー"
-              onClick={() => {
-                const d = new Date(candidate.birthday!);
-                const yyyymmdd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-                navigator.clipboard.writeText(yyyymmdd);
-                setBirthdayCopied(true);
-                setTimeout(() => setBirthdayCopied(false), 2000);
-              }}
-            >
-              {birthdayCopied
-                ? "✅ コピーしました"
-                : `🎂 ${new Date(candidate.birthday).getFullYear()}年${new Date(candidate.birthday).getMonth() + 1}月${new Date(candidate.birthday).getDate()}日`}
+            <span className="flex items-center gap-1.5">
+              <span
+                className="cursor-pointer hover:text-[#2563EB] transition-colors"
+                onClick={() => {
+                  const d = new Date(candidate.birthday!);
+                  const yyyymmdd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+                  navigator.clipboard.writeText(yyyymmdd);
+                  setBirthdayCopied(true);
+                  setTimeout(() => setBirthdayCopied(false), 2000);
+                }}
+              >
+                {birthdayCopied
+                  ? "✅ コピーしました"
+                  : `🎂 ${new Date(candidate.birthday).getFullYear()}年${new Date(candidate.birthday).getMonth() + 1}月${new Date(candidate.birthday).getDate()}日`}
+              </span>
+              {!birthdayCopied && (
+                <span className="text-[11px] text-gray-400">📋 クリックでコピー</span>
+              )}
             </span>
           )}
           <span>登録日: {formatDate(candidate.createdAt)}</span>
