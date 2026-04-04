@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { TARGET_AREAS } from "@/lib/constants/target-areas";
+import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -242,7 +242,8 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
   const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
-  const [sendCustomArea, setSendCustomArea] = useState("");
+  const [otherSearch, setOtherSearch] = useState("");
+  const [showOtherDropdown, setShowOtherDropdown] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; projectUrl?: string; message?: string } | null>(null);
   const [sendStep, setSendStep] = useState(0);
@@ -429,7 +430,6 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
   const handleSendToJobTool = async () => {
     const areas = [...sendAreas];
-    if (sendCustomArea.trim()) areas.push(sendCustomArea.trim());
     if (areas.length === 0) return;
     if (sendDbType === "circus" && !memoFile) return;
 
@@ -482,6 +482,8 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     setShowSendModal(false);
     setSendResult(null);
     setSendStep(0);
+    setOtherSearch("");
+    setShowOtherDropdown(false);
     if (sendResult?.success) {
       setSelectedIds(new Set());
     }
@@ -494,6 +496,29 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
       return n;
     });
   };
+
+  const toggleGroup = (prefectures: readonly string[]) => {
+    setSendAreas((prev) => {
+      const n = new Set(prev);
+      const allSelected = prefectures.every((p) => n.has(p));
+      if (allSelected) {
+        for (const p of prefectures) n.delete(p);
+      } else {
+        for (const p of prefectures) {
+          if (!n.has(p) && n.size < 5) n.add(p);
+        }
+      }
+      return n;
+    });
+  };
+
+  const otherSelected = [...sendAreas].filter((a) =>
+    OTHER_PREFECTURES.includes(a)
+  );
+
+  const filteredOtherPrefectures = OTHER_PREFECTURES.filter(
+    (p) => !sendAreas.has(p) && p.includes(otherSearch)
+  );
 
   return (
     <div
@@ -557,7 +582,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   {bulkDownloading ? "⬇ ダウンロード中..." : `⬇ 一括DL（${selectedIds.size}件）`}
                 </button>
                 <button
-                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setSendCustomArea(""); setMemoFile(null); setShowSendModal(true); }}
+                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setOtherSearch(""); setShowOtherDropdown(false); setMemoFile(null); setShowSendModal(true); }}
                   className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
                 >
                   📤 求人出力へ送信（{selectedIds.size}件）
@@ -788,23 +813,98 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   </div>
                 )}
                 <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-2">対象エリア（1〜5件選択）</label>
-                  <div className="grid grid-cols-2 gap-1.5 max-h-[200px] overflow-y-auto">
-                    {TARGET_AREAS.map((area) => (
-                      <label key={area} className="flex items-center gap-1.5 text-[13px] cursor-pointer">
-                        <input type="checkbox" checked={sendAreas.has(area)} onChange={() => toggleArea(area)} disabled={!sendAreas.has(area) && sendAreas.size >= 5} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer disabled:opacity-50" />
-                        {area}
-                      </label>
-                    ))}
+                  <label className="block text-[13px] font-medium text-[#374151] mb-2">
+                    対象エリア（1〜5件選択）
+                    <span className="ml-2 text-[12px] font-normal text-gray-500">{sendAreas.size}/5</span>
+                  </label>
+                  {sendAreas.size >= 5 && (
+                    <p className="text-[11px] text-red-500 mb-2">最大5件まで選択可能です</p>
+                  )}
+                  <div className="space-y-2">
+                    {AREA_GROUPS.map((group) => {
+                      const allSelected = group.prefectures.every((p) => sendAreas.has(p));
+                      const someSelected = !allSelected && group.prefectures.some((p) => sendAreas.has(p));
+                      const wouldExceed = !allSelected && sendAreas.size + group.prefectures.filter((p) => !sendAreas.has(p)).length > 5;
+                      return (
+                        <div key={group.label}>
+                          <label className="flex items-start gap-1.5 text-[13px] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                              onChange={() => toggleGroup(group.prefectures)}
+                              disabled={wouldExceed && !allSelected && !someSelected}
+                              className="w-3.5 h-3.5 mt-0.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer disabled:opacity-50"
+                            />
+                            <span>
+                              <span className="font-medium">{group.label}</span>
+                              <span className="text-[11px] text-gray-500 ml-1">（{group.prefectures.join("・")}）</span>
+                            </span>
+                          </label>
+                          <div className="ml-5 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                            {group.prefectures.map((pref) => (
+                              <label key={pref} className="flex items-center gap-1 text-[12px] cursor-pointer text-gray-600">
+                                <input
+                                  type="checkbox"
+                                  checked={sendAreas.has(pref)}
+                                  onChange={() => toggleArea(pref)}
+                                  disabled={!sendAreas.has(pref) && sendAreas.size >= 5}
+                                  className="w-3 h-3 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer disabled:opacity-50"
+                                />
+                                {pref}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[12px] text-gray-500">その他:</span>
-                    <input value={sendCustomArea} onChange={(e) => setSendCustomArea(e.target.value)} placeholder="エリア名を入力" className="flex-1 border border-gray-300 rounded-md px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
+                  <div className="mt-3">
+                    <span className="text-[12px] font-medium text-gray-600">その他の都道府県</span>
+                    {otherSelected.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5 mb-1.5">
+                        {otherSelected.map((pref) => (
+                          <span key={pref} className="inline-flex items-center gap-1 bg-blue-50 text-[#2563EB] text-[12px] px-2 py-0.5 rounded-full border border-blue-200">
+                            {pref}
+                            <button onClick={() => toggleArea(pref)} className="hover:text-red-500 text-[10px] leading-none">✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="relative mt-1">
+                      <input
+                        value={otherSearch}
+                        onChange={(e) => { setOtherSearch(e.target.value); setShowOtherDropdown(true); }}
+                        onFocus={() => setShowOtherDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowOtherDropdown(false), 200)}
+                        placeholder="都道府県を検索..."
+                        disabled={sendAreas.size >= 5}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] disabled:opacity-50 disabled:bg-gray-50"
+                      />
+                      {showOtherDropdown && filteredOtherPrefectures.length > 0 && (
+                        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-[150px] overflow-y-auto">
+                          {filteredOtherPrefectures.map((pref) => (
+                            <button
+                              key={pref}
+                              onClick={() => {
+                                toggleArea(pref);
+                                setOtherSearch("");
+                                setShowOtherDropdown(false);
+                              }}
+                              disabled={sendAreas.size >= 5}
+                              className="block w-full text-left px-3 py-1.5 text-[12px] text-gray-700 hover:bg-blue-50 hover:text-[#2563EB] disabled:opacity-50"
+                            >
+                              {pref}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleCloseSendModal} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50">キャンセル</button>
-                  <button onClick={handleSendToJobTool} disabled={(sendAreas.size === 0 && !sendCustomArea.trim()) || (sendDbType === "circus" && !memoFile)} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
+                  <button onClick={handleSendToJobTool} disabled={sendAreas.size === 0 || (sendDbType === "circus" && !memoFile)} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
                 </div>
               </div>
             )}
