@@ -55,6 +55,7 @@ export default function AdvisorFloatingPanel({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
 
   const validateAndSetFile = (file: File) => {
     if (file.size > 20 * 1024 * 1024) {
@@ -316,6 +317,56 @@ export default function AdvisorFloatingPanel({
     }
   };
 
+  const handleTypeDiagnosis = async () => {
+    if (isDiagnosing || !activeSessionId || isSending || isAnalyzing) return;
+    setIsDiagnosing(true);
+
+    const diagnosisMessage = `この求職者のタイプ診断と検索戦略を分析してください。
+
+以下の項目を全て出力してください：
+1. 6タイプ志向性診断（主タイプ・副タイプ、根拠付き）
+2. Will-Can-Must分析
+3. 検索条件（職種キーワード、業種S→A→B優先度、年収レンジ、エリア、フリーワード）
+4. 避けるべき求人の特徴
+5. 提案時の注意点（応募を躊躇しそうなポイント、書類通過率の見込み）
+6. 書類作成のポイント（職務経歴書で強調すべき点）`;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `temp-user-${Date.now()}`,
+        role: "user",
+        content: "🔍 タイプ診断を実行",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: `temp-loading-${Date.now()}`,
+        role: "assistant",
+        content: "",
+        createdAt: new Date().toISOString(),
+        isLoading: true,
+      },
+    ]);
+
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: diagnosisMessage }),
+        }
+      );
+      if (!res.ok) throw new Error("タイプ診断の実行に失敗しました");
+      await fetchMessages(activeSessionId);
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => !m.isLoading));
+      alert(err instanceof Error ? err.message : "タイプ診断の実行に失敗しました");
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
   const hasAnalysisHistory = messages.some(
     (m) => m.role === "assistant" && m.content.includes("【求人分析")
   );
@@ -502,6 +553,20 @@ export default function AdvisorFloatingPanel({
             {isGeneratingGreeting && (
               <span className="text-[13px] text-gray-400 animate-pulse">挨拶文を生成中...</span>
             )}
+            <button
+              onClick={handleTypeDiagnosis}
+              disabled={!activeSessionId || isDiagnosing || isSending || isAnalyzing || isGeneratingGreeting}
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isDiagnosing ? (
+                <span className="flex items-center gap-1">
+                  <span className="animate-spin text-sm">⏳</span>
+                  分析中...
+                </span>
+              ) : (
+                "🔍 タイプ診断"
+              )}
+            </button>
             <div className="ml-auto flex items-center gap-2">
               {isAnalyzing ? (
                 <div className="flex items-center gap-2 text-blue-600">
