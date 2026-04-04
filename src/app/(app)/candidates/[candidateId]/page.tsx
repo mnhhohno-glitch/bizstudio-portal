@@ -1471,7 +1471,10 @@ export default function CandidateDetailPage() {
           </span>
           <span>性別: {genderLabel(candidate.gender)}</span>
           {candidate.birthday && (
-            <span className="flex items-center gap-1.5">
+            <span className="inline-flex flex-col items-start">
+              {!birthdayCopied && (
+                <span className="text-[10px] text-gray-400 leading-tight">📋 クリックでコピー</span>
+              )}
               <span
                 className="cursor-pointer hover:text-[#2563EB] transition-colors"
                 onClick={() => {
@@ -1486,9 +1489,6 @@ export default function CandidateDetailPage() {
                   ? "✅ コピーしました"
                   : `🎂 ${new Date(candidate.birthday).getFullYear()}年${new Date(candidate.birthday).getMonth() + 1}月${new Date(candidate.birthday).getDate()}日`}
               </span>
-              {!birthdayCopied && (
-                <span className="text-[11px] text-gray-400">📋 クリックでコピー</span>
-              )}
             </span>
           )}
           <span>登録日: {formatDate(candidate.createdAt)}</span>
