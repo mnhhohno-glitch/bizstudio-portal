@@ -1456,7 +1456,7 @@ export default function CandidateDetailPage() {
           <span className="text-sm text-gray-500">ID: {candidate.candidateNumber}</span>
         </div>
 
-        <div className="flex flex-wrap gap-4 mt-4 text-sm text-gray-600">
+        <div className="flex flex-wrap items-end gap-4 mt-4 text-sm text-gray-600">
           <span>
             ✉{" "}
             {candidate.email || (
