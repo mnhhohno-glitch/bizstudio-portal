@@ -207,11 +207,6 @@ export async function POST(
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
-  }
-
   const { candidateId } = await params;
   const body = await req.json();
   const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate } = body as {
@@ -298,6 +293,11 @@ export async function POST(
 - C: 厳しい — 要件との乖離があり、推薦文でのカバーが必要
 - D: 非常に厳しい — 経歴・スキルの接続が弱い
 判断材料: 必須要件の充足度、経験年数、業界経験、スキルマッチ
+補足判断基準:
+- 業務委託・BPO・派遣での経験は、自社運営の経験より書類評価が低くなる傾向がある
+- 35歳以上で未経験業種への応募は、書類通過率が大幅に下がる
+- 求人票の必須要件だけでなく、年齢の上限感、前職の企業規模感、転職回数の許容範囲など暗黙の基準も考慮する
+- 固定残業時間が長い求人（30時間超）は、安定志向の求職者にはマイナス評価とする
 
 ### ③ 総合（紹介推奨度）
 - A: 積極的に紹介 — 本人希望にも合い、通過も見込める
@@ -387,7 +387,7 @@ ${EVAL_RULES}
   });
   const pastMessages = chatMessages.slice(-MAX_PAST_MESSAGES);
 
-  const messages = [
+  const messagesArray = [
     ...pastMessages.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
@@ -398,25 +398,35 @@ ${EVAL_RULES}
     },
   ];
 
-  // 7. Call OpenAI
+  // 7. Call Anthropic API
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "gpt-5.4",
-        max_completion_tokens: 16000,
+        model: "claude-opus-4-6",
+        max_tokens: 16000,
         temperature: 0.7,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
+        system: [
+          {
+            type: "text",
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" },
+          },
         ],
+        messages: messagesArray,
       }),
       signal: controller.signal,
     });
@@ -425,12 +435,15 @@ ${EVAL_RULES}
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("[AnalyzeBatch] OpenAI error:", response.status, errText);
-      return NextResponse.json({ error: "AI応答の取得に失敗しました" }, { status: 500 });
+      console.error("[AnalyzeBatch] Anthropic error:", response.status, errText);
+      if (response.status === 429) {
+        return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
+      }
+      return NextResponse.json({ error: "AIからの応答取得に失敗しました" }, { status: 500 });
     }
 
     const data = await response.json();
-    const analysisText = data.choices?.[0]?.message?.content || "";
+    const analysisText = data.content?.[0]?.text || "";
 
     // 8. Save to chat
     const label = isLastBatch

@@ -151,9 +151,9 @@ export async function POST(
     console.error("Greeting meeting files fetch error:", e);
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY が未設定です" }, { status: 500 });
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
   const systemPrompt = buildSystemPrompt(format as "line" | "email", advisorName);
@@ -169,20 +169,21 @@ export async function POST(
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "gpt-5.4",
+        model: "claude-opus-4-6",
+        max_tokens: 16000,
+        temperature: 0.7,
+        system: systemPrompt,
         messages: [
-          { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        temperature: 0.7,
-        max_completion_tokens: 16000,
       }),
       signal: controller.signal,
     });
@@ -191,12 +192,15 @@ export async function POST(
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("Greeting OpenAI API error:", response.status, errText);
+      console.error("Greeting Anthropic API error:", response.status, errText);
+      if (response.status === 429) {
+        return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
+      }
       return NextResponse.json({ error: "挨拶文の生成に失敗しました" }, { status: 500 });
     }
 
     const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content;
+    const rawContent = data.content?.[0]?.text;
     const greetingText = rawContent && rawContent.trim() !== ""
       ? rawContent
       : "挨拶文の生成に失敗しました。もう一度お試しください。";
@@ -222,11 +226,11 @@ export async function POST(
     clearTimeout(timeoutId);
 
     if (e instanceof Error && e.name === "AbortError") {
-      console.error("Greeting OpenAI API timeout after", API_TIMEOUT_MS, "ms");
+      console.error("Greeting Anthropic API timeout after", API_TIMEOUT_MS, "ms");
       return NextResponse.json({ error: "タイムアウトしました" }, { status: 504 });
     }
 
-    console.error("Greeting OpenAI API call error:", e);
+    console.error("Greeting Anthropic API call error:", e);
     return NextResponse.json({ error: "挨拶文の生成に失敗しました" }, { status: 500 });
   }
 }
