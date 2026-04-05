@@ -1569,18 +1569,10 @@ export default function CandidateDetailPage() {
             <span className="inline-block border border-gray-200 bg-gray-50 rounded-md px-4 py-2 text-sm text-gray-400 animate-pulse">
               📱 求人マイページ
             </span>
-          ) : mypageUrl ? (
+          ) : (
             <button
               onClick={() => setMypageModalOpen(true)}
               className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              📱 求人マイページ
-            </button>
-          ) : (
-            <button
-              disabled
-              className="border border-gray-200 bg-gray-50 text-gray-400 rounded-md px-4 py-2 text-sm font-medium cursor-not-allowed"
-              title="求人処理ツールでURLを生成してください"
             >
               📱 求人マイページ
             </button>
@@ -1644,7 +1636,7 @@ export default function CandidateDetailPage() {
       )}
 
       {/* 求人マイページモーダル */}
-      {mypageModalOpen && mypageUrl && (
+      {mypageModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setMypageModalOpen(false); setMypageCopied(false); }}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
@@ -1652,46 +1644,52 @@ export default function CandidateDetailPage() {
               <button onClick={() => { setMypageModalOpen(false); setMypageCopied(false); }} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">URL</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={mypageUrl}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50 select-all focus:outline-none focus:border-[#2563EB]"
-                  onFocus={(e) => e.target.select()}
-                />
-              </div>
+            {mypageUrl ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">URL</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={mypageUrl}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 bg-gray-50 select-all focus:outline-none focus:border-[#2563EB]"
+                    onFocus={(e) => e.target.select()}
+                  />
+                </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(mypageUrl);
-                    setMypageCopied(true);
-                    setTimeout(() => setMypageCopied(false), 2000);
-                  }}
-                  className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
-                >
-                  {mypageCopied ? "✅ コピーしました" : "📋 URLをコピー"}
-                </button>
-                <button
-                  onClick={() => window.open(mypageUrl, "_blank")}
-                  className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
-                >
-                  🔗 リンクを開く
-                </button>
-              </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(mypageUrl);
+                      setMypageCopied(true);
+                      setTimeout(() => setMypageCopied(false), 2000);
+                    }}
+                    className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    {mypageCopied ? "✅ コピーしました" : "📋 URLをコピー"}
+                  </button>
+                  <button
+                    onClick={() => window.open(mypageUrl, "_blank")}
+                    className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    🔗 リンクを開く
+                  </button>
+                </div>
 
-              <div className="flex gap-4 text-sm text-gray-500">
-                {mypageAccessCount != null && (
-                  <span>閲覧回数: {mypageAccessCount}回</span>
-                )}
-                {mypageExpiresAt && (
-                  <span>有効期限: {new Date(mypageExpiresAt).toLocaleDateString("ja-JP")}</span>
-                )}
+                <div className="flex gap-4 text-sm text-gray-500">
+                  {mypageAccessCount != null && (
+                    <span>閲覧回数: {mypageAccessCount}回</span>
+                  )}
+                  {mypageExpiresAt && (
+                    <span>有効期限: {new Date(mypageExpiresAt).toLocaleDateString("ja-JP")}</span>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="text-center py-6">
+                <p className="text-sm text-gray-500">マイページが未生成です。求人出力ページで生成してください。</p>
+              </div>
+            )}
 
             <div className="mt-5 flex justify-end">
               <button

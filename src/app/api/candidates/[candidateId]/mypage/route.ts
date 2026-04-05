@@ -43,6 +43,7 @@ export async function GET(
     const data = await res.json();
     return NextResponse.json({
       url: data.url ?? null,
+      isActive: data.is_active ?? false,
       accessCount: data.access_count ?? null,
       expiresAt: data.expires_at ?? null,
     });
