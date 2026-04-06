@@ -238,6 +238,7 @@ model Candidate {
   files           CandidateFile[]
   advisorSessions AdvisorChatSession[]
   jobEntries      JobEntry[]
+  hiddenJobIntroductions HiddenJobIntroduction[]
   shareLinks      FileShareLink[]
 
   createdAt       DateTime @default(now()) @map("created_at")
@@ -1091,6 +1092,19 @@ model JobEntry {
   @@index([entryFlag])
   @@index([isActive])
   @@map("job_entries")
+}
+
+model HiddenJobIntroduction {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  externalJobId   Int       @map("external_job_id")
+  hiddenBy        String?   @map("hidden_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([candidateId, externalJobId])
+  @@index([candidateId])
+  @@map("hidden_job_introductions")
 }
 
 model EntryFlagMaster {

@@ -14,15 +14,11 @@ export async function DELETE(request: Request, context: RouteContext) {
 
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { candidateNumber: true },
+    select: { id: true },
   });
 
   if (!candidate) {
     return NextResponse.json({ error: "求職者が見つかりません" }, { status: 404 });
-  }
-
-  if (!candidate.candidateNumber) {
-    return NextResponse.json({ error: "求職者番号が設定されていません" }, { status: 400 });
   }
 
   const body = await request.json();
@@ -52,58 +48,26 @@ export async function DELETE(request: Request, context: RouteContext) {
     });
   }
 
-  // 外部API（kyuujin-pdf-tool）を呼び出して削除
-  const baseUrl = process.env.KYUUJIN_PDF_TOOL_URL;
-  if (!baseUrl) {
-    return NextResponse.json(
-      { error: "KYUUJIN_PDF_TOOL_URL is not configured" },
-      { status: 500 }
-    );
-  }
-
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const res = await fetch(
-      `${baseUrl}/api/projects/by-job-seeker-id/${candidate.candidateNumber}/jobs`,
-      {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_ids: deletableIds }),
-        signal: controller.signal,
-      }
-    );
-
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => "");
-      console.error("kyuujin-pdf-tool delete failed:", res.status, errorText);
-      return NextResponse.json(
-        { error: "求人の削除に失敗しました" },
-        { status: 502 }
-      );
-    }
-
-    const data = await res.json().catch(() => ({}));
-    const deletedCount = data.deleted_count ?? deletableIds.length;
+    // ローカルDBに非表示レコードを作成（既存は skipDuplicates で無視）
+    await prisma.hiddenJobIntroduction.createMany({
+      data: deletableIds.map((externalJobId) => ({
+        candidateId,
+        externalJobId,
+        hiddenBy: user.id,
+      })),
+      skipDuplicates: true,
+    });
 
     return NextResponse.json({
-      deleted_count: deletedCount,
+      deleted_count: deletableIds.length,
       skipped_count: skippedCount,
       message: skippedCount > 0
-        ? `${deletedCount}件の求人を削除しました（${skippedCount}件はエントリー済みのためスキップ）`
-        : `${deletedCount}件の求人を紹介リストから削除しました`,
+        ? `${deletableIds.length}件の求人を削除しました（${skippedCount}件はエントリー済みのためスキップ）`
+        : `${deletableIds.length}件の求人を紹介リストから削除しました`,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return NextResponse.json(
-        { error: "kyuujin-pdf-tool APIがタイムアウトしました" },
-        { status: 502 }
-      );
-    }
-    console.error("Job introduction delete error:", error);
+    console.error("Job introduction hide error:", error);
     return NextResponse.json(
       { error: "削除処理中にエラーが発生しました" },
       { status: 500 }

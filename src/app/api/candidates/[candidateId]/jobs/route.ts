@@ -71,6 +71,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
             : job.company_name,
         })
       );
+
+      // 非表示にされた求人をフィルタリング
+      const hiddenRecords = await prisma.hiddenJobIntroduction.findMany({
+        where: { candidateId },
+        select: { externalJobId: true },
+      });
+      if (hiddenRecords.length > 0) {
+        const hiddenIds = new Set(hiddenRecords.map((r) => r.externalJobId));
+        data.jobs = data.jobs.filter(
+          (job: { id?: number; [key: string]: unknown }) =>
+            !hiddenIds.has(job.id as number)
+        );
+        data.total_jobs = data.jobs.length;
+      }
     }
 
     return NextResponse.json(data);
