@@ -14,7 +14,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { id: true },
+    select: { id: true, candidateNumber: true },
   });
 
   if (!candidate) {
@@ -58,6 +58,29 @@ export async function DELETE(request: Request, context: RouteContext) {
       })),
       skipDuplicates: true,
     });
+
+    // kyuujinPDFに非表示リクエストを送信（マイページ連動）
+    const KYUUJIN_API_URL = process.env.KYUUJIN_API_URL || "https://web-production-95808.up.railway.app";
+    const KYUUJIN_API_SECRET = process.env.KYUUJIN_API_SECRET;
+
+    if (KYUUJIN_API_SECRET && candidate.candidateNumber) {
+      try {
+        await fetch(`${KYUUJIN_API_URL}/api/external/jobs/hide`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-secret": KYUUJIN_API_SECRET,
+          },
+          body: JSON.stringify({
+            job_ids: deletableIds,
+            job_seeker_id: candidate.candidateNumber,
+          }),
+        });
+      } catch (error) {
+        // kyuujinPDF連携が失敗してもポータル側の削除は成功させる
+        console.error("[KYUUJIN] Failed to hide jobs:", error);
+      }
+    }
 
     return NextResponse.json({
       deleted_count: deletableIds.length,
