@@ -233,6 +233,17 @@ function DeleteConfirmModal({
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
+/* ---------- Sort Icon ---------- */
+function SortIcon({ field, current, dir }: { field: string; current: string | null; dir: "asc" | "desc" }) {
+  const active = current === field;
+  return (
+    <span className="inline-flex flex-col text-[8px] leading-[9px] ml-0.5">
+      <span className={active && dir === "asc" ? "text-[#2563EB]" : "text-gray-300"}>▲</span>
+      <span className={active && dir === "desc" ? "text-[#2563EB]" : "text-gray-300"}>▼</span>
+    </span>
+  );
+}
+
 /* ---------- Bookmark Section ---------- */
 type BookmarkFile = {
   id: string;
@@ -305,6 +316,8 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
+  const [sortField, setSortField] = useState<"name" | "rating" | "uploader" | "date" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
   const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
@@ -466,15 +479,44 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     });
   };
 
-  // Filtered files
-  const filteredFiles = files.filter((f) => {
-    if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    if (filterDate) {
-      const fileDate = new Date(f.createdAt).toISOString().slice(0, 10);
-      if (fileDate !== filterDate) return false;
+  // Filtered + sorted files
+  const handleSort = (field: "name" | "rating" | "uploader" | "date") => {
+    if (sortField === field) {
+      if (sortDir === "asc") { setSortDir("desc"); }
+      else { setSortField(null); setSortDir("asc"); }
+    } else {
+      setSortField(field);
+      setSortDir(field === "date" ? "desc" : "asc");
     }
-    return true;
-  });
+  };
+
+  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+
+  const filteredFiles = (() => {
+    let result = files.filter((f) => {
+      if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (filterDate) {
+        const fileDate = new Date(f.createdAt).toISOString().slice(0, 10);
+        if (fileDate !== filterDate) return false;
+      }
+      return true;
+    });
+    if (sortField) {
+      const dir = sortDir === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        if (sortField === "name") return a.fileName.localeCompare(b.fileName) * dir;
+        if (sortField === "rating") {
+          const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
+          const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
+          return (ra - rb) * dir;
+        }
+        if (sortField === "uploader") return a.uploadedBy.name.localeCompare(b.uploadedBy.name) * dir;
+        if (sortField === "date") return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+        return 0;
+      });
+    }
+    return result;
+  })();
 
   const toggleAll = () => {
     const ids = filteredFiles.map((f) => f.id);
@@ -695,6 +737,42 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
         </div>
       )}
 
+      {/* Table header */}
+      {files.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+          <span className="w-4 shrink-0" />
+          <span
+            onClick={() => handleSort("name")}
+            className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "name" ? "text-[#2563EB]" : ""}`}
+          >
+            会社名
+            <SortIcon field="name" current={sortField} dir={sortDir} />
+          </span>
+          <span
+            onClick={() => handleSort("rating")}
+            className={`w-[90px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "rating" ? "text-[#2563EB]" : ""}`}
+          >
+            評価
+            <SortIcon field="rating" current={sortField} dir={sortDir} />
+          </span>
+          <span
+            onClick={() => handleSort("uploader")}
+            className={`w-[72px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "uploader" ? "text-[#2563EB]" : ""}`}
+          >
+            担当
+            <SortIcon field="uploader" current={sortField} dir={sortDir} />
+          </span>
+          <span
+            onClick={() => handleSort("date")}
+            className={`w-[44px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "date" ? "text-[#2563EB]" : ""}`}
+          >
+            紹介日
+            <SortIcon field="date" current={sortField} dir={sortDir} />
+          </span>
+          <span className="w-[60px] shrink-0" />
+        </div>
+      )}
+
       {/* Scrollable file list */}
       <div className="max-h-[500px] overflow-y-auto">
         {loading ? (
@@ -713,49 +791,56 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   type="checkbox"
                   checked={selectedIds.has(file.id)}
                   onChange={() => toggleSelect(file.id)}
-                  className="w-3.5 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                  className="w-4 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                 />
-                <span className="shrink-0 text-base">{getFileIcon(file.mimeType)}</span>
-                <a
-                  href={getPreviewUrl(file.driveViewUrl)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-w-0 flex-1 text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate"
-                  title="クリックでPDFをプレビュー"
-                >{file.fileName}</a>
-                <span className="shrink-0 text-[11px] text-gray-400">{formatFileSize(file.fileSize)}</span>
-                {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
-                {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAnalysis({
-                        fileName: file.fileName,
-                        rating: file.aiMatchRating!,
-                        comment: file.aiAnalysisComment || "分析コメントがありません",
-                      });
-                    }}
-                    className={`shrink-0 inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border cursor-pointer hover:opacity-80 transition-opacity ${RATING_STYLES[file.aiMatchRating]}`}
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <span className="shrink-0 text-sm">{getFileIcon(file.mimeType)}</span>
+                  <a
+                    href={getPreviewUrl(file.driveViewUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate"
+                    title={file.fileName}
+                  >{file.fileName}</a>
+                  {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
+                </div>
+                <span className="w-[90px] shrink-0">
+                  {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAnalysis({
+                          fileName: file.fileName,
+                          rating: file.aiMatchRating!,
+                          comment: file.aiAnalysisComment || "分析コメントがありません",
+                        });
+                      }}
+                      className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border cursor-pointer hover:opacity-80 transition-opacity ${RATING_STYLES[file.aiMatchRating]}`}
+                    >
+                      {RATING_LABELS[file.aiMatchRating]}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-gray-300">—</span>
+                  )}
+                </span>
+                <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
+                <span className="w-[44px] shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
+                <span className="w-[60px] shrink-0 flex items-center gap-1 justify-end">
+                  <a
+                    href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+                    download
+                    className="text-gray-400 hover:text-gray-700 text-[12px] font-medium"
                   >
-                    {RATING_LABELS[file.aiMatchRating]}
+                    ⬇
+                  </a>
+                  <button
+                    onClick={() => handleDelete(file.id)}
+                    disabled={deletingId === file.id}
+                    className="text-gray-400 hover:text-red-500 text-[12px] font-medium disabled:opacity-50"
+                  >
+                    🗑
                   </button>
-                )}
-                <span className="shrink-0 text-[11px] text-gray-400 hidden sm:inline">{file.uploadedBy.name}</span>
-                <span className="shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
-                <a
-                  href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
-                  download
-                  className="shrink-0 text-gray-400 hover:text-gray-700 text-[12px] font-medium"
-                >
-                  ⬇DL
-                </a>
-                <button
-                  onClick={() => handleDelete(file.id)}
-                  disabled={deletingId === file.id}
-                  className="shrink-0 text-gray-400 hover:text-red-500 text-[12px] font-medium disabled:opacity-50"
-                >
-                  🗑
-                </button>
+                </span>
               </div>
             ))}
           </div>
