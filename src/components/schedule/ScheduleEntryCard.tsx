@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 export interface ScheduleEntryCardProps {
   startTime: string;
   endTime: string;
@@ -12,9 +14,11 @@ export interface ScheduleEntryCardProps {
   entryId?: string;
   canComplete?: boolean;
   canEdit?: boolean;
+  canDrag?: boolean;
   onToggleComplete?: (entryId: string) => void;
   onEdit?: (entryId: string) => void;
   onDelete?: (entryId: string) => void;
+  dragHandleProps?: Record<string, unknown>;
 }
 
 export default function ScheduleEntryCard({
@@ -29,12 +33,32 @@ export default function ScheduleEntryCard({
   entryId,
   canComplete = false,
   canEdit = false,
+  canDrag = false,
   onToggleComplete,
   onEdit,
   onDelete,
+  dragHandleProps,
 }: ScheduleEntryCardProps) {
   return (
     <div className={`group flex rounded-lg overflow-hidden transition-colors ${isActive ? "bg-blue-50 ring-1 ring-blue-200" : "bg-[#F9FAFB] hover:bg-gray-100"} ${isCompleted ? "opacity-50" : ""}`}>
+      {/* Drag handle */}
+      {canDrag && (
+        <div
+          {...dragHandleProps}
+          className="flex items-center pl-1.5 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 touch-none"
+          title="ドラッグして並び替え"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3" r="1.2" />
+            <circle cx="11" cy="3" r="1.2" />
+            <circle cx="5" cy="8" r="1.2" />
+            <circle cx="11" cy="8" r="1.2" />
+            <circle cx="5" cy="13" r="1.2" />
+            <circle cx="11" cy="13" r="1.2" />
+          </svg>
+        </div>
+      )}
+
       {/* Checkbox */}
       {canComplete && entryId && (
         <div className="flex items-center pl-2">
