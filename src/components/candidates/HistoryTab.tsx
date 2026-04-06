@@ -164,6 +164,72 @@ function EntryDateModal({
   );
 }
 
+/* ---------- Delete Confirm Modal ---------- */
+function DeleteConfirmModal({
+  count,
+  skippedCount,
+  onConfirm,
+  onCancel,
+  deleting,
+}: {
+  count: number;
+  skippedCount: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white rounded-xl max-w-md w-full mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[15px] font-bold text-[#374151]">
+            紹介リストから削除
+          </h2>
+          <button
+            onClick={onCancel}
+            className="text-[#6B7280] hover:text-[#374151] text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        <p className="text-sm text-gray-600 mb-2">
+          選択した{count}件の求人を紹介リストから削除しますか？
+        </p>
+
+        {skippedCount > 0 && (
+          <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-2 mb-4">
+            ※エントリー済みの{skippedCount}件は削除されません
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            disabled={deleting}
+            className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="bg-red-500 text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
+          >
+            {deleting ? "削除中..." : "削除する"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
@@ -961,6 +1027,9 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
   const [showEntryModal, setShowEntryModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<number[]>([]);
+  const [jobDeleting, setJobDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
 
@@ -1127,6 +1196,48 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
     }
   };
 
+  /* ---------- Job Delete Handlers ---------- */
+  const openDeleteModal = (jobIds: number[]) => {
+    setDeleteTargetIds(jobIds);
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteJobs = async () => {
+    if (deleteTargetIds.length === 0) return;
+    setJobDeleting(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/job-introductions`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_ids: deleteTargetIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "削除に失敗しました");
+      }
+      const data = await res.json();
+      if (data.deleted_count > 0) {
+        toast.success(data.message);
+      } else {
+        toast.error(data.message);
+      }
+      setSelectedJobIds((prev) => {
+        const next = new Set(prev);
+        for (const id of deleteTargetIds) next.delete(id);
+        return next;
+      });
+      setShowDeleteModal(false);
+      setDeleteTargetIds([]);
+      fetchJobs();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "削除に失敗しました");
+    } finally {
+      setJobDeleting(false);
+    }
+  };
+
+  const deleteSkippedCount = deleteTargetIds.filter((id) => enteredJobIds.has(id)).length;
+
   /* ---------- Render ---------- */
   const allJobs = jobsData?.jobs || [];
   const totalJobs = jobsData?.total_jobs ?? 0;
@@ -1220,14 +1331,25 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                 {allSelectableChecked ? "☑ 全解除" : "☐ 全選択"}
               </button>
             )}
-            <button
-              onClick={() => setShowEntryModal(true)}
-              disabled={selectedJobIds.size === 0 || submitting}
-              className="ml-auto bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ☑ 選択してエントリー
-              {selectedJobIds.size > 0 && ` (${selectedJobIds.size})`}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              {selectedJobIds.size > 0 && (
+                <button
+                  onClick={() => openDeleteModal(Array.from(selectedJobIds))}
+                  disabled={jobDeleting}
+                  className="border border-red-400 text-red-500 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  🗑 選択を削除（{selectedJobIds.size}件）
+                </button>
+              )}
+              <button
+                onClick={() => setShowEntryModal(true)}
+                disabled={selectedJobIds.size === 0 || submitting}
+                className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ☑ 選択してエントリー
+                {selectedJobIds.size > 0 && ` (${selectedJobIds.size})`}
+              </button>
+            </div>
           </div>
 
           {/* コンテンツ */}
@@ -1287,6 +1409,17 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                         <span className="shrink-0 ml-auto text-xs text-gray-400">
                           {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
                         </span>
+                        {!isEntered && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openDeleteModal([job.id]); }}
+                            className="shrink-0 ml-1 p-1 text-gray-400 hover:text-red-500 transition-colors rounded"
+                            title="紹介リストから削除"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
                       </div>
                       {/* 2行目: 求人タイトル + 紹介日 */}
                       <div className="flex items-start justify-between gap-3 mt-1 ml-6">
@@ -1453,6 +1586,17 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
           count={selectedJobIds.size}
           onConfirm={handleEntrySubmit}
           onCancel={() => setShowEntryModal(false)}
+        />
+      )}
+
+      {/* 削除確認モーダル */}
+      {showDeleteModal && (
+        <DeleteConfirmModal
+          count={deleteTargetIds.length}
+          skippedCount={deleteSkippedCount}
+          onConfirm={handleDeleteJobs}
+          onCancel={() => { setShowDeleteModal(false); setDeleteTargetIds([]); }}
+          deleting={jobDeleting}
         />
       )}
     </div>
