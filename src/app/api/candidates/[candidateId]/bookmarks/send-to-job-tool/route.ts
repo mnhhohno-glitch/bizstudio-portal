@@ -101,8 +101,17 @@ export async function POST(
 
     // 2. Download bookmark PDFs from Google Drive (parallel, batched)
     console.log("[SendToJobTool] Step 2: Downloading PDFs from Google Drive...", { fileCount: fileIds.length });
-    const bookmarkFiles = await prisma.candidateFile.findMany({
-      where: { id: { in: fileIds }, category: "BOOKMARK" },
+    // AI評価順（A→B→C→D→未評価）でソート
+    const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+    const bookmarkFiles = (
+      await prisma.candidateFile.findMany({
+        where: { id: { in: fileIds }, category: "BOOKMARK" },
+      })
+    ).sort((a, b) => {
+      const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
+      const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
+      if (ra !== rb) return ra - rb;
+      return a.fileName.localeCompare(b.fileName);
     });
 
     const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string }[] = [];
