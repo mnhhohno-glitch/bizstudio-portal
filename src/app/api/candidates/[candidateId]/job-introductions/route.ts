@@ -65,7 +65,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     if (KYUUJIN_API_SECRET && candidate.candidateNumber) {
       try {
-        await fetch(`${KYUUJIN_API_URL}/api/external/jobs/hide`, {
+        await fetch(`${KYUUJIN_API_URL}/api/external/mypage/jobs/hide`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
