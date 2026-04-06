@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { PageTitle } from "@/components/ui/PageTitle";
 
+type TaskAssigneeStatusItem = {
+  userId: string;
+  isCompleted: boolean;
+  completedAt: string | null;
+};
 type Task = {
   id: string;
   title: string;
@@ -11,9 +16,11 @@ type Task = {
   priority: string | null;
   dueDate: string | null;
   createdAt: string;
+  completionType: string;
   category: { id: string; name: string } | null;
   candidate: { name: string; candidateNumber: string } | null;
   assignees: { employee: { name: string } }[];
+  assigneeStatuses: TaskAssigneeStatusItem[];
 };
 type Category = { id: string; name: string; group: { id: string; name: string; sortOrder: number } | null };
 type CatGroup = { id: string; name: string; sortOrder: number };
@@ -132,11 +139,16 @@ export default function TasksPage() {
 
   const handleSingleComplete = async (id: string) => {
     try {
-      await fetch(`/api/tasks/${id}/status`, {
+      const res = await fetch(`/api/tasks/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "COMPLETED" }),
       });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "ステータス更新に失敗しました");
+        return;
+      }
       await fetchTasks();
     } catch { /* ignore */ }
   };
@@ -465,9 +477,15 @@ export default function TasksPage() {
                     />
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
-                      {STATUS_LABEL[t.status] ?? t.status}
-                    </span>
+                    {t.completionType === "all" && t.assignees.length > 1 && t.status !== "COMPLETED" ? (
+                      <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                        {t.assigneeStatuses?.filter((s) => s.isCompleted).length ?? 0}/{t.assignees.length}完了
+                      </span>
+                    ) : (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
+                        {STATUS_LABEL[t.status] ?? t.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <Link href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
@@ -511,7 +529,7 @@ export default function TasksPage() {
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
                           className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
-                          title="完了にする"
+                          title={t.completionType === "all" && t.assignees.length > 1 ? "自分を完了にする" : "完了にする"}
                         >
                           ✓
                         </button>

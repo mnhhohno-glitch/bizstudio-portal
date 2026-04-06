@@ -13,6 +13,12 @@ type FieldValue = {
   field: { id: string; label: string; fieldType: string; sortOrder: number; options: Option[] };
   value: string;
 };
+type AssigneeStatus = {
+  userId: string;
+  isCompleted: boolean;
+  completedAt: string | null;
+  user: { id: string; name: string };
+};
 type Task = {
   id: string;
   title: string;
@@ -22,10 +28,12 @@ type Task = {
   dueDate: string | null;
   createdAt: string;
   createdByUserId: string;
+  completionType: string;
   category: { id: string; name: string } | null;
   candidate: { id: string; name: string; candidateNumber: string } | null;
   createdByUser: { id: string; name: string } | null;
   assignees: { employee: { id: string; name: string } }[];
+  assigneeStatuses: AssigneeStatus[];
   fieldValues: FieldValue[];
   attachments: unknown[];
   comments: unknown[];
@@ -87,6 +95,7 @@ export default function TaskDetailPage() {
   }, [fetchTask]);
 
   const canEdit = user && task && (task.createdByUserId === user.id || user.role === "admin");
+  const isAllCompletion = task?.completionType === "all" && task.assignees.length > 1;
 
   const handleStatusChange = async (newStatus: string) => {
     if (statusUpdating || !task) return;
@@ -102,7 +111,12 @@ export default function TaskDetailPage() {
         alert(err.error || "ステータス更新に失敗しました");
         return;
       }
-      setTask((prev) => (prev ? { ...prev, status: newStatus } : prev));
+      // 全員完了タイプの場合はサーバーの最新状態を再取得
+      if (isAllCompletion) {
+        await fetchTask();
+      } else {
+        setTask((prev) => (prev ? { ...prev, status: newStatus } : prev));
+      }
     } catch {
       alert("ステータス更新に失敗しました");
     } finally {
@@ -142,6 +156,12 @@ export default function TaskDetailPage() {
     return new Date(d).toLocaleDateString("ja-JP");
   };
 
+  const formatDateTime = (d: string | null) => {
+    if (!d) return "";
+    const date = new Date(d);
+    return `${date.toLocaleDateString("ja-JP")} ${date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
   const isOverdue = task && task.dueDate && task.status !== "COMPLETED" &&
     new Date(task.dueDate) < new Date(new Date().toDateString());
 
@@ -164,6 +184,12 @@ export default function TaskDetailPage() {
     );
   }
 
+  // 全員完了タイプの進捗計算
+  const completedCount = task.assigneeStatuses?.filter((s) => s.isCompleted).length ?? 0;
+  const totalAssignees = task.assignees.length;
+  const myStatus = task.assigneeStatuses?.find((s) => s.userId === user?.id);
+  const isMyCompleted = myStatus?.isCompleted ?? false;
+
   // Sort field values by field sortOrder
   const sortedFieldValues = [...task.fieldValues].sort(
     (a, b) => a.field.sortOrder - b.field.sortOrder
@@ -183,16 +209,29 @@ export default function TaskDetailPage() {
         {/* status + priority badges + actions */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {/* status dropdown */}
-          <select
-            value={task.status}
-            disabled={statusUpdating}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            className={`rounded-full border-0 px-3 py-1 text-[12px] font-medium outline-none ${STATUS_COLOR[task.status] ?? ""}`}
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-            ))}
-          </select>
+          {isAllCompletion ? (
+            <span className={`inline-block rounded-full px-3 py-1 text-[12px] font-medium ${STATUS_COLOR[task.status] ?? ""}`}>
+              {STATUS_LABEL[task.status] ?? task.status}
+            </span>
+          ) : (
+            <select
+              value={task.status}
+              disabled={statusUpdating}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className={`rounded-full border-0 px-3 py-1 text-[12px] font-medium outline-none ${STATUS_COLOR[task.status] ?? ""}`}
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+              ))}
+            </select>
+          )}
+
+          {/* 全員完了タイプの進捗バッジ */}
+          {isAllCompletion && (
+            <span className="inline-block rounded-full bg-purple-100 px-2.5 py-0.5 text-[12px] font-medium text-purple-700">
+              {completedCount}/{totalAssignees}完了
+            </span>
+          )}
 
           {task.priority && (
             <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${PRIORITY_COLOR[task.priority] ?? ""}`}>
@@ -219,24 +258,50 @@ export default function TaskDetailPage() {
               >
                 複製
               </button>
-              {task.status !== "COMPLETED" ? (
-                <button
-                  type="button"
-                  disabled={statusUpdating}
-                  onClick={() => handleStatusChange("COMPLETED")}
-                  className="rounded-[6px] border border-green-200 px-3 py-1.5 text-[13px] font-medium text-green-600 transition-colors hover:bg-green-50"
-                >
-                  完了
-                </button>
+              {isAllCompletion ? (
+                // 全員完了タイプ: 自分の完了状態を切り替えるボタン
+                !isMyCompleted ? (
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={() => handleStatusChange("COMPLETED")}
+                    className="rounded-[6px] border border-green-200 px-3 py-1.5 text-[13px] font-medium text-green-600 transition-colors hover:bg-green-50"
+                    title="自分の完了状態を変更します"
+                  >
+                    自分を完了
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={() => handleStatusChange("NOT_STARTED")}
+                    className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6]"
+                    title="自分の完了状態を取り消します"
+                  >
+                    自分を未完了に戻す
+                  </button>
+                )
               ) : (
-                <button
-                  type="button"
-                  disabled={statusUpdating}
-                  onClick={() => handleStatusChange("NOT_STARTED")}
-                  className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6]"
-                >
-                  未完了に戻す
-                </button>
+                // 通常タイプ
+                task.status !== "COMPLETED" ? (
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={() => handleStatusChange("COMPLETED")}
+                    className="rounded-[6px] border border-green-200 px-3 py-1.5 text-[13px] font-medium text-green-600 transition-colors hover:bg-green-50"
+                  >
+                    完了
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={() => handleStatusChange("NOT_STARTED")}
+                    className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] font-medium text-[#6B7280] transition-colors hover:bg-[#F3F4F6]"
+                  >
+                    未完了に戻す
+                  </button>
+                )
               )}
               <button
                 type="button"
@@ -266,10 +331,61 @@ export default function TaskDetailPage() {
                   : "-"
               }
             />
-            <InfoCell
-              label="担当者"
-              value={task.assignees.map((a) => a.employee.name).join("、") || "-"}
-            />
+            {/* 全員完了タイプの場合は担当者欄を専用表示 */}
+            {isAllCompletion ? (
+              <div className="sm:col-span-2">
+                <dt className="mb-2 text-[12px] font-medium text-[#6B7280]">
+                  担当者（全員完了で完了）
+                  <span className="ml-2 inline-block rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                    {completedCount}/{totalAssignees} 完了
+                  </span>
+                </dt>
+                <dd className="space-y-1.5">
+                  {task.assignees.map((a) => {
+                    const assigneeStatus = task.assigneeStatuses?.find(
+                      (s) => s.user?.name === a.employee.name
+                    );
+                    const completed = assigneeStatus?.isCompleted ?? false;
+                    const isMe = user && assigneeStatus?.userId === user.id;
+                    return (
+                      <div
+                        key={a.employee.id}
+                        className={`flex items-center gap-2 rounded-[6px] px-3 py-2 text-[14px] ${
+                          completed ? "bg-green-50" : "bg-gray-50"
+                        }`}
+                      >
+                        <span className="text-[16px]">{completed ? "\u2705" : "\u2B1C"}</span>
+                        <span className={`font-medium ${completed ? "text-[#374151]" : "text-[#6B7280]"}`}>
+                          {a.employee.name}
+                        </span>
+                        {completed ? (
+                          <span className="ml-auto text-[12px] text-green-600">
+                            完了 {formatDateTime(assigneeStatus?.completedAt ?? null)}
+                          </span>
+                        ) : (
+                          <span className="ml-auto text-[12px] text-[#9CA3AF]">未完了</span>
+                        )}
+                        {isMe && !completed && (
+                          <button
+                            type="button"
+                            disabled={statusUpdating}
+                            onClick={() => handleStatusChange("COMPLETED")}
+                            className="ml-2 rounded-[4px] bg-green-600 px-2 py-0.5 text-[11px] font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+                          >
+                            完了する
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </dd>
+              </div>
+            ) : (
+              <InfoCell
+                label="担当者"
+                value={task.assignees.map((a) => a.employee.name).join("、") || "-"}
+              />
+            )}
             <InfoCell
               label="期限"
               value={formatDate(task.dueDate)}

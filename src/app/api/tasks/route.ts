@@ -109,6 +109,9 @@ export async function GET(request: Request) {
           assignees: {
             include: { employee: { select: { name: true } } },
           },
+          assigneeStatuses: {
+            select: { userId: true, isCompleted: true, completedAt: true },
+          },
         },
       }),
       prisma.task.count({ where }),
@@ -183,6 +186,29 @@ export async function POST(request: Request) {
         assignees: { include: { employee: { select: { name: true } } } },
       },
     });
+
+    // completionType="all" の場合、全担当者分の TaskAssigneeStatus を生成
+    if ((completionType || "any") === "all" && assigneeIds.length > 1) {
+      const assigneeEmployees = await prisma.employee.findMany({
+        where: { id: { in: assigneeIds }, status: "active" },
+        select: { id: true, name: true },
+      });
+      const assigneeNames = assigneeEmployees.map((e) => e.name);
+      const assigneeUsers = assigneeNames.length > 0
+        ? await prisma.user.findMany({
+            where: { name: { in: assigneeNames }, status: "active" },
+            select: { id: true, name: true },
+          })
+        : [];
+      const statusRecords = assigneeUsers.map((u) => ({
+        taskId: task.id,
+        userId: u.id,
+        isCompleted: false,
+      }));
+      if (statusRecords.length > 0) {
+        await prisma.taskAssigneeStatus.createMany({ data: statusRecords });
+      }
+    }
 
     // LINE WORKS通知（失敗してもタスク作成には影響させない）
     try {

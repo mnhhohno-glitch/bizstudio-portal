@@ -48,39 +48,86 @@ export async function PATCH(
     }
 
     // 「全員完了で完了」タイプの場合の特別処理
-    if (status === "COMPLETED" && task.completionType === "all" && task.assignees.length > 1) {
-      // 自分の完了状態を更新
-      await prisma.taskAssigneeStatus.upsert({
-        where: { taskId_userId: { taskId, userId: actor.id } },
-        create: { taskId, userId: actor.id, isCompleted: true, completedAt: new Date() },
-        update: { isCompleted: true, completedAt: new Date() },
-      });
-
-      // 全担当者の完了状態をチェック
-      const allStatuses = await prisma.taskAssigneeStatus.findMany({
-        where: { taskId },
-      });
-      const completedCount = allStatuses.filter((s) => s.isCompleted).length;
-      const totalAssignees = task.assignees.length;
-
-      if (completedCount >= totalAssignees) {
-        // 全員完了 → タスク全体を完了
-        await prisma.task.update({ where: { id: taskId }, data: { status: "COMPLETED" } });
-        // 完了通知
-        sendCompletionNotification(task, actor).catch((e) => console.error("完了通知エラー:", e));
-      } else {
-        // 一部完了 → 対応中に設定（未着手から変更）
-        if (task.status === "NOT_STARTED") {
-          await prisma.task.update({ where: { id: taskId }, data: { status: "IN_PROGRESS" } });
+    if (task.completionType === "all" && task.assignees.length > 1) {
+      if (status === "COMPLETED") {
+        // TaskAssigneeStatus がまだ存在しない場合は全担当者分を自動生成
+        if (task.assigneeStatuses.length === 0) {
+          const assigneeEmployees = await prisma.employee.findMany({
+            where: { id: { in: task.assignees.map((a) => a.employeeId) }, status: "active" },
+            select: { name: true },
+          });
+          const assigneeUsers = assigneeEmployees.length > 0
+            ? await prisma.user.findMany({
+                where: { name: { in: assigneeEmployees.map((e) => e.name) }, status: "active" },
+                select: { id: true },
+              })
+            : [];
+          if (assigneeUsers.length > 0) {
+            await prisma.taskAssigneeStatus.createMany({
+              data: assigneeUsers.map((u) => ({ taskId, userId: u.id, isCompleted: false })),
+              skipDuplicates: true,
+            });
+          }
         }
+
+        // 自分の完了状態を更新
+        await prisma.taskAssigneeStatus.upsert({
+          where: { taskId_userId: { taskId, userId: actor.id } },
+          create: { taskId, userId: actor.id, isCompleted: true, completedAt: new Date() },
+          update: { isCompleted: true, completedAt: new Date() },
+        });
+
+        // 全担当者の完了状態をチェック
+        const allStatuses = await prisma.taskAssigneeStatus.findMany({
+          where: { taskId },
+        });
+        const completedCount = allStatuses.filter((s) => s.isCompleted).length;
+        const totalAssignees = task.assignees.length;
+
+        if (completedCount >= totalAssignees) {
+          // 全員完了 → タスク全体を完了
+          await prisma.task.update({ where: { id: taskId }, data: { status: "COMPLETED" } });
+          // 完了通知
+          sendCompletionNotification(task, actor).catch((e) => console.error("完了通知エラー:", e));
+        } else {
+          // 一部完了 → 対応中に設定（未着手から変更）
+          if (task.status === "NOT_STARTED") {
+            await prisma.task.update({ where: { id: taskId }, data: { status: "IN_PROGRESS" } });
+          }
+        }
+
+        return NextResponse.json({
+          success: true,
+          completedCount,
+          totalAssignees,
+          taskCompleted: completedCount >= totalAssignees,
+        });
       }
 
-      return NextResponse.json({
-        success: true,
-        completedCount,
-        totalAssignees,
-        taskCompleted: completedCount >= totalAssignees,
-      });
+      // 未完了に戻す場合：自分の完了状態をリセット
+      if (status === "NOT_STARTED" || status === "IN_PROGRESS") {
+        await prisma.taskAssigneeStatus.updateMany({
+          where: { taskId, userId: actor.id },
+          data: { isCompleted: false, completedAt: null },
+        });
+
+        // タスクのステータスも更新
+        const allStatuses = await prisma.taskAssigneeStatus.findMany({
+          where: { taskId },
+        });
+        const completedCount = allStatuses.filter((s) => s.isCompleted).length;
+
+        // 誰かが完了済みなら対応中、誰も完了していなければ未着手
+        const newStatus = completedCount > 0 ? "IN_PROGRESS" : "NOT_STARTED";
+        await prisma.task.update({ where: { id: taskId }, data: { status: newStatus } });
+
+        return NextResponse.json({
+          success: true,
+          completedCount,
+          totalAssignees: task.assignees.length,
+          taskCompleted: false,
+        });
+      }
     }
 
     // 通常の完了処理（any or 単一担当者）
