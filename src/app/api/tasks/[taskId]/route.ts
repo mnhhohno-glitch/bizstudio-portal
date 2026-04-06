@@ -24,6 +24,9 @@ export async function GET(
         assignees: {
           include: { employee: { select: { id: true, name: true, employeeNumber: true } } },
         },
+        assigneeStatuses: {
+          select: { userId: true, isCompleted: true, completedAt: true, user: { select: { id: true, name: true } } },
+        },
         fieldValues: {
           include: {
             field: {
@@ -68,7 +71,7 @@ export async function PUT(
     const { taskId } = await params;
     const task = await prisma.task.findUnique({
       where: { id: taskId },
-      select: { createdByUserId: true, notificationPending: true },
+      select: { createdByUserId: true, notificationPending: true, completionType: true },
     });
 
     if (!task) {
@@ -104,6 +107,27 @@ export async function PUT(
         await prisma.taskAssignee.createMany({
           data: assigneeIds.map((employeeId: string) => ({ taskId, employeeId })),
         });
+      }
+
+      // completionType="all" の場合、TaskAssigneeStatus を再生成
+      if (task.completionType === "all" && assigneeIds.length > 1) {
+        await prisma.taskAssigneeStatus.deleteMany({ where: { taskId } });
+        const assigneeEmployees = await prisma.employee.findMany({
+          where: { id: { in: assigneeIds }, status: "active" },
+          select: { name: true },
+        });
+        const assigneeUsers = assigneeEmployees.length > 0
+          ? await prisma.user.findMany({
+              where: { name: { in: assigneeEmployees.map((e: { name: string }) => e.name) }, status: "active" },
+              select: { id: true },
+            })
+          : [];
+        if (assigneeUsers.length > 0) {
+          await prisma.taskAssigneeStatus.createMany({
+            data: assigneeUsers.map((u: { id: string }) => ({ taskId, userId: u.id, isCompleted: false })),
+            skipDuplicates: true,
+          });
+        }
       }
     }
 
