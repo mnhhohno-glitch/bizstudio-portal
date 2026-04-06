@@ -147,21 +147,60 @@ export async function POST(
     }
 
     // 3-4. Upload and memo import (branched by dbType)
-    const formData = new FormData();
-    for (const file of downloadedFiles) {
-      const uint8 = new Uint8Array(file.buffer);
-      const blob = new Blob([uint8], { type: file.mimeType });
-      formData.append("files", blob, file.fileName);
-    }
-
     if (dbType === "circus") {
       // === Circus mode: local upload + user memo ===
+
+      // Circus: メモ帳からCircus IDを抽出し、PDFファイル名にNo番号を付与
+      // メモ帳フォーマット: 会社名\nCircus URL の2行ペア
+      const circusFormData = new FormData();
+
+      if (memoContent && memoContent.trim()) {
+        const memoLines = memoContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        // 2行ずつペア: [会社名, URL]
+        const memoEntries: { companyName: string; circusId: string }[] = [];
+        for (let mi = 0; mi < memoLines.length - 1; mi += 2) {
+          const companyLine = memoLines[mi];
+          const urlLine = memoLines[mi + 1];
+          const idMatch = urlLine.match(/search\/(\d+)/);
+          if (idMatch) {
+            memoEntries.push({ companyName: companyLine, circusId: idMatch[1] });
+          }
+        }
+
+        // 会社名の正規化（比較用）
+        const norm = (s: string) => s.replace(/[\s\u3000_]/g, "").replace(/_\d{14,}$/, "").toLowerCase();
+
+        for (const file of downloadedFiles) {
+          const fileNameNorm = norm(file.fileName);
+          // メモエントリの会社名がファイル名に含まれるか照合
+          const matched = memoEntries.find((e) => fileNameNorm.includes(norm(e.companyName)));
+          let newFileName = file.fileName;
+          if (matched) {
+            // 拡張子を保持してリネーム: {会社名}_No{id}.pdf
+            const ext = file.fileName.match(/\.[^.]+$/)?.[0] || ".pdf";
+            newFileName = `${matched.companyName}_No${matched.circusId}${ext}`;
+            console.log(`[SendToJobTool] Circus rename: "${file.fileName}" → "${newFileName}"`);
+          } else {
+            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}", keeping original name`);
+          }
+          const uint8 = new Uint8Array(file.buffer);
+          const blob = new Blob([uint8], { type: file.mimeType });
+          circusFormData.append("files", blob, newFileName);
+        }
+      } else {
+        // メモなし: オリジナルファイル名のまま
+        for (const file of downloadedFiles) {
+          const uint8 = new Uint8Array(file.buffer);
+          const blob = new Blob([uint8], { type: file.mimeType });
+          circusFormData.append("files", blob, file.fileName);
+        }
+      }
 
       // Step 3: Upload to local storage
       console.log("[SendToJobTool] Step 3 (Circus): Uploading to local storage...", { fileCount: downloadedFiles.length });
       const uploadRes = await fetchWithTimeout(
         `${KYUUJIN_PDF_TOOL_URL}/api/upload/projects/${projectId}/files/batch`,
-        { method: "POST", body: formData },
+        { method: "POST", body: circusFormData },
         BATCH_UPLOAD_TIMEOUT_MS
       );
 
@@ -199,6 +238,12 @@ export async function POST(
 
     } else {
       // === HITO-Link/マイナビ mode: Google Drive auto-process ===
+      const formData = new FormData();
+      for (const file of downloadedFiles) {
+        const uint8 = new Uint8Array(file.buffer);
+        const blob = new Blob([uint8], { type: file.mimeType });
+        formData.append("files", blob, file.fileName);
+      }
 
       // Step 3: Upload via auto-process/batch
       console.log("[SendToJobTool] Step 3 (HITO): Uploading to auto-process...", { fileCount: downloadedFiles.length });
