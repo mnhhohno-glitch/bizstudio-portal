@@ -71,6 +71,41 @@ export async function GET(request: NextRequest, context: RouteContext) {
             : job.company_name,
         })
       );
+
+      // 非表示にされた求人をフィルタリング
+      const [hiddenRecords, responseRecords] = await Promise.all([
+        prisma.hiddenJobIntroduction.findMany({
+          where: { candidateId },
+          select: { externalJobId: true },
+        }),
+        prisma.candidateJobResponse.findMany({
+          where: { candidateId },
+          select: { externalJobId: true, response: true, respondedAt: true },
+        }),
+      ]);
+      if (hiddenRecords.length > 0) {
+        const hiddenIds = new Set(hiddenRecords.map((r) => r.externalJobId));
+        data.jobs = data.jobs.filter(
+          (job: { id?: number; [key: string]: unknown }) =>
+            !hiddenIds.has(job.id as number)
+        );
+        data.total_jobs = data.jobs.length;
+      }
+
+      // 求職者反応情報を付与
+      if (responseRecords.length > 0) {
+        const responseMap = new Map(responseRecords.map((r) => [r.externalJobId, r]));
+        data.jobs = data.jobs.map(
+          (job: { id?: number; [key: string]: unknown }) => {
+            const resp = responseMap.get(job.id as number);
+            return {
+              ...job,
+              candidate_response: resp?.response ?? null,
+              candidate_responded_at: resp?.respondedAt?.toISOString() ?? null,
+            };
+          }
+        );
+      }
     }
 
     return NextResponse.json(data);
