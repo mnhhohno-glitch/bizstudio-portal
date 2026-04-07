@@ -6,6 +6,7 @@ import EntryTable from "./EntryTable";
 import EntryDetailModal from "./EntryDetailModal";
 import EntryCreateModal from "./EntryCreateModal";
 import BulkFlagChangeModal from "./BulkFlagChangeModal";
+import EndNoticeModal from "./EndNoticeModal";
 
 export type Entry = {
   id: string;
@@ -91,6 +92,7 @@ export default function EntryBoard() {
   const [detailEntryId, setDetailEntryId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkFlags, setShowBulkFlags] = useState(false);
+  const [showEndNotice, setShowEndNotice] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -231,23 +233,36 @@ export default function EntryBoard() {
       </div>
 
       {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md">
-          <span className="text-sm font-medium text-[#2563EB]">✓ {selectedIds.size}件選択中</span>
-          <button
-            onClick={() => setShowBulkFlags(true)}
-            className="bg-[#2563EB] text-white rounded-md px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8]"
-          >
-            一括フラグ変更
-          </button>
-          <button
-            onClick={() => setSelectedIds(new Set())}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            選択解除
-          </button>
-        </div>
-      )}
+      {selectedIds.size > 0 && (() => {
+        const selectedEntries = entries.filter((e) => selectedIds.has(e.id));
+        const candidateIds = new Set(selectedEntries.map((e) => e.candidateId));
+        const isSameCandidate = candidateIds.size === 1;
+        return (
+          <div className="flex items-center gap-3 mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md">
+            <span className="text-sm font-medium text-[#2563EB]">✓ {selectedIds.size}件選択中</span>
+            <button
+              onClick={() => setShowBulkFlags(true)}
+              className="bg-[#2563EB] text-white rounded-md px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8]"
+            >
+              一括フラグ変更
+            </button>
+            <button
+              onClick={() => setShowEndNotice(true)}
+              disabled={!isSameCandidate}
+              title={!isSameCandidate ? "同一求職者のレコードのみ選択してください" : ""}
+              className="border border-orange-400 text-orange-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              📝 選考終了案内
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              選択解除
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Table */}
       {loading ? (
@@ -317,6 +332,15 @@ export default function EntryBoard() {
           flagData={flagData}
           onClose={() => setShowBulkFlags(false)}
           onDone={() => { setShowBulkFlags(false); setSelectedIds(new Set()); fetchEntries(); }}
+        />
+      )}
+
+      {/* End Notice Modal */}
+      {showEndNotice && (
+        <EndNoticeModal
+          selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
+          onClose={() => setShowEndNotice(false)}
+          onDone={() => { setShowEndNotice(false); setSelectedIds(new Set()); fetchEntries(); }}
         />
       )}
     </div>
