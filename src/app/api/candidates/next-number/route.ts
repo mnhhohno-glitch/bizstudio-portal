@@ -8,9 +8,11 @@ export async function GET() {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
-  // 5から始まる番号の最大値を取得
+  // 5000000〜5899999の範囲で最大値を取得（5900000以上はテスト番号として除外）
   const candidates = await prisma.candidate.findMany({
-    where: { candidateNumber: { startsWith: "5" } },
+    where: {
+      candidateNumber: { startsWith: "5", lt: "5900000" },
+    },
     select: { candidateNumber: true },
     orderBy: { candidateNumber: "desc" },
     take: 1,

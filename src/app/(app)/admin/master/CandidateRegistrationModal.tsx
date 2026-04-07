@@ -165,7 +165,7 @@ export default function CandidateRegistrationModal({
           const createdCandidate = await res.json();
           const uploadFormData = new FormData();
           uploadFormData.append("file", pdfFile);
-          uploadFormData.append("category", "ORIGINAL");
+          uploadFormData.append("category", "MEETING");
           await fetch(`/api/candidates/${createdCandidate.id}/files/upload`, {
             method: "POST",
             body: uploadFormData,
@@ -191,7 +191,7 @@ export default function CandidateRegistrationModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleClose}>
-      <div className="bg-white rounded-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[16px] font-bold text-[#374151]">求職者を新規登録</h2>
           <button onClick={handleClose} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
@@ -229,12 +229,20 @@ export default function CandidateRegistrationModal({
           </button>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-[13px] font-medium text-[#374151]">求職者番号 <span className="text-red-500">*</span></label>
             <input type="text" inputMode="numeric" placeholder="例: 5001234" maxLength={7} value={candidateNumber} onInput={(e) => setCandidateNumber((e.target as HTMLInputElement).value.replace(/\D/g, ""))} className={errors.candidateNumber ? errorInputClass : inputClass} />
             <p className="mt-0.5 text-[11px] text-[#6B7280]">※ 自動生成（編集可）</p>
             {errors.candidateNumber && <p className="text-red-500 text-xs mt-0.5">{errors.candidateNumber}</p>}
+          </div>
+          <div>
+            <label className="text-[13px] font-medium text-[#374151]">担当キャリアアドバイザー <span className="text-red-500">*</span></label>
+            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
+              <option value="">選択してください</option>
+              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+            </select>
+            {errors.employeeId && <p className="text-red-500 text-xs mt-0.5">{errors.employeeId}</p>}
           </div>
           <div>
             <label className="text-[13px] font-medium text-[#374151]">氏名 <span className="text-red-500">*</span></label>
@@ -273,17 +281,9 @@ export default function CandidateRegistrationModal({
             <label className="text-[13px] font-medium text-[#374151]">電話番号</label>
             <input type="tel" placeholder="例: 08012345678" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="text-[13px] font-medium text-[#374151]">住所</label>
             <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">担当キャリアアドバイザー <span className="text-red-500">*</span></label>
-            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
-              <option value="">選択してください</option>
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-            </select>
-            {errors.employeeId && <p className="text-red-500 text-xs mt-0.5">{errors.employeeId}</p>}
           </div>
         </div>
 
