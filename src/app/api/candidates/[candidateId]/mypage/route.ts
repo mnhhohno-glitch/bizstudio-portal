@@ -41,8 +41,13 @@ export async function GET(
     }
 
     const data = await res.json();
+    const baseUrl = data.url ?? null;
+    const adminUrl = baseUrl
+      ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}admin=true&secret=${secret}`
+      : null;
     return NextResponse.json({
-      url: data.url ?? null,
+      url: baseUrl,
+      adminUrl,
       isActive: data.is_active ?? false,
       accessCount: data.access_count ?? null,
       expiresAt: data.expires_at ?? null,

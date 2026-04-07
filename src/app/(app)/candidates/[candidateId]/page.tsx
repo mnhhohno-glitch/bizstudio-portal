@@ -1294,6 +1294,7 @@ export default function CandidateDetailPage() {
   const [jobOutputLoading, setJobOutputLoading] = useState(false);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
   const [mypageUrl, setMypageUrl] = useState<string | null>(null);
+  const [mypageAdminUrl, setMypageAdminUrl] = useState<string | null>(null);
   const [mypageAccessCount, setMypageAccessCount] = useState<number | null>(null);
   const [mypageExpiresAt, setMypageExpiresAt] = useState<string | null>(null);
   const [mypageLoading, setMypageLoading] = useState(true);
@@ -1390,6 +1391,7 @@ export default function CandidateDetailPage() {
       .then((r) => r.json())
       .then((data) => {
         setMypageUrl(data.url ?? null);
+        setMypageAdminUrl(data.adminUrl ?? null);
         setMypageAccessCount(data.accessCount ?? null);
         setMypageExpiresAt(data.expiresAt ?? null);
       })
@@ -1669,10 +1671,10 @@ export default function CandidateDetailPage() {
                     {mypageCopied ? "✅ コピーしました" : "📋 URLをコピー"}
                   </button>
                   <button
-                    onClick={() => window.open(mypageUrl, "_blank")}
+                    onClick={() => window.open(mypageAdminUrl || mypageUrl, "_blank")}
                     className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors"
                   >
-                    🔗 リンクを開く
+                    🔗 管理者プレビュー
                   </button>
                 </div>
 
