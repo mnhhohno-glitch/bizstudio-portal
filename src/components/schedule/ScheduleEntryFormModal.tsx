@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import TimeComboBox from "./TimeComboBox";
 
 const TAG_OPTIONS = [
   { label: "CA業務", color: "#6B7280" },
@@ -109,23 +110,11 @@ export default function ScheduleEntryFormModal({
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-[12px] font-medium text-[#374151] mb-1">開始時間</label>
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                step="900"
-                className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:border-[#2563EB] focus:outline-none"
-              />
+              <TimeComboBox value={startTime} onChange={setStartTime} />
             </div>
             <div className="flex-1">
               <label className="block text-[12px] font-medium text-[#374151] mb-1">終了時間</label>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                step="900"
-                className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:border-[#2563EB] focus:outline-none"
-              />
+              <TimeComboBox value={endTime} onChange={setEndTime} />
             </div>
           </div>
 
