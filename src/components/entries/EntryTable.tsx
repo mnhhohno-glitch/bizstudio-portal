@@ -20,9 +20,22 @@ function fmtDate(iso: string | null) {
 }
 
 function getRowClass(entry: Entry) {
-  if (!entry.isActive) return "bg-gray-200 text-gray-400";
-  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-100 text-gray-500";
+  if (!entry.isActive) return "bg-gray-300 text-gray-400";
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-200 text-gray-500";
   return "bg-white";
+}
+
+function isEnded(entry: Entry) {
+  return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
+}
+
+function sortEntries(entries: Entry[]) {
+  return [...entries].sort((a, b) => {
+    const aEnded = isEnded(a) ? 1 : 0;
+    const bEnded = isEnded(b) ? 1 : 0;
+    if (aEnded !== bEnded) return aEnded - bEnded;
+    return 0; // 同じ状態内はAPIの元順を維持
+  });
 }
 
 const COL = {
@@ -71,7 +84,7 @@ export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry) => {
+          {sortEntries(entries).map((entry) => {
             const rowClass = getRowClass(entry);
             const inactive = !entry.isActive;
             const companyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
@@ -149,7 +162,7 @@ export default function EntryTable({ entries, flagData, onFlagUpdate, onRowClick
                     <select
                       value={entry.personFlag || ""}
                       onChange={(e) => onFlagUpdate(entry.id, { personFlag: e.target.value || null })}
-                      className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.personFlag ? "text-gray-400" : ""}`}
+                      className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.personFlag === "見送り通知未送信" ? "text-red-600 font-semibold" : !entry.personFlag ? "text-gray-400" : ""}`}
                     >
                       <option value="" className="text-gray-400">本人対応</option>
                       {personOptions.map((f) => <option key={f} value={f}>{f}</option>)}
