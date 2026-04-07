@@ -1726,9 +1726,9 @@ export default function CandidateDetailPage() {
               <label className="block text-sm font-medium text-[#374151] mb-2">面接方式 <span className="text-red-500">*</span></label>
               <div className="flex gap-4 mb-4">
                 {[
-                  { value: "対面", label: "対面" },
-                  { value: "オンライン", label: "オンライン" },
-                  { value: "どちらでも可", label: "どちらでも可" },
+                  { value: "in-person", label: "対面" },
+                  { value: "online", label: "オンライン" },
+                  { value: "flexible", label: "どちらでも可" },
                 ].map((opt) => (
                   <label key={opt.value} className="flex items-center gap-2 text-sm cursor-pointer">
                     <input
