@@ -44,6 +44,7 @@ interface CandidateListClientProps {
   initialCandidates: CandidateRow[];
   initialTotalCount: number;
   employees: Employee[];
+  currentEmployeeId?: string | null;
 }
 
 const PAGE_SIZE = 20;
@@ -70,6 +71,7 @@ export default function CandidateListClient({
   initialCandidates,
   initialTotalCount,
   employees,
+  currentEmployeeId,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
@@ -79,7 +81,7 @@ export default function CandidateListClient({
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ACTIVE");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
-  const [caFilter, setCaFilter] = useState("ALL");
+  const [caFilter, setCaFilter] = useState(currentEmployeeId || "ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
@@ -204,7 +206,7 @@ export default function CandidateListClient({
         {SUPPORT_TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); }}
+            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               supportTab === tab.key
                 ? "text-[#2563EB] border-[#2563EB]"

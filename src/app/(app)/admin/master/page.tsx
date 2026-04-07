@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import CandidateListClient from "./CandidateListClient";
 
 export default async function CandidateMasterPage() {
+  const actor = await getSessionUser();
+
   const [candidates, totalCount, employees] = await Promise.all([
     prisma.candidate.findMany({
       orderBy: { candidateNumber: "desc" },
@@ -38,6 +41,11 @@ export default async function CandidateMasterPage() {
     jobStatus: entryCountMap.has(c.id) ? ("entry" as const) : null,
   }));
 
+  // ログインユーザーに対応する社員IDを取得
+  const currentEmployee = actor
+    ? employees.find((e) => e.name === actor.name)
+    : null;
+
   return (
     <div>
       <CandidateListClient
@@ -48,6 +56,7 @@ export default async function CandidateMasterPage() {
           employeeNumber: e.employeeNumber,
           name: e.name,
         }))}
+        currentEmployeeId={currentEmployee?.id ?? null}
       />
     </div>
   );
