@@ -240,6 +240,7 @@ model Candidate {
   advisorSessions AdvisorChatSession[]
   jobEntries      JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
+  candidateJobResponses CandidateJobResponse[]
   shareLinks      FileShareLink[]
 
   createdAt       DateTime @default(now()) @map("created_at")
@@ -1106,6 +1107,21 @@ model HiddenJobIntroduction {
   @@unique([candidateId, externalJobId])
   @@index([candidateId])
   @@map("hidden_job_introductions")
+}
+
+model CandidateJobResponse {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  externalJobId   Int       @map("external_job_id")
+  response        String    // WANT_TO_APPLY | INTERESTED
+  respondedAt     DateTime  @map("responded_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([candidateId, externalJobId])
+  @@index([candidateId])
+  @@map("candidate_job_responses")
 }
 
 model EntryFlagMaster {

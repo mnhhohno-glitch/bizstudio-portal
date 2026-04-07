@@ -20,6 +20,13 @@ type Job = {
   original_url: string | null;
   created_at: string;
   updated_at: string;
+  candidate_response: string | null;
+  candidate_responded_at: string | null;
+};
+
+const RESPONSE_BADGE: Record<string, { label: string; cls: string }> = {
+  WANT_TO_APPLY: { label: "応募したい", cls: "bg-red-100 text-red-700" },
+  INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
 };
 
 type JobsResponse = {
@@ -1117,6 +1124,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [jobDeleting, setJobDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
+  const [responseFilter, setResponseFilter] = useState<"ALL" | "WANT_TO_APPLY" | "INTERESTED" | "NONE">("ALL");
 
   // Entries state
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -1326,9 +1334,25 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   /* ---------- Render ---------- */
   const allJobs = jobsData?.jobs || [];
   const totalJobs = jobsData?.total_jobs ?? 0;
-  const jobs = jobSearch
-    ? allJobs.filter((j) => normalize(j.company_name).includes(normalize(jobSearch)))
-    : allJobs;
+  const responseOrder: Record<string, number> = { WANT_TO_APPLY: 0, INTERESTED: 1 };
+
+  const jobs = (() => {
+    let result = allJobs;
+    if (jobSearch) {
+      result = result.filter((j) => normalize(j.company_name).includes(normalize(jobSearch)));
+    }
+    if (responseFilter !== "ALL") {
+      result = responseFilter === "NONE"
+        ? result.filter((j) => !j.candidate_response)
+        : result.filter((j) => j.candidate_response === responseFilter);
+    }
+    // 応募したい→気になる→未回答の順にソート
+    return [...result].sort((a, b) => {
+      const ra = a.candidate_response ? (responseOrder[a.candidate_response] ?? 2) : 2;
+      const rb = b.candidate_response ? (responseOrder[b.candidate_response] ?? 2) : 2;
+      return ra - rb;
+    });
+  })();
   const filteredEntries = entrySearch
     ? entries.filter((e) => normalize(e.companyName).includes(normalize(entrySearch)))
     : entries;
@@ -1408,6 +1432,16 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                 </button>
               )}
             </div>
+            <select
+              value={responseFilter}
+              onChange={(e) => setResponseFilter(e.target.value as typeof responseFilter)}
+              className="border border-gray-300 rounded-md px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            >
+              <option value="ALL">全て</option>
+              <option value="WANT_TO_APPLY">応募したい</option>
+              <option value="INTERESTED">気になる</option>
+              <option value="NONE">未回答</option>
+            </select>
             {selectableJobIds.length > 0 && (
               <button
                 onClick={handleToggleAll}
@@ -1489,6 +1523,11 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                         {job.job_category && (
                           <span className="shrink-0 text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
                             {job.job_category}
+                          </span>
+                        )}
+                        {job.candidate_response && RESPONSE_BADGE[job.candidate_response] && (
+                          <span className={`shrink-0 text-xs rounded px-2 py-0.5 font-medium ${RESPONSE_BADGE[job.candidate_response].cls}`}>
+                            {RESPONSE_BADGE[job.candidate_response].label}
                           </span>
                         )}
                         <span className="shrink-0 ml-auto text-xs text-gray-400">
