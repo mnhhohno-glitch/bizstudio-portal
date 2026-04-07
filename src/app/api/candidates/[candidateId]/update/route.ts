@@ -66,6 +66,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.supportEndDate !== undefined) {
     updateData.supportEndDate = body.supportEndDate ? new Date(body.supportEndDate) : null;
   }
+  if (body.supportEndComment !== undefined) {
+    updateData.supportEndComment = body.supportEndComment || null;
+  }
 
   const updated = await prisma.candidate.update({
     where: { id: candidateId },

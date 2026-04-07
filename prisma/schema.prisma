@@ -226,6 +226,7 @@ model Candidate {
   supportEndReason String?  @map("support_end_reason")
   supportEndNote  String?   @map("support_end_note")
   supportEndDate  DateTime? @map("support_end_date")
+  supportEndComment String? @db.Text @map("support_end_comment")
 
   // 担当キャリアアドバイザー
   employeeId      String?  @map("employee_id")

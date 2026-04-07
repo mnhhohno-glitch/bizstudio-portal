@@ -66,6 +66,7 @@ type Candidate = {
   birthday: string | null;
   supportStatus: string;
   supportEndReason: string | null;
+  supportEndComment: string | null;
   employeeId: string | null;
   employee: Employee | null;
   guideEntries: GuideEntry[];
@@ -1498,12 +1499,19 @@ export default function CandidateDetailPage() {
 
         <div className="flex gap-3 mt-4">
           {candidate.supportStatus === "ENDED" ? (
-            <button
-              onClick={() => setShowEndModal(true)}
-              className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200"
-            >
-              支援終了{candidate.supportEndReason ? `（${REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason}）` : ""}
-            </button>
+            <div className="flex items-start gap-2">
+              <button
+                onClick={() => setShowEndModal(true)}
+                className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200"
+              >
+                支援終了{candidate.supportEndReason ? `（${REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason}）` : ""}
+              </button>
+              {candidate.supportEndComment && (
+                <div className="max-w-xs text-[12px] text-gray-500 bg-gray-50 rounded-md px-3 py-2 border border-gray-200 whitespace-pre-wrap line-clamp-3" title={candidate.supportEndComment}>
+                  {candidate.supportEndComment}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex items-center gap-1">
               <select
@@ -1844,6 +1852,7 @@ export default function CandidateDetailPage() {
       {showEndModal && (
         <SupportEndModal
           candidateId={candidateId}
+          initialComment={candidate?.supportEndComment}
           onClose={() => setShowEndModal(false)}
           onSaved={fetchCandidate}
         />
