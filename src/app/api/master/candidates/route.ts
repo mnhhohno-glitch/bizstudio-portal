@@ -54,9 +54,13 @@ const createSchema = z.object({
   candidateNumber: z.string().min(1, "求職者番号を入力してください"),
   name: z.string().min(1, "氏名を入力してください"),
   nameKana: z.string().min(1, "フリガナを入力してください"),
+  email: z.string().email("正しいメールアドレスを入力してください").optional().or(z.literal("")),
+  phone: z.string().optional().or(z.literal("")),
+  address: z.string().optional().or(z.literal("")),
   gender: z.enum(["male", "female", "other"], {
     message: "性別を選択してください",
   }),
+  birthday: z.string().optional(),
   employeeId: z.string().min(1, "担当キャリアアドバイザーを選択してください"),
 });
 
@@ -77,7 +81,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { candidateNumber, name, nameKana, gender, employeeId } = parsed.data;
+    const { candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId } = parsed.data;
 
     // 氏名バリデーション
     const nameValidation = validateName(name);
@@ -117,7 +121,11 @@ export async function POST(request: NextRequest) {
         candidateNumber,
         name: formattedName,
         nameKana: nameKana.trim(),
+        ...(email ? { email: email.trim() } : {}),
+        ...(phone ? { phone: phone.trim() } : {}),
+        ...(address ? { address: address.trim() } : {}),
         gender,
+        ...(birthday ? { birthday: new Date(birthday + "T12:00:00.000Z") } : {}),
         employeeId,
       },
     });

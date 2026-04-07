@@ -221,6 +221,8 @@ model Candidate {
   nameKana        String?  @map("name_kana")
   gender          String?  // "male" | "female" | "other"
   email           String?
+  phone           String?
+  address         String?
   birthday        DateTime?
   supportStatus   String    @default("BEFORE") @map("support_status")
   supportEndReason String?  @map("support_end_reason")
