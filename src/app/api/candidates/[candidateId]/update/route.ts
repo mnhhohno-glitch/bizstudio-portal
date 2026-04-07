@@ -39,6 +39,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.email !== undefined) {
     updateData.email = body.email.trim() || null;
   }
+  if (body.phone !== undefined) {
+    updateData.phone = body.phone.trim() || null;
+  }
+  if (body.address !== undefined) {
+    updateData.address = body.address.trim() || null;
+  }
+  if (body.candidateNumber !== undefined) {
+    updateData.candidateNumber = body.candidateNumber.trim();
+  }
   if (body.gender !== undefined) {
     updateData.gender = body.gender || null;
   }

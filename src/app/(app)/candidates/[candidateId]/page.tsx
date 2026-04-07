@@ -63,6 +63,8 @@ type Candidate = {
   nameKana: string | null;
   gender: string | null;
   email: string | null;
+  phone: string | null;
+  address: string | null;
   birthday: string | null;
   supportStatus: string;
   supportEndReason: string | null;
@@ -135,7 +137,10 @@ function EditModal({
   const [name, setName] = useState(candidate.name);
   const [furigana, setFurigana] = useState(candidate.nameKana || "");
   const [isFuriganaComposing, setIsFuriganaComposing] = useState(false);
+  const [candidateNo, setCandidateNo] = useState(candidate.candidateNumber);
   const [email, setEmail] = useState(candidate.email || "");
+  const [phone, setPhone] = useState(candidate.phone || "");
+  const [address, setAddress] = useState(candidate.address || "");
   const [gender, setGender] = useState(candidate.gender || "");
   const [birthday, setBirthday] = useState(candidate.birthday ? new Date(candidate.birthday).toISOString().slice(0, 10) : "");
   const [assignedEmployeeId, setAssignedEmployeeId] = useState(
@@ -151,9 +156,12 @@ function EditModal({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          candidateNumber: candidateNo.trim(),
           name: name.trim(),
           furigana: furigana.trim(),
           email: email.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
           gender: gender || null,
           birthday: birthday || null,
           assignedEmployeeId: assignedEmployeeId || null,
@@ -191,6 +199,10 @@ function EditModal({
         </div>
         <div className="p-6 space-y-4">
           <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
+            <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+          </div>
+          <div>
             <label className="block text-[13px] font-medium text-[#374151] mb-1">
               氏名 <span className="text-red-500">*</span>
             </label>
@@ -224,6 +236,14 @@ function EditModal({
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
             />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
+            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
+            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
           </div>
           <div>
             <label className="block text-[13px] font-medium text-[#374151] mb-1">
@@ -1466,6 +1486,18 @@ export default function CandidateDetailPage() {
               <span className="text-gray-400">未登録</span>
             )}
           </span>
+          {candidate.phone && (
+            <span
+              className="cursor-pointer hover:text-[#2563EB] transition-colors"
+              onClick={() => navigator.clipboard.writeText(candidate.phone!)}
+              title="クリックでコピー"
+            >
+              📞 {candidate.phone}
+            </span>
+          )}
+          {candidate.address && (
+            <span>📍 {candidate.address}</span>
+          )}
           <span>
             👤 担当CA:{" "}
             {candidate.employee?.name || (
