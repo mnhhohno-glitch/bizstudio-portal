@@ -1095,8 +1095,6 @@ model JobEntry {
   @@map("job_entries")
 }
 
-<<<<<<< Updated upstream
-=======
 model HiddenJobIntroduction {
   id              String    @id @default(cuid())
   candidateId     String    @map("candidate_id")
@@ -1125,7 +1123,6 @@ model CandidateJobResponse {
   @@map("candidate_job_responses")
 }
 
->>>>>>> Stashed changes
 model EntryFlagMaster {
   id          String  @id @default(cuid())
   flagType    String  @map("flag_type")
