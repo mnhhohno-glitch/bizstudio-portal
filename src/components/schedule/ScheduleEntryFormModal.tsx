@@ -17,18 +17,6 @@ const TAG_OPTIONS = [
   { label: "その他", color: "#6B7280" },
 ];
 
-function generateTimeOptions(): string[] {
-  const times: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 5) {
-      times.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    }
-  }
-  return times;
-}
-
-const TIME_OPTIONS = generateTimeOptions();
-
 export interface EntryFormData {
   startTime: string;
   endTime: string;
@@ -121,15 +109,23 @@ export default function ScheduleEntryFormModal({
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-[12px] font-medium text-[#374151] mb-1">開始時間</label>
-              <select value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px]">
-                {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                step="900"
+                className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:border-[#2563EB] focus:outline-none"
+              />
             </div>
             <div className="flex-1">
               <label className="block text-[12px] font-medium text-[#374151] mb-1">終了時間</label>
-              <select value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px]">
-                {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                step="900"
+                className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:border-[#2563EB] focus:outline-none"
+              />
             </div>
           </div>
 
