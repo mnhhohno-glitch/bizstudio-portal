@@ -202,6 +202,10 @@ model Employee {
   candidates     Candidate[]
   taskAssignees  TaskAssignee[]
 
+  // 面談履歴
+  interviewsConducted  InterviewRecord[] @relation("interviewConductedBy")
+  interviewsCreated    InterviewRecord[] @relation("interviewCreatedBy")
+
   // 勤怠管理
   dailyAttendances  DailyAttendance[]
   punchEvents       PunchEvent[]
@@ -244,6 +248,7 @@ model Candidate {
   hiddenJobIntroductions HiddenJobIntroduction[]
   candidateJobResponses CandidateJobResponse[]
   shareLinks      FileShareLink[]
+  interviewRecords InterviewRecord[]
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt      @map("updated_at")
@@ -1236,4 +1241,197 @@ model GoogleCalendarConnection {
   calendarId   String   @default("primary")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// ========================================
+// 面談履歴管理
+// ========================================
+
+model InterviewRecord {
+  id                String    @id @default(cuid())
+  candidateId       String    @map("candidate_id")
+  candidate         Candidate @relation(fields: [candidateId], references: [id])
+  interviewDate     DateTime  @map("interview_date")
+  startTime         String    @map("start_time")
+  endTime           String    @map("end_time")
+  duration          Int?
+  interviewTool     String    @map("interview_tool")
+  interviewerUserId String    @map("interviewer_user_id")
+  interviewer       Employee  @relation("interviewConductedBy", fields: [interviewerUserId], references: [id])
+  interviewType     String    @map("interview_type")
+  interviewCount    Int?      @map("interview_count")
+  resultFlag        String?   @map("result_flag")
+  interviewMemo     String?   @db.Text @map("interview_memo")
+  previousMemo      String?   @db.Text @map("previous_memo")
+  summaryText       String?   @db.Text @map("summary_text")
+  rawTranscript     String?   @db.Text @map("raw_transcript")
+  resumePdfFileId   String?   @map("resume_pdf_file_id")
+  createdByUserId   String    @map("created_by_user_id")
+  createdBy         Employee  @relation("interviewCreatedBy", fields: [createdByUserId], references: [id])
+  detail            InterviewDetail?
+  rating            InterviewRating?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([candidateId])
+  @@index([interviewDate])
+  @@map("interview_records")
+}
+
+model InterviewDetail {
+  id                  String          @id @default(cuid())
+  interviewRecordId   String          @unique @map("interview_record_id")
+  interviewRecord     InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+
+  // 転職活動状況
+  agentUsageFlag          String?  @map("agent_usage_flag")
+  agentUsageMemo          String?  @map("agent_usage_memo")
+  employmentStatus        String?  @map("employment_status")
+  resignationDate         DateTime? @map("resignation_date")
+  jobChangeTimeline       String?  @map("job_change_timeline")
+  jobChangeTimelineMemo   String?  @map("job_change_timeline_memo")
+  activityPeriod          String?  @map("activity_period")
+  activityPeriodMemo      String?  @map("activity_period_memo")
+  currentApplicationCount Int?     @map("current_application_count")
+  applicationTypeFlag     String?  @map("application_type_flag")
+  applicationMemo         String?  @db.Text @map("application_memo")
+
+  // 学歴・職歴
+  educationFlag           String?  @map("education_flag")
+  educationMemo           String?  @map("education_memo")
+  graduationDate          String?  @map("graduation_date")
+  companyName             String?  @map("company_name")
+  businessContent         String?  @map("business_content")
+  tenure                  String?
+  jobTypeFlag             String?  @map("job_type_flag")
+  jobTypeMemo             String?  @map("job_type_memo")
+  resignReasonLarge       String?  @map("resign_reason_large")
+  resignReasonMedium      String?  @map("resign_reason_medium")
+  resignReasonSmall       String?  @map("resign_reason_small")
+  jobChangeReasonMemo     String?  @db.Text @map("job_change_reason_memo")
+  jobChangeAxisFlag       String?  @map("job_change_axis_flag")
+  jobChangeAxisMemo       String?  @db.Text @map("job_change_axis_memo")
+
+  // 希望条件
+  desiredJobType1         String?  @map("desired_job_type_1")
+  desiredJobType1Memo     String?  @map("desired_job_type_1_memo")
+  desiredJobType2         String?  @map("desired_job_type_2")
+  desiredIndustry1        String?  @map("desired_industry_1")
+  desiredIndustry1Memo    String?  @map("desired_industry_1_memo")
+  desiredArea             String?  @map("desired_area")
+  desiredPrefecture       String?  @map("desired_prefecture")
+  desiredCity             String?  @map("desired_city")
+  desiredAreaMemo         String?  @map("desired_area_memo")
+  currentSalary           Int?     @map("current_salary")
+  currentSalaryMemo       String?  @map("current_salary_memo")
+  desiredSalaryMin        Int?     @map("desired_salary_min")
+  desiredSalaryMinMemo    String?  @map("desired_salary_min_memo")
+  desiredSalaryMax        Int?     @map("desired_salary_max")
+  desiredSalaryMaxMemo    String?  @map("desired_salary_max_memo")
+  desiredDayOff           String?  @map("desired_day_off")
+  desiredDayOffMemo       String?  @map("desired_day_off_memo")
+  desiredHolidayCount     String?  @map("desired_holiday_count")
+  desiredOvertimeMax      String?  @map("desired_overtime_max")
+  desiredOvertimeMemo     String?  @map("desired_overtime_memo")
+  desiredTransfer         String?  @map("desired_transfer")
+  desiredTransferMemo     String?  @map("desired_transfer_memo")
+  workStyleFlags          String?  @map("work_style_flags")
+  companyFeatureFlags     String?  @map("company_feature_flags")
+  priorityCondition1      String?  @map("priority_condition_1")
+  priorityCondition2      String?  @map("priority_condition_2")
+  priorityCondition3      String?  @map("priority_condition_3")
+  priorityConditionMemo   String?  @map("priority_condition_memo")
+
+  // スキル
+  driverLicenseFlag       String?  @map("driver_license_flag")
+  driverLicenseMemo       String?  @map("driver_license_memo")
+  languageSkillFlag       String?  @map("language_skill_flag")
+  languageSkillMemo       String?  @map("language_skill_memo")
+  chineseSkillMemo        String?  @map("chinese_skill_memo")
+  japaneseSkillFlag       String?  @map("japanese_skill_flag")
+  japaneseSkillMemo       String?  @map("japanese_skill_memo")
+  typingFlag              String?  @map("typing_flag")
+  typingMemo              String?  @map("typing_memo")
+  excelFlag               String?  @map("excel_flag")
+  excelMemo               String?  @map("excel_memo")
+  wordFlag                String?  @map("word_flag")
+  wordMemo                String?  @map("word_memo")
+  pptFlag                 String?  @map("ppt_flag")
+  pptMemo                 String?  @map("ppt_memo")
+
+  // アクション
+  documentStatusFlag      String?  @map("document_status_flag")
+  documentStatusMemo      String?  @map("document_status_memo")
+  documentSupportFlag     String?  @map("document_support_flag")
+  documentSupportMemo     String?  @map("document_support_memo")
+  jobReferralFlag         String?  @map("job_referral_flag")
+  jobReferralTimeline     String?  @map("job_referral_timeline")
+  jobReferralMemo         String?  @map("job_referral_memo")
+  lineSetupFlag           String?  @map("line_setup_flag")
+  lineSetupMemo           String?  @map("line_setup_memo")
+  nextInterviewFlag       String?  @map("next_interview_flag")
+  nextInterviewDate       DateTime? @map("next_interview_date")
+  nextInterviewTime       String?  @map("next_interview_time")
+  nextInterviewMemo       String?  @map("next_interview_memo")
+  freeMemo                String?  @db.Text @map("free_memo")
+  initialSummary          String?  @db.Text @map("initial_summary")
+
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@map("interview_details")
+}
+
+model InterviewRating {
+  id                  String          @id @default(cuid())
+  interviewRecordId   String          @unique @map("interview_record_id")
+  interviewRecord     InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+
+  personalityMotivation           Int?  @map("personality_motivation")
+  personalityMotivationMemo       String? @map("personality_motivation_memo")
+  personalityCommunication        Int?  @map("personality_communication")
+  personalityCommunicationMemo    String? @map("personality_communication_memo")
+  personalityManner               Int?  @map("personality_manner")
+  personalityMannerMemo           String? @map("personality_manner_memo")
+  personalityIntelligence         Int?  @map("personality_intelligence")
+  personalityIntelligenceMemo     String? @map("personality_intelligence_memo")
+  personalityHumanity             Int?  @map("personality_humanity")
+  personalityHumanityMemo         String? @map("personality_humanity_memo")
+  personalityTotal                Int?  @map("personality_total")
+  personalityTotalMemo            String? @map("personality_total_memo")
+
+  careerJobType                   Int?  @map("career_job_type")
+  careerJobTypeMemo               String? @map("career_job_type_memo")
+  careerExperience                Int?  @map("career_experience")
+  careerExperienceMemo            String? @map("career_experience_memo")
+  careerJobChangeCount            Int?  @map("career_job_change_count")
+  careerJobChangeCountMemo        String? @map("career_job_change_count_memo")
+  careerAchievement               Int?  @map("career_achievement")
+  careerAchievementMemo           String? @map("career_achievement_memo")
+  careerQualification             Int?  @map("career_qualification")
+  careerQualificationMemo         String? @map("career_qualification_memo")
+  careerTotal                     Int?  @map("career_total")
+  careerTotalMemo                 String? @map("career_total_memo")
+
+  conditionJobType                Int?  @map("condition_job_type")
+  conditionJobTypeMemo            String? @map("condition_job_type_memo")
+  conditionSalary                 Int?  @map("condition_salary")
+  conditionSalaryMemo             String? @map("condition_salary_memo")
+  conditionHoliday                Int?  @map("condition_holiday")
+  conditionHolidayMemo            String? @map("condition_holiday_memo")
+  conditionArea                   Int?  @map("condition_area")
+  conditionAreaMemo               String? @map("condition_area_memo")
+  conditionFlexibility            Int?  @map("condition_flexibility")
+  conditionFlexibilityMemo        String? @map("condition_flexibility_memo")
+  conditionTotal                  Int?  @map("condition_total")
+  conditionTotalMemo              String? @map("condition_total_memo")
+
+  grandTotal                      Int?  @map("grand_total")
+  grandTotalMemo                  String? @db.Text @map("grand_total_memo")
+  overallRank                     String? @map("overall_rank")
+
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  @@map("interview_ratings")
 }

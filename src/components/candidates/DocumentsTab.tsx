@@ -395,12 +395,12 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
               </button>
             )}
             {activeSubTab === "MEETING" && (
-              <button
-                onClick={handleOpenIntake}
+              <a
+                href={`/interviews/new?candidateId=${candidateId}`}
                 className="border border-green-200 bg-green-50 text-green-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-green-100 transition-colors"
               >
                 📝 面談登録
-              </button>
+              </a>
             )}
             <button
               onClick={() => setShowUploadModal(true)}
@@ -512,6 +512,11 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         </div>
       </div>
 
+      {/* 面談履歴一覧（面談タブのみ） */}
+      {activeSubTab === "MEETING" && (
+        <InterviewHistory candidateId={candidateId} />
+      )}
+
       {/* アップロードモーダル */}
       {showUploadModal && (
         <FileUploadModal
@@ -617,6 +622,60 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ========== Interview History Sub-Component ========== */
+
+function InterviewHistory({ candidateId }: { candidateId: string }) {
+  const [records, setRecords] = useState<{
+    id: string; interviewDate: string; interviewType: string; interviewCount: number | null;
+    interviewMemo: string | null; interviewer: { name: string };
+    rating: { overallRank: string | null; grandTotal: number | null } | null;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/candidates/${candidateId}/interviews`)
+      .then((r) => r.json())
+      .then((d) => setRecords(d.records || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [candidateId]);
+
+  if (loading) return <div className="mt-6 text-center text-[13px] text-gray-400">面談履歴を読み込み中...</div>;
+  if (records.length === 0) return <div className="mt-6 text-center text-[13px] text-gray-400 py-4">面談履歴がありません</div>;
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-[14px] font-bold text-[#374151] mb-3">面談履歴（{records.length}件）</h3>
+      <div className="space-y-2">
+        {records.map((rec) => (
+          <a key={rec.id} href={`/interviews/${rec.id}`}
+            className="block bg-white rounded-lg border border-gray-200 p-3 hover:shadow-sm hover:border-[#2563EB] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-[13px] font-medium">{new Date(rec.interviewDate).toLocaleDateString("ja-JP")}</span>
+                <span className="text-[12px] bg-blue-50 text-[#2563EB] rounded px-2 py-0.5">{rec.interviewType}</span>
+                <span className="text-[12px] text-gray-500">#{rec.interviewCount}</span>
+                <span className="text-[12px] text-gray-500">{rec.interviewer.name}</span>
+              </div>
+              {rec.rating?.overallRank && (
+                <span className={`text-[13px] font-bold px-2 py-0.5 rounded ${
+                  rec.rating.overallRank === "A" ? "bg-green-100 text-green-700" :
+                  rec.rating.overallRank === "B" ? "bg-blue-100 text-blue-700" :
+                  rec.rating.overallRank === "C" ? "bg-yellow-100 text-yellow-700" :
+                  "bg-red-100 text-red-700"
+                }`}>{rec.rating.overallRank}</span>
+              )}
+            </div>
+            {rec.interviewMemo && (
+              <p className="text-[12px] text-gray-500 mt-1 line-clamp-2">{rec.interviewMemo}</p>
+            )}
+          </a>
+        ))}
+      </div>
     </div>
   );
 }

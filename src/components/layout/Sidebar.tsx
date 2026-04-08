@@ -151,12 +151,13 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
       icon: "📄",
       requiresAuth: false,
     },
-    {
-      href: candidateIntakeUrl,
-      label: "面談登録",
-      icon: "👥",
-      requiresAuth: false,
-    },
+    // candidate-intake は面談履歴機能に移行済み（当面並行稼働）
+    // {
+    //   href: candidateIntakeUrl,
+    //   label: "面談登録(旧)",
+    //   icon: "👥",
+    //   requiresAuth: false,
+    // },
     {
       href: resumeGeneratorUrl,
       label: "履歴書生成",
@@ -169,6 +170,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const common: Item[] = [
     { href: "/admin/master", label: "求職者管理", icon: "📇" },
     { href: "/entries", label: "エントリー管理", icon: "📋" },
+    { href: "/interviews/new", label: "面談登録", icon: "👥" },
     { href: "/tasks", label: "タスク管理", icon: "✅" },
     { href: "/attendance", label: "勤怠管理", icon: "🕐" },
     { href: "/announcements", label: "お知らせ", icon: "📢" },
