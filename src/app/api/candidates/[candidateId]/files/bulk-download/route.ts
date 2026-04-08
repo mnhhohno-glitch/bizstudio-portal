@@ -30,38 +30,60 @@ export async function POST(
     return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
   }
 
-  // Create ZIP using archiver
-  const passthrough = new PassThrough();
-  const archive = archiver("zip", { zlib: { level: 5 } });
-  archive.pipe(passthrough);
-
-  // Download files and add to archive
-  for (const file of files) {
+  // Single file: direct download without zipping
+  if (files.length === 1) {
     try {
-      const { base64 } = await downloadFileFromDrive(file.driveFileId);
+      const { base64, mimeType } = await downloadFileFromDrive(files[0].driveFileId);
       const buffer = Buffer.from(base64, "base64");
-      archive.append(buffer, { name: file.fileName });
-    } catch (e) {
-      console.error(`[BulkDownload] Failed to download ${file.fileName}:`, e);
+      return new NextResponse(buffer, {
+        headers: {
+          "Content-Type": mimeType,
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(files[0].fileName)}"`,
+        },
+      });
+    } catch {
+      return NextResponse.json({ error: "ダウンロードに失敗しました" }, { status: 502 });
     }
   }
 
-  await archive.finalize();
-
-  // Collect all chunks into a buffer
-  const chunks: Buffer[] = [];
-  for await (const chunk of passthrough) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const zipBuffer = Buffer.concat(chunks);
-
+  // Multiple files: stream ZIP response
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-  return new NextResponse(zipBuffer, {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const passthrough = new PassThrough();
+      const archive = archiver("zip", { zlib: { level: 5 } });
+      archive.pipe(passthrough);
+
+      passthrough.on("data", (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk));
+      });
+      passthrough.on("end", () => {
+        controller.close();
+      });
+      passthrough.on("error", (err) => {
+        console.error("[BulkDownload] Stream error:", err);
+        controller.error(err);
+      });
+
+      for (const file of files) {
+        try {
+          const { base64 } = await downloadFileFromDrive(file.driveFileId);
+          const buffer = Buffer.from(base64, "base64");
+          archive.append(buffer, { name: file.fileName });
+        } catch (e) {
+          console.error(`[BulkDownload] Failed to download ${file.fileName}:`, e);
+        }
+      }
+
+      await archive.finalize();
+    },
+  });
+
+  return new NextResponse(stream, {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="bookmarks_${date}.zip"`,
-      "Content-Length": String(zipBuffer.length),
     },
   });
 }

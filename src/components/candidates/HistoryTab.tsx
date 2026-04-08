@@ -472,7 +472,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      toast.error("一括ダウンロードに失敗しました");
+      toast.error("一括ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。");
     } finally {
       setBulkDownloading(false);
     }

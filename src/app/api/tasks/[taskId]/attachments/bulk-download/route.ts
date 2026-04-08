@@ -42,32 +42,42 @@ export async function POST(
     });
   }
 
-  // Multiple files: ZIP
-  const passthrough = new PassThrough();
-  const archive = archiver("zip", { zlib: { level: 5 } });
-  archive.pipe(passthrough);
-
-  for (const att of attachments) {
-    try {
-      const res = await fetch(att.publicUrl);
-      if (!res.ok) continue;
-      const buffer = Buffer.from(await res.arrayBuffer());
-      archive.append(buffer, { name: att.fileName });
-    } catch (e) {
-      console.error(`[BulkDownload] Failed: ${att.fileName}`, e);
-    }
-  }
-
-  await archive.finalize();
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of passthrough) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const zipBuffer = Buffer.concat(chunks);
+  // Multiple files: stream ZIP response
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-  return new NextResponse(zipBuffer, {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const passthrough = new PassThrough();
+      const archive = archiver("zip", { zlib: { level: 5 } });
+      archive.pipe(passthrough);
+
+      passthrough.on("data", (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk));
+      });
+      passthrough.on("end", () => {
+        controller.close();
+      });
+      passthrough.on("error", (err) => {
+        console.error("[BulkDownload] Stream error:", err);
+        controller.error(err);
+      });
+
+      for (const att of attachments) {
+        try {
+          const res = await fetch(att.publicUrl);
+          if (!res.ok) continue;
+          const buffer = Buffer.from(await res.arrayBuffer());
+          archive.append(buffer, { name: att.fileName });
+        } catch (e) {
+          console.error(`[BulkDownload] Failed: ${att.fileName}`, e);
+        }
+      }
+
+      await archive.finalize();
+    },
+  });
+
+  return new NextResponse(stream, {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="task_files_${date}.zip"`,

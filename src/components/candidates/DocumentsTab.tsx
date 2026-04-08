@@ -229,7 +229,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
       a.download = `files_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch { toast.error("ダウンロードに失敗しました"); }
+    } catch { toast.error("ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。"); }
     finally { setBulkDLing(false); }
   };
 
