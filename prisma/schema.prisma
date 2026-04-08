@@ -1376,6 +1376,42 @@ model InterviewDetail {
   freeMemo                String?  @db.Text @map("free_memo")
   initialSummary          String?  @db.Text @map("initial_summary")
 
+  // 左カラム: 転職活動状況（テキストエリア）
+  careerSummary           String?  @db.Text @map("career_summary")
+
+  // 初期条件タブ: 登録時条件
+  regIndustry1            String?  @map("reg_industry_1")
+  regIndustry2            String?  @map("reg_industry_2")
+  regIndustry3            String?  @map("reg_industry_3")
+  regJobType1             String?  @map("reg_job_type_1")
+  regJobType2             String?  @map("reg_job_type_2")
+  regJobType3             String?  @map("reg_job_type_3")
+  regAreaPrefecture       String?  @map("reg_area_prefecture")
+  regAreaCity             String?  @map("reg_area_city")
+  regEmploymentType       String?  @map("reg_employment_type")
+  regSalaryMin            Int?     @map("reg_salary_min")
+  regSalaryMax            Int?     @map("reg_salary_max")
+  regHolidays             String?  @map("reg_holidays")
+  regOvertime             String?  @map("reg_overtime")
+  regJobFeatures          String?  @map("reg_job_features")
+  regCompanyFeatures      String?  @map("reg_company_features")
+  regFreeMemo             String?  @db.Text @map("reg_free_memo")
+
+  // アクションタブ追加
+  contactMethod           String?  @map("contact_method")
+  contactMemo             String?  @map("contact_memo")
+  jobSendDeadline         DateTime? @map("job_send_deadline")
+  nextAction              String?  @db.Text @map("next_action")
+  gptMemo                 String?  @db.Text @map("gpt_memo")
+
+  // 働き方チェックボックス（JSON文字列）
+  workStylePreferences    String?  @db.Text @map("work_style_preferences")
+
+  // テキストメモタブ
+  existingInterviewMemo   String?  @db.Text @map("existing_interview_memo")
+  interviewPrepMemo       String?  @db.Text @map("interview_prep_memo")
+  referralHistory         String?  @db.Text @map("referral_history")
+
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
 

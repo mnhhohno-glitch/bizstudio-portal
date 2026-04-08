@@ -95,6 +95,13 @@ export async function POST(request: Request) {
   const transcript = formData.get("transcript") as string | null;
   const resumePdf = formData.get("resumePdf") as File | null;
 
+  console.log("[analyze] Request received:", {
+    hasTranscript: !!transcript,
+    transcriptLength: transcript?.length,
+    hasPdf: !!resumePdf,
+    pdfSize: resumePdf?.size,
+  });
+
   if (!transcript && !resumePdf) {
     return NextResponse.json({ error: "テキストまたはPDFを入力してください" }, { status: 400 });
   }
@@ -119,6 +126,8 @@ export async function POST(request: Request) {
 
   parts.push({ text: textContent });
 
+  console.log("[analyze] Calling Gemini API, parts count:", parts.length, "text length:", textContent.length);
+
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
@@ -140,18 +149,20 @@ export async function POST(request: Request) {
 
     const data = await response.json();
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    console.log("[analyze] Gemini response length:", rawText.length, "preview:", rawText.substring(0, 300));
 
     // Parse JSON from response
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error("[InterviewAnalyze] No JSON in response:", rawText.substring(0, 500));
+      console.error("[analyze] No JSON in response:", rawText.substring(0, 500));
       return NextResponse.json({ error: "AI応答のパースに失敗しました" }, { status: 500 });
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
+    console.log("[analyze] Parsed fields:", Object.keys(parsed), "detail keys:", parsed.detail ? Object.keys(parsed.detail).length : 0);
     return NextResponse.json(parsed);
   } catch (e) {
-    console.error("[InterviewAnalyze] Error:", e);
+    console.error("[analyze] Error:", e instanceof Error ? e.message : e, e instanceof Error ? e.stack : "");
     return NextResponse.json({ error: "AI解析に失敗しました" }, { status: 500 });
   }
 }
