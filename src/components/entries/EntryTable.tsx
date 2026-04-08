@@ -94,6 +94,24 @@ function isEnded(entry: Entry) {
   return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
 }
 
+function isCompanyFlagRed(entry: Entry): boolean {
+  const f = entry.companyFlag;
+  if (!f) return false;
+  if (f === "希望日提出済") return true;
+  if (!f.includes("済")) return true;
+  if (entry.entryFlagDetail === "承諾" && f !== "入社報告済") return true;
+  return false;
+}
+
+function isPersonFlagRed(entry: Entry): boolean {
+  const f = entry.personFlag;
+  if (!f) return false;
+  if (f === "日程回収済") return true;
+  if (!f.includes("済")) return true;
+  if (entry.entryFlagDetail === "承諾" && f !== "入社済") return true;
+  return false;
+}
+
 function getFieldValue(entry: Entry, key: string): string | null {
   switch (key) {
     case "candidate": return entry.candidate.name;
@@ -213,7 +231,7 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
           onClick={(e) => e.stopPropagation()} />
       ) : (
         <span onClick={(e) => { e.stopPropagation(); setEditTime(true); }}
-          className={`text-[10px] block cursor-pointer rounded mt-0.5 min-h-[14px] leading-[14px] ${timeValue ? "text-gray-400 hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
+          className={`text-[10px] block cursor-pointer rounded mt-0.5 min-h-[14px] leading-[14px] ${timeValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
           {timeValue || "HH:mm"}
         </span>
       )}
@@ -366,7 +384,7 @@ export default function EntryTable({
             {companyOptions.length > 0 ? (
               <select value={entry.companyFlag || ""}
                 onChange={(e) => onFlagUpdate(entry.id, { companyFlag: e.target.value || null })}
-                className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${!entry.companyFlag ? "text-gray-400" : ""}`}>
+                className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${isCompanyFlagRed(entry) ? "text-red-600 font-semibold" : !entry.companyFlag ? "text-gray-400" : ""}`}>
                 <option value="" className="text-gray-400">企業対応</option>
                 {companyOptions.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
@@ -374,7 +392,7 @@ export default function EntryTable({
             {personOptions.length > 0 ? (
               <select value={entry.personFlag || ""}
                 onChange={(e) => onFlagUpdate(entry.id, { personFlag: e.target.value || null })}
-                className={`w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.personFlag === "見送り通知未送信" ? "text-red-600 font-semibold" : !entry.personFlag ? "text-gray-400" : ""}`}>
+                className={`w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${isPersonFlagRed(entry) ? "text-red-600 font-semibold" : !entry.personFlag ? "text-gray-400" : ""}`}>
                 <option value="" className="text-gray-400">本人対応</option>
                 {personOptions.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
