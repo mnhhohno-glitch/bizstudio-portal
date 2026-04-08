@@ -31,10 +31,8 @@ const COMMON_COLS: ColConfig[] = [
   { key: "ca", label: "担当CA", width: 80, sortKey: "ca" },
   { key: "company", label: "紹介先企業", width: 160, sortKey: "company" },
   { key: "jobDb", label: "求人DB", width: 80, sortKey: "jobDb" },
-  { key: "entryFlag", label: "エントリーフラグ", width: 110, sortKey: "entryFlag" },
-  { key: "flagDetail", label: "フラグ詳細", width: 110, sortKey: "entryFlagDetail" },
-  { key: "companyFlag", label: "企業対応", width: 110, sortKey: "companyFlag" },
-  { key: "personFlag", label: "本人対応", width: 110, sortKey: "personFlag" },
+  { key: "entryFlags", label: "エントリーフラグ", width: 130, sortKey: "entryFlag" },
+  { key: "statusFlags", label: "対応状況", width: 130, sortKey: "companyFlag" },
   { key: "entryDate", label: "エントリー日", width: 80, sortKey: "entryDate" },
 ];
 
@@ -342,30 +340,25 @@ export default function EntryTable({
             {entry.externalJobNo && <div className="text-[10px] text-gray-400">{entry.externalJobNo}</div>}
           </td>
         );
-      case "entryFlag":
+      case "entryFlags":
         return (
-          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+          <td key={col.key} className="px-1 py-0.5" onClick={(e) => e.stopPropagation()}>
             <select value={entry.entryFlag || ""}
               onChange={(e) => onFlagUpdate(entry.id, { entryFlag: e.target.value, entryFlagDetail: null, companyFlag: null, personFlag: null })}
               className="w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]">
               {entryFlagOptions.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
-          </td>
-        );
-      case "flagDetail":
-        return (
-          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
             <select value={entry.entryFlagDetail || ""}
               onChange={(e) => onFlagUpdate(entry.id, { entryFlagDetail: e.target.value })}
-              className="w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]">
+              className="w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] text-gray-500">
               <option value="">-</option>
               {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </td>
         );
-      case "companyFlag":
+      case "statusFlags":
         return (
-          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+          <td key={col.key} className="px-1 py-0.5" onClick={(e) => e.stopPropagation()}>
             {companyOptions.length > 0 ? (
               <select value={entry.companyFlag || ""}
                 onChange={(e) => onFlagUpdate(entry.id, { companyFlag: e.target.value || null })}
@@ -373,20 +366,15 @@ export default function EntryTable({
                 <option value="" className="text-gray-400">企業対応</option>
                 {companyOptions.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
-            ) : <span className="text-gray-300 text-[11px]">-</span>}
-          </td>
-        );
-      case "personFlag":
-        return (
-          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+            ) : <div className="text-gray-300 text-[11px] px-1 py-0.5">-</div>}
             {personOptions.length > 0 ? (
               <select value={entry.personFlag || ""}
                 onChange={(e) => onFlagUpdate(entry.id, { personFlag: e.target.value || null })}
-                className={`w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.personFlag === "見送り通知未送信" ? "text-red-600 font-semibold" : !entry.personFlag ? "text-gray-400" : ""}`}>
+                className={`w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.personFlag === "見送り通知未送信" ? "text-red-600 font-semibold" : !entry.personFlag ? "text-gray-400" : ""}`}>
                 <option value="" className="text-gray-400">本人対応</option>
                 {personOptions.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
-            ) : <span className="text-gray-300 text-[11px]">-</span>}
+            ) : <div className="text-gray-300 text-[10px] px-1 py-0.5 mt-0.5">-</div>}
           </td>
         );
       case "entryDate":
@@ -438,10 +426,21 @@ export default function EntryTable({
             </th>
             {cols.map((c) => (
               <th key={c.key}
-                className={`px-2 py-1.5 text-left whitespace-nowrap text-[11px] font-semibold ${c.sortKey ? "cursor-pointer select-none hover:bg-[#1E3A8A]/80" : ""}`}
+                className={`px-2 py-1 text-left whitespace-nowrap text-[11px] font-semibold ${c.sortKey ? "cursor-pointer select-none hover:bg-[#1E3A8A]/80" : ""}`}
                 onClick={() => c.sortKey && onSort(c.sortKey)}>
-                {c.label}
-                <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} />
+                {c.key === "entryFlags" ? (
+                  <div>
+                    <div>エントリーフラグ <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></div>
+                    <div className="text-[10px] font-normal text-blue-200">フラグ詳細</div>
+                  </div>
+                ) : c.key === "statusFlags" ? (
+                  <div>
+                    <div>企業対応 <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></div>
+                    <div className="text-[10px] font-normal text-blue-200">本人対応</div>
+                  </div>
+                ) : (
+                  <>{c.label}<SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></>
+                )}
               </th>
             ))}
           </tr>
