@@ -85,6 +85,10 @@ export default function EntryBoard() {
   const [companyName, setCompanyName] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
 
+  // Sort
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -149,6 +153,34 @@ export default function EntryBoard() {
       fetchEntries();
     } catch {
       toast.error("更新に失敗しました");
+    }
+  };
+
+  const handleFieldUpdate = async (entryId: string, fields: Record<string, unknown>) => {
+    try {
+      const res = await fetch(`/api/entries/${entryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!res.ok) {
+        toast.error("更新に失敗しました");
+        return;
+      }
+      const data = await res.json();
+      setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
+    } catch {
+      toast.error("更新に失敗しました");
+    }
+  };
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      if (sortDir === "asc") setSortDir("desc");
+      else { setSortField(null); setSortDir("asc"); }
+    } else {
+      setSortField(field);
+      setSortDir("asc");
     }
   };
 
@@ -273,7 +305,12 @@ export default function EntryBoard() {
         <EntryTable
           entries={entries}
           flagData={flagData}
+          activeTab={activeTab}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSort={handleSort}
           onFlagUpdate={handleFlagUpdate}
+          onFieldUpdate={handleFieldUpdate}
           onRowClick={(id) => setDetailEntryId(id)}
           selectedIds={selectedIds}
           onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
