@@ -199,6 +199,8 @@ function normalizeCompanyName(name: string): string {
 
 const API_TIMEOUT_MS = 120000;
 const MAX_PAST_MESSAGES = 30;
+const MAX_CONTEXT_CHARS = 20000;
+const MAX_CHAT_MESSAGE_CHARS = 4000;
 
 export async function POST(
   req: Request,
@@ -263,6 +265,11 @@ export async function POST(
     }
   } catch (e) {
     console.error("[AnalyzeBatch] Context error:", e);
+  }
+
+  // Truncate context to prevent oversized payloads
+  if (candidateContext.length > MAX_CONTEXT_CHARS) {
+    candidateContext = candidateContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
   }
 
   // 4. Build job posting section for this batch
@@ -390,7 +397,9 @@ ${EVAL_RULES}
   const messagesArray = [
     ...pastMessages.map((m) => ({
       role: m.role as "user" | "assistant",
-      content: m.content,
+      content: m.content.length > MAX_CHAT_MESSAGE_CHARS
+        ? m.content.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
+        : m.content,
     })),
     {
       role: "user" as const,
@@ -439,7 +448,14 @@ ${EVAL_RULES}
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
       }
-      return NextResponse.json({ error: "AIからの応答取得に失敗しました" }, { status: 500 });
+      let detail = "";
+      try {
+        const errJson = JSON.parse(errText);
+        detail = errJson?.error?.message || "";
+      } catch { /* not JSON */ }
+      return NextResponse.json({
+        error: `AIからの応答取得に失敗しました（${response.status}${detail ? `: ${detail}` : ""}）`,
+      }, { status: 500 });
     }
 
     const data = await response.json();
