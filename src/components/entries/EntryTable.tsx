@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
 import type { Entry, FlagData } from "./EntryBoard";
 
@@ -42,10 +43,8 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "docSubmit", label: "書類提出日", width: 85, sortKey: "documentSubmitDate" },
   ],
   "書類選考": [
-    { key: "docSubmit", label: "書類提出日", width: 85, sortKey: "documentSubmitDate" },
-    { key: "docPass", label: "書類通過日", width: 85, sortKey: "documentPassDate" },
-    { key: "aptitude", label: "適性検査", width: 70, sortKey: "aptitudeTestExists" },
-    { key: "aptitudeDeadline", label: "検査期限", width: 85, sortKey: "aptitudeTestDeadline" },
+    { key: "docDates", label: "書類提出日", width: 100, sortKey: "documentSubmitDate" },
+    { key: "aptitudeDates", label: "適性検査", width: 100, sortKey: "aptitudeTestExists" },
   ],
   "面接": [
     { key: "interviewPrep", label: "面接対策", width: 95, sortKey: "interviewPrepDate" },
@@ -163,8 +162,8 @@ function InlineDateCell({ value, entryId, field, onUpdate }: {
   return (
     <span onClick={(e) => { e.stopPropagation(); setEditing(true); }}
       title={fmtDateFull(value)}
-      className="cursor-pointer hover:bg-blue-50 rounded px-0.5 block min-h-[18px] w-full text-center">
-      {fmtDate(value)}
+      className={`cursor-pointer rounded px-0.5 block min-h-[20px] w-full text-center leading-[20px] ${value ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 text-[10px] hover:border-gray-400"}`}>
+      {fmtDate(value) || "MM/DD"}
     </span>
   );
 }
@@ -199,8 +198,9 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
           onClick={(e) => e.stopPropagation()} />
       ) : (
         <span onClick={(e) => { e.stopPropagation(); setEditDate(true); }}
-          title={fmtDateFull(dateValue)} className="cursor-pointer hover:bg-blue-50 rounded px-0.5 block min-h-[16px]">
-          {fmtDate(dateValue)}
+          title={fmtDateFull(dateValue)}
+          className={`cursor-pointer rounded px-0.5 block min-h-[18px] leading-[18px] ${dateValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 text-[10px] hover:border-gray-400"}`}>
+          {fmtDate(dateValue) || "MM/DD"}
         </span>
       )}
       {editTime ? (
@@ -211,8 +211,8 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
           onClick={(e) => e.stopPropagation()} />
       ) : (
         <span onClick={(e) => { e.stopPropagation(); setEditTime(true); }}
-          className="text-[10px] text-gray-400 block cursor-pointer hover:bg-blue-50 rounded min-h-[14px]">
-          {timeValue || "\u00A0"}
+          className={`text-[10px] block cursor-pointer rounded mt-0.5 min-h-[14px] leading-[14px] ${timeValue ? "text-gray-400 hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
+          {timeValue || "HH:mm"}
         </span>
       )}
     </div>
@@ -319,8 +319,10 @@ export default function EntryTable({
     switch (col.key) {
       case "candidate":
         return (
-          <td key={col.key} className="px-2 py-1.5 whitespace-nowrap cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)}>
-            <div className="font-medium">{entry.candidate.name}</div>
+          <td key={col.key} className="px-2 py-1.5 whitespace-nowrap">
+            <Link href={`/candidates/${entry.candidateId}`} className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
+              {entry.candidate.name}
+            </Link>
             <div className="text-gray-400 text-[10px]">{entry.candidate.candidateNumber}</div>
           </td>
         );
@@ -381,12 +383,20 @@ export default function EntryTable({
         return <td key={col.key} className="px-2 py-1.5 text-center text-[11px]" title={fmtDateFull(entry.entryDate)}>{fmtDate(entry.entryDate)}</td>;
       case "docSubmit":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} /></td>;
-      case "docPass":
-        return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.documentPassDate} entryId={entry.id} field="documentPassDate" onUpdate={onFieldUpdate} /></td>;
-      case "aptitude":
-        return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><AptitudeCell value={entry.aptitudeTestExists} entryId={entry.id} onUpdate={onFieldUpdate} /></td>;
-      case "aptitudeDeadline":
-        return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.aptitudeTestDeadline} entryId={entry.id} field="aptitudeTestDeadline" onUpdate={onFieldUpdate} /></td>;
+      case "docDates":
+        return (
+          <td key={col.key} className="px-1 py-0.5 text-center text-[11px]">
+            <InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} />
+            <div className="mt-0.5"><InlineDateCell value={entry.documentPassDate} entryId={entry.id} field="documentPassDate" onUpdate={onFieldUpdate} /></div>
+          </td>
+        );
+      case "aptitudeDates":
+        return (
+          <td key={col.key} className="px-1 py-0.5 text-center text-[11px]" onClick={(e) => e.stopPropagation()}>
+            <AptitudeCell value={entry.aptitudeTestExists} entryId={entry.id} onUpdate={onFieldUpdate} />
+            <div className="mt-0.5"><InlineDateCell value={entry.aptitudeTestDeadline} entryId={entry.id} field="aptitudeTestDeadline" onUpdate={onFieldUpdate} /></div>
+          </td>
+        );
       case "interviewPrep":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.interviewPrepDate} timeValue={entry.interviewPrepTime} entryId={entry.id} dateField="interviewPrepDate" timeField="interviewPrepTime" onUpdate={onFieldUpdate} /></td>;
       case "firstInterview":
@@ -437,6 +447,16 @@ export default function EntryTable({
                   <div>
                     <div>企業対応 <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></div>
                     <div className="text-[10px] font-normal text-blue-200">本人対応</div>
+                  </div>
+                ) : c.key === "docDates" ? (
+                  <div>
+                    <div>書類提出日 <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></div>
+                    <div className="text-[10px] font-normal text-blue-200">書類通過日</div>
+                  </div>
+                ) : c.key === "aptitudeDates" ? (
+                  <div>
+                    <div>適性検査 <SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></div>
+                    <div className="text-[10px] font-normal text-blue-200">検査期限</div>
                   </div>
                 ) : (
                   <>{c.label}<SortIndicator sortKey={c.sortKey} sortField={sortField} sortDir={sortDir} /></>
