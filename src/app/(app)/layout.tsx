@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <TopBar companyName="Bizstudio Portal" userName={userName} />
 
           <main className="flex-1 bg-[#F5F7FA] p-6">
-            <div className="mx-auto max-w-6xl">{children}</div>
+            <div className="w-full">{children}</div>
           </main>
         </div>
       </div>
