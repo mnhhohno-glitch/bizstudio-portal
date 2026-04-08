@@ -82,15 +82,24 @@ function fmtDateFull(iso: string | null) {
   return new Date(iso).toISOString().slice(0, 10).replace(/-/g, "/");
 }
 
+// 本人対応が完了済み（通知送信済・辞退報告済・入社済）のみ無効化
+const COMPLETED_PERSON_FLAGS = ["見送り通知送信済", "入社済"];
+const COMPLETED_COMPANY_FLAGS = ["辞退報告済"];
+
+function isPersonActionCompleted(entry: Entry): boolean {
+  if (COMPLETED_PERSON_FLAGS.includes(entry.personFlag || "")) return true;
+  if (COMPLETED_COMPANY_FLAGS.includes(entry.companyFlag || "")) return true;
+  return false;
+}
+
 function getRowClass(entry: Entry) {
-  if (entry.personFlag === "見送り通知未送信") return "bg-white";
-  if (!entry.isActive) return "bg-gray-300 text-gray-400";
-  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-200 text-gray-500";
+  if (!entry.isActive && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-400";
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "") && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-500";
   return "bg-white";
 }
 
 function isEnded(entry: Entry) {
-  if (entry.personFlag === "見送り通知未送信") return false;
+  if (!isPersonActionCompleted(entry)) return false;
   return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
 }
 
@@ -488,9 +497,8 @@ export default function EntryTable({
         <tbody>
           {sorted.map((entry) => {
             const rowClass = getRowClass(entry);
-            const inactive = !entry.isActive;
             return (
-              <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30 ${inactive ? "line-through" : ""}`}>
+              <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30`}>
                 <td className="px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selectedIds.has(entry.id)}
                     onChange={() => onSelectToggle(entry.id)}
