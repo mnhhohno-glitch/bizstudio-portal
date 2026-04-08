@@ -83,12 +83,14 @@ function fmtDateFull(iso: string | null) {
 }
 
 function getRowClass(entry: Entry) {
+  if (entry.personFlag === "見送り通知未送信") return "bg-white";
   if (!entry.isActive) return "bg-gray-300 text-gray-400";
   if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-200 text-gray-500";
   return "bg-white";
 }
 
 function isEnded(entry: Entry) {
+  if (entry.personFlag === "見送り通知未送信") return false;
   return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
 }
 

@@ -6,7 +6,7 @@ import type { Entry } from "./EntryBoard";
 
 const END_REASONS = [
   { code: "SKILL_MISMATCH", label: "経験・スキル不一致" },
-  { code: "COMPARISON", label: "他社比較による終了" },
+  { code: "COMPARISON", label: "他者比較による終了" },
   { code: "POSITION_CLOSED", label: "求人クローズ" },
   { code: "CULTURE_MISMATCH", label: "社風・カルチャー不一致" },
   { code: "CONDITION_MISMATCH", label: "条件面の不一致" },
