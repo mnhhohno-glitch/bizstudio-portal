@@ -2116,6 +2116,35 @@ function renderField(
 
   switch (field.fieldType) {
     case "TEXT":
+      if (field.label === "年収情報") {
+        const salaryMatch = value.match(/^(現在|前職)\s*(\d*)\s*万円\s*\/\s*希望\s*(\d*)\s*[〜~～]\s*(\d*)\s*万円$/);
+        const sType = salaryMatch?.[1] || "現在";
+        const sCurrent = salaryMatch?.[2] || "";
+        const sLow = salaryMatch?.[3] || "";
+        const sHigh = salaryMatch?.[4] || "";
+        const composeSalary = (t: string, c: string, l: string, h: string) =>
+          !c && !l && !h ? "" : `${t} ${c}万円 / 希望 ${l}〜${h}万円`;
+        const numInput = "w-[90px] rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
+        return (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <select
+              value={sType}
+              onChange={(e) => setFieldValue(field.id, composeSalary(e.target.value, sCurrent, sLow, sHigh))}
+              className="rounded-[6px] border border-[#D1D5DB] px-2 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+            >
+              <option value="現在">現在</option>
+              <option value="前職">前職</option>
+            </select>
+            <input type="number" min="0" value={sCurrent} placeholder="例: 350" onChange={(e) => setFieldValue(field.id, composeSalary(sType, e.target.value, sLow, sHigh))} className={numInput} />
+            <span className="text-[14px] text-[#374151]">万円</span>
+            <span className="text-[14px] text-[#6B7280] ml-2">希望</span>
+            <input type="number" min="0" value={sLow} placeholder="例: 400" onChange={(e) => setFieldValue(field.id, composeSalary(sType, sCurrent, e.target.value, sHigh))} className={numInput} />
+            <span className="text-[14px] text-[#6B7280]">〜</span>
+            <input type="number" min="0" value={sHigh} placeholder="例: 500" onChange={(e) => setFieldValue(field.id, composeSalary(sType, sCurrent, sLow, e.target.value))} className={numInput} />
+            <span className="text-[14px] text-[#374151]">万円</span>
+          </div>
+        );
+      }
       if (field.label === "エントリー件数") {
         return (
           <div className="flex items-center gap-2">
