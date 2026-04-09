@@ -278,6 +278,15 @@ const RATING_LABELS: Record<string, string> = {
   A: "A 非常に良い", B: "B 良い", C: "C 要検討", D: "D 合わない",
 };
 
+function parse3AxisRatings(comment: string | null): { wish: string; pass: string; overall: string } | null {
+  if (!comment) return null;
+  const w = comment.match(/■\s*本人希望[：:]\s*([ABCD])/);
+  const p = comment.match(/■\s*通過率[：:]\s*([ABCD])/);
+  const o = comment.match(/■\s*総合[：:]\s*([ABCD])/);
+  if (!w && !p && !o) return null;
+  return { wish: w?.[1] || "—", pass: p?.[1] || "—", overall: o?.[1] || "—" };
+}
+
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "application/msword",
@@ -338,6 +347,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [loadingMemoBookmark, setLoadingMemoBookmark] = useState(false);
   const [isMemoDropping, setIsMemoDropping] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileName: string; rating: string; comment: string } | null>(null);
+  const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
@@ -808,16 +818,14 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 />
                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                   <span className="shrink-0 text-sm">{getFileIcon(file.mimeType)}</span>
-                  <a
-                    href={getPreviewUrl(file.driveViewUrl)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate"
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
+                    className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
                     title={file.fileName}
-                  >{file.fileName}</a>
+                  >{file.fileName}</button>
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                 </div>
-                <span className="w-[90px] shrink-0">
+                <span className="w-[120px] shrink-0">
                   {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] ? (
                     <button
                       onClick={(e) => {
@@ -828,9 +836,27 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                           comment: file.aiAnalysisComment || "分析コメントがありません",
                         });
                       }}
-                      className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border cursor-pointer hover:opacity-80 transition-opacity ${RATING_STYLES[file.aiMatchRating]}`}
+                      className="cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      {RATING_LABELS[file.aiMatchRating]}
+                      {(() => {
+                        const axis = parse3AxisRatings(file.aiAnalysisComment);
+                        if (axis) {
+                          const rBadge = (v: string) => {
+                            const s = RATING_STYLES[v];
+                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
+                          };
+                          return (
+                            <div className="flex items-center gap-0.5">
+                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">希望</div>{rBadge(axis.wish)}</div>
+                              <span className="text-[8px] text-gray-300">/</span>
+                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">通過</div>{rBadge(axis.pass)}</div>
+                              <span className="text-[8px] text-gray-300">/</span>
+                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">総合</div>{rBadge(axis.overall)}</div>
+                            </div>
+                          );
+                        }
+                        return <span className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border ${RATING_STYLES[file.aiMatchRating!]}`}>{RATING_LABELS[file.aiMatchRating!]}</span>;
+                      })()}
                     </button>
                   ) : (
                     <span className="text-[11px] text-gray-300">—</span>
@@ -1116,6 +1142,42 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* PDF Preview popup */}
+      {previewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
+          <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(previewFile.id)}
+                  onChange={() => toggleSelect(previewFile.id)}
+                  className="w-4 h-4 rounded border-gray-300 text-[#2563EB] shrink-0"
+                />
+                <span className="text-[13px] font-medium truncate">{previewFile.fileName}</span>
+                {previewFile.aiMatchRating && RATING_STYLES[previewFile.aiMatchRating] && (
+                  <span className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border shrink-0 ${RATING_STYLES[previewFile.aiMatchRating]}`}>
+                    {previewFile.aiMatchRating}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a href={getPreviewUrl(previewFile.driveViewUrl)} target="_blank" rel="noopener noreferrer"
+                  className="text-[12px] text-blue-600 hover:underline">新しいタブで開く</a>
+                <button onClick={() => setPreviewFile(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0">
+              <iframe
+                src={getPreviewUrl(previewFile.driveViewUrl)}
+                className="w-full h-full border-0"
+                title={previewFile.fileName}
+              />
+            </div>
           </div>
         </div>
       )}
