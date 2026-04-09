@@ -30,8 +30,8 @@ type Props = {
 const COMMON_COLS: ColConfig[] = [
   { key: "candidate", label: "求職者", width: 120, sortKey: "candidate" },
   { key: "ca", label: "担当CA", width: 80, sortKey: "ca" },
-  { key: "company", label: "紹介先企業", width: 160, sortKey: "company" },
-  { key: "jobDb", label: "求人DB", width: 80, sortKey: "jobDb" },
+  { key: "company", label: "紹介先企業", width: 280, sortKey: "company" },
+  { key: "jobDb", label: "求人DB", width: 70, sortKey: "jobDb" },
   { key: "entryFlags", label: "エントリーフラグ", width: 130, sortKey: "entryFlag" },
   { key: "statusFlags", label: "対応状況", width: 130, sortKey: "companyFlag" },
   { key: "entryDate", label: "エントリー日", width: 80, sortKey: "entryDate" },
@@ -371,8 +371,8 @@ export default function EntryTable({
       case "company":
         return (
           <td key={col.key} className="px-2 py-1.5 cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)} title={entry.companyName}>
-            <div className="whitespace-nowrap truncate max-w-[160px]">{entry.companyName}</div>
-            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[160px]">{entry.jobTitle}</div>}
+            <div className="whitespace-nowrap truncate max-w-[280px]">{entry.companyName}</div>
+            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]">{entry.jobTitle}</div>}
           </td>
         );
       case "jobDb":
