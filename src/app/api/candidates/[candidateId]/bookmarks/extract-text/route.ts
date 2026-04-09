@@ -115,6 +115,9 @@ export async function POST(
             return;
           }
 
+          // Remove NULL bytes (PostgreSQL TEXT columns cannot store 0x00)
+          text = text.replace(/\0/g, "");
+
           // Save to DB
           await prisma.candidateFile.update({
             where: { id: file.id },
