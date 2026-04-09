@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const companyName = sp.get("companyName");
   const dateFrom = sp.get("dateFrom");
   const dateTo = sp.get("dateTo");
+  const careerAdvisorName = sp.get("careerAdvisorName");
   const includeInactive = sp.get("includeInactive") === "true";
   const hasJoined = sp.get("hasJoined");
   const sortBy = sp.get("sortBy") || "updatedAt";
@@ -27,8 +28,12 @@ export async function GET(req: NextRequest) {
   if (entryFlag) where.entryFlag = entryFlag;
   if (careerAdvisorId) where.careerAdvisorId = careerAdvisorId;
   if (companyName) where.companyName = { contains: companyName, mode: "insensitive" };
-  if (candidateName) {
-    where.candidate = { name: { contains: candidateName, mode: "insensitive" } };
+  if (candidateName || careerAdvisorName) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const candidateWhere: any = {};
+    if (candidateName) candidateWhere.name = { contains: candidateName, mode: "insensitive" };
+    if (careerAdvisorName) candidateWhere.employee = { name: careerAdvisorName };
+    where.candidate = candidateWhere;
   }
   if (dateFrom || dateTo) {
     where.entryDate = {};

@@ -30,8 +30,8 @@ type Props = {
 const COMMON_COLS: ColConfig[] = [
   { key: "candidate", label: "求職者", width: 120, sortKey: "candidate" },
   { key: "ca", label: "担当CA", width: 80, sortKey: "ca" },
-  { key: "company", label: "紹介先企業", width: 160, sortKey: "company" },
-  { key: "jobDb", label: "求人DB", width: 80, sortKey: "jobDb" },
+  { key: "company", label: "紹介先企業", width: 280, sortKey: "company" },
+  { key: "jobDb", label: "求人DB", width: 70, sortKey: "jobDb" },
   { key: "entryFlags", label: "エントリーフラグ", width: 130, sortKey: "entryFlag" },
   { key: "statusFlags", label: "対応状況", width: 130, sortKey: "companyFlag" },
   { key: "entryDate", label: "エントリー日", width: 80, sortKey: "entryDate" },
@@ -93,14 +93,19 @@ function isPersonActionCompleted(entry: Entry): boolean {
 }
 
 function getRowClass(entry: Entry) {
-  if (!entry.isActive && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-400";
-  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "") && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-500";
+  // 3. 無効行（完了済み）: グレー + 薄い
+  if (isPersonActionCompleted(entry)) return "bg-gray-100 text-gray-400 opacity-60";
+  // 2. 選考終了行: グレーのみ
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-100 text-gray-500";
+  // 1. 通常行
   return "bg-white";
 }
 
 function isEnded(entry: Entry) {
-  if (!isPersonActionCompleted(entry)) return false;
-  return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
+  // ソート用: 完了済みは最下部、選考終了はその上
+  if (isPersonActionCompleted(entry)) return true;
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return true;
+  return false;
 }
 
 function isCompanyFlagRed(entry: Entry): boolean {
@@ -148,11 +153,17 @@ function getFieldValue(entry: Entry, key: string): string | null {
   }
 }
 
+function getSortTier(entry: Entry): number {
+  if (isPersonActionCompleted(entry)) return 2; // 無効行（最下部）
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return 1; // 選考終了
+  return 0; // 通常
+}
+
 function applySortAndGroup(entries: Entry[], sortField: string | null, sortDir: "asc" | "desc") {
   return [...entries].sort((a, b) => {
-    const aEnded = isEnded(a) ? 1 : 0;
-    const bEnded = isEnded(b) ? 1 : 0;
-    if (aEnded !== bEnded) return aEnded - bEnded;
+    const aTier = getSortTier(a);
+    const bTier = getSortTier(b);
+    if (aTier !== bTier) return aTier - bTier;
     if (!sortField) return 0;
     const aVal = getFieldValue(a, sortField);
     const bVal = getFieldValue(b, sortField);
@@ -360,8 +371,8 @@ export default function EntryTable({
       case "company":
         return (
           <td key={col.key} className="px-2 py-1.5 cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)} title={entry.companyName}>
-            <div className="whitespace-nowrap truncate max-w-[160px]">{entry.companyName}</div>
-            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[160px]">{entry.jobTitle}</div>}
+            <div className="whitespace-nowrap truncate max-w-[280px]">{entry.companyName}</div>
+            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]">{entry.jobTitle}</div>}
           </td>
         );
       case "jobDb":

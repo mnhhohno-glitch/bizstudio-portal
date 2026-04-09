@@ -83,6 +83,8 @@ export default function EntryBoard() {
   // Filters
   const [candidateName, setCandidateName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [caFilter, setCaFilter] = useState("");
+  const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
 
   // Sort
@@ -107,6 +109,7 @@ export default function EntryBoard() {
     if (activeTab === "入社済") params.set("hasJoined", "true");
     if (candidateName) params.set("candidateName", candidateName);
     if (companyName) params.set("companyName", companyName);
+    if (caFilter) params.set("careerAdvisorName", caFilter);
     if (includeInactive) params.set("includeInactive", "true");
 
     try {
@@ -119,7 +122,7 @@ export default function EntryBoard() {
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [page, activeTab, candidateName, companyName, includeInactive]);
+  }, [page, activeTab, candidateName, companyName, caFilter, includeInactive]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -127,6 +130,18 @@ export default function EntryBoard() {
     fetch("/api/entry-flags")
       .then((r) => r.json())
       .then(setFlagData)
+      .catch(() => {});
+    // Load CA list and set default to current user
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((d) => {
+        const list: { name: string }[] = d.employees || d || [];
+        setCaOptions(list.map((e) => e.name));
+      })
+      .catch(() => {});
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => { if (d.name) setCaFilter(d.name); })
       .catch(() => {});
   }, []);
 
@@ -253,6 +268,14 @@ export default function EntryBoard() {
           placeholder="企業名で検索"
           className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
         />
+        <select
+          value={caFilter}
+          onChange={(e) => { setCaFilter(e.target.value); setPage(1); }}
+          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+        >
+          <option value="">担当CA（全員）</option>
+          {caOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
           <input
             type="checkbox"

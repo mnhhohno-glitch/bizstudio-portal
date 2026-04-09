@@ -43,6 +43,7 @@ export default function CandidateRegistrationModal({
 
   // PDF upload
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfDragging, setPdfDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -205,9 +206,11 @@ export default function CandidateRegistrationModal({
         <div className="mb-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <p className="text-[13px] font-medium text-[#374151] mb-2">📄 WEB履歴書から自動入力（任意）</p>
           <div
-            className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#2563EB] transition-colors cursor-pointer"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type === "application/pdf") setPdfFile(f); }}
+            className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer relative ${pdfDragging ? "border-[#2563EB] bg-blue-50" : "border-gray-300 hover:border-[#2563EB]"}`}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setPdfDragging(true); }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setPdfDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setPdfDragging(false); }}
+            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setPdfDragging(false); const f = e.dataTransfer.files[0]; if (f?.type === "application/pdf") setPdfFile(f); }}
             onClick={() => fileInputRef.current?.click()}
           >
             {pdfFile ? (
@@ -216,7 +219,7 @@ export default function CandidateRegistrationModal({
                 <button onClick={(e) => { e.stopPropagation(); setPdfFile(null); }} className="text-gray-400 hover:text-red-500 text-sm">✕</button>
               </div>
             ) : (
-              <p className="text-[13px] text-gray-400">PDFをドラッグ＆ドロップ、またはクリックして選択</p>
+              <p className="text-[13px] text-gray-400 pointer-events-none">{pdfDragging ? "ここにドロップ" : "PDFをドラッグ＆ドロップ、またはクリックして選択"}</p>
             )}
           </div>
           <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setPdfFile(f); e.target.value = ""; }} />
