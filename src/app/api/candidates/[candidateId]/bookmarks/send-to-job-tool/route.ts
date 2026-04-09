@@ -178,20 +178,29 @@ export async function POST(
           .toLowerCase();
 
         for (const file of downloadedFiles) {
-          const fileNameNorm = norm(file.fileName);
-          // メモエントリの会社名がファイル名に含まれるか照合
-          const matched = memoEntries.find((e) => {
-            const memoNorm = norm(e.companyName);
-            return fileNameNorm.includes(memoNorm) || memoNorm.includes(fileNameNorm);
-          });
+          // 1. 求人番号マッチ（最優先）: PDF _No420121 ↔ メモ circusId 420121
+          const jobNumMatch = file.fileName.match(/_No(\d+)/i);
+          const pdfJobNumber = jobNumMatch ? jobNumMatch[1] : null;
+          let matched = pdfJobNumber
+            ? memoEntries.find((e) => e.circusId === pdfJobNumber)
+            : null;
+
+          // 2. 会社名マッチ（フォールバック）
+          if (!matched) {
+            const fileNameNorm = norm(file.fileName);
+            matched = memoEntries.find((e) => {
+              const memoNorm = norm(e.companyName);
+              return fileNameNorm.includes(memoNorm) || memoNorm.includes(fileNameNorm);
+            });
+          }
+
           let newFileName = file.fileName;
           if (matched) {
-            // 拡張子を保持してリネーム: {会社名}_No{id}.pdf
             const ext = file.fileName.match(/\.[^.]+$/)?.[0] || ".pdf";
             newFileName = `${matched.companyName}_No${matched.circusId}${ext}`;
-            console.log(`[SendToJobTool] Circus rename: "${file.fileName}" → "${newFileName}"`);
+            console.log(`[SendToJobTool] Circus rename: "${file.fileName}" → "${newFileName}" (matched by ${pdfJobNumber && matched.circusId === pdfJobNumber ? "jobNumber" : "companyName"})`);
           } else {
-            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}" (norm: "${fileNameNorm}"), entries:`, memoEntries.map((e) => norm(e.companyName)));
+            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}" (jobNum: ${pdfJobNumber}), entries:`, memoEntries.map((e) => `${e.companyName}:${e.circusId}`));
           }
           const uint8 = new Uint8Array(file.buffer);
           const blob = new Blob([uint8], { type: file.mimeType });
