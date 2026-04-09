@@ -167,13 +167,23 @@ export async function POST(
           }
         }
 
-        // 会社名の正規化（比較用）
-        const norm = (s: string) => s.replace(/[\s\u3000_]/g, "").replace(/_\d{14,}$/, "").toLowerCase();
+        // 会社名の正規化（比較用）: ファイル名から求人番号・拡張子・プレフィックスを除去
+        const norm = (s: string) => s
+          .replace(/\.[^.]+$/, "")          // 拡張子除去
+          .replace(/_No\d+$/i, "")          // _No420121 等の求人番号除去
+          .replace(/^求人票[_]?/, "")       // 求人票プレフィックス除去
+          .replace(/[\s\u3000_]/g, "")      // 空白・アンダースコア除去
+          .replace(/_\d{14,}$/, "")         // タイムスタンプ除去
+          .replace(/[Ａ-Ｚａ-ｚ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)) // 全角→半角
+          .toLowerCase();
 
         for (const file of downloadedFiles) {
           const fileNameNorm = norm(file.fileName);
           // メモエントリの会社名がファイル名に含まれるか照合
-          const matched = memoEntries.find((e) => fileNameNorm.includes(norm(e.companyName)));
+          const matched = memoEntries.find((e) => {
+            const memoNorm = norm(e.companyName);
+            return fileNameNorm.includes(memoNorm) || memoNorm.includes(fileNameNorm);
+          });
           let newFileName = file.fileName;
           if (matched) {
             // 拡張子を保持してリネーム: {会社名}_No{id}.pdf
@@ -181,7 +191,7 @@ export async function POST(
             newFileName = `${matched.companyName}_No${matched.circusId}${ext}`;
             console.log(`[SendToJobTool] Circus rename: "${file.fileName}" → "${newFileName}"`);
           } else {
-            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}", keeping original name`);
+            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}" (norm: "${fileNameNorm}"), entries:`, memoEntries.map((e) => norm(e.companyName)));
           }
           const uint8 = new Uint8Array(file.buffer);
           const blob = new Blob([uint8], { type: file.mimeType });
