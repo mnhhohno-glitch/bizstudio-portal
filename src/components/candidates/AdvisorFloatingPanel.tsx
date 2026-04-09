@@ -164,11 +164,16 @@ export default function AdvisorFloatingPanel({
     }
   };
 
-  const handleCopyGreeting = async (messageId: string, body: string) => {
+  const handleCopyMessage = async (messageId: string, text: string) => {
     try {
-      await navigator.clipboard.writeText(body);
+      const plain = text
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/\*(.*?)\*/g, "$1")
+        .replace(/#{1,6}\s/g, "")
+        .replace(/`(.*?)`/g, "$1");
+      await navigator.clipboard.writeText(plain);
       setCopiedMessageId(messageId);
-      setTimeout(() => setCopiedMessageId(null), 2000);
+      setTimeout(() => setCopiedMessageId(null), 1500);
     } catch {
       // fallback
     }
@@ -621,18 +626,20 @@ export default function AdvisorFloatingPanel({
                       </div>
                     )}
                     <div
-                      className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed relative ${
+                      className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed relative group ${
                         msg.role === "user"
                           ? "bg-[#003366] text-white rounded-2xl rounded-br-sm"
                           : "bg-[#F4F7F9] text-gray-800 rounded-2xl rounded-bl-sm"
                       }`}
                     >
-                      {greeting?.isGreeting && !msg.isLoading && (
+                      {msg.role === "assistant" && !msg.isLoading && (
                         <button
-                          onClick={() => handleCopyGreeting(msg.id, greeting.body)}
-                          className="absolute top-2 right-2 text-[12px] text-gray-400 hover:text-[#2563EB] transition-colors"
+                          onClick={() => handleCopyMessage(msg.id, greeting?.isGreeting ? greeting.body : msg.content)}
+                          className={`absolute top-2 right-2 text-[12px] transition-colors ${
+                            copiedMessageId === msg.id ? "text-green-500" : "text-gray-400 hover:text-[#2563EB] opacity-0 group-hover:opacity-100"
+                          }`}
                         >
-                          {copiedMessageId === msg.id ? "✓ コピーしました" : "📋 コピー"}
+                          {copiedMessageId === msg.id ? "✓" : "📋"}
                         </button>
                       )}
 
