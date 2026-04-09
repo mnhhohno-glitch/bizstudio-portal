@@ -332,7 +332,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [sortField, setSortField] = useState<"name" | "rating" | "uploader" | "date" | null>(null);
+  const [sortField, setSortField] = useState<"name" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date" | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
@@ -499,7 +499,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   };
 
   // Filtered + sorted files
-  const handleSort = (field: "name" | "rating" | "uploader" | "date") => {
+  const handleSort = (field: "name" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date") => {
     if (sortField === field) {
       if (sortDir === "asc") { setSortDir("desc"); }
       else { setSortField(null); setSortDir("asc"); }
@@ -528,6 +528,14 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
           const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
           const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
           return (ra - rb) * dir;
+        }
+        if (sortField === "wish" || sortField === "pass" || sortField === "overall") {
+          const axisA = parse3AxisRatings(a.aiAnalysisComment);
+          const axisB = parse3AxisRatings(b.aiAnalysisComment);
+          const key = sortField === "wish" ? "wish" : sortField === "pass" ? "pass" : "overall";
+          const va = axisA ? (ratingOrder[axisA[key]] ?? 4) : 4;
+          const vb = axisB ? (ratingOrder[axisB[key]] ?? 4) : 4;
+          return (va - vb) * dir;
         }
         if (sortField === "uploader") return a.uploadedBy.name.localeCompare(b.uploadedBy.name) * dir;
         if (sortField === "date") return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
@@ -771,12 +779,17 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
             会社名
             <SortIcon field="name" current={sortField} dir={sortDir} />
           </span>
-          <span
-            onClick={() => handleSort("rating")}
-            className={`w-[90px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "rating" ? "text-[#2563EB]" : ""}`}
-          >
-            評価
-            <SortIcon field="rating" current={sortField} dir={sortDir} />
+          <span onClick={() => handleSort("wish")}
+            className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "wish" ? "text-[#2563EB]" : ""}`}>
+            希望<SortIcon field="wish" current={sortField} dir={sortDir} />
+          </span>
+          <span onClick={() => handleSort("pass")}
+            className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "pass" ? "text-[#2563EB]" : ""}`}>
+            通過<SortIcon field="pass" current={sortField} dir={sortDir} />
+          </span>
+          <span onClick={() => handleSort("overall")}
+            className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "overall" ? "text-[#2563EB]" : ""}`}>
+            総合<SortIcon field="overall" current={sortField} dir={sortDir} />
           </span>
           <span
             onClick={() => handleSort("uploader")}
@@ -787,12 +800,12 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
           </span>
           <span
             onClick={() => handleSort("date")}
-            className={`w-[44px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "date" ? "text-[#2563EB]" : ""}`}
+            className={`w-[52px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 whitespace-nowrap ${sortField === "date" ? "text-[#2563EB]" : ""}`}
           >
             紹介日
             <SortIcon field="date" current={sortField} dir={sortDir} />
           </span>
-          <span className="w-[60px] shrink-0" />
+          <span className="w-[70px] shrink-0" />
         </div>
       )}
 
@@ -825,57 +838,41 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   >{file.fileName}</button>
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                 </div>
-                <span className="w-[120px] shrink-0">
-                  {file.aiMatchRating && RATING_STYLES[file.aiMatchRating] ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAnalysis({
-                          fileName: file.fileName,
-                          rating: file.aiMatchRating!,
-                          comment: file.aiAnalysisComment || "分析コメントがありません",
-                        });
-                      }}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
-                    >
-                      {(() => {
-                        const axis = parse3AxisRatings(file.aiAnalysisComment);
-                        if (axis) {
-                          const rBadge = (v: string) => {
-                            const s = RATING_STYLES[v];
-                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
-                          };
-                          return (
-                            <div className="flex items-center gap-0.5">
-                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">希望</div>{rBadge(axis.wish)}</div>
-                              <span className="text-[8px] text-gray-300">/</span>
-                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">通過</div>{rBadge(axis.pass)}</div>
-                              <span className="text-[8px] text-gray-300">/</span>
-                              <div className="text-center"><div className="text-[8px] text-gray-400 leading-none">総合</div>{rBadge(axis.overall)}</div>
-                            </div>
-                          );
-                        }
-                        return <span className={`inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-semibold border ${RATING_STYLES[file.aiMatchRating!]}`}>{RATING_LABELS[file.aiMatchRating!]}</span>;
-                      })()}
-                    </button>
-                  ) : (
-                    <span className="text-[11px] text-gray-300">—</span>
-                  )}
-                </span>
+                {(() => {
+                  const axis = parse3AxisRatings(file.aiAnalysisComment);
+                  const badge = (v: string | undefined) => {
+                    if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
+                    const s = RATING_STYLES[v];
+                    return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
+                  };
+                  const openAnalysis = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    if (file.aiAnalysisComment) setSelectedAnalysis({ fileName: file.fileName, rating: file.aiMatchRating || "", comment: file.aiAnalysisComment });
+                  };
+                  return (
+                    <>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.wish)}</span>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.pass)}</span>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
+                    </>
+                  );
+                })()}
                 <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
-                <span className="w-[44px] shrink-0 text-[11px] text-gray-400">{shortDate(file.createdAt)}</span>
-                <span className="w-[60px] shrink-0 flex items-center gap-1 justify-end">
+                <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
+                <span className="w-[70px] shrink-0 flex items-center gap-0.5 justify-end">
                   <a
                     href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
                     download
-                    className="text-gray-400 hover:text-gray-700 text-[12px] font-medium"
+                    className="text-gray-400 hover:text-gray-700 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors"
+                    title="ダウンロード"
                   >
                     ⬇
                   </a>
                   <button
                     onClick={() => handleDelete(file.id)}
                     disabled={deletingId === file.id}
-                    className="text-gray-400 hover:text-red-500 text-[12px] font-medium disabled:opacity-50"
+                    className="text-gray-400 hover:text-red-500 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors disabled:opacity-50"
+                    title="削除"
                   >
                     🗑
                   </button>
