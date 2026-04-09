@@ -93,14 +93,19 @@ function isPersonActionCompleted(entry: Entry): boolean {
 }
 
 function getRowClass(entry: Entry) {
-  if (!entry.isActive && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-400";
-  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "") && isPersonActionCompleted(entry)) return "bg-gray-200 text-gray-500";
+  // 3. 無効行（完了済み）: グレー + 薄い
+  if (isPersonActionCompleted(entry)) return "bg-gray-100 text-gray-400 opacity-60";
+  // 2. 選考終了行: グレーのみ
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-100 text-gray-500";
+  // 1. 通常行
   return "bg-white";
 }
 
 function isEnded(entry: Entry) {
-  if (!isPersonActionCompleted(entry)) return false;
-  return !entry.isActive || SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "");
+  // ソート用: 完了済みは最下部、選考終了はその上
+  if (isPersonActionCompleted(entry)) return true;
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return true;
+  return false;
 }
 
 function isCompanyFlagRed(entry: Entry): boolean {
@@ -148,11 +153,17 @@ function getFieldValue(entry: Entry, key: string): string | null {
   }
 }
 
+function getSortTier(entry: Entry): number {
+  if (isPersonActionCompleted(entry)) return 2; // 無効行（最下部）
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return 1; // 選考終了
+  return 0; // 通常
+}
+
 function applySortAndGroup(entries: Entry[], sortField: string | null, sortDir: "asc" | "desc") {
   return [...entries].sort((a, b) => {
-    const aEnded = isEnded(a) ? 1 : 0;
-    const bEnded = isEnded(b) ? 1 : 0;
-    if (aEnded !== bEnded) return aEnded - bEnded;
+    const aTier = getSortTier(a);
+    const bTier = getSortTier(b);
+    if (aTier !== bTier) return aTier - bTier;
     if (!sortField) return 0;
     const aVal = getFieldValue(a, sortField);
     const bVal = getFieldValue(b, sortField);
