@@ -334,6 +334,8 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const [sendResult, setSendResult] = useState<{ success: boolean; projectUrl?: string; message?: string } | null>(null);
   const [sendStep, setSendStep] = useState(0);
   const [memoFile, setMemoFile] = useState<File | null>(null);
+  const [memoFromBookmark, setMemoFromBookmark] = useState<{ id: string; fileName: string; content: string } | null>(null);
+  const [loadingMemoBookmark, setLoadingMemoBookmark] = useState(false);
   const [isMemoDropping, setIsMemoDropping] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileName: string; rating: string; comment: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
@@ -546,7 +548,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
   const handleSendToJobTool = async () => {
     const areas = [...sendAreas];
     if (areas.length === 0) return;
-    if (sendDbType === "circus" && !memoFile) return;
+    if (sendDbType === "circus" && !memoFile && !memoFromBookmark) return;
 
     setSending(true);
     setSendResult(null);
@@ -554,8 +556,12 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
 
     try {
       let memoContent: string | null = null;
-      if (sendDbType === "circus" && memoFile) {
-        memoContent = await memoFile.text();
+      if (sendDbType === "circus") {
+        if (memoFromBookmark) {
+          memoContent = memoFromBookmark.content;
+        } else if (memoFile) {
+          memoContent = await memoFile.text();
+        }
       }
 
       // Simulate step progress during API call
@@ -926,48 +932,92 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 {sendDbType === "circus" && (
                   <div>
                     <label className="block text-[13px] font-medium text-[#374151] mb-2">メモ帳ファイル（必須）</label>
-                    <div
-                      onDragOver={(e) => { e.preventDefault(); setIsMemoDropping(true); }}
-                      onDragLeave={() => setIsMemoDropping(false)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        setIsMemoDropping(false);
-                        const file = e.dataTransfer.files[0];
-                        if (file && file.name.endsWith(".txt")) {
-                          setMemoFile(file);
-                        } else {
-                          toast.error(".txtファイルのみ添付可能です");
-                        }
-                      }}
-                      className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
-                        isMemoDropping ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
-                      }`}
-                    >
-                      {memoFile ? (
-                        <div className="flex items-center justify-between">
-                          <span className="text-[13px]">✅ {memoFile.name} ({(memoFile.size / 1024).toFixed(1)}KB)</span>
-                          <button onClick={() => setMemoFile(null)} className="text-gray-400 hover:text-red-500 text-sm">✕</button>
+                    {/* ブックマークから選択 */}
+                    {(() => {
+                      const txtFiles = files.filter((f) => f.fileName.endsWith(".txt"));
+                      if (txtFiles.length === 0) return null;
+                      return (
+                        <div className="mb-3">
+                          <select
+                            value={memoFromBookmark?.id || ""}
+                            onChange={async (e) => {
+                              const fileId = e.target.value;
+                              if (!fileId) { setMemoFromBookmark(null); return; }
+                              const tf = txtFiles.find((f) => f.id === fileId);
+                              if (!tf) return;
+                              setLoadingMemoBookmark(true);
+                              setMemoFile(null);
+                              try {
+                                const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/download`);
+                                if (!res.ok) throw new Error();
+                                const text = await res.text();
+                                setMemoFromBookmark({ id: fileId, fileName: tf.fileName, content: text });
+                              } catch {
+                                toast.error("ファイルのダウンロードに失敗しました");
+                                setMemoFromBookmark(null);
+                              } finally {
+                                setLoadingMemoBookmark(false);
+                              }
+                            }}
+                            disabled={loadingMemoBookmark}
+                            className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                          >
+                            <option value="">ブックマークから選択</option>
+                            {txtFiles.map((f) => <option key={f.id} value={f.id}>{f.fileName}</option>)}
+                          </select>
+                          {loadingMemoBookmark && <p className="text-[11px] text-gray-400 mt-1">読み込み中...</p>}
+                          {memoFromBookmark && (
+                            <div className="flex items-center justify-between mt-1 px-2 py-1 bg-green-50 rounded text-[12px]">
+                              <span>✅ {memoFromBookmark.fileName} ({memoFromBookmark.content.length.toLocaleString()}文字)</span>
+                              <button onClick={() => setMemoFromBookmark(null)} className="text-gray-400 hover:text-red-500">✕</button>
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <>
-                          <p className="text-[13px] text-gray-500">Circusのメモ帳（.txt）をドラッグ＆ドロップ</p>
-                          <p className="text-[11px] text-gray-400 mt-1">フォーマット: 会社名 → CircusURL（2行ずつ）</p>
-                          <label className="inline-block mt-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer text-[12px]">
-                            ファイルを選択
-                            <input
-                              type="file"
-                              accept=".txt"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) setMemoFile(file);
-                                e.target.value = "";
-                              }}
-                            />
-                          </label>
-                        </>
-                      )}
-                    </div>
+                      );
+                    })()}
+                    {/* ローカルファイル D&D */}
+                    {!memoFromBookmark && (
+                      <>
+                        {files.some((f) => f.fileName.endsWith(".txt")) && (
+                          <p className="text-[11px] text-gray-400 mb-2 text-center">--- または ---</p>
+                        )}
+                        <div
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsMemoDropping(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsMemoDropping(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsMemoDropping(false);
+                            const file = e.dataTransfer.files[0];
+                            if (file && file.name.endsWith(".txt")) {
+                              setMemoFile(file);
+                              setMemoFromBookmark(null);
+                            } else {
+                              toast.error(".txtファイルのみ添付可能です");
+                            }
+                          }}
+                          className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                            isMemoDropping ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
+                          }`}
+                        >
+                          {memoFile ? (
+                            <div className="flex items-center justify-between">
+                              <span className="text-[13px]">✅ {memoFile.name} ({(memoFile.size / 1024).toFixed(1)}KB)</span>
+                              <button onClick={() => setMemoFile(null)} className="text-gray-400 hover:text-red-500 text-sm">✕</button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-[13px] text-gray-500 pointer-events-none">Circusのメモ帳（.txt）をドラッグ＆ドロップ</p>
+                              <p className="text-[11px] text-gray-400 mt-1 pointer-events-none">フォーマット: 会社名 → CircusURL（2行ずつ）</p>
+                              <label className="inline-block mt-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer text-[12px]">
+                                ファイルを選択
+                                <input type="file" accept=".txt" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) { setMemoFile(file); setMemoFromBookmark(null); } e.target.value = ""; }} />
+                              </label>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
                 <div>
@@ -1062,7 +1112,7 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleCloseSendModal} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50">キャンセル</button>
-                  <button onClick={handleSendToJobTool} disabled={sendAreas.size === 0 || (sendDbType === "circus" && !memoFile)} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
+                  <button onClick={handleSendToJobTool} disabled={sendAreas.size === 0 || (sendDbType === "circus" && !memoFile && !memoFromBookmark)} className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">送信開始</button>
                 </div>
               </div>
             )}
