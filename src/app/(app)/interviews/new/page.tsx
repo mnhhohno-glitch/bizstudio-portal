@@ -1,90 +1,105 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import Link from "next/link";
-import LeftColumn from "@/components/interviews/LeftColumn";
-import InitialConditions from "@/components/interviews/tabs/InitialConditions";
-import DesiredConditions from "@/components/interviews/tabs/DesiredConditions";
-import RankEvaluation from "@/components/interviews/tabs/RankEvaluation";
-import ActionItems from "@/components/interviews/tabs/ActionItems";
-import MemoTab from "@/components/interviews/tabs/MemoTab";
-import type { InterviewFormData, Employee, CandidateFile, CandidateInfo } from "@/components/interviews/types";
-
-const TABS = [
-  { key: "initial", label: "初期条件" },
-  { key: "desired", label: "希望条件" },
-  { key: "rating", label: "ランク評価" },
-  { key: "action", label: "アクション" },
-  { key: "existingMemo", label: "既存面談メモ" },
-  { key: "prepMemo", label: "面接対策メモ" },
-  { key: "referral", label: "紹介履歴" },
-];
-
-function defaultForm(candidateId: string): InterviewFormData {
-  return {
-    candidateId,
-    interviewDate: new Date().toISOString().slice(0, 10),
-    startTime: "14:00", endTime: "15:00",
-    interviewTool: "オンライン", interviewerUserId: "", interviewType: "新規面談",
-    resultFlag: "", interviewMemo: "", rawTranscript: "", resumePdfFileId: "", summaryText: "",
-    detail: {}, rating: {},
-  };
-}
 
 export default function NewInterviewPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const candidateId = searchParams.get("candidateId") || "";
 
-  const [candidate, setCandidate] = useState<CandidateInfo | null>(null);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [originalFiles, setOriginalFiles] = useState<CandidateFile[]>([]);
-  const [form, setForm] = useState<InterviewFormData>(defaultForm(candidateId));
-  const [activeTab, setActiveTab] = useState("initial");
+  const [candidate, setCandidate] = useState<{ id: string; name: string; candidateNumber: string } | null>(null);
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
+  const [originalFiles, setOriginalFiles] = useState<{ id: string; fileName: string; driveFileId: string }[]>([]);
+
+  // Form state
+  const [interviewDate, setInterviewDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startTime, setStartTime] = useState("14:00");
+  const [endTime, setEndTime] = useState("15:00");
+  const [interviewTool, setInterviewTool] = useState("オンライン");
+  const [interviewerUserId, setInterviewerUserId] = useState("");
+  const [interviewType, setInterviewType] = useState("新規面談");
+
+  // AI input
+  const [transcript, setTranscript] = useState("");
+  const [resumePdfFile, setResumePdfFile] = useState<File | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  const setDetail = useCallback((key: string, value: unknown) => {
-    setForm((prev) => ({ ...prev, detail: { ...prev.detail, [key]: value } }));
-  }, []);
-  const setRating = useCallback((key: string, value: unknown) => {
-    setForm((prev) => ({ ...prev, rating: { ...prev.rating, [key]: value } }));
-  }, []);
 
   useEffect(() => {
     if (candidateId) {
       fetch(`/api/candidates/${candidateId}`)
-        .then((r) => r.json()).then((d) => setCandidate(d.candidate || d)).catch(() => {});
+        .then((r) => r.json())
+        .then((d) => setCandidate(d.candidate || d))
+        .catch(() => {});
+
       fetch(`/api/candidates/${candidateId}/files?category=ORIGINAL`)
-        .then((r) => r.json()).then((d) => setOriginalFiles(d.files || [])).catch(() => {});
+        .then((r) => r.json())
+        .then((d) => setOriginalFiles(d.files || []))
+        .catch(() => {});
     }
-    fetch("/api/employees").then((r) => r.json()).then((d) => {
-      const list = d.employees || d || [];
-      setEmployees(list);
-      if (list.length > 0) setForm((p) => ({ ...p, interviewerUserId: p.interviewerUserId || list[0].id }));
-    }).catch(() => {});
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((d) => {
+        const list = d.employees || d || [];
+        setEmployees(list);
+        if (list.length > 0 && !interviewerUserId) setInterviewerUserId(list[0].id);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateId]);
 
+  const handleTxtDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file?.type === "text/plain" || file?.name.endsWith(".txt")) {
+      file.text().then(setTranscript);
+    }
+  };
+
+  const handleTxtFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) file.text().then(setTranscript);
+  };
+
+  const handlePdfDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file?.type === "application/pdf") setResumePdfFile(file);
+  };
+
   const handleAnalyze = async () => {
+    if (!transcript && !resumePdfFile && !selectedFileId) {
+      toast.error("テキストまたはPDFを入力してください");
+      return;
+    }
     setAnalyzing(true);
     try {
-      console.log("[analyze-client] Sending request...");
-      const fd = new FormData();
-      if (form.rawTranscript) fd.append("transcript", form.rawTranscript);
-      const res = await fetch("/api/interviews/analyze", { method: "POST", body: fd });
-      console.log("[analyze-client] Response status:", res.status);
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      const data = await res.json();
-      console.log("[analyze-client] Response data:", JSON.stringify(data).substring(0, 500));
-      setForm((prev) => ({
-        ...prev,
-        interviewMemo: data.interviewMemo || prev.interviewMemo,
-        summaryText: data.summaryText || prev.summaryText,
-        detail: { ...prev.detail, ...data.detail },
-      }));
-      toast.success("AI解析完了。各タブに反映しました。");
+      const formData = new FormData();
+      if (transcript) formData.append("transcript", transcript);
+
+      if (resumePdfFile) {
+        formData.append("resumePdf", resumePdfFile);
+      } else if (selectedFileId) {
+        // Download file from Drive and send
+        const res = await fetch(`/api/candidates/${candidateId}/files/${selectedFileId}/download`);
+        if (res.ok) {
+          const blob = await res.blob();
+          formData.append("resumePdf", blob, "resume.pdf");
+        }
+      }
+
+      const res = await fetch("/api/interviews/analyze", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "解析に失敗しました");
+      }
+
+      const aiResult = await res.json();
+      // Save with AI results
+      await saveInterview(aiResult);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "解析に失敗しました");
     } finally {
@@ -92,94 +107,199 @@ export default function NewInterviewPage() {
     }
   };
 
-  const handleSave = async (andClose = false) => {
-    if (!candidateId || !form.interviewerUserId) {
-      toast.error("求職者と担当CAを選択してください");
-      return;
-    }
+  const saveInterview = async (aiResult?: Record<string, unknown>) => {
     setSaving(true);
     try {
-      const r = form.rating || {};
-      const pT = (r.personalityMotivation||0)+(r.personalityCommunication||0)+(r.personalityManner||0)+(r.personalityIntelligence||0)+(r.personalityHumanity||0);
-      const cT = (r.careerJobType||0)+(r.careerExperience||0)+(r.careerJobChangeCount||0)+(r.careerAchievement||0)+(r.careerQualification||0);
-      const condT = (r.conditionJobType||0)+(r.conditionSalary||0)+(r.conditionHoliday||0)+(r.conditionArea||0)+(r.conditionFlexibility||0);
-      const { id: _ri, interviewRecordId: _rr, createdAt: _rc, updatedAt: _ru, interviewRecord: _rir, ...ratingRest } = r;
-      const ratingData = { ...ratingRest, personalityTotal: pT||null, careerTotal: cT||null, conditionTotal: condT||null, grandTotal: (pT+cT+condT)||null };
-      const { id: _di, interviewRecordId: _dr, createdAt: _dc, updatedAt: _du, interviewRecord: _dir, ...detailData } = form.detail;
+      const body: Record<string, unknown> = {
+        candidateId,
+        interviewDate: `${interviewDate}T12:00:00.000Z`,
+        startTime,
+        endTime,
+        interviewTool,
+        interviewerUserId,
+        interviewType,
+        rawTranscript: transcript || null,
+        resumePdfFileId: selectedFileId || null,
+      };
+
+      if (aiResult) {
+        body.interviewMemo = aiResult.interviewMemo || null;
+        body.summaryText = aiResult.summaryText || null;
+        if (aiResult.detail) body.detail = aiResult.detail;
+      }
 
       const res = await fetch("/api/interviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidateId, interviewDate: `${form.interviewDate}T12:00:00.000Z`,
-          startTime: form.startTime, endTime: form.endTime,
-          interviewTool: form.interviewTool, interviewerUserId: form.interviewerUserId,
-          interviewType: form.interviewType, resultFlag: form.resultFlag || null,
-          interviewMemo: form.interviewMemo || null,
-          rawTranscript: form.rawTranscript || null, resumePdfFileId: form.resumePdfFileId || null,
-          summaryText: form.summaryText || null, detail: detailData, rating: ratingData,
-        }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "保存に失敗しました");
+      }
+
       const { record } = await res.json();
       toast.success("面談を登録しました");
-      if (andClose) router.push(`/candidates/${candidateId}`);
-      else router.push(`/interviews/${record.id}`);
+      router.push(`/interviews/${record.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const d = form.detail || {};
-  const r = form.rating || {};
+  const handleManualSave = () => saveInterview();
+
+  const inputCls = "w-full rounded-md border border-gray-300 px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]";
+  const selectCls = inputCls;
+  const labelCls = "block text-[13px] font-medium text-[#374151] mb-1";
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-3xl mx-auto">
+      <h1 className="text-xl font-bold text-[#374151] mb-6">📝 面談登録</h1>
+
+      {candidate && (
+        <div className="mb-6 p-3 bg-blue-50 rounded-lg text-[14px]">
+          <span className="font-medium">{candidate.name}</span>
+          <span className="text-gray-500 ml-2">({candidate.candidateNumber})</span>
+        </div>
+      )}
+
+      {/* AI解析用ファイル */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+        <h2 className="text-[15px] font-bold text-[#374151] mb-4">AI解析用ファイル</h2>
+
+        <div className="mb-4">
+          <label className={labelCls}>Notta文字起こし (.txt)</label>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleTxtDrop}
+            className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#2563EB] transition-colors"
+          >
+            {transcript ? (
+              <div className="text-[13px] text-gray-600">
+                <span className="text-green-600 font-medium">✓ テキスト読み込み済み</span>
+                <span className="ml-2">({transcript.length.toLocaleString()}文字)</span>
+                <button onClick={() => setTranscript("")} className="ml-2 text-red-500 hover:underline">クリア</button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-[13px] text-gray-500 mb-2">TXTファイルをドラッグ＆ドロップ、またはテキスト貼付け</p>
+                <label className="text-[13px] text-[#2563EB] cursor-pointer hover:underline">
+                  ファイルを選択
+                  <input type="file" accept=".txt" className="hidden" onChange={handleTxtFileSelect} />
+                </label>
+              </div>
+            )}
+          </div>
+          {!transcript && (
+            <textarea
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              placeholder="または、文字起こしテキストを直接貼り付け..."
+              rows={3}
+              className={`${inputCls} mt-2`}
+            />
+          )}
+        </div>
+
         <div>
-          <h1 className="text-xl font-bold text-[#374151]">📝 面談登録</h1>
-          {candidate && (
-            <Link href={`/candidates/${candidateId}`} className="text-[13px] text-[#2563EB] hover:underline">
-              {candidate.name} ({candidate.candidateNumber})
-            </Link>
+          <label className={labelCls}>WEB履歴書 (PDF)</label>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handlePdfDrop}
+            className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#2563EB] transition-colors mb-2"
+          >
+            {resumePdfFile ? (
+              <div className="text-[13px]">
+                <span className="text-green-600 font-medium">✓ {resumePdfFile.name}</span>
+                <button onClick={() => setResumePdfFile(null)} className="ml-2 text-red-500 hover:underline">クリア</button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-[13px] text-gray-500 mb-2">PDFをドラッグ＆ドロップ</p>
+                <label className="text-[13px] text-[#2563EB] cursor-pointer hover:underline">
+                  ファイルを選択
+                  <input type="file" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setResumePdfFile(e.target.files[0]); }} />
+                </label>
+              </div>
+            )}
+          </div>
+          {originalFiles.length > 0 && !resumePdfFile && (
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-gray-500">📁 原本から選択:</span>
+              <select value={selectedFileId} onChange={(e) => setSelectedFileId(e.target.value)}
+                className="text-[13px] border border-gray-300 rounded px-2 py-1">
+                <option value="">選択してください</option>
+                {originalFiles.map((f) => (
+                  <option key={f.id} value={f.id}>{f.fileName}</option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
       </div>
 
-      <div className="flex gap-5 lg:flex-row flex-col">
-        <div className="lg:w-[40%] w-full shrink-0">
-          <LeftColumn form={form} setForm={setForm} setDetail={setDetail}
-            employees={employees} originalFiles={originalFiles} candidateId={candidateId}
-            isNew={true} onAnalyze={handleAnalyze} analyzing={analyzing} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex border-b border-gray-200 mb-4 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className={`px-3 py-2 text-[12px] font-medium border-b-2 whitespace-nowrap ${
-                  activeTab === tab.key ? "text-[#2563EB] border-[#2563EB]" : "text-gray-500 border-transparent hover:text-gray-700"
-                }`}>{tab.label}</button>
-            ))}
+      {/* 面談基本情報 */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+        <h2 className="text-[15px] font-bold text-[#374151] mb-4">面談基本情報</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>面談日 *</label>
+            <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)} className={inputCls} />
           </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-5 mb-20">
-            {activeTab === "initial" && <InitialConditions d={d} set={setDetail} />}
-            {activeTab === "desired" && <DesiredConditions d={d} set={setDetail} />}
-            {activeTab === "rating" && <RankEvaluation r={r} set={setRating} />}
-            {activeTab === "action" && <ActionItems d={d} set={setDetail} />}
-            {activeTab === "existingMemo" && <MemoTab label="既存面談メモ" value={d.existingInterviewMemo || ""} onChange={(v) => setDetail("existingInterviewMemo", v)} />}
-            {activeTab === "prepMemo" && <MemoTab label="面接対策メモ" value={d.interviewPrepMemo || ""} onChange={(v) => setDetail("interviewPrepMemo", v)} />}
-            {activeTab === "referral" && <MemoTab label="紹介履歴" value={d.referralHistory || ""} onChange={(v) => setDetail("referralHistory", v)} />}
+          <div>
+            <label className={labelCls}>面談種別 *</label>
+            <select value={interviewType} onChange={(e) => setInterviewType(e.target.value)} className={selectCls}>
+              <option value="新規面談">新規面談</option>
+              <option value="フォロー面談">フォロー面談</option>
+              <option value="面接対策">面接対策</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>開始時間 *</label>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>終了時間 *</label>
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>面談ツール *</label>
+            <select value={interviewTool} onChange={(e) => setInterviewTool(e.target.value)} className={selectCls}>
+              <option value="電話">電話</option>
+              <option value="オンライン">オンライン</option>
+              <option value="対面">対面</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>担当CA *</label>
+            <select value={interviewerUserId} onChange={(e) => setInterviewerUserId(e.target.value)} className={selectCls}>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 flex justify-center gap-3 z-40">
-        <button onClick={() => handleSave(false)} disabled={saving}
-          className="bg-[#2563EB] text-white rounded-lg px-6 py-2.5 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">
-          {saving ? "保存中..." : "💾 保存"}</button>
-        <button onClick={() => handleSave(true)} disabled={saving}
-          className="border border-gray-300 bg-white text-gray-700 rounded-lg px-6 py-2.5 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50">
-          保存して閉じる</button>
+      {/* Actions */}
+      <div className="flex gap-3 justify-center">
+        <button
+          onClick={handleAnalyze}
+          disabled={analyzing || saving || (!transcript && !resumePdfFile && !selectedFileId)}
+          className="bg-[#7C3AED] text-white rounded-lg px-6 py-3 text-[14px] font-medium hover:bg-[#6D28D9] disabled:opacity-50 transition-colors"
+        >
+          {analyzing ? "解析中..." : "✨ AI解析して自動入力"}
+        </button>
+        <button
+          onClick={handleManualSave}
+          disabled={analyzing || saving}
+          className="border border-gray-300 bg-white text-gray-700 rounded-lg px-6 py-3 text-[14px] font-medium hover:bg-gray-50 disabled:opacity-50"
+        >
+          {saving ? "保存中..." : "手動で入力 →"}
+        </button>
       </div>
     </div>
   );
