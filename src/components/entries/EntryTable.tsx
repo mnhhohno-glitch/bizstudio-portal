@@ -381,10 +381,12 @@ export default function EntryTable({
                 }
               }}
               className={`whitespace-nowrap truncate max-w-[280px] ${entry.originalUrl ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
+              title={entry.companyName}
+              data-company-name={entry.companyName}
             >
               {entry.companyName}
             </div>
-            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]">{entry.jobTitle}</div>}
+            {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]" title={entry.jobTitle} data-job-title={entry.jobTitle}>{entry.jobTitle}</div>}
           </td>
         );
       case "jobDb":
