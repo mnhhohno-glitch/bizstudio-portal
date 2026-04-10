@@ -77,6 +77,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       data: newEntries.map(
         (e: {
           externalJobId: number;
+          externalJobNo?: string | null;
           companyName: string;
           jobTitle: string;
           jobDb?: string;
@@ -92,6 +93,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         }) => ({
           candidateId,
           externalJobId: e.externalJobId,
+          externalJobNo: e.externalJobNo ?? null,
           companyName: e.companyName,
           jobTitle: e.jobTitle,
           jobDb: e.jobDb ?? null,

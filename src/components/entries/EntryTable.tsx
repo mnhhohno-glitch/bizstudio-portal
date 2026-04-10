@@ -415,7 +415,7 @@ export default function EntryTable({
             ) : (
               <div className="text-[11px]">-</div>
             )}
-            {entry.externalJobNo && <div className="text-[10px] text-gray-400">{entry.externalJobNo}</div>}
+            {entry.externalJobNo && <div className="text-[11px] text-gray-400">ID: {entry.externalJobNo}</div>}
           </td>
         );
       case "entryFlags":

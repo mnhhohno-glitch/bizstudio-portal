@@ -7,6 +7,7 @@ import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 /* ---------- Types ---------- */
 type Job = {
   id: number;
+  job_id: string | null;
   company_name: string;
   job_title: string;
   job_db: string | null;
@@ -1417,6 +1418,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
     const payload = {
       entries: selectedJobs.map((j) => ({
         externalJobId: j.id,
+        externalJobNo: j.job_id,
         companyName: j.company_name,
         jobTitle: j.job_title,
         jobDb: j.job_db,
