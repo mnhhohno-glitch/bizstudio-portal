@@ -261,13 +261,6 @@ export default function EntryBoard() {
           placeholder="求職者名で検索"
           className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
         />
-        <input
-          type="text"
-          value={companyName}
-          onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
-          placeholder="企業名で検索"
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
-        />
         <select
           value={caFilter}
           onChange={(e) => { setCaFilter(e.target.value); setPage(1); }}
@@ -276,6 +269,13 @@ export default function EntryBoard() {
           <option value="">担当CA（全員）</option>
           {caOptions.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
+        <input
+          type="text"
+          value={companyName}
+          onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
+          placeholder="企業名で検索"
+          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
+        />
         <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
           <input
             type="checkbox"

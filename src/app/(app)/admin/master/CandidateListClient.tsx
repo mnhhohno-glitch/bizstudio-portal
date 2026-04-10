@@ -37,7 +37,13 @@ type CandidateRow = {
   createdAt: string;
   supportStatus: string;
   supportEndReason: string | null;
-  jobStatus?: "entry" | null;
+  jobStatus?: "entry" | "introduced" | "before" | null;
+};
+
+const JOB_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  entry: { label: "エントリー", cls: "bg-orange-100 text-orange-700" },
+  introduced: { label: "求人紹介", cls: "bg-blue-100 text-blue-700" },
+  before: { label: "求人紹介前", cls: "bg-gray-100 text-gray-500" },
 };
 
 interface CandidateListClientProps {
@@ -400,9 +406,9 @@ export default function CandidateListClient({
                       )}
                     </Td>
                     <Td>
-                      {cand.jobStatus === "entry" && (
-                        <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full">
-                          エントリー
+                      {cand.jobStatus && JOB_STATUS_BADGE[cand.jobStatus] && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${JOB_STATUS_BADGE[cand.jobStatus].cls}`}>
+                          {JOB_STATUS_BADGE[cand.jobStatus].label}
                         </span>
                       )}
                     </Td>

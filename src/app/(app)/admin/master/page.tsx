@@ -17,16 +17,28 @@ export default async function CandidateMasterPage() {
     }),
   ]);
 
-  // Job status determination (entry only)
+  // Job status determination
   const candidateIds = candidates.map((c) => c.id);
-  const entryCounts = await prisma.jobEntry.groupBy({
-    by: ["candidateId"],
-    where: { candidateId: { in: candidateIds } },
-    _count: { id: true },
-  });
-  const entryCountMap = new Map(
-    entryCounts.map((e) => [e.candidateId, e._count.id])
-  );
+  const [entryCounts, bookmarkCounts] = await Promise.all([
+    prisma.jobEntry.groupBy({
+      by: ["candidateId"],
+      where: { candidateId: { in: candidateIds } },
+      _count: { id: true },
+    }),
+    prisma.candidateFile.groupBy({
+      by: ["candidateId"],
+      where: { candidateId: { in: candidateIds }, category: "BOOKMARK" },
+      _count: { id: true },
+    }),
+  ]);
+  const entryCountMap = new Map(entryCounts.map((e) => [e.candidateId, e._count.id]));
+  const bookmarkCountMap = new Map(bookmarkCounts.map((b) => [b.candidateId, b._count.id]));
+
+  function determineJobStatus(candidateId: string): "entry" | "introduced" | "before" {
+    if (entryCountMap.has(candidateId)) return "entry";
+    if (bookmarkCountMap.has(candidateId)) return "introduced";
+    return "before";
+  }
 
   const serialized = candidates.map((c) => ({
     id: c.id,
@@ -38,7 +50,7 @@ export default async function CandidateMasterPage() {
     createdAt: c.createdAt.toISOString(),
     supportStatus: (c.supportStatus as string) || "BEFORE",
     supportEndReason: (c.supportEndReason as string) || null,
-    jobStatus: entryCountMap.has(c.id) ? ("entry" as const) : null,
+    jobStatus: determineJobStatus(c.id),
   }));
 
   // ログインユーザーに対応する社員IDを取得
