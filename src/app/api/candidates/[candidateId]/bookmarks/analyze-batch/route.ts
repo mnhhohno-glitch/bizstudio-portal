@@ -272,11 +272,13 @@ export async function POST(
     candidateContext = candidateContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
   }
 
-  // 4. Build job posting section for this batch
+  // 4. Build job posting section for this batch (uses DB-stored extracted text - no PDF binary)
   const jobsSection = batchFiles
     .map((f, i) => {
       const globalIndex = start + i + 1;
-      const text = f.extractedText!.substring(0, 3000);
+      const fullText = f.extractedText || "";
+      const text = fullText.substring(0, 3000);
+      console.log(`[AnalyzeBatch] Using extracted text: ${f.fileName} (${fullText.length} chars, sent ${text.length})`);
       return `### 求人${globalIndex}: ${f.fileName}\n${text}`;
     })
     .join("\n\n---\n\n");
