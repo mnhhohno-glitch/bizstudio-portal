@@ -263,6 +263,27 @@ const MAX_PAST_MESSAGES = 20;
 const MAX_TEXT_FILE_CHARS = 8000;
 const API_TIMEOUT_MS = 120000; // 2分
 
+const OPUS_KEYWORDS = [
+  /タイプ診断/, /志向性/, /6タイプ/,
+  /Will[\s-]*Can[\s-]*Must/i, /ABCD/i, /マトリックス/,
+  /検索戦略/, /検索条件/, /分析して/, /診断して/,
+  /マッチング/, /適性評価/,
+  /求人.{0,10}評価/, /求人.{0,10}分析/,
+];
+
+function selectModel(message: string, hasFile: boolean): string {
+  if (hasFile) {
+    console.log("[Advisor] Model: Opus (file attached)");
+    return "claude-opus-4-6";
+  }
+  if (OPUS_KEYWORDS.some((p) => p.test(message))) {
+    console.log("[Advisor] Model: Opus (keyword match)");
+    return "claude-opus-4-6";
+  }
+  console.log("[Advisor] Model: Sonnet (general)");
+  return "claude-sonnet-4-6";
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ candidateId: string; sessionId: string }> }
@@ -409,7 +430,7 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
+        model: selectModel(content || "", !!file),
         max_tokens: 4000,
         temperature: 0.7,
         system: [
