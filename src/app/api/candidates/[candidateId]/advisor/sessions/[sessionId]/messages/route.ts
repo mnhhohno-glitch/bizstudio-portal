@@ -263,6 +263,7 @@ const MAX_PAST_MESSAGES = 20;
 const MAX_TEXT_FILE_CHARS = 8000;
 const API_TIMEOUT_MS = 120000; // 2分
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const OPUS_KEYWORDS = [
   /タイプ診断/, /志向性/, /6タイプ/,
   /Will[\s-]*Can[\s-]*Must/i, /ABCD/i, /マトリックス/,
@@ -271,7 +272,11 @@ const OPUS_KEYWORDS = [
   /求人.{0,10}評価/, /求人.{0,10}分析/,
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function selectModel(message: string, hasFile: boolean): string {
+  // コスト検証中: 一旦全てSonnetで運用
+  // 品質に問題があれば以下のコメントを外してOpus振り分けを復活
+  /*
   if (hasFile) {
     console.log("[Advisor] Model: Opus (file attached)");
     return "claude-opus-4-6";
@@ -280,7 +285,8 @@ function selectModel(message: string, hasFile: boolean): string {
     console.log("[Advisor] Model: Opus (keyword match)");
     return "claude-opus-4-6";
   }
-  console.log("[Advisor] Model: Sonnet (general)");
+  */
+  console.log("[Advisor] Model: Sonnet (all-sonnet mode)");
   return "claude-sonnet-4-6";
 }
 
