@@ -321,7 +321,7 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; onCountChange?: (count: number) => void }) {
+function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candidateId: string; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -628,6 +628,35 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
     }
   };
 
+  const [movingToJobs, setMovingToJobs] = useState(false);
+  const handleMoveToJobs = async () => {
+    if (selectedIds.size === 0) return;
+    setMovingToJobs(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileIds: Array.from(selectedIds),
+          dbType: "hito_mynavi",
+          targetAreas: ["首都圏"],
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success(`${data.uploadedCount}件のPDFを求人紹介に送信しました`);
+        setSelectedIds(new Set());
+        onSwitchToJobs?.();
+      } else {
+        toast.error(data.error || "送信に失敗しました");
+      }
+    } catch {
+      toast.error("通信エラーが発生しました");
+    } finally {
+      setMovingToJobs(false);
+    }
+  };
+
   const toggleArea = (area: string) => {
     setSendAreas((prev) => {
       const n = new Set(prev);
@@ -725,6 +754,13 @@ function BookmarkSection({ candidateId, onCountChange }: { candidateId: string; 
                   className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
                 >
                   📤 求人出力へ送信（{selectedIds.size}件）
+                </button>
+                <button
+                  onClick={handleMoveToJobs}
+                  disabled={movingToJobs}
+                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
+                >
+                  {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
                 </button>
               </>
             )}
@@ -1513,7 +1549,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} onCountChange={setBookmarkCount} />
+        <BookmarkSection candidateId={candidateId} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} />
       )}
 
       {/* ===== 求人紹介サブタブ ===== */}
