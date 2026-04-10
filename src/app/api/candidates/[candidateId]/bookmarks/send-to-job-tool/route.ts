@@ -124,7 +124,7 @@ export async function POST(
       return a.fileName.localeCompare(b.fileName);
     });
 
-    const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string; aiMatchRating: string | null; aiAnalysisComment: string | null }[] = [];
+    const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string; aiMatchRating: string | null; aiAnalysisComment: string | null; driveFileId: string }[] = [];
     let failedCount = 0;
 
     for (let i = 0; i < bookmarkFiles.length; i += DOWNLOAD_BATCH_SIZE) {
@@ -138,6 +138,7 @@ export async function POST(
             mimeType,
             aiMatchRating: file.aiMatchRating,
             aiAnalysisComment: file.aiAnalysisComment,
+            driveFileId: file.driveFileId,
           };
         })
       );
@@ -344,19 +345,22 @@ export async function POST(
           .map((f) => {
             if (!f.aiAnalysisComment || !f.aiMatchRating) return null;
             const jobNumMatch = f.fileName.match(/_No(\d+)/i);
-            if (!jobNumMatch) return null;
+            // Circus形式は求人番号、HITO形式はdriveFileIdで照合
+            if (!jobNumMatch && !f.driveFileId) return null;
             const commentBody = f.aiAnalysisComment
               .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
               .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
               .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
               .trim();
-            return {
-              job_number: jobNumMatch[1],
+            const entry: { job_number?: string; drive_file_id?: string; match_label: string; comment: string } = {
               match_label: toMatchLabel(f.aiMatchRating),
               comment: commentBody,
             };
+            if (jobNumMatch) entry.job_number = jobNumMatch[1];
+            if (f.driveFileId) entry.drive_file_id = f.driveFileId;
+            return entry;
           })
-          .filter((c): c is { job_number: string; match_label: string; comment: string } => c !== null);
+          .filter((c): c is { job_number?: string; drive_file_id?: string; match_label: string; comment: string } => c !== null);
 
         if (comments.length > 0) {
           const caRes = await fetchWithTimeout(
