@@ -18,6 +18,7 @@ type Props = {
   onSort: (field: string) => void;
   onFlagUpdate: (entryId: string, flags: Record<string, string | null>) => void;
   onFieldUpdate: (entryId: string, fields: Record<string, unknown>) => Promise<void>;
+  onJobDbUrlEdit: (entryId: string, currentUrl: string | null) => void;
   onRowClick: (entryId: string) => void;
   selectedIds: Set<string>;
   onSelectToggle: (id: string) => void;
@@ -342,7 +343,7 @@ function SortIndicator({ sortKey, sortField, sortDir }: {
 
 export default function EntryTable({
   entries, flagData, activeTab, sortField, sortDir, onSort,
-  onFlagUpdate, onFieldUpdate, onRowClick,
+  onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onRowClick,
   selectedIds, onSelectToggle, onSelectAll, onDeselectAll,
 }: Props) {
   const cols = getColumns(activeTab);
@@ -388,8 +389,32 @@ export default function EntryTable({
         );
       case "jobDb":
         return (
-          <td key={col.key} className="px-2 py-1.5 text-center">
-            <div className="text-[11px]">{entry.jobDb || "-"}</div>
+          <td key={col.key} className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+            {entry.jobDb ? (
+              entry.jobDbUrl ? (
+                <div className="flex flex-col items-center gap-0">
+                  <a
+                    href={entry.jobDbUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-[11px]"
+                  >{entry.jobDb}</a>
+                  <button
+                    onClick={() => onJobDbUrlEdit(entry.id, entry.jobDbUrl)}
+                    className="text-gray-400 hover:text-blue-600 text-[9px] leading-none mt-0.5"
+                    title="URLを編集"
+                  >✏️</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => onJobDbUrlEdit(entry.id, null)}
+                  className="text-gray-800 text-[11px] hover:text-blue-600 cursor-pointer underline decoration-dotted"
+                  title="クリックでURL登録"
+                >{entry.jobDb}</button>
+              )
+            ) : (
+              <div className="text-[11px]">-</div>
+            )}
             {entry.externalJobNo && <div className="text-[10px] text-gray-400">{entry.externalJobNo}</div>}
           </td>
         );

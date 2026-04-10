@@ -17,6 +17,7 @@ export type Entry = {
   externalJobNo: string | null;
   originalUrl: string | null;
   jobDb: string | null;
+  jobDbUrl: string | null;
   prefecture: string | null;
   jobCategory: string | null;
   status: string | null;
@@ -100,6 +101,11 @@ export default function EntryBoard() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkFlags, setShowBulkFlags] = useState(false);
   const [showEndNotice, setShowEndNotice] = useState(false);
+
+  // URL edit modal
+  const [urlModalEntryId, setUrlModalEntryId] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState("");
+  const [savingUrl, setSavingUrl] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
@@ -187,6 +193,32 @@ export default function EntryBoard() {
       setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
     } catch {
       toast.error("更新に失敗しました");
+    }
+  };
+
+  const openUrlEditModal = (entryId: string, currentUrl: string | null) => {
+    setUrlModalEntryId(entryId);
+    setUrlInput(currentUrl || "");
+  };
+
+  const saveJobDbUrl = async () => {
+    if (!urlModalEntryId) return;
+    setSavingUrl(true);
+    try {
+      const res = await fetch(`/api/entries/${urlModalEntryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDbUrl: urlInput.trim() || null }),
+      });
+      if (!res.ok) { toast.error("保存に失敗しました"); return; }
+      const data = await res.json();
+      setEntries((prev) => prev.map((e) => (e.id === urlModalEntryId ? { ...e, jobDbUrl: data.entry.jobDbUrl } : e)));
+      setUrlModalEntryId(null);
+      setUrlInput("");
+    } catch {
+      toast.error("保存に失敗しました");
+    } finally {
+      setSavingUrl(false);
     }
   };
 
@@ -335,6 +367,7 @@ export default function EntryBoard() {
           onSort={handleSort}
           onFlagUpdate={handleFlagUpdate}
           onFieldUpdate={handleFieldUpdate}
+          onJobDbUrlEdit={openUrlEditModal}
           onRowClick={(id) => setDetailEntryId(id)}
           selectedIds={selectedIds}
           onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
@@ -363,6 +396,37 @@ export default function EntryBoard() {
           >
             &gt;
           </button>
+        </div>
+      )}
+
+      {/* URL Edit Modal */}
+      {urlModalEntryId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+          onClick={() => { if (!savingUrl) setUrlModalEntryId(null); }}>
+          <div className="bg-white rounded-lg p-5 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-bold text-gray-700 mb-3">求人DBのURLを{urlInput ? "編集" : "登録"}</h3>
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveJobDbUrl(); }}
+              placeholder="求人DBのURLを貼り付け"
+              autoFocus
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setUrlModalEntryId(null)}
+                disabled={savingUrl}
+                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              >キャンセル</button>
+              <button
+                onClick={saveJobDbUrl}
+                disabled={savingUrl}
+                className="bg-blue-600 text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >{savingUrl ? "保存中..." : "保存"}</button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -41,7 +41,7 @@ export async function PATCH(
     "interviewPrepDate", "interviewPrepTime", "firstInterviewDate", "firstInterviewTime",
     "finalInterviewDate", "finalInterviewTime", "offerDate", "offerDeadline",
     "offerMeetingDate", "offerMeetingTime", "acceptanceDate", "joinDate",
-    "memo", "isActive", "careerAdvisorId", "entryDate",
+    "memo", "isActive", "careerAdvisorId", "entryDate", "jobDbUrl",
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

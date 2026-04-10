@@ -1093,6 +1093,7 @@ model JobEntry {
   joinDate            DateTime? @map("join_date")
 
   memo                String?   @db.Text
+  jobDbUrl            String?   @map("job_db_url")
   isActive            Boolean   @default(true) @map("is_active")
   careerAdvisorId     String?   @map("career_advisor_id")
 
