@@ -395,12 +395,12 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
               </button>
             )}
             {activeSubTab === "MEETING" && (
-              <a
-                href={`/interviews/new?candidateId=${candidateId}`}
+              <button
+                onClick={handleOpenIntake}
                 className="border border-green-200 bg-green-50 text-green-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-green-100 transition-colors"
               >
-                📝 面談登録
-              </a>
+                📝 面談登録 ↗
+              </button>
             )}
             <button
               onClick={() => setShowUploadModal(true)}
