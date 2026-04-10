@@ -272,6 +272,37 @@ const OPUS_KEYWORDS = [
   /求人.{0,10}評価/, /求人.{0,10}分析/,
 ];
 
+// スキルプロンプト（フルスキル版）が必要な場合のキーワード
+const SKILL_KEYWORDS = [
+  /タイプ診断/, /志向性/, /6タイプ/,
+  /検索戦略/, /検索軸/, /求人.{0,10}検索/,
+  /マッチング/, /マッチ度/, /ABCD/,
+  /Will[\s-]*Can[\s-]*Must/i,
+  /逆転質問/,
+  /求人.{0,10}分析/, /求人.{0,10}評価/,
+  /フレームワーク/,
+  /タイプ.{0,5}更新/, /評価.{0,5}アップデート/,
+];
+
+function needsSkillPrompt(message: string, hasFile: boolean): boolean {
+  if (hasFile) return true;
+  return SKILL_KEYWORDS.some((p) => p.test(message));
+}
+
+const LIGHT_SYSTEM_PROMPT = `あなたはビズスタジオのキャリアアドバイザーAIアシスタントです。
+転職エージェントとして求職者の支援を行っています。
+
+以下の情報を踏まえてアドバイスしてください:
+- 求職者の経歴、希望条件、面談内容に基づいた具体的なアドバイス
+- 面接対策、書類添削、年収交渉などの転職支援全般
+- 業界・職種の知識を活かした的確な回答
+
+タイプ診断、検索戦略の策定、求人のマッチング評価など、専門的なフレームワークが必要な場合は「タイプ診断して」「検索戦略を考えて」等と指示してください。
+
+回答は簡潔に、求職者名を使って親しみやすく対応してください。
+
+`;
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function selectModel(message: string, hasFile: boolean): string {
   // コスト検証中: 一旦全てSonnetで運用
@@ -424,6 +455,12 @@ export async function POST(
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
+  const useSkill = needsSkillPrompt(content || "", !!file);
+  console.log(`[Advisor] Skill mode: ${useSkill ? "FULL" : "LIGHT"}`);
+  const systemPromptText = useSkill
+    ? SYSTEM_PROMPT_TEMPLATE + context
+    : LIGHT_SYSTEM_PROMPT + context;
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -442,7 +479,7 @@ export async function POST(
         system: [
           {
             type: "text",
-            text: SYSTEM_PROMPT_TEMPLATE + context,
+            text: systemPromptText,
             cache_control: { type: "ephemeral" },
           },
         ],
