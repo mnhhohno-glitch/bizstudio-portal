@@ -1613,7 +1613,14 @@ export default function CandidateDetailPage() {
             </span>
           ) : (
             <button
-              onClick={() => setMypageModalOpen(true)}
+              onClick={() => {
+                setMypageModalOpen(true);
+                // バックグラウンドでCAコメント同期（失敗しても無視）
+                fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
+                  .then((r) => r.json())
+                  .then((r) => console.log("[SyncCaComments]", r))
+                  .catch(() => {});
+              }}
               className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
               📱 求人マイページ
