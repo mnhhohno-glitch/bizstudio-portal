@@ -346,7 +346,10 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
   const [memoFromBookmark, setMemoFromBookmark] = useState<{ id: string; fileName: string; content: string } | null>(null);
   const [loadingMemoBookmark, setLoadingMemoBookmark] = useState(false);
   const [isMemoDropping, setIsMemoDropping] = useState(false);
-  const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileName: string; rating: string; comment: string } | null>(null);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<{ fileId: string; fileName: string; rating: string; comment: string } | null>(null);
+  const [editingComment, setEditingComment] = useState(false);
+  const [editedCommentText, setEditedCommentText] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
   const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -883,7 +886,7 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                   };
                   const openAnalysis = (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    if (file.aiAnalysisComment) setSelectedAnalysis({ fileName: file.fileName, rating: file.aiMatchRating || "", comment: file.aiAnalysisComment });
+                    if (file.aiAnalysisComment) setSelectedAnalysis({ fileId: file.id, fileName: file.fileName, rating: file.aiMatchRating || "", comment: file.aiAnalysisComment });
                   };
                   return (
                     <>
@@ -1217,32 +1220,90 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
 
       {/* Analysis comment modal */}
       {selectedAnalysis && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setSelectedAnalysis(null)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[70vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => { if (!editingComment) setSelectedAnalysis(null); }}>
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${RATING_STYLES[selectedAnalysis.rating]}`}>
-                  {RATING_LABELS[selectedAnalysis.rating]}
-                </span>
+                {selectedAnalysis.rating && RATING_STYLES[selectedAnalysis.rating] && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border shrink-0 ${RATING_STYLES[selectedAnalysis.rating]}`}>
+                    {RATING_LABELS[selectedAnalysis.rating]}
+                  </span>
+                )}
                 <h3 className="font-semibold text-sm truncate">{selectedAnalysis.fileName}</h3>
               </div>
-              <button onClick={() => setSelectedAnalysis(null)} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
+              <button onClick={() => { setSelectedAnalysis(null); setEditingComment(false); }} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
             </div>
-            <div className="p-4 overflow-y-auto max-h-[55vh]">
-              <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                {selectedAnalysis.comment}
-              </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {editingComment ? (
+                <textarea
+                  value={editedCommentText}
+                  onChange={(e) => setEditedCommentText(e.target.value)}
+                  rows={16}
+                  className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
+                />
+              ) : (
+                <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedAnalysis.comment}
+                </div>
+              )}
             </div>
-            <div className="p-3 border-t flex justify-end">
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(selectedAnalysis.comment);
-                  toast.success("コピーしました");
-                }}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                📋 コピー
-              </button>
+            <div className="p-3 border-t flex justify-end gap-2 shrink-0">
+              {editingComment ? (
+                <>
+                  <button
+                    onClick={() => { setEditingComment(false); setEditedCommentText(""); }}
+                    disabled={savingComment}
+                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 disabled:opacity-50"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setSavingComment(true);
+                      try {
+                        const res = await fetch(`/api/candidates/${candidateId}/files/${selectedAnalysis.fileId}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ aiAnalysisComment: editedCommentText }),
+                        });
+                        if (!res.ok) throw new Error();
+                        toast.success("コメントを保存しました");
+                        // Update local state
+                        setFiles((prev) => prev.map((f) => f.id === selectedAnalysis.fileId ? { ...f, aiAnalysisComment: editedCommentText } : f));
+                        setSelectedAnalysis({ ...selectedAnalysis, comment: editedCommentText });
+                        setEditingComment(false);
+                        setEditedCommentText("");
+                      } catch {
+                        toast.error("保存に失敗しました");
+                      } finally {
+                        setSavingComment(false);
+                      }
+                    }}
+                    disabled={savingComment}
+                    className="bg-[#2563EB] text-white rounded px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    {savingComment ? "保存中..." : "💾 保存"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => { setEditedCommentText(selectedAnalysis.comment); setEditingComment(true); }}
+                    className="text-sm text-blue-600 hover:text-blue-800 px-2"
+                  >
+                    ✏️ 編集
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedAnalysis.comment);
+                      toast.success("コピーしました");
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-800 px-2"
+                  >
+                    📋 コピー
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

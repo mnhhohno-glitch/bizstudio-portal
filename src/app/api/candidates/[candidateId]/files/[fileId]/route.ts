@@ -89,6 +89,97 @@ export async function GET(
   return withCors(NextResponse.json({ file }), origin);
 }
 
+function toMatchLabel(rating: string | null): string {
+  switch (rating) {
+    case "A": return "◎ 非常にマッチ";
+    case "B": return "○ マッチ";
+    case "C":
+    case "D": return "△ チャレンジ求人";
+    default: return "";
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ candidateId: string; fileId: string }> }
+) {
+  const origin = req.headers.get("origin");
+  const userId = await resolveUserId(req);
+  if (!userId) {
+    return withCors(
+      NextResponse.json({ error: "forbidden" }, { status: 403 }),
+      origin
+    );
+  }
+
+  const { candidateId, fileId } = await params;
+  const body = await req.json();
+  const { aiAnalysisComment } = body as { aiAnalysisComment?: string };
+
+  if (typeof aiAnalysisComment !== "string") {
+    return withCors(
+      NextResponse.json({ error: "aiAnalysisComment is required" }, { status: 400 }),
+      origin
+    );
+  }
+
+  // 1. DB保存
+  const file = await prisma.candidateFile.update({
+    where: { id: fileId },
+    data: { aiAnalysisComment },
+  });
+
+  if (file.candidateId !== candidateId) {
+    return withCors(
+      NextResponse.json({ error: "candidate mismatch" }, { status: 400 }),
+      origin
+    );
+  }
+
+  // 2. kyuujinPDFに再送信（マイページ反映） — 失敗してもDB保存は成功扱い
+  try {
+    const KYUUJIN_PDF_TOOL_URL = process.env.KYUUJIN_PDF_TOOL_URL;
+    const KYUUJIN_API_SECRET = process.env.KYUUJIN_API_SECRET;
+    if (KYUUJIN_PDF_TOOL_URL && KYUUJIN_API_SECRET) {
+      const jobNumMatch = file.fileName.match(/_No(\d+)/i);
+      if (jobNumMatch) {
+        const candidate = await prisma.candidate.findUnique({
+          where: { id: candidateId },
+          select: { candidateNumber: true },
+        });
+        if (candidate?.candidateNumber) {
+          const commentBody = aiAnalysisComment
+            .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
+            .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
+            .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
+            .trim();
+          const matchLabel = toMatchLabel(file.aiMatchRating);
+          await fetch(`${KYUUJIN_PDF_TOOL_URL}/api/external/mypage/jobs/ca-comment`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-secret": KYUUJIN_API_SECRET,
+            },
+            body: JSON.stringify({
+              job_seeker_id: candidate.candidateNumber,
+              comments: [{
+                job_number: jobNumMatch[1],
+                match_label: matchLabel,
+                comment: commentBody,
+              }],
+            }),
+          });
+          console.log(`[FilePatch] CA comment synced to kyuujinPDF: ${file.fileName}`);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[FilePatch] kyuujinPDF sync failed:", e);
+  }
+
+  return withCors(NextResponse.json({ success: true, file }), origin);
+}
+
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ candidateId: string; fileId: string }> }
