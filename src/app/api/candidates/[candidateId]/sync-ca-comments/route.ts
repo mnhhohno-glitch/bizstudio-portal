@@ -57,21 +57,23 @@ export async function POST(
     .map((f) => {
       if (!f.aiAnalysisComment || !f.aiMatchRating) return null;
       const jobNumMatch = f.fileName.match(/_No(\d+)/i);
-      if (!jobNumMatch && !f.driveFileId) return null;
+      // fileNameがあれば照合可能なのでスキップしない
+      if (!jobNumMatch && !f.driveFileId && !f.fileName) return null;
       const commentBody = f.aiAnalysisComment
         .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
         .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
         .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
         .trim();
-      const entry: { job_number?: string; drive_file_id?: string; match_label: string; comment: string } = {
+      const entry: { job_number?: string; drive_file_id?: string; file_name?: string; match_label: string; comment: string } = {
         match_label: toMatchLabel(f.aiMatchRating),
         comment: commentBody,
+        file_name: f.fileName,
       };
       if (jobNumMatch) entry.job_number = jobNumMatch[1];
       if (f.driveFileId) entry.drive_file_id = f.driveFileId;
       return entry;
     })
-    .filter((c): c is { job_number?: string; drive_file_id?: string; match_label: string; comment: string } => c !== null);
+    .filter((c): c is { job_number?: string; drive_file_id?: string; file_name?: string; match_label: string; comment: string } => c !== null);
 
   if (comments.length === 0) {
     console.log("[SyncCaComments] No comments to sync");
