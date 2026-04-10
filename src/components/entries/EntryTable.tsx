@@ -370,8 +370,19 @@ export default function EntryTable({
         return <td key={col.key} className="px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-600">{entry.candidate.employee?.name || "-"}</td>;
       case "company":
         return (
-          <td key={col.key} className="px-2 py-1.5 cursor-pointer hover:text-[#2563EB]" onClick={() => onRowClick(entry.id)} title={entry.companyName}>
-            <div className="whitespace-nowrap truncate max-w-[280px]">{entry.companyName}</div>
+          <td key={col.key} className="px-2 py-1.5" title={entry.companyName}>
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                if (entry.originalUrl) {
+                  const previewUrl = entry.originalUrl.replace(/\/view(\?|$)/, "/preview$1");
+                  window.open(previewUrl, "_blank");
+                }
+              }}
+              className={`whitespace-nowrap truncate max-w-[280px] ${entry.originalUrl ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
+            >
+              {entry.companyName}
+            </div>
             {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]">{entry.jobTitle}</div>}
           </td>
         );

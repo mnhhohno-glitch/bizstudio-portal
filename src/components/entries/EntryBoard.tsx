@@ -15,6 +15,7 @@ export type Entry = {
   companyName: string;
   jobTitle: string;
   externalJobNo: string | null;
+  originalUrl: string | null;
   jobDb: string | null;
   prefecture: string | null;
   jobCategory: string | null;
