@@ -15,6 +15,16 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = AP
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
+function toMatchLabel(rating: string | null): string {
+  switch (rating) {
+    case "A": return "◎ 非常にマッチ";
+    case "B": return "○ マッチ";
+    case "C":
+    case "D": return "△ チャレンジ求人";
+    default: return "";
+  }
+}
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ candidateId: string }> }
@@ -114,7 +124,7 @@ export async function POST(
       return a.fileName.localeCompare(b.fileName);
     });
 
-    const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string }[] = [];
+    const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string; aiMatchRating: string | null; aiAnalysisComment: string | null }[] = [];
     let failedCount = 0;
 
     for (let i = 0; i < bookmarkFiles.length; i += DOWNLOAD_BATCH_SIZE) {
@@ -126,6 +136,8 @@ export async function POST(
             fileName: file.fileName,
             buffer: Buffer.from(base64, "base64"),
             mimeType,
+            aiMatchRating: file.aiMatchRating,
+            aiAnalysisComment: file.aiAnalysisComment,
           };
         })
       );
@@ -320,6 +332,56 @@ export async function POST(
       console.error("Complete files failed:", e);
     }
     console.log("[SendToJobTool] Step 5 complete");
+
+    // 5.5. Send CA comments to kyuujinPDF
+    console.log("[SendToJobTool] Step 5.5: Sending CA comments...");
+    try {
+      const KYUUJIN_API_SECRET = process.env.KYUUJIN_API_SECRET;
+      if (!KYUUJIN_API_SECRET) {
+        console.warn("[SendToJobTool] Step 5.5: KYUUJIN_API_SECRET not set, skipping");
+      } else {
+        const comments = downloadedFiles
+          .map((f) => {
+            if (!f.aiAnalysisComment || !f.aiMatchRating) return null;
+            const jobNumMatch = f.fileName.match(/_No(\d+)/i);
+            if (!jobNumMatch) return null;
+            const commentBody = f.aiAnalysisComment
+              .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
+              .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
+              .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
+              .trim();
+            return {
+              job_number: jobNumMatch[1],
+              match_label: toMatchLabel(f.aiMatchRating),
+              comment: commentBody,
+            };
+          })
+          .filter((c): c is { job_number: string; match_label: string; comment: string } => c !== null);
+
+        if (comments.length > 0) {
+          const caRes = await fetchWithTimeout(
+            `${KYUUJIN_PDF_TOOL_URL}/api/external/mypage/jobs/ca-comment`,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-secret": KYUUJIN_API_SECRET,
+              },
+              body: JSON.stringify({
+                job_seeker_id: candidate.candidateNumber,
+                comments,
+              }),
+            }
+          );
+          const caResult = await caRes.json().catch(() => null);
+          console.log("[SendToJobTool] Step 5.5 complete:", { count: comments.length, result: caResult });
+        } else {
+          console.log("[SendToJobTool] Step 5.5: No comments to send");
+        }
+      }
+    } catch (e) {
+      console.error("[SendToJobTool] Step 5.5 failed:", e);
+    }
 
     // 6. Skip extraction — user starts it manually from kyuujin-pdf-tool after reviewing memos
     console.log("[SendToJobTool] Step 6: Skipped (extraction will be started manually by user)");
