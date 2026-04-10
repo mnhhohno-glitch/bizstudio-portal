@@ -63,6 +63,9 @@ export async function POST(
         .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
         .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
         .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
+        // 懸念点・確認事項セクションを丸ごと除去
+        .replace(/◆\s*懸念[^◆]*/g, "")
+        .replace(/◆\s*確認事項[^◆]*/g, "")
         .trim();
       const entry: { job_number?: string; drive_file_id?: string; file_name?: string; match_label: string; comment: string } = {
         match_label: toMatchLabel(f.aiMatchRating),

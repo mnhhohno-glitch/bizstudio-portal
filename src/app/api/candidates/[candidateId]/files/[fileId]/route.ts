@@ -152,6 +152,9 @@ export async function PATCH(
             .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
             .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
             .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
+            // 懸念点・確認事項セクションを丸ごと除去
+            .replace(/◆\s*懸念[^◆]*/g, "")
+            .replace(/◆\s*確認事項[^◆]*/g, "")
             .trim();
           const matchLabel = toMatchLabel(file.aiMatchRating);
           await fetch(`${KYUUJIN_PDF_TOOL_URL}/api/external/mypage/jobs/ca-comment`, {
