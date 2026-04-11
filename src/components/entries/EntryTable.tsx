@@ -424,12 +424,33 @@ export default function EntryTable({
         return (
           <td key={col.key} className="px-1 py-0.5" onClick={(e) => e.stopPropagation()}>
             <select value={entry.entryFlag || ""}
-              onChange={(e) => onFlagUpdate(entry.id, { entryFlag: e.target.value, entryFlagDetail: null, companyFlag: null, personFlag: null })}
+              onChange={(e) => {
+                const newFlag = e.target.value;
+                const updates: Record<string, string | null> = { entryFlag: newFlag, entryFlagDetail: null, companyFlag: null, personFlag: null };
+                if (newFlag === "内定") {
+                  updates.entryFlagDetail = "検討中";
+                  updates.companyFlag = "承諾返答前";
+                  updates.personFlag = "内定通知前";
+                }
+                onFlagUpdate(entry.id, updates);
+              }}
               className="w-full text-[11px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]">
               {entryFlagOptions.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
             <select value={entry.entryFlagDetail || ""}
-              onChange={(e) => onFlagUpdate(entry.id, { entryFlagDetail: e.target.value })}
+              onChange={(e) => {
+                const newDetail = e.target.value;
+                const updates: Record<string, string | null> = { entryFlagDetail: newDetail };
+                const currentFlag = entry.entryFlag || "";
+                if (newDetail === "選考落ち" && (currentFlag === "書類選考" || currentFlag === "面接")) {
+                  updates.personFlag = "見送り通知未送信";
+                }
+                if (newDetail === "本人辞退") {
+                  updates.companyFlag = "辞退報告前";
+                  updates.personFlag = "辞退受付済";
+                }
+                onFlagUpdate(entry.id, updates);
+              }}
               className="w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] text-gray-500">
               <option value="">-</option>
               {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
