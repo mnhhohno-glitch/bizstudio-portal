@@ -443,6 +443,7 @@ export default function EntryTable({
                 const updates: Record<string, string | null> = { entryFlagDetail: newDetail };
                 const currentFlag = entry.entryFlag || "";
                 if (newDetail === "選考落ち" && (currentFlag === "書類選考" || currentFlag === "面接")) {
+                  updates.companyFlag = null;
                   updates.personFlag = "見送り通知未送信";
                 }
                 if (newDetail === "本人辞退") {
