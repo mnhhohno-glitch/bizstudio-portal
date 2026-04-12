@@ -169,16 +169,30 @@ export async function POST(
 
       if (memoContent && memoContent.trim()) {
         const memoLines = memoContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        // 2行ずつペア: [会社名, URL]
+        // URL行を基準にパース（2行でも3行でも対応）
+        // Circusメモは「会社名 → (任意で求人タイトル) → URL」の繰り返し
         const memoEntries: { companyName: string; circusId: string }[] = [];
-        for (let mi = 0; mi < memoLines.length - 1; mi += 2) {
-          const companyLine = memoLines[mi];
-          const urlLine = memoLines[mi + 1];
-          const idMatch = urlLine.match(/search\/(\d+)/);
+        for (let mi = 0; mi < memoLines.length; mi++) {
+          const line = memoLines[mi];
+          const idMatch = line.match(/circus-job\.com\/search\/(\d+)/);
           if (idMatch) {
-            memoEntries.push({ companyName: companyLine, circusId: idMatch[1] });
+            // URL行を見つけたら、その前の行をたどって会社名を特定
+            let companyName = '';
+            if (mi >= 1 && !memoLines[mi - 1].match(/circus-job\.com/)) {
+              if (mi >= 2 && !memoLines[mi - 2].match(/circus-job\.com/) && !memoLines[mi - 2].startsWith('【')) {
+                // 3行フォーマット: [会社名, 求人タイトル, URL]
+                companyName = memoLines[mi - 2];
+              } else {
+                // 2行フォーマット: [会社名, URL]
+                companyName = memoLines[mi - 1];
+              }
+            }
+            if (companyName) {
+              memoEntries.push({ companyName, circusId: idMatch[1] });
+            }
           }
         }
+        console.log(`[SendToJobTool] Circus memo parsed: ${memoEntries.length} entries:`, memoEntries.map((e) => `${e.companyName}:${e.circusId}`));
 
         // 会社名の正規化（比較用）: ファイル名から求人番号・拡張子・プレフィックスを除去
         const norm = (s: string) => s
