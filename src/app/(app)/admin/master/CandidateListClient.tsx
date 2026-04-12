@@ -141,10 +141,36 @@ export default function CandidateListClient({
   }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter]);
 
   const tabCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: candidates.length, BEFORE: 0, ACTIVE: 0, ENDED: 0 };
-    for (const c of candidates) { counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1; }
+    // Apply all filters except supportTab so counts reflect current filter state
+    let base = candidates;
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.trim().toLowerCase();
+      base = base.filter(
+        (c) =>
+          c.candidateNumber.toLowerCase().includes(q) ||
+          c.name.toLowerCase().includes(q) ||
+          (c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
+          (c.employee?.name && c.employee.name.toLowerCase().includes(q))
+      );
+    }
+    if (caFilter !== "ALL") {
+      base = base.filter((c) => c.employee?.id === caFilter);
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      base = base.filter((c) => new Date(c.createdAt) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59");
+      base = base.filter((c) => new Date(c.createdAt) <= to);
+    }
+    if (genderFilter !== "ALL") {
+      base = base.filter((c) => c.gender === genderFilter);
+    }
+    const counts: Record<string, number> = { ALL: base.length, BEFORE: 0, ACTIVE: 0, ENDED: 0 };
+    for (const c of base) { counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1; }
     return counts;
-  }, [candidates]);
+  }, [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter]);
 
   const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
     if (newStatus === "ENDED") {
