@@ -76,7 +76,7 @@ const TABS = [
 export default function EntryBoard() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("全件");
+  const [activeTab, setActiveTab] = useState("エントリー");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);

@@ -55,11 +55,22 @@ export async function GET(req: NextRequest) {
     prisma.jobEntry.count({ where }),
   ]);
 
-  // Counts for tabs (active only)
+  // Counts for tabs — apply same filters as main query so tab counts reflect current filter state
   const countBase: Prisma.JobEntryWhereInput = includeInactive ? {} : { isActive: true };
   if (careerAdvisorId) countBase.careerAdvisorId = careerAdvisorId;
-  if (candidateName) countBase.candidate = { name: { contains: candidateName, mode: "insensitive" } };
   if (companyName) countBase.companyName = { contains: companyName, mode: "insensitive" };
+  if (candidateName || careerAdvisorName) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const candidateWhere: any = {};
+    if (candidateName) candidateWhere.name = { contains: candidateName, mode: "insensitive" };
+    if (careerAdvisorName) candidateWhere.employee = { name: careerAdvisorName };
+    countBase.candidate = candidateWhere;
+  }
+  if (dateFrom || dateTo) {
+    countBase.entryDate = {};
+    if (dateFrom) (countBase.entryDate as Prisma.DateTimeFilter).gte = new Date(dateFrom);
+    if (dateTo) (countBase.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
+  }
 
   const flagValues = ["求人紹介", "応募", "エントリー", "書類選考", "面接", "内定"];
   const countResults = await Promise.all([
