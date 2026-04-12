@@ -148,6 +148,16 @@ function EditModal({
   );
   const [saving, setSaving] = useState(false);
 
+  const calcAge = (bd: string) => {
+    if (!bd) return "";
+    const today = new Date();
+    const birth = new Date(bd);
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+    return `${age}歳`;
+  };
+
   const handleSave = async () => {
     if (!name.trim() || !furigana.trim()) return;
     setSaving(true);
@@ -183,7 +193,7 @@ function EditModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-[8px] w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-xl"
+        className="bg-white rounded-[8px] w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
@@ -197,73 +207,11 @@ function EditModal({
             ×
           </button>
         </div>
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
-            <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              氏名 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              フリガナ <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={furigana}
-              onCompositionStart={() => setIsFuriganaComposing(true)}
-              onCompositionEnd={(e) => { setIsFuriganaComposing(false); setFurigana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
-              onChange={(e) => setFurigana(isFuriganaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              メールアドレス
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
-            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-          </div>
+        <div className="p-6">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
-              <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">生年月日</label>
-              <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                性別 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-              >
-                <option value="">選択してください</option>
-                <option value="male">男性</option>
-                <option value="female">女性</option>
-                <option value="other">その他</option>
-              </select>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
+              <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-[#374151] mb-1">
@@ -282,18 +230,74 @@ function EditModal({
                 ))}
               </select>
             </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                氏名 <span className="text-red-500">*</span>
+              </label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                フリガナ <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={furigana}
+                onCompositionStart={() => setIsFuriganaComposing(true)}
+                onCompositionEnd={(e) => { setIsFuriganaComposing(false); setFurigana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+                onChange={(e) => setFurigana(isFuriganaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">生年月日</label>
+              <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">年齢</label>
+              <input type="text" value={calcAge(birthday)} readOnly disabled className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-100 text-gray-500" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                性別 <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              >
+                <option value="">選択してください</option>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+                <option value="other">その他</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
+              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
           </div>
-          <div className="flex gap-3 pt-2">
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
+              <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end mt-6">
             <button
               onClick={onClose}
-              className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-[13px] hover:bg-gray-50 transition-colors"
+              className="border border-gray-300 bg-white text-gray-700 rounded-md px-6 py-2.5 text-[13px] hover:bg-gray-50 transition-colors"
             >
               キャンセル
             </button>
             <button
               onClick={handleSave}
               disabled={saving || !name.trim() || !furigana.trim()}
-              className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-[#2563EB] text-white rounded-md px-6 py-2.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? "保存中..." : "保存する"}
             </button>
