@@ -87,5 +87,34 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     },
   });
 
+  // Sync birthday hash to kyuujinPDF when birthday is changed
+  if (body.birthday !== undefined) {
+    const kyuujinApiUrl = process.env.KYUUJIN_API_URL || "https://web-production-95808.up.railway.app";
+    const kyuujinApiSecret = process.env.KYUUJIN_API_SECRET;
+    if (kyuujinApiSecret && existing.candidateNumber) {
+      try {
+        const syncRes = await fetch(`${kyuujinApiUrl}/api/external/mypage/update-birthday`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-secret": kyuujinApiSecret,
+          },
+          body: JSON.stringify({
+            job_seeker_id: existing.candidateNumber,
+            birthday: body.birthday || null,
+          }),
+        });
+        if (!syncRes.ok) {
+          console.warn(`[BIRTHDAY-SYNC] Failed to sync birthday hash: ${syncRes.status}`);
+        } else {
+          const result = await syncRes.json();
+          console.log(`[BIRTHDAY-SYNC] Updated ${result.updated_count} share tokens for candidateNumber: ${existing.candidateNumber}`);
+        }
+      } catch (error) {
+        console.error("[BIRTHDAY-SYNC] Error syncing birthday hash:", error);
+      }
+    }
+  }
+
   return NextResponse.json({ candidate: updated });
 }
