@@ -398,9 +398,9 @@ export default function EntryTable({
         const displayedId = switched ? entry.entryJobId : entry.externalJobNo;
         return (
           <td key={col.key} className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
-            {/* Row 1: DB名 | 求人種別ドロップダウン | 媒体切替アイコン | URL編集アイコン */}
+            {/* Row 1: DB名(固定幅) | 求人種別ドロップダウン(固定幅) | 🔄 | ✏️ */}
             <div className="flex items-center gap-1">
-              <div className="min-w-0 shrink-0 max-w-[90px]">
+              <div className="w-[84px] shrink-0 overflow-hidden">
                 {displayedDb ? (
                   entry.jobDbUrl ? (
                     <a
@@ -425,7 +425,7 @@ export default function EntryTable({
               <select
                 value={entry.jobType || ""}
                 onChange={(e) => onFieldUpdate(entry.id, { jobType: e.target.value || null })}
-                className={`flex-1 min-w-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
+                className={`w-[104px] shrink-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
                 title="求人種別"
               >
                 <option value="">種別</option>
