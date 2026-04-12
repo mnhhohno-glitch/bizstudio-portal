@@ -1083,6 +1083,8 @@ model JobEntry {
   interviewPrepTime   String?   @map("interview_prep_time")
   firstInterviewDate  DateTime? @map("first_interview_date")
   firstInterviewTime  String?   @map("first_interview_time")
+  secondInterviewDate DateTime? @map("second_interview_date")
+  secondInterviewTime String?   @map("second_interview_time")
   finalInterviewDate  DateTime? @map("final_interview_date")
   finalInterviewTime  String?   @map("final_interview_time")
   offerDate           DateTime? @map("offer_date")
@@ -1096,6 +1098,18 @@ model JobEntry {
   jobDbUrl            String?   @map("job_db_url")
   isActive            Boolean   @default(true) @map("is_active")
   careerAdvisorId     String?   @map("career_advisor_id")
+
+  // === 財務 ===
+  theoreticalIncome   Int?      @map("theoretical_income")
+  referralFee         Int?      @map("referral_fee")
+  revenue             Int?      @map("revenue")
+  grossProfit         Int?      @map("gross_profit")
+
+  // === 応募経路 ===
+  route               String?
+
+  // === FileMaker参照用 ===
+  fmEntryNo           String?   @map("fm_entry_no")
 
   @@index([candidateId])
   @@index([externalJobId])
