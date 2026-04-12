@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { JOB_TYPE_OPTIONS } from "@/lib/constants/job-types";
 import type { FlagData } from "./EntryBoard";
 
 type CandidateOption = {
@@ -26,6 +27,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
   const [jobTitle, setJobTitle] = useState("");
   const [externalJobNo, setExternalJobNo] = useState("");
   const [jobDb, setJobDb] = useState("");
+  const [jobType, setJobType] = useState("");
   const [prefecture, setPrefecture] = useState("");
   const [entryFlag, setEntryFlag] = useState("求人紹介");
   const [entryFlagDetail, setEntryFlagDetail] = useState("検討中");
@@ -60,6 +62,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
           jobTitle: jobTitle.trim(),
           externalJobNo: externalJobNo.trim() || null,
           jobDb: jobDb || null,
+          jobType: jobType || null,
           prefecture: prefecture.trim() || null,
           entryFlag,
           entryFlagDetail,
@@ -148,6 +151,13 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
                 {["HITO-Link", "Circus", "マイナビJOB", "DODA求人", "直接求人"].map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className={labelCls}>求人種別</label>
+            <select className={inputCls} value={jobType} onChange={(e) => setJobType(e.target.value)}>
+              <option value="">-</option>
+              {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           <div>
             <label className={labelCls}>都道府県</label>

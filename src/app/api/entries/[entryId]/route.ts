@@ -33,7 +33,8 @@ export async function PATCH(
 
   // Allow updating any field
   const allowedFields = [
-    "companyName", "jobTitle", "externalJobNo", "jobDb", "prefecture", "jobCategory",
+    "companyName", "jobTitle", "externalJobNo", "jobDb", "jobType", "prefecture", "jobCategory",
+    "entryRoute", "entryJobId",
     "status", "entryFlag", "entryFlagDetail", "companyFlag", "personFlag",
     "hasJobPosting", "hasEntry", "hasJoined",
     "firstMeetingDate", "jobMeetingDate", "jobIntroDate", "documentSubmitDate",

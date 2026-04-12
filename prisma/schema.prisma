@@ -1108,6 +1108,10 @@ model JobEntry {
   // === 応募経路 ===
   route               String?
 
+  // === エントリー媒体切替（紹介時とエントリー時で異なる媒体に対応） ===
+  entryRoute          String?   @map("entry_route")
+  entryJobId          String?   @map("entry_job_id")
+
   // === FileMaker参照用 ===
   fmEntryNo           String?   @map("fm_entry_no")
 

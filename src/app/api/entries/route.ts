@@ -72,17 +72,15 @@ export async function GET(req: NextRequest) {
     if (dateTo) (countBase.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
   }
 
-  const flagValues = ["求人紹介", "応募", "エントリー", "書類選考", "面接", "内定"];
+  const flagValues = ["求人紹介", "応募", "エントリー", "書類選考", "面接", "内定", "入社済"];
   const countResults = await Promise.all([
     ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...countBase, entryFlag: f } })),
-    prisma.jobEntry.count({ where: { ...countBase, hasJoined: true } }),
     prisma.jobEntry.count({ where: countBase }),
   ]);
 
   const counts: Record<string, number> = {};
   flagValues.forEach((f, i) => { counts[f] = countResults[i]; });
-  counts["入社済"] = countResults[flagValues.length];
-  counts["全件"] = countResults[flagValues.length + 1];
+  counts["全件"] = countResults[flagValues.length];
 
   return NextResponse.json({
     entries,
@@ -98,7 +96,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { candidateId, companyName, jobTitle, entryFlag, entryFlagDetail, externalJobNo, jobDb, prefecture, entryDate } = body;
+  const { candidateId, companyName, jobTitle, entryFlag, entryFlagDetail, externalJobNo, jobDb, jobType, prefecture, entryDate } = body;
 
   if (!candidateId || !companyName) {
     return NextResponse.json({ error: "candidateId and companyName are required" }, { status: 400 });
@@ -116,6 +114,7 @@ export async function POST(req: NextRequest) {
       entryFlagDetail: entryFlagDetail || "検討中",
       externalJobNo: externalJobNo || null,
       jobDb: jobDb || null,
+      jobType: jobType || null,
       prefecture: prefecture || null,
       careerAdvisorId: user.id,
       createdBy: user.id,

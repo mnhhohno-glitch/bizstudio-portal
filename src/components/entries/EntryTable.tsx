@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
+import { JOB_TYPE_OPTIONS } from "@/lib/constants/job-types";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -19,6 +20,7 @@ type Props = {
   onFlagUpdate: (entryId: string, flags: Record<string, string | null>) => void;
   onFieldUpdate: (entryId: string, fields: Record<string, unknown>) => Promise<void>;
   onJobDbUrlEdit: (entryId: string, currentUrl: string | null) => void;
+  onEntryRouteEdit: (entry: Entry) => void;
   onRowClick: (entryId: string) => void;
   selectedIds: Set<string>;
   onSelectToggle: (id: string) => void;
@@ -32,7 +34,7 @@ const COMMON_COLS: ColConfig[] = [
   { key: "candidate", label: "求職者", width: 120, sortKey: "candidate" },
   { key: "ca", label: "担当CA", width: 80, sortKey: "ca" },
   { key: "company", label: "紹介先企業", width: 280, sortKey: "company" },
-  { key: "jobDb", label: "求人DB", width: 130, sortKey: "jobDb" },
+  { key: "jobDb", label: "求人DB", width: 260, sortKey: "jobDb" },
   { key: "entryFlags", label: "エントリーフラグ", width: 130, sortKey: "entryFlag" },
   { key: "statusFlags", label: "対応状況", width: 130, sortKey: "companyFlag" },
   { key: "entryDate", label: "エントリー日", width: 80, sortKey: "entryDate" },
@@ -343,7 +345,7 @@ function SortIndicator({ sortKey, sortField, sortDir }: {
 
 export default function EntryTable({
   entries, flagData, activeTab, sortField, sortDir, onSort,
-  onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onRowClick,
+  onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onEntryRouteEdit, onRowClick,
   selectedIds, onSelectToggle, onSelectAll, onDeselectAll,
 }: Props) {
   const cols = getColumns(activeTab);
@@ -389,37 +391,68 @@ export default function EntryTable({
             {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]" title={entry.jobTitle} data-job-title={entry.jobTitle}>{entry.jobTitle}</div>}
           </td>
         );
-      case "jobDb":
+      case "jobDb": {
+        // エントリー媒体切替済み: entryRoute を優先表示、元の媒体は小さく表示
+        const switched = !!entry.entryRoute;
+        const displayedDb = switched ? entry.entryRoute : entry.jobDb;
+        const displayedId = switched ? entry.entryJobId : entry.externalJobNo;
         return (
-          <td key={col.key} className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-            {entry.jobDb ? (
-              entry.jobDbUrl ? (
-                <div className="flex flex-col items-center gap-0">
-                  <a
-                    href={entry.jobDbUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline text-[11px]"
-                  >{entry.jobDb}</a>
-                  <button
-                    onClick={() => onJobDbUrlEdit(entry.id, entry.jobDbUrl)}
-                    className="text-gray-400 hover:text-blue-600 text-[9px] leading-none mt-0.5"
-                    title="URLを編集"
-                  >✏️</button>
-                </div>
-              ) : (
+          <td key={col.key} className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+            {/* Row 1: DB名 | 求人種別ドロップダウン | 媒体切替アイコン | URL編集アイコン */}
+            <div className="flex items-center gap-1">
+              <div className="min-w-0 shrink-0 max-w-[90px]">
+                {displayedDb ? (
+                  entry.jobDbUrl ? (
+                    <a
+                      href={entry.jobDbUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-[11px] truncate block"
+                      title={displayedDb}
+                    >{displayedDb}</a>
+                  ) : (
+                    <button
+                      onClick={() => onJobDbUrlEdit(entry.id, null)}
+                      className="text-gray-800 text-[11px] hover:text-blue-600 cursor-pointer underline decoration-dotted truncate block text-left w-full"
+                      title={`${displayedDb} — クリックでURL登録`}
+                    >{displayedDb}</button>
+                  )
+                ) : (
+                  <div className="text-[11px] text-gray-400">-</div>
+                )}
+              </div>
+              <span className="text-[10px] text-gray-300 shrink-0">|</span>
+              <select
+                value={entry.jobType || ""}
+                onChange={(e) => onFieldUpdate(entry.id, { jobType: e.target.value || null })}
+                className={`flex-1 min-w-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
+                title="求人種別"
+              >
+                <option value="">種別</option>
+                {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <button
+                onClick={() => onEntryRouteEdit(entry)}
+                className={`text-[11px] leading-none shrink-0 ${switched ? "text-blue-600" : "text-gray-400 hover:text-blue-600"}`}
+                title={switched ? `エントリー媒体: ${entry.entryRoute}（元: ${entry.jobDb || "-"}）` : "エントリー媒体を切り替える"}
+              >🔄</button>
+              {entry.jobDbUrl && (
                 <button
-                  onClick={() => onJobDbUrlEdit(entry.id, null)}
-                  className="text-gray-800 text-[11px] hover:text-blue-600 cursor-pointer underline decoration-dotted"
-                  title="クリックでURL登録"
-                >{entry.jobDb}</button>
-              )
-            ) : (
-              <div className="text-[11px]">-</div>
+                  onClick={() => onJobDbUrlEdit(entry.id, entry.jobDbUrl)}
+                  className="text-[9px] leading-none text-gray-400 hover:text-blue-600 shrink-0"
+                  title="URLを編集"
+                >✏️</button>
+              )}
+            </div>
+            {/* Row 2: 切替済みの場合、元の媒体を小さく表示 */}
+            {switched && entry.jobDb && (
+              <div className="text-[9px] text-gray-400 mt-0.5 truncate" title={`元の媒体: ${entry.jobDb}`}>← {entry.jobDb}</div>
             )}
-            {entry.externalJobNo && <div className="text-[11px] text-gray-400">ID: {entry.externalJobNo}</div>}
+            {/* Row 3: ID */}
+            {displayedId && <div className="text-[10px] text-gray-400 truncate">ID: {displayedId}</div>}
           </td>
         );
+      }
       case "entryFlags":
         return (
           <td key={col.key} className="px-1 py-0.5" onClick={(e) => e.stopPropagation()}>

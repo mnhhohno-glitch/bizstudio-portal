@@ -7,6 +7,7 @@ import EntryDetailModal from "./EntryDetailModal";
 import EntryCreateModal from "./EntryCreateModal";
 import BulkFlagChangeModal from "./BulkFlagChangeModal";
 import EndNoticeModal from "./EndNoticeModal";
+import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 
 export type Entry = {
   id: string;
@@ -18,6 +19,9 @@ export type Entry = {
   originalUrl: string | null;
   jobDb: string | null;
   jobDbUrl: string | null;
+  jobType: string | null;
+  entryRoute: string | null;
+  entryJobId: string | null;
   prefecture: string | null;
   jobCategory: string | null;
   status: string | null;
@@ -107,13 +111,15 @@ export default function EntryBoard() {
   const [urlInput, setUrlInput] = useState("");
   const [savingUrl, setSavingUrl] = useState(false);
 
+  // Entry route switch modal
+  const [routeModalEntry, setRouteModalEntry] = useState<Entry | null>(null);
+
   const fetchEntries = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", "50");
-    if (activeTab !== "全件" && activeTab !== "入社済") params.set("entryFlag", activeTab);
-    if (activeTab === "入社済") params.set("hasJoined", "true");
+    if (activeTab !== "全件") params.set("entryFlag", activeTab);
     if (candidateName) params.set("candidateName", candidateName);
     if (companyName) params.set("companyName", companyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
@@ -234,8 +240,7 @@ export default function EntryBoard() {
 
   const handleExport = () => {
     const params = new URLSearchParams();
-    if (activeTab !== "全件" && activeTab !== "入社済") params.set("entryFlag", activeTab);
-    if (activeTab === "入社済") params.set("hasJoined", "true");
+    if (activeTab !== "全件") params.set("entryFlag", activeTab);
     if (candidateName) params.set("candidateName", candidateName);
     if (companyName) params.set("companyName", companyName);
     if (includeInactive) params.set("includeInactive", "true");
@@ -368,6 +373,7 @@ export default function EntryBoard() {
           onFlagUpdate={handleFlagUpdate}
           onFieldUpdate={handleFieldUpdate}
           onJobDbUrlEdit={openUrlEditModal}
+          onEntryRouteEdit={(entry) => setRouteModalEntry(entry)}
           onRowClick={(id) => setDetailEntryId(id)}
           selectedIds={selectedIds}
           onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
@@ -466,6 +472,18 @@ export default function EntryBoard() {
           selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
           onClose={() => setShowEndNotice(false)}
           onDone={() => { setShowEndNotice(false); setSelectedIds(new Set()); fetchEntries(); }}
+        />
+      )}
+
+      {/* Entry Route Switch Modal */}
+      {routeModalEntry && (
+        <EntryRouteSwitchModal
+          entry={routeModalEntry}
+          onClose={() => setRouteModalEntry(null)}
+          onSaved={(updated) => {
+            setEntries((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+            setRouteModalEntry(null);
+          }}
         />
       )}
     </div>
