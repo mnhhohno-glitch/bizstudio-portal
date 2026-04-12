@@ -53,6 +53,9 @@ function extractRatingsAndComments(
   }
 
   // === Phase 2: Extract individual section comments + fallback ratings ===
+  // Use space-normalized text for matching (length-preserving, so indices map to original)
+  const normalizedText = normalizeSpaces(analysisText);
+
   for (const file of batchFiles) {
     const searchNames = extractSearchNames(file.fileName);
 
@@ -70,16 +73,16 @@ function extractRatingsAndComments(
 
       let startIndex = -1;
       for (const pattern of sectionPatterns) {
-        const match = analysisText.match(pattern);
+        const match = normalizedText.match(pattern);
         if (match) {
-          startIndex = analysisText.indexOf(match[0]);
+          startIndex = normalizedText.indexOf(match[0]);
           if (startIndex !== -1) break;
         }
       }
 
       // Also try direct name search as fallback
       if (startIndex === -1) {
-        startIndex = analysisText.indexOf(name);
+        startIndex = normalizedText.indexOf(name);
         if (startIndex !== -1) {
           // Walk back to find section start (--- or line start)
           const before = analysisText.substring(Math.max(0, startIndex - 200), startIndex);
@@ -118,7 +121,7 @@ function extractRatingsAndComments(
     const entry = results.get(file.id);
     if (entry && !entry.rating) {
       for (const name of searchNames) {
-        const idx = analysisText.indexOf(name);
+        const idx = normalizedText.indexOf(name);
         if (idx === -1) continue;
         const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
         const patterns = [/■\s*総合[：:]\s*([ABCD])/, /総合[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
@@ -133,7 +136,7 @@ function extractRatingsAndComments(
     // Fallback: if no results at all, try simple text search for rating
     if (!results.has(file.id)) {
       for (const name of searchNames) {
-        const idx = analysisText.indexOf(name);
+        const idx = normalizedText.indexOf(name);
         if (idx === -1) continue;
         const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
         const patterns = [/■\s*総合[：:]\s*([ABCD])/, /総合[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
@@ -167,6 +170,11 @@ function extractSearchNames(fileName: string): string[] {
 
   if (names.length === 0) names.push(name);
 
+  // Normalize full-width spaces to half-width in all names
+  for (let i = 0; i < names.length; i++) {
+    names[i] = normalizeSpaces(names[i]);
+  }
+
   const expanded: string[] = [...names];
   for (const n of names) {
     const stripped = n
@@ -184,6 +192,11 @@ function extractSearchNames(fileName: string): string[] {
     }
   }
   return expanded;
+}
+
+/** Replace full-width spaces with half-width (length-preserving) for matching */
+function normalizeSpaces(str: string): string {
+  return str.replace(/　/g, " ");
 }
 
 function normalizeCompanyName(name: string): string {
@@ -499,15 +512,7 @@ ${EVAL_RULES}
     });
 
     // 9. Extract ratings + comments and save to CandidateFile
-    for (const f of batchFiles) {
-      console.log(`[AI-BOOKMARK] Processing file: ${f.id} ${f.fileName} searchNames:`, extractSearchNames(f.fileName));
-    }
     const ratingsAndComments = extractRatingsAndComments(analysisText, batchFiles);
-    for (const f of batchFiles) {
-      if (!ratingsAndComments.has(f.id)) {
-        console.log(`[AI-BOOKMARK] SKIPPED file: ${f.id} ${f.fileName} reason: no match found in AI response`);
-      }
-    }
     for (const [fileId, { rating, comment }] of ratingsAndComments) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateData: Record<string, any> = { aiAnalyzedAt: new Date() };
