@@ -183,7 +183,7 @@ function EditModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-[8px] w-full max-w-[520px] shadow-xl"
+        className="bg-white rounded-[8px] w-full max-w-[520px] max-h-[90vh] overflow-y-auto shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
@@ -241,52 +241,47 @@ function EditModal({
             <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
             <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
           </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
-            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              生年月日
-            </label>
-            <input
-              type="date"
-              value={birthday}
-              onChange={(e) => setBirthday(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              性別 <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={gender}
-              onChange={(e) => setGender(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            >
-              <option value="">選択してください</option>
-              <option value="male">男性</option>
-              <option value="female">女性</option>
-              <option value="other">その他</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">
-              担当キャリアアドバイザー <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={assignedEmployeeId}
-              onChange={(e) => setAssignedEmployeeId(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            >
-              <option value="">選択してください</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
+              <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">生年月日</label>
+              <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                性別 <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              >
+                <option value="">選択してください</option>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+                <option value="other">その他</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                担当キャリアアドバイザー <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={assignedEmployeeId}
+                onChange={(e) => setAssignedEmployeeId(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              >
+                <option value="">選択してください</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex gap-3 pt-2">
             <button
