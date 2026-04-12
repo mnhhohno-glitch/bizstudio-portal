@@ -499,7 +499,15 @@ ${EVAL_RULES}
     });
 
     // 9. Extract ratings + comments and save to CandidateFile
+    for (const f of batchFiles) {
+      console.log(`[AI-BOOKMARK] Processing file: ${f.id} ${f.fileName} searchNames:`, extractSearchNames(f.fileName));
+    }
     const ratingsAndComments = extractRatingsAndComments(analysisText, batchFiles);
+    for (const f of batchFiles) {
+      if (!ratingsAndComments.has(f.id)) {
+        console.log(`[AI-BOOKMARK] SKIPPED file: ${f.id} ${f.fileName} reason: no match found in AI response`);
+      }
+    }
     for (const [fileId, { rating, comment }] of ratingsAndComments) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateData: Record<string, any> = { aiAnalyzedAt: new Date() };
