@@ -163,3 +163,20 @@ export async function POST(request: NextRequest) {
     errors: errors.slice(0, 50),
   });
 }
+
+export async function DELETE(request: NextRequest) {
+  if (!validateInternalApiKey(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { fmEntryNos } = await request.json();
+  if (!Array.isArray(fmEntryNos) || fmEntryNos.length === 0) {
+    return NextResponse.json({ error: "fmEntryNos array is required" }, { status: 400 });
+  }
+
+  const result = await prisma.jobEntry.deleteMany({
+    where: { fmEntryNo: { in: fmEntryNos } },
+  });
+
+  return NextResponse.json({ deleted: result.count });
+}
