@@ -1538,8 +1538,9 @@ export default function CandidateDetailPage() {
           {candidate.supportStatus === "ENDED" ? (
             <div className="flex items-start gap-2">
               <button
+                aria-label="支援状況"
                 onClick={() => setShowEndModal(true)}
-                className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200"
+                className="rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200"
               >
                 支援終了{candidate.supportEndReason ? `（${REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason}）` : ""}
               </button>
@@ -1552,6 +1553,7 @@ export default function CandidateDetailPage() {
           ) : (
             <div className="flex items-center gap-3">
               <select
+                aria-label="支援状況"
                 value={candidate.supportStatus || "BEFORE"}
                 onChange={async (e) => {
                   const val = e.target.value;
@@ -1566,7 +1568,7 @@ export default function CandidateDetailPage() {
                   });
                   fetchCandidate();
                 }}
-                className={`rounded-md px-4 py-2 text-sm font-medium border cursor-pointer min-w-[120px] ${
+                className={`rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer min-w-[120px] ${
                   candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700 border-blue-200" :
                   candidate.supportStatus === "WAITING" ? "bg-yellow-100 text-yellow-700 border-yellow-200" :
                   "bg-gray-100 text-gray-600 border-gray-300"
@@ -1583,13 +1585,14 @@ export default function CandidateDetailPage() {
                 const options = SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || [];
                 if (fixed || options.length <= 1) {
                   return (
-                    <span className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium border bg-gray-50 text-gray-700 border-gray-200 min-w-[120px]">
+                    <span aria-label="ステータス" className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium border bg-gray-50 text-gray-700 border-gray-200 min-w-[120px]">
                       {candidate.supportSubStatus || options[0] || "-"}
                     </span>
                   );
                 }
                 return (
                   <select
+                    aria-label="ステータス"
                     value={candidate.supportSubStatus || ""}
                     onChange={async (e) => {
                       const val = e.target.value;
@@ -1600,7 +1603,7 @@ export default function CandidateDetailPage() {
                       });
                       fetchCandidate();
                     }}
-                    className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300 min-w-[120px]"
+                    className="rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300 min-w-[120px]"
                   >
                     {!candidate.supportSubStatus && (
                       <option value="" disabled>-</option>
@@ -1615,9 +1618,9 @@ export default function CandidateDetailPage() {
           )}
           <button
             onClick={() => setEditModalOpen(true)}
-            className="bg-white border border-gray-300 text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            className="bg-white border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
           >
-            ✏️ 基本情報を編集
+            ✏️ 基本情報編集
           </button>
           {candidate.guideEntries.find((e) => e.guideType === "INTERVIEW") && (
             <button
@@ -1630,26 +1633,26 @@ export default function CandidateDetailPage() {
                   setTimeout(() => setUrlCopied(false), 2000);
                 }
               }}
-              className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+              className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
               {urlCopied ? "✅ コピーしました" : "🔗 ガイドURL"}
             </button>
           )}
           <button
             onClick={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
-            className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
           >
             📅 日程調整URL
           </button>
           <button
             onClick={handleOpenJobOutput}
             disabled={jobOutputLoading}
-            className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             {jobOutputLoading ? "読み込み中..." : "📄 求人出力"}
           </button>
           {mypageLoading ? (
-            <span className="inline-block border border-gray-200 bg-gray-50 rounded-md px-4 py-2 text-sm text-gray-400 animate-pulse">
+            <span className="inline-block border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm font-medium text-gray-400 animate-pulse">
               📱 求人マイページ
             </span>
           ) : (
@@ -1662,7 +1665,7 @@ export default function CandidateDetailPage() {
                   .then((r) => console.log("[SyncCaComments]", r))
                   .catch(() => {});
               }}
-              className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+              className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
             >
               📱 求人マイページ
             </button>
