@@ -306,6 +306,50 @@ export default function TaskNewPage() {
     }
   }, [presetCategoryId, categories, presetCandidateId, candidates]);
 
+  // エントリーボードからの一括プリセット (prefill=entry)
+  // categoryName, assignees (csv employeeNo), title, memo, step を一括適用して追加情報ステップへジャンプ
+  const entryPrefillApplied = useRef(false);
+  useEffect(() => {
+    if (entryPrefillApplied.current) return;
+    if (searchParams.get("prefill") !== "entry") return;
+    if (loading) return;
+    if (categories.length === 0 || employees.length === 0 || candidates.length === 0) return;
+
+    // カテゴリ名 → categoryId
+    const catName = searchParams.get("categoryName");
+    if (catName) {
+      const cat = categories.find((c) => c.name === catName);
+      if (cat) setCategoryId(cat.id);
+    }
+
+    // 担当者社員番号csv → assigneeIds (Employee.id)
+    const assigneesCsv = searchParams.get("assignees");
+    if (assigneesCsv) {
+      const nums = assigneesCsv.split(",").map((s) => s.trim()).filter(Boolean);
+      const ids = nums
+        .map((n) => employees.find((e) => e.employeeNo === n)?.id)
+        .filter((id): id is string => !!id);
+      if (ids.length > 0) setAssigneeIds(ids);
+    }
+
+    // タイトル・メモ
+    const pt = searchParams.get("title");
+    if (pt) setTitle(pt);
+    const pm = searchParams.get("memo");
+    if (pm) setDescription(pm);
+
+    // ステップ指定（1-indexed → 0-indexed）
+    const stepStr = searchParams.get("step");
+    if (stepStr) {
+      const s = parseInt(stepStr, 10);
+      if (!isNaN(s) && s >= 1 && s <= STEPS.length) {
+        setStep(s - 1);
+      }
+    }
+
+    entryPrefillApplied.current = true;
+  }, [loading, categories, employees, candidates, searchParams]);
+
   /* ----- job category cascading ----- */
   useEffect(() => {
     if (!selectedMajorId) {
