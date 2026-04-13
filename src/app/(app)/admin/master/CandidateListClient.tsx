@@ -296,7 +296,7 @@ export default function CandidateListClient({
           <select
             value={caFilter}
             onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
-            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
           >
             <option value="ALL">ALL</option>
             {employees.map((emp) => (
@@ -312,7 +312,7 @@ export default function CandidateListClient({
             type="date"
             value={dateFrom}
             onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
-            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
           />
         </div>
 
@@ -323,7 +323,7 @@ export default function CandidateListClient({
             type="date"
             value={dateTo}
             onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
-            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
           />
         </div>
 
@@ -333,7 +333,7 @@ export default function CandidateListClient({
           <select
             value={genderFilter}
             onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
-            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
           >
             <option value="ALL">ALL</option>
             <option value="male">男性</option>
@@ -348,7 +348,7 @@ export default function CandidateListClient({
             <select
               value={endReasonFilter}
               onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
-              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
             >
               <option value="ALL">ALL</option>
               {SUPPORT_END_REASONS.map((r) => (
@@ -382,14 +382,14 @@ export default function CandidateListClient({
           <TableWrap>
             <Table className="table-fixed w-full">
               <colgroup>
-                <col style={{ width: "8%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "9%" }} />
                 <col style={{ width: "10%" }} />
-                <col style={{ width: "12%" }} />
-                <col style={{ width: "5%" }} />
-                <col style={{ width: "8%" }} />
-                <col style={{ width: "15%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "10%" }} />
+                <col style={{ width: "4%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "13%" }} />
               </colgroup>
               <thead>
                 <tr>
@@ -445,7 +445,7 @@ export default function CandidateListClient({
                         <button
                           onClick={() => setEndModalCandidateId(cand.id)}
                           title={cand.supportEndReason ? REASON_LABEL_MAP[cand.supportEndReason] || "" : ""}
-                          className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 cursor-pointer hover:bg-red-200"
+                          className="inline-flex items-center justify-center text-xs px-3 py-1 rounded-full bg-red-100 text-red-600 cursor-pointer hover:bg-red-200 min-w-[96px]"
                         >
                           終了{cand.supportEndReason ? `(${REASON_LABEL_MAP[cand.supportEndReason]?.slice(0, 6) || ""})` : ""}
                         </button>
@@ -453,7 +453,7 @@ export default function CandidateListClient({
                         <select
                           value={cand.supportStatus}
                           onChange={(e) => handleSupportStatusChange(cand.id, e.target.value)}
-                          className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs px-3 py-1 rounded-full border-0 cursor-pointer min-w-[96px] text-center ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
                         >
                           <option value="BEFORE">支援前</option>
                           <option value="ACTIVE">支援中</option>
@@ -464,7 +464,7 @@ export default function CandidateListClient({
                     </Td>
                     <Td>
                       {cand.supportSubStatus && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${SUB_STATUS_BADGE[cand.supportSubStatus] || "bg-gray-100 text-gray-600"}`}>
+                        <span className={`inline-flex items-center justify-center text-xs px-3 py-1 rounded-full min-w-[96px] ${SUB_STATUS_BADGE[cand.supportSubStatus] || "bg-gray-100 text-gray-600"}`}>
                           {cand.supportSubStatus}
                         </span>
                       )}

@@ -150,21 +150,24 @@ export default function EntryBoard() {
       .then((r) => r.json())
       .then(setFlagData)
       .catch(() => {});
-    // Load CA list and set default to current user
-    fetch("/api/employees")
-      .then((r) => r.json())
-      .then((d) => {
-        const list: { name: string }[] = d.employees || d || [];
-        setCaOptions(list.map((e) => e.name));
-      })
-      .catch(() => {});
-    fetch("/api/auth/session")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (d?.name) setCaFilter(d.name);
-        if (d?.role === "admin") setIsAdmin(true);
-      })
-      .catch(() => {});
+
+    // Load CA list + session in parallel, then match login user to an
+    // employee name (ignoring whitespace) to set the default filter.
+    const normalize = (s: string) => s.replace(/\s+/g, "");
+    Promise.all([
+      fetch("/api/employees").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/auth/session").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([empData, session]) => {
+      const list: { name: string }[] = empData?.employees || empData || [];
+      const names = list.map((e) => e.name);
+      setCaOptions(names);
+      if (session?.role === "admin") setIsAdmin(true);
+      if (session?.name) {
+        const target = normalize(session.name);
+        const match = names.find((n) => normalize(n) === target);
+        setCaFilter(match ?? session.name);
+      }
+    });
   }, []);
 
   const handleTabChange = (tab: string) => {
