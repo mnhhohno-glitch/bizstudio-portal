@@ -1098,6 +1098,7 @@ model JobEntry {
   jobDbUrl            String?   @map("job_db_url")
   isActive            Boolean   @default(true) @map("is_active")
   careerAdvisorId     String?   @map("career_advisor_id")
+  archivedAt          DateTime? @map("archived_at")
 
   // === 財務 ===
   theoreticalIncome   Int?      @map("theoretical_income")
@@ -1119,6 +1120,7 @@ model JobEntry {
   @@index([externalJobId])
   @@index([entryFlag])
   @@index([isActive])
+  @@index([archivedAt])
   @@map("job_entries")
 }
 

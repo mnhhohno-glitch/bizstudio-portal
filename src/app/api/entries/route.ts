@@ -18,12 +18,14 @@ export async function GET(req: NextRequest) {
   const dateTo = sp.get("dateTo");
   const careerAdvisorName = sp.get("careerAdvisorName");
   const includeInactive = sp.get("includeInactive") === "true";
+  const includeArchived = sp.get("includeArchived") === "true";
   const hasJoined = sp.get("hasJoined");
   const sortBy = sp.get("sortBy") || "updatedAt";
   const sortOrder = sp.get("sortOrder") || "desc";
 
   const where: Prisma.JobEntryWhereInput = {};
 
+  if (!includeArchived) where.archivedAt = null;
   if (!includeInactive) where.isActive = true;
   if (entryFlag) where.entryFlag = entryFlag;
   if (careerAdvisorId) where.careerAdvisorId = careerAdvisorId;
@@ -56,7 +58,9 @@ export async function GET(req: NextRequest) {
   ]);
 
   // Counts for tabs — apply same filters as main query so tab counts reflect current filter state
-  const countBase: Prisma.JobEntryWhereInput = includeInactive ? {} : { isActive: true };
+  const countBase: Prisma.JobEntryWhereInput = {};
+  if (!includeArchived) countBase.archivedAt = null;
+  if (!includeInactive) countBase.isActive = true;
   if (careerAdvisorId) countBase.careerAdvisorId = careerAdvisorId;
   if (companyName) countBase.companyName = { contains: companyName, mode: "insensitive" };
   if (candidateName || careerAdvisorName) {

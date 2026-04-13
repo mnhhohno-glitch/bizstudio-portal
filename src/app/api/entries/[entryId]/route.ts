@@ -43,6 +43,7 @@ export async function PATCH(
     "finalInterviewDate", "finalInterviewTime", "offerDate", "offerDeadline",
     "offerMeetingDate", "offerMeetingTime", "acceptanceDate", "joinDate",
     "memo", "isActive", "careerAdvisorId", "entryDate", "jobDbUrl",
+    "archivedAt",
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,7 +52,7 @@ export async function PATCH(
     if (key in body) {
       const val = body[key];
       // Convert date strings to Date objects
-      if (key.endsWith("Date") || key.endsWith("Deadline") || key === "entryDate") {
+      if (key.endsWith("Date") || key.endsWith("Deadline") || key.endsWith("At") || key === "entryDate") {
         data[key] = val ? new Date(val) : null;
       } else {
         data[key] = val;
@@ -76,6 +77,9 @@ export async function DELETE(
 ) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (user.role !== "admin") {
+    return NextResponse.json({ error: "管理者権限が必要です" }, { status: 403 });
+  }
 
   const { entryId } = await params;
   await prisma.jobEntry.delete({ where: { id: entryId } });

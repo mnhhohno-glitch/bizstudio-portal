@@ -26,6 +26,9 @@ type Props = {
   onSelectToggle: (id: string) => void;
   onSelectAll: (ids: string[]) => void;
   onDeselectAll: () => void;
+  isAdmin?: boolean;
+  onUnarchive?: (entryId: string) => void;
+  onHardDelete?: (entry: Entry) => void;
 };
 
 /* ========== Column Definitions ========== */
@@ -347,6 +350,7 @@ export default function EntryTable({
   entries, flagData, activeTab, sortField, sortDir, onSort,
   onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onEntryRouteEdit, onRowClick,
   selectedIds, onSelectToggle, onSelectAll, onDeselectAll,
+  isAdmin, onUnarchive, onHardDelete,
 }: Props) {
   const cols = getColumns(activeTab);
   const sorted = applySortAndGroup(entries, sortField, sortDir);
@@ -600,13 +604,37 @@ export default function EntryTable({
         </thead>
         <tbody>
           {sorted.map((entry) => {
-            const rowClass = getRowClass(entry);
+            const archived = !!entry.archivedAt;
+            const rowClass = archived
+              ? "bg-gray-100 text-gray-500 italic"
+              : getRowClass(entry);
             return (
               <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30`}>
                 <td className="px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" checked={selectedIds.has(entry.id)}
-                    onChange={() => onSelectToggle(entry.id)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
+                  {archived ? (
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => onUnarchive?.(entry.id)}
+                        title="アーカイブ解除"
+                        className="text-blue-600 hover:text-blue-800 text-xs"
+                      >
+                        ↩
+                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => onHardDelete?.(entry)}
+                          title="完全削除"
+                          className="text-red-600 hover:text-red-800 text-xs"
+                        >
+                          🗑
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <input type="checkbox" checked={selectedIds.has(entry.id)}
+                      onChange={() => onSelectToggle(entry.id)}
+                      className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
+                  )}
                 </td>
                 {cols.map((col) => renderCell(entry, col))}
               </tr>

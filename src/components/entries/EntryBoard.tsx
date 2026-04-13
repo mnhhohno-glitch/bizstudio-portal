@@ -54,6 +54,7 @@ export type Entry = {
   joinDate: string | null;
   memo: string | null;
   isActive: boolean;
+  archivedAt: string | null;
   careerAdvisorId: string | null;
   introducedAt: string;
   createdAt: string;
@@ -92,6 +93,10 @@ export default function EntryBoard() {
   const [caFilter, setCaFilter] = useState("");
   const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [includeArchived, setIncludeArchived] = useState(false);
+
+  // Current user role (for admin-gated features)
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Sort
   const [sortField, setSortField] = useState<string | null>(null);
@@ -124,6 +129,7 @@ export default function EntryBoard() {
     if (companyName) params.set("companyName", companyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
     if (includeInactive) params.set("includeInactive", "true");
+    if (includeArchived) params.set("includeArchived", "true");
 
     try {
       const res = await fetch(`/api/entries?${params}`);
@@ -135,7 +141,7 @@ export default function EntryBoard() {
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [page, activeTab, candidateName, companyName, caFilter, includeInactive]);
+  }, [page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -152,9 +158,12 @@ export default function EntryBoard() {
         setCaOptions(list.map((e) => e.name));
       })
       .catch(() => {});
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((d) => { if (d.name) setCaFilter(d.name); })
+    fetch("/api/auth/session")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.name) setCaFilter(d.name);
+        if (d?.role === "admin") setIsAdmin(true);
+      })
       .catch(() => {});
   }, []);
 
@@ -205,6 +214,69 @@ export default function EntryBoard() {
   const openUrlEditModal = (entryId: string, currentUrl: string | null) => {
     setUrlModalEntryId(entryId);
     setUrlInput(currentUrl || "");
+  };
+
+  const handleBulkArchive = async (selectedEntries: Entry[]) => {
+    const lines = selectedEntries
+      .slice(0, 10)
+      .map((e) => `・${e.candidate.name} / ${e.companyName}`)
+      .join("\n");
+    const more = selectedEntries.length > 10 ? `\n他${selectedEntries.length - 10}件...` : "";
+    const msg = `選択した${selectedEntries.length}件のエントリーをアーカイブしますか？\n\nアーカイブしたエントリーは30日後に自動削除されます。管理者は即座に削除できます。\n\n対象:\n${lines}${more}`;
+    if (!confirm(msg)) return;
+
+    try {
+      const res = await fetch("/api/entries/bulk-archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: selectedEntries.map((e) => e.id) }),
+      });
+      if (!res.ok) {
+        toast.error("アーカイブに失敗しました");
+        return;
+      }
+      const data = await res.json();
+      toast.success(`${data.archived}件をアーカイブしました`);
+      setSelectedIds(new Set());
+      fetchEntries();
+    } catch {
+      toast.error("アーカイブに失敗しました");
+    }
+  };
+
+  const handleUnarchive = async (entryId: string) => {
+    try {
+      const res = await fetch(`/api/entries/${entryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivedAt: null }),
+      });
+      if (!res.ok) {
+        toast.error("アーカイブ解除に失敗しました");
+        return;
+      }
+      toast.success("アーカイブを解除しました");
+      fetchEntries();
+    } catch {
+      toast.error("アーカイブ解除に失敗しました");
+    }
+  };
+
+  const handleHardDelete = async (entry: Entry) => {
+    if (!isAdmin) return;
+    const msg = `この操作は取り消せません。\n\n以下のエントリーをデータベースから完全に削除しますか？\n\n・${entry.candidate.name} / ${entry.companyName}`;
+    if (!confirm(msg)) return;
+    try {
+      const res = await fetch(`/api/entries/${entry.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error("完全削除に失敗しました");
+        return;
+      }
+      toast.success("完全に削除しました");
+      fetchEntries();
+    } catch {
+      toast.error("完全削除に失敗しました");
+    }
   };
 
   const handleCreateTasks = async (selectedEntries: Entry[]) => {
@@ -446,6 +518,15 @@ export default function EntryBoard() {
           />
           無効も表示
         </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }}
+            className="rounded border-gray-300 text-[#2563EB]"
+          />
+          アーカイブも表示
+        </label>
       </div>
 
       {/* Bulk action bar */}
@@ -475,6 +556,12 @@ export default function EntryBoard() {
               className="border border-indigo-400 text-indigo-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-indigo-50"
             >
               📋 タスク作成
+            </button>
+            <button
+              onClick={() => handleBulkArchive(selectedEntries)}
+              className="border border-red-400 text-red-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-red-50"
+            >
+              🗑 アーカイブ
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
@@ -508,6 +595,9 @@ export default function EntryBoard() {
           onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
           onSelectAll={(ids) => setSelectedIds(new Set(ids))}
           onDeselectAll={() => setSelectedIds(new Set())}
+          isAdmin={isAdmin}
+          onUnarchive={handleUnarchive}
+          onHardDelete={handleHardDelete}
         />
       )}
 
