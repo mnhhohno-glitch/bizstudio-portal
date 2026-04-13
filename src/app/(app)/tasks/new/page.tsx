@@ -307,7 +307,7 @@ export default function TaskNewPage() {
   }, [presetCategoryId, categories, presetCandidateId, candidates]);
 
   // エントリーボードからの一括プリセット (prefill=entry)
-  // categoryName, assignees (csv employeeNo), title, memo, step を一括適用して追加情報ステップへジャンプ
+  // categoryName, assignees (csv employeeNo), title, entryDate/entryCount/entryComment, step を一括適用
   const entryPrefillApplied = useRef(false);
   useEffect(() => {
     if (entryPrefillApplied.current) return;
@@ -315,11 +315,15 @@ export default function TaskNewPage() {
     if (loading) return;
     if (categories.length === 0 || employees.length === 0 || candidates.length === 0) return;
 
-    // カテゴリ名 → categoryId
+    // カテゴリ名 → categoryId（exact → fallback → contains）
     const catName = searchParams.get("categoryName");
+    let selectedCat: Category | undefined;
     if (catName) {
-      const cat = categories.find((c) => c.name === catName);
-      if (cat) setCategoryId(cat.id);
+      selectedCat =
+        categories.find((c) => c.name === catName) ||
+        categories.find((c) => c.name === "エントリー対応") ||
+        categories.find((c) => c.name.includes("エントリー対応"));
+      if (selectedCat) setCategoryId(selectedCat.id);
     }
 
     // 担当者社員番号csv → assigneeIds (Employee.id)
@@ -332,11 +336,25 @@ export default function TaskNewPage() {
       if (ids.length > 0) setAssigneeIds(ids);
     }
 
-    // タイトル・メモ
+    // タイトル
     const pt = searchParams.get("title");
     if (pt) setTitle(pt);
-    const pm = searchParams.get("memo");
-    if (pm) setDescription(pm);
+
+    // テンプレートフィールド（エントリー日 / エントリー件数 / コメント）をラベルで紐付け
+    if (selectedCat) {
+      const entryDateVal = searchParams.get("entryDate");
+      const entryCountVal = searchParams.get("entryCount");
+      const entryCommentVal = searchParams.get("entryComment");
+      const updates: Record<string, string> = {};
+      for (const field of selectedCat.fields) {
+        if (field.label === "エントリー日" && entryDateVal) updates[field.id] = entryDateVal;
+        else if (field.label === "エントリー件数" && entryCountVal) updates[field.id] = entryCountVal;
+        else if (field.label === "コメント" && entryCommentVal) updates[field.id] = entryCommentVal;
+      }
+      if (Object.keys(updates).length > 0) {
+        setFieldValues((prev) => ({ ...prev, ...updates }));
+      }
+    }
 
     // ステップ指定（1-indexed → 0-indexed）
     const stepStr = searchParams.get("step");

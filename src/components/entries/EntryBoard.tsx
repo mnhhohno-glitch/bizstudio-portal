@@ -208,6 +208,9 @@ export default function EntryBoard() {
   };
 
   const handleCreateTasks = async (selectedEntries: Entry[]) => {
+    const CATEGORY_NAME = "エントリー対応（求職者対応）";
+    const CATEGORY_NAME_FALLBACK = "エントリー対応";
+
     // 求職者ごとにグルーピング
     const byCandidate = new Map<string, { name: string; candidateNumber: string; entries: Entry[] }>();
     for (const e of selectedEntries) {
@@ -223,23 +226,19 @@ export default function EntryBoard() {
       }
     }
 
-    const fmtDate = (s: string | null | undefined) => {
-      if (!s) return "";
-      const d = new Date(s);
-      if (isNaN(d.getTime())) return "";
-      return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+    // エントリー日: entries内で最新の日付を YYYY-MM-DD 形式で返す
+    const latestEntryDate = (es: Entry[]): string => {
+      const times = es
+        .map((e) => (e.entryDate ? new Date(e.entryDate).getTime() : NaN))
+        .filter((t) => !isNaN(t));
+      if (times.length === 0) return "";
+      const d = new Date(Math.max(...times));
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     };
 
-    const fmtMemo = (es: Entry[]) => {
-      const dates = [...new Set(es.map((e) => fmtDate(e.entryDate)).filter(Boolean))];
-      const lines = [
-        `エントリー日: ${dates.join(", ")}`,
-        `対象件数: ${es.length}件`,
-        "",
-        ...es.map((e) => `■ ${e.companyName}${e.jobDb ? `（${e.jobDb}）` : ""}`),
-      ];
-      return lines.join("\n");
-    };
+    // コメント欄に入れる企業一覧
+    const buildComment = (es: Entry[]): string =>
+      es.map((e) => `■ ${e.companyName}${e.jobDb ? `（${e.jobDb}）` : ""}`).join("\n");
 
     // 1名のみ: タスク作成画面へ遷移
     if (byCandidate.size === 1) {
@@ -247,10 +246,12 @@ export default function EntryBoard() {
       const params = new URLSearchParams({
         prefill: "entry",
         candidateId,
-        categoryName: "エントリー対応（求職者対応）",
+        categoryName: CATEGORY_NAME,
         assignees: "1000025,1000007",
-        title: `エントリー対応 - ${info.name}`,
-        memo: fmtMemo(info.entries),
+        title: `エントリー対応依頼 - ${info.name}`,
+        entryDate: latestEntryDate(info.entries),
+        entryCount: String(info.entries.length),
+        entryComment: buildComment(info.entries),
         step: "5",
       });
       window.location.href = `/tasks/new?${params.toString()}`;
@@ -259,16 +260,20 @@ export default function EntryBoard() {
 
     // 複数名: APIを直接叩いて一括作成
     try {
-      // カテゴリと担当者IDを解決
       const [catRes, empRes] = await Promise.all([
         fetch("/api/task-categories?includeFields=true"),
         fetch("/api/employees"),
       ]);
       const catJson = await catRes.json();
       const empJson = await empRes.json();
-      const categories: { id: string; name: string }[] = catJson.categories || [];
+      type CatField = { id: string; label: string };
+      type Cat = { id: string; name: string; fields: CatField[] };
+      const categories: Cat[] = catJson.categories || [];
       const employees: { id: string; employeeNo: string }[] = Array.isArray(empJson) ? empJson : [];
-      const category = categories.find((c) => c.name === "エントリー対応（求職者対応）");
+      const category =
+        categories.find((c) => c.name === CATEGORY_NAME) ||
+        categories.find((c) => c.name === CATEGORY_NAME_FALLBACK) ||
+        categories.find((c) => c.name.includes("エントリー対応"));
       if (!category) {
         toast.error("カテゴリ「エントリー対応（求職者対応）」が見つかりません");
         return;
@@ -281,21 +286,31 @@ export default function EntryBoard() {
         return;
       }
 
+      // テンプレートフィールドのID解決
+      const entryDateField = category.fields.find((f) => f.label === "エントリー日");
+      const entryCountField = category.fields.find((f) => f.label === "エントリー件数");
+      const commentField = category.fields.find((f) => f.label === "コメント");
+
       let ok = 0;
       let fail = 0;
       for (const [cid, info] of byCandidate.entries()) {
+        const fieldValues: { fieldId: string; value: string }[] = [];
+        if (entryDateField) fieldValues.push({ fieldId: entryDateField.id, value: latestEntryDate(info.entries) });
+        if (entryCountField) fieldValues.push({ fieldId: entryCountField.id, value: String(info.entries.length) });
+        if (commentField) fieldValues.push({ fieldId: commentField.id, value: buildComment(info.entries) });
+
         try {
           const res = await fetch("/api/tasks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              title: `エントリー対応 - ${info.name}`,
-              description: fmtMemo(info.entries),
+              title: `エントリー対応依頼 - ${info.name}`,
               categoryId: category.id,
               candidateId: cid,
               priority: "MEDIUM",
               assigneeIds,
               completionType: "any",
+              fieldValues,
             }),
           });
           if (res.ok) ok++;
