@@ -12,7 +12,7 @@ import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import {
   SUPPORT_SUB_STATUS_MAP,
   isSubStatusFixed,
-} from "@/lib/support-sub-status";
+} from "@/lib/support-status-constants";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
