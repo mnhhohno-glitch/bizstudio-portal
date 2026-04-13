@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
+import { splitAnalysisComment } from "@/lib/comment-split";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -1242,11 +1243,42 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                   rows={16}
                   className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
                 />
-              ) : (
-                <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {selectedAnalysis.comment}
-                </div>
-              )}
+              ) : (() => {
+                const split = splitAnalysisComment(selectedAnalysis.comment);
+                if (!split.hasSections) {
+                  return (
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                      {selectedAnalysis.comment}
+                    </div>
+                  );
+                }
+                return (
+                  <div>
+                    {split.header && (
+                      <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mb-3">
+                        {split.header}
+                      </div>
+                    )}
+                    {split.candidateFacing && (
+                      <div className="mb-4">
+                        <div className="text-xs font-semibold text-gray-600 mb-1">◆ おすすめポイント（本人向け）</div>
+                        <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                          {split.candidateFacing}
+                        </div>
+                      </div>
+                    )}
+                    {split.caFacing && (
+                      <div className="border-l-4 border-gray-400 bg-gray-50 p-3 rounded">
+                        <div className="text-xs font-semibold text-gray-600 mb-1">◆ 選考分析（CA向け）</div>
+                        <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                          {split.caFacing}
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-2">※この内容はマイページには表示されません</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div className="p-3 border-t flex justify-end gap-2 shrink-0">
               {editingComment ? (

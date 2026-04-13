@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { hashToken } from "@/lib/encryption";
 import { deletePdfFromDrive, downloadFileFromDrive } from "@/lib/google-drive";
 import { getCorsHeaders, handleCorsOptions, withCors } from "@/lib/cors";
+import { extractCandidateFacingComment } from "@/lib/comment-split";
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
   // 1. Cookie-based session
@@ -148,14 +149,10 @@ export async function PATCH(
           select: { candidateNumber: true },
         });
         if (candidate?.candidateNumber) {
-          const commentBody = aiAnalysisComment
-            .replace(/■\s*本人希望[：:]\s*[ABCD]\s*/g, "")
-            .replace(/■\s*通過率[：:]\s*[ABCD]\s*/g, "")
-            .replace(/■\s*総合[：:]\s*[ABCD]\s*/g, "")
-            // 懸念点・確認事項セクションを丸ごと除去
-            .replace(/◆\s*懸念[^◆]*/g, "")
-            .replace(/◆\s*確認事項[^◆]*/g, "")
-            .trim();
+          const commentBody = extractCandidateFacingComment(aiAnalysisComment);
+          if (!commentBody) {
+            console.log(`[FilePatch] Empty comment body after extraction, skipping sync: ${file.fileName}`);
+          } else {
           const matchLabel = toMatchLabel(file.aiMatchRating);
           await fetch(`${KYUUJIN_PDF_TOOL_URL}/api/external/mypage/jobs/ca-comment`, {
             method: "PUT",
@@ -173,6 +170,7 @@ export async function PATCH(
             }),
           });
           console.log(`[FilePatch] CA comment synced to kyuujinPDF: ${file.fileName}`);
+          }
         }
       }
     }

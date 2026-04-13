@@ -207,6 +207,129 @@ export default function EntryBoard() {
     setUrlInput(currentUrl || "");
   };
 
+  const handleCreateTasks = async (selectedEntries: Entry[]) => {
+    const CATEGORY_NAME = "エントリー対応（求職者対応）";
+    const CATEGORY_NAME_FALLBACK = "エントリー対応";
+
+    // 求職者ごとにグルーピング
+    const byCandidate = new Map<string, { name: string; candidateNumber: string; entries: Entry[] }>();
+    for (const e of selectedEntries) {
+      const existing = byCandidate.get(e.candidateId);
+      if (existing) {
+        existing.entries.push(e);
+      } else {
+        byCandidate.set(e.candidateId, {
+          name: e.candidate.name,
+          candidateNumber: e.candidate.candidateNumber,
+          entries: [e],
+        });
+      }
+    }
+
+    // エントリー日: entries内で最新の日付を YYYY-MM-DD 形式で返す
+    const latestEntryDate = (es: Entry[]): string => {
+      const times = es
+        .map((e) => (e.entryDate ? new Date(e.entryDate).getTime() : NaN))
+        .filter((t) => !isNaN(t));
+      if (times.length === 0) return "";
+      const d = new Date(Math.max(...times));
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+
+    // コメント欄に入れる企業一覧
+    const buildComment = (es: Entry[]): string =>
+      es.map((e) => `■ ${e.companyName}${e.jobDb ? `（${e.jobDb}）` : ""}`).join("\n");
+
+    // 1名のみ: タスク作成画面へ遷移
+    if (byCandidate.size === 1) {
+      const [candidateId, info] = [...byCandidate.entries()][0];
+      const params = new URLSearchParams({
+        prefill: "entry",
+        candidateId,
+        categoryName: CATEGORY_NAME,
+        assignees: "1000025,1000007",
+        title: `エントリー対応依頼 - ${info.name}`,
+        entryDate: latestEntryDate(info.entries),
+        entryCount: String(info.entries.length),
+        entryComment: buildComment(info.entries),
+        step: "5",
+      });
+      window.location.href = `/tasks/new?${params.toString()}`;
+      return;
+    }
+
+    // 複数名: APIを直接叩いて一括作成
+    try {
+      const [catRes, empRes] = await Promise.all([
+        fetch("/api/task-categories?includeFields=true"),
+        fetch("/api/employees"),
+      ]);
+      const catJson = await catRes.json();
+      const empJson = await empRes.json();
+      type CatField = { id: string; label: string };
+      type Cat = { id: string; name: string; fields: CatField[] };
+      const categories: Cat[] = catJson.categories || [];
+      const employees: { id: string; employeeNo: string }[] = Array.isArray(empJson) ? empJson : [];
+      const category =
+        categories.find((c) => c.name === CATEGORY_NAME) ||
+        categories.find((c) => c.name === CATEGORY_NAME_FALLBACK) ||
+        categories.find((c) => c.name.includes("エントリー対応"));
+      if (!category) {
+        toast.error("カテゴリ「エントリー対応（求職者対応）」が見つかりません");
+        return;
+      }
+      const assigneeIds = ["1000025", "1000007"]
+        .map((num) => employees.find((e) => e.employeeNo === num)?.id)
+        .filter((id): id is string => !!id);
+      if (assigneeIds.length === 0) {
+        toast.error("担当者が見つかりません");
+        return;
+      }
+
+      // テンプレートフィールドのID解決
+      const entryDateField = category.fields.find((f) => f.label === "エントリー日");
+      const entryCountField = category.fields.find((f) => f.label === "エントリー件数");
+      const commentField = category.fields.find((f) => f.label === "コメント");
+
+      let ok = 0;
+      let fail = 0;
+      for (const [cid, info] of byCandidate.entries()) {
+        const fieldValues: { fieldId: string; value: string }[] = [];
+        if (entryDateField) fieldValues.push({ fieldId: entryDateField.id, value: latestEntryDate(info.entries) });
+        if (entryCountField) fieldValues.push({ fieldId: entryCountField.id, value: String(info.entries.length) });
+        if (commentField) fieldValues.push({ fieldId: commentField.id, value: buildComment(info.entries) });
+
+        try {
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: `エントリー対応依頼 - ${info.name}`,
+              categoryId: category.id,
+              candidateId: cid,
+              priority: "MEDIUM",
+              assigneeIds,
+              completionType: "any",
+              fieldValues,
+            }),
+          });
+          if (res.ok) ok++;
+          else fail++;
+        } catch {
+          fail++;
+        }
+      }
+      if (fail === 0) {
+        toast.success(`${ok}件のエントリータスクを作成しました`);
+        setSelectedIds(new Set());
+      } else {
+        toast.error(`${ok}件成功、${fail}件失敗しました`);
+      }
+    } catch {
+      toast.error("タスク作成に失敗しました");
+    }
+  };
+
   const saveJobDbUrl = async () => {
     if (!urlModalEntryId) return;
     setSavingUrl(true);
@@ -346,6 +469,12 @@ export default function EntryBoard() {
               className="border border-orange-400 text-orange-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-orange-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               📝 選考終了案内
+            </button>
+            <button
+              onClick={() => handleCreateTasks(selectedEntries)}
+              className="border border-indigo-400 text-indigo-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-indigo-50"
+            >
+              📋 タスク作成
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
