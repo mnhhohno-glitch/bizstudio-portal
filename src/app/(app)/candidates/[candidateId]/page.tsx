@@ -1589,31 +1589,26 @@ export default function CandidateDetailPage() {
                   );
                 }
                 return (
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={candidate.supportSubStatus || ""}
-                      onChange={async (e) => {
-                        const val = e.target.value;
-                        await fetch(`/api/candidates/${candidate.id}/update`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ supportSubStatus: val }),
-                        });
-                        fetchCandidate();
-                      }}
-                      className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300 min-w-[120px]"
-                    >
-                      {!candidate.supportSubStatus && (
-                        <option value="" disabled>-</option>
-                      )}
-                      {options.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                    <span className={`text-[11px] ${candidate.supportSubStatusManual ? "text-orange-600" : "text-blue-600"}`}>
-                      {candidate.supportSubStatusManual ? "手動" : "自動"}
-                    </span>
-                  </div>
+                  <select
+                    value={candidate.supportSubStatus || ""}
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      await fetch(`/api/candidates/${candidate.id}/update`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ supportSubStatus: val }),
+                      });
+                      fetchCandidate();
+                    }}
+                    className="rounded-md px-4 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300 min-w-[120px]"
+                  >
+                    {!candidate.supportSubStatus && (
+                      <option value="" disabled>-</option>
+                    )}
+                    {options.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
                 );
               })()}
             </div>

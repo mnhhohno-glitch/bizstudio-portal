@@ -43,10 +43,19 @@ type CandidateRow = {
   jobStatus?: "entry" | "introduced" | "before" | null;
 };
 
-const JOB_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  entry: { label: "エントリー", cls: "bg-orange-100 text-orange-700" },
-  introduced: { label: "求人紹介", cls: "bg-blue-100 text-blue-700" },
-  before: { label: "求人紹介前", cls: "bg-gray-100 text-gray-500" },
+const SUB_STATUS_BADGE: Record<string, string> = {
+  "面談前": "bg-gray-100 text-gray-600",
+  "求人紹介前": "bg-gray-100 text-gray-500",
+  "BM": "bg-purple-100 text-purple-700",
+  "求人紹介": "bg-blue-100 text-blue-700",
+  "エントリー": "bg-orange-100 text-orange-700",
+  "書類選考": "bg-amber-100 text-amber-700",
+  "面接": "bg-teal-100 text-teal-700",
+  "内定": "bg-pink-100 text-pink-700",
+  "入社済": "bg-emerald-100 text-emerald-700",
+  "待機": "bg-yellow-100 text-yellow-700",
+  "当社判断": "bg-red-100 text-red-600",
+  "本人希望": "bg-red-100 text-red-600",
 };
 
 interface CandidateListClientProps {
@@ -443,9 +452,9 @@ export default function CandidateListClient({
                       )}
                     </Td>
                     <Td>
-                      {cand.jobStatus && JOB_STATUS_BADGE[cand.jobStatus] && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${JOB_STATUS_BADGE[cand.jobStatus].cls}`}>
-                          {JOB_STATUS_BADGE[cand.jobStatus].label}
+                      {cand.supportSubStatus && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${SUB_STATUS_BADGE[cand.supportSubStatus] || "bg-gray-100 text-gray-600"}`}>
+                          {cand.supportSubStatus}
                         </span>
                       )}
                     </Td>
