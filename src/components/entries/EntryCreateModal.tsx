@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { JOB_TYPE_OPTIONS } from "@/lib/constants/job-types";
+import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import type { FlagData } from "./EntryBoard";
 
 type CandidateOption = {
@@ -146,7 +146,19 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
             </div>
             <div>
               <label className={labelCls}>求人DB</label>
-              <select className={inputCls} value={jobDb} onChange={(e) => setJobDb(e.target.value)}>
+              <select
+                className={inputCls}
+                value={jobDb}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setJobDb(next);
+                  // 媒体変更時、選択中の求人種別が新しい媒体の候補に含まれない場合はクリア
+                  const nextOptions = getJobTypeOptionsForRoute(next || null);
+                  if (jobType && !nextOptions.includes(jobType)) {
+                    setJobType("");
+                  }
+                }}
+              >
                 <option value="">-</option>
                 {["HITO-Link", "Circus", "マイナビJOB", "DODA求人", "直接求人"].map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -156,7 +168,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
             <label className={labelCls}>求人種別</label>
             <select className={inputCls} value={jobType} onChange={(e) => setJobType(e.target.value)}>
               <option value="">-</option>
-              {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+              {getJobTypeOptionsForRoute(jobDb || null).map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>

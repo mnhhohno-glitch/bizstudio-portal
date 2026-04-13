@@ -1,19 +1,28 @@
-// 求人種別マスター（固定リスト）
+// 媒体（求人DB / 媒体切替後のentryRoute）別の求人種別マスター
+export const JOB_TYPE_BY_ROUTE: Record<string, string[]> = {
+  "Circus": ["自社求人", "事務局求人", "直接求人", "share求人"],
+  "マイナビJOB": ["ダイレクト求人", "事務局求人"],
+  "HITO-Link": ["DODA求人", "パーソル求人"],
+};
+
+// 全媒体の求人種別を重複排除したユニオン（媒体未設定時やマッピング外の媒体で使用）
 export const JOB_TYPE_OPTIONS = [
-  "HP",
-  "直接求人",
+  "自社求人",
   "事務局求人",
+  "直接求人",
   "share求人",
+  "ダイレクト求人",
   "DODA求人",
-  "RA",
-  "アライアンス(70%)",
-  "アライアンス(80%)",
-  "アライアンス(85%)",
-  "doda掲載求人",
   "パーソル求人",
 ] as const;
 
 export type JobType = (typeof JOB_TYPE_OPTIONS)[number];
+
+// 媒体に応じた求人種別の候補を返す。媒体未設定 or マッピング外は全種別を返す。
+export function getJobTypeOptionsForRoute(route: string | null | undefined): readonly string[] {
+  if (!route) return JOB_TYPE_OPTIONS;
+  return JOB_TYPE_BY_ROUTE[route] ?? JOB_TYPE_OPTIONS;
+}
 
 // エントリー媒体（切替時に選べる媒体）
 export const ENTRY_ROUTE_OPTIONS = [

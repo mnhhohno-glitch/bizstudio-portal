@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
-import { JOB_TYPE_OPTIONS } from "@/lib/constants/job-types";
+import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -426,15 +426,21 @@ export default function EntryTable({
                 )}
               </div>
               <span className="text-[10px] text-gray-300 shrink-0">|</span>
-              <select
-                value={entry.jobType || ""}
-                onChange={(e) => onFieldUpdate(entry.id, { jobType: e.target.value || null })}
-                className={`w-[104px] shrink-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
-                title="求人種別"
-              >
-                <option value="">種別</option>
-                {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              {(() => {
+                const effectiveRoute = entry.entryRoute || entry.jobDb;
+                const jobTypeOptions = getJobTypeOptionsForRoute(effectiveRoute);
+                return (
+                  <select
+                    value={entry.jobType || ""}
+                    onChange={(e) => onFieldUpdate(entry.id, { jobType: e.target.value || null })}
+                    className={`w-[104px] shrink-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
+                    title="求人種別"
+                  >
+                    <option value="">種別</option>
+                    {jobTypeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                );
+              })()}
               <button
                 onClick={() => onEntryRouteEdit(entry)}
                 className={`text-[11px] leading-none shrink-0 ${switched ? "text-blue-600" : "text-gray-400 hover:text-blue-600"}`}
