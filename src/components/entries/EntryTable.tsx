@@ -436,7 +436,7 @@ export default function EntryTable({
                     className={`w-[104px] shrink-0 text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${entry.jobType ? "text-gray-700" : "text-gray-400"}`}
                     title="求人種別"
                   >
-                    <option value="">種別</option>
+                    <option value=""></option>
                     {jobTypeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 );

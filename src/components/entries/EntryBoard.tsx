@@ -94,6 +94,9 @@ export default function EntryBoard() {
   const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
+  // セッションロード完了までは一覧の取得を遅らせる（caFilterの初期値セット前に
+  // 無フィルタで取ってしまうとレース条件で全件表示になるため）
+  const [sessionLoaded, setSessionLoaded] = useState(false);
 
   // Current user role (for admin-gated features)
   const [isAdmin, setIsAdmin] = useState(false);
@@ -120,6 +123,7 @@ export default function EntryBoard() {
   const [routeModalEntry, setRouteModalEntry] = useState<Entry | null>(null);
 
   const fetchEntries = useCallback(async () => {
+    if (!sessionLoaded) return;
     setLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
@@ -141,7 +145,7 @@ export default function EntryBoard() {
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived]);
+  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -167,6 +171,9 @@ export default function EntryBoard() {
         const match = names.find((n) => normalize(n) === target);
         setCaFilter(match ?? session.name);
       }
+    }).finally(() => {
+      // caFilter の初期値セットが反映された状態で fetchEntries を走らせる
+      setSessionLoaded(true);
     });
   }, []);
 
