@@ -380,7 +380,17 @@ export default function CandidateListClient({
       <div className="mt-4 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <div className="p-4">
           <TableWrap>
-            <Table>
+            <Table className="table-fixed w-full">
+              <colgroup>
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "5%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "15%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <Th>求職者番号</Th>
@@ -396,38 +406,39 @@ export default function CandidateListClient({
               <tbody>
                 {pageData.map((cand) => (
                   <tr key={cand.id}>
-                    <Td>
-                      <span className="font-mono text-[13px]">
+                    <Td className="overflow-hidden">
+                      <div className="font-mono text-[13px] truncate">
                         {cand.candidateNumber}
-                      </span>
+                      </div>
                     </Td>
-                    <Td>
+                    <Td className="overflow-hidden">
                       <Link
                         href={`/candidates/${cand.id}`}
-                        className="text-[#2563EB] hover:underline cursor-pointer"
+                        className="block truncate text-[#2563EB] hover:underline cursor-pointer"
+                        title={cand.name}
                       >
                         {cand.name}
                       </Link>
                     </Td>
-                    <Td>
-                      <span className="text-[13px] text-[#374151]/70">
+                    <Td className="overflow-hidden">
+                      <div className="truncate text-[13px] text-[#374151]/70" title={cand.nameKana || ""}>
                         {cand.nameKana || "-"}
-                      </span>
+                      </div>
                     </Td>
-                    <Td>
-                      <span className="text-[13px]">
+                    <Td className="overflow-hidden">
+                      <div className="truncate text-[13px]">
                         {formatGender(cand.gender)}
-                      </span>
+                      </div>
                     </Td>
-                    <Td>
-                      <span className="text-[13px]">
+                    <Td className="overflow-hidden">
+                      <div className="truncate text-[13px]" title={cand.employee?.name || ""}>
                         {cand.employee?.name || "-"}
-                      </span>
+                      </div>
                     </Td>
-                    <Td>
-                      <span className="font-mono text-[12px] text-[#374151]/70">
+                    <Td className="overflow-hidden">
+                      <div className="truncate font-mono text-[12px] text-[#374151]/70">
                         {formatDate(cand.createdAt)}
-                      </span>
+                      </div>
                     </Td>
                     <Td>
                       {cand.supportStatus === "ENDED" ? (
