@@ -108,6 +108,25 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
   }
 
   // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDFのみ、最大4件）
+  // [DEBUG] 全ファイルの一覧をログ出力（調査用）
+  const allCandidateFiles = await prisma.candidateFile.findMany({
+    where: {
+      candidateId,
+      category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { fileName: true, category: true, mimeType: true, extractedText: true },
+  });
+  console.log(
+    `[Advisor-Context] candidateId=${candidateId} | ORIGINAL/BS_DOCUMENT/MEETING files:`,
+    allCandidateFiles.map((f) => ({
+      name: f.fileName,
+      category: f.category,
+      mime: f.mimeType,
+      hasExtractedText: !!f.extractedText,
+    }))
+  );
+
   const keyFiles = await prisma.candidateFile.findMany({
     where: {
       candidateId,
@@ -118,6 +137,19 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     take: 4,
     select: { driveFileId: true, fileName: true, category: true },
   });
+  console.log(
+    `[Advisor-Context] keyFiles after PDF filter (${keyFiles.length}):`,
+    keyFiles.map((f) => f.fileName)
+  );
+  const excluded = allCandidateFiles.filter(
+    (f) => f.mimeType !== "application/pdf"
+  );
+  if (excluded.length > 0) {
+    console.log(
+      `[Advisor-Context] EXCLUDED (non-PDF):`,
+      excluded.map((f) => `${f.fileName} [${f.mimeType}]`)
+    );
+  }
 
   if (keyFiles.length > 0) {
     context += `## 主要書類の内容\n\n`;
