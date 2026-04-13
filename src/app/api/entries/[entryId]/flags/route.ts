@@ -60,7 +60,15 @@ export async function PATCH(
     where: { id: entryId },
     data,
     include: {
-      candidate: { select: { id: true, name: true, candidateNumber: true } },
+      candidate: {
+        select: {
+          id: true,
+          name: true,
+          candidateNumber: true,
+          employeeId: true,
+          employee: { select: { name: true } },
+        },
+      },
     },
   });
 
