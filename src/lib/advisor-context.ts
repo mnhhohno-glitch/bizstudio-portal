@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { downloadFileFromDrive } from "@/lib/google-drive";
-import { parsePdfWithAI } from "@/lib/file-parser";
+import { parsePdfWithAI, parseTextFile } from "@/lib/file-parser";
+
+const MEETING_TEXT_MAX_CHARS = 8000;
 
 /**
  * Build candidate context string for AI advisor.
@@ -107,56 +109,32 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     context += "\n";
   }
 
-  // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDFのみ、最大4件）
-  // [DEBUG] 全ファイルの一覧をログ出力（調査用）
-  const allCandidateFiles = await prisma.candidateFile.findMany({
-    where: {
-      candidateId,
-      category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { fileName: true, category: true, mimeType: true, extractedText: true },
-  });
-  console.log(
-    `[Advisor-Context] candidateId=${candidateId} | ORIGINAL/BS_DOCUMENT/MEETING files:`,
-    allCandidateFiles.map((f) => ({
-      name: f.fileName,
-      category: f.category,
-      mime: f.mimeType,
-      hasExtractedText: !!f.extractedText,
-    }))
-  );
-
+  // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDF/テキストのみ、最大4件）
   const keyFiles = await prisma.candidateFile.findMany({
     where: {
       candidateId,
       category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
-      mimeType: "application/pdf",
+      mimeType: { in: ["application/pdf", "text/plain"] },
     },
     orderBy: { createdAt: "desc" },
     take: 4,
-    select: { driveFileId: true, fileName: true, category: true },
+    select: { driveFileId: true, fileName: true, category: true, mimeType: true },
   });
-  console.log(
-    `[Advisor-Context] keyFiles after PDF filter (${keyFiles.length}):`,
-    keyFiles.map((f) => f.fileName)
-  );
-  const excluded = allCandidateFiles.filter(
-    (f) => f.mimeType !== "application/pdf"
-  );
-  if (excluded.length > 0) {
-    console.log(
-      `[Advisor-Context] EXCLUDED (non-PDF):`,
-      excluded.map((f) => `${f.fileName} [${f.mimeType}]`)
-    );
-  }
 
   if (keyFiles.length > 0) {
     context += `## 主要書類の内容\n\n`;
     for (const file of keyFiles) {
       try {
         const { base64 } = await downloadFileFromDrive(file.driveFileId);
-        const parsedText = await parsePdfWithAI(base64);
+        let parsedText: string;
+        if (file.mimeType === "text/plain") {
+          const raw = parseTextFile(base64);
+          parsedText = raw.length > MEETING_TEXT_MAX_CHARS
+            ? raw.substring(0, MEETING_TEXT_MAX_CHARS) + "\n...(以下省略)"
+            : raw;
+        } else {
+          parsedText = await parsePdfWithAI(base64);
+        }
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;
       } catch (error) {
