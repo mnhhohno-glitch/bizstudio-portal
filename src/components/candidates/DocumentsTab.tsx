@@ -73,6 +73,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [sharing, setSharing] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
 
+  // Sort state
+  const [sortField, setSortField] = useState<"fileName" | "ext" | "date">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
   // File selection + bulk ops
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [bulkDLing, setBulkDLing] = useState(false);
@@ -212,6 +216,36 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
   const toggleFileSelect = (id: string) => setSelectedFileIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allFilesSelected = files.length > 0 && files.every((f) => selectedFileIds.has(f.id));
+
+  // ソート
+  const getExt = (name: string) => {
+    const idx = name.lastIndexOf(".");
+    return idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
+  };
+  const sortedFiles = [...files].sort((a, b) => {
+    let cmp = 0;
+    if (sortField === "fileName") {
+      cmp = a.fileName.localeCompare(b.fileName, "ja");
+    } else if (sortField === "ext") {
+      const ea = getExt(a.fileName);
+      const eb = getExt(b.fileName);
+      cmp = ea.localeCompare(eb, "ja");
+      if (cmp === 0) cmp = a.fileName.localeCompare(b.fileName, "ja");
+    } else {
+      cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+  const toggleSort = (field: "fileName" | "ext" | "date") => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+  const sortArrow = (field: "fileName" | "ext" | "date") =>
+    sortField === field ? (sortDir === "asc" ? "↑" : "↓") : "↕";
 
   const handleBulkFileDownload = async () => {
     setBulkDLing(true);
@@ -443,6 +477,27 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 <input type="checkbox" checked={allFilesSelected} onChange={() => allFilesSelected ? setSelectedFileIds(new Set()) : setSelectedFileIds(new Set(files.map((f) => f.id)))} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
                 全選択
               </label>
+              <div className="flex items-center gap-1 text-[12px] text-gray-500">
+                <span>並び替え:</span>
+                <button
+                  onClick={() => toggleSort("fileName")}
+                  className={`px-2 py-0.5 rounded border ${sortField === "fileName" ? "border-[#2563EB] text-[#2563EB] bg-blue-50" : "border-gray-300 text-gray-600 hover:bg-gray-50"}`}
+                >
+                  ファイル名 {sortArrow("fileName")}
+                </button>
+                <button
+                  onClick={() => toggleSort("ext")}
+                  className={`px-2 py-0.5 rounded border ${sortField === "ext" ? "border-[#2563EB] text-[#2563EB] bg-blue-50" : "border-gray-300 text-gray-600 hover:bg-gray-50"}`}
+                >
+                  形式 {sortArrow("ext")}
+                </button>
+                <button
+                  onClick={() => toggleSort("date")}
+                  className={`px-2 py-0.5 rounded border ${sortField === "date" ? "border-[#2563EB] text-[#2563EB] bg-blue-50" : "border-gray-300 text-gray-600 hover:bg-gray-50"}`}
+                >
+                  日時 {sortArrow("date")}
+                </button>
+              </div>
               {selectedFileIds.size > 0 && (
                 <>
                   <span className="text-[12px] font-medium text-[#2563EB]">✓ {selectedFileIds.size}件選択</span>
@@ -455,7 +510,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 </>
               )}
             </div>
-            {files.map((file) => (
+            {sortedFiles.map((file) => (
               <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
                 {/* チェックボックス + ファイル名 */}
                 <div className="flex items-center gap-2">
