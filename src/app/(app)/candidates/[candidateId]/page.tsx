@@ -1577,7 +1577,6 @@ export default function CandidateDetailPage() {
                 <option value="WAITING">待機</option>
                 <option value="ENDED">支援終了</option>
               </select>
-              <span className="text-gray-300 select-none">｜</span>
               {/* 中項目 */}
               {(() => {
                 const fixed = isSubStatusFixed(candidate.supportStatus);
