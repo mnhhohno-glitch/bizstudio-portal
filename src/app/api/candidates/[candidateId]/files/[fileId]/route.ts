@@ -5,6 +5,7 @@ import { hashToken } from "@/lib/encryption";
 import { deletePdfFromDrive, downloadFileFromDrive } from "@/lib/google-drive";
 import { getCorsHeaders, handleCorsOptions, withCors } from "@/lib/cors";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
   // 1. Cookie-based session
@@ -209,6 +210,14 @@ export async function DELETE(
 
   // DBから削除
   await prisma.candidateFile.delete({ where: { id: fileId } });
+
+  if (file.category === "BOOKMARK") {
+    try {
+      await recalculateSubStatusIfAuto(file.candidateId);
+    } catch (e) {
+      console.error("[files.DELETE] recalculateSubStatusIfAuto failed:", e);
+    }
+  }
 
   return withCors(NextResponse.json({ success: true }), origin);
 }

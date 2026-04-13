@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export async function GET(
   _req: NextRequest,
@@ -67,6 +68,15 @@ export async function PATCH(
       candidate: { select: { id: true, name: true, candidateNumber: true } },
     },
   });
+
+  // entryFlag / personFlag / hasJoined の変更は中項目の自動判定トリガー
+  if ("entryFlag" in data || "personFlag" in data || "hasJoined" in data) {
+    try {
+      await recalculateSubStatusIfAuto(entry.candidateId);
+    } catch (e) {
+      console.error("[entries.PATCH] recalculateSubStatusIfAuto failed:", e);
+    }
+  }
 
   return NextResponse.json({ entry });
 }

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import {
+  resetSubStatusForStatus,
+  SUPPORT_SUB_STATUS_MAP,
+} from "@/lib/support-sub-status";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -57,13 +61,37 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.birthday !== undefined) {
     updateData.birthday = body.birthday ? new Date(body.birthday) : null;
   }
+  let statusChanged = false;
   if (body.supportStatus !== undefined) {
     updateData.supportStatus = body.supportStatus;
+    statusChanged = body.supportStatus !== existing.supportStatus;
     // Clear end reason when moving away from ENDED
     if (body.supportStatus !== "ENDED") {
       updateData.supportEndReason = null;
       updateData.supportEndNote = null;
       updateData.supportEndDate = null;
+    }
+    if (statusChanged) {
+      // 大項目変更時は中項目の手動フラグをリセットして再判定
+      updateData.supportSubStatusManual = false;
+      const nextSub = await resetSubStatusForStatus(candidateId, body.supportStatus);
+      updateData.supportSubStatus = nextSub || null;
+    }
+  }
+  if (body.supportSubStatus !== undefined) {
+    const targetStatus =
+      (updateData.supportStatus as string | undefined) ?? existing.supportStatus;
+    const allowed = SUPPORT_SUB_STATUS_MAP[targetStatus] ?? [];
+    if (body.supportSubStatus && !allowed.includes(body.supportSubStatus)) {
+      return NextResponse.json(
+        { error: "中項目の値が不正です" },
+        { status: 400 }
+      );
+    }
+    updateData.supportSubStatus = body.supportSubStatus || null;
+    // 中項目を直接変更した場合は手動フラグを立てる（大項目変更と同時の場合は除く）
+    if (!statusChanged) {
+      updateData.supportSubStatusManual = true;
     }
   }
   if (body.supportEndReason !== undefined) {

@@ -11,6 +11,7 @@ import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-e
 const SUPPORT_TABS = [
   { key: "ACTIVE", label: "支援中" },
   { key: "BEFORE", label: "支援前" },
+  { key: "WAITING", label: "待機" },
   { key: "ENDED", label: "支援終了" },
   { key: "ALL", label: "ALL" },
 ] as const;
@@ -18,6 +19,7 @@ const SUPPORT_TABS = [
 const SUPPORT_BADGE: Record<string, { label: string; cls: string }> = {
   BEFORE: { label: "支援前", cls: "bg-gray-100 text-gray-600" },
   ACTIVE: { label: "支援中", cls: "bg-blue-100 text-blue-700" },
+  WAITING: { label: "待機", cls: "bg-yellow-100 text-yellow-700" },
   ENDED: { label: "支援終了", cls: "bg-red-100 text-red-600" },
 };
 
@@ -36,6 +38,7 @@ type CandidateRow = {
   employee: { id: string; name: string } | null;
   createdAt: string;
   supportStatus: string;
+  supportSubStatus: string | null;
   supportEndReason: string | null;
   jobStatus?: "entry" | "introduced" | "before" | null;
 };
@@ -167,7 +170,7 @@ export default function CandidateListClient({
     if (genderFilter !== "ALL") {
       base = base.filter((c) => c.gender === genderFilter);
     }
-    const counts: Record<string, number> = { ALL: base.length, BEFORE: 0, ACTIVE: 0, ENDED: 0 };
+    const counts: Record<string, number> = { ALL: base.length, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0 };
     for (const c of base) { counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1; }
     return counts;
   }, [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter]);
@@ -184,7 +187,14 @@ export default function CandidateListClient({
         body: JSON.stringify({ supportStatus: newStatus }),
       });
       if (res.ok) {
-        setCandidates((prev) => prev.map((c) => c.id === candidateId ? { ...c, supportStatus: newStatus, supportEndReason: null } : c));
+        const json = await res.json().catch(() => null);
+        const updated = json?.candidate;
+        setCandidates((prev) => prev.map((c) => c.id === candidateId ? {
+          ...c,
+          supportStatus: newStatus,
+          supportSubStatus: updated?.supportSubStatus ?? null,
+          supportEndReason: null,
+        } : c));
         toast.success("更新しました");
       }
     } catch { toast.error("更新に失敗しました"); }
@@ -411,25 +421,31 @@ export default function CandidateListClient({
                       </span>
                     </Td>
                     <Td>
-                      {cand.supportStatus === "ENDED" ? (
-                        <button
-                          onClick={() => setEndModalCandidateId(cand.id)}
-                          title={cand.supportEndReason ? REASON_LABEL_MAP[cand.supportEndReason] || "" : ""}
-                          className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 cursor-pointer hover:bg-red-200"
-                        >
-                          終了{cand.supportEndReason ? `(${REASON_LABEL_MAP[cand.supportEndReason]?.slice(0, 6) || ""})` : ""}
-                        </button>
-                      ) : (
-                        <select
-                          value={cand.supportStatus}
-                          onChange={(e) => handleSupportStatusChange(cand.id, e.target.value)}
-                          className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
-                        >
-                          <option value="BEFORE">支援前</option>
-                          <option value="ACTIVE">支援中</option>
-                          <option value="ENDED">支援終了</option>
-                        </select>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {cand.supportStatus === "ENDED" ? (
+                          <button
+                            onClick={() => setEndModalCandidateId(cand.id)}
+                            title={cand.supportEndReason ? REASON_LABEL_MAP[cand.supportEndReason] || "" : ""}
+                            className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 cursor-pointer hover:bg-red-200"
+                          >
+                            終了{cand.supportEndReason ? `(${REASON_LABEL_MAP[cand.supportEndReason]?.slice(0, 6) || ""})` : ""}
+                          </button>
+                        ) : (
+                          <select
+                            value={cand.supportStatus}
+                            onChange={(e) => handleSupportStatusChange(cand.id, e.target.value)}
+                            className={`text-xs px-2 py-0.5 rounded-full border-0 cursor-pointer ${SUPPORT_BADGE[cand.supportStatus]?.cls || "bg-gray-100 text-gray-600"}`}
+                          >
+                            <option value="BEFORE">支援前</option>
+                            <option value="ACTIVE">支援中</option>
+                            <option value="WAITING">待機</option>
+                            <option value="ENDED">支援終了</option>
+                          </select>
+                        )}
+                        {cand.supportSubStatus && (
+                          <span className="text-[11px] text-gray-500">/ {cand.supportSubStatus}</span>
+                        )}
+                      </div>
                     </Td>
                     <Td>
                       {cand.jobStatus && JOB_STATUS_BADGE[cand.jobStatus] && (

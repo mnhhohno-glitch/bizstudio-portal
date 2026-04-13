@@ -5,6 +5,7 @@ import { hashToken } from "@/lib/encryption";
 import { uploadFileToDrive, getOrCreateFolder, convertDocxToPdf } from "@/lib/google-drive";
 import { handleCorsOptions, withCors } from "@/lib/cors";
 import { CandidateFileCategory } from "@prisma/client";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -153,6 +154,14 @@ export async function POST(
     //     await prisma.candidateFile.create({ data: { candidateId, category, fileName: pdfFileName, fileSize: pdfResult.fileSize, mimeType: "application/pdf", driveFileId: pdfResult.fileId, driveViewUrl: pdfResult.webViewLink, driveFolderId: candidateFolderId, memo: ((memo?.trim() || "") + "（PDF自動変換）").replace(/^（/, "（"), uploadedByUserId: userId } });
     //   } catch (pdfError) { console.error("[Upload] PDF conversion failed:", pdfError); }
     // }
+
+    if (record.category === "BOOKMARK") {
+      try {
+        await recalculateSubStatusIfAuto(candidateId);
+      } catch (e) {
+        console.error("[files.upload] recalculateSubStatusIfAuto failed:", e);
+      }
+    }
 
     return withCors(
       NextResponse.json({ file: record }, { status: 201 }),

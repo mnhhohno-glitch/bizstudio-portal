@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 type RouteContext = {
   params: Promise<{ candidateId: string; entryId: string }>;
@@ -61,6 +62,12 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   await prisma.jobEntry.delete({ where: { id: entryId } });
+
+  try {
+    await recalculateSubStatusIfAuto(candidateId);
+  } catch (e) {
+    console.error("[entries.DELETE] recalculateSubStatusIfAuto failed:", e);
+  }
 
   return NextResponse.json({ message: "エントリーを削除しました" });
 }

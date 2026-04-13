@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -114,6 +115,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const skipped = entries.length - newEntries.length;
+
+  if (newEntries.length > 0) {
+    try {
+      await recalculateSubStatusIfAuto(candidateId);
+    } catch (e) {
+      console.error("[entries.POST] recalculateSubStatusIfAuto failed:", e);
+    }
+  }
 
   return NextResponse.json(
     {

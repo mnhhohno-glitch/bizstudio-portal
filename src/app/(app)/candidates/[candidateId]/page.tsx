@@ -9,6 +9,10 @@ import AdvisorFloatingPanel from "@/components/candidates/AdvisorFloatingPanel";
 import HistoryTab from "@/components/candidates/HistoryTab";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
+import {
+  SUPPORT_SUB_STATUS_MAP,
+  isSubStatusFixed,
+} from "@/lib/support-sub-status";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -67,6 +71,8 @@ type Candidate = {
   address: string | null;
   birthday: string | null;
   supportStatus: string;
+  supportSubStatus: string | null;
+  supportSubStatusManual: boolean;
   supportEndReason: string | null;
   supportEndComment: string | null;
   employeeId: string | null;
@@ -1544,7 +1550,7 @@ export default function CandidateDetailPage() {
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <select
                 value={candidate.supportStatus || "BEFORE"}
                 onChange={async (e) => {
@@ -1562,13 +1568,54 @@ export default function CandidateDetailPage() {
                 }}
                 className={`rounded-md px-4 py-2 text-sm font-medium border cursor-pointer ${
                   candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700 border-blue-200" :
+                  candidate.supportStatus === "WAITING" ? "bg-yellow-100 text-yellow-700 border-yellow-200" :
                   "bg-gray-100 text-gray-600 border-gray-300"
                 }`}
               >
                 <option value="BEFORE">支援前</option>
                 <option value="ACTIVE">支援中</option>
+                <option value="WAITING">待機</option>
                 <option value="ENDED">支援終了</option>
               </select>
+              {/* 中項目 */}
+              {(() => {
+                const fixed = isSubStatusFixed(candidate.supportStatus);
+                const options = SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || [];
+                if (fixed || options.length <= 1) {
+                  return (
+                    <span className="rounded-md px-3 py-2 text-sm font-medium border bg-gray-50 text-gray-700 border-gray-200">
+                      {candidate.supportSubStatus || options[0] || "-"}
+                    </span>
+                  );
+                }
+                return (
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={candidate.supportSubStatus || ""}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        await fetch(`/api/candidates/${candidate.id}/update`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ supportSubStatus: val }),
+                        });
+                        fetchCandidate();
+                      }}
+                      className="rounded-md px-3 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300"
+                    >
+                      {!candidate.supportSubStatus && (
+                        <option value="" disabled>-</option>
+                      )}
+                      {options.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${candidate.supportSubStatusManual ? "bg-orange-50 text-orange-600 border border-orange-200" : "bg-blue-50 text-blue-600 border border-blue-200"}`}>
+                      {candidate.supportSubStatusManual ? "手動" : "自動"}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           )}
           <button
