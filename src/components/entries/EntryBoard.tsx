@@ -6,6 +6,7 @@ import EntryTable from "./EntryTable";
 import EntryDetailModal from "./EntryDetailModal";
 import EntryCreateModal from "./EntryCreateModal";
 import BulkFlagChangeModal from "./BulkFlagChangeModal";
+import BulkEndFlagModal from "./BulkEndFlagModal";
 import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 
@@ -113,6 +114,7 @@ export default function EntryBoard() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkFlags, setShowBulkFlags] = useState(false);
   const [showEndNotice, setShowEndNotice] = useState(false);
+  const [showBulkEndFlag, setShowBulkEndFlag] = useState(false);
 
   // URL edit modal
   const [urlModalEntryId, setUrlModalEntryId] = useState<string | null>(null);
@@ -562,6 +564,13 @@ export default function EntryBoard() {
               📝 選考終了案内
             </button>
             <button
+              onClick={() => setShowBulkEndFlag(true)}
+              className="border border-red-300 text-red-500 rounded-md px-3 py-1 text-sm font-medium hover:bg-red-50"
+              title="メッセージを作成せずフラグだけを一括更新"
+            >
+              🚫 選考終了（フラグのみ）
+            </button>
+            <button
               onClick={() => handleCreateTasks(selectedEntries)}
               className="border border-indigo-400 text-indigo-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-indigo-50"
             >
@@ -701,6 +710,15 @@ export default function EntryBoard() {
           selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
           onClose={() => setShowEndNotice(false)}
           onDone={() => { setShowEndNotice(false); setSelectedIds(new Set()); fetchEntries(); }}
+        />
+      )}
+
+      {/* Bulk End Flag Modal (message-less) */}
+      {showBulkEndFlag && (
+        <BulkEndFlagModal
+          selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
+          onClose={() => setShowBulkEndFlag(false)}
+          onDone={() => { setShowBulkEndFlag(false); setSelectedIds(new Set()); fetchEntries(); }}
         />
       )}
 
