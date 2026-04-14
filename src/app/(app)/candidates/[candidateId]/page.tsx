@@ -1416,12 +1416,15 @@ export default function CandidateDetailPage() {
     fetch(`/api/candidates/${candidateId}/mypage`)
       .then((r) => r.json())
       .then((data) => {
+        console.log("[mypage-client] fetched:", data);
         setMypageUrl(data.url ?? null);
         setMypageAdminUrl(data.adminUrl ?? null);
         setMypageAccessCount(data.accessCount ?? null);
         setMypageExpiresAt(data.expiresAt ?? null);
       })
-      .catch(() => {})
+      .catch((e) => {
+        console.error("[mypage-client] fetch error:", e);
+      })
       .finally(() => setMypageLoading(false));
   }, [fetchCandidate, fetchGuideData, fetchJimuSessions, candidateId]);
 
