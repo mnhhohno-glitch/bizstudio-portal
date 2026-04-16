@@ -106,6 +106,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           areaMatch: e.areaMatch ?? null,
           transfer: e.transfer ?? null,
           originalUrl: e.originalUrl ?? null,
+          entryFlag: "エントリー",
+          entryFlagDetail: "検討中",
           entryDate: new Date(entryDate),
           introducedAt: new Date(e.introducedAt),
           createdBy: user.id,
