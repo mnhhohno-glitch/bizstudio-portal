@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import CandidateQuickSearch from "@/components/candidates/CandidateQuickSearch";
 import InterviewUrlModal from "@/components/candidates/InterviewUrlModal";
 import DocumentsTab from "@/components/candidates/DocumentsTab";
 import AdvisorFloatingPanel from "@/components/candidates/AdvisorFloatingPanel";
@@ -1463,13 +1464,16 @@ export default function CandidateDetailPage() {
 
   return (
     <div>
-      {/* パンくず */}
-      <Link
-        href="/admin/master"
-        className="text-[13px] text-[#2563EB] hover:underline"
-      >
-        ← 求職者一覧に戻る
-      </Link>
+      {/* パンくず + 検索 */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/admin/master"
+          className="text-[13px] text-[#2563EB] hover:underline"
+        >
+          ← 求職者一覧に戻る
+        </Link>
+        <CandidateQuickSearch />
+      </div>
 
       {/* ヘッダーカード */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mt-4">
