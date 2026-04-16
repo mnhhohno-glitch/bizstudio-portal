@@ -153,6 +153,26 @@ export default function EntryBoard() {
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
+  // Refresh only tab counts (no loading state, no entry replacement)
+  const refreshCounts = useCallback(async () => {
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    params.set("limit", "1");
+    if (candidateName) params.set("candidateName", candidateName);
+    if (companyName) params.set("companyName", companyName);
+    if (caFilter) params.set("careerAdvisorName", caFilter);
+    if (includeInactive) params.set("includeInactive", "true");
+    if (includeArchived) params.set("includeArchived", "true");
+    if (urlMissingOnly) params.set("urlMissingOnly", "true");
+    try {
+      const res = await fetch(`/api/entries?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCounts(data.counts || {});
+      }
+    } catch { /* */ }
+  }, [candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
+
   useEffect(() => {
     fetch("/api/entry-flags")
       .then((r) => r.json())
@@ -201,8 +221,7 @@ export default function EntryBoard() {
       }
       const data = await res.json();
       setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
-      // Refresh counts
-      fetchEntries();
+      refreshCounts();
     } catch {
       toast.error("更新に失敗しました");
     }
@@ -252,8 +271,12 @@ export default function EntryBoard() {
       }
       const data = await res.json();
       toast.success(`${data.archived}件をアーカイブしました`);
+      const archivedIds = new Set(selectedEntries.map((e) => e.id));
       setSelectedIds(new Set());
-      fetchEntries();
+      if (!includeArchived) {
+        setEntries((prev) => prev.filter((e) => !archivedIds.has(e.id)));
+      }
+      refreshCounts();
     } catch {
       toast.error("アーカイブに失敗しました");
     }
@@ -270,8 +293,10 @@ export default function EntryBoard() {
         toast.error("アーカイブ解除に失敗しました");
         return;
       }
+      const data = await res.json();
+      setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
       toast.success("アーカイブを解除しました");
-      fetchEntries();
+      refreshCounts();
     } catch {
       toast.error("アーカイブ解除に失敗しました");
     }
@@ -288,7 +313,9 @@ export default function EntryBoard() {
         return;
       }
       toast.success("完全に削除しました");
-      fetchEntries();
+      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+      setSelectedIds((prev) => { const n = new Set(prev); n.delete(entry.id); return n; });
+      refreshCounts();
     } catch {
       toast.error("完全削除に失敗しました");
     }
