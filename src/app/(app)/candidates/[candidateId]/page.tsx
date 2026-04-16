@@ -1465,7 +1465,7 @@ export default function CandidateDetailPage() {
   return (
     <div>
       {/* パンくず + 検索 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-4">
         <Link
           href="/admin/master"
           className="text-[13px] text-[#2563EB] hover:underline"
