@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   const careerAdvisorName = sp.get("careerAdvisorName");
   const includeInactive = sp.get("includeInactive") === "true";
   const includeArchived = sp.get("includeArchived") === "true";
+  const urlMissingOnly = sp.get("urlMissingOnly") === "true";
   const hasJoined = sp.get("hasJoined");
   const sortBy = sp.get("sortBy") || "updatedAt";
   const sortOrder = sp.get("sortOrder") || "desc";
@@ -43,6 +44,9 @@ export async function GET(req: NextRequest) {
     if (dateTo) (where.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
   }
   if (hasJoined === "true") where.hasJoined = true;
+  if (urlMissingOnly) {
+    where.OR = [{ jobDbUrl: null }, { jobDbUrl: "" }];
+  }
 
   const [entries, total] = await Promise.all([
     prisma.jobEntry.findMany({
@@ -74,6 +78,10 @@ export async function GET(req: NextRequest) {
     countBase.entryDate = {};
     if (dateFrom) (countBase.entryDate as Prisma.DateTimeFilter).gte = new Date(dateFrom);
     if (dateTo) (countBase.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
+  }
+
+  if (urlMissingOnly) {
+    countBase.OR = [{ jobDbUrl: null }, { jobDbUrl: "" }];
   }
 
   const flagValues = ["求人紹介", "応募", "エントリー", "書類選考", "面接", "内定", "入社済"];

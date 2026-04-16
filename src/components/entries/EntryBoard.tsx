@@ -95,6 +95,7 @@ export default function EntryBoard() {
   const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [urlMissingOnly, setUrlMissingOnly] = useState(false);
   // セッションロード完了までは一覧の取得を遅らせる（caFilterの初期値セット前に
   // 無フィルタで取ってしまうとレース条件で全件表示になるため）
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -136,6 +137,7 @@ export default function EntryBoard() {
     if (caFilter) params.set("careerAdvisorName", caFilter);
     if (includeInactive) params.set("includeInactive", "true");
     if (includeArchived) params.set("includeArchived", "true");
+    if (urlMissingOnly) params.set("urlMissingOnly", "true");
 
     try {
       const res = await fetch(`/api/entries?${params}`);
@@ -147,7 +149,7 @@ export default function EntryBoard() {
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived]);
+  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -182,6 +184,7 @@ export default function EntryBoard() {
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setPage(1);
+    if (tab !== "書類選考" && tab !== "面接") setUrlMissingOnly(false);
   };
 
   const handleFlagUpdate = async (entryId: string, flags: Record<string, string | null>) => {
@@ -539,6 +542,17 @@ export default function EntryBoard() {
           />
           アーカイブも表示
         </label>
+        {(activeTab === "書類選考" || activeTab === "面接") && (
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={urlMissingOnly}
+              onChange={(e) => { setUrlMissingOnly(e.target.checked); setPage(1); }}
+              className="rounded border-gray-300 text-[#2563EB]"
+            />
+            URL未入力のみ
+          </label>
+        )}
       </div>
 
       {/* Bulk action bar */}
