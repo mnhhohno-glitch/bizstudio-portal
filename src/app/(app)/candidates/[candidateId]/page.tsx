@@ -92,8 +92,8 @@ type SessionUser = {
 
 /* ---------- Constants ---------- */
 const TABS = [
-  { key: "documents", label: "書類" },
   { key: "history", label: "紹介履歴" },
+  { key: "documents", label: "書類" },
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
   { key: "notes", label: "メモ" },
@@ -1296,7 +1296,7 @@ export default function CandidateDetailPage() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "documents";
+  const activeTab = (searchParams.get("tab") as TabKey) || "history";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
