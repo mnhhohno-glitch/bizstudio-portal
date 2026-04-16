@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 type Employee = {
@@ -46,6 +47,14 @@ export default function CandidateRegistrationModal({
   const [pdfDragging, setPdfDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Support status dialog
+  const [showStatusDialog, setShowStatusDialog] = useState(false);
+  const [createdCandidateId, setCreatedCandidateId] = useState<string | null>(null);
+  const [createdCandidateName, setCreatedCandidateName] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState("BEFORE");
+  const [savingStatus, setSavingStatus] = useState(false);
+  const router = useRouter();
 
   // Auto-fetch next number on open
   useEffect(() => {
@@ -160,10 +169,11 @@ export default function CandidateRegistrationModal({
         return;
       }
 
+      const createdCandidate = await res.json();
+
       // PDF自動解析で登録した場合、PDFを原本として保存
       if (pdfFile) {
         try {
-          const createdCandidate = await res.json();
           const uploadFormData = new FormData();
           uploadFormData.append("file", pdfFile);
           uploadFormData.append("category", "MEETING");
@@ -176,8 +186,12 @@ export default function CandidateRegistrationModal({
         }
       }
 
-      handleClose();
+      toast.success("求職者を登録しました");
       onCreated();
+      setCreatedCandidateId(createdCandidate.id);
+      setCreatedCandidateName(normalizeName(candidateName));
+      setSelectedStatus("BEFORE");
+      setShowStatusDialog(true);
     } catch {
       setErrors({ form: "登録に失敗しました" });
     } finally {
@@ -185,10 +199,86 @@ export default function CandidateRegistrationModal({
     }
   };
 
+  const handleStatusSubmit = async () => {
+    if (!createdCandidateId) return;
+    setSavingStatus(true);
+    try {
+      await fetch(`/api/candidates/${createdCandidateId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supportStatus: selectedStatus }),
+      });
+    } catch { /* ignore */ }
+    finally { setSavingStatus(false); }
+    setShowStatusDialog(false);
+    handleClose();
+    router.push(`/candidates/${createdCandidateId}`);
+  };
+
+  const handleStatusSkip = () => {
+    setShowStatusDialog(false);
+    handleClose();
+    if (createdCandidateId) router.push(`/candidates/${createdCandidateId}`);
+  };
+
+  const STATUS_OPTIONS = [
+    { value: "BEFORE", label: "支援前" },
+    { value: "ACTIVE", label: "支援中" },
+    { value: "WAITING", label: "待機" },
+    { value: "ENDED", label: "支援終了" },
+  ];
+
   const inputClass =
     "mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[13px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]";
   const errorInputClass =
     "mt-1 w-full rounded-md border border-red-400 px-3 py-2 text-[13px] focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500";
+
+  // Show support status dialog
+  if (showStatusDialog) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl max-w-sm w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+          <h2 className="text-[16px] font-bold text-[#374151] mb-2">支援状況を選択してください</h2>
+          <p className="text-[13px] text-[#6B7280] mb-5">{createdCandidateName}さんの支援状況を設定してください</p>
+          <div className="space-y-2 mb-5">
+            {STATUS_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+                  selectedStatus === opt.value
+                    ? "border-[#2563EB] bg-blue-50"
+                    : "border-[#E5E7EB] hover:border-[#9CA3AF]"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="supportStatus"
+                  value={opt.value}
+                  checked={selectedStatus === opt.value}
+                  onChange={() => setSelectedStatus(opt.value)}
+                  className="accent-[#2563EB]"
+                />
+                <span className="text-[14px] font-medium text-[#374151]">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <button
+            onClick={handleStatusSubmit}
+            disabled={savingStatus}
+            className="w-full rounded-md bg-[#2563EB] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors"
+          >
+            {savingStatus ? "設定中..." : "設定する"}
+          </button>
+          <button
+            onClick={handleStatusSkip}
+            className="w-full mt-2 text-center text-[13px] text-[#6B7280] hover:text-[#374151] py-1"
+          >
+            スキップ
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleClose}>
