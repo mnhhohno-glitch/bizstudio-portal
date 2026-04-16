@@ -509,6 +509,7 @@ model Task {
 
   completionType      String   @default("any") @map("completion_type")  // "any" or "all"
   notificationPending Boolean  @default(false) @map("notification_pending")
+  manualSortOrder     Int?     @map("manual_sort_order")
 
   assignees       TaskAssignee[]
   assigneeStatuses TaskAssigneeStatus[]

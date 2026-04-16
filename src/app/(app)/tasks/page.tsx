@@ -3,6 +3,23 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { PageTitle } from "@/components/ui/PageTitle";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type TaskAssigneeStatusItem = {
   userId: string;
@@ -17,6 +34,7 @@ type Task = {
   dueDate: string | null;
   createdAt: string;
   completionType: string;
+  manualSortOrder: number | null;
   category: { id: string; name: string } | null;
   candidate: { name: string; candidateNumber: string } | null;
   assignees: { employee: { name: string } }[];
@@ -48,6 +66,16 @@ const PRIORITY_COLOR: Record<string, string> = {
   LOW: "bg-gray-100 text-gray-600",
 };
 
+function SortableRow({ id, children }: { id: string; children: (props: { listeners: Record<string, unknown>; attributes: Record<string, unknown>; style: React.CSSProperties; setNodeRef: (node: HTMLElement | null) => void; isDragging: boolean }) => React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.8 : 1,
+  };
+  return <>{children({ listeners: listeners as unknown as Record<string, unknown>, attributes: attributes as unknown as Record<string, unknown>, style, setNodeRef, isDragging })}</>;
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
@@ -68,7 +96,7 @@ export default function TasksPage() {
   const [viewMode, setViewMode] = useState<"mine" | "requested" | "all">("mine");
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortBy, setSortBy] = useState("manualSort");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // selection
@@ -249,6 +277,35 @@ export default function TasksPage() {
     );
   };
 
+  const isManualSort = sortBy === "manualSort";
+
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = tasks.findIndex((t) => t.id === active.id);
+    const newIndex = tasks.findIndex((t) => t.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(tasks, oldIndex, newIndex);
+    setTasks(reordered);
+
+    // Save to API
+    try {
+      await fetch("/api/tasks/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskIds: reordered.map((t) => t.id) }),
+      });
+    } catch { /* ignore */ }
+  };
+
   const formatDate = (d: string | null) => {
     if (!d) return "-";
     return new Date(d).toLocaleDateString("ja-JP");
@@ -281,6 +338,118 @@ export default function TasksPage() {
 
   const selectCls =
     "rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
+
+  const renderRow = (t: Task, dragHandleProps?: { listeners?: Record<string, unknown>; attributes?: Record<string, unknown>; style?: React.CSSProperties; setNodeRef?: (node: HTMLElement | null) => void; isDragging?: boolean }) => {
+    const rowStyle = dragHandleProps?.style;
+    const isDragging = dragHandleProps?.isDragging;
+    return (
+      <tr
+        key={t.id}
+        ref={dragHandleProps?.setNodeRef}
+        style={rowStyle}
+        className={`border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB] ${t.status === "COMPLETED" ? "opacity-50" : ""} ${isDragging ? "bg-white shadow-lg z-10 relative" : ""}`}
+      >
+        <td className="w-8 px-1 py-3 text-center">
+          {isManualSort ? (
+            <span
+              {...(dragHandleProps?.listeners ?? {})}
+              {...(dragHandleProps?.attributes ?? {})}
+              className="cursor-grab text-[#9CA3AF] hover:text-[#6B7280] select-none text-[16px] leading-none"
+              title="ドラッグして並び替え"
+            >
+              ⠿
+            </span>
+          ) : (
+            <span className="text-[#E5E7EB] text-[16px] leading-none select-none" title="カスタム順でのみ並び替え可能">⠿</span>
+          )}
+        </td>
+        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selectedIds.has(t.id)}
+            onChange={() => toggleSelect(t.id)}
+            className="h-4 w-4 accent-[#2563EB]"
+          />
+        </td>
+        <td className="whitespace-nowrap px-4 py-3">
+          {t.completionType === "all" && t.assignees.length > 1 && t.status !== "COMPLETED" ? (
+            <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+              {t.assigneeStatuses?.filter((s) => s.isCompleted).length ?? 0}/{t.assignees.length}完了
+            </span>
+          ) : (
+            <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
+              {STATUS_LABEL[t.status] ?? t.status}
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3">
+          <Link href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
+            {t.title}
+          </Link>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+          {getGroupName(t.category?.id)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+          {t.category?.name ?? "-"}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
+          {t.candidate ? (
+            <>
+              {t.candidate.name}
+              <span className="ml-1 text-[11px] text-[#9CA3AF]">（{t.candidate.candidateNumber}）</span>
+            </>
+          ) : "-"}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
+          {t.assignees.map((a) => a.employee.name).join("、") || "-"}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3">
+          {t.priority ? (
+            <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY_COLOR[t.priority] ?? ""}`}>
+              {PRIORITY_LABEL[t.priority] ?? t.priority}
+            </span>
+          ) : "-"}
+        </td>
+        <td className={`whitespace-nowrap px-4 py-3 ${isOverdue(t.dueDate, t.status) ? "font-medium text-red-600" : "text-[#374151]"}`}>
+          {formatDate(t.dueDate)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
+          {formatDate(t.createdAt)}
+        </td>
+        <td className="px-3 py-3">
+          <div className="flex items-center gap-1">
+            {t.status !== "COMPLETED" && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
+                className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
+                title={t.completionType === "all" && t.assignees.length > 1 ? "自分を完了にする" : "完了にする"}
+              >
+                ✓
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleClone(t.id); }}
+              className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-blue-50 hover:text-blue-600"
+              title="複製"
+            >
+              📋
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleSingleDelete(t.id); }}
+              className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-red-50 hover:text-red-600"
+              title="削除"
+            >
+              🗑
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div>
@@ -326,6 +495,15 @@ export default function TasksPage() {
           />
           完了タスクを表示
         </label>
+        {!isManualSort && (
+          <button
+            type="button"
+            onClick={() => { setSortBy("manualSort"); setSortOrder("desc"); resetPage(); }}
+            className="rounded-[6px] border border-[#D1D5DB] bg-white px-3 py-1.5 text-[12px] text-[#374151] transition-colors hover:bg-[#F3F4F6]"
+          >
+            ⠿ カスタム順に戻す
+          </button>
+        )}
       </div>
 
       {/* filters */}
@@ -417,6 +595,7 @@ export default function TasksPage() {
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-[12px] font-medium text-[#6B7280]">
+              <th className="w-8 px-1 py-3"></th>
               <th className="w-10 px-3 py-3">
                 <input
                   ref={headerCheckRef}
@@ -452,110 +631,39 @@ export default function TasksPage() {
               <th className="w-10 px-3 py-3"></th>
             </tr>
           </thead>
-          <tbody>
-            {loading ? (
+          {loading ? (
+            <tbody>
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={12} className="px-4 py-12 text-center text-[#6B7280]">
                   読み込み中...
                 </td>
               </tr>
-            ) : tasks.length === 0 ? (
+            </tbody>
+          ) : tasks.length === 0 ? (
+            <tbody>
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-[#6B7280]">
+                <td colSpan={12} className="px-4 py-12 text-center text-[#6B7280]">
                   タスクがありません
                 </td>
               </tr>
-            ) : (
-              tasks.map((t) => (
-                <tr key={t.id} className={`border-b border-[#F3F4F6] transition-colors hover:bg-[#F9FAFB] ${t.status === "COMPLETED" ? "opacity-50" : ""}`}>
-                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(t.id)}
-                      onChange={() => toggleSelect(t.id)}
-                      className="h-4 w-4 accent-[#2563EB]"
-                    />
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {t.completionType === "all" && t.assignees.length > 1 && t.status !== "COMPLETED" ? (
-                      <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-700">
-                        {t.assigneeStatuses?.filter((s) => s.isCompleted).length ?? 0}/{t.assignees.length}完了
-                      </span>
-                    ) : (
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[t.status] ?? ""}`}>
-                        {STATUS_LABEL[t.status] ?? t.status}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
-                      {t.title}
-                    </Link>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
-                    {getGroupName(t.category?.id)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
-                    {t.category?.name ?? "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
-                    {t.candidate ? (
-                      <>
-                        {t.candidate.name}
-                        <span className="ml-1 text-[11px] text-[#9CA3AF]">（{t.candidate.candidateNumber}）</span>
-                      </>
-                    ) : "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[#374151]">
-                    {t.assignees.map((a) => a.employee.name).join("、") || "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {t.priority ? (
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY_COLOR[t.priority] ?? ""}`}>
-                        {PRIORITY_LABEL[t.priority] ?? t.priority}
-                      </span>
-                    ) : "-"}
-                  </td>
-                  <td className={`whitespace-nowrap px-4 py-3 ${isOverdue(t.dueDate, t.status) ? "font-medium text-red-600" : "text-[#374151]"}`}>
-                    {formatDate(t.dueDate)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[#6B7280]">
-                    {formatDate(t.createdAt)}
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-1">
-                      {t.status !== "COMPLETED" && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleSingleComplete(t.id); }}
-                          className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-green-50 hover:text-green-600"
-                          title={t.completionType === "all" && t.assignees.length > 1 ? "自分を完了にする" : "完了にする"}
-                        >
-                          ✓
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleClone(t.id); }}
-                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-blue-50 hover:text-blue-600"
-                        title="複製"
-                      >
-                        📋
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSingleDelete(t.id); }}
-                        className="rounded-[4px] p-1 text-[#9CA3AF] transition-colors hover:bg-red-50 hover:text-red-600"
-                        title="削除"
-                      >
-                        🗑
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
+            </tbody>
+          ) : isManualSort ? (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+                <tbody>
+                  {tasks.map((t) => (
+                    <SortableRow key={t.id} id={t.id}>
+                      {(props) => renderRow(t, props)}
+                    </SortableRow>
+                  ))}
+                </tbody>
+              </SortableContext>
+            </DndContext>
+          ) : (
+            <tbody>
+              {tasks.map((t) => renderRow(t))}
+            </tbody>
+          )}
         </table>
       </div>
 

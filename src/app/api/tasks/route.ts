@@ -86,8 +86,14 @@ export async function GET(request: Request) {
 
     // ソート
     const validSortFields = ["createdAt", "dueDate", "title", "status", "priority"];
-    let orderBy: Prisma.TaskOrderByWithRelationInput;
-    if (sortBy === "categoryName") {
+    let orderBy: Prisma.TaskOrderByWithRelationInput | Prisma.TaskOrderByWithRelationInput[];
+    if (sortBy === "manualSort") {
+      // 手動並び替え: manualSortOrder 昇順（nullは末尾）→ createdAt 降順
+      orderBy = [
+        { manualSortOrder: { sort: "asc", nulls: "last" } },
+        { createdAt: "desc" },
+      ];
+    } else if (sortBy === "categoryName") {
       orderBy = { category: { name: sortOrder } };
     } else if (sortBy === "categoryGroup") {
       orderBy = { category: { group: { sortOrder: sortOrder } } };
