@@ -7,9 +7,10 @@ export const maxDuration = 300; // 5 minutes
 
 function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   if (!comment) return false;
-  const hasDesire = /■\s*本人希望[：:]\s*[ABCD]/.test(comment);
-  const hasPass = /■\s*通過率[：:]\s*[ABCD]/.test(comment);
-  const hasOverall = /■\s*総合[：:]\s*[ABCD]/.test(comment);
+  const c = comment.replace(/\*\*/g, "");
+  const hasDesire = /■\s*本人希望[：:]\s*[ABCD]/.test(c);
+  const hasPass = /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c);
+  const hasOverall = /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c);
   return hasDesire && hasPass && hasOverall;
 }
 

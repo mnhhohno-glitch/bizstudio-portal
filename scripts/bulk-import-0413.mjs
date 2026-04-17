@@ -1,0 +1,44 @@
+const API_URL = "https://bizstudio-portal-production.up.railway.app/api/internal/entries/bulk-import";
+const API_KEY = "5Ut51UxKyQ5A9Tve6zvHe0XHIMmDM1Jov9SqvyJF2fdifEtW";
+
+const entries = [
+  {"fmEntryNo":"Entry39236","candidateNumber":"5004236","externalJobNo":"3_25939_23","companyName":"株式会社マイナビ","jobTitle":"【キャリアデザイン事業本部】「マイナビ20××」への会員登録・サイト広報","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"事務局求人","route":"マイナビJOB"},
+  {"fmEntryNo":"Entry39237","candidateNumber":"5004320","externalJobNo":"7_241927_20","companyName":"アルケア 株式会社","jobTitle":"【墨田区/週2在宅】データアナリスト／DX推進部データ活用戦略課／残業10h／医療福祉機器メーカー","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39238","candidateNumber":"5004320","externalJobNo":"7_211396_20","companyName":"トランス・コスモス株式会社","jobTitle":"【リモート可】マーケティングリサーチ／プロジェクトマネジャー※toC向け大規模案件／東証プライム上場","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39239","candidateNumber":"5004320","externalJobNo":"7_239004_20","companyName":"株式会社アスマーク","jobTitle":"【リサーチャー経験者】リサーチコンサルタント◆調査実績4万件超のリサーチ会社◆","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39240","candidateNumber":"5004320","externalJobNo":"7_256803_20","companyName":"株式会社レオパレス21","jobTitle":"【中野】データ分析・戦略策定◆マーケ領域未経験◎｜残業少なめ｜働き方改善｜プライム上場×業績安定","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39241","candidateNumber":"5004320","externalJobNo":"7_284207_20","companyName":"楽天トータルソリューションズ株式会社","jobTitle":"【二子玉川】ロジスティクスオペレーション担当◆サプライチェーン全体を統括・最適化を推進◎","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39242","candidateNumber":"5004320","externalJobNo":"7_158852_20","companyName":"株式会社エム・シー・アイ","jobTitle":"【日本橋】マーケティングリサーチャー◆インタビュー調査参加者の募集、日程の調整など／フレックス","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39243","candidateNumber":"5004320","externalJobNo":"7_276228_17","companyName":"株式会社日立ハイテク","jobTitle":"【虎ノ門】製品・サービス企画(医療機器) ※無形商材営業経験歓迎／市場調査～推進業務までお任せ","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39244","candidateNumber":"5004320","externalJobNo":"7_171104_20","companyName":"auコマース＆ライフ株式会社","jobTitle":"マーケティング(オープンポジション)／「au PAYマーケット」会員向け施策立案〜実行まで","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39245","candidateNumber":"5004320","externalJobNo":"7_245360_20","companyName":"日清ヨーク株式会社","jobTitle":"【東京】～未経験歓迎～マーケティング／商品企画／日清食品G／ピルクル400等～企画からマーケまで～","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39246","candidateNumber":"5004320","externalJobNo":"7_121004_20","companyName":"株式会社MTG","jobTitle":"【東京／美容健康】WEBマーケティング＜ギフト販促企画・戦略＞ReFa・SIXPAD等／売上980億","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39247","candidateNumber":"5004320","externalJobNo":"7_187083_20","companyName":"株式会社オリエントコーポレーション","jobTitle":"デジタルマーケティングプランナー◆大手信販会社で広告運用を担当","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39248","candidateNumber":"5004320","externalJobNo":"7_288527_20","companyName":"株式会社ＬＩＸＩＬ","jobTitle":"【リモート勤務】ブランドマーケティング◆LIXILブランド戦略の立案と実行をお任せ／残業10h程度","careerAdvisorId":"1000001","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link","grossProfit":"-150000"},
+  {"fmEntryNo":"Entry39249","candidateNumber":"5004321","externalJobNo":"7_239758_30","companyName":"アートテクノ株式会社","jobTitle":"【愛知／半田】組みつけスタッフ（車・大型産業機器等）◆未経験・第二新卒歓迎◆正社員／年休120日","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39250","candidateNumber":"5004321","externalJobNo":"7_228723_30","companyName":"日幸ライト工業株式会社","jobTitle":"【常滑】金型開発スタッフ/未経験歓迎！自動車プラスチック部品メーカー/残業月20h/年休120日","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39251","candidateNumber":"5004321","externalJobNo":"7_228727_30","companyName":"日幸ライト工業株式会社","jobTitle":"【常滑】未経験・女性活躍中！◆プラスチック部品の品質検査◆正社員◆残業10h／穏やかな社員が多い職場","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39252","candidateNumber":"5004321","externalJobNo":"7_150751_30","companyName":"東明工業株式会社","jobTitle":"◆アルバイト経験のみ可【愛知／知多市】三菱重工業社の航空機等の組立★残業20h／年休121／車通勤可","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39253","candidateNumber":"5004321","externalJobNo":"7_270004_30","companyName":"株式会社ＬＩＸＩＬ","jobTitle":"【愛知／未経験OK】製造オペレーター（樹脂射出成型機）◆資格取得補助あり／業界最大手メーカー","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39254","candidateNumber":"5004321","externalJobNo":"7_133343_30","companyName":"コカ・コーラ　ボトラーズジャパン株式会社","jobTitle":"【愛知：東海工場】コカ・コーラG飲料製造◇未経験歓迎／正社員／充実の就業環境と豊富なキャリアパス◎","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"DODA求人","route":"HITO-Link"},
+  {"fmEntryNo":"Entry39255","candidateNumber":"5004321","externalJobNo":"2_231383_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"◆製造職／《未経験OK！》自動車製造工程における各業務（組立・加工・検査・搬送）","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39256","candidateNumber":"5004321","externalJobNo":"2_360466_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"(愛知県大府市長根町)自動車製造工程における各業務（組立・加工・検査・搬送）/未経験OK/正社員/寮完備","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39257","candidateNumber":"5004321","externalJobNo":"2_236481_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"◆製造職／《経験者優遇》自動車シートの検査・補修／自動車シート内部のウレタン成形・加工・検査業務","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39258","candidateNumber":"5004321","externalJobNo":"2_346145_30","companyName":"株式会社ウイルテック","jobTitle":"【愛知県知多市】未経験歓迎！【動車エアバッグ・ステアリング組立スタッフ】シフト勤務／残業月平均30時間程度","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39259","candidateNumber":"5004321","externalJobNo":"2_367121_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"未経験から始める製造職！異業種からの転職9割以上！独自の「ヨコタアカデミー」で未経験から一生モノのスキルを習得","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39260","candidateNumber":"5004321","externalJobNo":"2_309250_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"【製造職】自動車製造工程／未経験からキャリアアップ！","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+  {"fmEntryNo":"Entry39261","candidateNumber":"5004321","externalJobNo":"2_209991_30","companyName":"株式会社ヨコタエンタープライズ","jobTitle":"(東浦町)世界初採用された水素電池の製造/新工場/未経験OK/正社員/寮完備","careerAdvisorId":"1000009","entryDate":"2026-04-13","entryFlag":"求人紹介","entryFlagDetail":"検討中","jobType":"share","route":"Circus"},
+];
+
+async function main() {
+  console.log(`Importing ${entries.length} entries...`);
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify({ entries }),
+  });
+  const data = await res.json();
+  console.log("Result:", JSON.stringify(data, null, 2));
+}
+
+main().catch(console.error);
