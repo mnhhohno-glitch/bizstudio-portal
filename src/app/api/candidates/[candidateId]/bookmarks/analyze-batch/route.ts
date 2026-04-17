@@ -225,7 +225,7 @@ function normalizeCompanyName(name: string): string {
     .toLowerCase();
 }
 
-const API_TIMEOUT_MS = 120000;
+const API_TIMEOUT_MS = 300000;
 const MAX_PAST_MESSAGES = 30;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_CHAT_MESSAGE_CHARS = 4000;
