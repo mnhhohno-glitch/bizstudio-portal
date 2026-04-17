@@ -21,6 +21,7 @@ type Props = {
   onFieldUpdate: (entryId: string, fields: Record<string, unknown>) => Promise<void>;
   onJobDbUrlEdit: (entryId: string, currentUrl: string | null) => void;
   onEntryRouteEdit: (entry: Entry) => void;
+  onEditEntry: (entry: Entry) => void;
   onRowClick: (entryId: string) => void;
   selectedIds: Set<string>;
   onSelectToggle: (id: string) => void;
@@ -70,7 +71,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   "全件": [],
 };
 
-const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 50, sortKey: null };
+const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 68, sortKey: null };
 
 function getColumns(tab: string): ColConfig[] {
   return [...COMMON_COLS, ...(TAB_EXTRA[tab] || []), MEMO_COL];
@@ -348,7 +349,7 @@ function SortIndicator({ sortKey, sortField, sortDir }: {
 
 export default function EntryTable({
   entries, flagData, activeTab, sortField, sortDir, onSort,
-  onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onEntryRouteEdit, onRowClick,
+  onFlagUpdate, onFieldUpdate, onJobDbUrlEdit, onEntryRouteEdit, onEditEntry, onRowClick,
   selectedIds, onSelectToggle, onSelectAll, onDeselectAll,
   isAdmin, onUnarchive, onHardDelete,
 }: Props) {
@@ -557,7 +558,21 @@ export default function EntryTable({
       case "joinDate":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.joinDate} entryId={entry.id} field="joinDate" onUpdate={onFieldUpdate} /></td>;
       case "memo":
-        return <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}><MemoCell value={entry.memo} entryId={entry.id} onUpdate={onFieldUpdate} /></td>;
+        return (
+          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEditEntry(entry); }}
+                title="エントリーを編集"
+                className="text-[13px] leading-none text-gray-300 hover:text-[#2563EB]"
+              >
+                ✏️
+              </button>
+              <MemoCell value={entry.memo} entryId={entry.id} onUpdate={onFieldUpdate} />
+            </div>
+          </td>
+        );
       default:
         return <td key={col.key} />;
     }
