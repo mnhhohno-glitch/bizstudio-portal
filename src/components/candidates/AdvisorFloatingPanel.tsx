@@ -56,6 +56,23 @@ export default function AdvisorFloatingPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
+
+  const hasValidThreeAxisMarkers = (comment: string | null | undefined): boolean => {
+    if (!comment) return false;
+    return (
+      /■\s*本人希望[：:]\s*[ABCD]/.test(comment) &&
+      /■\s*通過率[：:]\s*[ABCD]/.test(comment) &&
+      /■\s*総合[：:]\s*[ABCD]/.test(comment)
+    );
+  };
+
+  const isInvalidFile = (f: { aiAnalysisComment?: string | null }): boolean => {
+    const c = f.aiAnalysisComment;
+    if (!c || c.trim() === "") return true;
+    if (!hasValidThreeAxisMarkers(c)) return true;
+    return false;
+  };
 
   const validateAndSetFile = (file: File) => {
     if (file.size > 20 * 1024 * 1024) {
@@ -188,22 +205,32 @@ export default function AdvisorFloatingPanel({
       const filesRes = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
       const filesData = await filesRes.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const totalFiles = filesData.files?.filter((f: any) => f.extractedAt).length || 0;
+      const extractedFiles = (filesData.files || []).filter((f: any) => f.extractedAt);
+      const targetFiles = invalidOnlyMode
+        ? extractedFiles.filter(isInvalidFile)
+        : extractedFiles;
+      const totalFiles = targetFiles.length;
 
       if (totalFiles === 0) {
-        toast.error("テキスト化済みのブックマークがありません");
+        toast.error(
+          invalidOnlyMode
+            ? "未評価/破損のブックマークはありません"
+            : "テキスト化済みのブックマークがありません"
+        );
         setIsAnalyzing(false);
         return;
       }
 
       const batchSize = 5;
       const totalBatches = Math.ceil(totalFiles / batchSize);
+      const queryStr = invalidOnlyMode ? "?mode=invalid-only" : "";
+      const allSkippedFileIds: string[] = [];
 
       for (let i = 0; i < totalBatches; i++) {
         setAnalysisProgress(`分析中... (${i + 1}/${totalBatches}バッチ)`);
 
         try {
-          const res = await fetch(`/api/candidates/${candidateId}/bookmarks/analyze-batch`, {
+          const res = await fetch(`/api/candidates/${candidateId}/bookmarks/analyze-batch${queryStr}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -220,6 +247,11 @@ export default function AdvisorFloatingPanel({
             throw new Error(err?.error || `バッチ${i + 1}の分析に失敗しました`);
           }
 
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.skippedFileIds) && data.skippedFileIds.length > 0) {
+            allSkippedFileIds.push(...data.skippedFileIds);
+          }
+
           // Refresh messages to show new results
           await fetchMessages(activeSessionId);
 
@@ -234,7 +266,18 @@ export default function AdvisorFloatingPanel({
         }
       }
 
-      toast.success(`全${totalFiles}件の分析が完了しました`);
+      const skipped = allSkippedFileIds.length;
+      const succeeded = Math.max(0, totalFiles - skipped);
+      toast.success(
+        skipped > 0
+          ? `${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
+          : `全${totalFiles}件の分析が完了しました`
+      );
+      if (skipped > 0) {
+        toast.warning(
+          `${skipped}件の求人でAIレスポンスのフォーマットが不正だったため、既存の評価を保持しました。もう一度「全件分析」を実行してください。`
+        );
+      }
       window.dispatchEvent(new Event("bookmark-ratings-updated"));
     } catch (error) {
       console.error("[FullAnalysis] Error:", error);
@@ -278,6 +321,7 @@ export default function AdvisorFloatingPanel({
     const totalFiles = newFiles.length;
     const batchSize = 5;
     const totalBatches = Math.ceil(totalFiles / batchSize);
+    const allSkippedFileIds: string[] = [];
 
     try {
       for (let i = 0; i < totalBatches; i++) {
@@ -302,6 +346,11 @@ export default function AdvisorFloatingPanel({
             throw new Error(err?.error || `追加分析バッチ${i + 1}に失敗しました`);
           }
 
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.skippedFileIds) && data.skippedFileIds.length > 0) {
+            allSkippedFileIds.push(...data.skippedFileIds);
+          }
+
           await fetchMessages(activeSessionId);
 
           if (i < totalBatches - 1) {
@@ -314,7 +363,18 @@ export default function AdvisorFloatingPanel({
         }
       }
 
-      toast.success(`追加${totalFiles}件の分析が完了しました`);
+      const skipped = allSkippedFileIds.length;
+      const succeeded = Math.max(0, totalFiles - skipped);
+      toast.success(
+        skipped > 0
+          ? `追加${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
+          : `追加${totalFiles}件の分析が完了しました`
+      );
+      if (skipped > 0) {
+        toast.warning(
+          `${skipped}件の求人でAIレスポンスのフォーマットが不正だったため、既存の評価を保持しました。もう一度実行してください。`
+        );
+      }
       window.dispatchEvent(new Event("bookmark-ratings-updated"));
     } finally {
       setIsAnalyzing(false);
@@ -590,6 +650,15 @@ export default function AdvisorFloatingPanel({
                   >
                     📊 全件分析
                   </button>
+                  <label className="flex items-center gap-1 text-[12px] text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={invalidOnlyMode}
+                      onChange={(e) => setInvalidOnlyMode(e.target.checked)}
+                      className="accent-[#2563EB]"
+                    />
+                    未評価/破損のみ
+                  </label>
                   {hasAnalysisHistory && (
                     <button
                       onClick={handleAdditionalAnalysis}
