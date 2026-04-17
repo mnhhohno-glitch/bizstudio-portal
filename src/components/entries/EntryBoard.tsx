@@ -9,6 +9,7 @@ import BulkFlagChangeModal from "./BulkFlagChangeModal";
 import BulkEndFlagModal from "./BulkEndFlagModal";
 import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
+import EntryEditModal from "./EntryEditModal";
 
 export type Entry = {
   id: string;
@@ -124,6 +125,9 @@ export default function EntryBoard() {
 
   // Entry route switch modal
   const [routeModalEntry, setRouteModalEntry] = useState<Entry | null>(null);
+
+  // Entry edit modal
+  const [editEntry, setEditEntry] = useState<Entry | null>(null);
 
   const fetchEntries = useCallback(async () => {
     if (!sessionLoaded) return;
@@ -650,6 +654,7 @@ export default function EntryBoard() {
           onFieldUpdate={handleFieldUpdate}
           onJobDbUrlEdit={openUrlEditModal}
           onEntryRouteEdit={(entry) => setRouteModalEntry(entry)}
+          onEditEntry={(entry) => setEditEntry(entry)}
           onRowClick={(id) => setDetailEntryId(id)}
           selectedIds={selectedIds}
           onSelectToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
@@ -760,6 +765,19 @@ export default function EntryBoard() {
           selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
           onClose={() => setShowBulkEndFlag(false)}
           onDone={() => { setShowBulkEndFlag(false); setSelectedIds(new Set()); fetchEntries(); }}
+        />
+      )}
+
+      {/* Entry Edit Modal */}
+      {editEntry && (
+        <EntryEditModal
+          entry={editEntry}
+          onClose={() => setEditEntry(null)}
+          onSaved={(updated) => {
+            setEntries((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+            setEditEntry(null);
+            refreshCounts();
+          }}
         />
       )}
 
