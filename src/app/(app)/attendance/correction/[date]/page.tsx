@@ -117,6 +117,9 @@ export default function CorrectionPage() {
   const d = new Date(date + "T00:00:00");
   const dateLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${["日", "月", "火", "水", "木", "金", "土"][d.getDay()]}）`;
   const isFinalized = attendance?.isFinalized ?? false;
+  const todayStr = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const isPastDate = date < todayStr;
+  const useCorrectionForm = isFinalized || isPastDate;
 
   return (
     <div className="mx-auto max-w-lg">
@@ -127,8 +130,8 @@ export default function CorrectionPage() {
         <h1 className="mt-2 text-[18px] font-bold text-[#1E3A8A]">打刻修正 - {dateLabel}</h1>
       </div>
 
-      {/* Pre-finalize: inline edit */}
-      {!isFinalized && punches.length > 0 && (
+      {/* Pre-finalize: inline edit (当日のみ) */}
+      {!useCorrectionForm && punches.length > 0 && (
         <div className="mb-6 rounded-xl border border-[#E5E7EB] bg-white">
           <div className="border-b border-[#E5E7EB] px-4 py-3">
             <h3 className="text-[14px] font-bold text-[#374151]">打刻記録（確定前 - 直接編集可能）</h3>
@@ -163,8 +166,8 @@ export default function CorrectionPage() {
         </div>
       )}
 
-      {/* Post-finalize: multi-item correction form */}
-      {isFinalized && (
+      {/* Post-finalize or past date: multi-item correction form */}
+      {useCorrectionForm && (
         <div className="rounded-xl border border-[#E5E7EB] bg-white p-6">
           <h3 className="mb-2 text-[15px] font-bold text-[#374151]">修正申請</h3>
           <p className="mb-4 text-[13px] text-[#6B7280]">修正する項目にチェックを入れ、修正後の時刻を入力してください。</p>

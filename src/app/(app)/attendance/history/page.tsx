@@ -143,6 +143,8 @@ export default function AttendanceHistoryPage() {
                   const d = new Date(r.date);
                   const dayName = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
                   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                  const todayStr = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+                  const isPastWithData = dateStr < todayStr && r.clockIn !== null;
                   const leave = leaveMap.get(dateStr);
                   const statusLabel = leave && leave.status === "APPROVED"
                     ? LEAVE_LABEL[leave.leaveType] ?? "休暇"
@@ -154,7 +156,7 @@ export default function AttendanceHistoryPage() {
                   return (
                     <tr key={r.id} className={`border-b border-[#F3F4F6] hover:bg-[#F9FAFB] ${isWeekend ? "bg-gray-50" : ""}`}>
                       <td className="px-4 py-2.5">
-                        {r.isFinalized ? (
+                        {isPastWithData ? (
                           <Link href={`/attendance/correction/${dateStr}`} className="text-[#2563EB] hover:underline">
                             {`${d.getMonth() + 1}/${d.getDate()}(${dayName})`}
                           </Link>
@@ -174,7 +176,7 @@ export default function AttendanceHistoryPage() {
                       <td className="px-3 py-2.5 tabular-nums">{r.totalWork > 0 ? formatSec(r.totalWork) : "-"}</td>
                       <td className="px-3 py-2.5 text-[#6B7280]">{r.note ?? ""}</td>
                       <td className="px-3 py-2.5">
-                        {r.isFinalized && (
+                        {isPastWithData && (
                           <Link href={`/attendance/correction/${dateStr}`} className="text-[13px] text-[#2563EB] hover:underline">修正</Link>
                         )}
                       </td>
