@@ -283,6 +283,7 @@ export async function POST(
     ? fetchedBookmarks.filter((f) => {
         if (!f.aiAnalysisComment || f.aiAnalysisComment.trim() === "") return true;
         if (!hasValidThreeAxisMarkers(f.aiAnalysisComment)) return true;
+        if (!f.aiAnalysisComment.includes("◆")) return true;
         return false;
       })
     : fetchedBookmarks;

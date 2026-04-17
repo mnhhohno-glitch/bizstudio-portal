@@ -71,6 +71,7 @@ export default function AdvisorFloatingPanel({
     const c = f.aiAnalysisComment;
     if (!c || c.trim() === "") return true;
     if (!hasValidThreeAxisMarkers(c)) return true;
+    if (!c.includes("◆")) return true;
     return false;
   };
 
