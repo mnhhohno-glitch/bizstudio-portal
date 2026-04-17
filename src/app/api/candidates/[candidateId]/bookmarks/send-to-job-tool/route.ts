@@ -311,8 +311,16 @@ export async function POST(
     // 6. Skip extraction — user starts it manually from kyuujin-pdf-tool after reviewing memos
     console.log("[SendToJobTool] Step 6: Skipped (extraction will be started manually by user)");
 
-    const memoUrl = recordKey
-      ? `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}&key=${recordKey}`
+    // Circus送信ではメモ帳インポート画面(-4)へ遷移させる。
+    // kyuujin-pdf-tool が返す record_key はメモ編集画面(-3)を指すため、
+    // Circus の場合のみ末尾を -4 に差し替える。HITO-Link/マイナビは素の recordKey を使う。
+    const navigationRecordKey =
+      dbType === "circus" && recordKey
+        ? recordKey.replace(/-\d+$/, "-4")
+        : recordKey;
+
+    const memoUrl = navigationRecordKey
+      ? `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}&key=${navigationRecordKey}`
       : `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}`;
 
     return NextResponse.json({
