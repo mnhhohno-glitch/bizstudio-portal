@@ -5,6 +5,15 @@ import { getCandidateContext } from "@/lib/advisor-context";
 
 export const maxDuration = 300; // 5 minutes
 
+function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
+  if (!comment) return false;
+  const c = comment.replace(/\*\*/g, "");
+  const hasDesire = /■\s*本人希望[：:]\s*[ABCD]/.test(c);
+  const hasPass = /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c);
+  const hasOverall = /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c);
+  return hasDesire && hasPass && hasOverall;
+}
+
 function extractRatingsAndComments(
   analysisText: string,
   batchFiles: { id: string; fileName: string }[]
@@ -63,11 +72,15 @@ function extractRatingsAndComments(
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       // Try multiple section header patterns:
-      // 1. New format: 【会社名】求人タイトル
-      // 2. Old format: 求人N: ファイル名
-      // 3. ### 求人N: ファイル名
+      // 1. Current AI format: ## 【会社名】 / ### 【会社名】 / **【会社名】**
+      // 2. Legacy: 【会社名】 (bare)
+      // 3. Legacy: 求人N: ファイル名
       const sectionPatterns = [
+        // 行頭アンカー + Markdown見出し/太字装飾許容
+        new RegExp(`(?:^|\\n)(?:#{1,3}\\s*)?(?:\\*\\*\\s*)?【[^】]*${escaped}[^】]*】`, "i"),
+        // 素の【...】マッチ（行中含む）
         new RegExp(`【[^】]*${escaped}[^】]*】`, "i"),
+        // 旧フォーマット
         new RegExp(`(?:###?\\s*)?求人\\d+[：:]\\s*[^\\n]*${escaped}`, "i"),
       ];
 
@@ -75,8 +88,14 @@ function extractRatingsAndComments(
       for (const pattern of sectionPatterns) {
         const match = normalizedText.match(pattern);
         if (match) {
-          startIndex = normalizedText.indexOf(match[0]);
-          if (startIndex !== -1) break;
+          const matchedText = match[0];
+          const rawIndex = normalizedText.indexOf(matchedText);
+          if (rawIndex !== -1) {
+            // 先頭の \n や ## や ** 分を除外して 【 の位置にずらす
+            const braceOffset = matchedText.indexOf("【");
+            startIndex = braceOffset >= 0 ? rawIndex + braceOffset : rawIndex;
+            break;
+          }
         }
       }
 
@@ -96,12 +115,15 @@ function extractRatingsAndComments(
 
       if (startIndex === -1) continue;
 
-      // Find section end: next --- separator, next 【company】, next 求人N:, or summary section
+      // セクション終端: 次の会社セクション（## 【】 / **【】 / 空行後の裸【】）・総合まとめ・旧求人N:
+      // ※ \n--- は求人内部の区切りにも使われるため終端に含めない（推薦本文まで取り込む）
       const afterStart = analysisText.substring(startIndex);
-      const nextSection = afterStart.slice(1).match(/\n---|\n【[^】]+】|\n(?:###?\s*)?求人\d+[：:]|\n━━━|\n\n【総合/);
+      const nextSection = afterStart
+        .slice(1)
+        .match(/\n##\s+【[^】]+】|\n\*\*\s*【[^】]+】|\n\n【[^】]+】|\n(?:###?\s*)?求人\d+[：:]|\n━━━/);
       const endIndex = nextSection
         ? startIndex + 1 + (nextSection.index || afterStart.length)
-        : startIndex + Math.min(afterStart.length, 1000);
+        : startIndex + Math.min(afterStart.length, 3000);
 
       const comment = analysisText.substring(startIndex, endIndex).trim();
 
@@ -133,19 +155,12 @@ function extractRatingsAndComments(
       }
     }
 
-    // Fallback: if no results at all, try simple text search for rating
+    // Fallback: Phase 2 が失敗した場合は「rating だけ保存/comment NULL」を
+    // 量産しないよう、results には追加せずスキップする（警告ログのみ）。
     if (!results.has(file.id)) {
-      for (const name of searchNames) {
-        const idx = normalizedText.indexOf(name);
-        if (idx === -1) continue;
-        const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
-        const patterns = [/■\s*総合[：:]\s*([ABCD])/, /総合[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
-        for (const p of patterns) {
-          const m = area.match(p);
-          if (m) { results.set(file.id, { rating: m[1], comment: "" }); break; }
-        }
-        if (results.has(file.id)) break;
-      }
+      console.warn(
+        `[AnalyzeBatch] Phase2 failed to extract section, skipping partial save: fileId=${file.id}, fileName="${file.fileName}", searchNames=${JSON.stringify(searchNames)}`
+      );
     }
   }
 
@@ -210,7 +225,7 @@ function normalizeCompanyName(name: string): string {
     .toLowerCase();
 }
 
-const API_TIMEOUT_MS = 120000;
+const API_TIMEOUT_MS = 300000;
 const MAX_PAST_MESSAGES = 30;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_CHAT_MESSAGE_CHARS = 4000;
@@ -223,6 +238,8 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { candidateId } = await params;
+  const { searchParams } = new URL(req.url);
+  const mode = searchParams.get("mode");
   const body = await req.json();
   const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate } = body as {
     sessionId: string;
@@ -248,15 +265,29 @@ export async function POST(
     whereClause.createdAt = { gt: new Date(sinceDate) };
   }
 
-  const allBookmarks = await prisma.candidateFile.findMany({
+  const fetchedBookmarks = await prisma.candidateFile.findMany({
     where: whereClause,
     select: {
       id: true,
       fileName: true,
       extractedText: true,
+      aiAnalysisComment: true,
     },
     orderBy: { createdAt: "desc" },
   });
+
+  // invalid-only mode:
+  //   - aiAnalysisComment が NULL/空 → 対象
+  //   - 3軸マーカーが欠落している → 対象
+  //   - それ以外（正常）は除外
+  const allBookmarks = mode === "invalid-only"
+    ? fetchedBookmarks.filter((f) => {
+        if (!f.aiAnalysisComment || f.aiAnalysisComment.trim() === "") return true;
+        if (!hasValidThreeAxisMarkers(f.aiAnalysisComment)) return true;
+        if (!f.aiAnalysisComment.includes("◆")) return true;
+        return false;
+      })
+    : fetchedBookmarks;
 
   // 2. Get batch slice
   const start = batchIndex * batchSize;
@@ -546,17 +577,50 @@ ${EVAL_RULES}
     });
 
     // 9. Extract ratings + comments and save to CandidateFile
+    //    「rating + comment + 3軸マーカー」の3点が揃って初めて DB 反映する。
+    //    部分保存（rating だけ / 3軸欠落）は一切行わず、skippedFileIds として返す。
     const ratingsAndComments = extractRatingsAndComments(analysisText, batchFiles);
-    for (const [fileId, { rating, comment }] of ratingsAndComments) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const updateData: Record<string, any> = { aiAnalyzedAt: new Date() };
-      if (rating) updateData.aiMatchRating = rating;
-      if (comment) updateData.aiAnalysisComment = comment;
-      await prisma.candidateFile.update({ where: { id: fileId }, data: updateData });
+    const skippedFileIds: string[] = [];
+    // batchFiles にあって extraction 結果に載らなかったものも skip として報告
+    const extractedIds = new Set(ratingsAndComments.keys());
+    for (const f of batchFiles) {
+      if (!extractedIds.has(f.id)) skippedFileIds.push(f.id);
     }
+
+    for (const [fileId, { rating, comment }] of ratingsAndComments) {
+      try {
+        if (!rating || !comment) {
+          skippedFileIds.push(fileId);
+          console.warn(
+            `[AnalyzeBatch] Incomplete data, skipping update: fileId=${fileId} hasRating=${!!rating} hasComment=${!!comment}`
+          );
+          continue;
+        }
+        if (!hasValidThreeAxisMarkers(comment)) {
+          skippedFileIds.push(fileId);
+          console.warn(
+            `[AnalyzeBatch] 3軸マーカー欠落により上書きスキップ: fileId=${fileId}, candidateId=${candidateId}, head="${comment.substring(0, 100).replace(/\n/g, " ")}"`
+          );
+          continue;
+        }
+        await prisma.candidateFile.update({
+          where: { id: fileId },
+          data: {
+            aiAnalyzedAt: new Date(),
+            aiMatchRating: rating,
+            aiAnalysisComment: comment,
+          },
+        });
+      } catch (updateErr) {
+        skippedFileIds.push(fileId);
+        console.error(`[AnalyzeBatch] Update failed for fileId=${fileId}:`, updateErr);
+      }
+    }
+
     console.log("[AnalyzeBatch] Extracted ratings:", {
       totalFiles: batchFiles.length,
       extractedCount: ratingsAndComments.size,
+      skippedCount: skippedFileIds.length,
       ratings: Object.fromEntries([...ratingsAndComments].map(([id, { rating }]) => [id, rating])),
     });
 
@@ -568,6 +632,7 @@ ${EVAL_RULES}
       isLastBatch: end >= allBookmarks.length,
       analysisText: `${label}\n\n${analysisText}`,
       remainingFiles: allBookmarks.length - end,
+      skippedFileIds,
     });
   } catch (e: unknown) {
     clearTimeout(timeoutId);

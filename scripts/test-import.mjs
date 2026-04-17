@@ -1,0 +1,110 @@
+const testEntries = [
+  {
+    fmEntryNo: "Entry10091",
+    candidateNumber: "5000051",
+    companyName: "アリストジャパン株式会社",
+    jobTitle: "【日本橋】未経験OK◎LED製品の法人営業◆年休127日休／所定労働7.5ｈ／東京国際空港などに納入",
+    externalJobNo: "7_126031_20",
+    jobDb: "HITO-Link",
+    prefecture: "東京都",
+    status: "終了",
+    entryFlag: "求人紹介",
+    entryFlagDetail: "本人辞退",
+    companyFlag: "辞退報告済",
+    personFlag: "",
+    careerAdvisorId: "BS1000001",
+    entryDate: "",
+    introducedAt: "2023-12-01",
+    jobIntroDate: "2023-12-04",
+    documentSubmitDate: "",
+    documentPassDate: "",
+    firstInterviewDate: "",
+    offerDate: "",
+    acceptanceDate: "",
+    joinDate: "",
+    aptitudeTestExists: "false",
+    memo: "",
+    theoreticalIncome: "3500000",
+    referralFee: "500000",
+    revenue: "350000",
+    grossProfit: "300000",
+    route: "スカウト"
+  },
+  {
+    fmEntryNo: "Entry10092",
+    candidateNumber: "5000051",
+    companyName: "マンパワーグループ株式会社",
+    jobTitle: "営業事務",
+    externalJobNo: "3_16848_49",
+    jobDb: "マイナビJOB",
+    prefecture: "福岡県",
+    status: "終了",
+    entryFlag: "面接",
+    entryFlagDetail: "選考落ち",
+    companyFlag: "",
+    personFlag: "",
+    careerAdvisorId: "BS1000001",
+    entryDate: "2023-12-04",
+    introducedAt: "2023-12-01",
+    jobIntroDate: "2023-12-04",
+    documentSubmitDate: "2023-12-04",
+    documentPassDate: "2023-12-15",
+    firstInterviewDate: "2023-12-15",
+    offerDate: "",
+    acceptanceDate: "",
+    joinDate: "",
+    aptitudeTestExists: "false",
+    memo: "12/15 18:00～面接 前日に面接対策実施",
+    theoreticalIncome: "2300000",
+    referralFee: "400000",
+    revenue: "280000",
+    grossProfit: "240000",
+    route: ""
+  },
+  {
+    fmEntryNo: "Entry10095",
+    candidateNumber: "5000060",
+    companyName: "三菱電機ビルソリューションズ株式会社",
+    jobTitle: "未経験歓迎！ビルの設備保全エンジニア【研修充実】",
+    externalJobNo: "2_84767_20",
+    jobDb: "Circus",
+    prefecture: "東京都",
+    status: "終了",
+    entryFlag: "求人紹介",
+    entryFlagDetail: "本人辞退",
+    companyFlag: "辞退報告済",
+    personFlag: "",
+    careerAdvisorId: "BS1000002",
+    entryDate: "2023-12-05",
+    introducedAt: "2023-12-05",
+    jobIntroDate: "2023-12-05",
+    documentSubmitDate: "",
+    documentPassDate: "",
+    firstInterviewDate: "",
+    offerDate: "",
+    acceptanceDate: "",
+    joinDate: "",
+    aptitudeTestExists: "false",
+    memo: "",
+    theoreticalIncome: "",
+    referralFee: "600000",
+    revenue: "600000",
+    grossProfit: "300000",
+    route: "スカウト"
+  }
+];
+
+async function run() {
+  const res = await fetch('https://bizstudio-portal-production.up.railway.app/api/internal/entries/bulk-import', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'x-api-key': '5Ut51UxKyQ5A9Tve6zvHe0XHIMmDM1Jov9SqvyJF2fdifEtW'
+    },
+    body: JSON.stringify({ entries: testEntries })
+  });
+  const data = await res.json();
+  console.log(JSON.stringify(data, null, 2));
+}
+
+run();
