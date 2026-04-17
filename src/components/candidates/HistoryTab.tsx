@@ -1142,6 +1142,7 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                   .replace(/\*\*/g, "")
                   .replace(/^###?\s+/gm, "")
                   .replace(/^-{3,}\s*$/gm, "")
+                  .replace(/^■\s*(本人希望|通過率|総合)[：:]\s*[ABCD].*$/gm, "")
                   .replace(/\n{3,}/g, "\n\n")
                   .trim();
                 if (!split.hasSections) {
