@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { calculateDailyTotals } from "./calculator";
+import { toJST, dayjs } from "./timezone";
 import type { PunchType } from "@prisma/client";
 
 const PUNCH_TYPE_MAP: Record<string, PunchType> = {
@@ -87,7 +88,7 @@ export async function approveModificationRequest(
         }
       }
 
-      // status と clockIn/clockOut を PunchEvent から再計算し、集計値も再計算
+      // PunchEvent から DailyAttendance を完全に再構築
       if (items.length > 0) {
         const allEvents = await tx.punchEvent.findMany({
           where: { dailyAttendanceId: attendance.id },
@@ -97,6 +98,7 @@ export async function approveModificationRequest(
         const clockInEvent = allEvents.find((e) => e.type === "CLOCK_IN");
         const clockOutEvent = allEvents.find((e) => e.type === "CLOCK_OUT");
 
+        // ステータス判定
         let newStatus: "NOT_STARTED" | "WORKING" | "ON_BREAK" | "INTERRUPTED" | "FINISHED";
         if (!clockInEvent) {
           newStatus = "NOT_STARTED";
@@ -113,7 +115,46 @@ export async function approveModificationRequest(
           }
         }
 
-        const totals = await calculateDailyTotals(attendance.id, tx);
+        // 休憩ペア集計
+        const breakStarts = allEvents.filter((e) => e.type === "BREAK_START");
+        const breakEnds = allEvents.filter((e) => e.type === "BREAK_END");
+        let totalBreak = 0;
+        for (let i = 0; i < Math.min(breakStarts.length, breakEnds.length); i++) {
+          totalBreak += Math.floor((breakEnds[i].timestamp.getTime() - breakStarts[i].timestamp.getTime()) / 1000);
+        }
+
+        // 中断ペア集計
+        const intStarts = allEvents.filter((e) => e.type === "INTERRUPT_START");
+        const intEnds = allEvents.filter((e) => e.type === "INTERRUPT_END");
+        let totalInterrupt = 0;
+        for (let i = 0; i < Math.min(intStarts.length, intEnds.length); i++) {
+          totalInterrupt += Math.floor((intEnds[i].timestamp.getTime() - intStarts[i].timestamp.getTime()) / 1000);
+        }
+
+        // 実労働時間・残業時間
+        let totalWork = 0;
+        let overtime = 0;
+        let overtimeRounded = 0;
+        let nightTime = 0;
+        if (clockInEvent && clockOutEvent) {
+          const grossWork = Math.floor((clockOutEvent.timestamp.getTime() - clockInEvent.timestamp.getTime()) / 1000);
+          totalWork = Math.max(0, grossWork - totalBreak - totalInterrupt);
+          overtime = Math.max(0, totalWork - 28800);
+          overtimeRounded = Math.floor(overtime / 60) * 60;
+
+          // 深夜時間（22:00〜翌5:00）
+          try {
+            const totals = await calculateDailyTotals(attendance.id, tx);
+            nightTime = totals.nightTime;
+          } catch {
+            // clockOut未設定等で計算できない場合は0
+          }
+        }
+
+        // 備考
+        const breakCount = Math.min(breakStarts.length, breakEnds.length);
+        const note = breakCount >= 2 ? `休憩${breakCount}回` : null;
+
         await tx.dailyAttendance.update({
           where: { id: attendance.id },
           data: {
@@ -121,13 +162,13 @@ export async function approveModificationRequest(
             clockIn: clockInEvent?.timestamp ?? null,
             clockOut: clockOutEvent?.timestamp ?? null,
             isFinalized: newStatus === "FINISHED",
-            totalBreak: totals.totalBreak,
-            totalInterrupt: totals.totalInterrupt,
-            totalWork: totals.totalWork,
-            overtime: totals.overtime,
-            overtimeRounded: totals.overtimeRounded,
-            nightTime: totals.nightTime,
-            note: totals.note,
+            totalBreak,
+            totalInterrupt,
+            totalWork,
+            overtime,
+            overtimeRounded,
+            nightTime,
+            note,
           },
         });
       }
