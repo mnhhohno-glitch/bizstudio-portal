@@ -49,6 +49,8 @@ const MOD_LABEL: Record<string, string> = {
   BREAK_START_EDIT: "休憩開始", BREAK_END_EDIT: "休憩終了",
   INTERRUPT_START_EDIT: "中断開始", INTERRUPT_END_EDIT: "中断終了",
   ADD_BREAK: "休憩追加", ADD_INTERRUPT: "中断追加",
+  ADD_BREAK_START: "休憩開始追加", ADD_BREAK_END: "休憩終了追加",
+  ADD_INTERRUPT_START: "中断開始追加", ADD_INTERRUPT_END: "中断終了追加",
 };
 
 const LEAVE_LABEL: Record<string, string> = {

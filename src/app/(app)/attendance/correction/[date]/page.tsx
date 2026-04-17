@@ -92,7 +92,17 @@ export default function CorrectionPage() {
     setSubmitting(true);
     try {
       const items = checkedTypes.map((pt) => ({
-        requestType: currentTimes[pt.type] ? pt.reqType : (pt.type.includes("BREAK") ? "ADD_BREAK" : pt.type.includes("INTERRUPT") ? "ADD_INTERRUPT" : pt.reqType),
+        requestType: currentTimes[pt.type]
+          ? pt.reqType
+          : pt.type === "BREAK_START"
+            ? "ADD_BREAK_START"
+            : pt.type === "BREAK_END"
+              ? "ADD_BREAK_END"
+              : pt.type === "INTERRUPT_START"
+                ? "ADD_INTERRUPT_START"
+                : pt.type === "INTERRUPT_END"
+                  ? "ADD_INTERRUPT_END"
+                  : pt.reqType,
         beforeValue: currentTimes[pt.type] ? (() => {
           const punch = punches.find((p) => p.type === pt.type);
           return punch ? punch.timestamp : null;

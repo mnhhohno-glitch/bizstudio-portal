@@ -748,8 +748,12 @@ enum ModReqType {
   BREAK_END_EDIT
   INTERRUPT_START_EDIT
   INTERRUPT_END_EDIT
-  ADD_BREAK           // 休憩追加（押し忘れ対応）
-  ADD_INTERRUPT       // 中断追加
+  ADD_BREAK           // 【非推奨】休憩追加（START/END区別なし）。新規は ADD_BREAK_START / ADD_BREAK_END を使う
+  ADD_INTERRUPT       // 【非推奨】中断追加（START/END区別なし）。新規は ADD_INTERRUPT_START / ADD_INTERRUPT_END を使う
+  ADD_BREAK_START     // 休憩開始追加
+  ADD_BREAK_END       // 休憩終了追加
+  ADD_INTERRUPT_START // 中断開始追加
+  ADD_INTERRUPT_END   // 中断終了追加
 }
 
 enum ApprovalStatus {

@@ -20,6 +20,8 @@ const MOD_LABEL: Record<string, string> = {
   BREAK_START_EDIT: "休憩開始修正", BREAK_END_EDIT: "休憩終了修正",
   INTERRUPT_START_EDIT: "中断開始修正", INTERRUPT_END_EDIT: "中断終了修正",
   ADD_BREAK: "休憩追加", ADD_INTERRUPT: "中断追加",
+  ADD_BREAK_START: "休憩開始追加", ADD_BREAK_END: "休憩終了追加",
+  ADD_INTERRUPT_START: "中断開始追加", ADD_INTERRUPT_END: "中断終了追加",
   PAID_FULL: "有給(全日)", PAID_HALF: "有給(半日)", OTHER: "その他休暇",
 };
 

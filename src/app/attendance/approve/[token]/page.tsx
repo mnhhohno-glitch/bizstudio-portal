@@ -9,6 +9,8 @@ const MOD_TYPE_LABEL: Record<string, string> = {
   BREAK_START_EDIT: "休憩開始の修正", BREAK_END_EDIT: "休憩終了の修正",
   INTERRUPT_START_EDIT: "中断開始の修正", INTERRUPT_END_EDIT: "中断終了の修正",
   ADD_BREAK: "休憩の追加", ADD_INTERRUPT: "中断の追加",
+  ADD_BREAK_START: "休憩開始の追加", ADD_BREAK_END: "休憩終了の追加",
+  ADD_INTERRUPT_START: "中断開始の追加", ADD_INTERRUPT_END: "中断終了の追加",
 };
 const LEAVE_LABEL: Record<string, string> = { PAID_FULL: "有給（全日）", PAID_HALF: "有給（半日）", OTHER: "その他休暇" };
 
