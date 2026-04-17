@@ -222,7 +222,7 @@ export default function AdvisorFloatingPanel({
         return;
       }
 
-      const batchSize = 5;
+      const batchSize = 1;
       const totalBatches = Math.ceil(totalFiles / batchSize);
       const queryStr = invalidOnlyMode ? "?mode=invalid-only" : "";
       const allSkippedFileIds: string[] = [];
@@ -265,6 +265,7 @@ export default function AdvisorFloatingPanel({
           toast.error(`バッチ${i + 1}の分析に失敗しました`);
           break;
         }
+        break;
       }
 
       const skipped = allSkippedFileIds.length;
