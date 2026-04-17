@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Toaster, toast } from "sonner";
 
 const MOD_TYPE_LABEL: Record<string, string> = {
@@ -88,6 +89,13 @@ export default function ApprovePage() {
     <div className="flex min-h-screen items-center justify-center bg-[#F9FAFB] p-4">
       <Toaster position="top-center" richColors />
       <div className="w-full max-w-md rounded-[8px] border border-[#E5E7EB] bg-white p-6 shadow-lg">
+        {isPending && (
+          <div className="mb-3">
+            <Link href="/attendance/admin/approvals" className="text-[13px] text-[#6B7280] hover:underline">
+              ← 承認待ち一覧に戻る
+            </Link>
+          </div>
+        )}
         <h1 className="mb-4 text-[18px] font-bold text-[#374151]">
           {data.type === "modification" ? "打刻修正申請" : "休暇申請"}
         </h1>
@@ -163,6 +171,19 @@ export default function ApprovePage() {
               <textarea value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} rows={2}
                 className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px]" placeholder="理由を入力..." />
             </div>
+          </div>
+        )}
+
+        {!isPending && (
+          <div className="mt-6 flex justify-center gap-3">
+            <Link href="/attendance/admin/approvals"
+              className="rounded-[8px] bg-[#2563EB] px-4 py-2 text-[14px] font-medium text-white hover:bg-[#1D4ED8]">
+              承認待ち一覧へ
+            </Link>
+            <Link href="/"
+              className="rounded-[8px] bg-[#E5E7EB] px-4 py-2 text-[14px] font-medium text-[#374151] hover:bg-[#D1D5DB]">
+              ダッシュボードへ
+            </Link>
           </div>
         )}
       </div>
