@@ -308,8 +308,23 @@ export async function POST(
       console.error("[SendToJobTool] Step 5.5 failed:", e);
     }
 
-    // 6. Skip extraction — user starts it manually from kyuujin-pdf-tool after reviewing memos
-    console.log("[SendToJobTool] Step 6: Skipped (extraction will be started manually by user)");
+    // 6. Start extraction so jobs appear in the job introduction tab
+    console.log("[SendToJobTool] Step 6: Starting extraction...");
+    try {
+      const extractRes = await fetchWithTimeout(
+        `${KYUUJIN_PDF_TOOL_URL}/api/extraction/projects/${projectId}/extract?processing_unit_id=${processingUnitId}`,
+        { method: "POST" },
+        BATCH_UPLOAD_TIMEOUT_MS
+      );
+      if (extractRes.ok) {
+        const extractData = await extractRes.json();
+        console.log("[SendToJobTool] Step 6 complete:", extractData);
+      } else {
+        console.warn("[SendToJobTool] Step 6: Extraction request failed:", extractRes.status);
+      }
+    } catch (e) {
+      console.warn("[SendToJobTool] Step 6: Extraction failed (non-blocking):", e);
+    }
 
     // Circus送信ではメモ帳インポート画面(-4)へ遷移させる。
     // kyuujin-pdf-tool が返す record_key はメモ編集画面(-3)を指すため、
