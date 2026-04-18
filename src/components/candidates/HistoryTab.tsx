@@ -1246,6 +1246,17 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
   const [responseFilter, setResponseFilter] = useState<"ALL" | "WANT_TO_APPLY" | "INTERESTED" | "NONE">("ALL");
+  const [jobSortField, setJobSortField] = useState<"wish" | "pass" | "overall" | null>(null);
+  const [jobSortDir, setJobSortDir] = useState<"asc" | "desc">("asc");
+  const handleJobSort = (field: "wish" | "pass" | "overall") => {
+    if (jobSortField === field) {
+      if (jobSortDir === "asc") { setJobSortDir("desc"); }
+      else { setJobSortField(null); setJobSortDir("asc"); }
+    } else {
+      setJobSortField(field);
+      setJobSortDir("asc");
+    }
+  };
 
   // Entries state
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -1509,12 +1520,26 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
         ? result.filter((j) => !j.candidate_response)
         : result.filter((j) => j.candidate_response === responseFilter);
     }
-    // 応募したい→気になる→未回答の順にソート
-    return [...result].sort((a, b) => {
-      const ra = a.candidate_response ? (responseOrder[a.candidate_response] ?? 2) : 2;
-      const rb = b.candidate_response ? (responseOrder[b.candidate_response] ?? 2) : 2;
-      return ra - rb;
-    });
+    const sorted = [...result];
+    if (jobSortField) {
+      const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+      const dir = jobSortDir === "asc" ? 1 : -1;
+      const key = jobSortField === "wish" ? "wish" : jobSortField === "pass" ? "pass" : "overall";
+      sorted.sort((a, b) => {
+        const axA = findBookmarkRating(a.company_name);
+        const axB = findBookmarkRating(b.company_name);
+        const va = axA ? (ratingOrder[axA[key]] ?? 4) : 4;
+        const vb = axB ? (ratingOrder[axB[key]] ?? 4) : 4;
+        return (va - vb) * dir;
+      });
+    } else {
+      sorted.sort((a, b) => {
+        const ra = a.candidate_response ? (responseOrder[a.candidate_response] ?? 2) : 2;
+        const rb = b.candidate_response ? (responseOrder[b.candidate_response] ?? 2) : 2;
+        return ra - rb;
+      });
+    }
+    return sorted;
   })();
   const filteredEntries = entrySearch
     ? entries.filter((e) => normalize(e.companyName).includes(normalize(entrySearch)))
@@ -1652,6 +1677,23 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               className="overflow-y-auto"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
+              {/* 列ヘッダー */}
+              <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-500 font-medium border-b mb-2">
+                <span className="flex-1 min-w-0">会社名</span>
+                <span onClick={() => handleJobSort("wish")}
+                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "wish" ? "text-[#2563EB]" : ""}`}>
+                  希望<SortIcon field="wish" current={jobSortField} dir={jobSortDir} />
+                </span>
+                <span onClick={() => handleJobSort("pass")}
+                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "pass" ? "text-[#2563EB]" : ""}`}>
+                  通過<SortIcon field="pass" current={jobSortField} dir={jobSortDir} />
+                </span>
+                <span onClick={() => handleJobSort("overall")}
+                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "overall" ? "text-[#2563EB]" : ""}`}>
+                  総合<SortIcon field="overall" current={jobSortField} dir={jobSortDir} />
+                </span>
+                <span className="shrink-0 ml-auto text-xs">DB</span>
+              </div>
               <div className="grid grid-cols-1 gap-3">
                 {jobs.map((job) => {
                   const isEntered = enteredJobIds.has(job.id);
@@ -1695,16 +1737,17 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                         )}
                         {(() => {
                           const axis = findBookmarkRating(job.company_name);
-                          if (!axis) return null;
-                          const b = (v: string) => {
-                            if (!v || v === "—") return null;
+                          const b = (v: string | undefined) => {
+                            if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
                             const s = RATING_STYLES[v];
-                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : null;
+                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
                           };
                           return (
-                            <span className="shrink-0 flex items-center gap-0.5">
-                              {b(axis.wish)}{b(axis.pass)}{b(axis.overall)}
-                            </span>
+                            <>
+                              <span className="w-[40px] shrink-0 text-center">{b(axis?.wish)}</span>
+                              <span className="w-[40px] shrink-0 text-center">{b(axis?.pass)}</span>
+                              <span className="w-[40px] shrink-0 text-center">{b(axis?.overall)}</span>
+                            </>
                           );
                         })()}
                         <span className="shrink-0 ml-auto text-xs text-gray-400">
