@@ -16,13 +16,21 @@ const CANDIDATE_HEADER_RE = /◆\s*おすすめポイント（本人向け）\s*
 const CA_HEADER_RE = /◆\s*選考分析（CA向け）\s*/;
 const RATING_LINE_RE = /■\s*(本人希望|通過率|総合)[：:]\s*[ABCD]\s*/g;
 
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/\*\*/g, "")
+    .replace(/^###?\s+/gm, "")
+    .replace(/^-{3,}\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /**
  * マイページに送信する本人向けコメントを抽出する。
  *
- * - 新フォーマット（2セクション）: 「おすすめポイント（本人向け）」セクションの本文のみ返す
- *   （ヘッダー行自体は含めない）
+ * - 新フォーマット（2セクション）: ヘッダー（企業名+タイトル）+「おすすめポイント（本人向け）」本文を返す
+ *   （評価行・CA向けセクション・Markdown装飾は除去）
  * - 旧フォーマット: 従来通り「懸念」「確認事項」セクションを除去した内容を返す
- * - 評価行（■ 本人希望 等）は常に除去
  */
 export function extractCandidateFacingComment(
   comment: string | null | undefined
@@ -33,23 +41,25 @@ export function extractCandidateFacingComment(
   const cmCandidate = text.match(CANDIDATE_HEADER_RE);
 
   if (cmCandidate && cmCandidate.index !== undefined) {
-    // 新フォーマット
+    const header = text.substring(0, cmCandidate.index)
+      .replace(RATING_LINE_RE, "")
+      .trim();
     const start = cmCandidate.index + cmCandidate[0].length;
     const rest = text.substring(start);
     const cmCa = rest.match(CA_HEADER_RE);
     const end = cmCa && cmCa.index !== undefined ? cmCa.index : rest.length;
-    return rest
-      .substring(0, end)
-      .replace(RATING_LINE_RE, "")
-      .trim();
+    const body = rest.substring(0, end).trim();
+    const parts = [header, body].filter(Boolean).join("\n\n");
+    return stripMarkdown(parts);
   }
 
   // 旧フォーマットのフォールバック
-  return text
-    .replace(RATING_LINE_RE, "")
-    .replace(/◆\s*懸念[^◆]*/g, "")
-    .replace(/◆\s*確認事項[^◆]*/g, "")
-    .trim();
+  return stripMarkdown(
+    text
+      .replace(RATING_LINE_RE, "")
+      .replace(/◆\s*懸念[^◆]*/g, "")
+      .replace(/◆\s*確認事項[^◆]*/g, "")
+  );
 }
 
 /**
