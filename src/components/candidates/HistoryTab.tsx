@@ -1256,10 +1256,44 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [entrySearch, setEntrySearch] = useState("");
 
+  // Bookmark ratings for cross-referencing with jobs
+  const [bookmarkRatings, setBookmarkRatings] = useState<Map<string, { wish: string; pass: string; overall: string }>>(new Map());
+
   // Derive entered external job ids for cross-referencing
   const enteredJobIds = new Set(entries.map((e) => e.externalJobId));
 
   /* ---------- Fetch ---------- */
+  const fetchBookmarkRatings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = new Map<string, { wish: string; pass: string; overall: string }>();
+      for (const f of data.files || []) {
+        const axis = parse3AxisRatings(f.aiAnalysisComment);
+        if (!axis) continue;
+        const key = normalize(
+          (f.fileName as string)
+            .replace(/\.pdf$/i, "")
+            .replace(/^求人票[_]?/, "")
+            .replace(/_\d{10,}$/, "")
+            .replace(/株式会社|有限会社|合同会社/g, "")
+            .trim()
+        );
+        if (key) map.set(key, axis);
+      }
+      setBookmarkRatings(map);
+    } catch { /* silent */ }
+  }, [candidateId]);
+
+  const findBookmarkRating = useCallback((companyName: string) => {
+    const cn = normalize(companyName.replace(/株式会社|有限会社|合同会社/g, "").trim());
+    for (const [key, axis] of bookmarkRatings) {
+      if (key.includes(cn) || cn.includes(key)) return axis;
+    }
+    return null;
+  }, [bookmarkRatings]);
+
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
     setJobsError(null);
@@ -1296,7 +1330,14 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   useEffect(() => {
     fetchJobs();
     fetchEntries();
-  }, [fetchJobs, fetchEntries]);
+    fetchBookmarkRatings();
+  }, [fetchJobs, fetchEntries, fetchBookmarkRatings]);
+
+  useEffect(() => {
+    const handler = () => fetchBookmarkRatings();
+    window.addEventListener("bookmark-ratings-updated", handler);
+    return () => window.removeEventListener("bookmark-ratings-updated", handler);
+  }, [fetchBookmarkRatings]);
 
   /* ---------- Handlers ---------- */
   const toggleJobSelection = (jobId: number) => {
@@ -1652,6 +1693,20 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                             {RESPONSE_BADGE[job.candidate_response].label}
                           </span>
                         )}
+                        {(() => {
+                          const axis = findBookmarkRating(job.company_name);
+                          if (!axis) return null;
+                          const b = (v: string) => {
+                            if (!v || v === "—") return null;
+                            const s = RATING_STYLES[v];
+                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : null;
+                          };
+                          return (
+                            <span className="shrink-0 flex items-center gap-0.5">
+                              {b(axis.wish)}{b(axis.pass)}{b(axis.overall)}
+                            </span>
+                          );
+                        })()}
                         <span className="shrink-0 ml-auto text-xs text-gray-400">
                           {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
                         </span>
