@@ -1662,102 +1662,80 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
               {/* 列ヘッダー */}
-              <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-500 font-medium border-b mb-2">
+              <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+                <span className="w-4 shrink-0" />
                 <span className="flex-1 min-w-0">会社名</span>
                 <span onClick={() => handleJobSort("wish")}
-                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "wish" ? "text-[#2563EB]" : ""}`}>
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "wish" ? "text-[#2563EB]" : ""}`}>
                   希望<SortIcon field="wish" current={jobSortField} dir={jobSortDir} />
                 </span>
                 <span onClick={() => handleJobSort("pass")}
-                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "pass" ? "text-[#2563EB]" : ""}`}>
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "pass" ? "text-[#2563EB]" : ""}`}>
                   通過<SortIcon field="pass" current={jobSortField} dir={jobSortDir} />
                 </span>
                 <span onClick={() => handleJobSort("overall")}
-                  className={`w-[40px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center justify-center gap-0.5 ${jobSortField === "overall" ? "text-[#2563EB]" : ""}`}>
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "overall" ? "text-[#2563EB]" : ""}`}>
                   総合<SortIcon field="overall" current={jobSortField} dir={jobSortDir} />
                 </span>
-                <span className="shrink-0 ml-auto text-xs">DB</span>
+                <span className="w-[72px] shrink-0">DB</span>
+                <span className="w-[52px] shrink-0">紹介日</span>
+                <span className="w-[28px] shrink-0" />
               </div>
-              <div className="grid grid-cols-1 gap-3">
+              <div className="divide-y divide-gray-100">
                 {jobs.map((job) => {
                   const isEntered = enteredJobIds.has(job.id);
                   const isSelected = selectedJobIds.has(job.id);
+                  const axis = findBookmarkRating(job.company_name);
+                  const badge = (v: string | undefined) => {
+                    if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
+                    const s = RATING_STYLES[v];
+                    return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
+                  };
 
                   return (
                     <div
                       key={job.id}
-                      className={`rounded-lg border p-3 transition-shadow ${
-                        isSelected
-                          ? "border-[#2563EB] bg-blue-50/30"
-                          : "border-gray-200 hover:shadow-sm"
+                      className={`flex items-center gap-2 px-4 py-2 hover:bg-gray-50 ${
+                        isSelected ? "bg-blue-50/40" : ""
                       }`}
                     >
-                      {/* 1行目: チェック + 会社名 + バッジ + DB/タイプ */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        {isEntered ? (
-                          <span className="shrink-0 text-xs text-gray-400 bg-gray-100 rounded px-2 py-0.5">
-                            済
-                          </span>
-                        ) : (
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleJobSelection(job.id)}
-                            className="shrink-0 w-4 h-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-                          />
-                        )}
-                        <span className="font-semibold text-sm text-[#374151] truncate">
-                          {job.company_name}
-                        </span>
-                        {job.job_category && (
-                          <span className="shrink-0 text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5">
-                            {job.job_category}
-                          </span>
-                        )}
-                        {job.candidate_response && RESPONSE_BADGE[job.candidate_response] && (
-                          <span className={`shrink-0 text-xs rounded px-2 py-0.5 font-medium ${RESPONSE_BADGE[job.candidate_response].cls}`}>
-                            {RESPONSE_BADGE[job.candidate_response].label}
-                          </span>
-                        )}
-                        {(() => {
-                          const axis = findBookmarkRating(job.company_name);
-                          const b = (v: string | undefined) => {
-                            if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
-                            const s = RATING_STYLES[v];
-                            return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
-                          };
-                          return (
-                            <>
-                              <span className="w-[40px] shrink-0 text-center">{b(axis?.wish)}</span>
-                              <span className="w-[40px] shrink-0 text-center">{b(axis?.pass)}</span>
-                              <span className="w-[40px] shrink-0 text-center">{b(axis?.overall)}</span>
-                            </>
-                          );
-                        })()}
-                        <span className="shrink-0 ml-auto text-xs text-gray-400">
-                          {[job.job_db, job.job_type].filter(Boolean).join(" / ")}
-                        </span>
-                        {!isEntered && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openDeleteModal([job.id]); }}
-                            className="shrink-0 ml-1 p-1 text-gray-400 hover:text-red-500 transition-colors rounded"
-                            title="紹介リストから削除"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        )}
+                      {isEntered ? (
+                        <span className="w-4 shrink-0 text-xs text-gray-400 text-center">済</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleJobSelection(job.id)}
+                          className="shrink-0 w-4 h-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[13px] font-medium text-[#374151] truncate">{job.company_name}</span>
+                          {job.candidate_response && RESPONSE_BADGE[job.candidate_response] && (
+                            <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${RESPONSE_BADGE[job.candidate_response].cls}`}>
+                              {RESPONSE_BADGE[job.candidate_response].label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[12px] text-gray-500 truncate">{job.job_title}</p>
                       </div>
-                      {/* 2行目: 求人タイトル + 紹介日 */}
-                      <div className="flex items-start justify-between gap-3 mt-1 ml-6">
-                        <p className="text-sm text-gray-700 line-clamp-2 min-w-0">
-                          {job.job_title}
-                        </p>
-                        <span className="shrink-0 text-xs text-gray-400 pt-0.5">
-                          紹介日: {formatDateJST(job.created_at)}
-                        </span>
-                      </div>
+                      <span className="w-[56px] shrink-0 text-center">{badge(axis?.wish)}</span>
+                      <span className="w-[56px] shrink-0 text-center">{badge(axis?.pass)}</span>
+                      <span className="w-[56px] shrink-0 text-center">{badge(axis?.overall)}</span>
+                      <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{job.job_db || "—"}</span>
+                      <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{formatDateJST(job.created_at).slice(5)}</span>
+                      {!isEntered ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openDeleteModal([job.id]); }}
+                          className="w-[28px] shrink-0 p-1 text-gray-400 hover:text-red-500 transition-colors rounded"
+                          title="紹介リストから削除"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      ) : <span className="w-[28px] shrink-0" />}
                     </div>
                   );
                 })}
