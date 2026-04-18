@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
-import { splitAnalysisComment } from "@/lib/comment-split";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -1136,31 +1135,16 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                   rows={16}
                   className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
                 />
-              ) : (() => {
-                const split = splitAnalysisComment(selectedAnalysis.comment);
-                const stripMd = (s: string) => s
-                  .replace(/\*\*/g, "")
-                  .replace(/^###?\s+/gm, "")
-                  .replace(/^-{3,}\s*$/gm, "")
-                  .replace(/^■\s*(本人希望|通過率|総合)[：:]\s*[ABCD].*$/gm, "")
-                  .replace(/\n{3,}/g, "\n\n")
-                  .trim();
-                if (!split.hasSections) {
-                  return (
-                    <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                      {stripMd(selectedAnalysis.comment)}
-                    </div>
-                  );
-                }
-                const display = [split.header, split.candidateFacing]
-                  .filter(Boolean)
-                  .join("\n\n");
-                return (
-                  <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                    {stripMd(display)}
-                  </div>
-                );
-              })()}
+              ) : (
+                <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedAnalysis.comment
+                    .replace(/\*\*/g, "")
+                    .replace(/^###?\s+/gm, "")
+                    .replace(/^-{3,}\s*$/gm, "")
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim()}
+                </div>
+              )}
             </div>
             <div className="p-3 border-t flex justify-end gap-2 shrink-0">
               {editingComment ? (
