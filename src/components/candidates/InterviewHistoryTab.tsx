@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast, Toaster } from "sonner";
+import InterviewForm from "@/components/candidates/InterviewForm";
 
 type InterviewRecord = {
   id: string;
@@ -198,18 +199,11 @@ export default function InterviewHistoryTab({
             {creating ? "作成中..." : "+ 新規面談"}
           </button>
 
-          {/* Right side action buttons */}
           {selectedInterview && (
-            <div className="ml-auto flex items-center gap-2">
-              <button className="px-3 py-1.5 rounded-md text-[12px] font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors">
-                PDF表示
-              </button>
-              <button className="px-3 py-1.5 rounded-md text-[12px] font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors">
-                キャンセル
-              </button>
-              <button className="px-3 py-1.5 rounded-md text-[12px] font-medium bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-colors">
-                保存
-              </button>
+            <div className="ml-auto flex items-center gap-1 text-[11px] text-gray-400">
+              <span>{selectedInterview.interviewType || ""}</span>
+              <span className="text-gray-300">|</span>
+              <span>{selectedInterview.interviewer?.name || ""}</span>
             </div>
           )}
         </div>
@@ -217,24 +211,12 @@ export default function InterviewHistoryTab({
 
       {/* Interview form area */}
       {selectedInterview ? (
-        <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 flex items-center justify-center min-h-[400px]">
-          <div className="text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-lg p-10">
-            <p className="text-lg mb-2">📋 面談履歴入力フォーム</p>
-            <p className="text-sm">
-              （面談 {selectedInterview.interviewCount}回目 /{" "}
-              {new Date(selectedInterview.interviewDate).toLocaleDateString("ja-JP")}）
-            </p>
-            <p className="text-xs mt-2 text-gray-300">Phase 5b で実装予定</p>
-            <div className="mt-4 text-xs text-gray-300 space-y-1">
-              <p>ステータス: {selectedInterview.status === "complete" ? "完了" : "下書き"}</p>
-              <p>面談者: {selectedInterview.interviewer?.name || "未設定"}</p>
-              <p>種別: {selectedInterview.interviewType || "未設定"}</p>
-              {selectedInterview.rating?.overallRank && (
-                <p>総合ランク: {selectedInterview.rating.overallRank}</p>
-              )}
-            </div>
-          </div>
-        </div>
+        <InterviewForm
+          interviewId={selectedInterview.id}
+          candidateId={candidateId}
+          currentUser={currentUser}
+          onSaved={() => fetchInterviews()}
+        />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
           <div className="text-center text-gray-400">
