@@ -25,6 +25,7 @@ export async function GET() {
       employeeNo: emp.employeeNumber,
       name: emp.name,
       status: emp.status,
+      userId: emp.userId,
     }));
 
     return NextResponse.json(response, {
