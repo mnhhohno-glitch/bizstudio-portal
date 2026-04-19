@@ -9,10 +9,13 @@ import DocumentsTab from "@/components/candidates/DocumentsTab";
 import AdvisorFloatingPanel from "@/components/candidates/AdvisorFloatingPanel";
 import HistoryTab from "@/components/candidates/HistoryTab";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
+import CandidateHeader from "@/components/candidates/CandidateHeader";
+import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
+import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import {
   SUPPORT_SUB_STATUS_MAP,
-  isSubStatusFixed,
+  isSubStatusFixed as isSubStatusFixedFn,
 } from "@/lib/support-status-constants";
 
 /* ---------- Types ---------- */
@@ -93,6 +96,7 @@ type SessionUser = {
 
 /* ---------- Constants ---------- */
 const TABS = [
+  { key: "interview", label: "面談履歴" },
   { key: "history", label: "紹介履歴" },
   { key: "documents", label: "書類" },
   { key: "tasks", label: "タスク" },
@@ -1297,7 +1301,7 @@ export default function CandidateDetailPage() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "history";
+  const activeTab = (searchParams.get("tab") as TabKey) || "interview";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -1312,7 +1316,6 @@ export default function CandidateDetailPage() {
   const [error, setError] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
-  const [urlCopied, setUrlCopied] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleMethod, setScheduleMethod] = useState("");
   const [scheduleGenerating, setScheduleGenerating] = useState(false);
@@ -1327,7 +1330,6 @@ export default function CandidateDetailPage() {
   const [mypageLoading, setMypageLoading] = useState(true);
   const [mypageModalOpen, setMypageModalOpen] = useState(false);
   const [mypageCopied, setMypageCopied] = useState(false);
-  const [birthdayCopied, setBirthdayCopied] = useState(false);
 
   const handleOpenJobOutput = async () => {
     if (jobOutputLoading) return;
@@ -1464,8 +1466,10 @@ export default function CandidateDetailPage() {
 
   return (
     <div>
+      <Toaster position="bottom-center" richColors />
+
       {/* パンくず + 検索 */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 mb-3">
         <Link
           href="/admin/master"
           className="text-[13px] text-[#2563EB] hover:underline"
@@ -1475,213 +1479,53 @@ export default function CandidateDetailPage() {
         <CandidateQuickSearch />
       </div>
 
-      {/* ヘッダーカード */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mt-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-[#374151]">
-              {candidate.name}
-            </h1>
-            {candidate.nameKana && (
-              <p className="text-sm text-gray-500 mt-1">
-                {candidate.nameKana}
-              </p>
-            )}
-          </div>
-          <span className="text-sm text-gray-500">ID: {candidate.candidateNumber}</span>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-4 mt-4 text-sm text-gray-600">
-          <span>
-            ✉{" "}
-            {candidate.email || (
-              <span className="text-gray-400">未登録</span>
-            )}
-          </span>
-          {candidate.phone && (
-            <span
-              className="cursor-pointer hover:text-[#2563EB] transition-colors"
-              onClick={() => navigator.clipboard.writeText(candidate.phone!)}
-              title="クリックでコピー"
-            >
-              📞 {candidate.phone}
-            </span>
-          )}
-          {candidate.address && (
-            <span>📍 {candidate.address}</span>
-          )}
-          <span>
-            👤 担当CA:{" "}
-            {candidate.employee?.name || (
-              <span className="text-gray-400">未設定</span>
-            )}
-          </span>
-          <span>性別: {genderLabel(candidate.gender)}</span>
-          {candidate.birthday && (
-            <span className="inline-flex flex-col items-start">
-              {!birthdayCopied && (
-                <span className="text-[10px] text-gray-400 leading-tight">📋 クリックでコピー</span>
-              )}
-              <span
-                className="cursor-pointer hover:text-[#2563EB] transition-colors"
-                onClick={() => {
-                  const d = new Date(candidate.birthday!);
-                  const yyyymmdd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-                  navigator.clipboard.writeText(yyyymmdd);
-                  setBirthdayCopied(true);
-                  setTimeout(() => setBirthdayCopied(false), 2000);
-                }}
-              >
-                {birthdayCopied
-                  ? "✅ コピーしました"
-                  : `🎂 ${new Date(candidate.birthday).getFullYear()}年${new Date(candidate.birthday).getMonth() + 1}月${new Date(candidate.birthday).getDate()}日`}
-              </span>
-            </span>
-          )}
-          <span>登録日: {formatDate(candidate.createdAt)}</span>
-        </div>
-
-        <div className="flex gap-3 mt-4">
-          {candidate.supportStatus === "ENDED" ? (
-            <div className="flex items-start gap-2">
-              <button
-                aria-label="支援状況"
-                onClick={() => setShowEndModal(true)}
-                className="rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200"
-              >
-                支援終了{candidate.supportEndReason ? `（${REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason}）` : ""}
-              </button>
-              {candidate.supportEndComment && (
-                <div className="max-w-xs text-[12px] text-gray-500 bg-gray-50 rounded-md px-3 py-2 border border-gray-200 whitespace-pre-wrap line-clamp-3" title={candidate.supportEndComment}>
-                  {candidate.supportEndComment}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <select
-                aria-label="支援状況"
-                value={candidate.supportStatus || "BEFORE"}
-                onChange={async (e) => {
-                  const val = e.target.value;
-                  if (val === "ENDED") {
-                    setShowEndModal(true);
-                    return;
-                  }
-                  await fetch(`/api/candidates/${candidate.id}/update`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ supportStatus: val }),
-                  });
-                  fetchCandidate();
-                }}
-                className={`rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer min-w-[120px] ${
-                  candidate.supportStatus === "ACTIVE" ? "bg-blue-100 text-blue-700 border-blue-200" :
-                  candidate.supportStatus === "WAITING" ? "bg-yellow-100 text-yellow-700 border-yellow-200" :
-                  "bg-gray-100 text-gray-600 border-gray-300"
-                }`}
-              >
-                <option value="BEFORE">支援前</option>
-                <option value="ACTIVE">支援中</option>
-                <option value="WAITING">待機</option>
-                <option value="ENDED">支援終了</option>
-              </select>
-              {/* 中項目 */}
-              {(() => {
-                const fixed = isSubStatusFixed(candidate.supportStatus);
-                const options = SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || [];
-                if (fixed || options.length <= 1) {
-                  return (
-                    <span aria-label="ステータス" className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium border bg-gray-50 text-gray-700 border-gray-200 min-w-[120px]">
-                      {candidate.supportSubStatus || options[0] || "-"}
-                    </span>
-                  );
-                }
-                return (
-                  <select
-                    aria-label="ステータス"
-                    value={candidate.supportSubStatus || ""}
-                    onChange={async (e) => {
-                      const val = e.target.value;
-                      await fetch(`/api/candidates/${candidate.id}/update`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ supportSubStatus: val }),
-                      });
-                      fetchCandidate();
-                    }}
-                    className="rounded-lg px-4 py-2 text-sm font-medium border cursor-pointer bg-white text-gray-700 border-gray-300 min-w-[120px]"
-                  >
-                    {!candidate.supportSubStatus && (
-                      <option value="" disabled>-</option>
-                    )}
-                    {options.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                );
-              })()}
-            </div>
-          )}
-          <button
-            onClick={() => setEditModalOpen(true)}
-            className="bg-white border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            ✏️ 基本情報編集
-          </button>
-          {candidate.guideEntries.find((e) => e.guideType === "INTERVIEW") && (
-            <button
-              onClick={() => {
-                const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
-                if (guide) {
-                  const url = `${window.location.origin}/g/${guide.token}`;
-                  navigator.clipboard.writeText(url);
-                  setUrlCopied(true);
-                  setTimeout(() => setUrlCopied(false), 2000);
-                }
-              }}
-              className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              {urlCopied ? "✅ コピーしました" : "🔗 ガイドURL"}
-            </button>
-          )}
-          <button
-            onClick={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
-            className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            📅 日程調整URL
-          </button>
-          <button
-            onClick={handleOpenJobOutput}
-            disabled={jobOutputLoading}
-            className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            {jobOutputLoading ? "読み込み中..." : "📄 求人出力"}
-          </button>
-          {mypageLoading ? (
-            <span className="inline-block border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 text-sm font-medium text-gray-400 animate-pulse">
-              📱 求人マイページ
-            </span>
-          ) : (
-            <button
-              onClick={() => {
-                setMypageModalOpen(true);
-                // バックグラウンドでCAコメント同期（失敗しても無視）
-                fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
-                  .then((r) => r.json())
-                  .then((r) => console.log("[SyncCaComments]", r))
-                  .catch(() => {});
-              }}
-              className="border border-gray-300 bg-white text-gray-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              📱 求人マイページ
-            </button>
-          )}
-        </div>
-      </div>
+      {/* スティッキーヘッダ */}
+      <CandidateHeader
+        candidate={candidate}
+        onStatusChange={async (val) => {
+          await fetch(`/api/candidates/${candidate.id}/update`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supportStatus: val }),
+          });
+          fetchCandidate();
+        }}
+        onSubStatusChange={async (val) => {
+          await fetch(`/api/candidates/${candidate.id}/update`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supportSubStatus: val }),
+          });
+          fetchCandidate();
+        }}
+        onEditBasicInfo={() => setEditModalOpen(true)}
+        onGuideUrlCopy={() => {
+          const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
+          if (guide) {
+            const url = `${window.location.origin}/g/${guide.token}`;
+            navigator.clipboard.writeText(url);
+          }
+        }}
+        onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
+        onJobOutput={handleOpenJobOutput}
+        onMypageOpen={() => {
+          setMypageModalOpen(true);
+          fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
+            .then((r) => r.json())
+            .then((r) => console.log("[SyncCaComments]", r))
+            .catch(() => {});
+        }}
+        hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
+        mypageLoading={mypageLoading}
+        jobOutputLoading={jobOutputLoading}
+        supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
+        onSupportEndClick={() => setShowEndModal(true)}
+        subStatusOptions={SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || []}
+        isSubStatusFixed={isSubStatusFixedFn(candidate.supportStatus)}
+      />
 
       {/* タブバー */}
-      <div className="flex border-b border-gray-200 mt-6">
+      <div className="flex border-b border-gray-200 mt-4">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -1699,6 +1543,12 @@ export default function CandidateDetailPage() {
 
       {/* タブコンテンツ */}
       <div className="mt-6">
+        {activeTab === "interview" && (
+          <InterviewHistoryTab
+            candidateId={candidateId}
+            currentUser={currentUser}
+          />
+        )}
         {activeTab === "documents" && (
           <DocumentsTab candidateId={candidateId} />
         )}
