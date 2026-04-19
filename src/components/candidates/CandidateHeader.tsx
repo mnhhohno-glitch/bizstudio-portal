@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 type Candidate = {
@@ -126,7 +126,11 @@ export default function CandidateHeader({
   isSubStatusFixed,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
-  const age = calcAge(candidate.birthday);
+  const [age, setAge] = useState<number | null>(null);
+
+  useEffect(() => {
+    setAge(calcAge(candidate.birthday));
+  }, [candidate.birthday]);
 
   const handleGuideUrlCopy = () => {
     onGuideUrlCopy();

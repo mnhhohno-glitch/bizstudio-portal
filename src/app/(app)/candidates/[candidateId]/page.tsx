@@ -333,8 +333,11 @@ function InterviewTab({
     (e) => e.guideType === "INTERVIEW"
   );
   const data = (guideData || {}) as Record<string, unknown>;
-  const appUrl =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const [appUrl, setAppUrl] = useState("");
+
+  useEffect(() => {
+    setAppUrl(window.location.origin);
+  }, []);
 
   const worksheetFields = [
     { key: "worksheet_q1", label: "① なぜ転職するのか" },
