@@ -1318,6 +1318,27 @@ export default function CandidateDetailPage() {
 }
 
 function CandidateDetailPageInner() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-4 border-[#2563EB] border-t-transparent rounded-full mx-auto" />
+          <p className="mt-3 text-[14px] text-gray-500">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <CandidateDetailPageBody />;
+}
+
+function CandidateDetailPageBody() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
