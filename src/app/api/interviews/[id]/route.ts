@@ -15,6 +15,8 @@ export async function GET(
     include: {
       detail: true,
       rating: true,
+      memos: { orderBy: { date: "desc" } },
+      attachments: { orderBy: { uploadedAt: "desc" } },
       candidate: { select: { id: true, name: true, candidateNumber: true } },
       interviewer: { select: { id: true, name: true } },
       createdBy: { select: { id: true, name: true } },
@@ -48,6 +50,13 @@ export async function PATCH(
     recordFields.interviewDate = new Date(recordFields.interviewDate);
   }
 
+  if (recordFields.status === "complete") {
+    recordFields.lastSavedAt = new Date();
+  }
+
+  // isLatest は自動管理のため手動変更を除外
+  delete recordFields.isLatest;
+
   const record = await prisma.interviewRecord.update({
     where: { id },
     data: {
@@ -62,6 +71,8 @@ export async function PATCH(
     include: {
       detail: true,
       rating: true,
+      memos: { orderBy: { date: "desc" } },
+      attachments: { orderBy: { uploadedAt: "desc" } },
       candidate: { select: { id: true, name: true, candidateNumber: true } },
       interviewer: { select: { id: true, name: true } },
     },
@@ -78,6 +89,22 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { id } = await params;
-  await prisma.interviewRecord.delete({ where: { id } });
+  const deleted = await prisma.interviewRecord.delete({
+    where: { id },
+    select: { candidateId: true },
+  });
+
+  const latestRemaining = await prisma.interviewRecord.findFirst({
+    where: { candidateId: deleted.candidateId },
+    orderBy: { interviewDate: "desc" },
+    select: { id: true },
+  });
+  if (latestRemaining) {
+    await prisma.interviewRecord.update({
+      where: { id: latestRemaining.id },
+      data: { isLatest: true },
+    });
+  }
+
   return NextResponse.json({ success: true });
 }

@@ -60,10 +60,27 @@ export async function POST(req: Request) {
       resumePdfFileId: resumePdfFileId || null,
       summaryText: summaryText || null,
       createdByUserId: employee.id,
+      status: body.status ?? "draft",
+      isLatest: true,
       detail: detail ? { create: detail } : undefined,
       rating: rating ? { create: rating } : undefined,
     },
-    include: { detail: true, rating: true, candidate: { select: { name: true, candidateNumber: true } } },
+    include: {
+      detail: true,
+      rating: true,
+      memos: true,
+      attachments: true,
+      candidate: { select: { id: true, name: true, candidateNumber: true } },
+    },
+  });
+
+  await prisma.interviewRecord.updateMany({
+    where: {
+      candidateId,
+      id: { not: record.id },
+      isLatest: true,
+    },
+    data: { isLatest: false },
   });
 
   return NextResponse.json({ record });

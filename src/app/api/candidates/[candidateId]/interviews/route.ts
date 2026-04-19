@@ -16,6 +16,7 @@ export async function GET(
     include: {
       interviewer: { select: { name: true } },
       rating: { select: { overallRank: true, grandTotal: true } },
+      _count: { select: { memos: true, attachments: true } },
     },
   });
 
