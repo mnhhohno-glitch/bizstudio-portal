@@ -54,6 +54,7 @@ export default function InterviewHistoryTab({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null);
 
   const fetchInterviews = useCallback(async () => {
     try {
@@ -79,8 +80,20 @@ export default function InterviewHistoryTab({
     fetchInterviews();
   }, [fetchInterviews]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((data: { id: string; userId: string | null }[]) => {
+        if (!Array.isArray(data)) return;
+        const match = data.find((e) => e.userId === currentUser.id);
+        if (match) setCurrentEmployeeId(match.id);
+      })
+      .catch(() => {});
+  }, [currentUser]);
+
   const handleCreateInterview = async () => {
-    if (creating || !currentUser) return;
+    if (creating || !currentUser || !currentEmployeeId) return;
     setCreating(true);
     try {
       const now = new Date();
@@ -94,7 +107,7 @@ export default function InterviewHistoryTab({
           startTime: timeStr,
           endTime: timeStr,
           interviewTool: "電話",
-          interviewerUserId: currentUser.id,
+          interviewerUserId: currentEmployeeId,
           interviewType: interviews.length === 0 ? "初回面談" : "フォロー面談",
           status: "draft",
         }),

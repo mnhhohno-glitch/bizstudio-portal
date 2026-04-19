@@ -15,6 +15,7 @@ export async function GET() {
         employeeNumber: true,
         name: true,
         status: true,
+        userId: true,
       },
     });
 
