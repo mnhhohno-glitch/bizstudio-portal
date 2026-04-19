@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CandidateQuickSearch from "@/components/candidates/CandidateQuickSearch";
@@ -1301,6 +1301,23 @@ function PlaceholderTab({
 /*  Main Page Component                                                 */
 /* ================================================================== */
 export default function CandidateDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="animate-spin h-8 w-8 border-4 border-[#2563EB] border-t-transparent rounded-full mx-auto" />
+            <p className="mt-3 text-[14px] text-gray-500">読み込み中...</p>
+          </div>
+        </div>
+      }
+    >
+      <CandidateDetailPageInner />
+    </Suspense>
+  );
+}
+
+function CandidateDetailPageInner() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
