@@ -132,8 +132,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL || "";
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
     || "https://web-production-95808.up.railway.app";
-  const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
-    || "https://candidate-intake-production.up.railway.app";
   const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
     || "https://ai-resume-generator-production-66cb.up.railway.app";
 
@@ -149,12 +147,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
       href: jobAnalyzerUrl,
       label: "求人出力",
       icon: "📄",
-      requiresAuth: false,
-    },
-    {
-      href: candidateIntakeUrl,
-      label: "面談登録",
-      icon: "👥",
       requiresAuth: false,
     },
     {
