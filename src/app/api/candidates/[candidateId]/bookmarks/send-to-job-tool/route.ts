@@ -82,6 +82,16 @@ export async function POST(
       if (existingData.project_id) {
         projectId = existingData.project_id;
 
+        // db_type を現在の送信タイプに更新（既存プロジェクトが別のdb_typeで作成されていた場合に必要）
+        await fetchWithTimeout(
+          `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ db_type: dbType }),
+          }
+        );
+
         const unitRes = await fetchWithTimeout(
           `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/processing-units`,
           {
@@ -380,6 +390,12 @@ async function createProject(
   if (createRes.status === 409) {
     const conflictData = await createRes.json();
     const projectId = conflictData.existing_project_id;
+    // db_type を現在の送信タイプに更新（既存プロジェクトが別のdb_typeで作成されていた場合に必要）
+    await fetchWithTimeout(`${baseUrl}/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ db_type: dbType }),
+    });
     const unitRes = await fetchWithTimeout(`${baseUrl}/api/projects/${projectId}/processing-units`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
