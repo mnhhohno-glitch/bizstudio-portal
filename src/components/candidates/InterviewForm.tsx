@@ -250,16 +250,17 @@ function Chip({ text, variant }: { text: string; variant: "info" | "ok" | "warn"
   );
 }
 
-function BtnMini({ children, onClick, variant }: { children: React.ReactNode; onClick?: () => void; variant?: "danger" | "ai" }) {
+function BtnMini({ children, onClick, variant, disabled }: { children: React.ReactNode; onClick?: () => void; variant?: "danger" | "ai"; disabled?: boolean }) {
   const styles: React.CSSProperties = {
     padding: "2px 8px", fontSize: 11, borderRadius: 4, border: "0.5px solid var(--im-bdr)",
     background: variant === "ai" ? "var(--im-bg-info)" : "transparent",
     color: variant === "danger" ? "var(--im-fg-err)" : variant === "ai" ? "var(--im-fg-info)" : "var(--im-fg2)",
-    cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
+    cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
     fontWeight: variant === "ai" ? 500 : undefined,
     borderColor: variant === "ai" ? "var(--im-bdr-info)" : undefined,
+    opacity: disabled ? 0.5 : undefined,
   };
-  return <button type="button" style={styles} onClick={onClick}>{children}</button>;
+  return <button type="button" style={styles} onClick={disabled ? undefined : onClick} disabled={disabled}>{children}</button>;
 }
 
 /* ================================================================== */
@@ -288,6 +289,7 @@ export default function InterviewForm({
   const prevIdRef = useRef<string | null>(null);
   const [candidate, setCandidate] = useState<CandidateInfo | null>(null);
   const [desiredSub, setDesiredSub] = useState("st-job");
+  const [aiOrganizeLoading, setAiOrganizeLoading] = useState(false);
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -567,6 +569,27 @@ export default function InterviewForm({
       }
     } catch {
       toast.error("削除に失敗しました");
+    }
+  };
+
+  const handleAiOrganize = async () => {
+    if (!interviewId || aiOrganizeLoading) return;
+    if (isDirty) {
+      toast.error("先に保存してからAI整理を実行してください");
+      return;
+    }
+    setAiOrganizeLoading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/interviews/${interviewId}/ai-organize`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "AI整理に失敗しました");
+      setDetail("nextAction", data.suggestions);
+      setIsDirty(true);
+      toast.success("AI整理が完了しました");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI整理に失敗しました");
+    } finally {
+      setAiOrganizeLoading(false);
     }
   };
 
@@ -1104,7 +1127,7 @@ export default function InterviewForm({
                 <div>
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>
                     <span>ネクストアクション</span>
-                    <span title="準備中" style={{ opacity: 0.4, cursor: "not-allowed" }}><BtnMini variant="ai">✨ AI整理</BtnMini></span>
+                    <BtnMini variant="ai" onClick={handleAiOrganize} disabled={aiOrganizeLoading}>{aiOrganizeLoading ? "AI整理中..." : "✨ AI整理"}</BtnMini>
                   </div>
                   <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} />
                 </div>
