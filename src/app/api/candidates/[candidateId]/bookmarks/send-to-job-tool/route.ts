@@ -35,10 +35,11 @@ export async function POST(
 
   const { candidateId } = await params;
   const body = await req.json();
-  const { fileIds, dbType, targetAreas } = body as {
+  const { fileIds, dbType, targetAreas, memoContent } = body as {
     fileIds: string[];
     dbType: string;
     targetAreas: string[];
+    memoContent?: string | null;
   };
 
   if (!fileIds?.length || !dbType || !targetAreas?.length) {
@@ -171,15 +172,88 @@ export async function POST(
 
     // 3-4. Upload and memo import (branched by dbType)
     if (dbType === "circus") {
-      // === Circus mode: local upload (memo is attached in kyuujinPDF UI) ===
+      // === Circus mode: local upload + user memo ===
+
+      // Circus: メモ帳からCircus IDを抽出し、PDFファイル名にNo番号を付与
+      // メモ帳フォーマット: 会社名\nCircus URL の2行ペア
       const circusFormData = new FormData();
-      for (const file of downloadedFiles) {
-        const uint8 = new Uint8Array(file.buffer);
-        const blob = new Blob([uint8], { type: file.mimeType });
-        circusFormData.append("files", blob, file.fileName);
+
+      if (memoContent && memoContent.trim()) {
+        const memoLines = memoContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        // URL行を基準にパース（2行でも3行でも対応）
+        // Circusメモは「会社名 → (任意で求人タイトル) → URL」の繰り返し
+        const memoEntries: { companyName: string; circusId: string }[] = [];
+        for (let mi = 0; mi < memoLines.length; mi++) {
+          const line = memoLines[mi];
+          const idMatch = line.match(/circus-job\.com\/search\/(\d+)/);
+          if (idMatch) {
+            // URL行を見つけたら、その前の行をたどって会社名を特定
+            let companyName = '';
+            if (mi >= 1 && !memoLines[mi - 1].match(/circus-job\.com/)) {
+              if (mi >= 2 && !memoLines[mi - 2].match(/circus-job\.com/) && !memoLines[mi - 2].startsWith('【')) {
+                // 3行フォーマット: [会社名, 求人タイトル, URL]
+                companyName = memoLines[mi - 2];
+              } else {
+                // 2行フォーマット: [会社名, URL]
+                companyName = memoLines[mi - 1];
+              }
+            }
+            if (companyName) {
+              memoEntries.push({ companyName, circusId: idMatch[1] });
+            }
+          }
+        }
+        console.log(`[SendToJobTool] Circus memo parsed: ${memoEntries.length} entries:`, memoEntries.map((e) => `${e.companyName}:${e.circusId}`));
+
+        // 会社名の正規化（比較用）: ファイル名から求人番号・拡張子・プレフィックスを除去
+        const norm = (s: string) => s
+          .replace(/\.[^.]+$/, "")          // 拡張子除去
+          .replace(/_No\d+$/i, "")          // _No420121 等の求人番号除去
+          .replace(/^求人票[_]?/, "")       // 求人票プレフィックス除去
+          .replace(/[\s\u3000_]/g, "")      // 空白・アンダースコア除去
+          .replace(/_\d{14,}$/, "")         // タイムスタンプ除去
+          .replace(/[Ａ-Ｚａ-ｚ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)) // 全角→半角
+          .toLowerCase();
+
+        for (const file of downloadedFiles) {
+          // 1. 求人番号マッチ（最優先）: PDF _No420121 ↔ メモ circusId 420121
+          const jobNumMatch = file.fileName.match(/_No(\d+)/i);
+          const pdfJobNumber = jobNumMatch ? jobNumMatch[1] : null;
+          let matched = pdfJobNumber
+            ? memoEntries.find((e) => e.circusId === pdfJobNumber)
+            : null;
+
+          // 2. 会社名マッチ（フォールバック）
+          if (!matched) {
+            const fileNameNorm = norm(file.fileName);
+            matched = memoEntries.find((e) => {
+              const memoNorm = norm(e.companyName);
+              return fileNameNorm.includes(memoNorm) || memoNorm.includes(fileNameNorm);
+            });
+          }
+
+          let newFileName = file.fileName;
+          if (matched) {
+            const ext = file.fileName.match(/\.[^.]+$/)?.[0] || ".pdf";
+            newFileName = `${matched.companyName}_No${matched.circusId}${ext}`;
+            console.log(`[SendToJobTool] Circus rename: "${file.fileName}" → "${newFileName}" (matched by ${pdfJobNumber && matched.circusId === pdfJobNumber ? "jobNumber" : "companyName"})`);
+          } else {
+            console.log(`[SendToJobTool] Circus: no memo match for "${file.fileName}" (jobNum: ${pdfJobNumber}), entries:`, memoEntries.map((e) => `${e.companyName}:${e.circusId}`));
+          }
+          const uint8 = new Uint8Array(file.buffer);
+          const blob = new Blob([uint8], { type: file.mimeType });
+          circusFormData.append("files", blob, newFileName);
+        }
+      } else {
+        // メモなし: オリジナルファイル名のまま
+        for (const file of downloadedFiles) {
+          const uint8 = new Uint8Array(file.buffer);
+          const blob = new Blob([uint8], { type: file.mimeType });
+          circusFormData.append("files", blob, file.fileName);
+        }
       }
 
-      // Step 3: Upload to local storage (original filenames)
+      // Step 3: Upload to local storage
       console.log("[SendToJobTool] Step 3 (Circus): Uploading to local storage...", { fileCount: downloadedFiles.length });
       const uploadRes = await fetchWithTimeout(
         `${KYUUJIN_PDF_TOOL_URL}/api/upload/projects/${projectId}/files/batch`,
@@ -198,8 +272,26 @@ export async function POST(
         failed: uploadData.total_failed,
       });
 
-      // Step 4: Skipped — memo is now attached directly in kyuujinPDF
-      console.log("[SendToJobTool] Step 4 (Circus): Skipped (memo attached in kyuujinPDF)");
+      // Step 4: Import user-provided memo
+      console.log("[SendToJobTool] Step 4 (Circus): Importing user memo...");
+      if (memoContent && memoContent.trim()) {
+        try {
+          await fetchWithTimeout(
+            `${KYUUJIN_PDF_TOOL_URL}/api/projects/${projectId}/memos/import`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                content: memoContent,
+                processing_unit_id: processingUnitId,
+              }),
+            }
+          );
+        } catch (e) {
+          console.error("Circus memo import failed:", e);
+        }
+      }
+      console.log("[SendToJobTool] Step 4 complete (Circus)");
 
     } else {
       // === HITO-Link/マイナビ mode: Google Drive auto-process ===
