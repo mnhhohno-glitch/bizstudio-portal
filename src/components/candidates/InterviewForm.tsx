@@ -602,23 +602,22 @@ export default function InterviewForm({
 
   const handlePdfExport = async () => {
     if (pdfLoading) return;
-    if (isDirty) {
-      toast.error("先に保存してください");
+    const pdfFiles = attachments
+      .filter((a) => a.mimeType === "application/pdf" || a.fileType === "pdf")
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    if (pdfFiles.length === 0) {
+      toast.error("PDFが添付されていません");
       return;
     }
     setPdfLoading(true);
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/interviews/${interviewId}/pdf`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "PDF生成に失敗しました");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const latest = pdfFiles[0];
+      const res = await fetch(`/api/interviews/${interviewId}/attachments/${latest.id}?url=true`);
+      if (!res.ok) throw new Error("PDFのURL取得に失敗しました");
+      const data = await res.json();
+      window.open(data.signedUrl, "_blank");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "PDF生成に失敗しました");
+      toast.error(e instanceof Error ? e.message : "PDFの表示に失敗しました");
     } finally {
       setPdfLoading(false);
     }
@@ -698,7 +697,7 @@ export default function InterviewForm({
             style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg3)", fontFamily: "inherit", opacity: pdfLoading ? 0.5 : 1 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
-            {pdfLoading ? "PDF生成中..." : "PDF表示"}
+            {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
           <button
             type="button" onClick={handleSave} disabled={saving}

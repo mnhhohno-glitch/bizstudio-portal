@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 const BUCKET = "interview-attachments";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   {
     params,
   }: { params: Promise<{ id: string; attachmentId: string }> }
@@ -28,6 +28,16 @@ export async function GET(
       { error: "Attachment not found" },
       { status: 404 }
     );
+  }
+
+  if (req.nextUrl.searchParams.get("url") === "true") {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(attachment.filePath, 300);
+    if (error || !data?.signedUrl) {
+      return NextResponse.json({ error: "URL生成に失敗しました" }, { status: 500 });
+    }
+    return NextResponse.json({ signedUrl: data.signedUrl });
   }
 
   return NextResponse.json(attachment);
