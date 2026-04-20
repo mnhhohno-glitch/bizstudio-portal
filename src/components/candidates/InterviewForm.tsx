@@ -55,6 +55,7 @@ interface InterviewFormProps {
   candidateId: string;
   currentUser: SessionUser | null;
   onSaved?: () => void;
+  onDeleted?: () => void;
 }
 
 /* ================================================================== */
@@ -268,7 +269,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 /* ================================================================== */
 
 export default function InterviewForm({
-  interviewId, candidateId, currentUser, onSaved,
+  interviewId, candidateId, currentUser, onSaved, onDeleted,
 }: InterviewFormProps) {
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
@@ -291,6 +292,7 @@ export default function InterviewForm({
   const [desiredSub, setDesiredSub] = useState("st-job");
   const [aiOrganizeLoading, setAiOrganizeLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -623,6 +625,22 @@ export default function InterviewForm({
     }
   };
 
+  const handleDelete = async () => {
+    if (deleting) return;
+    if (!confirm("この面談記録を削除しますか？この操作は取り消せません。")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("削除に失敗しました");
+      toast.success("面談記録を削除しました");
+      onDeleted?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   /* ---- Computed ---- */
   const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileType === "pdf");
   const d = detail;
@@ -684,6 +702,14 @@ export default function InterviewForm({
           </span>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button" onClick={handleDelete} disabled={deleting}
+            className="inline-flex items-center justify-center gap-1 cursor-pointer"
+            style={{ padding: "6px 12px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "#ef4444", fontFamily: "inherit", opacity: deleting ? 0.5 : 1 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            {deleting ? "削除中..." : "削除"}
+          </button>
           <button
             type="button" onClick={() => window.history.back()}
             className="cursor-pointer" style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg2)", fontFamily: "inherit" }}

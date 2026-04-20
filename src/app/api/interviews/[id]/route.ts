@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(
   _req: NextRequest,
@@ -89,6 +90,16 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { id } = await params;
+
+  const attachments = await prisma.interviewAttachment.findMany({
+    where: { interviewRecordId: id },
+    select: { filePath: true },
+  });
+  if (attachments.length > 0) {
+    const paths = attachments.map((a) => a.filePath);
+    await supabase.storage.from("interview-attachments").remove(paths);
+  }
+
   const deleted = await prisma.interviewRecord.delete({
     where: { id },
     select: { candidateId: true },

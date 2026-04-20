@@ -245,6 +245,7 @@ export default function InterviewHistoryTab({
           candidateId={candidateId}
           currentUser={currentUser}
           onSaved={() => fetchInterviews()}
+          onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
         />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
