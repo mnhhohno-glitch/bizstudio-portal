@@ -172,12 +172,24 @@ export default function CandidateHeader({
           {/* Right: Status + Edit */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {candidate.supportStatus === "ENDED" ? (
-              <button
-                onClick={onSupportEndClick}
-                className="w-[130px] h-8 rounded-md px-3 text-[13px] font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200 truncate"
-              >
-                支援終了{supportEndReasonLabel ? `(${supportEndReasonLabel})` : ""}
-              </button>
+              <>
+                <button
+                  onClick={onSupportEndClick}
+                  className="w-[130px] h-8 rounded-md px-3 text-[13px] font-medium border cursor-pointer bg-red-100 text-red-600 border-red-200 hover:bg-red-200 truncate"
+                >
+                  支援終了{supportEndReasonLabel ? `(${supportEndReasonLabel})` : ""}
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm("この求職者の支援状況を「支援中」に戻しますか？")) {
+                      onStatusChange("ACTIVE");
+                    }
+                  }}
+                  className="h-8 rounded-md px-3 text-[13px] font-medium border cursor-pointer bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200"
+                >
+                  支援中に戻す
+                </button>
+              </>
             ) : (
               <>
                 <select
