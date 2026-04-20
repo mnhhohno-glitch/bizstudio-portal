@@ -639,11 +639,12 @@ export default function InterviewForm({
             className="cursor-pointer" style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
           >キャンセル</button>
           <button
-            type="button"
-            className="cursor-pointer inline-flex items-center justify-center gap-1"
-            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+            type="button" disabled
+            title="準備中"
+            className="inline-flex items-center justify-center gap-1"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg3)", fontFamily: "inherit", opacity: 0.5, cursor: "not-allowed" }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg-err)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             PDF表示
           </button>
           <button
@@ -1103,7 +1104,7 @@ export default function InterviewForm({
                 <div className="flex-1 flex flex-col min-h-0">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>
                     <span>ネクストアクション</span>
-                    <BtnMini variant="ai">✨ AI整理</BtnMini>
+                    <span title="準備中" style={{ opacity: 0.4, cursor: "not-allowed" }}><BtnMini variant="ai">✨ AI整理</BtnMini></span>
                   </div>
                   <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} />
                 </div>
