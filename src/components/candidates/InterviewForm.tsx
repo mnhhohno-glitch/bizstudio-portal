@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 /* ================================================================== */
@@ -37,6 +37,19 @@ type MemoRecord = {
   content: string;
 };
 
+type CandidateInfo = {
+  id: string;
+  candidateNumber: string;
+  name: string;
+  nameKana: string | null;
+  birthday: string | null;
+  phone: string | null;
+  email: string | null;
+  gender: string | null;
+  address: string | null;
+  employee: { name: string; employeeNumber: string } | null;
+};
+
 interface InterviewFormProps {
   interviewId: string;
   candidateId: string;
@@ -53,10 +66,47 @@ const RIGHT_TABS = [
   { id: "desired", label: "希望条件" },
   { id: "rating", label: "ランク評価" },
   { id: "action", label: "アクション" },
-  { id: "attachments", label: "添付" },
+  { id: "attachments", label: "添��" },
 ] as const;
 
 const AUTOSAVE_INTERVAL = 30_000;
+
+const MEMO_FLAGS = ["初回面談", "既存面談", "面接対策", "内定面談", "その他"];
+
+const WORK_STYLE_OPTIONS = [
+  "フルリモート", "上場企業", "退職金制度", "海外勤務・出張あり",
+  "ハイブリッド", "スタートアップ", "固定残業NG", "海外常駐希望",
+  "フレックス勤務", "住宅手当", "賞与必須", "英語を使う仕事",
+];
+
+const DESIRED_SUBTABS = [
+  { id: "st-job", label: "職種" },
+  { id: "st-industry", label: "業種" },
+  { id: "st-area", label: "エ���ア" },
+];
+
+/* ================================================================== */
+/*  CSS custom properties (Notion-like palette)                        */
+/* ================================================================== */
+
+const CSS_VARS: React.CSSProperties & Record<string, string> = {
+  "--im-bg": "#ffffff",
+  "--im-bg2": "#f7f7f5",
+  "--im-bg3": "#f1efe8",
+  "--im-bg-info": "#e6f1fb",
+  "--im-bg-ok": "#e1f5ee",
+  "--im-bg-warn": "#faeeda",
+  "--im-fg": "#1a1a19",
+  "--im-fg2": "#5f5e5a",
+  "--im-fg3": "#888780",
+  "--im-fg-info": "#0c447c",
+  "--im-fg-ok": "#0f6e56",
+  "--im-fg-warn": "#854f0b",
+  "--im-fg-err": "#791f1f",
+  "--im-bdr": "rgba(0,0,0,0.08)",
+  "--im-bdr2": "rgba(0,0,0,0.15)",
+  "--im-bdr-info": "#85b7eb",
+};
 
 /* ================================================================== */
 /*  Helpers                                                            */
@@ -81,144 +131,135 @@ function cleanRelationFields(obj: AnyRecord): AnyRecord {
   return copy;
 }
 
+function calcAge(bd: string | null): number | null {
+  if (!bd) return null;
+  const today = new Date();
+  const birth = new Date(bd);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+function genderLabel(g: string | null) {
+  if (!g) return "-";
+  switch (g) { case "male": return "男"; case "female": return "女"; case "other": return "他"; default: return "-"; }
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function rankColor(rank: string | null): { bg: string; fg: string } {
+  if (!rank) return { bg: "var(--im-bg2)", fg: "var(--im-fg2)" };
+  if (rank.startsWith("A")) return { bg: "var(--im-bg-ok)", fg: "var(--im-fg-ok)" };
+  if (rank.startsWith("B")) return { bg: "var(--im-bg-info)", fg: "var(--im-fg-info)" };
+  if (rank.startsWith("C")) return { bg: "var(--im-bg-warn)", fg: "var(--im-fg-warn)" };
+  return { bg: "#fde8e8", fg: "var(--im-fg-err)" };
+}
+
 /* ================================================================== */
 /*  Sub-components                                                     */
 /* ================================================================== */
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionHd({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
-    <div className="mb-4">
-      {title && (
-        <h3 className="text-[13px] font-bold text-[#374151] mb-2 border-b border-gray-200 pb-1">
-          {title}
-        </h3>
-      )}
-      {children}
+    <div
+      className="flex items-center justify-between mb-2.5 px-2.5 py-1 rounded-sm"
+      style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", background: "var(--im-bg2)", borderLeft: "3px solid var(--im-fg-info)" }}
+    >
+      <span>{title}</span>
+      {right}
     </div>
   );
 }
 
-function Field({
-  label, value, onChange, type = "text", options, rows, placeholder, className,
+function RoField({ v }: { v: string }) {
+  return (
+    <span
+      className="flex-1 min-w-0 truncate"
+      style={{ fontSize: 12, padding: "5px 8px", borderRadius: 5, background: "var(--im-bg2)", color: "var(--im-fg)" }}
+    >{v || "-"}</span>
+  );
+}
+
+function Fld({
+  value, onChange, type = "text", options, rows, placeholder, style: extraStyle, className, readOnly,
 }: {
-  label: string;
   value: unknown;
   onChange: (v: string) => void;
   type?: "text" | "textarea" | "select" | "number" | "date" | "time";
   options?: string[];
   rows?: number;
   placeholder?: string;
+  style?: React.CSSProperties;
   className?: string;
+  readOnly?: boolean;
 }) {
-  const cls =
-    "w-full rounded-md border border-gray-300 px-2 py-1.5 text-[13px] focus:border-[#2563EB] focus:outline-none";
+  const base: React.CSSProperties = {
+    flex: "1 1 auto", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5,
+    color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: readOnly ? "var(--im-bg2)" : "var(--im-bg)",
+    fontFamily: "inherit", width: "100%", ...extraStyle,
+  };
 
   if (type === "select" && options) {
     return (
-      <div className={className}>
-        {label && <label className="block text-[11px] font-medium text-[#6B7280] mb-0.5">{label}</label>}
-        <select value={(value as string) || ""} onChange={(e) => onChange(e.target.value)} className={cls}>
-          <option value="">-</option>
-          {options.map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
-        </select>
-      </div>
+      <select value={(value as string) || ""} onChange={(e) => onChange(e.target.value)} style={base} className={className} disabled={readOnly}>
+        <option value="">-</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
     );
   }
   if (type === "textarea") {
     return (
-      <div className={className}>
-        {label && <label className="block text-[11px] font-medium text-[#6B7280] mb-0.5">{label}</label>}
-        <textarea
-          value={(value as string) || ""}
-          onChange={(e) => onChange(e.target.value)}
-          rows={rows || 3}
-          className={cls}
-          placeholder={placeholder}
-        />
-      </div>
+      <textarea
+        value={(value as string) || ""} onChange={(e) => onChange(e.target.value)}
+        rows={rows || 3} placeholder={placeholder} style={{ ...base, resize: "vertical", minHeight: 42, lineHeight: 1.5 }} className={className}
+        readOnly={readOnly}
+      />
     );
   }
   return (
-    <div className={className}>
-      {label && <label className="block text-[11px] font-medium text-[#6B7280] mb-0.5">{label}</label>}
-      <input
-        type={type === "number" ? "number" : type === "date" ? "date" : type === "time" ? "time" : "text"}
-        value={value != null ? String(value) : ""}
-        onChange={(e) => onChange(e.target.value)}
-        className={cls}
-        placeholder={placeholder}
-      />
+    <input
+      type={type === "number" ? "number" : type === "date" ? "date" : type === "time" ? "time" : "text"}
+      value={value != null ? String(value) : ""} onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder} style={base} className={className} readOnly={readOnly}
+    />
+  );
+}
+
+function Row({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-1 min-w-0" style={wide ? { gridColumn: "span 4" } : undefined}>
+      <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", whiteSpace: "nowrap", minWidth: 64 }}>{label}</span>
+      {children}
     </div>
   );
 }
 
-function RatingRow({
-  label, scoreKey, memoKey, rating, setRating,
-}: {
-  label: string;
-  scoreKey: string;
-  memoKey: string;
-  rating: AnyRecord;
-  setRating: (k: string, v: unknown) => void;
-}) {
+function Chip({ text, variant }: { text: string; variant: "info" | "ok" | "warn" | "rank" }) {
+  const bgMap = { info: "var(--im-bg-info)", ok: "var(--im-bg-ok)", warn: "var(--im-bg-warn)", rank: "var(--im-bg-info)" };
+  const fgMap = { info: "var(--im-fg-info)", ok: "var(--im-fg-ok)", warn: "var(--im-fg-warn)", rank: "var(--im-fg-info)" };
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[12px] w-32 shrink-0 text-[#374151]">{label}</span>
-      <div className="flex gap-1">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => setRating(scoreKey, rating[scoreKey] === n ? null : n)}
-            className={`w-7 h-7 rounded text-[11px] font-bold border transition-colors ${
-              rating[scoreKey] === n
-                ? "bg-[#2563EB] text-white border-[#2563EB]"
-                : "bg-white text-gray-500 border-gray-300 hover:border-[#2563EB]"
-            }`}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-      <input
-        type="text"
-        value={rating[memoKey] || ""}
-        onChange={(e) => setRating(memoKey, e.target.value)}
-        placeholder="メモ"
-        className="flex-1 rounded border border-gray-300 px-2 py-1 text-[11px] focus:border-[#2563EB] focus:outline-none"
-      />
-    </div>
+    <span
+      className="inline-flex items-center rounded-[10px]"
+      style={{ padding: variant === "rank" ? "2px 12px" : "3px 10px", fontSize: variant === "rank" ? 13 : 11, fontWeight: 500, background: bgMap[variant], color: fgMap[variant] }}
+    >{text}</span>
   );
 }
 
-function RatingSection({
-  title, prefix, items, rating, setRating,
-}: {
-  title: string;
-  prefix: string;
-  items: { key: string; label: string }[];
-  rating: AnyRecord;
-  setRating: (k: string, v: unknown) => void;
-}) {
-  const total = items.reduce((sum, item) => sum + (rating[`${prefix}${item.key}`] || 0), 0);
-  return (
-    <Section title={`${title}（小計: ${total}/${items.length * 5}）`}>
-      <div className="space-y-1.5">
-        {items.map((item) => (
-          <RatingRow
-            key={item.key}
-            label={item.label}
-            scoreKey={`${prefix}${item.key}`}
-            memoKey={`${prefix}${item.key}Memo`}
-            rating={rating}
-            setRating={setRating}
-          />
-        ))}
-      </div>
-    </Section>
-  );
+function BtnMini({ children, onClick, variant }: { children: React.ReactNode; onClick?: () => void; variant?: "danger" | "ai" }) {
+  const styles: React.CSSProperties = {
+    padding: "2px 8px", fontSize: 11, borderRadius: 4, border: "0.5px solid var(--im-bdr)",
+    background: variant === "ai" ? "var(--im-bg-info)" : "transparent",
+    color: variant === "danger" ? "var(--im-fg-err)" : variant === "ai" ? "var(--im-fg-info)" : "var(--im-fg2)",
+    cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
+    fontWeight: variant === "ai" ? 500 : undefined,
+    borderColor: variant === "ai" ? "var(--im-bdr-info)" : undefined,
+  };
+  return <button type="button" style={styles} onClick={onClick}>{children}</button>;
 }
 
 /* ================================================================== */
@@ -228,6 +269,7 @@ function RatingSection({
 export default function InterviewForm({
   interviewId, candidateId, currentUser, onSaved,
 }: InterviewFormProps) {
+  /* ---- State ---- */
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<AnyRecord>({});
   const [detail, setDetailState] = useState<AnyRecord>({});
@@ -244,8 +286,10 @@ export default function InterviewForm({
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevIdRef = useRef<string | null>(null);
+  const [candidate, setCandidate] = useState<CandidateInfo | null>(null);
+  const [desiredSub, setDesiredSub] = useState("st-job");
 
-  // Fetch interview data
+  /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
     if (!interviewId) return;
     setLoading(true);
@@ -291,7 +335,16 @@ export default function InterviewForm({
     }
   }, [interviewId, fetchData]);
 
-  // Field setters
+  /* ---- Fetch candidate info ---- */
+  useEffect(() => {
+    if (!candidateId) return;
+    fetch(`/api/candidates/${candidateId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setCandidate(data); })
+      .catch(() => {});
+  }, [candidateId]);
+
+  /* ---- Field setters ---- */
   const setField = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setIsDirty(true);
@@ -305,7 +358,7 @@ export default function InterviewForm({
     setIsDirty(true);
   };
 
-  // Autosave
+  /* ---- Autosave (existing logic) ---- */
   useEffect(() => {
     if (!isDirty || !interviewId) return;
     const timer = setInterval(async () => {
@@ -326,11 +379,9 @@ export default function InterviewForm({
             lastEditedBy: currentUser?.id,
             autosaveToken: autosaveToken || undefined,
             detail: Object.keys(cleanRelationFields(detail)).length > 0
-              ? cleanRelationFields(detail)
-              : undefined,
+              ? cleanRelationFields(detail) : undefined,
             rating: Object.keys(cleanRelationFields(rating)).length > 0
-              ? cleanRelationFields(rating)
-              : undefined,
+              ? cleanRelationFields(rating) : undefined,
           }),
         });
         if (res.ok) {
@@ -348,7 +399,7 @@ export default function InterviewForm({
     return () => clearInterval(timer);
   }, [isDirty, interviewId, form, detail, rating, autosaveToken, currentUser?.id]);
 
-  // beforeunload
+  /* ---- beforeunload (existing logic) ---- */
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (isDirty) { e.preventDefault(); e.returnValue = ""; }
@@ -357,13 +408,13 @@ export default function InterviewForm({
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  // Update time-ago display every 10s
+  /* ---- Tick for time-ago display ---- */
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 10000);
     return () => clearInterval(t);
   }, []);
 
-  // Manual save
+  /* ---- Manual save (existing logic) ---- */
   const handleSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -372,7 +423,6 @@ export default function InterviewForm({
       const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
       const cTotal = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
       const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
-
       const ratingData = {
         ...cleanRelationFields(r),
         personalityTotal: pTotal || null,
@@ -380,7 +430,6 @@ export default function InterviewForm({
         conditionTotal: condTotal || null,
         grandTotal: (pTotal + cTotal + condTotal) || null,
       };
-
       const res = await fetch(`/api/interviews/${interviewId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -410,16 +459,13 @@ export default function InterviewForm({
     }
   };
 
-  // Attachment upload
+  /* ---- Attachment upload (existing logic) ---- */
   const handleUpload = async (file: File) => {
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/interviews/${interviewId}/attachments`, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(`/api/interviews/${interviewId}/attachments`, { method: "POST", body: fd });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "アップロードに失敗しました");
@@ -434,13 +480,11 @@ export default function InterviewForm({
     }
   };
 
-  // Attachment analyze
+  /* ---- Attachment analyze (existing logic) ---- */
   const handleAnalyze = async (attachmentId: string) => {
     setAnalyzingId(attachmentId);
     try {
-      const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}/analyze`, {
-        method: "POST",
-      });
+      const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}/analyze`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         setAttachments((prev) =>
@@ -453,22 +497,20 @@ export default function InterviewForm({
         toast.success("AI解析が完了しました");
       } else {
         setAttachments((prev) =>
-          prev.map((a) =>
-            a.id === attachmentId ? { ...a, analysisStatus: "failed", analysisError: data.error } : a
-          )
+          prev.map((a) => a.id === attachmentId ? { ...a, analysisStatus: "failed", analysisError: data.error } : a)
         );
         toast.error(`解析失敗: ${data.error}`);
       }
     } catch {
-      toast.error("解析リクエストに失敗しました");
+      toast.error("解析リクエストに��敗しました");
     } finally {
       setAnalyzingId(null);
     }
   };
 
-  // Attachment delete
+  /* ---- Attachment delete (existing logic) ---- */
   const handleDeleteAttachment = async (attachmentId: string) => {
-    if (!confirm("この添付ファイルを削除しますか？")) return;
+    if (!confirm("この添付ファイルを削除し���すか？")) return;
     try {
       const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}`, { method: "DELETE" });
       if (res.ok) {
@@ -480,531 +522,655 @@ export default function InterviewForm({
     }
   };
 
+  /* ---- Memo CRUD ---- */
+  const handleAddMemo = async () => {
+    try {
+      const now = new Date();
+      const res = await fetch(`/api/interviews/${interviewId}/memos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "新規メ���",
+          flag: "初回面談",
+          date: now.toISOString(),
+          time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+          content: "",
+        }),
+      });
+      if (res.ok) {
+        const memo = await res.json();
+        setMemos((prev) => [memo, ...prev]);
+      }
+    } catch {
+      toast.error("メモ作成に失敗しました");
+    }
+  };
+
+  const handleUpdateMemo = async (memoId: string, field: string, value: string) => {
+    setMemos((prev) => prev.map((m) => m.id === memoId ? { ...m, [field]: value } : m));
+    try {
+      await fetch(`/api/interviews/${interviewId}/memos/${memoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+    } catch { /* silent */ }
+  };
+
+  const handleDeleteMemo = async (memoId: string) => {
+    if (!confirm("このメモを削除しますか？")) return;
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/memos/${memoId}`, { method: "DELETE" });
+      if (res.ok) {
+        setMemos((prev) => prev.filter((m) => m.id !== memoId));
+        toast.success("メモを削除しました");
+      }
+    } catch {
+      toast.error("削除に失敗しました");
+    }
+  };
+
+  /* ---- Computed ---- */
+  const d = detail;
+  const r = rating;
+  const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
+  const cTotal = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
+  const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
+  const grandTotal = pTotal + cTotal + condTotal;
+
+  const duration = (() => {
+    if (form.startTime && form.endTime) {
+      const [sh, sm] = form.startTime.split(":").map(Number);
+      const [eh, em] = form.endTime.split(":").map(Number);
+      const dur = (eh * 60 + em) - (sh * 60 + sm);
+      return dur > 0 ? `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")}` : "0:00";
+    }
+    return "";
+  })();
+
+  const age = candidate ? calcAge(candidate.birthday) : null;
+
+  const workStyleSet = new Set<string>((d.workStylePreferences ? JSON.parse(d.workStylePreferences) : []) as string[]);
+  const toggleWorkStyle = (item: string) => {
+    const next = new Set(workStyleSet);
+    if (next.has(item)) next.delete(item); else next.add(item);
+    setDetail("workStylePreferences", JSON.stringify([...next]));
+  };
+
+  /* ---- Loading state ---- */
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin h-6 w-6 border-3 border-[#2563EB] border-t-transparent rounded-full" />
+        <div className="animate-spin h-6 w-6 border-2 rounded-full" style={{ borderColor: "var(--im-bdr-info)", borderTopColor: "transparent" }} />
       </div>
     );
   }
 
-  const d = detail;
-  const r = rating;
-
-  const grandTotal =
-    (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) +
-    (r.personalityIntelligence || 0) + (r.personalityHumanity || 0) +
-    (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) +
-    (r.careerAchievement || 0) + (r.careerQualification || 0) +
-    (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) +
-    (r.conditionArea || 0) + (r.conditionFlexibility || 0);
-
+  /* ================================================================ */
+  /*  RENDER                                                           */
+  /* ================================================================ */
   return (
-    <div className="flex gap-4">
-      {/* ========== Left Column ========== */}
-      <div className="w-[460px] shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-260px)] pr-2">
-        {/* 面談基本情報 */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <Section title="面談基本情報">
-            <div className="grid grid-cols-4 gap-2">
-              <Field label="面談日" value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" />
-              <Field label="開始" value={form.startTime} onChange={(v) => setField("startTime", v)} type="time" />
-              <Field label="終了" value={form.endTime} onChange={(v) => setField("endTime", v)} type="time" />
-              <Field
-                label="所要(分)"
-                value={(() => {
-                  if (form.startTime && form.endTime) {
-                    const [sh, sm] = form.startTime.split(":").map(Number);
-                    const [eh, em] = form.endTime.split(":").map(Number);
-                    const dur = (eh * 60 + em) - (sh * 60 + sm);
-                    return dur > 0 ? dur : "";
-                  }
-                  return form.duration ?? "";
-                })()}
-                onChange={() => {}}
-                type="number"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <Field label="面談手法" value={form.interviewTool} onChange={(v) => setField("interviewTool", v)}
-                options={["電話", "対面", "Web面談", "Zoom", "Teams"]} type="select" />
-              <Field label="担当CA" value={form.interviewer?.name || ""} onChange={() => {}} />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <Field label="面談種別" value={form.interviewType} onChange={(v) => setField("interviewType", v)}
-                options={["初回面談", "フォロー面談", "面接対策", "内定面談", "その他"]} type="select" />
-              <Field label="面談回数" value={form.interviewCount} onChange={() => {}} type="number" />
-            </div>
-            <div className="mt-2">
-              <Field label="結果フラグ" value={form.resultFlag} onChange={(v) => setField("resultFlag", v)}
-                options={["継続", "求人送付", "書類作成", "保留", "辞退"]} type="select" />
-            </div>
-            <div className="mt-2">
-              <Field label="面談メモ" value={form.interviewMemo} onChange={(v) => setField("interviewMemo", v)}
-                type="textarea" rows={4} placeholder="面談メモを入力..." />
-            </div>
-          </Section>
-        </div>
+    <div style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
 
-        {/* 転職活動状況 */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <Section title="転職活動状況">
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="AG利用" value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)}
-                  options={["初めて利用", "利用中", "過去利用あり"]} type="select" />
-                <Field label="AG利用メモ" value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="在籍状況" value={d.employmentStatus} onChange={(v) => setDetail("employmentStatus", v)}
-                  options={["在職中", "離職中", "退職予定"]} type="select" />
-                <Field label="転職時期" value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)}
-                  options={["1カ月以内", "3カ月以内", "半年以内", "未定"]} type="select" />
-              </div>
-              <Field label="転職時期メモ" value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} />
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="活動期間" value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)}
-                  options={["1週間以内", "1カ月以内", "3カ月以内"]} type="select" />
-                <Field label="活動期間メモ" value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="応募数" value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" />
-                <Field label="応募種別" value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)}
-                  options={["検討中", "応募中"]} type="select" />
-              </div>
-              <Field label="応募メモ" value={d.applicationMemo} onChange={(v) => setDetail("applicationMemo", v)} type="textarea" rows={2} />
-            </div>
-          </Section>
+      {/* ============ HEADER ============ */}
+      <div className="flex items-center justify-between px-5 py-2.5" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
+        <div className="flex items-center gap-3">
+          <span style={{ fontSize: 15, fontWeight: 500 }}>面談履歴入力</span>
+          <span style={{ fontSize: 12, color: "var(--im-fg2)" }}>
+            求職者詳細 / {candidate?.name || "..."} / 面談 #{form.interviewCount || "?"}
+          </span>
+          {/* Save status indicator */}
+          <span className="flex items-center gap-1.5" style={{ fontSize: 11, color: "var(--im-fg3)" }}>
+            {lastSavedAt ? (
+              <><span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-ok)" }} />{formatTimeAgo(lastSavedAt)}</>
+            ) : (
+              <><span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-err)" }} />未保存</>
+            )}
+            {isDirty && <span style={{ color: "var(--im-fg-warn)" }}>（変更あ���）</span>}
+          </span>
         </div>
-
-        {/* 学歴・職歴 */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <Section title="学歴・職歴">
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="学歴" value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)}
-                  options={["大学院卒", "大卒", "短大・専門卒", "高卒"]} type="select" />
-                <Field label="学歴メモ" value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
-              </div>
-              <Field label="卒業年月" value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} />
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="企業名" value={d.companyName} onChange={(v) => setDetail("companyName", v)} />
-                <Field label="在籍期間" value={d.tenure} onChange={(v) => setDetail("tenure", v)} />
-              </div>
-              <Field label="事業内容" value={d.businessContent} onChange={(v) => setDetail("businessContent", v)} type="textarea" rows={2} />
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="職種フラグ" value={d.jobTypeFlag} onChange={(v) => setDetail("jobTypeFlag", v)} />
-                <Field label="職種メモ" value={d.jobTypeMemo} onChange={(v) => setDetail("jobTypeMemo", v)} />
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <Field label="退職理由（大）" value={d.resignReasonLarge} onChange={(v) => setDetail("resignReasonLarge", v)} />
-                <Field label="退職理由（中）" value={d.resignReasonMedium} onChange={(v) => setDetail("resignReasonMedium", v)} />
-                <Field label="退職理由（小）" value={d.resignReasonSmall} onChange={(v) => setDetail("resignReasonSmall", v)} />
-              </div>
-              <Field label="転職理由メモ" value={d.jobChangeReasonMemo} onChange={(v) => setDetail("jobChangeReasonMemo", v)} type="textarea" rows={2} />
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="転職軸" value={d.jobChangeAxisFlag} onChange={(v) => setDetail("jobChangeAxisFlag", v)} />
-                <Field label="転職軸メモ" value={d.jobChangeAxisMemo} onChange={(v) => setDetail("jobChangeAxisMemo", v)} />
-              </div>
-            </div>
-          </Section>
-        </div>
-
-        {/* Save status */}
-        <div className="text-[11px] text-gray-400 px-1 flex items-center gap-2">
-          {lastSavedAt ? (
-            <>
-              <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
-              <span>最終保存: {formatTimeAgo(lastSavedAt)}</span>
-            </>
-          ) : (
-            <>
-              <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
-              <span>未保存</span>
-            </>
-          )}
-          {isDirty && <span className="text-yellow-500">（変更あり）</span>}
+        <div className="flex gap-2">
+          <button
+            type="button" onClick={() => window.history.back()}
+            className="cursor-pointer" style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg2)", fontFamily: "inherit" }}
+          >← 一覧に戻る</button>
+          <button
+            type="button" onClick={() => { if (!isDirty || confirm("変更を破棄しますか？")) window.history.back(); }}
+            className="cursor-pointer" style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+          >キャンセル</button>
+          <button
+            type="button"
+            className="cursor-pointer inline-flex items-center justify-center gap-1"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg-err)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+            PDF表示
+          </button>
+          <button
+            type="button" onClick={handleSave} disabled={saving}
+            className="cursor-pointer"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr-info)", background: "var(--im-bg-info)", color: "var(--im-fg-info)", fontFamily: "inherit", fontWeight: 500, opacity: saving ? 0.6 : 1 }}
+          >{saving ? "保存中..." : "保存"}</button>
         </div>
       </div>
 
-      {/* ========== Right Column ========== */}
-      <div className="flex-1 min-w-0 overflow-y-auto max-h-[calc(100vh-260px)]">
-        {/* Right tabs */}
-        <div className="flex border-b border-gray-200 mb-3 overflow-x-auto">
-          {RIGHT_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setRightTab(tab.id)}
-              className={`px-3 py-2 text-[12px] font-medium border-b-2 whitespace-nowrap transition-colors ${
-                rightTab === tab.id
-                  ? "text-[#2563EB] border-[#2563EB]"
-                  : "text-gray-500 border-transparent hover:text-gray-700"
-              }`}
-            >
-              {tab.label}
-              {tab.id === "attachments" && attachments.length > 0 && (
-                <span className="ml-1 bg-gray-100 text-gray-600 rounded-full px-1.5 text-[10px]">
-                  {attachments.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+      {/* ============ GRID: LEFT + RIGHT ============ */}
+      <div className="grid grid-cols-2" style={{ minHeight: "calc(100vh - 300px)" }}>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          {/* ===== 初期条件タブ ===== */}
-          {rightTab === "initial" && (
-            <div className="space-y-4">
-              <Section title="転職活動状況">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="AG利用" value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)}
-                    options={["初めて利用", "利用中", "過去利用あり"]} type="select" />
-                  <Field label="AG利用メモ" value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} />
-                  <Field label="在籍状況" value={d.employmentStatus} onChange={(v) => setDetail("employmentStatus", v)}
-                    options={["在職中", "離職中", "退職予定"]} type="select" />
-                  <Field label="転職時期" value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)}
-                    options={["1カ月以内", "3カ月以内", "半年以内", "未定"]} type="select" />
-                  <Field label="転職時期メモ" value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} />
-                  <Field label="活動期間" value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)}
-                    options={["1週間以内", "1カ月以内", "3カ月以内"]} type="select" />
-                  <Field label="応募数" value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" />
-                  <Field label="応募種別" value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)}
-                    options={["検討中", "応募中"]} type="select" />
+        {/* ======== LEFT COLUMN ======== */}
+        <div className="flex flex-col p-3.5 overflow-y-auto" style={{ background: "var(--im-bg)", borderRight: "0.5px solid var(--im-bdr)", maxHeight: "calc(100vh - 300px)" }}>
+
+          {/* --- 面談基本情報 --- */}
+          <div className="mb-4">
+            <SectionHd title="面談基本情報" />
+            <div className="grid gap-x-2 gap-y-1.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+              {/* Row 1: 面談日 | 時刻 | 時間/手法 */}
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>面談日</span>
+                <Fld value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" />
+              </div>
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>時刻</span>
+                <div className="flex gap-0.5 flex-1 min-w-0">
+                  <Fld value={form.startTime} onChange={(v) => setField("startTime", v)} type="time" />
+                  <Fld value={form.endTime} onChange={(v) => setField("endTime", v)} type="time" />
                 </div>
-                <Field label="応募メモ" value={d.applicationMemo} onChange={(v) => setDetail("applicationMemo", v)} type="textarea" className="mt-2" />
-              </Section>
-
-              <Section title="学歴・職歴">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="学歴" value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)}
-                    options={["大学院卒", "大卒", "短大・専門卒", "高卒"]} type="select" />
-                  <Field label="学歴メモ" value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
-                  <Field label="卒業年月" value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} />
-                  <Field label="企業名" value={d.companyName} onChange={(v) => setDetail("companyName", v)} />
-                  <Field label="事業内容" value={d.businessContent} onChange={(v) => setDetail("businessContent", v)} />
-                  <Field label="在籍期間" value={d.tenure} onChange={(v) => setDetail("tenure", v)} />
-                  <Field label="職種" value={d.jobTypeFlag} onChange={(v) => setDetail("jobTypeFlag", v)} />
-                  <Field label="職種メモ" value={d.jobTypeMemo} onChange={(v) => setDetail("jobTypeMemo", v)} />
+              </div>
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>時間/<br/>手法</span>
+                <div className="flex gap-0.5 flex-1 min-w-0">
+                  <RoField v={duration} />
+                  <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} />
                 </div>
-                <div className="grid grid-cols-3 gap-3 mt-2">
-                  <Field label="退職理由（大）" value={d.resignReasonLarge} onChange={(v) => setDetail("resignReasonLarge", v)} />
-                  <Field label="退職理由（中）" value={d.resignReasonMedium} onChange={(v) => setDetail("resignReasonMedium", v)} />
-                  <Field label="退職理由（小）" value={d.resignReasonSmall} onChange={(v) => setDetail("resignReasonSmall", v)} />
-                </div>
-                <Field label="転職理由メモ" value={d.jobChangeReasonMemo} onChange={(v) => setDetail("jobChangeReasonMemo", v)} type="textarea" className="mt-2" />
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <Field label="転職軸" value={d.jobChangeAxisFlag} onChange={(v) => setDetail("jobChangeAxisFlag", v)} />
-                  <Field label="転職軸メモ" value={d.jobChangeAxisMemo} onChange={(v) => setDetail("jobChangeAxisMemo", v)} />
-                </div>
-              </Section>
-
-              {/* Memos */}
-              <Section title={`面談メモ (${memos.length}件)`}>
-                {memos.length > 0 ? (
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {memos.map((memo) => (
-                      <div key={memo.id} className="bg-gray-50 rounded p-2 text-[12px]">
-                        <div className="flex items-center gap-2 text-gray-500 mb-1">
-                          <span className="font-medium text-[#374151]">{memo.title || memo.flag}</span>
-                          <span>{new Date(memo.date).toLocaleDateString("ja-JP")}</span>
-                        </div>
-                        <p className="text-gray-700 whitespace-pre-wrap">{memo.content}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-[12px] text-gray-400">メモはまだありません</p>
-                )}
-              </Section>
-            </div>
-          )}
-
-          {/* ===== 希望条件タブ ===== */}
-          {rightTab === "desired" && (
-            <div className="space-y-4">
-              <Section title="職種・業種">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="第一希望職種" value={d.desiredJobType1} onChange={(v) => setDetail("desiredJobType1", v)} />
-                  <Field label="職種メモ" value={d.desiredJobType1Memo} onChange={(v) => setDetail("desiredJobType1Memo", v)} />
-                  <Field label="第二希望職種" value={d.desiredJobType2} onChange={(v) => setDetail("desiredJobType2", v)} />
-                  <Field label="希望業界" value={d.desiredIndustry1} onChange={(v) => setDetail("desiredIndustry1", v)} />
-                  <Field label="業界メモ" value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} />
-                </div>
-              </Section>
-
-              <Section title="エリア">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="希望エリア" value={d.desiredArea} onChange={(v) => setDetail("desiredArea", v)} />
-                  <Field label="都道府県" value={d.desiredPrefecture} onChange={(v) => setDetail("desiredPrefecture", v)} />
-                  <Field label="市区町村" value={d.desiredCity} onChange={(v) => setDetail("desiredCity", v)} />
-                  <Field label="エリアメモ" value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="年収">
-                <div className="grid grid-cols-3 gap-3">
-                  <Field label="現在年収(万)" value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" />
-                  <Field label="希望下限(万)" value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" />
-                  <Field label="希望上限(万)" value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" />
-                </div>
-                <div className="grid grid-cols-3 gap-3 mt-2">
-                  <Field label="現年収メモ" value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} />
-                  <Field label="下限メモ" value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} />
-                  <Field label="上限メモ" value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="休日・残業・転勤">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="休日" value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} />
-                  <Field label="休日メモ" value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} />
-                  <Field label="年間休日数" value={d.desiredHolidayCount} onChange={(v) => setDetail("desiredHolidayCount", v)} />
-                  <Field label="残業上限" value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} />
-                  <Field label="残業メモ" value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} />
-                  <Field label="転勤" value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)}
-                    options={["可", "不可", "条件付き可"]} type="select" />
-                  <Field label="転勤メモ" value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="スキル">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="普通免許" value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)}
-                    options={["あり", "なし"]} type="select" />
-                  <Field label="免許メモ" value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} />
-                  <Field label="語学力" value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} />
-                  <Field label="語学メモ" value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} />
-                  <Field label="日本語力" value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} />
-                  <Field label="日本語メモ" value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} />
-                  <Field label="タイピング" value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} />
-                  <Field label="タイピングメモ" value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} />
-                  <Field label="Excel" value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} />
-                  <Field label="Excelメモ" value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} />
-                  <Field label="Word" value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} />
-                  <Field label="Wordメモ" value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} />
-                  <Field label="PPT" value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} />
-                  <Field label="PPTメモ" value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="働き方・会社特徴">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="働き方" value={d.workStyleFlags} onChange={(v) => setDetail("workStyleFlags", v)} placeholder="例: リモート可,フレックス" />
-                  <Field label="会社特徴" value={d.companyFeatureFlags} onChange={(v) => setDetail("companyFeatureFlags", v)} placeholder="例: 上場企業,ベンチャー" />
-                </div>
-              </Section>
-
-              <Section title="優先条件">
-                <div className="grid grid-cols-3 gap-3">
-                  <Field label="1位" value={d.priorityCondition1} onChange={(v) => setDetail("priorityCondition1", v)} />
-                  <Field label="2位" value={d.priorityCondition2} onChange={(v) => setDetail("priorityCondition2", v)} />
-                  <Field label="3位" value={d.priorityCondition3} onChange={(v) => setDetail("priorityCondition3", v)} />
-                </div>
-                <Field label="優先条件メモ" value={d.priorityConditionMemo} onChange={(v) => setDetail("priorityConditionMemo", v)} type="textarea" className="mt-2" />
-              </Section>
-            </div>
-          )}
-
-          {/* ===== ランク評価タブ ===== */}
-          {rightTab === "rating" && (
-            <div className="space-y-4">
-              <RatingSection title="人物評価" prefix="personality" items={[
-                { key: "Motivation", label: "やる気・熱意" },
-                { key: "Communication", label: "コミュニケーション" },
-                { key: "Manner", label: "マナー" },
-                { key: "Intelligence", label: "地頭" },
-                { key: "Humanity", label: "人間性" },
-              ]} rating={r} setRating={setRating} />
-
-              <RatingSection title="経歴評価" prefix="career" items={[
-                { key: "JobType", label: "職種マッチ" },
-                { key: "Experience", label: "経験年数" },
-                { key: "JobChangeCount", label: "転職回数" },
-                { key: "Achievement", label: "実績" },
-                { key: "Qualification", label: "資格" },
-              ]} rating={r} setRating={setRating} />
-
-              <RatingSection title="条件評価" prefix="condition" items={[
-                { key: "JobType", label: "職種" },
-                { key: "Salary", label: "年収" },
-                { key: "Holiday", label: "休日" },
-                { key: "Area", label: "エリア" },
-                { key: "Flexibility", label: "柔軟性" },
-              ]} rating={r} setRating={setRating} />
-
-              <Section title="総合">
-                <div className="flex items-center gap-4 text-[13px]">
-                  <span>
-                    合計: <strong className="text-lg">{grandTotal || 0}</strong> / 75
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <label className="text-[11px] text-gray-500">面談評価:</label>
-                    <select
-                      value={r.overallRank || ""}
-                      onChange={(e) => setRating("overallRank", e.target.value || null)}
-                      className="border border-gray-300 rounded px-2 py-1 text-[13px] font-bold"
-                    >
-                      <option value="">-</option>
-                      {["A", "B", "C", "D"].map((v) => (
-                        <option key={v} value={v}>{v}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <Field label="総合メモ" value={r.grandTotalMemo} onChange={(v) => setRating("grandTotalMemo", v)} type="textarea" rows={3} />
-                </div>
-              </Section>
-            </div>
-          )}
-
-          {/* ===== アクションタブ ===== */}
-          {rightTab === "action" && (
-            <div className="space-y-4">
-              <Section title="応募書類">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="書類ステータス" value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)}
-                    options={["未着手", "作成中", "完了"]} type="select" />
-                  <Field label="書類メモ" value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} />
-                  <Field label="書類サポート" value={d.documentSupportFlag} onChange={(v) => setDetail("documentSupportFlag", v)} />
-                  <Field label="サポートメモ" value={d.documentSupportMemo} onChange={(v) => setDetail("documentSupportMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="連絡">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="LINE設定" value={d.lineSetupFlag} onChange={(v) => setDetail("lineSetupFlag", v)}
-                    options={["設定済", "未設定", "不要"]} type="select" />
-                  <Field label="LINEメモ" value={d.lineSetupMemo} onChange={(v) => setDetail("lineSetupMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="求人送付">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="送付フラグ" value={d.jobReferralFlag} onChange={(v) => setDetail("jobReferralFlag", v)}
-                    options={["未送付", "送付予定", "送付済"]} type="select" />
-                  <Field label="送付予定時期" value={d.jobReferralTimeline} onChange={(v) => setDetail("jobReferralTimeline", v)} />
-                </div>
-                <Field label="送付メモ" value={d.jobReferralMemo} onChange={(v) => setDetail("jobReferralMemo", v)} type="textarea" className="mt-2" />
-              </Section>
-
-              <Section title="次回面談">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="次回面談フラグ" value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} />
-                  <Field label="次回面談メモ" value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} />
-                </div>
-              </Section>
-
-              <Section title="フリーメモ">
-                <Field label="" value={d.freeMemo} onChange={(v) => setDetail("freeMemo", v)} type="textarea" rows={5} />
-              </Section>
-
-              <Section title="初回面談まとめ">
-                <Field label="" value={d.initialSummary || form.summaryText} onChange={(v) => setDetail("initialSummary", v)} type="textarea" rows={5} />
-              </Section>
-            </div>
-          )}
-
-          {/* ===== 添付タブ ===== */}
-          {rightTab === "attachments" && (
-            <div className="space-y-4">
-              {/* Upload area */}
-              <div
-                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-300 hover:bg-blue-50/30 transition-colors cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleUpload(file);
-                }}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.docx,.xlsx,.csv,.txt"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUpload(file);
-                    e.target.value = "";
-                  }}
-                />
-                {uploading ? (
-                  <p className="text-[13px] text-gray-500">アップロード中...</p>
-                ) : (
-                  <>
-                    <p className="text-[13px] text-gray-500">ファイルをドロップ、またはクリックして選択</p>
-                    <p className="text-[11px] text-gray-400 mt-1">PDF, 画像, Word, Excel, CSV, テキスト (最大20MB)</p>
-                  </>
-                )}
               </div>
 
-              {/* Attachment list */}
-              {attachments.length > 0 ? (
-                <div className="space-y-2">
-                  {attachments.map((att) => (
-                    <div key={att.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                      <div className="flex items-start justify-between">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium text-[#374151] truncate">{att.fileName}</p>
-                          <div className="flex items-center gap-3 text-[11px] text-gray-500 mt-1">
-                            <span>{att.fileType.toUpperCase()}</span>
-                            <span>{(att.fileSize / 1024).toFixed(0)} KB</span>
-                            <span>{new Date(att.uploadedAt).toLocaleDateString("ja-JP")}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              att.analysisStatus === "completed" ? "bg-green-100 text-green-700" :
-                              att.analysisStatus === "processing" ? "bg-yellow-100 text-yellow-700" :
-                              att.analysisStatus === "failed" ? "bg-red-100 text-red-700" :
-                              "bg-gray-100 text-gray-500"
-                            }`}>
-                              {att.analysisStatus === "completed" ? "解析済" :
-                               att.analysisStatus === "processing" ? "解析中" :
-                               att.analysisStatus === "failed" ? "失敗" : "未解析"}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 ml-2">
-                          {(att.fileType === "pdf" || att.fileType === "xlsx" || att.fileType === "txt" || att.fileType === "csv") && att.analysisStatus !== "processing" && (
-                            <button
-                              onClick={() => handleAnalyze(att.id)}
-                              disabled={analyzingId === att.id}
-                              className="text-[11px] bg-purple-50 text-purple-700 border border-purple-200 rounded px-2 py-1 hover:bg-purple-100 transition-colors disabled:opacity-50"
-                            >
-                              {analyzingId === att.id ? "解析中..." : "AI解析"}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDeleteAttachment(att.id)}
-                            className="text-[11px] text-red-400 hover:text-red-600 px-1.5 py-1 transition-colors"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      </div>
-                      {att.analysisStatus === "failed" && att.analysisError && (
-                        <p className="text-[11px] text-red-500 mt-1">{att.analysisError}</p>
-                      )}
-                    </div>
-                  ))}
+              {/* Row 2: 求職者ID | 氏名 | フリガナ */}
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>求職者ID</span><RoField v={candidate?.candidateNumber || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>氏名</span><RoField v={candidate?.name || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フリガナ</span><RoField v={candidate?.nameKana || ""} /></div>
+
+              {/* Row 3: 生年月日 | 電話 | メール */}
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>生年月日</span><RoField v={fmtDate(candidate?.birthday ?? null)} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>電話</span><RoField v={candidate?.phone || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>メール</span><RoField v={candidate?.email || ""} /></div>
+
+              {/* Row 4: 年齢/性別 | 住所(wide) */}
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>年齢/<br/>性別</span>
+                <div className="flex gap-0.5 flex-1 min-w-0">
+                  <RoField v={age !== null ? String(age) : ""} />
+                  <RoField v={genderLabel(candidate?.gender ?? null)} />
                 </div>
-              ) : (
-                <p className="text-[12px] text-gray-400 text-center py-4">添付ファイルはまだありません</p>
-              )}
+              </div>
+              <div className="col-span-4 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
+
+              {/* Row 5: 担当CA | 社員名 | ランク */}
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>���当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>社員名</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>ランク</span>
+                <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
+                  {r.overallRank ? (
+                    <span className="inline-flex items-center rounded-[10px] px-3 py-0.5" style={{ fontSize: 13, fontWeight: 500, background: rankColor(r.overallRank).bg, color: rankColor(r.overallRank).fg }}>{r.overallRank}</span>
+                  ) : <span style={{ fontSize: 12, color: "var(--im-fg3)" }}>-</span>}
+                </div>
+              </div>
+
+              {/* Row 6: 回数/状態 | 結果 | 最新 */}
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>回数/<br/>状態</span>
+                <div className="flex gap-0.5 flex-1 min-w-0">
+                  <RoField v={form.interviewCount ? `${form.interviewCount}回` : ""} />
+                  <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
+                    <Chip text={form.status === "complete" ? "入力済" : "下書き"} variant={form.status === "complete" ? "warn" : "info"} />
+                  </div>
+                </div>
+              </div>
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
+                <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求���紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
+              </div>
+              <div className="col-span-2 flex items-center gap-1.5">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>最新</span>
+                <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
+                  <Chip text="最新" variant="ok" />
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* --- 転職活動状�� --- */}
+          <div className="mb-4">
+            <SectionHd title="転職活動状況" />
+            <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
+            <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={["3カ月以内", "半年以内", "1年以内", "未定"]} style={{ width: 110, flex: "none" }} /><Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
+            <Row label="活動期間"><Fld value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)} type="select" options={["1週間以内", "1カ月以内", "3カ月以内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} /></Row>
+            <Row label="他社応募">
+              <Fld value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)} type="select" options={["検討中", "応募中", "選考中", "なし"]} style={{ width: 110, flex: "none" }} />
+              <Fld value={d.applicationMemo} onChange={(v) => setDetail("applicationMemo", v)} />
+              <div className="flex items-center gap-1 shrink-0" style={{ width: 80 }}>
+                <Fld value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" style={{ width: 48, textAlign: "center", flex: "none" }} />
+                <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>社</span>
+              </div>
+            </Row>
+            <Row label="最終学歴">
+              <Fld value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)} type="select" options={["大学卒", "大学院卒", "短大卒", "専門卒", "高卒"]} style={{ width: 110, flex: "none" }} />
+              <Fld value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
+              <div className="flex items-center gap-1 shrink-0" style={{ width: 186 }}>
+                <Fld value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} style={{ width: 92 }} placeholder="2016年3月" />
+                <Fld value={d.employmentStatus} onChange={(v) => setDetail("employmentStatus", v)} type="select" options={["卒業", "中退", "在職中", "離職中", "退職予定"]} style={{ flex: 1 }} />
+              </div>
+            </Row>
+          </div>
+
+          {/* --- 職務経歴 --- */}
+          <div className="flex-1 flex flex-col min-h-0 mb-2">
+            <SectionHd title="職務経歴" />
+            <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[200px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+              <div className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>1 社目</span>
+                  <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>企業名</span>
+                  <Fld value={d.companyName} onChange={(v) => setDetail("companyName", v)} />
+                  <Fld value={d.tenure} onChange={(v) => setDetail("tenure", v)} placeholder="例: 11年0カ月" style={{ width: 100, flex: "none" }} />
+                </div>
+                <Row label="会社概要"><Fld value={d.businessContent} onChange={(v) => setDetail("businessContent", v)} /></Row>
+                <Row label="職種"><Fld value={d.jobTypeFlag} onChange={(v) => setDetail("jobTypeFlag", v)} /><Fld value={d.jobTypeMemo} onChange={(v) => setDetail("jobTypeMemo", v)} /></Row>
+                <div className="flex items-start gap-1.5 mb-1">
+                  <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>業務内容</span>
+                  <Fld value={d.careerSummary} onChange={(v) => setDetail("careerSummary", v)} type="textarea" rows={3} />
+                </div>
+                <Row label="退社理由">
+                  <Fld value={d.resignReasonLarge} onChange={(v) => setDetail("resignReasonLarge", v)} type="select" options={["過去型", "未来型", "現職"]} style={{ width: 90, flex: "none" }} />
+                  <Fld value={d.resignReasonMedium} onChange={(v) => setDetail("resignReasonMedium", v)} type="select" options={["環境要因", "キャリア要因", "待遇要因"]} style={{ width: 100, flex: "none" }} />
+                  <Fld value={d.resignReasonSmall} onChange={(v) => setDetail("resignReasonSmall", v)} />
+                </Row>
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>詳細</span>
+                  <Fld value={d.jobChangeReasonMemo} onChange={(v) => setDetail("jobChangeReasonMemo", v)} type="textarea" rows={2} />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Save button (bottom of right column) */}
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-[#2563EB] text-white rounded-md px-6 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+        {/* ======== RIGHT COLUMN ======== */}
+        <div className="flex flex-col overflow-y-auto" style={{ background: "var(--im-bg)", maxHeight: "calc(100vh - 300px)" }}>
+
+          {/* Tabs */}
+          <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
+            {RIGHT_TABS.map((tab) => (
+              <button
+                key={tab.id} type="button" onClick={() => setRightTab(tab.id)}
+                className="cursor-pointer whitespace-nowrap"
+                style={{
+                  padding: "9px 14px", fontSize: 13, fontFamily: "inherit",
+                  color: rightTab === tab.id ? "var(--im-fg)" : "var(--im-fg2)",
+                  fontWeight: rightTab === tab.id ? 500 : 400,
+                  borderBottom: rightTab === tab.id ? "2px solid var(--im-fg-info)" : "2px solid transparent",
+                  background: "none", border: "none", borderTop: 0, borderLeft: 0, borderRight: 0,
+                  borderBottomStyle: "solid", borderBottomWidth: 2, borderBottomColor: rightTab === tab.id ? "var(--im-fg-info)" : "transparent",
+                }}
+              >
+                {tab.label}
+                {tab.id === "attachments" && attachments.length > 0 && (
+                  <span className="ml-1 rounded-full px-1.5" style={{ fontSize: 10, background: "var(--im-bg2)", color: "var(--im-fg2)" }}>{attachments.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 flex flex-col p-3.5 min-h-0 overflow-y-auto">
+
+            {/* ===== 初期条件タブ ===== */}
+            {rightTab === "initial" && (
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="mb-4">
+                  <SectionHd title="登録時条件" />
+                  <div className="grid gap-x-2 gap-y-1.5 items-center" style={{ gridTemplateColumns: "64px 64px minmax(0,1fr) 64px minmax(0,1fr)" }}>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>業種</span>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第一</span>
+                    <Fld value={d.regIndustry1} onChange={(v) => setDetail("regIndustry1", v)} placeholder="（未入力）" />
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第二</span>
+                    <Fld value={d.regIndustry2} onChange={(v) => setDetail("regIndustry2", v)} placeholder="��未入力）" />
+
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>職種</span>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第一</span>
+                    <Fld value={d.regJobType1} onChange={(v) => setDetail("regJobType1", v)} />
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第二</span>
+                    <Fld value={d.regJobType2} onChange={(v) => setDetail("regJobType2", v)} />
+
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>エリア</span>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>都道府県</span>
+                    <div className="flex items-center gap-1.5">
+                      <Fld value={d.regAreaPrefecture} onChange={(v) => setDetail("regAreaPrefecture", v)} placeholder="都道府県" />
+                      <span style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.2, textAlign: "center", width: 28, flexShrink: 0 }}>雇用<br/>形態</span>
+                      <Fld value={d.regEmploymentType} onChange={(v) => setDetail("regEmploymentType", v)} type="select" options={["正社員", "契約社員", "派遣"]} />
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>年収</span>
+                    <div className="flex items-center gap-1 flex-nowrap">
+                      <span style={{ fontSize: 11, color: "var(--im-fg2)", flexShrink: 0 }}>下限</span>
+                      <Fld value={d.regSalaryMin} onChange={(v) => setDetail("regSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 60, textAlign: "center", flex: "1 1 60px" }} />
+                      <span style={{ fontSize: 11, color: "var(--im-fg3)", flexShrink: 0 }}>万円</span>
+                      <span style={{ fontSize: 11, color: "var(--im-fg3)", flexShrink: 0 }}>〜</span>
+                      <span style={{ fontSize: 11, color: "var(--im-fg2)", flexShrink: 0 }}>上限</span>
+                      <Fld value={d.regSalaryMax} onChange={(v) => setDetail("regSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 60, textAlign: "center", flex: "1 1 60px" }} />
+                      <span style={{ fontSize: 11, color: "var(--im-fg3)", flexShrink: 0 }}>万円</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Memo Section */}
+                <div className="flex-1 flex flex-col min-h-0">
+                  <SectionHd title="メモ" />
+                  <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[200px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+                    {memos.map((memo) => (
+                      <div key={memo.id} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
+                        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                          <BtnMini variant="danger" onClick={() => handleDeleteMemo(memo.id)}>🗑 削除</BtnMini>
+                          <input
+                            value={memo.title} onChange={(e) => handleUpdateMemo(memo.id, "title", e.target.value)}
+                            style={{ flex: "1 1 180px", minWidth: 120, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
+                          />
+                          <select
+                            value={memo.flag} onChange={(e) => handleUpdateMemo(memo.id, "flag", e.target.value)}
+                            style={{ width: 110, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
+                          >
+                            {MEMO_FLAGS.map((f) => <option key={f} value={f}>{f}</option>)}
+                          </select>
+                          <input
+                            type="date" value={memo.date ? new Date(memo.date).toISOString().slice(0, 10) : ""}
+                            onChange={(e) => handleUpdateMemo(memo.id, "date", e.target.value)}
+                            style={{ width: 116, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
+                          />
+                          <input
+                            type="time" value={memo.time || ""}
+                            onChange={(e) => handleUpdateMemo(memo.id, "time", e.target.value)}
+                            style={{ width: 78, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
+                          />
+                        </div>
+                        <textarea
+                          value={memo.content} onChange={(e) => handleUpdateMemo(memo.id, "content", e.target.value)}
+                          rows={4}
+                          style={{ width: "100%", fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)", resize: "vertical", lineHeight: 1.5 }}
+                        />
+                      </div>
+                    ))}
+                    {memos.length === 0 && <p style={{ fontSize: 11, color: "var(--im-fg3)", fontStyle: "italic", textAlign: "center", padding: 20 }}>メモはまだありません</p>}
+                  </div>
+                  <button
+                    type="button" onClick={handleAddMemo}
+                    className="w-full mt-1.5 cursor-pointer"
+                    style={{ padding: "8px 12px", fontSize: 12, border: "0.5px dashed var(--im-bdr2)", background: "transparent", color: "var(--im-fg2)", borderRadius: 6, fontFamily: "inherit" }}
+                  >＋ ���規メモ登録</button>
+                </div>
+              </div>
+            )}
+
+            {/* ===== 希望条��タブ ===== */}
+            {rightTab === "desired" && (
+              <div>
+                <div className="mb-4">
+                  <SectionHd title="希望条件（詳細）" />
+                  <div className="inline-flex gap-0.5 rounded-md p-0.5 mb-2.5" style={{ background: "var(--im-bg2)" }}>
+                    {DESIRED_SUBTABS.map((st) => (
+                      <button
+                        key={st.id} type="button" onClick={() => setDesiredSub(st.id)}
+                        className="cursor-pointer"
+                        style={{
+                          padding: "4px 12px", fontSize: 12, borderRadius: 5, border: 0, fontFamily: "inherit",
+                          background: desiredSub === st.id ? "var(--im-bg)" : "transparent",
+                          color: desiredSub === st.id ? "var(--im-fg)" : "var(--im-fg2)",
+                          fontWeight: desiredSub === st.id ? 500 : 400,
+                        }}
+                      >{st.label}</button>
+                    ))}
+                  </div>
+                  {desiredSub === "st-job" && (
+                    <div>
+                      <Fld value={d.desiredJobType1} onChange={(v) => setDetail("desiredJobType1", v)} placeholder="（例：管理・事務 ／ 一般事務・庶務）" />
+                      <div className="mt-1.5"><Fld value={d.desiredJobType1Memo} onChange={(v) => setDetail("desiredJobType1Memo", v)} type="textarea" rows={2} placeholder="職種に関する所感・詳細メモ" /></div>
+                    </div>
+                  )}
+                  {desiredSub === "st-industry" && (
+                    <div>
+                      <Fld value={d.desiredIndustry1} onChange={(v) => setDetail("desiredIndustry1", v)} placeholder="（例：IT・通信 ／ サービス ／ メーカー）" />
+                      <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メ��" /></div>
+                    </div>
+                  )}
+                  {desiredSub === "st-area" && (
+                    <div>
+                      <Fld value={d.desiredArea} onChange={(v) => setDetail("desiredArea", v)} placeholder="（例：横浜市 ／ 川崎市 ／ 東京都内���" />
+                      <div className="mt-1.5"><Fld value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} type="textarea" rows={2} placeholder="エ���アに関する所感・詳細メモ" /></div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-4">
+                  <SectionHd title="年収・勤務条件" />
+                  <Row label="現年収"><Fld value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} /></Row>
+                  <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
+                  <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
+                  <Row label="希望休日"><Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={["土日祝休み", "完全週休2日", "シフト制"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} /></Row>
+                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["20時間以内", "30時間以内", "45時間���内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
+                  <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={["なし", "可", "要相談"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
+                </div>
+
+                <div className="mb-4">
+                  <SectionHd title="スキル" />
+                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予��"]} style={{ width: 110, flex: "none" }} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
+                  <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={["不可", "日常会話", "ビジネス", "ネイティブ"]} style={{ width: 110, flex: "none" }} /><Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
+                  <Row label="日本���"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
+                  <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={["ブラインドタッチ可", "中級", "初級"]} style={{ width: 110, flex: "none" }} /><Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
+                  <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
+                  <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
+                  <Row label="PPT"><Fld value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} /></Row>
+                </div>
+
+                <div className="mb-4">
+                  <SectionHd title="働き方" />
+                  <div className="grid grid-cols-4 gap-x-2.5 gap-y-1.5">
+                    {WORK_STYLE_OPTIONS.map((ws) => (
+                      <label key={ws} className="flex items-center gap-1.5 cursor-pointer" style={{ fontSize: 12, color: "var(--im-fg2)" }}>
+                        <input type="checkbox" checked={workStyleSet.has(ws)} onChange={() => toggleWorkStyle(ws)} className="m-0" />
+                        {ws}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ===== ランク評価タブ ===== */}
+            {rightTab === "rating" && (
+              <div>
+                <div className="flex items-center gap-3.5 mb-3.5 p-3 rounded-lg" style={{ background: "var(--im-bg2)" }}>
+                  <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>ラ��ク</span>
+                  <select
+                    value={r.overallRank || ""} onChange={(e) => setRating("overallRank", e.target.value || null)}
+                    style={{ fontSize: 24, fontWeight: 500, color: "var(--im-fg-info)", background: "transparent", border: "none", fontFamily: "inherit", cursor: "pointer" }}
+                  >
+                    <option value="">-</option>
+                    {["S", "A", "B+", "B", "B-", "C", "D"].map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <span className="ml-auto" style={{ fontSize: 12, color: "var(--im-fg2)" }}>合計：<b style={{ fontSize: 15, fontWeight: 500, color: "var(--im-fg)" }}>{grandTotal || 0}</b> ／ 75</span>
+                </div>
+
+                <table className="w-full" style={{ borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th className="text-left" style={{ fontWeight: 500, background: "var(--im-bg2)", color: "var(--im-fg2)", padding: "7px 10px", fontSize: 11, borderBottom: "0.5px solid var(--im-bdr)", width: "35%" }}>カテゴリ</th>
+                      <th style={{ fontWeight: 500, background: "var(--im-bg2)", color: "var(--im-fg2)", padding: "7px 10px", fontSize: 11, borderBottom: "0.5px solid var(--im-bdr)", width: 150, textAlign: "left" }}>点数</th>
+                      <th className="text-left" style={{ fontWeight: 500, background: "var(--im-bg2)", color: "var(--im-fg2)", padding: "7px 10px", fontSize: 11, borderBottom: "0.5px solid var(--im-bdr)" }}>備考</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { items: [
+                        { label: "転職意欲", key: "personalityMotivation" },
+                        { label: "コミュニケーションスキル", key: "personalityCommunication" },
+                        { label: "ビジネスマナー", key: "personalityManner" },
+                        { label: "地頭", key: "personalityIntelligence" },
+                        { label: "人間性", key: "personalityHumanity" },
+                      ], subtotalLabel: "人物評価 総評", subtotalVal: pTotal },
+                      { items: [
+                        { label: "経験職種", key: "careerJobType" },
+                        { label: "社会人経験", key: "careerExperience" },
+                        { label: "転職回数", key: "careerJobChangeCount" },
+                        { label: "実績・スキル", key: "careerAchievement" },
+                        { label: "語学・資格", key: "careerQualification" },
+                      ], subtotalLabel: "経歴評価 総評", subtotalVal: cTotal },
+                      { items: [
+                        { label: "希望職種", key: "conditionJobType" },
+                        { label: "希望年収", key: "conditionSalary" },
+                        { label: "休日・シフト", key: "conditionHoliday" },
+                        { label: "エリア", key: "conditionArea" },
+                        { label: "柔軟性", key: "conditionFlexibility" },
+                      ], subtotalLabel: "条件評価 総評", subtotalVal: condTotal },
+                    ].map((group) => (
+                      <React.Fragment key={group.subtotalLabel}>
+                        {group.items.map((item) => (
+                          <tr key={item.key}>
+                            <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)" }}>{item.label}</td>
+                            <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)" }}>
+                              <div className="flex gap-0.5">
+                                {[1, 2, 3, 4, 5].map((n) => (
+                                  <button
+                                    key={n} type="button"
+                                    onClick={() => setRating(item.key, r[item.key] === n ? null : n)}
+                                    className="cursor-pointer"
+                                    style={{
+                                      width: 24, height: 24, borderRadius: 4, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit",
+                                      border: "0.5px solid " + (r[item.key] === n ? "var(--im-bdr-info)" : "var(--im-bdr)"),
+                                      background: r[item.key] === n ? "var(--im-bg-info)" : "var(--im-bg)",
+                                      color: r[item.key] === n ? "var(--im-fg-info)" : "var(--im-fg2)",
+                                      fontWeight: r[item.key] === n ? 500 : 400,
+                                    }}
+                                  >{n}</button>
+                                ))}
+                              </div>
+                            </td>
+                            <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)" }}>
+                              <input
+                                value={r[`${item.key}Memo`] || ""} onChange={(e) => setRating(`${item.key}Memo`, e.target.value)}
+                                style={{ width: "100%", fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                        <tr>
+                          <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg2)", fontWeight: 500 }}>{group.subtotalLabel}</td>
+                          <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg2)", fontWeight: 500 }}>{group.subtotalVal}</td>
+                          <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg2)" }}></td>
+                        </tr>
+                      </React.Fragment>
+                    ))}
+                    <tr>
+                      <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg-warn)", fontWeight: 500 }}>合計点</td>
+                      <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg-warn)", fontWeight: 500 }}>{grandTotal}</td>
+                      <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)", background: "var(--im-bg-warn)" }}>人物評価{pTotal} + 経歴評価{cTotal} + 条件評価{condTotal}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ===== アクションタブ ===== */}
+            {rightTab === "action" && (
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="mb-3.5">
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>応募書類状況</div>
+                  <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
+                  <Row label="サポート"><Fld value={d.documentSupportFlag} onChange={(v) => setDetail("documentSupportFlag", v)} type="select" options={["本人作成書類から作成", "ヤギッシュ作成依頼", "テンプレ送付のみ"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentSupportMemo} onChange={(v) => setDetail("documentSupportMemo", v)} /></Row>
+                </div>
+                <div className="mb-3.5">
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>連絡方法</div>
+                  <Row label="連絡手段"><Fld value={d.contactMethod} onChange={(v) => setDetail("contactMethod", v)} type="select" options={["LINE", "メール", "電話", "LINE WORKS"]} style={{ width: 110, flex: "none" }} /><Fld value={d.contactMemo} onChange={(v) => setDetail("contactMemo", v)} /></Row>
+                </div>
+                <div className="mb-3.5">
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>求人送付／送付期限</div>
+                  <Row label="送付予定"><Fld value={d.jobReferralFlag} onChange={(v) => setDetail("jobReferralFlag", v)} type="select" options={["週明け月曜日", "今週中", "未定", "送付済"]} style={{ width: 110, flex: "none" }} /><Fld value={d.jobReferralMemo} onChange={(v) => setDetail("jobReferralMemo", v)} /></Row>
+                </div>
+                <div className="mb-3.5">
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>次回面談予���</div>
+                  <Row label="日時">
+                    <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={["設定済", "調整中", "未設定"]} style={{ width: 110, flex: "none" }} />
+                    <Fld value={d.nextInterviewDate ? new Date(d.nextInterviewDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("nextInterviewDate", v)} type="date" style={{ width: 116, flex: "none" }} />
+                    <Fld value={d.nextInterviewTime} onChange={(v) => setDetail("nextInterviewTime", v)} type="time" style={{ width: 78, flex: "none" }} />
+                    <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" />
+                  </Row>
+                </div>
+                <div className="flex-1 flex flex-col min-h-0">
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>
+                    <span>ネクストアクション</span>
+                    <BtnMini variant="ai">✨ AI整理</BtnMini>
+                  </div>
+                  <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} />
+                </div>
+              </div>
+            )}
+
+            {/* ===== 添付タブ ===== */}
+            {rightTab === "attachments" && (
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="mb-4">
+                  <SectionHd title="面談ログ・資料アップロード" />
+                  <div
+                    className="cursor-pointer text-center"
+                    style={{ border: "0.5px dashed var(--im-bdr2)", borderRadius: 8, padding: 20, background: "var(--im-bg2)" }}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+                  >
+                    <input
+                      ref={fileInputRef} type="file" className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.docx,.xlsx,.csv,.txt,.mp3,.m4a"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }}
+                    />
+                    {uploading ? (
+                      <p style={{ fontSize: 13, color: "var(--im-fg2)" }}>アップロード中...</p>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 22, marginBottom: 4 }}>📎</div>
+                        <div style={{ fontSize: 13, color: "var(--im-fg2)", marginBottom: 6 }}>Nottaログ / 録音 / 履歴書PDF等をドラッグ＆ドロップ または</div>
+                        <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 6, fontSize: 12, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}>ファイルを選��</span>
+                        <div style={{ fontSize: 11, color: "var(--im-fg3)", marginTop: 6 }}>対応形式: .txt / .pdf / .docx / .xlsx / .mp3 / .m4a / .png / .jpg （最大 20MB）</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex-1 flex flex-col min-h-0">
+                  <SectionHd
+                    title="添付��ァイル一覧"
+                    right={attachments.length > 0 ? <BtnMini variant="ai" onClick={() => { const first = attachments.find((a) => a.analysisStatus !== "completed"); if (first) handleAnalyze(first.id); }}>✨ ログを解析して各カラムへ自動入力</BtnMini> : undefined}
+                  />
+                  <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[150px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+                    {attachments.map((att) => (
+                      <div key={att.id} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
+                        <div className="flex items-center gap-1.5">
+                          <BtnMini variant="danger" onClick={() => handleDeleteAttachment(att.id)}>🗑 削除</BtnMini>
+                          <span style={{ fontSize: 18, flexShrink: 0 }}>{att.mimeType?.startsWith("audio") ? "🎙️" : "📄"}</span>
+                          <span className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: "var(--im-fg)" }}>{att.fileName}</span>
+                          <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>{(att.fileSize / 1024).toFixed(0)} KB</span>
+                          <Chip text={att.analysisStatus === "completed" ? "解析済" : att.analysisStatus === "processing" ? "解析中" : "未解析"} variant={att.analysisStatus === "completed" ? "ok" : "warn"} />
+                          {(att.fileType === "pdf" || att.fileType === "xlsx" || att.fileType === "txt" || att.fileType === "csv") && att.analysisStatus !== "processing" && (
+                            <BtnMini variant="ai" onClick={() => handleAnalyze(att.id)}>
+                              {analyzingId === att.id ? "解析中..." : "✨ AI解析"}
+                            </BtnMini>
+                          )}
+                        </div>
+                        {att.analysisStatus === "failed" && att.analysisError && (
+                          <p className="mt-1" style={{ fontSize: 11, color: "var(--im-fg-err)" }}>{att.analysisError}</p>
+                        )}
+                      </div>
+                    ))}
+                    {attachments.length === 0 && <p style={{ fontSize: 11, color: "var(--im-fg3)", fontStyle: "italic", textAlign: "center", padding: 20 }}>添付ファイルはまだありません</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
