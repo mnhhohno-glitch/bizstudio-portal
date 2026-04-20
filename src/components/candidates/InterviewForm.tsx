@@ -66,7 +66,7 @@ const RIGHT_TABS = [
   { id: "desired", label: "希望条件" },
   { id: "rating", label: "ランク評価" },
   { id: "action", label: "アクション" },
-  { id: "attachments", label: "添��" },
+  { id: "attachments", label: "添付" },
 ] as const;
 
 const AUTOSAVE_INTERVAL = 30_000;
@@ -82,7 +82,7 @@ const WORK_STYLE_OPTIONS = [
 const DESIRED_SUBTABS = [
   { id: "st-job", label: "職種" },
   { id: "st-industry", label: "業種" },
-  { id: "st-area", label: "エ���ア" },
+  { id: "st-area", label: "エリア" },
 ];
 
 /* ================================================================== */
@@ -340,7 +340,7 @@ export default function InterviewForm({
     if (!candidateId) return;
     fetch(`/api/candidates/${candidateId}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data) setCandidate(data); })
+      .then((data) => { if (data?.candidate) setCandidate(data.candidate); })
       .catch(() => {});
   }, [candidateId]);
 
@@ -502,7 +502,7 @@ export default function InterviewForm({
         toast.error(`解析失敗: ${data.error}`);
       }
     } catch {
-      toast.error("解析リクエストに��敗しました");
+      toast.error("解析リクエストに失敗しました");
     } finally {
       setAnalyzingId(null);
     }
@@ -510,7 +510,7 @@ export default function InterviewForm({
 
   /* ---- Attachment delete (existing logic) ---- */
   const handleDeleteAttachment = async (attachmentId: string) => {
-    if (!confirm("この添付ファイルを削除し���すか？")) return;
+    if (!confirm("この添付ファイルを削除しますか？")) return;
     try {
       const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}`, { method: "DELETE" });
       if (res.ok) {
@@ -530,7 +530,7 @@ export default function InterviewForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "新規メ���",
+          title: "新規メモ",
           flag: "初回面談",
           date: now.toISOString(),
           time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
@@ -626,7 +626,7 @@ export default function InterviewForm({
             ) : (
               <><span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-err)" }} />未保存</>
             )}
-            {isDirty && <span style={{ color: "var(--im-fg-warn)" }}>（変更あ���）</span>}
+            {isDirty && <span style={{ color: "var(--im-fg-warn)" }}>（変更あり）</span>}
           </span>
         </div>
         <div className="flex gap-2">
@@ -705,7 +705,7 @@ export default function InterviewForm({
               <div className="col-span-4 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
 
               {/* Row 5: 担当CA | 社員名 | ランク */}
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>���当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>社員名</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>ランク</span>
@@ -728,7 +728,7 @@ export default function InterviewForm({
               </div>
               <div className="col-span-2 flex items-center gap-1.5">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
-                <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求���紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
+                <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>最新</span>
@@ -739,7 +739,7 @@ export default function InterviewForm({
             </div>
           </div>
 
-          {/* --- 転職活動状�� --- */}
+          {/* --- 転職活動状況 --- */}
           <div className="mb-4">
             <SectionHd title="転職活動状況" />
             <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
@@ -832,7 +832,7 @@ export default function InterviewForm({
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第一</span>
                     <Fld value={d.regIndustry1} onChange={(v) => setDetail("regIndustry1", v)} placeholder="（未入力）" />
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第二</span>
-                    <Fld value={d.regIndustry2} onChange={(v) => setDetail("regIndustry2", v)} placeholder="��未入力）" />
+                    <Fld value={d.regIndustry2} onChange={(v) => setDetail("regIndustry2", v)} placeholder="（未入力）" />
 
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>職種</span>
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>第一</span>
@@ -902,12 +902,12 @@ export default function InterviewForm({
                     type="button" onClick={handleAddMemo}
                     className="w-full mt-1.5 cursor-pointer"
                     style={{ padding: "8px 12px", fontSize: 12, border: "0.5px dashed var(--im-bdr2)", background: "transparent", color: "var(--im-fg2)", borderRadius: 6, fontFamily: "inherit" }}
-                  >＋ ���規メモ登録</button>
+                  >＋ 新規メモ登録</button>
                 </div>
               </div>
             )}
 
-            {/* ===== 希望条��タブ ===== */}
+            {/* ===== 希望条件タブ ===== */}
             {rightTab === "desired" && (
               <div>
                 <div className="mb-4">
@@ -935,13 +935,13 @@ export default function InterviewForm({
                   {desiredSub === "st-industry" && (
                     <div>
                       <Fld value={d.desiredIndustry1} onChange={(v) => setDetail("desiredIndustry1", v)} placeholder="（例：IT・通信 ／ サービス ／ メーカー）" />
-                      <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メ��" /></div>
+                      <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メモ" /></div>
                     </div>
                   )}
                   {desiredSub === "st-area" && (
                     <div>
-                      <Fld value={d.desiredArea} onChange={(v) => setDetail("desiredArea", v)} placeholder="（例：横浜市 ／ 川崎市 ／ 東京都内���" />
-                      <div className="mt-1.5"><Fld value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} type="textarea" rows={2} placeholder="エ���アに関する所感・詳細メモ" /></div>
+                      <Fld value={d.desiredArea} onChange={(v) => setDetail("desiredArea", v)} placeholder="（例：横浜市 ／ 川崎市 ／ 東京都内）" />
+                      <div className="mt-1.5"><Fld value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} type="textarea" rows={2} placeholder="エリアに関する所感・詳細メモ" /></div>
                     </div>
                   )}
                 </div>
@@ -952,15 +952,15 @@ export default function InterviewForm({
                   <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
                   <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
                   <Row label="希望休日"><Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={["土日祝休み", "完全週休2日", "シフト制"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} /></Row>
-                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["20時間以内", "30時間以内", "45時間���内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
+                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["20時間以内", "30時間以内", "45時間以内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
                   <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={["なし", "可", "要相談"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
                 </div>
 
                 <div className="mb-4">
                   <SectionHd title="スキル" />
-                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予��"]} style={{ width: 110, flex: "none" }} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
+                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予定"]} style={{ width: 110, flex: "none" }} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
                   <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={["不可", "日常会話", "ビジネス", "ネイティブ"]} style={{ width: 110, flex: "none" }} /><Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
-                  <Row label="日本���"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
+                  <Row label="日本語"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
                   <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={["ブラインドタッチ可", "中級", "初級"]} style={{ width: 110, flex: "none" }} /><Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
                   <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
                   <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
@@ -985,7 +985,7 @@ export default function InterviewForm({
             {rightTab === "rating" && (
               <div>
                 <div className="flex items-center gap-3.5 mb-3.5 p-3 rounded-lg" style={{ background: "var(--im-bg2)" }}>
-                  <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>ラ��ク</span>
+                  <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>ランク</span>
                   <select
                     value={r.overallRank || ""} onChange={(e) => setRating("overallRank", e.target.value || null)}
                     style={{ fontSize: 24, fontWeight: 500, color: "var(--im-fg-info)", background: "transparent", border: "none", fontFamily: "inherit", cursor: "pointer" }}
@@ -1092,7 +1092,7 @@ export default function InterviewForm({
                   <Row label="送付予定"><Fld value={d.jobReferralFlag} onChange={(v) => setDetail("jobReferralFlag", v)} type="select" options={["週明け月曜日", "今週中", "未定", "送付済"]} style={{ width: 110, flex: "none" }} /><Fld value={d.jobReferralMemo} onChange={(v) => setDetail("jobReferralMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
-                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>次回面談予���</div>
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>次回面談予定</div>
                   <Row label="日時">
                     <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={["設定済", "調整中", "未設定"]} style={{ width: 110, flex: "none" }} />
                     <Fld value={d.nextInterviewDate ? new Date(d.nextInterviewDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("nextInterviewDate", v)} type="date" style={{ width: 116, flex: "none" }} />
@@ -1133,7 +1133,7 @@ export default function InterviewForm({
                       <>
                         <div style={{ fontSize: 22, marginBottom: 4 }}>📎</div>
                         <div style={{ fontSize: 13, color: "var(--im-fg2)", marginBottom: 6 }}>Nottaログ / 録音 / 履歴書PDF等をドラッグ＆ドロップ または</div>
-                        <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 6, fontSize: 12, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}>ファイルを選��</span>
+                        <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 6, fontSize: 12, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}>ファイルを選択</span>
                         <div style={{ fontSize: 11, color: "var(--im-fg3)", marginTop: 6 }}>対応形式: .txt / .pdf / .docx / .xlsx / .mp3 / .m4a / .png / .jpg （最大 20MB）</div>
                       </>
                     )}
@@ -1142,7 +1142,7 @@ export default function InterviewForm({
 
                 <div className="flex-1 flex flex-col min-h-0">
                   <SectionHd
-                    title="添付��ァイル一覧"
+                    title="添付ファイル一覧"
                     right={attachments.length > 0 ? <BtnMini variant="ai" onClick={() => { const first = attachments.find((a) => a.analysisStatus !== "completed"); if (first) handleAnalyze(first.id); }}>✨ ログを解析して各カラムへ自動入力</BtnMini> : undefined}
                   />
                   <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[150px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>

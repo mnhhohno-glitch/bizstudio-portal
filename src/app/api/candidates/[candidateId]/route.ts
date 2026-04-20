@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
     include: {
-      employee: { select: { id: true, name: true } },
+      employee: { select: { id: true, name: true, employeeNumber: true } },
       guideEntries: {
         select: {
           id: true,
