@@ -573,14 +573,20 @@ export default function InterviewForm({
   };
 
   const handleAiOrganize = async () => {
-    if (!interviewId || aiOrganizeLoading) return;
-    if (isDirty) {
-      toast.error("先に保存してからAI整理を実行してください");
-      return;
-    }
+    if (aiOrganizeLoading) return;
     setAiOrganizeLoading(true);
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/interviews/${interviewId}/ai-organize`, { method: "POST" });
+      const res = await fetch(`/api/candidates/${candidateId}/interviews/ai-organize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          form,
+          detail,
+          rating,
+          memos,
+          candidate,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "AI整理に失敗しました");
       setDetail("nextAction", data.suggestions);
