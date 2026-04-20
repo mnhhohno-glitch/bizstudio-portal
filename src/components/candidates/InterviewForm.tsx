@@ -1107,7 +1107,7 @@ export default function InterviewForm({
 
             {/* ===== アクションタブ ===== */}
             {rightTab === "action" && (
-              <div className="flex flex-col">
+              <div className="flex flex-col flex-1">
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>応募書類状況</div>
                   <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
@@ -1130,12 +1130,12 @@ export default function InterviewForm({
                     <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" />
                   </Row>
                 </div>
-                <div>
+                <div className="flex flex-col flex-1">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>
                     <span>ネクストアクション</span>
                     <BtnMini variant="ai" onClick={handleAiOrganize} disabled={aiOrganizeLoading}>{aiOrganizeLoading ? "AI整理中..." : "✨ AI整理"}</BtnMini>
                   </div>
-                  <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} />
+                  <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} style={{ flex: "1 1 auto", minHeight: 300 }} />
                 </div>
               </div>
             )}
