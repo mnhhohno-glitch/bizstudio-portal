@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
-import { toJST, dayjs, TZ } from "./timezone";
+import { toJST } from "./timezone";
 
 function secondsToExcelTime(seconds: number): number {
   return seconds / 86400;
@@ -11,8 +11,10 @@ function dateTimeToExcelTime(dt: Date): number {
   return (d.hour() * 3600 + d.minute() * 60 + d.second()) / 86400;
 }
 
-function getDayOfWeek(date: dayjs.Dayjs): string {
-  return ["日", "月", "火", "水", "木", "金", "土"][date.day()];
+const DAY_NAMES = ["日", "月", "火", "水", "木", "金", "土"];
+
+function utcDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 export async function generateMonthlyExcel(year: number, month: number): Promise<Buffer> {
@@ -21,9 +23,14 @@ export async function generateMonthlyExcel(year: number, month: number): Promise
     orderBy: { employeeNumber: "asc" },
   });
 
-  const monthStart = dayjs.tz(`${year}-${String(month).padStart(2, "0")}-01`, TZ).startOf("month");
-  const monthEnd = monthStart.endOf("month");
-  const daysInMonth = monthEnd.date();
+  // @db.Date は UTC 00:00:00 として保存されるため、UTC基準で比較する
+  const startDate = new Date(Date.UTC(year, month - 1, 1));
+  const endDate = new Date(Date.UTC(year, month, 1));
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  console.log("[Export] year:", year, "month:", month);
+  console.log("[Export] startDate:", startDate.toISOString());
+  console.log("[Export] endDate:", endDate.toISOString());
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("勤怠データ");
@@ -60,25 +67,24 @@ export async function generateMonthlyExcel(year: number, month: number): Promise
   for (let i = 5; i <= 14; i++) ws.getColumn(i).width = 12;
 
   for (const emp of employees) {
-    // Fetch all daily attendances for this employee this month
     const attendances = await prisma.dailyAttendance.findMany({
       where: {
         employeeId: emp.id,
         date: {
-          gte: new Date(monthStart.format("YYYY-MM-DD") + "T00:00:00.000Z"),
-          lte: new Date(monthEnd.format("YYYY-MM-DD") + "T00:00:00.000Z"),
+          gte: startDate,
+          lt: endDate,
         },
       },
       include: { punchEvents: { orderBy: { timestamp: "asc" } } },
     });
 
     const attMap = new Map(
-      attendances.map((a) => [toJST(a.date).format("YYYY-MM-DD"), a])
+      attendances.map((a) => [utcDateKey(a.date), a])
     );
 
     for (let d = 1; d <= daysInMonth; d++) {
-      const dateObj = monthStart.date(d);
-      const dateStr = dateObj.format("YYYY-MM-DD");
+      const targetDate = new Date(Date.UTC(year, month - 1, d));
+      const dateStr = utcDateKey(targetDate);
       const att = attMap.get(dateStr);
 
       const row = ws.addRow([]);
@@ -92,12 +98,12 @@ export async function generateMonthlyExcel(year: number, month: number): Promise
       r.getCell(2).value = emp.name;
       r.getCell(2).numFmt = "@";
 
-      // C: 出勤日
-      r.getCell(3).value = dateObj.toDate();
+      // C: 出勤日（UTC midnight = JST 09:00 なので日付は同じ）
+      r.getCell(3).value = targetDate;
       r.getCell(3).numFmt = "yyyy/mm/dd";
 
       // D: 曜日
-      r.getCell(4).value = `(${getDayOfWeek(dateObj)})`;
+      r.getCell(4).value = `(${DAY_NAMES[targetDate.getUTCDay()]})`;
       r.getCell(4).numFmt = "@";
 
       if (att && att.clockIn) {
