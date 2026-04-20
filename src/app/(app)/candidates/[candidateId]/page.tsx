@@ -95,8 +95,14 @@ type SessionUser = {
 };
 
 /* ---------- Constants ---------- */
-const TABS = [
+const TOP_VIEWS = [
+  { key: "basic", label: "基本" },
   { key: "interview", label: "面談履歴" },
+] as const;
+
+type TopViewKey = (typeof TOP_VIEWS)[number]["key"];
+
+const SUB_TABS = [
   { key: "history", label: "紹介履歴" },
   { key: "documents", label: "書類" },
   { key: "tasks", label: "タスク" },
@@ -104,7 +110,7 @@ const TABS = [
   { key: "notes", label: "メモ" },
 ] as const;
 
-type TabKey = (typeof TABS)[number]["key"];
+type SubTabKey = (typeof SUB_TABS)[number]["key"];
 
 /* ---------- Helpers ---------- */
 function formatDate(iso: string) {
@@ -1342,7 +1348,8 @@ function CandidateDetailPageBody() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "interview";
+  const activeView = (searchParams.get("view") as TopViewKey) || "basic";
+  const activeTab = (searchParams.get("tab") as SubTabKey) || "history";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -1472,9 +1479,19 @@ function CandidateDetailPageBody() {
       .finally(() => setMypageLoading(false));
   }, [fetchCandidate, fetchGuideData, fetchJimuSessions, candidateId]);
 
-  const handleTabChange = (tab: TabKey) => {
+  const handleViewChange = (view: TopViewKey) => {
+    const params = new URLSearchParams();
+    if (view !== "basic") params.set("view", view);
+    const qs = params.toString();
+    router.push(`/candidates/${candidateId}${qs ? `?${qs}` : ""}`, {
+      scroll: false,
+    });
+  };
+
+  const handleTabChange = (tab: SubTabKey) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
+    params.delete("view");
     router.push(`/candidates/${candidateId}?${params.toString()}`, {
       scroll: false,
     });
@@ -1509,7 +1526,7 @@ function CandidateDetailPageBody() {
     <div>
       <Toaster position="bottom-center" richColors />
 
-      {/* パンくず + 検索 */}
+      {/* 行1: パンくず + 検索 */}
       <div className="flex items-center gap-4 mb-3">
         <Link
           href="/admin/master"
@@ -1520,101 +1537,122 @@ function CandidateDetailPageBody() {
         <CandidateQuickSearch />
       </div>
 
-      {/* スティッキーヘッダ */}
-      <CandidateHeader
-        candidate={candidate}
-        onStatusChange={async (val) => {
-          await fetch(`/api/candidates/${candidate.id}/update`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ supportStatus: val }),
-          });
-          fetchCandidate();
-        }}
-        onSubStatusChange={async (val) => {
-          await fetch(`/api/candidates/${candidate.id}/update`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ supportSubStatus: val }),
-          });
-          fetchCandidate();
-        }}
-        onEditBasicInfo={() => setEditModalOpen(true)}
-        onGuideUrlCopy={() => {
-          const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
-          if (guide) {
-            const url = `${window.location.origin}/g/${guide.token}`;
-            navigator.clipboard.writeText(url);
-          }
-        }}
-        onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
-        onJobOutput={handleOpenJobOutput}
-        onMypageOpen={() => {
-          setMypageModalOpen(true);
-          fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
-            .then((r) => r.json())
-            .then((r) => console.log("[SyncCaComments]", r))
-            .catch(() => {});
-        }}
-        hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
-        mypageLoading={mypageLoading}
-        jobOutputLoading={jobOutputLoading}
-        supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
-        onSupportEndClick={() => setShowEndModal(true)}
-        subStatusOptions={SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || []}
-        isSubStatusFixed={isSubStatusFixedFn(candidate.supportStatus)}
-      />
-
-      {/* タブバー */}
-      <div className="flex border-b border-gray-200 mt-4">
-        {TABS.map((tab) => (
+      {/* 行2: トップレベルタブ */}
+      <div className="flex border-b border-gray-200 mb-4">
+        {TOP_VIEWS.map((v) => (
           <button
-            key={tab.key}
-            onClick={() => handleTabChange(tab.key)}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab.key
+            key={v.key}
+            onClick={() => handleViewChange(v.key as TopViewKey)}
+            className={`px-5 py-3 text-[15px] font-semibold border-b-2 transition-colors ${
+              activeView === v.key
                 ? "text-[#2563EB] border-[#2563EB]"
                 : "text-gray-500 hover:text-gray-700 border-transparent"
             }`}
           >
-            {tab.label}
+            {v.label}
           </button>
         ))}
       </div>
 
-      {/* タブコンテンツ */}
-      <div className="mt-6">
-        {activeTab === "interview" && (
-          <InterviewHistoryTab
-            candidateId={candidateId}
-            currentUser={currentUser}
-          />
-        )}
-        {activeTab === "documents" && (
-          <DocumentsTab candidateId={candidateId} />
-        )}
-        {activeTab === "support" && (
-          <SupportTab
+      {/* 行3以降: ビューに応じたコンテンツ */}
+      {activeView === "interview" ? (
+        <InterviewHistoryTab
+          candidateId={candidateId}
+          currentUser={currentUser}
+        />
+      ) : (
+        <>
+          {/* 基本タブ: 候補者ヘッダー */}
+          <CandidateHeader
             candidate={candidate}
-            guideData={guideData}
-            jimuSessions={jimuSessions}
-            onJimuCreated={fetchJimuSessions}
+            onStatusChange={async (val) => {
+              await fetch(`/api/candidates/${candidate.id}/update`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ supportStatus: val }),
+              });
+              fetchCandidate();
+            }}
+            onSubStatusChange={async (val) => {
+              await fetch(`/api/candidates/${candidate.id}/update`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ supportSubStatus: val }),
+              });
+              fetchCandidate();
+            }}
+            onEditBasicInfo={() => setEditModalOpen(true)}
+            onGuideUrlCopy={() => {
+              const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
+              if (guide) {
+                const url = `${window.location.origin}/g/${guide.token}`;
+                navigator.clipboard.writeText(url);
+              }
+            }}
+            onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
+            onJobOutput={handleOpenJobOutput}
+            onMypageOpen={() => {
+              setMypageModalOpen(true);
+              fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
+                .then((r) => r.json())
+                .then((r) => console.log("[SyncCaComments]", r))
+                .catch(() => {});
+            }}
+            hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
+            mypageLoading={mypageLoading}
+            jobOutputLoading={jobOutputLoading}
+            supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
+            onSupportEndClick={() => setShowEndModal(true)}
+            subStatusOptions={SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || []}
+            isSubStatusFixed={isSubStatusFixedFn(candidate.supportStatus)}
           />
-        )}
-        {activeTab === "tasks" && (
-          <CandidateTasksTab candidateId={candidateId} />
-        )}
-        {activeTab === "history" && (
-          <HistoryTab candidateId={candidateId} />
-        )}
-        {activeTab === "notes" && (
-          <NotesTab
-            candidate={candidate}
-            currentUser={currentUser}
-            onRefresh={fetchCandidate}
-          />
-        )}
-      </div>
+
+          {/* サブタブバー */}
+          <div className="flex border-b border-gray-200 mt-4">
+            {SUB_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => handleTabChange(tab.key as SubTabKey)}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.key
+                    ? "text-[#2563EB] border-[#2563EB]"
+                    : "text-gray-500 hover:text-gray-700 border-transparent"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* サブタブコンテンツ */}
+          <div className="mt-6">
+            {activeTab === "documents" && (
+              <DocumentsTab candidateId={candidateId} />
+            )}
+            {activeTab === "support" && (
+              <SupportTab
+                candidate={candidate}
+                guideData={guideData}
+                jimuSessions={jimuSessions}
+                onJimuCreated={fetchJimuSessions}
+              />
+            )}
+            {activeTab === "tasks" && (
+              <CandidateTasksTab candidateId={candidateId} />
+            )}
+            {activeTab === "history" && (
+              <HistoryTab candidateId={candidateId} />
+            )}
+            {activeTab === "notes" && (
+              <NotesTab
+                candidate={candidate}
+                currentUser={currentUser}
+                onRefresh={fetchCandidate}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       {/* 基本情報編集モーダル */}
       {editModalOpen && (
