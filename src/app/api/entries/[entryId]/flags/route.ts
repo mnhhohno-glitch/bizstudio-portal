@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, INACTIVE_TRIGGERS } from "@/lib/constants/entry-flag-rules";
-import { checkAutoSupportEnd } from "@/lib/support-status-auto";
 
 export async function PATCH(
   req: NextRequest,
@@ -71,18 +70,6 @@ export async function PATCH(
       },
     },
   });
-
-  // Auto-linkage: check if candidate should be auto-ended
-  try {
-    await checkAutoSupportEnd(
-      entry.candidate.id,
-      entryFlag || entry.entryFlag || null,
-      entryFlagDetail || entry.entryFlagDetail || null,
-      personFlag !== undefined ? personFlag : entry.personFlag || null
-    );
-  } catch (e) {
-    console.error("[Flags] Auto support end check failed:", e);
-  }
 
   return NextResponse.json({ entry });
 }
