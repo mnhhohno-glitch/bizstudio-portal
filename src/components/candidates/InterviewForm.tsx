@@ -664,21 +664,21 @@ export default function InterviewForm({
           {/* --- 面談基本情報 --- */}
           <div className="mb-4">
             <SectionHd title="面談基本情報" />
-            <div className="grid gap-x-2 gap-y-1.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+            <div className="grid gap-x-2 gap-y-1.5 overflow-hidden" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
               {/* Row 1: 面談日 | 時刻 | 時間/手法 */}
-              <div className="col-span-2 flex items-center gap-1.5">
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>面談日</span>
                 <Fld value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" />
               </div>
-              <div className="col-span-2 flex items-center gap-1.5">
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>時刻</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <Fld value={form.startTime} onChange={(v) => setField("startTime", v)} type="time" />
                   <Fld value={form.endTime} onChange={(v) => setField("endTime", v)} type="time" />
                 </div>
               </div>
-              <div className="col-span-2 flex items-center gap-1.5">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>時間/<br/>手法</span>
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>時間/手法</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <RoField v={duration} />
                   <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} />
@@ -696,14 +696,14 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>メール</span><RoField v={candidate?.email || ""} /></div>
 
               {/* Row 4: 年齢/性別 | 住所(wide) */}
-              <div className="col-span-2 flex items-center gap-1.5">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>年齢/<br/>性別</span>
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>年齢/性別</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <RoField v={age !== null ? String(age) : ""} />
                   <RoField v={genderLabel(candidate?.gender ?? null)} />
                 </div>
               </div>
-              <div className="col-span-4 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
+              <div className="col-span-4 flex items-center gap-1.5 min-w-0"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
 
               {/* Row 5: 担当CA | 社員名 | ランク */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
@@ -718,20 +718,20 @@ export default function InterviewForm({
               </div>
 
               {/* Row 6: 回数/状態 | 結果 | 最新 */}
-              <div className="col-span-2 flex items-center gap-1.5">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", lineHeight: 1.25, minWidth: 40 }}>回数/<br/>状態</span>
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>回数/状態</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <RoField v={form.interviewCount ? `${form.interviewCount}回` : ""} />
-                  <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
+                  <div className="flex items-center justify-center rounded-[5px] py-0.5 shrink-0" style={{ background: "var(--im-bg2)" }}>
                     <Chip text={form.status === "complete" ? "入力済" : "下書き"} variant={form.status === "complete" ? "warn" : "info"} />
                   </div>
                 </div>
               </div>
-              <div className="col-span-2 flex items-center gap-1.5">
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
                 <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
               </div>
-              <div className="col-span-2 flex items-center gap-1.5">
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>最新</span>
                 <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                   <Chip text="最新" variant="ok" />
