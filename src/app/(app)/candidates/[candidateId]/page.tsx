@@ -1526,32 +1526,32 @@ function CandidateDetailPageBody() {
     <div>
       <Toaster position="bottom-center" richColors />
 
-      {/* 行1: パンくず + 検索 */}
-      <div className="flex items-center gap-4 mb-3">
-        <Link
-          href="/admin/master"
-          className="text-[13px] text-[#2563EB] hover:underline"
-        >
-          ← 求職者一覧に戻る
-        </Link>
-        <CandidateQuickSearch />
-      </div>
-
-      {/* 行2: トップレベルタブ */}
-      <div className="flex border-b border-gray-200 mb-4">
-        {TOP_VIEWS.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => handleViewChange(v.key as TopViewKey)}
-            className={`px-5 py-3 text-[15px] font-semibold border-b-2 transition-colors ${
-              activeView === v.key
-                ? "text-[#2563EB] border-[#2563EB]"
-                : "text-gray-500 hover:text-gray-700 border-transparent"
-            }`}
+      {/* ヘッダー1行: タブ（左） + 戻る・検索（右） */}
+      <div className="flex items-center justify-between border-b border-gray-200 mb-4">
+        <div className="flex">
+          {TOP_VIEWS.map((v) => (
+            <button
+              key={v.key}
+              onClick={() => handleViewChange(v.key as TopViewKey)}
+              className={`px-5 py-3 text-[15px] font-semibold border-b-2 transition-colors ${
+                activeView === v.key
+                  ? "text-[#2563EB] border-[#2563EB]"
+                  : "text-gray-500 hover:text-gray-700 border-transparent"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-4 pr-10">
+          <Link
+            href="/admin/master"
+            className="text-[13px] text-[#2563EB] hover:underline whitespace-nowrap"
           >
-            {v.label}
-          </button>
-        ))}
+            ← 求職者一覧に戻る
+          </Link>
+          <CandidateQuickSearch />
+        </div>
       </div>
 
       {/* 行3以降: ビューに応じたコンテンツ */}
