@@ -624,6 +624,7 @@ export default function InterviewForm({
   };
 
   /* ---- Computed ---- */
+  const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileType === "pdf");
   const d = detail;
   const r = rating;
   const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
@@ -692,11 +693,11 @@ export default function InterviewForm({
             className="cursor-pointer" style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
           >キャンセル</button>
           <button
-            type="button" onClick={handlePdfExport} disabled={pdfLoading}
-            className="inline-flex items-center justify-center gap-1 cursor-pointer"
-            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg3)", fontFamily: "inherit", opacity: pdfLoading ? 0.5 : 1 }}
+            type="button" onClick={handlePdfExport} disabled={pdfLoading || !hasPdf}
+            className="inline-flex items-center justify-center gap-1"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: `0.5px solid ${hasPdf ? "var(--im-bdr)" : "var(--im-bdr)"}`, background: "transparent", color: hasPdf ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: pdfLoading || !hasPdf ? 0.5 : 1, cursor: hasPdf && !pdfLoading ? "pointer" : "not-allowed" }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasPdf ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
           <button
