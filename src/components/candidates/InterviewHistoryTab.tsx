@@ -156,11 +156,11 @@ export default function InterviewHistoryTab({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div>
       <Toaster position="bottom-center" richColors />
 
       {/* Interview list bar */}
-      <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3 shrink-0">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[13px] font-medium text-gray-500 mr-1">面談:</span>
 
@@ -240,14 +240,12 @@ export default function InterviewHistoryTab({
 
       {/* Interview form area */}
       {selectedInterview ? (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <InterviewForm
-            interviewId={selectedInterview.id}
-            candidateId={candidateId}
-            currentUser={currentUser}
-            onSaved={() => fetchInterviews()}
-          />
-        </div>
+        <InterviewForm
+          interviewId={selectedInterview.id}
+          candidateId={candidateId}
+          currentUser={currentUser}
+          onSaved={() => fetchInterviews()}
+        />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
           <div className="text-center text-gray-400">

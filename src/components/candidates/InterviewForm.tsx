@@ -610,10 +610,10 @@ export default function InterviewForm({
   /*  RENDER                                                           */
   /* ================================================================ */
   return (
-    <div className="flex flex-col flex-1 min-h-0" style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
+    <div style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
 
       {/* ============ HEADER ============ */}
-      <div className="flex items-center justify-between px-5 py-2.5 shrink-0" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
+      <div className="flex items-center justify-between px-5 py-2.5" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
         <div className="flex items-center gap-3">
           <span style={{ fontSize: 15, fontWeight: 500 }}>面談履歴入力</span>
           <span style={{ fontSize: 12, color: "var(--im-fg2)" }}>
@@ -656,10 +656,10 @@ export default function InterviewForm({
       </div>
 
       {/* ============ GRID: LEFT + RIGHT ============ */}
-      <div className="grid grid-cols-2 flex-1 min-h-0">
+      <div className="grid grid-cols-2">
 
         {/* ======== LEFT COLUMN ======== */}
-        <div className="flex flex-col p-3.5 overflow-y-auto" style={{ background: "var(--im-bg)", borderRight: "0.5px solid var(--im-bdr)" }}>
+        <div className="flex flex-col p-3.5" style={{ background: "var(--im-bg)", borderRight: "0.5px solid var(--im-bdr)" }}>
 
           {/* --- 面談基本情報 --- */}
           <div className="mb-4">
@@ -765,9 +765,9 @@ export default function InterviewForm({
           </div>
 
           {/* --- 職務経歴 --- */}
-          <div className="flex-1 flex flex-col min-h-0 mb-2">
+          <div className="mb-2">
             <SectionHd title="職務経歴" />
-            <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[200px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+            <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
               <div className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>1 社目</span>
@@ -796,7 +796,7 @@ export default function InterviewForm({
         </div>
 
         {/* ======== RIGHT COLUMN ======== */}
-        <div className="flex flex-col overflow-y-auto" style={{ background: "var(--im-bg)" }}>
+        <div className="flex flex-col" style={{ background: "var(--im-bg)" }}>
 
           {/* Tabs */}
           <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
@@ -821,11 +821,11 @@ export default function InterviewForm({
             ))}
           </div>
 
-          <div className="flex-1 flex flex-col p-3.5 min-h-0 overflow-y-auto">
+          <div className="flex flex-col p-3.5">
 
             {/* ===== 初期条件タブ ===== */}
             {rightTab === "initial" && (
-              <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex flex-col">
                 <div className="mb-4">
                   <SectionHd title="登録時条件" />
                   <div className="grid gap-x-2 gap-y-1.5 items-center" style={{ gridTemplateColumns: "64px 64px minmax(0,1fr) 64px minmax(0,1fr)" }}>
@@ -862,9 +862,9 @@ export default function InterviewForm({
                 </div>
 
                 {/* Memo Section */}
-                <div className="flex-1 flex flex-col min-h-0">
+                <div>
                   <SectionHd title="メモ" />
-                  <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[200px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+                  <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
                     {memos.map((memo) => (
                       <div key={memo.id} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
                         <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
@@ -1078,7 +1078,7 @@ export default function InterviewForm({
 
             {/* ===== アクションタブ ===== */}
             {rightTab === "action" && (
-              <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex flex-col">
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>応募書類状況</div>
                   <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
@@ -1101,7 +1101,7 @@ export default function InterviewForm({
                     <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" />
                   </Row>
                 </div>
-                <div className="flex-1 flex flex-col min-h-0">
+                <div>
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>
                     <span>ネクストアクション</span>
                     <span title="準備中" style={{ opacity: 0.4, cursor: "not-allowed" }}><BtnMini variant="ai">✨ AI整理</BtnMini></span>
@@ -1113,7 +1113,7 @@ export default function InterviewForm({
 
             {/* ===== 添付タブ ===== */}
             {rightTab === "attachments" && (
-              <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex flex-col">
                 <div className="mb-4">
                   <SectionHd title="面談ログ・資料アップロード" />
                   <div
@@ -1141,12 +1141,12 @@ export default function InterviewForm({
                   </div>
                 </div>
 
-                <div className="flex-1 flex flex-col min-h-0">
+                <div>
                   <SectionHd
                     title="添付ファイル一覧"
                     right={attachments.length > 0 ? <BtnMini variant="ai" onClick={() => { const first = attachments.find((a) => a.analysisStatus !== "completed"); if (first) handleAnalyze(first.id); }}>✨ ログを解析して各カラムへ自動入力</BtnMini> : undefined}
                   />
-                  <div className="flex-1 overflow-y-auto rounded-lg p-2 min-h-[150px]" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
+                  <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
                     {attachments.map((att) => (
                       <div key={att.id} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
                         <div className="flex items-center gap-1.5">

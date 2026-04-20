@@ -1556,12 +1556,10 @@ function CandidateDetailPageBody() {
 
       {/* 行3以降: ビューに応じたコンテンツ */}
       {activeView === "interview" ? (
-        <div className="flex flex-col" style={{ height: "calc(100vh - 140px)" }}>
-          <InterviewHistoryTab
-            candidateId={candidateId}
-            currentUser={currentUser}
-          />
-        </div>
+        <InterviewHistoryTab
+          candidateId={candidateId}
+          currentUser={currentUser}
+        />
       ) : (
         <>
           {/* 基本タブ: 候補者ヘッダー */}
