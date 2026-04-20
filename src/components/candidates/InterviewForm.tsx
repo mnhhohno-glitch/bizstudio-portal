@@ -610,10 +610,10 @@ export default function InterviewForm({
   /*  RENDER                                                           */
   /* ================================================================ */
   return (
-    <div style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
+    <div className="flex flex-col flex-1 min-h-0" style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
 
       {/* ============ HEADER ============ */}
-      <div className="flex items-center justify-between px-5 py-2.5" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
+      <div className="flex items-center justify-between px-5 py-2.5 shrink-0" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
         <div className="flex items-center gap-3">
           <span style={{ fontSize: 15, fontWeight: 500 }}>面談履歴入力</span>
           <span style={{ fontSize: 12, color: "var(--im-fg2)" }}>
@@ -656,10 +656,10 @@ export default function InterviewForm({
       </div>
 
       {/* ============ GRID: LEFT + RIGHT ============ */}
-      <div className="grid grid-cols-2" style={{ minHeight: "calc(100vh - 300px)" }}>
+      <div className="grid grid-cols-2 flex-1 min-h-0">
 
         {/* ======== LEFT COLUMN ======== */}
-        <div className="flex flex-col p-3.5 overflow-y-auto" style={{ background: "var(--im-bg)", borderRight: "0.5px solid var(--im-bdr)", maxHeight: "calc(100vh - 300px)" }}>
+        <div className="flex flex-col p-3.5 overflow-y-auto" style={{ background: "var(--im-bg)", borderRight: "0.5px solid var(--im-bdr)" }}>
 
           {/* --- 面談基本情報 --- */}
           <div className="mb-4">
@@ -796,7 +796,7 @@ export default function InterviewForm({
         </div>
 
         {/* ======== RIGHT COLUMN ======== */}
-        <div className="flex flex-col overflow-y-auto" style={{ background: "var(--im-bg)", maxHeight: "calc(100vh - 300px)" }}>
+        <div className="flex flex-col overflow-y-auto" style={{ background: "var(--im-bg)" }}>
 
           {/* Tabs */}
           <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
