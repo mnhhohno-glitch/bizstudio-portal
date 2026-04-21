@@ -1253,13 +1253,10 @@ export default function InterviewForm({
               <div>
                 <div className="flex items-center gap-3.5 mb-3.5 p-3 rounded-lg" style={{ background: "var(--im-bg2)" }}>
                   <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>ランク</span>
-                  <select
-                    value={r.overallRank || ""} onChange={(e) => setRating("overallRank", e.target.value || null)}
-                    style={{ fontSize: 24, fontWeight: 500, color: "var(--im-fg-info)", background: "transparent", border: "none", fontFamily: "inherit", cursor: "pointer" }}
-                  >
-                    <option value="">-</option>
-                    {["S", "A+", "A", "B+", "B", "C", "D"].map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
+                  <span
+                    className="inline-flex items-center rounded-[10px]"
+                    style={{ padding: "2px 16px", fontSize: 24, fontWeight: 500, background: rankColor(r.overallRank ?? null).bg, color: rankColor(r.overallRank ?? null).fg }}
+                  >{r.overallRank || "-"}</span>
                   <span className="ml-auto" style={{ fontSize: 12, color: "var(--im-fg2)" }}>合計：<b style={{ fontSize: 15, fontWeight: 500, color: "var(--im-fg)" }}>{grandTotal || 0}</b> ／ 75</span>
                 </div>
 
