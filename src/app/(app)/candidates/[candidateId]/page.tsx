@@ -1350,6 +1350,7 @@ function CandidateDetailPageBody() {
   const searchParams = useSearchParams();
   const activeView = (searchParams.get("view") as TopViewKey) || "basic";
   const activeTab = (searchParams.get("tab") as SubTabKey) || "history";
+  const fromInterviews = searchParams.get("from") === "interviews";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -1544,6 +1545,14 @@ function CandidateDetailPageBody() {
           ))}
         </div>
         <div className="flex items-center gap-4 pr-10">
+          {fromInterviews && (
+            <Link
+              href="/admin/interviews"
+              className="text-[13px] text-[#2563EB] hover:underline whitespace-nowrap"
+            >
+              ← 面談一覧に戻る
+            </Link>
+          )}
           <Link
             href="/admin/master"
             className="text-[13px] text-[#2563EB] hover:underline whitespace-nowrap"

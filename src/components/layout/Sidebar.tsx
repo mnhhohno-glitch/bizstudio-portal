@@ -193,7 +193,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
           <AppNavItem key={it.href} {...it} />
         ))}
         <NavItem href="/schedule-urls" label="日程URL" icon="📅" />
-        <NavItem href="/admin/interviews" label="面談登録" icon="📝" />
+        <NavItem href="/admin/interviews" label="面談管理" icon="📝" />
 
         <div className="mt-2 border-t border-white/10 pt-2">
           <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">

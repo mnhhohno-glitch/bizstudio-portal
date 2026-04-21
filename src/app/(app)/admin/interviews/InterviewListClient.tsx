@@ -60,7 +60,7 @@ const RANK_BADGE: Record<string, string> = {
 const TOOL_OPTIONS = ["電話", "オンライン", "対面"];
 const TYPE_OPTIONS = ["新規面談", "既存面談", "フォロー面談", "面接対策"];
 
-const COL_WIDTHS = [68, 115, 115, 115, 95, 105, 135, 85, 145, 240, 135, 115, 145];
+const COL_WIDTHS = [68, 115, 115, 120, 100, 110, 140, 90, 145, 240, 145, 130, 155];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -441,7 +441,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
             {COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>
           <thead>
-            <tr className="bg-[#185FA5] text-white text-[12px]">
+            <tr className="bg-[#185FA5] text-white text-[12px] whitespace-nowrap">
               <th className="px-2 py-2.5 text-center font-medium">操作</th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("rcName")}>担当RC<SortIcon col="rcName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("caName")}>担当CA<SortIcon col="caName" /></th>
@@ -452,7 +452,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("age")}>年齢/性別<SortIcon col="age" /></th>
               <th className="px-2 py-2.5 text-left font-medium">電話番号</th>
               <th className="px-2 py-2.5 text-left font-medium">メール/住所</th>
-              <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewDate")}>転職時期/評価</th>
+              <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewCount")}>転職時期/評価<SortIcon col="interviewCount" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("desiredPrefecture")}>希望都道府県<SortIcon col="desiredPrefecture" /></th>
               <th className="px-2 py-2.5 text-left font-medium">第一希望職種</th>
             </tr>
@@ -471,7 +471,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   {/* 操作 */}
                   <td className="px-2 py-2 text-center whitespace-nowrap">
                     <Link
-                      href={`/candidates/${r.candidate.id}?view=interview`}
+                      href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
                       className="text-[12px] text-[#2563EB] hover:underline mr-1"
                       title="詳細"
                     >✎</Link>
@@ -513,7 +513,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   {/* 求職者氏名 */}
                   <td className="px-2 py-2">
                     <Link
-                      href={`/candidates/${r.candidate.id}?view=interview`}
+                      href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
                       className="text-[13px] text-[#2563EB] hover:underline"
                     >{r.candidate.name}</Link>
                     <div className="text-[11px] text-gray-400">{r.candidate.candidateNumber}</div>
