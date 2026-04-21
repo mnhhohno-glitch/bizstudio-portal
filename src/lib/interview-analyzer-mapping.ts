@@ -113,15 +113,14 @@ export function mapFilemakerToDetail(
 
   if (result.desiredJobType1) {
     const parts = String(result.desiredJobType1).split(" / ");
-    result.desiredJobTypeLarge = parts[0] || null;
-    result.desiredJobTypeMedium = parts[1] || null;
-    result.desiredJobTypeSmall = parts[2] || null;
+    result.desiredJobTypes = [{ large: parts[0] || "", medium: parts[1] || "", small: parts[2] || "" }];
   }
   if (result.desiredIndustry1) {
     const parts = String(result.desiredIndustry1).split(" / ");
-    result.desiredIndustryLarge = parts[0] || null;
-    result.desiredIndustryMedium = parts[1] || null;
-    result.desiredIndustrySmall = parts[2] || null;
+    result.desiredIndustries = [{ large: parts[0] || "", medium: parts[1] || "", small: parts[2] || "" }];
+  }
+  if (result.desiredArea || result.desiredPrefecture) {
+    result.desiredAreas = [{ area: result.desiredArea || "", prefecture: result.desiredPrefecture || "", city: result.desiredCity || "" }];
   }
 
   return { detailUpdates: result, interviewMemo };

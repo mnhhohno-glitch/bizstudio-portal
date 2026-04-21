@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
-import HierarchicalCategorySelect, { type HierarchicalValue } from "@/components/common/HierarchicalCategorySelect";
+import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -339,17 +339,16 @@ export default function InterviewForm({
         interviewer: rec.interviewer,
       });
       const loadedDetail = rec.detail || {};
-      if (!loadedDetail.desiredJobTypeLarge && loadedDetail.desiredJobType1) {
+      if (!loadedDetail.desiredJobTypes && loadedDetail.desiredJobType1) {
         const parts = String(loadedDetail.desiredJobType1).split(" / ");
-        loadedDetail.desiredJobTypeLarge = parts[0] || null;
-        loadedDetail.desiredJobTypeMedium = parts[1] || null;
-        loadedDetail.desiredJobTypeSmall = parts[2] || null;
+        loadedDetail.desiredJobTypes = [{ large: parts[0] || "", medium: parts[1] || "", small: parts[2] || "" }];
       }
-      if (!loadedDetail.desiredIndustryLarge && loadedDetail.desiredIndustry1) {
+      if (!loadedDetail.desiredIndustries && loadedDetail.desiredIndustry1) {
         const parts = String(loadedDetail.desiredIndustry1).split(" / ");
-        loadedDetail.desiredIndustryLarge = parts[0] || null;
-        loadedDetail.desiredIndustryMedium = parts[1] || null;
-        loadedDetail.desiredIndustrySmall = parts[2] || null;
+        loadedDetail.desiredIndustries = [{ large: parts[0] || "", medium: parts[1] || "", small: parts[2] || "" }];
+      }
+      if (!loadedDetail.desiredAreas && (loadedDetail.desiredArea || loadedDetail.desiredPrefecture)) {
+        loadedDetail.desiredAreas = [{ area: loadedDetail.desiredArea || "", prefecture: loadedDetail.desiredPrefecture || "", city: loadedDetail.desiredCity || "" }];
       }
       setDetailState(loadedDetail);
       setRatingState(rec.rating || {});
@@ -1223,77 +1222,66 @@ export default function InterviewForm({
                   </div>
                   {desiredSub === "st-job" && (
                     <div>
-                      <HierarchicalCategorySelect
-                        apiBase="/api/job-categories"
-                        level1Label="職種大"
-                        level2Label="職種中"
-                        level3Label="職種小"
-                        value={{
-                          level1: d.desiredJobTypeLarge ?? null,
-                          level2: d.desiredJobTypeMedium ?? null,
-                          level3: d.desiredJobTypeSmall ?? null,
-                        }}
-                        onChange={(v: HierarchicalValue) => {
+                      <SearchableMultiSelect
+                        apiUrl="/api/job-categories/all"
+                        selected={Array.isArray(d.desiredJobTypes) ? d.desiredJobTypes as FlatItem[] : []}
+                        onChange={(items: FlatItem[]) => {
+                          const first = items[0];
                           setDetailState((prev) => ({
                             ...prev,
-                            desiredJobTypeLarge: v.level1,
-                            desiredJobTypeMedium: v.level2,
-                            desiredJobTypeSmall: v.level3,
-                            desiredJobType1: [v.level1, v.level2, v.level3].filter(Boolean).join(" / ") || null,
+                            desiredJobTypes: items,
+                            desiredJobType1: first ? [first.large, first.medium, first.small].filter(Boolean).join(" / ") : null,
                           }));
                           setIsDirty(true);
                         }}
+                        maxSelect={3}
+                        columnLabels={["職種大", "職種中", "職種小"]}
+                        searchPlaceholder="職種を検索..."
                       />
                       <div className="mt-1.5"><Fld value={d.desiredJobType1Memo} onChange={(v) => setDetail("desiredJobType1Memo", v)} type="textarea" rows={2} placeholder="職種に関する所感・詳細メモ" /></div>
                     </div>
                   )}
                   {desiredSub === "st-industry" && (
                     <div>
-                      <HierarchicalCategorySelect
-                        apiBase="/api/industry-categories"
-                        level1Label="業種大"
-                        level2Label="業種中"
-                        level3Label="業種小"
-                        value={{
-                          level1: d.desiredIndustryLarge ?? null,
-                          level2: d.desiredIndustryMedium ?? null,
-                          level3: d.desiredIndustrySmall ?? null,
-                        }}
-                        onChange={(v: HierarchicalValue) => {
+                      <SearchableMultiSelect
+                        apiUrl="/api/industry-categories/all"
+                        selected={Array.isArray(d.desiredIndustries) ? d.desiredIndustries as FlatItem[] : []}
+                        onChange={(items: FlatItem[]) => {
+                          const first = items[0];
                           setDetailState((prev) => ({
                             ...prev,
-                            desiredIndustryLarge: v.level1,
-                            desiredIndustryMedium: v.level2,
-                            desiredIndustrySmall: v.level3,
-                            desiredIndustry1: [v.level1, v.level2, v.level3].filter(Boolean).join(" / ") || null,
+                            desiredIndustries: items,
+                            desiredIndustry1: first ? [first.large, first.medium, first.small].filter(Boolean).join(" / ") : null,
                           }));
                           setIsDirty(true);
                         }}
+                        maxSelect={3}
+                        columnLabels={["業種大", "業種中", "業種小"]}
+                        searchPlaceholder="業種を検索..."
                       />
                       <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メモ" /></div>
                     </div>
                   )}
                   {desiredSub === "st-area" && (
                     <div>
-                      <HierarchicalCategorySelect
-                        apiBase="/api/area-categories"
-                        level1Label="エリア"
-                        level2Label="都道府県"
-                        level3Label="市区"
-                        value={{
-                          level1: d.desiredArea ?? null,
-                          level2: d.desiredPrefecture ?? null,
-                          level3: d.desiredCity ?? null,
-                        }}
-                        onChange={(v: HierarchicalValue) => {
+                      <SearchableMultiSelect
+                        apiUrl="/api/area-categories/all"
+                        selected={Array.isArray(d.desiredAreas) ? (d.desiredAreas as Array<Record<string, string>>).map((a) => ({ large: a.area || a.large || "", medium: a.prefecture || a.medium || "", small: a.city || a.small || "" })) : []}
+                        onChange={(items: FlatItem[]) => {
+                          const areaItems = items.map((i) => ({ area: i.large, prefecture: i.medium, city: i.small }));
+                          const first = areaItems[0];
                           setDetailState((prev) => ({
                             ...prev,
-                            desiredArea: v.level1,
-                            desiredPrefecture: v.level2,
-                            desiredCity: v.level3,
+                            desiredAreas: areaItems,
+                            desiredArea: first?.area ?? null,
+                            desiredPrefecture: first?.prefecture ?? null,
+                            desiredCity: first?.city ?? null,
                           }));
                           setIsDirty(true);
                         }}
+                        maxSelect={5}
+                        columnLabels={["エリア", "都道府県", "市区"]}
+                        searchPlaceholder="エリアを検索..."
                       />
                       <div className="mt-1.5"><Fld value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} type="textarea" rows={2} placeholder="エリアに関する所感・詳細メモ" /></div>
                     </div>
