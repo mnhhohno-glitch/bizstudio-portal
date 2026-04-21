@@ -111,6 +111,19 @@ export function mapFilemakerToDetail(
     }
   }
 
+  if (result.desiredJobType1) {
+    const parts = String(result.desiredJobType1).split(" / ");
+    result.desiredJobTypeLarge = parts[0] || null;
+    result.desiredJobTypeMedium = parts[1] || null;
+    result.desiredJobTypeSmall = parts[2] || null;
+  }
+  if (result.desiredIndustry1) {
+    const parts = String(result.desiredIndustry1).split(" / ");
+    result.desiredIndustryLarge = parts[0] || null;
+    result.desiredIndustryMedium = parts[1] || null;
+    result.desiredIndustrySmall = parts[2] || null;
+  }
+
   return { detailUpdates: result, interviewMemo };
 }
 

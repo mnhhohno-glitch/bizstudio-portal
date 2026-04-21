@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
+import HierarchicalCategorySelect, { type HierarchicalValue } from "@/components/common/HierarchicalCategorySelect";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -337,7 +338,20 @@ export default function InterviewForm({
         interviewerUserId: rec.interviewerUserId || "",
         interviewer: rec.interviewer,
       });
-      setDetailState(rec.detail || {});
+      const loadedDetail = rec.detail || {};
+      if (!loadedDetail.desiredJobTypeLarge && loadedDetail.desiredJobType1) {
+        const parts = String(loadedDetail.desiredJobType1).split(" / ");
+        loadedDetail.desiredJobTypeLarge = parts[0] || null;
+        loadedDetail.desiredJobTypeMedium = parts[1] || null;
+        loadedDetail.desiredJobTypeSmall = parts[2] || null;
+      }
+      if (!loadedDetail.desiredIndustryLarge && loadedDetail.desiredIndustry1) {
+        const parts = String(loadedDetail.desiredIndustry1).split(" / ");
+        loadedDetail.desiredIndustryLarge = parts[0] || null;
+        loadedDetail.desiredIndustryMedium = parts[1] || null;
+        loadedDetail.desiredIndustrySmall = parts[2] || null;
+      }
+      setDetailState(loadedDetail);
       setRatingState(rec.rating || {});
       setAutosaveToken(rec.autosaveToken || null);
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
@@ -1209,19 +1223,78 @@ export default function InterviewForm({
                   </div>
                   {desiredSub === "st-job" && (
                     <div>
-                      <Fld value={d.desiredJobType1} onChange={(v) => setDetail("desiredJobType1", v)} placeholder="（例：管理・事務 ／ 一般事務・庶務）" />
+                      <HierarchicalCategorySelect
+                        apiBase="/api/job-categories"
+                        level1Label="職種大"
+                        level2Label="職種中"
+                        level3Label="職種小"
+                        value={{
+                          level1: d.desiredJobTypeLarge ?? null,
+                          level2: d.desiredJobTypeMedium ?? null,
+                          level3: d.desiredJobTypeSmall ?? null,
+                        }}
+                        onChange={(v: HierarchicalValue) => {
+                          setDetailState((prev) => ({
+                            ...prev,
+                            desiredJobTypeLarge: v.level1,
+                            desiredJobTypeMedium: v.level2,
+                            desiredJobTypeSmall: v.level3,
+                            desiredJobType1: [v.level1, v.level2, v.level3].filter(Boolean).join(" / ") || null,
+                          }));
+                          setIsDirty(true);
+                        }}
+                      />
                       <div className="mt-1.5"><Fld value={d.desiredJobType1Memo} onChange={(v) => setDetail("desiredJobType1Memo", v)} type="textarea" rows={2} placeholder="職種に関する所感・詳細メモ" /></div>
                     </div>
                   )}
                   {desiredSub === "st-industry" && (
                     <div>
-                      <Fld value={d.desiredIndustry1} onChange={(v) => setDetail("desiredIndustry1", v)} placeholder="（例：IT・通信 ／ サービス ／ メーカー）" />
+                      <HierarchicalCategorySelect
+                        apiBase="/api/industry-categories"
+                        level1Label="業種大"
+                        level2Label="業種中"
+                        level3Label="業種小"
+                        value={{
+                          level1: d.desiredIndustryLarge ?? null,
+                          level2: d.desiredIndustryMedium ?? null,
+                          level3: d.desiredIndustrySmall ?? null,
+                        }}
+                        onChange={(v: HierarchicalValue) => {
+                          setDetailState((prev) => ({
+                            ...prev,
+                            desiredIndustryLarge: v.level1,
+                            desiredIndustryMedium: v.level2,
+                            desiredIndustrySmall: v.level3,
+                            desiredIndustry1: [v.level1, v.level2, v.level3].filter(Boolean).join(" / ") || null,
+                          }));
+                          setIsDirty(true);
+                        }}
+                      />
                       <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メモ" /></div>
                     </div>
                   )}
                   {desiredSub === "st-area" && (
                     <div>
-                      <Fld value={d.desiredArea} onChange={(v) => setDetail("desiredArea", v)} placeholder="（例：横浜市 ／ 川崎市 ／ 東京都内）" />
+                      <HierarchicalCategorySelect
+                        apiBase="/api/area-categories"
+                        level1Label="エリア"
+                        level2Label="都道府県"
+                        level3Label="市区"
+                        value={{
+                          level1: d.desiredArea ?? null,
+                          level2: d.desiredPrefecture ?? null,
+                          level3: d.desiredCity ?? null,
+                        }}
+                        onChange={(v: HierarchicalValue) => {
+                          setDetailState((prev) => ({
+                            ...prev,
+                            desiredArea: v.level1,
+                            desiredPrefecture: v.level2,
+                            desiredCity: v.level3,
+                          }));
+                          setIsDirty(true);
+                        }}
+                      />
                       <div className="mt-1.5"><Fld value={d.desiredAreaMemo} onChange={(v) => setDetail("desiredAreaMemo", v)} type="textarea" rows={2} placeholder="エリアに関する所感・詳細メモ" /></div>
                     </div>
                   )}
