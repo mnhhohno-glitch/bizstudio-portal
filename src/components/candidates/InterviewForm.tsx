@@ -963,8 +963,8 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>時間/手法</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <div style={{ flex: "1 1 0%", minWidth: 0 }}><RoField v={duration} /></div>
-                  <div style={{ flex: "1 1 0%", minWidth: 0 }}><Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} /></div>
+                  <RoField v={duration} />
+                  <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} style={{ flex: "1 1 0%" }} />
                 </div>
               </div>
 
@@ -1004,8 +1004,8 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>回数/状態</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <div style={{ flex: "1 1 0%", minWidth: 0 }}><RoField v={form.interviewCount ? `${form.interviewCount}回` : ""} /></div>
-                  <div className="flex items-center justify-center rounded-[5px] py-0.5" style={{ flex: "1 1 0%", minWidth: 0, background: "var(--im-bg2)" }}>
+                  <RoField v={form.interviewCount ? `${form.interviewCount}回` : ""} />
+                  <div className="flex-1 min-w-0 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                     <Chip text={form.status === "complete" ? "入力済" : "下書き"} variant={form.status === "complete" ? "warn" : "info"} />
                   </div>
                 </div>
