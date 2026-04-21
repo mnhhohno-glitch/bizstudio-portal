@@ -988,11 +988,11 @@ export default function InterviewForm({
               </div>
               <div className="col-span-4 flex items-center gap-1.5 min-w-0"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
 
-              {/* Row 5: 担当CA | 社員名 | ランク */}
+              {/* Row 5: 担当CA | 氏名 | ランク */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>社員名</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>氏名</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>ランク</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>ランク</span>
                 <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                   {r.overallRank ? (
                     <span className="inline-flex items-center rounded-[10px] px-3 py-0.5" style={{ fontSize: 13, fontWeight: 500, background: rankColor(r.overallRank).bg, color: rankColor(r.overallRank).fg }}>{r.overallRank}</span>
@@ -1011,11 +1011,11 @@ export default function InterviewForm({
                 </div>
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>結果</span>
                 <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>最新</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>最新</span>
                 <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                   <Chip text="最新" variant="ok" />
                 </div>
