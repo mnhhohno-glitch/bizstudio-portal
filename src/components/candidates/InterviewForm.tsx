@@ -37,6 +37,21 @@ type MemoRecord = {
   content: string;
 };
 
+type WorkHistoryRecord = {
+  id?: string;
+  order: number;
+  companyName: string | null;
+  businessContent: string | null;
+  tenureYear: number | null;
+  tenureMonth: number | null;
+  jobTypeFlag: string | null;
+  jobTypeMemo: string | null;
+  resignReasonLarge: string | null;
+  resignReasonMedium: string | null;
+  resignReasonSmall: string | null;
+  jobChangeReasonMemo: string | null;
+};
+
 type CandidateInfo = {
   id: string;
   candidateNumber: string;
@@ -284,7 +299,6 @@ export default function InterviewForm({
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevIdRef = useRef<string | null>(null);
@@ -293,6 +307,8 @@ export default function InterviewForm({
   const [aiOrganizeLoading, setAiOrganizeLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
+  const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -325,6 +341,37 @@ export default function InterviewForm({
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
       setAttachments(rec.attachments || []);
       setMemos(rec.memos || []);
+      const wh = rec.workHistories || [];
+      if (wh.length > 0) {
+        setWorkHistories(wh);
+      } else if (rec.detail?.companyName) {
+        const tenureStr = rec.detail.tenure || "";
+        const yMatch = tenureStr.match(/(\d+)\s*年/);
+        const mMatch = tenureStr.match(/(\d+)\s*[ヶカか]月/);
+        const migrated: WorkHistoryRecord = {
+          order: 1,
+          companyName: rec.detail.companyName || null,
+          businessContent: rec.detail.businessContent || null,
+          tenureYear: yMatch ? Number(yMatch[1]) : null,
+          tenureMonth: mMatch ? Number(mMatch[1]) : null,
+          jobTypeFlag: rec.detail.jobTypeFlag || null,
+          jobTypeMemo: rec.detail.jobTypeMemo || null,
+          resignReasonLarge: rec.detail.resignReasonLarge || null,
+          resignReasonMedium: rec.detail.resignReasonMedium || null,
+          resignReasonSmall: rec.detail.resignReasonSmall || null,
+          jobChangeReasonMemo: rec.detail.jobChangeReasonMemo || null,
+        };
+        setWorkHistories([migrated]);
+        fetch(`/api/interviews/${interviewId}/work-histories`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(migrated),
+        }).then((r) => r.ok ? r.json() : null).then((saved) => {
+          if (saved) setWorkHistories([saved]);
+        }).catch(() => {});
+      } else {
+        setWorkHistories([]);
+      }
       setIsDirty(false);
     } catch {
       // silent
@@ -404,6 +451,25 @@ export default function InterviewForm({
     return () => clearInterval(timer);
   }, [isDirty, interviewId, form, detail, rating, autosaveToken, currentUser?.id]);
 
+  /* ---- WorkHistory autosave ---- */
+  const whTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!interviewId || workHistories.length === 0) return;
+    if (whTimerRef.current) clearTimeout(whTimerRef.current);
+    whTimerRef.current = setTimeout(() => {
+      const items = workHistories.filter((w) => w.id);
+      for (const wh of items) {
+        const { id: whId, ...data } = wh;
+        fetch(`/api/interviews/${interviewId}/work-histories/${whId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        }).catch(() => {});
+      }
+    }, 5000);
+    return () => { if (whTimerRef.current) clearTimeout(whTimerRef.current); };
+  }, [workHistories, interviewId]);
+
   /* ---- beforeunload (existing logic) ---- */
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -435,6 +501,31 @@ export default function InterviewForm({
         conditionTotal: condTotal || null,
         grandTotal: (pTotal + cTotal + condTotal) || null,
       };
+
+      const detailData = cleanRelationFields(detail);
+      if (workHistories.length > 0) {
+        const first = [...workHistories].sort((a, b) => a.order - b.order)[0];
+        detailData.companyName = first.companyName;
+        detailData.businessContent = first.businessContent;
+        const tenure = [
+          first.tenureYear != null ? `${first.tenureYear}年` : null,
+          first.tenureMonth != null ? `${first.tenureMonth}ヶ月` : null,
+        ].filter(Boolean).join("");
+        detailData.tenure = tenure || null;
+        detailData.jobTypeFlag = first.jobTypeFlag;
+        detailData.jobTypeMemo = first.jobTypeMemo;
+        detailData.resignReasonLarge = first.resignReasonLarge;
+        detailData.resignReasonMedium = first.resignReasonMedium;
+        detailData.resignReasonSmall = first.resignReasonSmall;
+        detailData.jobChangeReasonMemo = first.jobChangeReasonMemo;
+        detailData.careerSummary = workHistories
+          .map((w) => {
+            const t = [w.tenureYear != null ? `${w.tenureYear}年` : null, w.tenureMonth != null ? `${w.tenureMonth}ヶ月` : null].filter(Boolean).join("");
+            return `【${w.order}社目】${w.companyName ?? ""}（${w.businessContent ?? ""}）${t} / ${w.jobTypeFlag ?? ""}`;
+          })
+          .join("\n");
+      }
+
       const res = await fetch(`/api/interviews/${interviewId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -448,11 +539,20 @@ export default function InterviewForm({
           interviewMemo: form.interviewMemo || null,
           summaryText: form.summaryText || null,
           status: "complete",
-          detail: cleanRelationFields(detail),
+          detail: detailData,
           rating: ratingData,
         }),
       });
       if (!res.ok) throw new Error();
+
+      if (interviewId && workHistories.length > 0) {
+        await fetch(`/api/interviews/${interviewId}/work-histories`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workHistories }),
+        }).catch(() => {});
+      }
+
       setIsDirty(false);
       setLastSavedAt(new Date());
       toast.success("保存しました");
@@ -482,34 +582,6 @@ export default function InterviewForm({
       toast.error(e instanceof Error ? e.message : "アップロードに失敗しました");
     } finally {
       setUploading(false);
-    }
-  };
-
-  /* ---- Attachment analyze (existing logic) ---- */
-  const handleAnalyze = async (attachmentId: string) => {
-    setAnalyzingId(attachmentId);
-    try {
-      const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}/analyze`, { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        setAttachments((prev) =>
-          prev.map((a) =>
-            a.id === attachmentId
-              ? { ...a, analysisStatus: "completed", analysisResult: data.analysisResult, analyzedAt: new Date().toISOString() }
-              : a
-          )
-        );
-        toast.success("AI解析が完了しました");
-      } else {
-        setAttachments((prev) =>
-          prev.map((a) => a.id === attachmentId ? { ...a, analysisStatus: "failed", analysisError: data.error } : a)
-        );
-        toast.error(`解析失敗: ${data.error}`);
-      }
-    } catch {
-      toast.error("解析リクエストに失敗しました");
-    } finally {
-      setAnalyzingId(null);
     }
   };
 
@@ -639,6 +711,94 @@ export default function InterviewForm({
     } finally {
       setDeleting(false);
     }
+  };
+
+  /* ---- Intake analyze (candidate-intake proxy) ---- */
+  const handleIntakeAnalyze = async () => {
+    if (!interviewId) {
+      toast.error("先に面談を保存してから解析を実行してください");
+      return;
+    }
+    setIntakeAnalyzing(true);
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/analyze-with-intake`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "解析に失敗しました");
+      }
+      const { detailUpdates, interviewMemo: memo, workHistories: newWH, missingItems } = await res.json();
+      if (detailUpdates && typeof detailUpdates === "object") {
+        setDetailState((prev) => ({ ...prev, ...detailUpdates }));
+      }
+      if (memo) {
+        setForm((prev) => ({ ...prev, interviewMemo: memo }));
+      }
+      if (Array.isArray(newWH) && newWH.length > 0) {
+        await fetch(`/api/interviews/${interviewId}/work-histories`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workHistories: newWH }),
+        });
+        const whRes = await fetch(`/api/interviews/${interviewId}/work-histories`);
+        if (whRes.ok) {
+          const whData = await whRes.json();
+          setWorkHistories(whData.workHistories || newWH);
+        } else {
+          setWorkHistories(newWH);
+        }
+      }
+      setIsDirty(true);
+      if (missingItems && missingItems.length > 0) {
+        toast.info(`解析完了。不足項目: ${missingItems.length}件`);
+      } else {
+        toast.success("解析結果を反映しました");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "解析に失敗しました");
+    } finally {
+      setIntakeAnalyzing(false);
+    }
+  };
+
+  /* ---- WorkHistory helpers ---- */
+  const setWH = (index: number, key: keyof WorkHistoryRecord, value: unknown) => {
+    setWorkHistories((prev) => prev.map((w, i) => i === index ? { ...w, [key]: value } : w));
+    setIsDirty(true);
+  };
+
+  const addWorkHistory = () => {
+    const nextOrder = workHistories.length > 0 ? Math.max(...workHistories.map((w) => w.order)) + 1 : 1;
+    const newWH: WorkHistoryRecord = {
+      order: nextOrder, companyName: null, businessContent: null,
+      tenureYear: null, tenureMonth: null, jobTypeFlag: null, jobTypeMemo: null,
+      resignReasonLarge: null, resignReasonMedium: null, resignReasonSmall: null,
+      jobChangeReasonMemo: null,
+    };
+    setWorkHistories((prev) => [...prev, newWH]);
+    setIsDirty(true);
+    if (interviewId) {
+      fetch(`/api/interviews/${interviewId}/work-histories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newWH),
+      }).then((r) => r.ok ? r.json() : null).then((saved) => {
+        if (saved) setWorkHistories((prev) => prev.map((w, i) => i === prev.length - 1 ? { ...saved } : w));
+      }).catch(() => {});
+    }
+  };
+
+  const removeWorkHistory = async (index: number) => {
+    if (!confirm("この職歴を削除しますか？")) return;
+    const target = workHistories[index];
+    if (target.id && interviewId) {
+      await fetch(`/api/interviews/${interviewId}/work-histories/${target.id}`, { method: "DELETE" }).catch(() => {});
+    }
+    setWorkHistories((prev) => prev.filter((_, i) => i !== index));
+    setIsDirty(true);
   };
 
   /* ---- Computed ---- */
@@ -847,30 +1007,40 @@ export default function InterviewForm({
           <div className="mb-2">
             <SectionHd title="職務経歴" />
             <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
-              <div className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>1 社目</span>
-                  <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>企業名</span>
-                  <Fld value={d.companyName} onChange={(v) => setDetail("companyName", v)} />
-                  <Fld value={d.tenure} onChange={(v) => setDetail("tenure", v)} placeholder="例: 11年0カ月" style={{ width: 100, flex: "none" }} />
+              {workHistories.map((wh, idx) => (
+                <div key={wh.id ?? idx} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>{wh.order} 社目</span>
+                    <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>企業名</span>
+                    <Fld value={wh.companyName} onChange={(v) => setWH(idx, "companyName", v)} />
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Fld value={wh.tenureYear} onChange={(v) => setWH(idx, "tenureYear", v ? Number(v) : null)} type="number" style={{ width: 40, textAlign: "center", flex: "none" }} />
+                      <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>年</span>
+                      <Fld value={wh.tenureMonth} onChange={(v) => setWH(idx, "tenureMonth", v ? Number(v) : null)} type="number" style={{ width: 40, textAlign: "center", flex: "none" }} />
+                      <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>月</span>
+                    </div>
+                    <BtnMini variant="danger" onClick={() => removeWorkHistory(idx)}>🗑</BtnMini>
+                  </div>
+                  <Row label="会社概要"><Fld value={wh.businessContent} onChange={(v) => setWH(idx, "businessContent", v)} /></Row>
+                  <Row label="職種"><Fld value={wh.jobTypeFlag} onChange={(v) => setWH(idx, "jobTypeFlag", v)} /><Fld value={wh.jobTypeMemo} onChange={(v) => { setWH(idx, "jobTypeMemo", v); }} /></Row>
+                  <Row label="退社理由">
+                    <Fld value={wh.resignReasonLarge} onChange={(v) => setWH(idx, "resignReasonLarge", v)} type="select" options={["過去型", "未来型", "現職"]} style={{ width: 90, flex: "none" }} />
+                    <Fld value={wh.resignReasonMedium} onChange={(v) => setWH(idx, "resignReasonMedium", v)} type="select" options={["環境要因", "キャリア要因", "待遇要因"]} style={{ width: 100, flex: "none" }} />
+                    <Fld value={wh.resignReasonSmall} onChange={(v) => setWH(idx, "resignReasonSmall", v)} />
+                  </Row>
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>詳細</span>
+                    <Fld value={wh.jobChangeReasonMemo} onChange={(v) => setWH(idx, "jobChangeReasonMemo", v)} type="textarea" rows={2} />
+                  </div>
                 </div>
-                <Row label="会社概要"><Fld value={d.businessContent} onChange={(v) => setDetail("businessContent", v)} /></Row>
-                <Row label="職種"><Fld value={d.jobTypeFlag} onChange={(v) => setDetail("jobTypeFlag", v)} /><Fld value={d.jobTypeMemo} onChange={(v) => setDetail("jobTypeMemo", v)} /></Row>
-                <div className="flex items-start gap-1.5 mb-1">
-                  <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>業務内容</span>
-                  <Fld value={d.careerSummary} onChange={(v) => setDetail("careerSummary", v)} type="textarea" rows={3} />
-                </div>
-                <Row label="退社理由">
-                  <Fld value={d.resignReasonLarge} onChange={(v) => setDetail("resignReasonLarge", v)} type="select" options={["過去型", "未来型", "現職"]} style={{ width: 90, flex: "none" }} />
-                  <Fld value={d.resignReasonMedium} onChange={(v) => setDetail("resignReasonMedium", v)} type="select" options={["環境要因", "キャリア要因", "待遇要因"]} style={{ width: 100, flex: "none" }} />
-                  <Fld value={d.resignReasonSmall} onChange={(v) => setDetail("resignReasonSmall", v)} />
-                </Row>
-                <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>詳細</span>
-                  <Fld value={d.jobChangeReasonMemo} onChange={(v) => setDetail("jobChangeReasonMemo", v)} type="textarea" rows={2} />
-                </div>
-              </div>
+              ))}
+              {workHistories.length === 0 && <p style={{ fontSize: 11, color: "var(--im-fg3)", fontStyle: "italic", textAlign: "center", padding: 12 }}>職歴データなし</p>}
             </div>
+            <button
+              type="button" onClick={addWorkHistory}
+              className="w-full mt-1.5 cursor-pointer"
+              style={{ padding: "8px 12px", fontSize: 12, border: "0.5px dashed var(--im-bdr2)", background: "transparent", color: "var(--im-fg2)", borderRadius: 6, fontFamily: "inherit" }}
+            >＋ 職歴を追加</button>
           </div>
         </div>
 
@@ -1223,7 +1393,7 @@ export default function InterviewForm({
                 <div>
                   <SectionHd
                     title="添付ファイル一覧"
-                    right={attachments.length > 0 ? <BtnMini variant="ai" onClick={() => { const first = attachments.find((a) => a.analysisStatus !== "completed"); if (first) handleAnalyze(first.id); }}>✨ ログを解析して各カラムへ自動入力</BtnMini> : undefined}
+                    right={attachments.length > 0 ? <BtnMini variant="ai" onClick={handleIntakeAnalyze} disabled={intakeAnalyzing}>{intakeAnalyzing ? "解析中..." : "✨ ログを解析して各カラムへ自動入力"}</BtnMini> : undefined}
                   />
                   <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
                     {attachments.map((att) => (
@@ -1233,16 +1403,7 @@ export default function InterviewForm({
                           <span style={{ fontSize: 18, flexShrink: 0 }}>{att.mimeType?.startsWith("audio") ? "🎙️" : "📄"}</span>
                           <span className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: "var(--im-fg)" }}>{att.fileName}</span>
                           <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>{(att.fileSize / 1024).toFixed(0)} KB</span>
-                          <Chip text={att.analysisStatus === "completed" ? "解析済" : att.analysisStatus === "processing" ? "解析中" : "未解析"} variant={att.analysisStatus === "completed" ? "ok" : "warn"} />
-                          {(att.fileType === "pdf" || att.fileType === "xlsx" || att.fileType === "txt" || att.fileType === "csv") && att.analysisStatus !== "processing" && (
-                            <BtnMini variant="ai" onClick={() => handleAnalyze(att.id)}>
-                              {analyzingId === att.id ? "解析中..." : "✨ AI解析"}
-                            </BtnMini>
-                          )}
                         </div>
-                        {att.analysisStatus === "failed" && att.analysisError && (
-                          <p className="mt-1" style={{ fontSize: 11, color: "var(--im-fg-err)" }}>{att.analysisError}</p>
-                        )}
                       </div>
                     ))}
                     {attachments.length === 0 && <p style={{ fontSize: 11, color: "var(--im-fg3)", fontStyle: "italic", textAlign: "center", padding: 20 }}>添付ファイルはまだありません</p>}
