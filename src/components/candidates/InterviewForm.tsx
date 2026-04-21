@@ -460,7 +460,7 @@ export default function InterviewForm({
     whTimerRef.current = setTimeout(() => {
       const items = workHistories.filter((w) => w.id);
       for (const wh of items) {
-        const { id: whId, ...data } = wh;
+        const { id: whId, interviewRecordId: _ir, createdAt: _ca, updatedAt: _ua, ...data } = wh as WorkHistoryRecord & Record<string, unknown>;
         fetch(`/api/interviews/${interviewId}/work-histories/${whId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

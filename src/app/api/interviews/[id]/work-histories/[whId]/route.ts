@@ -21,7 +21,19 @@ export async function PATCH(
 
   const updated = await prisma.workHistory.update({
     where: { id: whId },
-    data: body,
+    data: {
+      order: body.order,
+      companyName: body.companyName ?? null,
+      businessContent: body.businessContent ?? null,
+      tenureYear: body.tenureYear ?? null,
+      tenureMonth: body.tenureMonth ?? null,
+      jobTypeFlag: body.jobTypeFlag ?? null,
+      jobTypeMemo: body.jobTypeMemo ?? null,
+      resignReasonLarge: body.resignReasonLarge ?? null,
+      resignReasonMedium: body.resignReasonMedium ?? null,
+      resignReasonSmall: body.resignReasonSmall ?? null,
+      jobChangeReasonMemo: body.jobChangeReasonMemo ?? null,
+    },
   });
   return NextResponse.json(updated);
 }
