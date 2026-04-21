@@ -195,12 +195,29 @@ function SectionHd({ title, right }: { title: string; right?: React.ReactNode })
   );
 }
 
-function RoField({ v }: { v: string }) {
+function RoField({ v, copyable }: { v: string; copyable?: boolean }) {
+  const value = v || "-";
+  const canCopy = copyable && value !== "-";
+
+  const handleClick = async () => {
+    if (!canCopy) return;
+    try {
+      await navigator.clipboard.writeText(v);
+      toast.success("コピーしました");
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
   return (
     <span
-      className="flex-1 min-w-0 truncate"
+      className={`flex-1 min-w-0 truncate${canCopy ? " cursor-pointer transition-colors" : ""}`}
       style={{ fontSize: 12, padding: "5px 8px", borderRadius: 5, background: "var(--im-bg2)", color: "var(--im-fg)" }}
-    >{v || "-"}</span>
+      onClick={canCopy ? handleClick : undefined}
+      onMouseEnter={canCopy ? (e) => { (e.currentTarget as HTMLElement).style.background = "var(--im-bg3, #E5E7EB)"; } : undefined}
+      onMouseLeave={canCopy ? (e) => { (e.currentTarget as HTMLElement).style.background = "var(--im-bg2)"; } : undefined}
+      title={canCopy ? "クリックでコピー" : undefined}
+    >{value}</span>
   );
 }
 
@@ -246,6 +263,40 @@ function Fld({
       value={value != null ? String(value) : ""} onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder} style={base} className={className} readOnly={readOnly}
     />
+  );
+}
+
+function TimeStampField({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const stamp = () => {
+    const now = new Date();
+    onChange(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+  };
+  return (
+    <div className="flex items-center flex-1 min-w-0" style={{ gap: 2 }}>
+      <input
+        ref={ref}
+        type="time"
+        value={value != null ? String(value) : ""}
+        onChange={(e) => onChange(e.target.value)}
+        onClick={stamp}
+        onKeyDown={(e) => e.preventDefault()}
+        onBeforeInput={(e) => e.preventDefault()}
+        onPaste={(e) => e.preventDefault()}
+        style={{ flex: "1 1 0%", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5, color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", width: "100%", cursor: "pointer" }}
+      />
+      <button
+        type="button"
+        className="shrink-0 p-0.5 transition-colors"
+        style={{ color: "var(--im-fg3, #9CA3AF)" }}
+        title="時刻を選択"
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg, #374151)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg3, #9CA3AF)"; }}
+        onClick={() => { try { ref.current?.showPicker(); } catch { /* showPicker not supported */ } }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </button>
+    </div>
   );
 }
 
@@ -952,12 +1003,20 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>面談日</span>
                 <Fld value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" />
+                {form.interviewDate && (
+                  <button type="button" className="shrink-0 p-0.5 transition-colors" style={{ color: "var(--im-fg3, #9CA3AF)" }} title="日付をコピー"
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg, #374151)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg3, #9CA3AF)"; }}
+                    onClick={async () => { try { await navigator.clipboard.writeText(form.interviewDate); toast.success("コピーしました"); } catch { toast.error("コピーに失敗しました"); } }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  </button>
+                )}
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>時刻</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <Fld value={form.startTime} onChange={(v) => setField("startTime", v)} type="time" />
-                  <Fld value={form.endTime} onChange={(v) => setField("endTime", v)} type="time" />
+                  <TimeStampField value={form.startTime} onChange={(v) => setField("startTime", v)} />
+                  <TimeStampField value={form.endTime} onChange={(v) => setField("endTime", v)} />
                 </div>
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
@@ -969,14 +1028,14 @@ export default function InterviewForm({
               </div>
 
               {/* Row 2: 求職者ID | 氏名 | フリガナ */}
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>求職者ID</span><RoField v={candidate?.candidateNumber || ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>氏名</span><RoField v={candidate?.name || ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フリガナ</span><RoField v={candidate?.nameKana || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>求職者ID</span><RoField v={candidate?.candidateNumber || ""} copyable /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>氏名</span><RoField v={candidate?.name || ""} copyable /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フリガナ</span><RoField v={candidate?.nameKana || ""} copyable /></div>
 
               {/* Row 3: 生年月日 | 電話 | メール */}
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>生年月日</span><RoField v={fmtDate(candidate?.birthday ?? null)} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>電話</span><RoField v={candidate?.phone || ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>メール</span><RoField v={candidate?.email || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>生年月日</span><RoField v={fmtDate(candidate?.birthday ?? null)} copyable /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>電話</span><RoField v={candidate?.phone || ""} copyable /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>メール</span><RoField v={candidate?.email || ""} copyable /></div>
 
               {/* Row 4: 年齢/性別 | 住所(wide) */}
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
@@ -986,7 +1045,7 @@ export default function InterviewForm({
                   <RoField v={genderLabel(candidate?.gender ?? null)} />
                 </div>
               </div>
-              <div className="col-span-4 flex items-center gap-1.5 min-w-0"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
+              <div className="col-span-4 flex items-center gap-1.5 min-w-0"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} copyable /></div>
 
               {/* Row 5: 担当CA | 担当 | ランク */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
