@@ -153,7 +153,7 @@ function toInt(v: unknown): number | null {
 }
 
 export function mapWorkHistoryArray(rawHistory: Record<string, unknown>[]): WorkHistoryInput[] {
-  return rawHistory
+  const mapped = rawHistory
     .map((w, i) => ({
       order: toInt(w["何社目"]) ?? i + 1,
       companyName: toStr(w["企業名"]),
@@ -168,6 +168,62 @@ export function mapWorkHistoryArray(rawHistory: Record<string, unknown>[]): Work
       jobChangeReasonMemo: toStr(w["転職理由メモ"]),
     }))
     .sort((a, b) => a.order - b.order);
+  return mergeSameCompany(mapped);
+}
+
+function extractBaseCompanyName(name: string | null): string {
+  if (!name) return "";
+  return name
+    .replace(/[（(][^)）]*[)）]/g, "")
+    .replace(/[\s　]+/g, "")
+    .trim();
+}
+
+function mergeSameCompany(records: WorkHistoryInput[]): WorkHistoryInput[] {
+  const groups = new Map<string, WorkHistoryInput[]>();
+  const order: string[] = [];
+
+  for (const r of records) {
+    const base = extractBaseCompanyName(r.companyName);
+    if (!base) {
+      const key = `__unmatched_${groups.size}`;
+      groups.set(key, [r]);
+      order.push(key);
+      continue;
+    }
+    if (!groups.has(base)) {
+      groups.set(base, []);
+      order.push(base);
+    }
+    groups.get(base)!.push(r);
+  }
+
+  const merged: WorkHistoryInput[] = [];
+  for (const key of order) {
+    const recs = groups.get(key)!;
+    if (recs.length === 1) {
+      merged.push(recs[0]);
+      continue;
+    }
+    const sorted = [...recs].sort((a, b) => a.order - b.order);
+    const totalMonths = sorted.reduce((sum, r) => {
+      return sum + (r.tenureYear ?? 0) * 12 + (r.tenureMonth ?? 0);
+    }, 0);
+    const memos = sorted.map((r) => r.jobTypeMemo).filter(Boolean);
+    const last = sorted[sorted.length - 1];
+    merged.push({
+      ...sorted[0],
+      tenureYear: Math.floor(totalMonths / 12),
+      tenureMonth: totalMonths % 12,
+      jobTypeMemo: memos.length > 0 ? memos.join(" / ") : sorted[0].jobTypeMemo,
+      resignReasonLarge: last.resignReasonLarge,
+      resignReasonMedium: last.resignReasonMedium,
+      resignReasonSmall: last.resignReasonSmall,
+      jobChangeReasonMemo: last.jobChangeReasonMemo,
+    });
+  }
+
+  return merged.map((r, i) => ({ ...r, order: i + 1 }));
 }
 
 export function workHistoryToDetailSync(histories: WorkHistoryInput[]): Record<string, unknown> {

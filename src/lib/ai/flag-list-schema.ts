@@ -85,11 +85,11 @@ export function buildCommonAnalysisResponseSchema() {
           candidate_no: buildStringProperty("5で始まる7桁の求職者番号"),
           candidate_name: buildStringProperty("求職者氏名"),
           work_history: buildArrayProperty(
-            "職歴の配列。在籍順に並べる",
+            "職歴の配列。会社単位で在籍順に並べる。同一会社内の部署異動・昇進・組織改編による所属変更は1エントリにまとめ、職種メモに時系列で記載する",
             {
               type: "object",
               properties: {
-                企業名: buildStringProperty("会社名"),
+                企業名: buildStringProperty("会社名（部署名・課名・グループ識別子を含めない母体法人名。例:「ABC株式会社（営業部）」ではなく「ABC株式会社」）"),
                 事業内容: buildStringProperty("会社の事業内容"),
                 在籍期間_年: buildIntegerProperty("在籍年数"),
                 在籍期間_ヶ月: buildIntegerProperty("在籍月数（12未満）"),
