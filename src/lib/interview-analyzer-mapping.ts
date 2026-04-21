@@ -267,7 +267,10 @@ function mergeSameCompany(records: WorkHistoryInput[]): WorkHistoryInput[] {
       resignReasonMedium: last.resignReasonMedium,
       resignReasonSmall: last.resignReasonSmall,
       jobChangeReasonMemo: last.jobChangeReasonMemo,
-      leaveDate: last.leaveDate,
+      hireDate: sorted.map((r) => r.hireDate).filter((h) => h && h.trim() !== "").sort()[0] ?? null,
+      leaveDate: sorted.some((r) => !r.leaveDate || r.leaveDate.trim() === "")
+        ? null
+        : sorted.map((r) => r.leaveDate).filter((l) => l).sort().reverse()[0] ?? null,
     });
   }
 

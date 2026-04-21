@@ -38,6 +38,8 @@ export async function PUT(
     resignReasonMedium?: string | null;
     resignReasonSmall?: string | null;
     jobChangeReasonMemo?: string | null;
+    hireDate?: string | null;
+    leaveDate?: string | null;
   }>;
 
   if (!Array.isArray(items)) {
@@ -61,6 +63,8 @@ export async function PUT(
           resignReasonMedium: item.resignReasonMedium ?? null,
           resignReasonSmall: item.resignReasonSmall ?? null,
           jobChangeReasonMemo: item.jobChangeReasonMemo ?? null,
+          hireDate: item.hireDate ?? null,
+          leaveDate: item.leaveDate ?? null,
         },
       }),
     ),
@@ -97,6 +101,8 @@ export async function POST(
       resignReasonMedium: body.resignReasonMedium ?? null,
       resignReasonSmall: body.resignReasonSmall ?? null,
       jobChangeReasonMemo: body.jobChangeReasonMemo ?? null,
+      hireDate: body.hireDate ?? null,
+      leaveDate: body.leaveDate ?? null,
     },
   });
   return NextResponse.json(created);

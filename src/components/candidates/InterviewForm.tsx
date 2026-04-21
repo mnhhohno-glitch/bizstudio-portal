@@ -52,6 +52,8 @@ type WorkHistoryRecord = {
   resignReasonMedium: string | null;
   resignReasonSmall: string | null;
   jobChangeReasonMemo: string | null;
+  hireDate?: string | null;
+  leaveDate?: string | null;
 };
 
 type CandidateInfo = {

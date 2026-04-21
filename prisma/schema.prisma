@@ -1378,6 +1378,8 @@ model WorkHistory {
   resignReasonMedium  String?         @map("resign_reason_medium")
   resignReasonSmall   String?         @map("resign_reason_small")
   jobChangeReasonMemo String?         @map("job_change_reason_memo") @db.Text
+  hireDate            String?         @map("hire_date")
+  leaveDate           String?         @map("leave_date")
   createdAt           DateTime        @default(now()) @map("created_at")
   updatedAt           DateTime        @updatedAt @map("updated_at")
 
