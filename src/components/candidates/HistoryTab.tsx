@@ -265,6 +265,8 @@ type BookmarkFile = {
   aiMatchRating: string | null;
   aiAnalysisComment: string | null;
   aiAnalyzedAt: string | null;
+  lastExportedAt: string | null;
+  lastExportedTo: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
 };
@@ -613,6 +615,7 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
     setShowOtherDropdown(false);
     if (sendResult?.success) {
       setSelectedIds(new Set());
+      fetchFiles();
     }
   };
 
@@ -861,6 +864,12 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                     title={file.fileName}
                   >{file.fileName}</button>
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
+                  {file.lastExportedAt && (
+                    <span
+                      className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-800 border border-green-200"
+                      title={`${file.lastExportedTo === "circus" ? "Circus" : "HITO-Link"} に送信済（${new Date(file.lastExportedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）`}
+                    >出力済</span>
+                  )}
                 </div>
                 {(() => {
                   const axis = parse3AxisRatings(file.aiAnalysisComment);

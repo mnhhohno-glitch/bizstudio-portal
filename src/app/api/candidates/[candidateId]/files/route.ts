@@ -74,6 +74,8 @@ export async function GET(
       aiMatchRating: true,
       aiAnalysisComment: true,
       aiAnalyzedAt: true,
+      lastExportedAt: true,
+      lastExportedTo: true,
       uploadedBy: { select: { id: true, name: true } },
     },
   });
