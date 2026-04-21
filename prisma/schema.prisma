@@ -998,6 +998,8 @@ model CandidateFile {
   aiMatchRating     String?               @map("ai_match_rating")
   aiAnalysisComment String?               @map("ai_analysis_comment") @db.Text
   aiAnalyzedAt      DateTime?             @map("ai_analyzed_at")
+  lastExportedAt    DateTime?             @map("last_exported_at")
+  lastExportedTo    String?               @map("last_exported_to")
   uploadedByUserId  String                @map("uploaded_by_user_id")
   uploadedBy        User                  @relation("UserCandidateFiles", fields: [uploadedByUserId], references: [id])
   createdAt         DateTime              @default(now()) @map("created_at")
