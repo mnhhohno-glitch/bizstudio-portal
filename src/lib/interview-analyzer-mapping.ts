@@ -168,7 +168,67 @@ export function mapWorkHistoryArray(rawHistory: Record<string, unknown>[]): Work
       jobChangeReasonMemo: toStr(w["転職理由メモ"]),
     }))
     .sort((a, b) => a.order - b.order);
-  return mergeSameCompany(mapped);
+  const merged = mergeSameCompany(mapped);
+  const analysisDate = new Date();
+  return merged.map((r) => correctTenureFromJobMemo(r, analysisDate));
+}
+
+function extractTenureFromJobMemo(
+  jobMemo: string | undefined | null,
+  analysisDate: Date = new Date(),
+): { years: number; months: number } | null {
+  if (!jobMemo || jobMemo.trim().length === 0) return null;
+
+  const yearMonthPattern = /(\d{4})(?:[./年](\d{1,2}))?/g;
+  const matches = [...jobMemo.matchAll(yearMonthPattern)];
+  if (matches.length === 0) return null;
+
+  const monthValues = matches.map((m) => {
+    const year = parseInt(m[1], 10);
+    const month = m[2] ? parseInt(m[2], 10) : 1;
+    return year * 12 + month;
+  });
+
+  const minMonth = Math.min(...monthValues);
+
+  const lastMatch = matches[matches.length - 1];
+  const lastMatchEnd = (lastMatch.index ?? 0) + lastMatch[0].length;
+  const restAfterLast = jobMemo.slice(lastMatchEnd, lastMatchEnd + 5).trim();
+  const isCurrentlyEmployed =
+    restAfterLast.startsWith("-") ||
+    restAfterLast.startsWith("〜") ||
+    restAfterLast.startsWith("～");
+
+  let maxMonth: number;
+  if (isCurrentlyEmployed) {
+    maxMonth = analysisDate.getFullYear() * 12 + (analysisDate.getMonth() + 1);
+  } else {
+    maxMonth = Math.max(...monthValues);
+  }
+
+  const totalMonths = maxMonth - minMonth;
+  if (totalMonths < 0 || totalMonths > 600) return null;
+
+  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+}
+
+function correctTenureFromJobMemo(
+  record: WorkHistoryInput,
+  analysisDate: Date = new Date(),
+): WorkHistoryInput {
+  const aiYears = record.tenureYear ?? 0;
+  const aiMonths = record.tenureMonth ?? 0;
+  const aiTotal = aiYears * 12 + aiMonths;
+
+  const fromMemo = extractTenureFromJobMemo(record.jobTypeMemo, analysisDate);
+  if (!fromMemo) return record;
+
+  const memoTotal = fromMemo.years * 12 + fromMemo.months;
+  if (memoTotal > aiTotal) {
+    return { ...record, tenureYear: fromMemo.years, tenureMonth: fromMemo.months };
+  }
+
+  return record;
 }
 
 function extractBaseCompanyName(name: string | null): string {
