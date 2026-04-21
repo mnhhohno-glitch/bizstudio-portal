@@ -213,6 +213,15 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     setDateTo(toDateInputValue(last));
     setPage(1);
   };
+  const handleThisMonth = () => {
+    const d = new Date();
+    setNavMonth(d);
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    setDateFrom(toDateInputValue(first));
+    setDateTo(toDateInputValue(last));
+    setPage(1);
+  };
   const handleShowAll = () => {
     setDateFrom("");
     setDateTo("");
@@ -348,15 +357,16 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
 
       {/* Action Bar */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="inline-block w-[16px] flex-shrink-0" />
         <button
           onClick={() => { resetModal(); setModalOpen(true); }}
-          className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]"
+          className="w-[110px] bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]"
         >
           + 新規登録
         </button>
         <button
           onClick={handleShowAll}
-          className="border border-gray-300 bg-white text-[#374151] rounded-md px-3 py-2 text-[13px] hover:bg-gray-50"
+          className="w-[110px] border border-gray-300 bg-white text-[#374151] rounded-md px-3 py-2 text-[13px] hover:bg-gray-50"
         >
           📋 全表示
         </button>
@@ -383,7 +393,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
         {/* Month nav */}
         <div className="flex items-center gap-1 text-[13px]">
           <button onClick={() => handleMonthNav(-1)} className="px-2 py-1 rounded hover:bg-gray-100">◀</button>
-          <span className="px-2 py-1 font-medium">{fmtYM(navMonth)}</span>
+          <button onClick={handleThisMonth} className="px-2 py-1 rounded hover:bg-gray-100 font-medium">
+            {fmtYM(navMonth)}
+          </button>
           <button onClick={() => handleMonthNav(1)} className="px-2 py-1 rounded hover:bg-gray-100">▶</button>
         </div>
       </div>
