@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { sanitizeDateTimeFields } from "@/lib/date-utils";
 
 export async function GET(
   _req: NextRequest,
@@ -58,6 +59,11 @@ export async function PATCH(
 
   // isLatest は自動管理のため手動変更を除外
   delete recordFields.isLatest;
+
+  if (detail) {
+    const DETAIL_DT = ["resignationDate", "nextInterviewDate", "jobSendDeadline"];
+    sanitizeDateTimeFields(detail, DETAIL_DT);
+  }
 
   const record = await prisma.interviewRecord.update({
     where: { id },

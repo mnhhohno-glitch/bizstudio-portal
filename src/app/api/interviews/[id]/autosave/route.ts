@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sanitizeDateTimeFields } from "@/lib/date-utils";
 
 export const runtime = "nodejs";
 
@@ -82,6 +83,8 @@ export async function PATCH(
       });
 
       if (body.detail && typeof body.detail === "object") {
+        const DETAIL_DT = ["resignationDate", "nextInterviewDate", "jobSendDeadline"];
+        sanitizeDateTimeFields(body.detail, DETAIL_DT);
         await tx.interviewDetail.upsert({
           where: { interviewRecordId: id },
           create: { interviewRecordId: id, ...body.detail },
