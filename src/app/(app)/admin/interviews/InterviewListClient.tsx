@@ -328,11 +328,11 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
   const displayStart = total > 0 ? (safePage - 1) * PAGE_SIZE + 1 : 0;
   const displayEnd = Math.min(safePage * PAGE_SIZE, total);
 
-  // Sort icon
-  const SortIcon = ({ col }: { col: string }) => (
-    <span className="ml-1 inline-flex flex-col text-[9px] leading-none opacity-60">
-      <span className={sortBy === col && sortOrder === "asc" ? "text-white opacity-100" : "opacity-40"}>▲</span>
-      <span className={sortBy === col && sortOrder === "desc" ? "text-white opacity-100" : "opacity-40"}>▼</span>
+  // Sort icon (visible or invisible spacer to align all header heights)
+  const SortIcon = ({ col, hidden }: { col?: string; hidden?: boolean }) => (
+    <span className={`ml-1 inline-flex flex-col text-[9px] leading-none ${hidden ? "invisible" : "opacity-60"}`}>
+      <span className={!hidden && sortBy === col && sortOrder === "asc" ? "text-white opacity-100" : "opacity-40"}>▲</span>
+      <span className={!hidden && sortBy === col && sortOrder === "desc" ? "text-white opacity-100" : "opacity-40"}>▼</span>
     </span>
   );
 
@@ -442,7 +442,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           </colgroup>
           <thead>
             <tr className="bg-[#185FA5] text-white text-[12px] whitespace-nowrap">
-              <th className="px-2 py-2.5 text-center font-medium">操作</th>
+              <th className="px-2 py-2.5 text-center font-medium">操作<SortIcon hidden /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("rcName")}>担当RC<SortIcon col="rcName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("caName")}>担当CA<SortIcon col="caName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewDate")}>面談日<SortIcon col="interviewDate" /></th>
@@ -450,11 +450,11 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewCount")}>回数/結果<SortIcon col="interviewCount" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("candidateName")}>求職者氏名<SortIcon col="candidateName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("age")}>年齢/性別<SortIcon col="age" /></th>
-              <th className="px-2 py-2.5 text-left font-medium">電話番号</th>
-              <th className="px-2 py-2.5 text-left font-medium">メール/住所</th>
+              <th className="px-2 py-2.5 text-left font-medium">電話番号<SortIcon hidden /></th>
+              <th className="px-2 py-2.5 text-left font-medium">メール/住所<SortIcon hidden /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewCount")}>転職時期/評価<SortIcon col="interviewCount" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("desiredPrefecture")}>希望都道府県<SortIcon col="desiredPrefecture" /></th>
-              <th className="px-2 py-2.5 text-left font-medium">第一希望職種</th>
+              <th className="px-2 py-2.5 text-left font-medium">第一希望職種<SortIcon hidden /></th>
             </tr>
           </thead>
           <tbody>
