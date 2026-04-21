@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { normalizeDate } from "@/lib/date-utils";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -85,7 +86,7 @@ const RIGHT_TABS = [
   { id: "attachments", label: "添付" },
 ] as const;
 
-const AUTOSAVE_INTERVAL = 30_000;
+const AUTOSAVE_DEBOUNCE = 3_000;
 
 const MEMO_FLAGS = ["初回面談", "既存面談", "面接対策", "内定面談", "その他"];
 
@@ -402,8 +403,12 @@ export default function InterviewForm({
     setForm((prev) => ({ ...prev, [key]: value }));
     setIsDirty(true);
   };
+  const DETAIL_DATETIME_KEYS = ["resignationDate", "nextInterviewDate", "jobSendDeadline"];
   const setDetail = (key: string, value: unknown) => {
-    setDetailState((prev) => ({ ...prev, [key]: value }));
+    const v = DETAIL_DATETIME_KEYS.includes(key) && typeof value === "string"
+      ? normalizeDate(value)
+      : value;
+    setDetailState((prev) => ({ ...prev, [key]: v }));
     setIsDirty(true);
   };
   const setRating = (key: string, value: unknown) => {
@@ -411,96 +416,28 @@ export default function InterviewForm({
     setIsDirty(true);
   };
 
-  /* ---- Autosave (existing logic) ---- */
-  useEffect(() => {
-    if (!isDirty || !interviewId) return;
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/interviews/${interviewId}/autosave`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            interviewDate: form.interviewDate || undefined,
-            startTime: form.startTime || undefined,
-            endTime: form.endTime || undefined,
-            interviewTool: form.interviewTool || undefined,
-            interviewType: form.interviewType || undefined,
-            resultFlag: form.resultFlag || undefined,
-            interviewMemo: form.interviewMemo || undefined,
-            summaryText: form.summaryText || undefined,
-            status: form.status || undefined,
-            lastEditedBy: currentUser?.id,
-            autosaveToken: autosaveToken || undefined,
-            detail: Object.keys(cleanRelationFields(detail)).length > 0
-              ? cleanRelationFields(detail) : undefined,
-            rating: Object.keys(cleanRelationFields(rating)).length > 0
-              ? cleanRelationFields(rating) : undefined,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setLastSavedAt(new Date(data.lastSavedAt));
-          setAutosaveToken(data.autosaveToken);
-          setIsDirty(false);
-        } else if (res.status === 409) {
-          toast.error("他のセッションで変更されました。リロードしてください。");
-        }
-      } catch {
-        localStorage.setItem(`interview-draft-${interviewId}`, JSON.stringify({ form, detail, rating }));
-      }
-    }, AUTOSAVE_INTERVAL);
-    return () => clearInterval(timer);
-  }, [isDirty, interviewId, form, detail, rating, autosaveToken, currentUser?.id]);
+  /* ---- Unified debounce autosave (3s) ---- */
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
+  const whDirtyRef = useRef(false);
+  const forceCompleteRef = useRef(false);
 
-  /* ---- WorkHistory autosave ---- */
-  const whTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!interviewId || workHistories.length === 0) return;
-    if (whTimerRef.current) clearTimeout(whTimerRef.current);
-    whTimerRef.current = setTimeout(() => {
-      const items = workHistories.filter((w) => w.id);
-      for (const wh of items) {
-        const { id: whId, interviewRecordId: _ir, createdAt: _ca, updatedAt: _ua, ...data } = wh as WorkHistoryRecord & Record<string, unknown>;
-        fetch(`/api/interviews/${interviewId}/work-histories/${whId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        }).catch(() => {});
-      }
-    }, 5000);
-    return () => { if (whTimerRef.current) clearTimeout(whTimerRef.current); };
-  }, [workHistories, interviewId]);
-
-  /* ---- beforeunload (existing logic) ---- */
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) { e.preventDefault(); e.returnValue = ""; }
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
-
-  /* ---- Tick for time-ago display ---- */
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 10000);
-    return () => clearInterval(t);
-  }, []);
-
-  /* ---- Manual save (existing logic) ---- */
-  const handleSave = async () => {
-    if (saving) return;
-    setSaving(true);
+  const doAutoSave = useCallback(async () => {
+    if (!interviewId || savingRef.current) return;
+    savingRef.current = true;
+    setSaveStatus("saving");
     try {
       const r = rating;
-      const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
-      const cTotal = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
-      const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
+      const pT = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
+      const cT = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
+      const cdT = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
       const ratingData = {
         ...cleanRelationFields(r),
-        personalityTotal: pTotal || null,
-        careerTotal: cTotal || null,
-        conditionTotal: condTotal || null,
-        grandTotal: (pTotal + cTotal + condTotal) || null,
+        personalityTotal: pT || null,
+        careerTotal: cT || null,
+        conditionTotal: cdT || null,
+        grandTotal: (pT + cT + cdT) || null,
       };
 
       const detailData = cleanRelationFields(detail);
@@ -527,7 +464,7 @@ export default function InterviewForm({
           .join("\n");
       }
 
-      const res = await fetch(`/api/interviews/${interviewId}`, {
+      const res = await fetch(`/api/interviews/${interviewId}/autosave`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -537,30 +474,86 @@ export default function InterviewForm({
           interviewTool: form.interviewTool || undefined,
           interviewType: form.interviewType || undefined,
           resultFlag: form.resultFlag || undefined,
-          interviewMemo: form.interviewMemo || null,
-          summaryText: form.summaryText || null,
-          status: "complete",
-          detail: detailData,
-          rating: ratingData,
+          interviewMemo: form.interviewMemo || undefined,
+          summaryText: form.summaryText || undefined,
+          status: forceCompleteRef.current ? "complete" : (form.status || undefined),
+          lastEditedBy: currentUser?.id,
+          autosaveToken: autosaveToken || undefined,
+          detail: Object.keys(detailData).length > 0 ? detailData : undefined,
+          rating: Object.keys(ratingData).length > 0 ? ratingData : undefined,
         }),
       });
-      if (!res.ok) throw new Error();
 
-      if (interviewId && workHistories.length > 0) {
+      if (res.ok) {
+        const data = await res.json();
+        setLastSavedAt(new Date(data.lastSavedAt));
+        setAutosaveToken(data.autosaveToken);
+      } else if (res.status === 409) {
+        toast.error("他のセッションで変更されました。リロードしてください。");
+        setSaveStatus("error");
+        return;
+      } else {
+        setSaveStatus("error");
+        return;
+      }
+
+      if (workHistories.length > 0 && whDirtyRef.current) {
         await fetch(`/api/interviews/${interviewId}/work-histories`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ workHistories }),
         }).catch(() => {});
+        whDirtyRef.current = false;
       }
 
       setIsDirty(false);
-      setLastSavedAt(new Date());
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+      localStorage.setItem(`interview-draft-${interviewId}`, JSON.stringify({ form, detail, rating }));
+    } finally {
+      savingRef.current = false;
+    }
+  }, [interviewId, form, detail, rating, workHistories, autosaveToken, currentUser?.id]);
+
+  useEffect(() => {
+    if (!isDirty || !interviewId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => { doAutoSave(); }, AUTOSAVE_DEBOUNCE);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [isDirty, interviewId, form, detail, rating, workHistories, doAutoSave]);
+
+  /* ---- beforeunload (existing logic) ---- */
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  /* ---- Tick for time-ago display ---- */
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* ---- Manual save (immediate, cancels debounce, marks complete) ---- */
+  const handleSave = async () => {
+    if (saving || savingRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaving(true);
+    whDirtyRef.current = true;
+    forceCompleteRef.current = true;
+    try {
+      await doAutoSave();
+      setForm((prev) => ({ ...prev, status: "complete" }));
       toast.success("保存しました");
       onSaved?.();
     } catch {
       toast.error("保存に失敗しました");
     } finally {
+      forceCompleteRef.current = false;
       setSaving(false);
     }
   };
@@ -768,6 +761,7 @@ export default function InterviewForm({
   /* ---- WorkHistory helpers ---- */
   const setWH = (index: number, key: keyof WorkHistoryRecord, value: unknown) => {
     setWorkHistories((prev) => prev.map((w, i) => i === index ? { ...w, [key]: value } : w));
+    whDirtyRef.current = true;
     setIsDirty(true);
   };
 
@@ -780,6 +774,7 @@ export default function InterviewForm({
       jobChangeReasonMemo: null,
     };
     setWorkHistories((prev) => [...prev, newWH]);
+    whDirtyRef.current = true;
     setIsDirty(true);
     if (interviewId) {
       fetch(`/api/interviews/${interviewId}/work-histories`, {
@@ -799,6 +794,7 @@ export default function InterviewForm({
       await fetch(`/api/interviews/${interviewId}/work-histories/${target.id}`, { method: "DELETE" }).catch(() => {});
     }
     setWorkHistories((prev) => prev.filter((_, i) => i !== index));
+    whDirtyRef.current = true;
     setIsDirty(true);
   };
 
@@ -869,13 +865,31 @@ export default function InterviewForm({
             求職者詳細 / {candidate?.name || "..."} / 面談 #{form.interviewCount || "?"}
           </span>
           {/* Save status indicator */}
-          <span className="flex items-center gap-1.5" style={{ fontSize: 11, color: "var(--im-fg3)" }}>
-            {lastSavedAt ? (
-              <><span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-ok)" }} />{formatTimeAgo(lastSavedAt)}</>
+          <span className="flex items-center gap-1.5" style={{ fontSize: 11 }}>
+            {saveStatus === "saving" ? (
+              <span className="flex items-center gap-1.5" style={{ color: "var(--im-fg-info)" }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--im-fg-info)" }} />保存中...
+              </span>
+            ) : saveStatus === "error" ? (
+              <button
+                type="button"
+                onClick={() => { doAutoSave(); }}
+                className="flex items-center gap-1.5 cursor-pointer"
+                style={{ fontSize: 11, color: "var(--im-fg-err)", background: "none", border: "none", padding: 0, fontFamily: "inherit" }}
+              >
+                <span style={{ fontSize: 13 }}>⚠</span> 保存失敗（クリックで再試行）
+              </button>
+            ) : isDirty ? (
+              <span className="flex items-center gap-1.5" style={{ color: "var(--im-fg3)" }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg3)" }} />未保存
+              </span>
+            ) : lastSavedAt ? (
+              <span className="flex items-center gap-1.5" style={{ color: "var(--im-fg-ok)" }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-ok)" }} />保存済み {formatTimeAgo(lastSavedAt)}
+              </span>
             ) : (
-              <><span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--im-fg-err)" }} />未保存</>
+              <span style={{ color: "var(--im-fg3)" }}>-</span>
             )}
-            {isDirty && <span style={{ color: "var(--im-fg-warn)" }}>（変更あり）</span>}
           </span>
         </div>
         <div className="flex gap-2">
