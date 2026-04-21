@@ -1311,17 +1311,41 @@ model InterviewRecord {
   lastEditedBy  String?   @map("last_edited_by")
   autosaveToken String?   @map("autosave_token")
 
-  detail      InterviewDetail?
-  rating      InterviewRating?
-  memos       InterviewMemo[]
-  attachments InterviewAttachment[]
-  createdAt   DateTime              @default(now()) @map("created_at")
-  updatedAt   DateTime              @updatedAt @map("updated_at")
+  detail        InterviewDetail?
+  rating        InterviewRating?
+  memos         InterviewMemo[]
+  attachments   InterviewAttachment[]
+  workHistories WorkHistory[]
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
 
   @@index([candidateId])
   @@index([interviewDate])
   @@index([isLatest])
   @@map("interview_records")
+}
+
+model WorkHistory {
+  id                  String          @id @default(cuid())
+  interviewRecordId   String          @map("interview_record_id")
+  interviewRecord     InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+  order               Int
+  companyName         String?         @map("company_name")
+  businessContent     String?         @map("business_content")
+  tenureYear          Int?            @map("tenure_year")
+  tenureMonth         Int?            @map("tenure_month")
+  jobTypeFlag         String?         @map("job_type_flag")
+  jobTypeMemo         String?         @map("job_type_memo") @db.Text
+  resignReasonLarge   String?         @map("resign_reason_large")
+  resignReasonMedium  String?         @map("resign_reason_medium")
+  resignReasonSmall   String?         @map("resign_reason_small")
+  jobChangeReasonMemo String?         @map("job_change_reason_memo") @db.Text
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  @@index([interviewRecordId])
+  @@index([interviewRecordId, order])
+  @@map("work_histories")
 }
 
 model InterviewDetail {
