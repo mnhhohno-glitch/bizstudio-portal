@@ -170,6 +170,7 @@ function fmtDate(iso: string | null): string {
 
 function rankColor(rank: string | null): { bg: string; fg: string } {
   if (!rank) return { bg: "var(--im-bg2)", fg: "var(--im-fg2)" };
+  if (rank === "S") return { bg: "#fef3c7", fg: "#92400e" };
   if (rank.startsWith("A")) return { bg: "var(--im-bg-ok)", fg: "var(--im-fg-ok)" };
   if (rank.startsWith("B")) return { bg: "var(--im-bg-info)", fg: "var(--im-fg-info)" };
   if (rank.startsWith("C")) return { bg: "var(--im-bg-warn)", fg: "var(--im-fg-warn)" };
@@ -810,6 +811,22 @@ export default function InterviewForm({
   const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
   const grandTotal = pTotal + cTotal + condTotal;
 
+  const autoRank = grandTotal > 0
+    ? grandTotal >= 70 ? "S"
+      : grandTotal >= 63 ? "A+"
+      : grandTotal >= 56 ? "A"
+      : grandTotal >= 48 ? "B+"
+      : grandTotal >= 40 ? "B"
+      : grandTotal >= 30 ? "C"
+      : "D"
+    : null;
+
+  useEffect(() => {
+    if (autoRank && autoRank !== r.overallRank) {
+      setRating("overallRank", autoRank);
+    }
+  }, [autoRank]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const duration = (() => {
     if (form.startTime && form.endTime) {
       const [sh, sm] = form.startTime.split(":").map(Number);
@@ -1241,7 +1258,7 @@ export default function InterviewForm({
                     style={{ fontSize: 24, fontWeight: 500, color: "var(--im-fg-info)", background: "transparent", border: "none", fontFamily: "inherit", cursor: "pointer" }}
                   >
                     <option value="">-</option>
-                    {["S", "A", "B+", "B", "B-", "C", "D"].map((v) => <option key={v} value={v}>{v}</option>)}
+                    {["S", "A+", "A", "B+", "B", "C", "D"].map((v) => <option key={v} value={v}>{v}</option>)}
                   </select>
                   <span className="ml-auto" style={{ fontSize: 12, color: "var(--im-fg2)" }}>合計：<b style={{ fontSize: 15, fontWeight: 500, color: "var(--im-fg)" }}>{grandTotal || 0}</b> ／ 75</span>
                 </div>
