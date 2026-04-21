@@ -99,6 +99,12 @@ export function buildCommonAnalysisResponseSchema() {
                 退職理由_中: buildEnumProperty("退職理由の中分類", FLAG_DEFINITIONS.カテゴリ_中),
                 退職理由_小: buildEnumProperty("退職理由の小分類", FLAG_DEFINITIONS.カテゴリ_小),
                 転職理由メモ: buildStringProperty("退職・転職理由の詳細メモ"),
+                入社年月: buildStringProperty(
+                  "入社年月（YYYY-MM 形式、例: '2016-04'）。履歴書・職務経歴書から会社ごとの最初の入社日を抽出する。"
+                ),
+                退職年月: buildStringProperty(
+                  "退職年月（YYYY-MM 形式、例: '2023-03'）。現在在籍中の場合は空文字で返す。履歴書・職務経歴書から会社ごとの最終在籍日を抽出する。"
+                ),
               },
             }
           ),

@@ -138,6 +138,8 @@ export interface WorkHistoryInput {
   resignReasonMedium: string | null;
   resignReasonSmall: string | null;
   jobChangeReasonMemo: string | null;
+  hireDate: string | null;
+  leaveDate: string | null;
 }
 
 function toStr(v: unknown): string | null {
@@ -166,69 +168,54 @@ export function mapWorkHistoryArray(rawHistory: Record<string, unknown>[]): Work
       resignReasonMedium: toStr(w["退職理由_中"]),
       resignReasonSmall: toStr(w["退職理由_小"]),
       jobChangeReasonMemo: toStr(w["転職理由メモ"]),
+      hireDate: toStr(w["入社年月"]),
+      leaveDate: toStr(w["退職年月"]),
     }))
     .sort((a, b) => a.order - b.order);
   const merged = mergeSameCompany(mapped);
   const analysisDate = new Date();
-  return merged.map((r) => correctTenureFromJobMemo(r, analysisDate));
+  return merged.map((r) => applyCalculatedTenure(r, analysisDate));
 }
 
-function extractTenureFromJobMemo(
-  jobMemo: string | undefined | null,
-  analysisDate: Date = new Date(),
+function parseYearMonth(str: string): { year: number; month: number } | null {
+  const match = str.match(/(\d{4})[-年\/.](\d{1,2})/);
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  if (month < 1 || month > 12) return null;
+  return { year, month };
+}
+
+function calculateTenureFromDates(
+  hireDate: string | null | undefined,
+  leaveDate: string | null | undefined,
+  analysisDate: Date,
 ): { years: number; months: number } | null {
-  if (!jobMemo || jobMemo.trim().length === 0) return null;
+  if (!hireDate || hireDate.trim() === "") return null;
+  const hire = parseYearMonth(hireDate);
+  if (!hire) return null;
 
-  const yearMonthPattern = /(\d{4})(?:[./年](\d{1,2}))?/g;
-  const matches = [...jobMemo.matchAll(yearMonthPattern)];
-  if (matches.length === 0) return null;
-
-  const monthValues = matches.map((m) => {
-    const year = parseInt(m[1], 10);
-    const month = m[2] ? parseInt(m[2], 10) : 1;
-    return year * 12 + month;
-  });
-
-  const minMonth = Math.min(...monthValues);
-
-  const lastMatch = matches[matches.length - 1];
-  const lastMatchEnd = (lastMatch.index ?? 0) + lastMatch[0].length;
-  const restAfterLast = jobMemo.slice(lastMatchEnd, lastMatchEnd + 5).trim();
-  const isCurrentlyEmployed =
-    restAfterLast.startsWith("-") ||
-    restAfterLast.startsWith("〜") ||
-    restAfterLast.startsWith("～");
-
-  let maxMonth: number;
-  if (isCurrentlyEmployed) {
-    maxMonth = analysisDate.getFullYear() * 12 + (analysisDate.getMonth() + 1);
+  let leave: { year: number; month: number };
+  if (!leaveDate || leaveDate.trim() === "") {
+    leave = { year: analysisDate.getFullYear(), month: analysisDate.getMonth() + 1 };
   } else {
-    maxMonth = Math.max(...monthValues);
+    const parsed = parseYearMonth(leaveDate);
+    if (!parsed) return null;
+    leave = parsed;
   }
 
-  const totalMonths = maxMonth - minMonth;
-  if (totalMonths < 0 || totalMonths > 600) return null;
-
-  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+  const diff = (leave.year * 12 + leave.month) - (hire.year * 12 + hire.month);
+  if (diff < 0 || diff > 600) return null;
+  return { years: Math.floor(diff / 12), months: diff % 12 };
 }
 
-function correctTenureFromJobMemo(
+function applyCalculatedTenure(
   record: WorkHistoryInput,
-  analysisDate: Date = new Date(),
+  analysisDate: Date,
 ): WorkHistoryInput {
-  const aiYears = record.tenureYear ?? 0;
-  const aiMonths = record.tenureMonth ?? 0;
-  const aiTotal = aiYears * 12 + aiMonths;
-
-  const fromMemo = extractTenureFromJobMemo(record.jobTypeMemo, analysisDate);
-  if (!fromMemo) return record;
-
-  const memoTotal = fromMemo.years * 12 + fromMemo.months;
-  if (memoTotal > aiTotal) {
-    return { ...record, tenureYear: fromMemo.years, tenureMonth: fromMemo.months };
-  }
-
-  return record;
+  const calculated = calculateTenureFromDates(record.hireDate, record.leaveDate, analysisDate);
+  if (!calculated) return record;
+  return { ...record, tenureYear: calculated.years, tenureMonth: calculated.months };
 }
 
 function extractBaseCompanyName(name: string | null): string {
@@ -280,6 +267,7 @@ function mergeSameCompany(records: WorkHistoryInput[]): WorkHistoryInput[] {
       resignReasonMedium: last.resignReasonMedium,
       resignReasonSmall: last.resignReasonSmall,
       jobChangeReasonMemo: last.jobChangeReasonMemo,
+      leaveDate: last.leaveDate,
     });
   }
 
