@@ -1125,7 +1125,13 @@ export default function InterviewForm({
                     <BtnMini variant="danger" onClick={() => removeWorkHistory(idx)}>🗑</BtnMini>
                   </div>
                   <Row label="会社概要"><Fld value={wh.businessContent} onChange={(v) => setWH(idx, "businessContent", v)} /></Row>
-                  <Row label="職種"><Fld value={wh.jobTypeFlag} onChange={(v) => setWH(idx, "jobTypeFlag", v)} /><Fld value={wh.jobTypeMemo} onChange={(v) => { setWH(idx, "jobTypeMemo", v); }} /></Row>
+                  <div className="flex gap-1.5 mb-1 min-w-0">
+                    <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", whiteSpace: "nowrap", minWidth: 64 }}>職種</span>
+                    <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                      <Fld value={wh.jobTypeFlag} onChange={(v) => setWH(idx, "jobTypeFlag", v)} />
+                      <Fld value={wh.jobTypeMemo} onChange={(v) => setWH(idx, "jobTypeMemo", v)} type="textarea" rows={3} />
+                    </div>
+                  </div>
                   <Row label="退社理由">
                     <Fld value={wh.resignReasonLarge} onChange={(v) => setWH(idx, "resignReasonLarge", v)} type="select" options={["過去型", "未来型", "現職"]} style={{ width: 90, flex: "none" }} />
                     <Fld value={wh.resignReasonMedium} onChange={(v) => setWH(idx, "resignReasonMedium", v)} type="select" options={["環境要因", "キャリア要因", "待遇要因"]} style={{ width: 100, flex: "none" }} />
