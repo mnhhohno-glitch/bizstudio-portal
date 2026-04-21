@@ -60,7 +60,7 @@ const RANK_BADGE: Record<string, string> = {
 const TOOL_OPTIONS = ["電話", "オンライン", "対面"];
 const TYPE_OPTIONS = ["新規面談", "既存面談", "フォロー面談", "面接対策"];
 
-const COL_WIDTHS = [68, 115, 115, 120, 100, 110, 140, 90, 145, 240, 145, 130, 155];
+const COL_WIDTHS = [60, 100, 100, 110, 90, 100, 130, 80, 130, 220, 110, 110, 180];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -382,7 +382,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
         {/* Day nav */}
         <div className="flex items-center gap-1 text-[13px]">
           <button onClick={() => handleDateNav(-1)} className="px-2 py-1 rounded hover:bg-gray-100">◀</button>
-          <button onClick={handleToday} className="px-2 py-1 rounded hover:bg-gray-100 font-medium">
+          <button onClick={handleToday} className="px-3 py-1 border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-100 transition-colors font-medium">
             本日 {navDate.getMonth() + 1}/{navDate.getDate()}
           </button>
           <button onClick={() => handleDateNav(1)} className="px-2 py-1 rounded hover:bg-gray-100">▶</button>
@@ -393,7 +393,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
         {/* Month nav */}
         <div className="flex items-center gap-1 text-[13px]">
           <button onClick={() => handleMonthNav(-1)} className="px-2 py-1 rounded hover:bg-gray-100">◀</button>
-          <button onClick={handleThisMonth} className="px-2 py-1 rounded hover:bg-gray-100 font-medium">
+          <button onClick={handleThisMonth} className="px-3 py-1 border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-100 transition-colors font-medium">
             {fmtYM(navMonth)}
           </button>
           <button onClick={() => handleMonthNav(1)} className="px-2 py-1 rounded hover:bg-gray-100">▶</button>
@@ -448,7 +448,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
 
       {/* Table */}
       <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB]">
-        <table className="w-full border-collapse text-[13px]" style={{ minWidth: COL_WIDTHS.reduce((a, b) => a + b, 0) }}>
+        <table className="w-full border-collapse text-[13px] table-fixed" style={{ minWidth: COL_WIDTHS.reduce((a, b) => a + b, 0) }}>
           <colgroup>
             {COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>
@@ -494,63 +494,63 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                     >🗑</button>
                   </td>
                   {/* 担当RC */}
-                  <td className="px-2 py-2">
-                    <div className="text-[11px] text-gray-400">{r.interviewer.employeeNumber}</div>
-                    <div className="text-[13px]">{r.interviewer.name}</div>
+                  <td className="px-2 py-2 overflow-hidden" title={`${r.interviewer.employeeNumber} ${r.interviewer.name}`}>
+                    <div className="text-[11px] text-gray-400 truncate">{r.interviewer.employeeNumber}</div>
+                    <div className="text-[13px] truncate">{r.interviewer.name}</div>
                   </td>
                   {/* 担当CA */}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 overflow-hidden" title={r.candidate.employee ? `${r.candidate.employee.employeeNumber} ${r.candidate.employee.name}` : "-"}>
                     {r.candidate.employee ? (
                       <>
-                        <div className="text-[11px] text-gray-400">{r.candidate.employee.employeeNumber}</div>
-                        <div className="text-[13px]">{r.candidate.employee.name}</div>
+                        <div className="text-[11px] text-gray-400 truncate">{r.candidate.employee.employeeNumber}</div>
+                        <div className="text-[13px] truncate">{r.candidate.employee.name}</div>
                       </>
                     ) : <span className="text-gray-400">-</span>}
                   </td>
                   {/* 面談日 */}
-                  <td className="px-2 py-2">
-                    <div className="text-[13px]">{fmtDateFull(r.interviewDate)}</div>
-                    <div className="text-[11px] text-gray-500">{r.interviewTool}</div>
+                  <td className="px-2 py-2 overflow-hidden">
+                    <div className="text-[13px] truncate">{fmtDateFull(r.interviewDate)}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{r.interviewTool}</div>
                   </td>
                   {/* 開始/終了 */}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 overflow-hidden">
                     <div className="text-[13px]">{r.startTime || "-"}</div>
                     <div className="text-[11px] text-gray-500">{r.endTime || "-"}</div>
                   </td>
                   {/* 回数/結果 */}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 overflow-hidden">
                     <div className="text-[13px]">{r.interviewCount != null ? `${r.interviewCount}回` : "-"}</div>
                     {rb && <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium ${rb.cls}`}>{rb.label}</span>}
                   </td>
                   {/* 求職者氏名 */}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 overflow-hidden" title={`${r.candidate.name} (${r.candidate.candidateNumber})`}>
                     <Link
                       href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
-                      className="text-[13px] text-[#2563EB] hover:underline"
+                      className="text-[13px] text-[#2563EB] hover:underline block truncate"
                     >{r.candidate.name}</Link>
-                    <div className="text-[11px] text-gray-400">{r.candidate.candidateNumber}</div>
+                    <div className="text-[11px] text-gray-400 truncate">{r.candidate.candidateNumber}</div>
                   </td>
                   {/* 年齢/性別 */}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 overflow-hidden">
                     <div className="text-[13px]">{age != null ? `${age}歳` : "-"}</div>
                     <div className="text-[11px] text-gray-500">{genderLabel(r.candidate.gender)}</div>
                   </td>
                   {/* 電話番号 */}
-                  <td className="px-2 py-2 text-[13px]">{r.candidate.phone || "-"}</td>
+                  <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.candidate.phone || "-"}>{r.candidate.phone || "-"}</td>
                   {/* メール/住所 */}
-                  <td className="px-2 py-2">
-                    <div className="text-[13px] truncate" title={r.candidate.email || ""}>{r.candidate.email || "-"}</div>
-                    <div className="text-[11px] text-gray-500 truncate" title={r.candidate.address || ""}>{r.candidate.address || "-"}</div>
+                  <td className="px-2 py-2 overflow-hidden" title={`${r.candidate.email || "-"}\n${r.candidate.address || "-"}`}>
+                    <div className="text-[13px] truncate">{r.candidate.email || "-"}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{r.candidate.address || "-"}</div>
                   </td>
                   {/* 転職時期/評価 */}
-                  <td className="px-2 py-2">
-                    <div className="text-[13px]">{r.detail?.jobChangeTimeline || "-"}</div>
+                  <td className="px-2 py-2 overflow-hidden" title={r.detail?.jobChangeTimeline || "-"}>
+                    <div className="text-[13px] truncate">{r.detail?.jobChangeTimeline || "-"}</div>
                     {rank && <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium ${RANK_BADGE[rank] || "bg-gray-100 text-gray-600"}`}>{rank}</span>}
                   </td>
                   {/* 希望都道府県 */}
-                  <td className="px-2 py-2 text-[13px]">{r.detail?.desiredPrefecture || "-"}</td>
+                  <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.detail?.desiredPrefecture || "-"}>{r.detail?.desiredPrefecture || "-"}</td>
                   {/* 第一希望職種 */}
-                  <td className="px-2 py-2 text-[13px]">{r.detail?.desiredJobType1 || "-"}</td>
+                  <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.detail?.desiredJobType1 || "-"}>{r.detail?.desiredJobType1 || "-"}</td>
                 </tr>
               );
             })}
