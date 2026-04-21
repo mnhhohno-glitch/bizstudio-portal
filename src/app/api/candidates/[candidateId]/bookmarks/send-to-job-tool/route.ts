@@ -348,6 +348,20 @@ export async function POST(
       ? `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}&key=${navigationRecordKey}`
       : `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}`;
 
+    // 7. Mark exported files
+    const exportedFileIds = bookmarkFiles
+      .filter((bf) => downloadedFiles.some((df) => df.driveFileId === bf.driveFileId))
+      .map((bf) => bf.id);
+    if (exportedFileIds.length > 0) {
+      await prisma.candidateFile.updateMany({
+        where: { id: { in: exportedFileIds } },
+        data: {
+          lastExportedAt: new Date(),
+          lastExportedTo: dbType === "circus" ? "circus" : "hito-link",
+        },
+      });
+    }
+
     return NextResponse.json({
       success: true,
       projectId,
