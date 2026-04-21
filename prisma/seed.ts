@@ -5,6 +5,8 @@ import bcrypt from "bcryptjs";
 import { readFileSync } from "fs";
 import { join } from "path";
 import "dotenv/config";
+import { INDUSTRY_MASTER_DATA } from "./seeds/data/industry-master-data";
+import { AREA_MASTER_DATA } from "./seeds/data/area-master-data";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -312,6 +314,124 @@ async function main() {
     }
   }
   console.log(`職種マスター投入完了: ${jobCategories.length} 大分類`);
+
+  // ========== 業種マスター初期データ ==========
+  console.log("\n=== 業種マスター初期データ投入 ===");
+
+  const industryLargeMap = new Map<string, { medium: string; small: string; sortOrder: number }[]>();
+  let industrySortOrder = 0;
+  for (const item of INDUSTRY_MASTER_DATA) {
+    if (!industryLargeMap.has(item.large)) {
+      industryLargeMap.set(item.large, []);
+    }
+    industryLargeMap.get(item.large)!.push({ medium: item.medium, small: item.small, sortOrder: item.sortOrder });
+  }
+
+  for (const [largeName, items] of industryLargeMap) {
+    industrySortOrder++;
+    const majorRec = await prisma.industryCategoryMajor.upsert({
+      where: { name: largeName },
+      update: { sortOrder: industrySortOrder },
+      create: { name: largeName, sortOrder: industrySortOrder },
+    });
+
+    const mediumMap = new Map<string, { small: string; sortOrder: number }[]>();
+    for (const item of items) {
+      if (!mediumMap.has(item.medium)) {
+        mediumMap.set(item.medium, []);
+      }
+      mediumMap.get(item.medium)!.push({ small: item.small, sortOrder: item.sortOrder });
+    }
+
+    let midSortOrder = 0;
+    for (const [mediumName, smalls] of mediumMap) {
+      midSortOrder++;
+      let middleRec = await prisma.industryCategoryMiddle.findFirst({
+        where: { majorId: majorRec.id, name: mediumName },
+      });
+      if (!middleRec) {
+        middleRec = await prisma.industryCategoryMiddle.create({
+          data: { name: mediumName, majorId: majorRec.id, sortOrder: midSortOrder },
+        });
+      } else {
+        await prisma.industryCategoryMiddle.update({
+          where: { id: middleRec.id },
+          data: { sortOrder: midSortOrder },
+        });
+      }
+
+      for (const s of smalls) {
+        const existing = await prisma.industryCategoryMinor.findFirst({
+          where: { middleId: middleRec.id, name: s.small },
+        });
+        if (!existing) {
+          await prisma.industryCategoryMinor.create({
+            data: { name: s.small, middleId: middleRec.id, sortOrder: s.sortOrder },
+          });
+        }
+      }
+    }
+  }
+  console.log(`業種マスター投入完了: ${industryLargeMap.size} 大分類, ${INDUSTRY_MASTER_DATA.length} 件`);
+
+  // ========== エリアマスター初期データ ==========
+  console.log("\n=== エリアマスター初期データ投入 ===");
+
+  const areaLargeMap = new Map<string, { prefecture: string; city: string; sortOrder: number }[]>();
+  let areaSortOrder = 0;
+  for (const item of AREA_MASTER_DATA) {
+    if (!areaLargeMap.has(item.area)) {
+      areaLargeMap.set(item.area, []);
+    }
+    areaLargeMap.get(item.area)!.push({ prefecture: item.prefecture, city: item.city, sortOrder: item.sortOrder });
+  }
+
+  for (const [areaName, items] of areaLargeMap) {
+    areaSortOrder++;
+    const majorRec = await prisma.areaCategoryMajor.upsert({
+      where: { name: areaName },
+      update: { sortOrder: areaSortOrder },
+      create: { name: areaName, sortOrder: areaSortOrder },
+    });
+
+    const prefMap = new Map<string, { city: string; sortOrder: number }[]>();
+    for (const item of items) {
+      if (!prefMap.has(item.prefecture)) {
+        prefMap.set(item.prefecture, []);
+      }
+      prefMap.get(item.prefecture)!.push({ city: item.city, sortOrder: item.sortOrder });
+    }
+
+    let prefSortOrder = 0;
+    for (const [prefName, cities] of prefMap) {
+      prefSortOrder++;
+      let middleRec = await prisma.areaCategoryMiddle.findFirst({
+        where: { majorId: majorRec.id, name: prefName },
+      });
+      if (!middleRec) {
+        middleRec = await prisma.areaCategoryMiddle.create({
+          data: { name: prefName, majorId: majorRec.id, sortOrder: prefSortOrder },
+        });
+      } else {
+        await prisma.areaCategoryMiddle.update({
+          where: { id: middleRec.id },
+          data: { sortOrder: prefSortOrder },
+        });
+      }
+
+      for (const c of cities) {
+        const existing = await prisma.areaCategoryMinor.findFirst({
+          where: { middleId: middleRec.id, name: c.city },
+        });
+        if (!existing) {
+          await prisma.areaCategoryMinor.create({
+            data: { name: c.city, middleId: middleRec.id, sortOrder: c.sortOrder },
+          });
+        }
+      }
+    }
+  }
+  console.log(`エリアマスター投入完了: ${areaLargeMap.size} エリア, ${AREA_MASTER_DATA.length} 件`);
 
   // ========== タスクマスター初期データ ==========
   console.log("\n=== タスクマスター初期データ投入 ===");
