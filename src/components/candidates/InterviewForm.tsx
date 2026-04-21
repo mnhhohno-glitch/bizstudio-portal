@@ -961,10 +961,10 @@ export default function InterviewForm({
                 </div>
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>時間/手法</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>時間/手法</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <RoField v={duration} />
-                  <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} />
+                  <div style={{ flex: 1, minWidth: 0 }}><RoField v={duration} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} /></div>
                 </div>
               </div>
 
@@ -976,7 +976,7 @@ export default function InterviewForm({
               {/* Row 3: 生年月日 | 電話 | メール */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>生年月日</span><RoField v={fmtDate(candidate?.birthday ?? null)} /></div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>電話</span><RoField v={candidate?.phone || ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 40 }}>メール</span><RoField v={candidate?.email || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>メール</span><RoField v={candidate?.email || ""} /></div>
 
               {/* Row 4: 年齢/性別 | 住所(wide) */}
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
@@ -988,9 +988,9 @@ export default function InterviewForm({
               </div>
               <div className="col-span-4 flex items-center gap-1.5 min-w-0"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>住所</span><RoField v={candidate?.address || ""} /></div>
 
-              {/* Row 5: 担当CA | 氏名 | ランク */}
+              {/* Row 5: 担当CA | 担当 | ランク */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>氏名</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>担当</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>ランク</span>
                 <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
@@ -1011,7 +1011,7 @@ export default function InterviewForm({
                 </div>
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>結果</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
                 <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
