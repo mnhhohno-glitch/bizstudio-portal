@@ -196,6 +196,7 @@ export async function POST(req: Request) {
 
   if (interviewCount === 1) {
     await copyCandidateFilesToInterview(candidateId, record.id);
+    await copyDesiredConditionsFromCandidate(candidateId, record.id);
     const freshRecord = await prisma.interviewRecord.findUnique({
       where: { id: record.id },
       include: {
@@ -274,5 +275,69 @@ async function copyCandidateFilesToInterview(
     }
   } catch (e) {
     console.error(`[auto-attach] Unexpected error:`, e);
+  }
+}
+
+async function copyDesiredConditionsFromCandidate(
+  candidateId: string,
+  interviewId: string,
+): Promise<void> {
+  try {
+    const candidate = await prisma.candidate.findUnique({
+      where: { id: candidateId },
+      select: {
+        desiredJobType1: true,
+        desiredJobType2: true,
+        desiredIndustry1: true,
+        desiredPrefecture: true,
+        desiredEmploymentType: true,
+        desiredSalaryMin: true,
+      },
+    });
+
+    if (!candidate) return;
+
+    const hasAny = Object.values(candidate).some((v) => v != null && v !== "");
+    if (!hasAny) {
+      console.log(`[copy-conditions] No conditions to copy for candidate ${candidateId}`);
+      return;
+    }
+
+    await prisma.interviewDetail.upsert({
+      where: { interviewRecordId: interviewId },
+      update: {
+        regJobType1: candidate.desiredJobType1,
+        regJobType2: candidate.desiredJobType2,
+        regIndustry1: candidate.desiredIndustry1,
+        regAreaPrefecture: candidate.desiredPrefecture,
+        regEmploymentType: candidate.desiredEmploymentType,
+        regSalaryMin: candidate.desiredSalaryMin,
+        desiredJobType1: candidate.desiredJobType1,
+        desiredJobType2: candidate.desiredJobType2,
+        desiredIndustry1: candidate.desiredIndustry1,
+        desiredPrefecture: candidate.desiredPrefecture,
+        desiredEmploymentType: candidate.desiredEmploymentType,
+        desiredSalaryMin: candidate.desiredSalaryMin,
+      },
+      create: {
+        interviewRecordId: interviewId,
+        regJobType1: candidate.desiredJobType1,
+        regJobType2: candidate.desiredJobType2,
+        regIndustry1: candidate.desiredIndustry1,
+        regAreaPrefecture: candidate.desiredPrefecture,
+        regEmploymentType: candidate.desiredEmploymentType,
+        regSalaryMin: candidate.desiredSalaryMin,
+        desiredJobType1: candidate.desiredJobType1,
+        desiredJobType2: candidate.desiredJobType2,
+        desiredIndustry1: candidate.desiredIndustry1,
+        desiredPrefecture: candidate.desiredPrefecture,
+        desiredEmploymentType: candidate.desiredEmploymentType,
+        desiredSalaryMin: candidate.desiredSalaryMin,
+      },
+    });
+
+    console.log(`[copy-conditions] Copied desired conditions to interview ${interviewId}`);
+  } catch (e) {
+    console.error(`[copy-conditions] Failed:`, e);
   }
 }

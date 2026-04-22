@@ -236,6 +236,14 @@ model Candidate {
   supportEndDate         DateTime? @map("support_end_date")
   supportEndComment      String?   @map("support_end_comment") @db.Text
 
+  // 希望条件（マイナビPDF等から自動抽出）
+  desiredJobType1       String? @map("desired_job_type_1")
+  desiredJobType2       String? @map("desired_job_type_2")
+  desiredIndustry1      String? @map("desired_industry_1")
+  desiredPrefecture     String? @map("desired_prefecture")
+  desiredEmploymentType String? @map("desired_employment_type")
+  desiredSalaryMin      Int?    @map("desired_salary_min")
+
   // 担当キャリアアドバイザー
   employeeId String?   @map("employee_id")
   employee   Employee? @relation(fields: [employeeId], references: [id])

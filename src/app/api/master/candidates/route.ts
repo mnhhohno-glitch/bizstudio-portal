@@ -62,6 +62,12 @@ const createSchema = z.object({
   }),
   birthday: z.string().optional(),
   employeeId: z.string().min(1, "担当キャリアアドバイザーを選択してください"),
+  desiredJobType1: z.string().optional(),
+  desiredJobType2: z.string().optional(),
+  desiredIndustry1: z.string().optional(),
+  desiredPrefecture: z.string().optional(),
+  desiredEmploymentType: z.string().optional(),
+  desiredSalaryMin: z.number().int().optional().nullable(),
 });
 
 export async function POST(request: NextRequest) {
@@ -81,7 +87,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId } = parsed.data;
+    const {
+      candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId,
+      desiredJobType1, desiredJobType2, desiredIndustry1, desiredPrefecture, desiredEmploymentType, desiredSalaryMin,
+    } = parsed.data;
 
     // 氏名バリデーション
     const nameValidation = validateName(name);
@@ -127,6 +136,12 @@ export async function POST(request: NextRequest) {
         gender,
         ...(birthday ? { birthday: new Date(birthday + "T12:00:00.000Z") } : {}),
         employeeId,
+        desiredJobType1: desiredJobType1 || null,
+        desiredJobType2: desiredJobType2 || null,
+        desiredIndustry1: desiredIndustry1 || null,
+        desiredPrefecture: desiredPrefecture || null,
+        desiredEmploymentType: desiredEmploymentType || null,
+        desiredSalaryMin: desiredSalaryMin ?? null,
       },
     });
 
