@@ -51,27 +51,23 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
       }
     }
 
-    // 3) OCR フォールバック — 無効化中（jpn.traineddata 未配置でプロセスがハングするため）
-    //    将来 traineddata を配置した際にコメントを外して復活可能
-    // if (text.length < MIN_TEXT_LENGTH_BEFORE_OCR && len > 0) {
-    //   if (process.env.NODE_ENV !== "test") {
-    //     console.log("[extractText] Text still short, trying OCR fallback...");
-    //   }
-    //   const { extractTextFromPdfWithOcr } = await import("./extract-text-pdf-ocr");
-    //   const ocrText = await extractTextFromPdfWithOcr(buffer);
-    //   if (ocrText.length > text.length) {
-    //     text = ocrText;
-    //     if (process.env.NODE_ENV !== "test") {
-    //       console.log("[extractText] OCR fallback succeeded, chars:", text.length);
-    //     }
-    //   } else if (text.length === 0 && process.env.NODE_ENV !== "test") {
-    //     console.warn(
-    //       "[extractText] PDF returned 0 characters; pdfjs and OCR did not add text. PDF may be image-only (scanned)."
-    //     );
-    //   }
-    // }
-    if (text.length < MIN_TEXT_LENGTH_BEFORE_OCR && len > 0 && process.env.NODE_ENV !== "test") {
-      console.warn("[extractText] PDF text extraction yielded < 20 chars (OCR disabled). PDF may be image-only.");
+    // 3) まだ短い場合に OCR（ページ数が取れていなくても len>0 なら試す。OCR 内で getDocument してページ数を取得する）
+    if (text.length < MIN_TEXT_LENGTH_BEFORE_OCR && len > 0) {
+      if (process.env.NODE_ENV !== "test") {
+        console.log("[extractText] Text still short, trying OCR fallback...");
+      }
+      const { extractTextFromPdfWithOcr } = await import("./extract-text-pdf-ocr");
+      const ocrText = await extractTextFromPdfWithOcr(buffer);
+      if (ocrText.length > text.length) {
+        text = ocrText;
+        if (process.env.NODE_ENV !== "test") {
+          console.log("[extractText] OCR fallback succeeded, chars:", text.length);
+        }
+      } else if (text.length === 0 && process.env.NODE_ENV !== "test") {
+        console.warn(
+          "[extractText] PDF returned 0 characters; pdfjs and OCR did not add text. PDF may be image-only (scanned)."
+        );
+      }
     }
 
     return text;
