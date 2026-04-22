@@ -134,7 +134,13 @@ export function buildCommonAnalysisResponseSchema() {
           卒業年月: buildStringProperty("YYYY年M月 卒業 形式"),
           面談メモ: buildStringProperty("面談全体のメモ"),
           希望職種フラグ: buildStringProperty("希望職種カテゴリ"),
+          希望職種フラグ2: buildStringProperty(
+            "第2希望の職種カテゴリ。履歴書・職務経歴書・マイナビPDFの「希望職種 第2希望：xxx」等の記載から抽出。第2希望が明記されていない場合は空文字"
+          ),
           希望職種メモ: buildStringProperty("希望職種の詳細"),
+          希望雇用形態フラグ: buildStringProperty(
+            "希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他）。マイナビPDF等の「希望雇用形態：xxx」から抽出。記載なしなら空文字"
+          ),
           希望業種フラグ: buildStringProperty("希望業種カテゴリ"),
           希望業種メモ: buildStringProperty("希望業種の詳細"),
           希望エリアフラグ: buildEnumProperty("希望勤務エリア", FLAG_DEFINITIONS.エリア),

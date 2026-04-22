@@ -138,11 +138,30 @@ export async function POST(
     const workHistories = mapWorkHistoryArray(rawWorkHistory);
     const detailFromWH = workHistoryToDetailSync(workHistories);
 
-    console.log(`[analyze-with-intake] Success: ${Object.keys(detailUpdates).length} detail fields, ${workHistories.length} work histories`);
+    const merged = { ...detailUpdates, ...detailFromWH } as Record<string, unknown>;
+
+    const existing = await prisma.interviewDetail.findUnique({
+      where: { interviewRecordId: interviewId },
+    });
+    const empty = (v: unknown) => v == null || v === "";
+    const REG_MAP: [string, string][] = [
+      ["desiredJobType1", "regJobType1"],
+      ["desiredJobType2", "regJobType2"],
+      ["desiredPrefecture", "regAreaPrefecture"],
+      ["desiredEmploymentType", "regEmploymentType"],
+      ["desiredSalaryMin", "regSalaryMin"],
+    ];
+    for (const [src, dst] of REG_MAP) {
+      if (empty(existing?.[dst as keyof typeof existing]) && !empty(merged[src])) {
+        merged[dst] = merged[src];
+      }
+    }
+
+    console.log(`[analyze-with-intake] Success: ${Object.keys(merged).length} detail fields, ${workHistories.length} work histories`);
 
     return NextResponse.json({
       success: true,
-      detailUpdates: { ...detailUpdates, ...detailFromWH },
+      detailUpdates: merged,
       interviewMemo,
       workHistories,
       missingItems,

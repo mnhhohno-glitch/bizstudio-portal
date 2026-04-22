@@ -1426,6 +1426,7 @@ model InterviewDetail {
   desiredJobType1       String? @map("desired_job_type_1")
   desiredJobType1Memo   String? @map("desired_job_type_1_memo")
   desiredJobType2       String? @map("desired_job_type_2")
+  desiredEmploymentType String? @map("desired_employment_type")
   desiredIndustry1      String? @map("desired_industry_1")
   desiredIndustry1Memo  String? @map("desired_industry_1_memo")
   desiredJobTypes       Json?   @map("desired_job_types")
