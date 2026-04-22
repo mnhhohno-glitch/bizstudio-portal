@@ -144,10 +144,19 @@ export async function POST(
       where: { interviewRecordId: interviewId },
     });
     const empty = (v: unknown) => v == null || v === "";
+
+    const prefPattern = /^(北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県)/;
+    function resolvePrefecture(): string {
+      if (!empty(merged.desiredPrefecture)) return String(merged.desiredPrefecture);
+      const area = merged.desiredArea;
+      if (!area || typeof area !== "string") return "";
+      const m = area.match(prefPattern);
+      return m ? m[1] : "";
+    }
+
     const REG_MAP: [string, string][] = [
       ["desiredJobType1", "regJobType1"],
       ["desiredJobType2", "regJobType2"],
-      ["desiredPrefecture", "regAreaPrefecture"],
       ["desiredEmploymentType", "regEmploymentType"],
       ["desiredSalaryMin", "regSalaryMin"],
     ];
@@ -155,6 +164,10 @@ export async function POST(
       if (empty(existing?.[dst as keyof typeof existing]) && !empty(merged[src])) {
         merged[dst] = merged[src];
       }
+    }
+    const resolvedPref = resolvePrefecture();
+    if (empty(existing?.regAreaPrefecture) && resolvedPref) {
+      merged.regAreaPrefecture = resolvedPref;
     }
 
     console.log(`[analyze-with-intake] Success: ${Object.keys(merged).length} detail fields, ${workHistories.length} work histories`);
