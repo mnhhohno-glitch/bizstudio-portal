@@ -50,7 +50,7 @@ export async function POST(request: Request) {
                   text: `以下はWEB履歴書（転職サイトの登録情報）のPDFから抽出したテキストです。
 以下の項目を抽出し、JSON形式で返却してください。
 
-## 抽出項目
+## 抽出項目（個人情報）
 - name: 氏名（姓と名の間に半角スペース）
 - furigana: フリガナ（カタカナ、姓と名の間に半角スペース）
 - gender: 性別（"male" or "female"）
@@ -58,6 +58,14 @@ export async function POST(request: Request) {
 - email: メールアドレス
 - phone: 電話番号（ハイフンなし、数字のみ）
 - address: 住所（都道府県から）
+
+## 抽出項目（希望条件 - 該当セクションがあれば）
+- desiredJobType1: 希望職種の第1希望（例 営業事務・営業アシスタント）
+- desiredJobType2: 希望職種の第2希望（例 一般事務・庶務）
+- desiredIndustry1: 希望業種の第1希望
+- desiredPrefecture: 希望勤務地の都道府県（例 神奈川県）
+- desiredEmploymentType: 希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他 のいずれか）
+- desiredSalaryMin: 希望年収の下限（万円単位の整数、例 450）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -70,7 +78,7 @@ export async function POST(request: Request) {
           ],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 1000,
+            maxOutputTokens: 2000,
           },
         }),
       }
@@ -100,6 +108,12 @@ export async function POST(request: Request) {
       email: parsed.email || null,
       phone: parsed.phone || null,
       address: parsed.address || null,
+      desiredJobType1: parsed.desiredJobType1 || null,
+      desiredJobType2: parsed.desiredJobType2 || null,
+      desiredIndustry1: parsed.desiredIndustry1 || null,
+      desiredPrefecture: parsed.desiredPrefecture || null,
+      desiredEmploymentType: parsed.desiredEmploymentType || null,
+      desiredSalaryMin: typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,
     });
   } catch (error) {
     console.error("Parse resume error:", error);
