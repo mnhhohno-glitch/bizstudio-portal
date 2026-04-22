@@ -487,18 +487,27 @@ export default function InterviewForm({
     (async () => {
       setAutoAnalyzing(true);
       try {
-        const res = await fetch(`/api/interviews/${interviewId}/analyze-pre-interview`, {
+        const res = await fetch(`/api/interviews/${interviewId}/analyze-with-intake`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateId }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error || "解析に失敗しました");
         }
         const { detailUpdates } = await res.json();
-        if (detailUpdates && typeof detailUpdates === "object" && Object.keys(detailUpdates).length > 0) {
-          setDetailState((prev) => ({ ...prev, ...detailUpdates }));
-          setIsDirty(true);
+        if (detailUpdates && typeof detailUpdates === "object") {
+          const filtered: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(detailUpdates)) {
+            if (key.startsWith("desired") || key.startsWith("reg")) {
+              filtered[key] = value;
+            }
+          }
+          if (Object.keys(filtered).length > 0) {
+            setDetailState((prev) => ({ ...prev, ...filtered }));
+            setIsDirty(true);
+          }
         }
         toast.success("希望条件・初期条件を自動入力しました");
       } catch (e) {
