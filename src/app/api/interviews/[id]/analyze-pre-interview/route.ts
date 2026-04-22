@@ -64,7 +64,10 @@ export async function POST(
     console.log(`[analyze-pre-interview] PDF text: ${pdfText.length} chars`);
 
     if (!pdfText.trim()) {
-      return NextResponse.json({ error: "PDFからテキストを抽出できませんでした" }, { status: 500 });
+      return NextResponse.json(
+        { error: "PDFからテキストを抽出できませんでした（画像のみのPDFの可能性があります）", code: "PDF_EXTRACTION_FAILED" },
+        { status: 400 },
+      );
     }
 
     const flagListText = FLAG_LIST_TSV;

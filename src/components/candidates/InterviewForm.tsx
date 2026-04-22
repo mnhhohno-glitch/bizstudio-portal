@@ -493,6 +493,10 @@ export default function InterviewForm({
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          if (err.code === "PDF_EXTRACTION_FAILED") {
+            toast.warning("PDFからテキストを抽出できませんでした（画像PDFの可能性）。添付タブから別のPDFをアップロードしてください");
+            return;
+          }
           throw new Error(err.error || "解析に失敗しました");
         }
         const { detailUpdates } = await res.json();
@@ -511,6 +515,47 @@ export default function InterviewForm({
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAnalyze, loading]);
+
+  /* ---- Manual pre-interview PDF analysis ---- */
+  const [preAnalyzing, setPreAnalyzing] = useState(false);
+  const handlePreInterviewAnalyze = async () => {
+    if (preAnalyzing || autoAnalyzing) return;
+    const hasPdf = attachments.some(
+      (a) => a.mimeType === "application/pdf" || a.fileName?.toLowerCase().endsWith(".pdf"),
+    );
+    if (!hasPdf) {
+      toast.error("PDFが添付されていません。添付タブからPDFをアップロードしてください");
+      return;
+    }
+    setPreAnalyzing(true);
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/analyze-pre-interview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (err.code === "PDF_EXTRACTION_FAILED") {
+          toast.warning("PDFからテキストを抽出できませんでした（画像PDFの可能性）。別のPDFをアップロードしてください");
+          return;
+        }
+        throw new Error(err.error || "解析に失敗しました");
+      }
+      const { detailUpdates } = await res.json();
+      if (detailUpdates && typeof detailUpdates === "object" && Object.keys(detailUpdates).length > 0) {
+        setDetailState((prev) => ({ ...prev, ...detailUpdates }));
+        setIsDirty(true);
+        toast.success("希望条件・初期条件を自動入力しました");
+      } else {
+        toast.info("解析結果に更新項目がありませんでした");
+      }
+    } catch (e) {
+      console.error("[pre-analyze] failed:", e);
+      toast.error(e instanceof Error ? e.message : "AI解析に失敗しました");
+    } finally {
+      setPreAnalyzing(false);
+    }
+  };
 
   /* ---- Field setters ---- */
   const setField = (key: string, value: unknown) => {
@@ -1244,6 +1289,23 @@ export default function InterviewForm({
             {/* ===== 初期条件タブ ===== */}
             {rightTab === "initial" && (
               <div className="flex flex-col">
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handlePreInterviewAnalyze}
+                    disabled={preAnalyzing || autoAnalyzing}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 transition-colors disabled:opacity-50"
+                  >
+                    {preAnalyzing ? (
+                      <>
+                        <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full" />
+                        解析中...
+                      </>
+                    ) : (
+                      "✨ AI解析（PDFのみ）"
+                    )}
+                  </button>
+                </div>
                 <div className="mb-4">
                   <SectionHd title="登録時条件" />
                   <div className="grid gap-x-2 gap-y-1.5 items-center" style={{ gridTemplateColumns: "64px 64px minmax(0,1fr) 64px minmax(0,1fr)" }}>
