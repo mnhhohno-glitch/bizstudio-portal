@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import InterviewListClient from "./InterviewListClient";
+
+export const metadata: Metadata = { title: "面談管理" };
 
 export default async function InterviewManagementPage() {
   const actor = await getSessionUser();

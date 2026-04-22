@@ -4,7 +4,10 @@ import "@fontsource-variable/noto-sans-jp";
 import "@fontsource-variable/inter";
 
 export const metadata: Metadata = {
-  title: "Bizstudio Portal",
+  title: {
+    default: "Bizstudio Portal",
+    template: "%s - Bizstudio",
+  },
   description: "社内ポータル",
 };
 

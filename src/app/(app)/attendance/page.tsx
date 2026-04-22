@@ -54,6 +54,7 @@ function formatTime(ts: string): string {
 }
 
 export default function AttendancePage() {
+  useEffect(() => { document.title = "勤怠 - Bizstudio"; }, []);
   const [data, setData] = useState<AttendanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [punching, setPunching] = useState(false);

@@ -1448,6 +1448,12 @@ function CandidateDetailPageBody() {
   }, [candidateId]);
 
   useEffect(() => {
+    if (candidate?.name) {
+      document.title = `${candidate.name} - Bizstudio`;
+    }
+  }, [candidate?.name]);
+
+  useEffect(() => {
     fetchCandidate();
     fetchGuideData();
     fetchJimuSessions();
