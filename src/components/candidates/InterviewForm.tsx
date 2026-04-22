@@ -1119,9 +1119,9 @@ export default function InterviewForm({
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>企業名</span>
                     <Fld value={wh.companyName} onChange={(v) => setWH(idx, "companyName", v)} />
                     <div className="flex items-center gap-0.5 shrink-0">
-                      <Fld value={wh.tenureYear} onChange={(v) => setWH(idx, "tenureYear", v ? Number(v) : null)} type="number" style={{ width: 40, textAlign: "center", flex: "none" }} />
+                      <Fld value={wh.tenureYear} onChange={(v) => setWH(idx, "tenureYear", v ? Number(v) : null)} type="number" style={{ width: 52, textAlign: "center", flex: "none" }} />
                       <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>年</span>
-                      <Fld value={wh.tenureMonth} onChange={(v) => setWH(idx, "tenureMonth", v ? Number(v) : null)} type="number" style={{ width: 40, textAlign: "center", flex: "none" }} />
+                      <Fld value={wh.tenureMonth} onChange={(v) => setWH(idx, "tenureMonth", v ? Number(v) : null)} type="number" style={{ width: 52, textAlign: "center", flex: "none" }} />
                       <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>月</span>
                     </div>
                     <BtnMini variant="danger" onClick={() => removeWorkHistory(idx)}>🗑</BtnMini>
