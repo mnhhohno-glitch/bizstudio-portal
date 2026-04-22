@@ -102,6 +102,16 @@ export default function TasksPage() {
   const [sortBy, setSortBy] = useState("manualSort");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
+  // 3点セット一括起票
+  const [bulk3ptOpen, setBulk3ptOpen] = useState(false);
+  const [bulk3ptCandidateSearch, setBulk3ptCandidateSearch] = useState("");
+  const [bulk3ptCandidateId, setBulk3ptCandidateId] = useState("");
+  const [bulk3ptAssigneeId, setBulk3ptAssigneeId] = useState("");
+  const [bulk3ptPriority, setBulk3ptPriority] = useState("MEDIUM");
+  const [bulk3ptDueDate, setBulk3ptDueDate] = useState("");
+  const [bulk3ptSubmitting, setBulk3ptSubmitting] = useState(false);
+  const [bulk3ptCandidates, setBulk3ptCandidates] = useState<{ id: string; name: string; candidateNumber: string }[]>([]);
+
   // selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -459,12 +469,32 @@ export default function TasksPage() {
       {/* header */}
       <div className="mb-6 flex items-center justify-between">
         <PageTitle>タスク管理</PageTitle>
-        <Link
-          href="/tasks/new"
-          className="rounded-[8px] bg-[#2563EB] px-5 py-2.5 text-[14px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
-        >
-          タスクを作成
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              setBulk3ptOpen(true);
+              if (bulk3ptCandidates.length === 0) {
+                try {
+                  const res = await fetch("/api/candidates");
+                  if (res.ok) {
+                    const data = await res.json();
+                    setBulk3ptCandidates(Array.isArray(data) ? data : []);
+                  }
+                } catch { /* ignore */ }
+              }
+            }}
+            className="rounded-[8px] border border-[#2563EB] bg-white px-5 py-2.5 text-[14px] font-medium text-[#2563EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#EFF6FF]"
+          >
+            3点セット一括起票
+          </button>
+          <Link
+            href="/tasks/new"
+            className="rounded-[8px] bg-[#2563EB] px-5 py-2.5 text-[14px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
+          >
+            タスクを作成
+          </Link>
+        </div>
       </div>
 
       {/* view toggle + completed checkbox */}
@@ -711,6 +741,144 @@ export default function TasksPage() {
             >
               次へ
             </button>
+          </div>
+        </div>
+      )}
+      {/* 3点セット一括起票モーダル */}
+      {bulk3ptOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-1 text-[16px] font-bold text-[#111827]">応募書類3点セット一括起票</h3>
+            <p className="mb-5 text-[13px] text-[#6B7280]">
+              履歴書作成・職務経歴書作成・推薦状作成の3タスクを一括で起票します
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">求職者 <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  placeholder="名前で検索..."
+                  value={bulk3ptCandidateSearch}
+                  onChange={(e) => {
+                    setBulk3ptCandidateSearch(e.target.value);
+                    if (!e.target.value) setBulk3ptCandidateId("");
+                  }}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                />
+                {bulk3ptCandidateSearch && !bulk3ptCandidateId && (
+                  <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white shadow-md">
+                    {bulk3ptCandidates
+                      .filter((c) => c.name.includes(bulk3ptCandidateSearch))
+                      .slice(0, 20)
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setBulk3ptCandidateId(c.id);
+                            setBulk3ptCandidateSearch(c.name);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-[13px] hover:bg-[#F3F4F6]"
+                        >
+                          {c.name}（{c.candidateNumber}）
+                        </button>
+                      ))}
+                  </div>
+                )}
+                {bulk3ptCandidateId && (
+                  <button
+                    type="button"
+                    onClick={() => { setBulk3ptCandidateId(""); setBulk3ptCandidateSearch(""); }}
+                    className="mt-1 text-[12px] text-[#6B7280] hover:text-[#374151]"
+                  >
+                    選択解除
+                  </button>
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">担当者 <span className="text-red-500">*</span></label>
+                <select
+                  value={bulk3ptAssigneeId}
+                  onChange={(e) => setBulk3ptAssigneeId(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                >
+                  <option value="">選択してください</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">優先度</label>
+                <select
+                  value={bulk3ptPriority}
+                  onChange={(e) => setBulk3ptPriority(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                >
+                  <option value="HIGH">高</option>
+                  <option value="MEDIUM">中</option>
+                  <option value="LOW">低</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">期日</label>
+                <input
+                  type="date"
+                  value={bulk3ptDueDate}
+                  onChange={(e) => setBulk3ptDueDate(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBulk3ptOpen(false)}
+                className="rounded-lg border border-[#D1D5DB] px-4 py-2 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={bulk3ptSubmitting || !bulk3ptCandidateId || !bulk3ptAssigneeId}
+                onClick={async () => {
+                  setBulk3ptSubmitting(true);
+                  try {
+                    const res = await fetch("/api/tasks/bulk-create-3point", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        candidateId: bulk3ptCandidateId,
+                        assigneeId: bulk3ptAssigneeId,
+                        priority: bulk3ptPriority,
+                        dueDate: bulk3ptDueDate || null,
+                      }),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json();
+                      alert(err.error || "一括起票に失敗しました");
+                      return;
+                    }
+                    const data = await res.json();
+                    alert(data.message || "3タスクを一括起票しました");
+                    setBulk3ptOpen(false);
+                    setBulk3ptCandidateId("");
+                    setBulk3ptCandidateSearch("");
+                    setBulk3ptAssigneeId("");
+                    setBulk3ptPriority("MEDIUM");
+                    setBulk3ptDueDate("");
+                    fetchTasks();
+                  } catch {
+                    alert("一括起票に失敗しました");
+                  } finally {
+                    setBulk3ptSubmitting(false);
+                  }
+                }}
+                className="rounded-lg bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                {bulk3ptSubmitting ? "起票中..." : "起票する"}
+              </button>
+            </div>
           </div>
         </div>
       )}
