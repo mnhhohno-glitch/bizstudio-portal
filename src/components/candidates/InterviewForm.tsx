@@ -469,52 +469,20 @@ export default function InterviewForm({
       .catch(() => {});
   }, [candidateId]);
 
-  /* ---- Auto-analyze on first interview creation (pre-interview, limited scope) ---- */
-  const [autoAnalyzing, setAutoAnalyzing] = useState(false);
-
+  /* ---- Auto-analyze on first interview creation ---- */
   useEffect(() => {
-    if (!autoAnalyze || loading || autoAnalyzeFiredRef.current || intakeAnalyzing || autoAnalyzing) return;
+    if (!autoAnalyze || loading || autoAnalyzeFiredRef.current || intakeAnalyzing) return;
     autoAnalyzeFiredRef.current = true;
-
-    const hasPdf = attachments.some(
-      (a) => a.mimeType === "application/pdf" || a.fileName?.toLowerCase().endsWith(".pdf"),
-    );
-    if (!hasPdf) {
+    if (attachments.length === 0) {
       onAutoAnalyzeDone?.();
       return;
     }
-
     (async () => {
-      setAutoAnalyzing(true);
       try {
-        const res = await fetch(`/api/interviews/${interviewId}/analyze-with-intake`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ candidateId }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "解析に失敗しました");
-        }
-        const { detailUpdates } = await res.json();
-        if (detailUpdates && typeof detailUpdates === "object") {
-          const filtered: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(detailUpdates)) {
-            if (key.startsWith("desired") || key.startsWith("reg")) {
-              filtered[key] = value;
-            }
-          }
-          if (Object.keys(filtered).length > 0) {
-            setDetailState((prev) => ({ ...prev, ...filtered }));
-            setIsDirty(true);
-          }
-        }
-        toast.success("希望条件・初期条件を自動入力しました");
-      } catch (e) {
-        console.error("[auto-analyze] failed:", e);
-        toast.error("自動AI解析に失敗しました。手動でAI解析ボタンを押してください");
+        await handleIntakeAnalyze();
+      } catch {
+        // handleIntakeAnalyze shows its own toast on error
       } finally {
-        setAutoAnalyzing(false);
         onAutoAnalyzeDone?.();
       }
     })();
@@ -979,16 +947,6 @@ export default function InterviewForm({
   /* ================================================================ */
   return (
     <div style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
-
-      {autoAnalyzing && (
-        <div className="fixed top-4 right-4 z-50 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
-          <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-          <div>
-            <div className="font-semibold text-[13px]">AI解析中...</div>
-            <div className="text-[11px] opacity-80">PDFから希望条件を読み取っています（10〜30秒）</div>
-          </div>
-        </div>
-      )}
 
       {/* ============ HEADER ============ */}
       <div className="flex items-center justify-between px-5 py-2.5" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
