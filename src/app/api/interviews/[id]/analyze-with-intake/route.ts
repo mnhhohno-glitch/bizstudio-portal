@@ -134,13 +134,10 @@ export async function POST(
     const rawWorkHistory = (data.work_history || []) as Record<string, unknown>[];
     const missingItems = (data.missing_items || []) as string[];
 
-    console.log("[analyze-with-intake] DEBUG raw work_history:", JSON.stringify(rawWorkHistory.map((r) => ({ 入社年月: r["入社年月"], 退職年月: r["退職年月"], 在籍期間_年: r["在籍期間_年"], 在籍期間_ヶ月: r["在籍期間_ヶ月"] }))));
-
     const { detailUpdates, interviewMemo } = mapFilemakerToDetail(fmMapping);
     const workHistories = mapWorkHistoryArray(rawWorkHistory);
     const detailFromWH = workHistoryToDetailSync(workHistories);
 
-    console.log("[analyze-with-intake] DEBUG mapped workHistories:", JSON.stringify(workHistories.map((w) => ({ hireDate: w.hireDate, leaveDate: w.leaveDate, tenureYear: w.tenureYear, tenureMonth: w.tenureMonth }))));
     console.log(`[analyze-with-intake] Success: ${Object.keys(detailUpdates).length} detail fields, ${workHistories.length} work histories`);
 
     return NextResponse.json({
