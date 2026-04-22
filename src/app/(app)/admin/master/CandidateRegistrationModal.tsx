@@ -42,14 +42,6 @@ export default function CandidateRegistrationModal({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // 希望条件
-  const [desiredJobType1, setDesiredJobType1] = useState("");
-  const [desiredJobType2, setDesiredJobType2] = useState("");
-  const [desiredIndustry1, setDesiredIndustry1] = useState("");
-  const [desiredPrefecture, setDesiredPrefecture] = useState("");
-  const [desiredEmploymentType, setDesiredEmploymentType] = useState("");
-  const [desiredSalaryMin, setDesiredSalaryMin] = useState<number | null>(null);
-
   // PDF upload
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfDragging, setPdfDragging] = useState(false);
@@ -93,12 +85,6 @@ export default function CandidateRegistrationModal({
     setBirthday("");
     setEmployeeId("");
     setPdfFile(null);
-    setDesiredJobType1("");
-    setDesiredJobType2("");
-    setDesiredIndustry1("");
-    setDesiredPrefecture("");
-    setDesiredEmploymentType("");
-    setDesiredSalaryMin(null);
     setErrors({});
     onClose();
   };
@@ -126,12 +112,6 @@ export default function CandidateRegistrationModal({
       if (data.email) setEmail(data.email);
       if (data.phone) setPhone(data.phone);
       if (data.address) setAddress(data.address);
-      if (data.desiredJobType1) setDesiredJobType1(data.desiredJobType1);
-      if (data.desiredJobType2) setDesiredJobType2(data.desiredJobType2);
-      if (data.desiredIndustry1) setDesiredIndustry1(data.desiredIndustry1);
-      if (data.desiredPrefecture) setDesiredPrefecture(data.desiredPrefecture);
-      if (data.desiredEmploymentType) setDesiredEmploymentType(data.desiredEmploymentType);
-      if (data.desiredSalaryMin != null) setDesiredSalaryMin(data.desiredSalaryMin);
       toast.success("履歴書の解析が完了しました");
     } catch {
       toast.error("PDF解析に失敗しました");
@@ -176,12 +156,6 @@ export default function CandidateRegistrationModal({
           gender,
           birthday: birthday || undefined,
           employeeId,
-          desiredJobType1: desiredJobType1 || undefined,
-          desiredJobType2: desiredJobType2 || undefined,
-          desiredIndustry1: desiredIndustry1 || undefined,
-          desiredPrefecture: desiredPrefecture || undefined,
-          desiredEmploymentType: desiredEmploymentType || undefined,
-          desiredSalaryMin: desiredSalaryMin ?? undefined,
         }),
       });
 
@@ -405,47 +379,6 @@ export default function CandidateRegistrationModal({
             <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
           </div>
         </div>
-
-        {/* 希望条件セクション */}
-        {(desiredJobType1 || desiredJobType2 || desiredIndustry1 || desiredPrefecture || desiredEmploymentType || desiredSalaryMin != null) && (
-          <div className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
-            <p className="text-[13px] font-medium text-purple-700 mb-3">✨ PDFから抽出した希望条件</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望職種 第1</label>
-                <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望職種 第2</label>
-                <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望業種</label>
-                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望都道府県</label>
-                <input type="text" value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望雇用形態</label>
-                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className={inputClass}>
-                  <option value="">未選択</option>
-                  <option value="正社員">正社員</option>
-                  <option value="契約社員">契約社員</option>
-                  <option value="派遣社員">派遣社員</option>
-                  <option value="パート・アルバイト">パート・アルバイト</option>
-                  <option value="業務委託">業務委託</option>
-                  <option value="その他">その他</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[12px] text-[#6B7280]">希望年収下限（万円）</label>
-                <input type="number" value={desiredSalaryMin ?? ""} onChange={(e) => setDesiredSalaryMin(e.target.value ? Number(e.target.value) : null)} className={inputClass} />
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="mt-5 flex gap-3 justify-end">
           <button onClick={handleClose} className="rounded-md border border-[#E5E7EB] px-5 py-2.5 text-[13px] text-[#374151] hover:bg-[#F5F7FA] transition-colors">キャンセル</button>
