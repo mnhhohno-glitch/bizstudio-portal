@@ -14,6 +14,7 @@ export const SUPPORT_END_REASONS = [
   { code: "NO_CONTACT_AFTER_APPLICATION", label: "応募後音信不通", auto: false },
   { code: "MEETING_SETUP_DECLINED", label: "面談設定辞退", auto: false },
   { code: "NO_CONTACT_AFTER_MEETING", label: "面談後連絡不通", auto: false },
+  { code: "NO_CONTACT_AFTER_REFERRAL", label: "求人紹介後連絡不通", auto: false },
   { code: "OTHER", label: "その他（自由記述）", auto: false },
 ] as const;
 
