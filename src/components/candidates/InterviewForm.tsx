@@ -75,8 +75,6 @@ interface InterviewFormProps {
   currentUser: SessionUser | null;
   onSaved?: () => void;
   onDeleted?: () => void;
-  autoAnalyze?: boolean;
-  onAutoAnalyzeDone?: () => void;
 }
 
 /* ================================================================== */
@@ -343,7 +341,6 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 
 export default function InterviewForm({
   interviewId, candidateId, currentUser, onSaved, onDeleted,
-  autoAnalyze, onAutoAnalyzeDone,
 }: InterviewFormProps) {
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
@@ -368,7 +365,6 @@ export default function InterviewForm({
   const [deleting, setDeleting] = useState(false);
   const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
   const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
-  const autoAnalyzeFiredRef = useRef(false);
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -455,7 +451,6 @@ export default function InterviewForm({
   useEffect(() => {
     if (interviewId !== prevIdRef.current) {
       prevIdRef.current = interviewId;
-      autoAnalyzeFiredRef.current = false;
       fetchData();
     }
   }, [interviewId, fetchData]);
@@ -468,26 +463,6 @@ export default function InterviewForm({
       .then((data) => { if (data?.candidate) setCandidate(data.candidate); })
       .catch(() => {});
   }, [candidateId]);
-
-  /* ---- Auto-analyze on first interview creation ---- */
-  useEffect(() => {
-    if (!autoAnalyze || loading || autoAnalyzeFiredRef.current || intakeAnalyzing) return;
-    autoAnalyzeFiredRef.current = true;
-    if (attachments.length === 0) {
-      onAutoAnalyzeDone?.();
-      return;
-    }
-    (async () => {
-      try {
-        await handleIntakeAnalyze();
-      } catch {
-        // handleIntakeAnalyze shows its own toast on error
-      } finally {
-        onAutoAnalyzeDone?.();
-      }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoAnalyze, loading]);
 
   /* ---- Field setters ---- */
   const setField = (key: string, value: unknown) => {

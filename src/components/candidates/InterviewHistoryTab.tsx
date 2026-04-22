@@ -55,7 +55,6 @@ export default function InterviewHistoryTab({
   const [creating, setCreating] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null);
-  const [autoAnalyzeId, setAutoAnalyzeId] = useState<string | null>(null);
 
   const fetchInterviews = useCallback(async () => {
     try {
@@ -132,9 +131,6 @@ export default function InterviewHistoryTab({
       const data = await res.json();
       console.log("[DEBUG-6] API response data:", data);
       toast.success("新規面談を作成しました");
-      if (data.record.interviewCount === 1) {
-        setAutoAnalyzeId(data.record.id);
-      }
       setSelectedId(data.record.id);
       console.log("[DEBUG-7] setSelectedId:", data.record.id);
       await fetchInterviews();
@@ -250,8 +246,6 @@ export default function InterviewHistoryTab({
           currentUser={currentUser}
           onSaved={() => fetchInterviews()}
           onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
-          autoAnalyze={selectedInterview.id === autoAnalyzeId}
-          onAutoAnalyzeDone={() => setAutoAnalyzeId(null)}
         />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
