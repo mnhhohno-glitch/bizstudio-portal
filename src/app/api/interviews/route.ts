@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
+import { downloadFileFromDrive } from "@/lib/google-drive";
+import { supabase } from "@/lib/supabase";
+import { randomUUID } from "crypto";
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
@@ -191,5 +194,85 @@ export async function POST(req: Request) {
     data: { isLatest: false },
   });
 
+  if (interviewCount === 1) {
+    await copyCandidateFilesToInterview(candidateId, record.id);
+    const freshRecord = await prisma.interviewRecord.findUnique({
+      where: { id: record.id },
+      include: {
+        detail: true,
+        rating: true,
+        memos: true,
+        attachments: true,
+        candidate: { select: { id: true, name: true, candidateNumber: true } },
+      },
+    });
+    if (freshRecord) return NextResponse.json({ record: freshRecord });
+  }
+
   return NextResponse.json({ record });
+}
+
+const ATTACHMENT_BUCKET = "interview-attachments";
+
+async function copyCandidateFilesToInterview(
+  candidateId: string,
+  interviewId: string,
+): Promise<void> {
+  try {
+    const files = await prisma.candidateFile.findMany({
+      where: {
+        candidateId,
+        category: { in: ["ORIGINAL", "MEETING"] },
+        mimeType: "application/pdf",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (files.length === 0) {
+      console.log(`[auto-attach] No PDF files found for candidate ${candidateId}`);
+      return;
+    }
+
+    console.log(`[auto-attach] Copying ${files.length} PDF(s) for candidate ${candidateId}`);
+
+    for (const file of files) {
+      try {
+        const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
+        const buffer = Buffer.from(base64, "base64");
+
+        const ext = (file.fileName.split(".").pop() || "pdf").replace(/[^a-zA-Z0-9]/g, "");
+        const storagePath = `interviews/${interviewId}/${randomUUID()}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .upload(storagePath, buffer, {
+            contentType: mimeType || file.mimeType,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error(`[auto-attach] Upload failed for ${file.fileName}:`, uploadError);
+          continue;
+        }
+
+        await prisma.interviewAttachment.create({
+          data: {
+            interviewRecordId: interviewId,
+            fileName: file.fileName,
+            fileType: ext.toLowerCase(),
+            filePath: storagePath,
+            fileSize: file.fileSize,
+            mimeType: mimeType || file.mimeType,
+            uploadedBy: "auto-attach",
+          },
+        });
+
+        console.log(`[auto-attach] Copied ${file.fileName} → ${storagePath}`);
+      } catch (e) {
+        console.error(`[auto-attach] Error copying ${file.fileName}:`, e);
+      }
+    }
+  } catch (e) {
+    console.error(`[auto-attach] Unexpected error:`, e);
+  }
 }
