@@ -227,6 +227,7 @@ function DocumentsList() {
 }
 
 export default function DocumentsListPage() {
+  useEffect(() => { document.title = "ドキュメント - Bizstudio"; }, []);
   return (
     <Suspense fallback={<div className="py-12 text-center text-[#6B7280]">読み込み中...</div>}>
       <DocumentsList />

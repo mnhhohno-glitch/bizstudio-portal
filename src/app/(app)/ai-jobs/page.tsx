@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -35,6 +35,7 @@ function statusColor(s: DummyAiJob["status"]) {
 }
 
 export default function AiJobsPage() {
+  useEffect(() => { document.title = "AI求人 - Bizstudio"; }, []);
   const router = useRouter();
   const [jobs, setJobs] = useState(DUMMY_AI_JOBS);
 

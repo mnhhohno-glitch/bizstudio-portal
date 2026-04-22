@@ -29,6 +29,7 @@ const PERIOD_OPTIONS = [
 ];
 
 export default function AnnouncementsListPage() {
+  useEffect(() => { document.title = "お知らせ - Bizstudio"; }, []);
   const searchParams = useSearchParams();
   const router = useRouter();
 

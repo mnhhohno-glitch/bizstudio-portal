@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { PageTitle } from "@/components/ui/PageTitle";
+
+const PAGE_TITLE = "タスク管理 - Bizstudio";
 import {
   DndContext,
   closestCenter,
@@ -77,6 +79,7 @@ function SortableRow({ id, children }: { id: string; children: (props: { listene
 }
 
 export default function TasksPage() {
+  useEffect(() => { document.title = PAGE_TITLE; }, []);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);

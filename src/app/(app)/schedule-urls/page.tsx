@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 const URLS = [
@@ -28,6 +28,7 @@ const URLS = [
 ];
 
 export default function ScheduleUrlsPage() {
+  useEffect(() => { document.title = "日程調整URL - Bizstudio"; }, []);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const handleCopy = async (url: string, index: number) => {

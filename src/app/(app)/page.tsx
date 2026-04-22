@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { PageTitle } from "@/components/ui/PageTitle";
+
+export const metadata: Metadata = { title: "ダッシュボード" };
 import Link from "next/link";
 import { ANNOUNCEMENT_CATEGORIES, AnnouncementCategoryKey } from "@/lib/constants/announcement";
 import AttendanceAlertBanner from "@/components/attendance/AlertBanner";
