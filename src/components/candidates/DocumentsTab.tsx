@@ -69,6 +69,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingDocxIds, setEditingDocxIds] = useState<Set<string>>(new Set());
+  const [replacingId, setReplacingId] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
   const [sharing, setSharing] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
@@ -159,6 +161,64 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const handleUploadSuccess = () => {
     fetchFiles();
     fetchCounts();
+  };
+
+  const isDocxFile = (f: CandidateFile) =>
+    f.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    f.fileName.toLowerCase().endsWith(".docx");
+
+  const handleWordEdit = (file: CandidateFile) => {
+    window.open(
+      `https://drive.google.com/uc?export=download&id=${file.driveFileId}`,
+      "_blank",
+    );
+    setEditingDocxIds((prev) => new Set(prev).add(file.id));
+    toast.success(`${file.fileName} をダウンロードしました。ローカルのWordで編集してください`);
+  };
+
+  const handleUploadEdited = (file: CandidateFile) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".docx";
+    input.onchange = async (e) => {
+      const newFile = (e.target as HTMLInputElement).files?.[0];
+      if (!newFile) return;
+      if (!newFile.name.toLowerCase().endsWith(".docx")) {
+        toast.error(".docxファイルを選択してください");
+        return;
+      }
+      setReplacingId(file.id);
+      try {
+        const formData = new FormData();
+        formData.append("file", newFile);
+        const res = await fetch(
+          `/api/candidates/${candidateId}/files/${file.id}/replace-docx`,
+          { method: "POST", body: formData },
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "failed");
+        }
+        const data = await res.json();
+        if (data.pdfUpdated) {
+          toast.success("docxを置き換え、PDFも再生成しました");
+        } else {
+          toast.success("docxを置き換えました（PDF変換はスキップされました）");
+        }
+        setEditingDocxIds((prev) => {
+          const next = new Set(prev);
+          next.delete(file.id);
+          return next;
+        });
+        fetchFiles();
+        fetchCounts();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "アップロードに失敗しました");
+      } finally {
+        setReplacingId(null);
+      }
+    };
+    input.click();
   };
 
   const ALLOWED_TYPES_SET = new Set([
@@ -526,9 +586,30 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {file.memo && (
                   <p className="text-xs text-gray-500 mt-1 italic">メモ: {file.memo}</p>
                 )}
+                {/* 編集中インジケーター */}
+                {editingDocxIds.has(file.id) && (
+                  <div className="mt-2 flex items-center gap-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                    <span>編集中</span>
+                    <button
+                      onClick={() => handleUploadEdited(file)}
+                      disabled={replacingId === file.id}
+                      className="ml-auto rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
+                    </button>
+                  </div>
+                )}
                 {/* アクション */}
                 <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
                   <div className="ml-auto flex gap-2">
+                    {isDocxFile(file) && !editingDocxIds.has(file.id) && (
+                      <button
+                        onClick={() => handleWordEdit(file)}
+                        className="text-amber-600 hover:text-amber-700 text-sm font-medium"
+                      >
+                        Word編集
+                      </button>
+                    )}
                     {activeSubTab === "BS_DOCUMENT" && (
                       <button
                         onClick={() => handleShareUrl([file.id])}
