@@ -196,23 +196,138 @@ export async function POST(req: Request) {
 
   if (interviewCount === 1) {
     await copyCandidateFilesToInterview(candidateId, record.id);
-    const freshRecord = await prisma.interviewRecord.findUnique({
-      where: { id: record.id },
+  } else {
+    await copyFromPreviousInterview(candidateId, record.id);
+  }
+
+  const freshRecord = await prisma.interviewRecord.findUnique({
+    where: { id: record.id },
+    include: {
+      detail: true,
+      rating: true,
+      memos: true,
+      attachments: true,
+      workHistories: true,
+      candidate: { select: { id: true, name: true, candidateNumber: true } },
+    },
+  });
+
+  return NextResponse.json({ record: freshRecord ?? record });
+}
+
+const ATTACHMENT_BUCKET = "interview-attachments";
+
+async function copyFromPreviousInterview(
+  candidateId: string,
+  newInterviewId: string,
+): Promise<void> {
+  try {
+    const previous = await prisma.interviewRecord.findFirst({
+      where: { candidateId, id: { not: newInterviewId } },
+      orderBy: { interviewCount: "desc" },
       include: {
         detail: true,
         rating: true,
         memos: true,
+        workHistories: true,
         attachments: true,
-        candidate: { select: { id: true, name: true, candidateNumber: true } },
       },
     });
-    if (freshRecord) return NextResponse.json({ record: freshRecord });
+
+    if (!previous) {
+      console.warn(`[copy-prev] No previous interview for candidate ${candidateId}`);
+      return;
+    }
+
+    console.log(`[copy-prev] Copying from interview ${previous.id} to ${newInterviewId}`);
+
+    if (previous.detail) {
+      const { id: _id, interviewRecordId: _rid, createdAt: _ca, updatedAt: _ua, ...detailData } = previous.detail;
+      const jsonFields = ["desiredJobTypes", "desiredIndustries", "desiredAreas"] as const;
+      const sanitized: Record<string, unknown> = { ...detailData };
+      for (const key of jsonFields) {
+        if (sanitized[key] === null) sanitized[key] = Prisma.JsonNull;
+      }
+      await prisma.interviewDetail.create({
+        data: { ...sanitized, interviewRecordId: newInterviewId } as Prisma.InterviewDetailUncheckedCreateInput,
+      });
+    }
+
+    if (previous.rating) {
+      const { id: _id, interviewRecordId: _rid, createdAt: _ca, updatedAt: _ua, ...ratingData } = previous.rating;
+      await prisma.interviewRating.create({
+        data: { ...ratingData, interviewRecordId: newInterviewId },
+      });
+    }
+
+    if (previous.memos.length > 0) {
+      await prisma.interviewMemo.createMany({
+        data: previous.memos.map(({ id: _id, interviewRecordId: _rid, createdAt: _ca, updatedAt: _ua, ...rest }) => ({
+          ...rest,
+          interviewRecordId: newInterviewId,
+        })),
+      });
+    }
+
+    if (previous.workHistories.length > 0) {
+      await prisma.workHistory.createMany({
+        data: previous.workHistories.map(({ id: _id, interviewRecordId: _rid, createdAt: _ca, updatedAt: _ua, ...rest }) => ({
+          ...rest,
+          interviewRecordId: newInterviewId,
+        })),
+      });
+    }
+
+    for (const att of previous.attachments) {
+      try {
+        const { data: fileData, error: dlErr } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .download(att.filePath);
+
+        if (dlErr || !fileData) {
+          console.warn(`[copy-prev] Download failed: ${att.filePath}`, dlErr);
+          continue;
+        }
+
+        const ext = (att.fileName.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "");
+        const newPath = `interviews/${newInterviewId}/${randomUUID()}.${ext}`;
+        const buffer = Buffer.from(await fileData.arrayBuffer());
+
+        const { error: upErr } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .upload(newPath, buffer, {
+            contentType: att.mimeType || "application/octet-stream",
+            upsert: false,
+          });
+
+        if (upErr) {
+          console.warn(`[copy-prev] Upload failed: ${newPath}`, upErr);
+          continue;
+        }
+
+        await prisma.interviewAttachment.create({
+          data: {
+            interviewRecordId: newInterviewId,
+            fileName: att.fileName,
+            fileType: att.fileType,
+            filePath: newPath,
+            fileSize: att.fileSize,
+            mimeType: att.mimeType,
+            uploadedBy: "copy-prev",
+          },
+        });
+
+        console.log(`[copy-prev] Copied attachment ${att.fileName} → ${newPath}`);
+      } catch (e) {
+        console.warn(`[copy-prev] Failed to copy attachment ${att.fileName}:`, e);
+      }
+    }
+
+    console.log(`[copy-prev] Done copying from ${previous.id}`);
+  } catch (e) {
+    console.error(`[copy-prev] Failed:`, e);
   }
-
-  return NextResponse.json({ record });
 }
-
-const ATTACHMENT_BUCKET = "interview-attachments";
 
 async function copyCandidateFilesToInterview(
   candidateId: string,
