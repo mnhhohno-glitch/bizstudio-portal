@@ -533,15 +533,11 @@ export default function TaskNewPage() {
         if (!cat) return false;
         // 履歴書作成: 志望動機の大中小必須
         if (isRirekisho) {
-          const mMajor = is3pointSet ? motivState3pt.majorName : motivMajorName;
-          const mMiddle = is3pointSet ? motivState3pt.middleName : motivMiddleName;
-          const mMinors = is3pointSet ? motivState3pt.minors : selectedMotivMinors;
-          if (!mMajor || !mMiddle || mMinors.length === 0) return false;
+          if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
         }
         // 職務経歴書: 職種大分類は必須
         if (isShokumu) {
-          const major = is3pointSet ? jobState3pt.majorName : selectedMajorName;
-          if (!major) return false;
+          if (!selectedMajorName) return false;
         }
         // 求人検索: 第1軸の大項目は必須
         if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
