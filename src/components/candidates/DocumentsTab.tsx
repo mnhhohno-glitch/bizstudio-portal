@@ -221,6 +221,14 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     input.click();
   };
 
+  const handleCancelEdit = (fileId: string) => {
+    setEditingDocxIds((prev) => {
+      const next = new Set(prev);
+      next.delete(fileId);
+      return next;
+    });
+  };
+
   const ALLOWED_TYPES_SET = new Set([
     "application/pdf",
     "application/msword",
@@ -596,6 +604,13 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                       className="ml-auto rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
                     >
                       {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
+                    </button>
+                    <button
+                      onClick={() => handleCancelEdit(file.id)}
+                      disabled={replacingId === file.id}
+                      className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                    >
+                      キャンセル
                     </button>
                   </div>
                 )}
