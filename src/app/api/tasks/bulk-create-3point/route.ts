@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { sendBotMessage } from "@/lib/lineworks";
+import { TaskPriority } from "@prisma/client";
 
 const CATEGORY_IDS = {
   rirekisho: "cmmolxn1v0026po4f0olekfps",
@@ -19,7 +20,17 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { candidateId, assigneeId, dueDate, priority } = body;
+    const { candidateId, assigneeId, dueDate, priority, fieldValues } = body as {
+      candidateId: string;
+      assigneeId: string;
+      dueDate?: string;
+      priority?: string;
+      fieldValues?: {
+        resume?: { fieldId: string; value: string }[];
+        career?: { fieldId: string; value: string }[];
+        recommendation?: { fieldId: string; value: string }[];
+      };
+    };
 
     if (!candidateId || !assigneeId) {
       return NextResponse.json(
@@ -58,21 +69,31 @@ export async function POST(request: Request) {
       );
     }
 
+    const fvKeys = ["resume", "career", "recommendation"] as const;
     const createdTasks = await prisma.$transaction(
-      Object.values(CATEGORY_IDS).map((categoryId) => {
+      Object.values(CATEGORY_IDS).map((categoryId, idx) => {
         const cat = categories.find((c) => c.id === categoryId);
+        const fvs = fieldValues?.[fvKeys[idx]] ?? [];
         return prisma.task.create({
           data: {
             title: `${cat?.name ?? "書類作成"} - ${candidate.name}`,
             categoryId,
             candidateId: candidate.id,
             status: "NOT_STARTED",
-            priority: priority || "MEDIUM",
+            priority: (priority || "MEDIUM") as TaskPriority,
             dueDate: dueDate ? new Date(dueDate) : null,
             createdByUserId: actor.id,
             assignees: {
               create: [{ employeeId: assigneeId }],
             },
+            ...(fvs.length > 0 ? {
+              fieldValues: {
+                create: fvs.map((fv: { fieldId: string; value: string }) => ({
+                  fieldId: fv.fieldId,
+                  value: fv.value,
+                })),
+              },
+            } : {}),
           },
         });
       })
