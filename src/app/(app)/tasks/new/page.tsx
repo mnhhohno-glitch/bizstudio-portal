@@ -57,6 +57,16 @@ const NON_SALES_HIDDEN_LABELS = [
   "その他実績",
 ];
 
+const SUISENJOU_CATEGORY = "推薦状作成";
+
+const THREE_POINT_CATEGORY_IDS = [
+  "cmmolxn1v0026po4f0olekfps", // 履歴書作成
+  "cmmolxv0g002qpo4fazblhj0f", // 職務経歴書作成
+  "cmmolxxtl002xpo4f1mf6srei", // 推薦状作成
+] as const;
+const THREE_POINT_LABELS = ["履歴書作成", "職務経歴書作成", "推薦状作成"];
+const HIDDEN_CATEGORY_ID = "cmoal05cp002r1dsxyokhti3i";
+
 const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
 const MENSETSU_TAISAKU_CATEGORY = "面接対策依頼";
 const NAITEI_CATEGORY = "内定承諾報告";
@@ -130,6 +140,14 @@ export default function TaskNewPage() {
 
   // step 1
   const [categoryId, setCategoryId] = useState<string | null>(null);
+
+  // 3点セットモード
+  const [is3pointSet, setIs3pointSet] = useState(false);
+  const [subStep3pt, setSubStep3pt] = useState(0); // 0=履歴書, 1=職務経歴書, 2=推薦状
+  const [fieldValues3pt, setFieldValues3pt] = useState<Record<string, string>[]>([{}, {}, {}]);
+  const [motivState3pt, setMotivState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] as string[] });
+  const [jobState3pt, setJobState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minorId: "", minorName: "" });
+  const [careerSummary3pt, setCareerSummary3pt] = useState("");
 
   // step 2
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -224,9 +242,16 @@ export default function TaskNewPage() {
     [candidates, candidateId]
   );
 
-  const isRirekisho = selectedCategory?.name === RIREKISHO_CATEGORY;
-  const isShokumu = selectedCategory?.name === SHOKUMU_CATEGORY;
-  const isSalesJob = SALES_MAJORS.includes(selectedMajorName);
+  const threePointCategories = useMemo(
+    () => THREE_POINT_CATEGORY_IDS.map((id) => categories.find((c) => c.id === id) ?? null),
+    [categories]
+  );
+  const active3ptCategory = is3pointSet ? threePointCategories[subStep3pt] : null;
+  const effectiveCategory = is3pointSet ? active3ptCategory : selectedCategory;
+
+  const isRirekisho = effectiveCategory?.name === RIREKISHO_CATEGORY;
+  const isShokumu = effectiveCategory?.name === SHOKUMU_CATEGORY;
+  const isSalesJob = SALES_MAJORS.includes(is3pointSet ? jobState3pt.majorName : selectedMajorName);
   const isMendanFusanka = selectedCategory?.name === MENDAN_FUSANKA_CATEGORY;
   const isMensetsuTaisaku = selectedCategory?.name === MENSETSU_TAISAKU_CATEGORY;
   const isNaitei = selectedCategory?.name === NAITEI_CATEGORY;
@@ -238,12 +263,15 @@ export default function TaskNewPage() {
 
   /** 職務経歴書: 「実績なし」チェックがONか */
   const noNumbersChecked = useMemo(() => {
-    if (!isShokumu || !selectedCategory) return false;
-    const checkField = selectedCategory.fields.find((f) =>
+    if (!isShokumu) return false;
+    const cat = is3pointSet ? active3ptCategory : selectedCategory;
+    if (!cat) return false;
+    const checkField = cat.fields.find((f) =>
       f.label.startsWith("提示できる実績や数字がない")
     );
-    return checkField ? fieldValues[checkField.id] === "true" : false;
-  }, [isShokumu, selectedCategory, fieldValues]);
+    const vals = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
+    return checkField ? vals[checkField.id] === "true" : false;
+  }, [isShokumu, selectedCategory, active3ptCategory, is3pointSet, fieldValues, fieldValues3pt, subStep3pt]);
 
   /* ----- fetch master data ----- */
   const fetchData = useCallback(async () => {
@@ -486,12 +514,12 @@ export default function TaskNewPage() {
 
   /* ----- auto title ----- */
   useEffect(() => {
-    if (step === 4) {
+    if (step === 4 && !is3pointSet) {
       const catName = selectedCategory?.name ?? "";
       const canName = selectedCandidate?.name ?? "";
       setTitle(canName ? `${catName} - ${canName}` : catName);
     }
-  }, [step, selectedCategory, selectedCandidate]);
+  }, [step, is3pointSet, selectedCategory, selectedCandidate]);
 
   /* ----- step validation ----- */
   const canProceed = (): boolean => {
@@ -499,36 +527,37 @@ export default function TaskNewPage() {
       case 0:
         return !withCandidate || !!candidateId;
       case 1:
-        return !!categoryId;
+        return !!categoryId || is3pointSet;
       case 2: {
-        if (!selectedCategory) return false;
+        const cat = is3pointSet ? active3ptCategory : selectedCategory;
+        if (!cat) return false;
         // 履歴書作成: 志望動機の大中小必須
         if (isRirekisho) {
           if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
         }
         // 職務経歴書: 職種大分類は必須
-        if (isShokumu && !selectedMajorName) return false;
+        if (isShokumu) {
+          if (!selectedMajorName) return false;
+        }
         // 求人検索: 第1軸の大項目は必須
         if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
         // テンプレート必須フィールドのバリデーション
         const visibleFields = getVisibleFields();
+        const vals = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
         return visibleFields
           .filter((f) => f.isRequired)
           .every((f) => {
-            // 応募職種は職種選択UIで代替するのでスキップ
             if (f.label === "応募職種") return true;
-            // 志望動機フィールドはカスケードUIで代替するのでスキップ
             if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return true;
-            // 求人検索: 職種はカスタムUIで代替
             if (isKyujinKensaku && f.label === "職種") return true;
-            const v = fieldValues[f.id];
+            const v = vals[f.id];
             return v !== undefined && v !== "";
           });
       }
       case 3:
         return assigneeIds.length > 0;
       case 4:
-        return !!title.trim();
+        return is3pointSet || !!title.trim();
       default:
         return true;
     }
@@ -536,11 +565,12 @@ export default function TaskNewPage() {
 
   /** 表示するフィールドを返す */
   const getVisibleFields = useCallback((): Field[] => {
-    if (!selectedCategory) return [];
+    const cat = is3pointSet ? active3ptCategory : selectedCategory;
+    if (!cat) return [];
 
     // 履歴書作成: 志望動機フィールドはカスケードUIで代替するので非表示
     if (isRirekisho) {
-      return selectedCategory.fields.filter((f) =>
+      return cat.fields.filter((f) =>
         f.label !== "志望動機（大分類）" &&
         f.label !== "志望動機（中分類）" &&
         f.label !== "志望動機（小分類）"
@@ -550,28 +580,28 @@ export default function TaskNewPage() {
     // 内定承諾報告: カスタムUIで代替するフィールドを非表示
     if (isNaitei) {
       const hiddenLabels = ["対象者フルネーム", "内定した職種", "内定した業種", "内定した勤務地（都道府県）", "雇用形態"];
-      return selectedCategory.fields.filter((f) => !hiddenLabels.includes(f.label));
+      return cat.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
     // 面接対策依頼: 選考求人情報をカスタムUIで代替（インラインで表示）
     if (isMensetsuTaisaku) {
-      return selectedCategory.fields.filter((f) => f.label !== "選考求人情報" && f.label !== "選考求人URL");
+      return cat.fields.filter((f) => f.label !== "選考求人情報" && f.label !== "選考求人URL");
     }
 
     // RAエントリー: エリアをカスタムUIで代替
     if (isRAEntry) {
-      return selectedCategory.fields.filter((f) => f.label !== "エリア");
+      return cat.fields.filter((f) => f.label !== "エリア");
     }
 
     // FM登録依頼: カスタムUIで代替するフィールドを非表示
     if (isFmTouroku) {
       const hiddenLabels = ["フルネーム", "ふりがな", "郵便番号＆住所"];
-      return selectedCategory.fields.filter((f) => !hiddenLabels.includes(f.label));
+      return cat.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
-    if (!isShokumu) return selectedCategory.fields;
+    if (!isShokumu) return cat.fields;
 
-    return selectedCategory.fields.filter((f) => {
+    return cat.fields.filter((f) => {
       if (f.label === "応募職種") return false;
       if (isSalesJob) {
         if (noNumbersChecked && SALES_ONLY_LABELS.includes(f.label)) return false;
@@ -580,7 +610,104 @@ export default function TaskNewPage() {
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
     });
-  }, [selectedCategory, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku]);
+  }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku]);
+
+  /* ----- submit (3point set) ----- */
+  const handle3ptSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      // 最後のサブステップ(推薦状)のstateを保存
+      save3ptSubStepState(2);
+
+      const buildFieldValues = (catIdx: number): { fieldId: string; value: string }[] => {
+        const cat = threePointCategories[catIdx];
+        if (!cat) return [];
+        const vals = fieldValues3pt[catIdx];
+        const normalFvs = Object.entries(vals)
+          .filter(([k, v]) => v !== "" && !k.startsWith("__"))
+          .map(([fieldId, value]) => ({ fieldId, value }));
+        const extra: { fieldId: string; value: string }[] = [];
+
+        if (catIdx === 0) {
+          // 履歴書: 志望動機
+          const majorField = cat.fields.find((f) => f.label === "志望動機（大分類）");
+          const middleField = cat.fields.find((f) => f.label === "志望動機（中分類）");
+          const minorField = cat.fields.find((f) => f.label === "志望動機（小分類）");
+          if (majorField && motivState3pt.majorName) extra.push({ fieldId: majorField.id, value: motivState3pt.majorName });
+          if (middleField && motivState3pt.middleName) extra.push({ fieldId: middleField.id, value: motivState3pt.middleName });
+          if (minorField && motivState3pt.minors.length > 0) extra.push({ fieldId: minorField.id, value: JSON.stringify(motivState3pt.minors) });
+        } else if (catIdx === 1) {
+          // 職務経歴書: 応募職種
+          const shokuField = cat.fields.find((f) => f.label === "応募職種");
+          if (shokuField) {
+            const name = jobState3pt.minorName || jobState3pt.middleName || jobState3pt.majorName;
+            if (name) extra.push({ fieldId: shokuField.id, value: name });
+          }
+          // 非営業: 経歴概要 → その他実績
+          if (!SALES_MAJORS.includes(jobState3pt.majorName) && careerSummary3pt.trim()) {
+            const otherField = cat.fields.find((f) => f.label === "その他実績");
+            if (otherField) extra.push({ fieldId: otherField.id, value: careerSummary3pt.trim() });
+          }
+        }
+        return [...normalFvs, ...extra];
+      };
+
+      const res = await fetch("/api/tasks/bulk-create-3point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId: candidateId,
+          assigneeId: assigneeIds[0],
+          dueDate: dueDate ? new Date(dueDate).toISOString() : null,
+          priority,
+          fieldValues: {
+            resume: buildFieldValues(0),
+            career: buildFieldValues(1),
+            recommendation: buildFieldValues(2),
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "一括起票に失敗しました");
+        return;
+      }
+
+      const data = await res.json();
+
+      // 添付ファイルのアップロード
+      const allFiles = [...attachmentFiles, ...templateAttachFiles];
+      if (allFiles.length > 0 && data.createdTaskIds?.length > 0) {
+        const failedFiles: string[] = [];
+        for (const file of allFiles) {
+          for (const taskId of data.createdTaskIds) {
+            try {
+              const formData = new FormData();
+              formData.append("file", file);
+              const uploadRes = await fetch(`/api/tasks/${taskId}/attachments`, { method: "POST", body: formData });
+              if (!uploadRes.ok) failedFiles.push(file.name);
+              break;
+            } catch { failedFiles.push(file.name); break; }
+          }
+        }
+        if (failedFiles.length > 0) {
+          alert(`3タスクを作成しました。\n一部ファイルのアップロードに失敗しました: ${failedFiles.join("、")}`);
+        } else {
+          alert(data.message || "応募書類3点セットのタスクを作成しました");
+        }
+      } else {
+        alert(data.message || "応募書類3点セットのタスクを作成しました");
+      }
+
+      router.push("/tasks");
+    } catch {
+      alert("一括起票に失敗しました");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   /* ----- submit ----- */
   const handleSubmit = async () => {
@@ -751,14 +878,25 @@ export default function TaskNewPage() {
     );
   };
 
+  const activeFieldValues = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
+
   const setFieldValue = (fieldId: string, value: string) => {
-    setFieldValues((prev) => ({ ...prev, [fieldId]: value }));
+    if (is3pointSet) {
+      setFieldValues3pt((prev) => {
+        const next = [...prev];
+        next[subStep3pt] = { ...next[subStep3pt], [fieldId]: value };
+        return next;
+      });
+    } else {
+      setFieldValues((prev) => ({ ...prev, [fieldId]: value }));
+    }
   };
 
   const toggleMultiSelect = (fieldId: string, optValue: string) => {
+    const vals = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
     const current: string[] = (() => {
       try {
-        return JSON.parse(fieldValues[fieldId] || "[]");
+        return JSON.parse(vals[fieldId] || "[]");
       } catch {
         return [];
       }
@@ -767,6 +905,56 @@ export default function TaskNewPage() {
       ? current.filter((v) => v !== optValue)
       : [...current, optValue];
     setFieldValue(fieldId, JSON.stringify(next));
+  };
+
+  const save3ptSubStepState = (sub: number) => {
+    if (sub === 0) {
+      setMotivState3pt({
+        majorId: motivMajorId, majorName: motivMajorName,
+        middleId: motivMiddleId, middleName: motivMiddleName,
+        minors: [...selectedMotivMinors],
+      });
+    } else if (sub === 1) {
+      setJobState3pt({
+        majorId: selectedMajorId, majorName: selectedMajorName,
+        middleId: selectedMiddleId, middleName: selectedMiddleName,
+        minorId: selectedMinorId, minorName: selectedMinorName,
+      });
+      setCareerSummary3pt(careerSummary);
+    }
+  };
+
+  const restore3ptSubStepState = (sub: number) => {
+    if (sub === 0) {
+      setMotivMajorId(motivState3pt.majorId);
+      setMotivMajorName(motivState3pt.majorName);
+      setMotivMiddleId(motivState3pt.middleId);
+      setMotivMiddleName(motivState3pt.middleName);
+      setSelectedMotivMinors([...motivState3pt.minors]);
+      setSelectedMajorId(""); setSelectedMajorName("");
+      setSelectedMiddleId(""); setSelectedMiddleName("");
+      setSelectedMinorId(""); setSelectedMinorName("");
+      setCareerSummary("");
+    } else if (sub === 1) {
+      setSelectedMajorId(jobState3pt.majorId);
+      setSelectedMajorName(jobState3pt.majorName);
+      setSelectedMiddleId(jobState3pt.middleId);
+      setSelectedMiddleName(jobState3pt.middleName);
+      setSelectedMinorId(jobState3pt.minorId);
+      setSelectedMinorName(jobState3pt.minorName);
+      setCareerSummary(careerSummary3pt);
+      setMotivMajorId(""); setMotivMajorName("");
+      setMotivMiddleId(""); setMotivMiddleName("");
+      setSelectedMotivMinors([]);
+    } else if (sub === 2) {
+      setSelectedMajorId(""); setSelectedMajorName("");
+      setSelectedMiddleId(""); setSelectedMiddleName("");
+      setSelectedMinorId(""); setSelectedMinorName("");
+      setMotivMajorId(""); setMotivMajorName("");
+      setMotivMiddleId(""); setMotivMiddleName("");
+      setSelectedMotivMinors([]);
+      setCareerSummary("");
+    }
   };
 
   const priorityLabel = (p: string) =>
@@ -920,9 +1108,11 @@ export default function TaskNewPage() {
           {step > 0 && !withCandidate && candidateId === null && (
             <span className="text-gray-400">👤 求職者なし</span>
           )}
-          {step > 1 && selectedCategory && (
+          {step > 1 && (is3pointSet ? (
+            <span>📁 応募書類3点セット</span>
+          ) : selectedCategory ? (
             <span>📁 {selectedCategory.name}{selectedCategory.group ? `（${selectedCategory.group.name}）` : ""}</span>
-          )}
+          ) : null)}
           {step > 3 && assigneeIds.length > 0 && (
             <span>👥 {employees.filter((e) => assigneeIds.includes(e.id)).map((e) => e.name).join("、")}（{assigneeIds.length}名）</span>
           )}
@@ -999,6 +1189,7 @@ export default function TaskNewPage() {
             {(() => {
               const selectCategory = (id: string) => {
                 setCategoryId(id);
+                setIs3pointSet(false);
                 setFieldValues({});
                 setSelectedMajorId("");
                 setSelectedMajorName("");
@@ -1014,6 +1205,16 @@ export default function TaskNewPage() {
                 setSelectedMotivMinors([]);
               };
 
+              const select3pointSet = () => {
+                setIs3pointSet(true);
+                setCategoryId(null);
+                setSubStep3pt(0);
+                setFieldValues3pt([{}, {}, {}]);
+                setMotivState3pt({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] });
+                setJobState3pt({ majorId: "", majorName: "", middleId: "", middleName: "", minorId: "", minorName: "" });
+                setCareerSummary3pt("");
+              };
+
               const renderCatButton = (cat: Category) => (
                 <button
                   key={cat.id}
@@ -1021,7 +1222,7 @@ export default function TaskNewPage() {
                   onClick={() => selectCategory(cat.id)}
                   className={[
                     "rounded-[8px] border-2 p-4 text-left transition-colors",
-                    categoryId === cat.id
+                    !is3pointSet && categoryId === cat.id
                       ? "border-[#2563EB] bg-[#EEF2FF]"
                       : "border-[#E5E7EB] hover:border-[#93C5FD] hover:bg-[#F9FAFB]",
                   ].join(" ")}
@@ -1033,20 +1234,40 @@ export default function TaskNewPage() {
                 </button>
               );
 
+              const render3ptButton = () => (
+                <button
+                  key="__3point"
+                  type="button"
+                  onClick={select3pointSet}
+                  className={[
+                    "rounded-[8px] border-2 p-4 text-left transition-colors",
+                    is3pointSet
+                      ? "border-[#2563EB] bg-[#EEF2FF]"
+                      : "border-[#E5E7EB] hover:border-[#93C5FD] hover:bg-[#F9FAFB]",
+                  ].join(" ")}
+                >
+                  <p className="text-[14px] font-bold text-[#374151]">応募書類3点セット</p>
+                  <p className="mt-1 text-[12px] text-[#6B7280]">履歴書・職務経歴書・推薦状を一度に作成</p>
+                </button>
+              );
+
+              const visibleCategories = categories.filter((c) => c.id !== HIDDEN_CATEGORY_ID);
+
               if (catGroups.length === 0) {
                 return (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {categories.map(renderCatButton)}
+                    {visibleCategories.map(renderCatButton)}
+                    {render3ptButton()}
                   </div>
                 );
               }
 
               const sections: { label: string; cats: Category[] }[] = [];
               for (const g of catGroups) {
-                const cats = categories.filter((c) => c.group?.id === g.id);
+                const cats = visibleCategories.filter((c) => c.group?.id === g.id);
                 if (cats.length > 0) sections.push({ label: g.name, cats });
               }
-              const ungrouped = categories.filter((c) => !c.group);
+              const ungrouped = visibleCategories.filter((c) => !c.group);
               if (ungrouped.length > 0) sections.push({ label: "未分類", cats: ungrouped });
 
               const toggleGroup = (label: string) => {
@@ -1078,6 +1299,7 @@ export default function TaskNewPage() {
                       {openGroups.has(sec.label) && (
                         <div className="p-3 grid gap-3 sm:grid-cols-2">
                           {sec.cats.map(renderCatButton)}
+                          {sec.cats.some((c) => (THREE_POINT_CATEGORY_IDS as readonly string[]).includes(c.id)) && render3ptButton()}
                         </div>
                       )}
                     </div>
@@ -1089,10 +1311,19 @@ export default function TaskNewPage() {
         )}
 
         {/* ----- Step 2: テンプレート入力 ----- */}
-        {step === 2 && selectedCategory && (
+        {step === 2 && (is3pointSet ? active3ptCategory : selectedCategory) && (
           <div>
             <h2 className="mb-4 text-[16px] font-bold text-[#374151]">
-              {selectedCategory.name} - テンプレート入力
+              {is3pointSet ? (
+                <>
+                  <span className="mr-2 text-[12px] font-normal text-[#6B7280]">
+                    応募書類3点セット（{subStep3pt + 1}/3）
+                  </span>
+                  {active3ptCategory?.name} - テンプレート入力
+                </>
+              ) : (
+                <>{selectedCategory?.name} - テンプレート入力</>
+              )}
             </h2>
 
             {/* 履歴書作成: 志望動機カスケード選択 */}
@@ -1413,7 +1644,7 @@ export default function TaskNewPage() {
                       {field.description && (
                         <p className="mb-1 text-[12px] text-[#9CA3AF]">{field.description}</p>
                       )}
-                      {renderField(field, fieldValues, setFieldValue, toggleMultiSelect)}
+                      {renderField(field, activeFieldValues, setFieldValue, toggleMultiSelect)}
 
                       {/* FM登録: メールアドレスの直下に郵便番号・住所を挿入 */}
                       {isFmTouroku && field.label === "メールアドレス" && (
@@ -1730,6 +1961,20 @@ export default function TaskNewPage() {
               追加情報
             </h2>
             <div className="space-y-4">
+              {is3pointSet ? (
+                <div>
+                  <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                    タスクタイトル（自動生成）
+                  </label>
+                  <div className="space-y-1">
+                    {THREE_POINT_LABELS.map((label) => (
+                      <p key={label} className="rounded-[6px] bg-[#F9FAFB] px-3 py-2 text-[14px] text-[#374151]">
+                        {label} - {selectedCandidate?.name ?? ""}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : (
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                   タスクタイトル<span className="ml-1 text-red-500">*</span>
@@ -1741,6 +1986,7 @@ export default function TaskNewPage() {
                   className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
                 />
               </div>
+              )}
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                   詳細メモ（任意）
@@ -1901,46 +2147,99 @@ export default function TaskNewPage() {
               入力内容の確認
             </h2>
             <dl className="space-y-3 text-[14px]">
-              <ConfirmRow label="タスクタイトル" value={title} />
-              {selectedCandidate && (
-                <ConfirmRow label="求職者" value={selectedCandidate.name} />
-              )}
-              <ConfirmRow
-                label="カテゴリ"
-                value={selectedCategory?.name ?? "-"}
-              />
-              {/* 志望動機情報 */}
-              {isRirekisho && motivMajorName && (
+              {is3pointSet ? (
                 <>
-                  <ConfirmRow label="志望動機（大分類）" value={motivMajorName} />
-                  {motivMiddleName && (
-                    <ConfirmRow label="志望動機（中分類）" value={motivMiddleName} />
+                  <ConfirmRow label="モード" value="応募書類3点セット一括作成" />
+                  {selectedCandidate && (
+                    <ConfirmRow label="求職者" value={selectedCandidate.name} />
                   )}
-                  {selectedMotivMinors.length > 0 && (
-                    <div>
-                      <dt className="text-[12px] font-medium text-[#6B7280]">志望動機（小分類）</dt>
-                      <dd className="mt-1 flex flex-wrap gap-1">
-                        {selectedMotivMinors.map((name) => (
-                          <span
-                            key={name}
-                            className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
-                          >
-                            {name}
-                          </span>
-                        ))}
-                      </dd>
-                    </div>
+                  <div>
+                    <dt className="text-[12px] font-medium text-[#6B7280]">作成されるタスク</dt>
+                    <dd className="mt-1 space-y-1">
+                      {THREE_POINT_LABELS.map((label) => (
+                        <p key={label} className="text-[13px] text-[#374151]">
+                          {label} - {selectedCandidate?.name ?? ""}
+                        </p>
+                      ))}
+                    </dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <ConfirmRow label="タスクタイトル" value={title} />
+                  {selectedCandidate && (
+                    <ConfirmRow label="求職者" value={selectedCandidate.name} />
                   )}
+                  <ConfirmRow
+                    label="カテゴリ"
+                    value={selectedCategory?.name ?? "-"}
+                  />
                 </>
               )}
+              {/* 志望動機情報 */}
+              {is3pointSet ? (
+                motivState3pt.majorName ? (
+                  <>
+                    <ConfirmRow label="志望動機（大分類）" value={motivState3pt.majorName} />
+                    {motivState3pt.middleName && (
+                      <ConfirmRow label="志望動機（中分類）" value={motivState3pt.middleName} />
+                    )}
+                    {motivState3pt.minors.length > 0 && (
+                      <div>
+                        <dt className="text-[12px] font-medium text-[#6B7280]">志望動機（小分類）</dt>
+                        <dd className="mt-1 flex flex-wrap gap-1">
+                          {motivState3pt.minors.map((name) => (
+                            <span key={name} className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]">{name}</span>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
+                  </>
+                ) : null
+              ) : (
+                isRirekisho && motivMajorName && (
+                  <>
+                    <ConfirmRow label="志望動機（大分類）" value={motivMajorName} />
+                    {motivMiddleName && (
+                      <ConfirmRow label="志望動機（中分類）" value={motivMiddleName} />
+                    )}
+                    {selectedMotivMinors.length > 0 && (
+                      <div>
+                        <dt className="text-[12px] font-medium text-[#6B7280]">志望動機（小分類）</dt>
+                        <dd className="mt-1 flex flex-wrap gap-1">
+                          {selectedMotivMinors.map((name) => (
+                            <span
+                              key={name}
+                              className="inline-block rounded-full bg-[#EEF2FF] px-2.5 py-0.5 text-[12px] font-medium text-[#2563EB]"
+                            >
+                              {name}
+                            </span>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
+                  </>
+                )
+              )}
               {/* 職種情報 */}
-              {isShokumu && selectedMajorName && (
-                <ConfirmRow
-                  label="応募職種"
-                  value={[selectedMajorName, selectedMiddleName, selectedMinorName]
-                    .filter(Boolean)
-                    .join(" > ")}
-                />
+              {is3pointSet ? (
+                jobState3pt.majorName ? (
+                  <ConfirmRow
+                    label="応募職種"
+                    value={[jobState3pt.majorName, jobState3pt.middleName, jobState3pt.minorName]
+                      .filter(Boolean)
+                      .join(" > ")}
+                  />
+                ) : null
+              ) : (
+                isShokumu && selectedMajorName && (
+                  <ConfirmRow
+                    label="応募職種"
+                    value={[selectedMajorName, selectedMiddleName, selectedMinorName]
+                      .filter(Boolean)
+                      .join(" > ")}
+                  />
+                )
               )}
               <ConfirmRow
                 label="担当者"
@@ -1956,11 +2255,14 @@ export default function TaskNewPage() {
               {description && (
                 <ConfirmRow label="詳細メモ" value={description} />
               )}
-              {/* 経歴概要（非営業） */}
-              {isShokumu && !isSalesJob && careerSummary && (
+              {/* 経歴概要（非営業・3pt） */}
+              {is3pointSet && !SALES_MAJORS.includes(jobState3pt.majorName) && careerSummary3pt && (
+                <ConfirmRow label="経歴・実績の概要" value={careerSummary3pt} />
+              )}
+              {!is3pointSet && isShokumu && !isSalesJob && careerSummary && (
                 <ConfirmRow label="経歴・実績の概要" value={careerSummary} />
               )}
-              {selectedCategory &&
+              {!is3pointSet && selectedCategory &&
                 selectedCategory.fields.length > 0 && (
                   <div>
                     <dt className="text-[12px] font-medium text-[#6B7280]">
@@ -1968,11 +2270,8 @@ export default function TaskNewPage() {
                     </dt>
                     <dd className="mt-1 space-y-1">
                       {selectedCategory.fields.map((f) => {
-                        // 志望動機フィールドは上で表示済み
                         if (isRirekisho && (f.label === "志望動機（大分類）" || f.label === "志望動機（中分類）" || f.label === "志望動機（小分類）")) return null;
-                        // 応募職種は上で表示済み
                         if (f.label === "応募職種" && isShokumu) return null;
-                        // 求人検索: 職種はパンくず形式で表示
                         if (isKyujinKensaku && f.label === "職種") {
                           return (
                             <div key={f.id} className="flex gap-2 text-[13px]">
@@ -2063,7 +2362,18 @@ export default function TaskNewPage() {
           <button
             type="button"
             disabled={step === 0}
-            onClick={() => setStep((s) => s - 1)}
+            onClick={() => {
+              if (is3pointSet && step === 2 && subStep3pt > 0) {
+                save3ptSubStepState(subStep3pt);
+                setSubStep3pt((s) => s - 1);
+                restore3ptSubStepState(subStep3pt - 1);
+              } else {
+                if (is3pointSet && step === 3) {
+                  restore3ptSubStepState(subStep3pt);
+                }
+                setStep((s) => s - 1);
+              }
+            }}
             className={[
               "rounded-[6px] px-4 py-2 text-[14px] font-medium transition-colors",
               step === 0
@@ -2078,7 +2388,18 @@ export default function TaskNewPage() {
             <button
               type="button"
               disabled={!canProceed()}
-              onClick={() => setStep((s) => s + 1)}
+              onClick={() => {
+                if (is3pointSet && step === 2 && subStep3pt < 2) {
+                  save3ptSubStepState(subStep3pt);
+                  setSubStep3pt((s) => s + 1);
+                  restore3ptSubStepState(subStep3pt + 1);
+                } else {
+                  if (is3pointSet && step === 2) {
+                    save3ptSubStepState(subStep3pt);
+                  }
+                  setStep((s) => s + 1);
+                }
+              }}
               className={[
                 "rounded-[8px] px-5 py-2.5 text-[14px] font-medium text-white transition-colors",
                 canProceed()
@@ -2092,7 +2413,7 @@ export default function TaskNewPage() {
             <button
               type="button"
               disabled={submitting}
-              onClick={handleSubmit}
+              onClick={is3pointSet ? handle3ptSubmit : handleSubmit}
               className={[
                 "rounded-[8px] px-5 py-2.5 text-[14px] font-medium text-white transition-colors",
                 submitting
@@ -2100,7 +2421,7 @@ export default function TaskNewPage() {
                   : "bg-[#2563EB] hover:bg-[#1D4ED8]",
               ].join(" ")}
             >
-              {submitting ? "タスクを作成中..." : "タスクを作成"}
+              {submitting ? "タスクを作成中..." : is3pointSet ? "3タスクを一括作成" : "タスクを作成"}
             </button>
           )}
         </div>

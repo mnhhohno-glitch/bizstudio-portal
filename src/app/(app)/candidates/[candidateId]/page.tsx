@@ -980,10 +980,16 @@ type CandidateTask = {
   assignees: { employee: { name: string } }[];
 };
 
-function CandidateTasksTab({ candidateId }: { candidateId: string }) {
+function CandidateTasksTab({ candidateId, employees }: { candidateId: string; employees: { id: string; name: string }[] }) {
   const [tasks, setTasks] = useState<CandidateTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [includeCompleted, setIncludeCompleted] = useState(false);
+
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkAssigneeId, setBulkAssigneeId] = useState("");
+  const [bulkPriority, setBulkPriority] = useState("MEDIUM");
+  const [bulkDueDate, setBulkDueDate] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -1016,16 +1022,61 @@ function CandidateTasksTab({ candidateId }: { candidateId: string }) {
     return new Date(d) < new Date(new Date().toDateString());
   };
 
+  const handleBulkCreate = async () => {
+    if (!bulkAssigneeId) {
+      alert("担当者を選択してください");
+      return;
+    }
+    setBulkSubmitting(true);
+    try {
+      const res = await fetch("/api/tasks/bulk-create-3point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId,
+          assigneeId: bulkAssigneeId,
+          priority: bulkPriority,
+          dueDate: bulkDueDate || null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "一括起票に失敗しました");
+        return;
+      }
+      const data = await res.json();
+      alert(data.message || "3タスクを一括起票しました");
+      setBulkModalOpen(false);
+      setBulkAssigneeId("");
+      setBulkPriority("MEDIUM");
+      setBulkDueDate("");
+      fetchTasks();
+    } catch {
+      alert("一括起票に失敗しました");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
   return (
     <div>
       {/* header: create button + toggle */}
       <div className="mb-4 flex items-center justify-between">
-        <a
-          href={`/tasks/new?candidateId=${candidateId}`}
-          className="rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
-        >
-          タスクを作成
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={`/tasks/new?candidateId=${candidateId}`}
+            className="rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
+          >
+            タスクを作成
+          </a>
+          <button
+            type="button"
+            onClick={() => setBulkModalOpen(true)}
+            className="rounded-[8px] border border-[#2563EB] bg-white px-4 py-2 text-[13px] font-medium text-[#2563EB] shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#EFF6FF]"
+          >
+            3点セット一括起票
+          </button>
+        </div>
         <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[#374151]">
           <input
             type="checkbox"
@@ -1036,6 +1087,71 @@ function CandidateTasksTab({ candidateId }: { candidateId: string }) {
           完了タスクを表示
         </label>
       </div>
+
+      {/* 3点セット一括起票モーダル */}
+      {bulkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-1 text-[16px] font-bold text-[#111827]">応募書類3点セット一括起票</h3>
+            <p className="mb-5 text-[13px] text-[#6B7280]">
+              履歴書作成・職務経歴書作成・推薦状作成の3タスクを一括で起票します
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">担当者 <span className="text-red-500">*</span></label>
+                <select
+                  value={bulkAssigneeId}
+                  onChange={(e) => setBulkAssigneeId(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                >
+                  <option value="">選択してください</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">優先度</label>
+                <select
+                  value={bulkPriority}
+                  onChange={(e) => setBulkPriority(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                >
+                  <option value="HIGH">高</option>
+                  <option value="MEDIUM">中</option>
+                  <option value="LOW">低</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[13px] font-medium text-[#374151]">期日</label>
+                <input
+                  type="date"
+                  value={bulkDueDate}
+                  onChange={(e) => setBulkDueDate(e.target.value)}
+                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-[13px]"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBulkModalOpen(false)}
+                className="rounded-lg border border-[#D1D5DB] px-4 py-2 text-[13px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkCreate}
+                disabled={bulkSubmitting || !bulkAssigneeId}
+                className="rounded-lg bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                {bulkSubmitting ? "起票中..." : "起票する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* table */}
       <div className="overflow-x-auto rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
@@ -1653,7 +1769,7 @@ function CandidateDetailPageBody() {
               />
             )}
             {activeTab === "tasks" && (
-              <CandidateTasksTab candidateId={candidateId} />
+              <CandidateTasksTab candidateId={candidateId} employees={employees} />
             )}
             {activeTab === "history" && (
               <HistoryTab candidateId={candidateId} />
