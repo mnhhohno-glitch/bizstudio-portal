@@ -1567,7 +1567,7 @@ function CandidateDetailPageBody() {
     if (candidate?.name) {
       document.title = `${candidate.name} - Bizstudio`;
     }
-  }, [candidate?.name]);
+  }, [candidate?.name, searchParams]);
 
   useEffect(() => {
     fetchCandidate();
