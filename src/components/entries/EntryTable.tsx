@@ -90,7 +90,7 @@ function fmtDateFull(iso: string | null) {
 }
 
 // 本人対応が完了済み（通知送信済・辞退報告済・入社済）のみ無効化
-const COMPLETED_PERSON_FLAGS = ["見送り通知送信済", "入社済"];
+const COMPLETED_PERSON_FLAGS = ["見送り通知送信済", "見送り通知済み", "入社済"];
 const COMPLETED_COMPANY_FLAGS = ["辞退報告済"];
 
 function isPersonActionCompleted(entry: Entry): boolean {

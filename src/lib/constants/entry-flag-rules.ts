@@ -1,6 +1,6 @@
 export const PERSON_FLAG_RULES: Record<string, string[]> = {
-  "求人紹介": ["辞退受付済"],
-  "エントリー": ["辞退受付済"],
+  "求人紹介": ["辞退受付済", "見送り通知済み"],
+  "エントリー": ["辞退受付済", "見送り通知済み"],
   "書類選考": ["辞退受付済", "見送り通知未送信", "見送り通知送信済", "選考通過連絡前"],
   "面接": [
     "辞退受付済", "見送り通知未送信", "見送り通知送信済", "選考通過連絡前",
@@ -39,6 +39,6 @@ export const SELECTION_ENDED_DETAILS = [
 ];
 
 export const INACTIVE_TRIGGERS = {
-  personFlags: ["見送り通知送信済", "入社済"],
+  personFlags: ["見送り通知送信済", "見送り通知済み", "入社済"],
   companyFlags: ["辞退報告済"],
 };
