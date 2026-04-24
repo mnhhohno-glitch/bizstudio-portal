@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
 import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
+import { TimeInput } from "@/components/ui/TimeInput";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -259,9 +260,17 @@ function Fld({
       />
     );
   }
+  if (type === "time") {
+    return (
+      <TimeInput
+        value={value != null ? String(value) : ""} onChange={onChange}
+        placeholder={placeholder} style={base} className={className} readOnly={readOnly}
+      />
+    );
+  }
   return (
     <input
-      type={type === "number" ? "number" : type === "date" ? "date" : type === "time" ? "time" : "text"}
+      type={type === "number" ? "number" : type === "date" ? "date" : "text"}
       value={value != null ? String(value) : ""} onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder} style={base} className={className} readOnly={readOnly}
     />
@@ -269,32 +278,25 @@ function Fld({
 }
 
 function TimeStampField({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
-  const ref = useRef<HTMLInputElement>(null);
   const stamp = () => {
     const now = new Date();
     onChange(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
   };
   return (
     <div className="flex items-center flex-1 min-w-0" style={{ gap: 2 }}>
-      <input
-        ref={ref}
-        type="time"
+      <TimeInput
         value={value != null ? String(value) : ""}
-        onChange={(e) => onChange(e.target.value)}
-        onClick={stamp}
-        onKeyDown={(e) => e.preventDefault()}
-        onBeforeInput={(e) => e.preventDefault()}
-        onPaste={(e) => e.preventDefault()}
-        style={{ flex: "1 1 0%", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5, color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", width: "100%", cursor: "pointer" }}
+        onChange={onChange}
+        style={{ flex: "1 1 0%", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5, color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", width: "100%" }}
       />
       <button
         type="button"
         className="shrink-0 p-0.5 transition-colors"
         style={{ color: "var(--im-fg3, #9CA3AF)" }}
-        title="時刻を選択"
+        title="現在時刻を入力"
         onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg, #374151)"; }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg3, #9CA3AF)"; }}
-        onClick={() => { try { ref.current?.showPicker(); } catch { /* showPicker not supported */ } }}
+        onClick={stamp}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       </button>
@@ -1244,9 +1246,9 @@ export default function InterviewForm({
                             onChange={(e) => handleUpdateMemo(memo.id, "date", e.target.value)}
                             style={{ width: 116, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
                           />
-                          <input
-                            type="time" value={memo.time || ""}
-                            onChange={(e) => handleUpdateMemo(memo.id, "time", e.target.value)}
+                          <TimeInput
+                            value={memo.time || ""}
+                            onChange={(v) => handleUpdateMemo(memo.id, "time", v)}
                             style={{ width: 78, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
                           />
                         </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { TimeInput } from "@/components/ui/TimeInput";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -630,11 +631,11 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
             <div className="mb-4 flex gap-3">
               <div className="flex-1">
                 <label className="block text-[13px] font-medium text-[#374151] mb-1">開始時間（必須）</label>
-                <input type="time" value={modalStartTime} onChange={(e) => setModalStartTime(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
+                <TimeInput value={modalStartTime} onChange={setModalStartTime} className="w-full border border-gray-300 rounded px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
               </div>
               <div className="flex-1">
                 <label className="block text-[13px] font-medium text-[#374151] mb-1">終了時間</label>
-                <input type="time" value={modalEndTime} onChange={(e) => setModalEndTime(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
+                <TimeInput value={modalEndTime} onChange={setModalEndTime} className="w-full border border-gray-300 rounded px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]" />
               </div>
             </div>
 
