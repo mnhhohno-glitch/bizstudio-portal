@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 
@@ -324,7 +324,7 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candidateId: string; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -353,6 +353,22 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
+
+  const findJobResponse = useCallback((fileName: string): string | null => {
+    const key = normalize(
+      fileName
+        .replace(/\.pdf$/i, "")
+        .replace(/^求人票[_]?/, "")
+        .replace(/_\d{10,}$/, "")
+        .replace(/株式会社|有限会社|合同会社/g, "")
+        .trim()
+    );
+    if (!key) return null;
+    for (const [cn, response] of jobResponseMap) {
+      if (key.includes(cn) || cn.includes(key)) return response;
+    }
+    return null;
+  }, [jobResponseMap]);
 
   const triggerExtraction = (fileIds: string[], label = "") => {
     if (fileIds.length === 0) return;
@@ -864,6 +880,14 @@ function BookmarkSection({ candidateId, onCountChange, onSwitchToJobs }: { candi
                     title={file.fileName}
                   >{file.fileName}</button>
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
+                  {(() => {
+                    const resp = findJobResponse(file.fileName);
+                    return resp && RESPONSE_BADGE[resp] ? (
+                      <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${RESPONSE_BADGE[resp].cls}`}>
+                        {RESPONSE_BADGE[resp].label}
+                      </span>
+                    ) : null;
+                  })()}
                   {file.lastExportedAt && (
                     <span
                       className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-800 border border-green-200"
@@ -1266,6 +1290,18 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   // Derive entered external job ids for cross-referencing
   const enteredJobIds = new Set(entries.map((e) => e.externalJobId));
 
+  // Job candidate responses for cross-referencing with bookmarks
+  const jobResponseMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!jobsData?.jobs) return map;
+    for (const job of jobsData.jobs) {
+      if (!job.candidate_response) continue;
+      const cn = normalize(job.company_name.replace(/株式会社|有限会社|合同会社/g, "").trim());
+      if (cn) map.set(cn, job.candidate_response);
+    }
+    return map;
+  }, [jobsData]);
+
   /* ---------- Fetch ---------- */
   const fetchBookmarkRatings = useCallback(async () => {
     try {
@@ -1585,7 +1621,7 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} />
       )}
 
       {/* ===== 求人紹介サブタブ ===== */}
