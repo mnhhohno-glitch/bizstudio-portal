@@ -138,6 +138,14 @@ export default function SharePage() {
         {status === "authenticated" && (
           <div>
             <p className="text-sm text-gray-600 text-center mb-4">以下の書類をご確認ください</p>
+            {files.length > 1 && (
+              <button
+                onClick={() => window.open(`/api/share/${token}/download-all`, "_blank")}
+                className="w-full bg-[#2563EB] text-white rounded-lg px-4 py-3 text-sm font-medium hover:bg-[#1D4ED8] transition-colors mb-4"
+              >
+                📦 すべてのファイルを一括ダウンロード（ZIP）
+              </button>
+            )}
             <div className="space-y-3">
               {files.map((file) => (
                 <div key={file.id} className="border border-gray-200 rounded-lg p-4">
