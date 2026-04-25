@@ -19,7 +19,6 @@ export default function SharePage() {
   const [verifying, setVerifying] = useState(false);
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [expiresAt, setExpiresAt] = useState("");
-  const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if link is valid
@@ -78,26 +77,8 @@ export default function SharePage() {
     // For now, just show files after auth
   }, []);
 
-  const handleDownload = async (fileId: string, fileName: string) => {
-    setDownloading(fileId);
-    try {
-      const res = await fetch(`/api/share/${token}/download/${fileId}`);
-      if (!res.ok) {
-        alert("ダウンロードに失敗しました");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("ダウンロードに失敗しました");
-    } finally {
-      setDownloading(null);
-    }
+  const handleDownload = (fileId: string) => {
+    window.open(`/api/share/${token}/download/${fileId}`, "_blank");
   };
 
   return (
@@ -166,11 +147,10 @@ export default function SharePage() {
                   </div>
                   <p className="text-xs text-gray-400 mt-1">{formatFileSize(file.fileSize)}</p>
                   <button
-                    onClick={() => handleDownload(file.id, file.fileName)}
-                    disabled={downloading === file.id}
-                    className="mt-3 w-full bg-[#2563EB] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors"
+                    onClick={() => handleDownload(file.id)}
+                    className="mt-3 w-full bg-[#2563EB] text-white rounded-md px-4 py-2 text-sm font-medium hover:bg-[#1D4ED8] transition-colors"
                   >
-                    {downloading === file.id ? "ダウンロード中..." : "⬇ ダウンロード"}
+                    ⬇ ダウンロード
                   </button>
                 </div>
               ))}
