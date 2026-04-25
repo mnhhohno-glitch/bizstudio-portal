@@ -77,6 +77,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const endReasons: Record<string, string> | undefined =
+        payload?.endReasons;
+
+      if (newStatus === "ENDED") {
+        for (const id of candidateIds) {
+          if (!endReasons?.[id]) {
+            return NextResponse.json(
+              { error: "全員の終了理由を選択してください" },
+              { status: 400 }
+            );
+          }
+        }
+      }
+
       await prisma.$transaction(async (tx) => {
         for (const candidateId of candidateIds) {
           const updateData: Record<string, unknown> = {
@@ -84,7 +98,10 @@ export async function POST(request: NextRequest) {
             supportSubStatusManual: false,
           };
 
-          if (newStatus !== "ENDED") {
+          if (newStatus === "ENDED" && endReasons?.[candidateId]) {
+            updateData.supportEndReason = endReasons[candidateId];
+            updateData.supportEndDate = new Date();
+          } else if (newStatus !== "ENDED") {
             updateData.supportEndReason = null;
             updateData.supportEndNote = null;
             updateData.supportEndDate = null;

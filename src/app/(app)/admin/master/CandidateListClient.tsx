@@ -109,6 +109,8 @@ export default function CandidateListClient({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
+  const [bulkStatusValue, setBulkStatusValue] = useState("");
+  const [bulkEndReasons, setBulkEndReasons] = useState<Record<string, string>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -315,20 +317,46 @@ export default function CandidateListClient({
     executeBulkAction("change_assignee", { newAssigneeUserId });
   };
 
-  const submitBulkStatus = (newStatus: string) => {
+  const selectedCandidates = useMemo(
+    () => candidates.filter((c) => selectedIds.includes(c.id)),
+    [candidates, selectedIds]
+  );
+
+  const submitBulkStatus = (
+    newStatus: string,
+    endReasons?: Record<string, string>
+  ) => {
     const labels: Record<string, string> = {
       BEFORE: "支援前",
       ACTIVE: "支援中",
       WAITING: "待機",
+      ENDED: "支援終了",
     };
-    if (
-      !window.confirm(
-        `${selectedIds.length}件の支援状況を「${labels[newStatus]}」に変更しますか？`
+    if (newStatus === "ENDED" && endReasons) {
+      const summary = selectedCandidates
+        .map(
+          (c) =>
+            `・${c.name}（${REASON_LABEL_MAP[endReasons[c.id]] || ""}）`
+        )
+        .join("\n");
+      if (
+        !window.confirm(
+          `以下の求職者を支援終了にしてよろしいですか？\n\n${summary}`
+        )
       )
-    )
-      return;
-    setBulkStatusModalOpen(false);
-    executeBulkAction("change_status", { newStatus });
+        return;
+      setBulkStatusModalOpen(false);
+      executeBulkAction("change_status", { newStatus, endReasons });
+    } else {
+      if (
+        !window.confirm(
+          `${selectedIds.length}件の支援状況を「${labels[newStatus]}」に変更しますか？`
+        )
+      )
+        return;
+      setBulkStatusModalOpen(false);
+      executeBulkAction("change_status", { newStatus });
+    }
   };
 
   const displayTotal = debouncedSearch.trim() ? totalFiltered : totalCount;
@@ -502,7 +530,7 @@ export default function CandidateListClient({
                 担当CA変更
               </button>
               <button
-                onClick={() => setBulkStatusModalOpen(true)}
+                onClick={() => { setBulkStatusValue(""); setBulkEndReasons({}); setBulkStatusModalOpen(true); }}
                 disabled={bulkLoading}
                 className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
               >
@@ -771,52 +799,139 @@ export default function CandidateListClient({
       )}
 
       {/* 一括支援状況変更モーダル */}
-      {bulkStatusModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-[400px]">
-            <h3 className="text-base font-semibold mb-4">
-              支援状況一括変更（{selectedIds.length}件）
-            </h3>
-            <select
-              id="bulk-status-select"
-              defaultValue=""
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            >
-              <option value="" disabled>
-                変更先の支援状況を選択してください
-              </option>
-              <option value="BEFORE">支援前</option>
-              <option value="ACTIVE">支援中</option>
-              <option value="WAITING">待機</option>
-            </select>
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                onClick={() => setBulkStatusModalOpen(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => {
-                  const sel = (
-                    document.getElementById(
-                      "bulk-status-select"
-                    ) as HTMLSelectElement
-                  )?.value;
-                  if (!sel) {
-                    toast.error("支援状況を選択してください");
-                    return;
-                  }
-                  submitBulkStatus(sel);
+      {bulkStatusModalOpen && (() => {
+        const canSubmitStatus =
+          !!bulkStatusValue &&
+          (bulkStatusValue !== "ENDED" ||
+            selectedCandidates.every((c) => bulkEndReasons[c.id]));
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[480px] max-h-[80vh] overflow-y-auto">
+              <h3 className="text-base font-semibold mb-4">
+                支援状況一括変更（{selectedIds.length}件）
+              </h3>
+              <select
+                value={bulkStatusValue}
+                onChange={(e) => {
+                  setBulkStatusValue(e.target.value);
+                  setBulkEndReasons({});
                 }}
-                className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
               >
-                変更する
-              </button>
+                <option value="" disabled>
+                  変更先の支援状況を選択してください
+                </option>
+                <option value="BEFORE">支援前</option>
+                <option value="ACTIVE">支援中</option>
+                <option value="WAITING">待機</option>
+                <option value="ENDED">支援終了</option>
+              </select>
+
+              {bulkStatusValue === "ENDED" && (
+                <div className="border-t pt-4 mt-4 space-y-4">
+                  <div className="text-sm font-medium text-gray-700">
+                    終了理由の選択
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-md">
+                    <label className="text-xs text-gray-600 block mb-1">
+                      全員に同じ理由を適用:
+                    </label>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const next: Record<string, string> = {};
+                        selectedCandidates.forEach(
+                          (c) => (next[c.id] = e.target.value)
+                        );
+                        setBulkEndReasons(next);
+                      }}
+                      className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                    >
+                      <option value="">選択してください</option>
+                      {SUPPORT_END_REASONS.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-xs text-gray-500">
+                      個別に終了理由を選択してください:
+                    </div>
+                    {selectedCandidates.map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex items-center gap-2"
+                      >
+                        <span className="w-28 text-sm truncate shrink-0" title={c.name}>
+                          {c.name}
+                        </span>
+                        <select
+                          value={bulkEndReasons[c.id] || ""}
+                          onChange={(e) =>
+                            setBulkEndReasons((prev) => ({
+                              ...prev,
+                              [c.id]: e.target.value,
+                            }))
+                          }
+                          className={`flex-1 border rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none ${
+                            bulkEndReasons[c.id]
+                              ? "border-gray-300"
+                              : "border-red-300 bg-red-50"
+                          }`}
+                        >
+                          <option value="">選択してください</option>
+                          {SUPPORT_END_REASONS.map((r) => (
+                            <option key={r.code} value={r.code}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 mt-6">
+                <button
+                  onClick={() => setBulkStatusModalOpen(false)}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={() => {
+                    if (!bulkStatusValue) {
+                      toast.error("支援状況を選択してください");
+                      return;
+                    }
+                    submitBulkStatus(
+                      bulkStatusValue,
+                      bulkStatusValue === "ENDED"
+                        ? bulkEndReasons
+                        : undefined
+                    );
+                  }}
+                  disabled={!canSubmitStatus}
+                  className={`px-4 py-2 text-sm rounded-md ${
+                    canSubmitStatus
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  {bulkStatusValue === "ENDED"
+                    ? "支援終了に変更"
+                    : "変更する"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </>
   );
 }
