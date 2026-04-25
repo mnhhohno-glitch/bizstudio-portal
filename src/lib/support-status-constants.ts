@@ -1,4 +1,4 @@
-export const SUPPORT_STATUS_VALUES = ["BEFORE", "ACTIVE", "WAITING", "ENDED"] as const;
+export const SUPPORT_STATUS_VALUES = ["BEFORE", "ACTIVE", "WAITING", "ENDED", "ARCHIVED"] as const;
 export type SupportStatus = (typeof SUPPORT_STATUS_VALUES)[number];
 
 export const SUPPORT_STATUS_LABEL: Record<string, string> = {
@@ -6,6 +6,7 @@ export const SUPPORT_STATUS_LABEL: Record<string, string> = {
   ACTIVE: "支援中",
   WAITING: "待機",
   ENDED: "支援終了",
+  ARCHIVED: "アーカイブ",
 };
 
 export const SUPPORT_SUB_STATUS_MAP: Record<string, string[]> = {
@@ -13,6 +14,7 @@ export const SUPPORT_SUB_STATUS_MAP: Record<string, string[]> = {
   ACTIVE: ["求人紹介前", "BM", "求人紹介", "エントリー", "書類選考", "面接", "内定", "入社済"],
   WAITING: ["待機"],
   ENDED: ["当社判断", "本人希望"],
+  ARCHIVED: [],
 };
 
 export const SUPPORT_SUB_STATUS_DEFAULT: Record<string, string> = {
@@ -20,6 +22,7 @@ export const SUPPORT_SUB_STATUS_DEFAULT: Record<string, string> = {
   ACTIVE: "求人紹介前",
   WAITING: "待機",
   ENDED: "当社判断",
+  ARCHIVED: "",
 };
 
 // 大項目が変更不可（= 中項目が1択）のケース

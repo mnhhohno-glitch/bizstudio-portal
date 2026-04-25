@@ -14,6 +14,7 @@ const SUPPORT_TABS = [
   { key: "WAITING", label: "待機" },
   { key: "ENDED", label: "支援終了" },
   { key: "ALL", label: "ALL" },
+  { key: "ARCHIVED", label: "アーカイブ" },
 ] as const;
 
 const SUPPORT_BADGE: Record<string, { label: string; cls: string }> = {
@@ -21,6 +22,7 @@ const SUPPORT_BADGE: Record<string, { label: string; cls: string }> = {
   ACTIVE: { label: "支援中", cls: "bg-blue-100 text-blue-700" },
   WAITING: { label: "待機", cls: "bg-yellow-100 text-yellow-700" },
   ENDED: { label: "支援終了", cls: "bg-red-100 text-red-600" },
+  ARCHIVED: { label: "アーカイブ", cls: "bg-gray-200 text-gray-500" },
 };
 
 type Employee = {
@@ -104,6 +106,10 @@ export default function CandidateListClient({
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
   const [endReasonFilter, setEndReasonFilter] = useState("ALL");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
+  const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -119,7 +125,9 @@ export default function CandidateListClient({
 
   const filtered = useMemo(() => {
     let result = candidates;
-    if (supportTab !== "ALL") {
+    if (supportTab === "ALL") {
+      result = result.filter((c) => c.supportStatus !== "ARCHIVED");
+    } else {
       result = result.filter((c) => c.supportStatus === supportTab);
     }
     if (debouncedSearch.trim()) {
@@ -179,8 +187,11 @@ export default function CandidateListClient({
     if (genderFilter !== "ALL") {
       base = base.filter((c) => c.gender === genderFilter);
     }
-    const counts: Record<string, number> = { ALL: base.length, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0 };
-    for (const c of base) { counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1; }
+    const counts: Record<string, number> = { ALL: 0, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0, ARCHIVED: 0 };
+    for (const c of base) {
+      counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1;
+      if (c.supportStatus !== "ARCHIVED") counts.ALL += 1;
+    }
     return counts;
   }, [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter]);
 
@@ -228,6 +239,98 @@ export default function CandidateListClient({
     }
   }, []);
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === pageData.length && pageData.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(pageData.map((c) => c.id));
+    }
+  };
+
+  const executeBulkAction = async (
+    action: string,
+    payload?: Record<string, unknown>
+  ) => {
+    setBulkLoading(true);
+    try {
+      const res = await fetch("/api/master/candidates/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, candidateIds: selectedIds, payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "操作に失敗しました");
+        return;
+      }
+      toast.success(data.message);
+      setSelectedIds([]);
+      refreshCandidates();
+    } catch {
+      toast.error("操作に失敗しました");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkArchive = () => {
+    if (selectedIds.length > 20) {
+      toast.error("一括操作は最大20件までです");
+      return;
+    }
+    if (
+      !window.confirm(
+        `${selectedIds.length}件の求職者をアーカイブしますか？\n（後でアーカイブタブから復元できます）`
+      )
+    )
+      return;
+    executeBulkAction("archive");
+  };
+
+  const handleBulkUnarchive = () => {
+    if (
+      !window.confirm(
+        `${selectedIds.length}件のアーカイブを解除しますか？（支援中に戻ります）`
+      )
+    )
+      return;
+    executeBulkAction("change_status", { newStatus: "ACTIVE" });
+  };
+
+  const submitBulkAssignee = (newAssigneeUserId: string) => {
+    const emp = employees.find((e) => e.id === newAssigneeUserId);
+    if (
+      !window.confirm(
+        `${selectedIds.length}件の担当CAを「${emp?.name}」に変更しますか？`
+      )
+    )
+      return;
+    setBulkAssigneeModalOpen(false);
+    executeBulkAction("change_assignee", { newAssigneeUserId });
+  };
+
+  const submitBulkStatus = (newStatus: string) => {
+    const labels: Record<string, string> = {
+      BEFORE: "支援前",
+      ACTIVE: "支援中",
+      WAITING: "待機",
+    };
+    if (
+      !window.confirm(
+        `${selectedIds.length}件の支援状況を「${labels[newStatus]}」に変更しますか？`
+      )
+    )
+      return;
+    setBulkStatusModalOpen(false);
+    executeBulkAction("change_status", { newStatus });
+  };
+
   const displayTotal = debouncedSearch.trim() ? totalFiltered : totalCount;
   const displayStart = totalFiltered > 0 ? skip + 1 : 0;
   const displayEnd = Math.min(skip + PAGE_SIZE, totalFiltered);
@@ -257,7 +360,7 @@ export default function CandidateListClient({
         {SUPPORT_TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
+            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               supportTab === tab.key
                 ? "text-[#2563EB] border-[#2563EB]"
@@ -376,12 +479,61 @@ export default function CandidateListClient({
         )}
       </div>
 
+      {/* 選択中ツールバー */}
+      {selectedIds.length > 0 && (
+        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-3 flex-wrap">
+          <span className="font-medium text-sm text-blue-800">
+            選択中 {selectedIds.length}件
+          </span>
+          {supportTab !== "ARCHIVED" ? (
+            <>
+              <button
+                onClick={handleBulkArchive}
+                disabled={bulkLoading}
+                className="bg-red-500 text-white px-3 py-1.5 rounded text-sm hover:bg-red-600 disabled:opacity-50"
+              >
+                アーカイブ
+              </button>
+              <button
+                onClick={() => setBulkAssigneeModalOpen(true)}
+                disabled={bulkLoading}
+                className="bg-[#2563EB] text-white px-3 py-1.5 rounded text-sm hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                担当CA変更
+              </button>
+              <button
+                onClick={() => setBulkStatusModalOpen(true)}
+                disabled={bulkLoading}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                支援状況変更
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleBulkUnarchive}
+              disabled={bulkLoading}
+              className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
+            >
+              アーカイブ解除（支援中に戻す）
+            </button>
+          )}
+          <button
+            onClick={() => setSelectedIds([])}
+            className="ml-auto text-sm text-gray-500 hover:text-gray-700"
+          >
+            選択解除
+          </button>
+        </div>
+      )}
+
       {/* テーブル */}
       <div className="mt-4 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <div className="p-4">
           <TableWrap>
             <Table className="table-fixed w-full">
               <colgroup>
+                <col style={{ width: "3%" }} />
                 <col style={{ width: "7%" }} />
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "10%" }} />
@@ -393,6 +545,14 @@ export default function CandidateListClient({
               </colgroup>
               <thead>
                 <tr>
+                  <Th>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.length === pageData.length && pageData.length > 0}
+                      onChange={toggleSelectAll}
+                      className="cursor-pointer"
+                    />
+                  </Th>
                   <Th>求職者番号</Th>
                   <Th>氏名</Th>
                   <Th>フリガナ</Th>
@@ -406,6 +566,14 @@ export default function CandidateListClient({
               <tbody>
                 {pageData.map((cand) => (
                   <tr key={cand.id}>
+                    <Td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(cand.id)}
+                        onChange={() => toggleSelect(cand.id)}
+                        className="cursor-pointer"
+                      />
+                    </Td>
                     <Td className="overflow-hidden">
                       <div className="font-mono text-[13px] truncate">
                         {cand.candidateNumber}
@@ -441,7 +609,11 @@ export default function CandidateListClient({
                       </div>
                     </Td>
                     <Td>
-                      {cand.supportStatus === "ENDED" ? (
+                      {cand.supportStatus === "ARCHIVED" ? (
+                        <span className="inline-flex items-center justify-center text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-500 min-w-[96px]">
+                          アーカイブ
+                        </span>
+                      ) : cand.supportStatus === "ENDED" ? (
                         <button
                           onClick={() => setEndModalCandidateId(cand.id)}
                           title={cand.supportEndReason ? REASON_LABEL_MAP[cand.supportEndReason] || "" : ""}
@@ -474,7 +646,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()
@@ -546,6 +718,104 @@ export default function CandidateListClient({
           onClose={() => setEndModalCandidateId(null)}
           onSaved={() => { setEndModalCandidateId(null); refreshCandidates(); }}
         />
+      )}
+
+      {/* 一括担当CA変更モーダル */}
+      {bulkAssigneeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[400px]">
+            <h3 className="text-base font-semibold mb-4">
+              担当CA一括変更（{selectedIds.length}件）
+            </h3>
+            <select
+              id="bulk-assignee-select"
+              defaultValue=""
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            >
+              <option value="" disabled>
+                担当CAを選択してください
+              </option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setBulkAssigneeModalOpen(false)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  const sel = (
+                    document.getElementById(
+                      "bulk-assignee-select"
+                    ) as HTMLSelectElement
+                  )?.value;
+                  if (!sel) {
+                    toast.error("担当CAを選択してください");
+                    return;
+                  }
+                  submitBulkAssignee(sel);
+                }}
+                className="px-4 py-2 text-sm bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8]"
+              >
+                変更する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 一括支援状況変更モーダル */}
+      {bulkStatusModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[400px]">
+            <h3 className="text-base font-semibold mb-4">
+              支援状況一括変更（{selectedIds.length}件）
+            </h3>
+            <select
+              id="bulk-status-select"
+              defaultValue=""
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            >
+              <option value="" disabled>
+                変更先の支援状況を選択してください
+              </option>
+              <option value="BEFORE">支援前</option>
+              <option value="ACTIVE">支援中</option>
+              <option value="WAITING">待機</option>
+            </select>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setBulkStatusModalOpen(false)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  const sel = (
+                    document.getElementById(
+                      "bulk-status-select"
+                    ) as HTMLSelectElement
+                  )?.value;
+                  if (!sel) {
+                    toast.error("支援状況を選択してください");
+                    return;
+                  }
+                  submitBulkStatus(sel);
+                }}
+                className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700"
+              >
+                変更する
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
