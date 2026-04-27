@@ -46,6 +46,8 @@ export type Entry = {
   interviewPrepTime: string | null;
   firstInterviewDate: string | null;
   firstInterviewTime: string | null;
+  secondInterviewDate: string | null;
+  secondInterviewTime: string | null;
   finalInterviewDate: string | null;
   finalInterviewTime: string | null;
   offerDate: string | null;

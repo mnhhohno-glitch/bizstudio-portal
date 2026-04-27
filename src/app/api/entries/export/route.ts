@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     "企業対応", "本人対応", "求人チェック", "有E", "入社",
     "エントリー日", "初回面談日", "求人紹介日", "書類提出日", "書類通過日",
     "適性検査", "適性検査期限", "面接対策日", "面接対策時間",
-    "一次面接日", "一次面接時間", "最終面接日", "最終面接時間",
+    "一次面接日", "一次面接時間", "二次面接日", "二次面接時間", "最終面接日", "最終面接時間",
     "内定日", "承諾期限", "オファー面談日", "オファー面談時間",
     "承諾日", "入社日", "メモ", "有効",
   ];
@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
     e.aptitudeTestExists ? "有" : "", fmtDate(e.aptitudeTestDeadline),
     fmtDate(e.interviewPrepDate), e.interviewPrepTime || "",
     fmtDate(e.firstInterviewDate), e.firstInterviewTime || "",
+    fmtDate(e.secondInterviewDate), e.secondInterviewTime || "",
     fmtDate(e.finalInterviewDate), e.finalInterviewTime || "",
     fmtDate(e.offerDate), fmtDate(e.offerDeadline),
     fmtDate(e.offerMeetingDate), e.offerMeetingTime || "",
