@@ -56,6 +56,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   "面接": [
     { key: "interviewPrep", label: "面接対策", width: 95, sortKey: "interviewPrepDate" },
     { key: "firstInterview", label: "一次面接", width: 95, sortKey: "firstInterviewDate" },
+    { key: "secondInterview", label: "二次面接", width: 95, sortKey: "secondInterviewDate" },
     { key: "finalInterview", label: "最終面接", width: 95, sortKey: "finalInterviewDate" },
   ],
   "内定": [
@@ -150,6 +151,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
     case "aptitudeTestDeadline": return entry.aptitudeTestDeadline;
     case "interviewPrepDate": return entry.interviewPrepDate;
     case "firstInterviewDate": return entry.firstInterviewDate;
+    case "secondInterviewDate": return entry.secondInterviewDate;
     case "finalInterviewDate": return entry.finalInterviewDate;
     case "offerDate": return entry.offerDate;
     case "offerDeadline": return entry.offerDeadline;
@@ -545,6 +547,8 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.interviewPrepDate} timeValue={entry.interviewPrepTime} entryId={entry.id} dateField="interviewPrepDate" timeField="interviewPrepTime" onUpdate={onFieldUpdate} /></td>;
       case "firstInterview":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
+      case "secondInterview":
+        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
       case "finalInterview":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
       case "offerDate":

@@ -41,6 +41,7 @@ export async function PATCH(
     "firstMeetingDate", "jobMeetingDate", "jobIntroDate", "documentSubmitDate",
     "documentPassDate", "aptitudeTestExists", "aptitudeTestDeadline",
     "interviewPrepDate", "interviewPrepTime", "firstInterviewDate", "firstInterviewTime",
+    "secondInterviewDate", "secondInterviewTime",
     "finalInterviewDate", "finalInterviewTime", "offerDate", "offerDeadline",
     "offerMeetingDate", "offerMeetingTime", "acceptanceDate", "joinDate",
     "memo", "isActive", "careerAdvisorId", "entryDate", "jobDbUrl",

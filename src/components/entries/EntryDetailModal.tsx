@@ -52,6 +52,8 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved }
           interviewPrepTime: e.interviewPrepTime || "",
           firstInterviewDate: toInputDate(e.firstInterviewDate),
           firstInterviewTime: e.firstInterviewTime || "",
+          secondInterviewDate: toInputDate(e.secondInterviewDate),
+          secondInterviewTime: e.secondInterviewTime || "",
           finalInterviewDate: toInputDate(e.finalInterviewDate),
           finalInterviewTime: e.finalInterviewTime || "",
           offerDate: toInputDate(e.offerDate),
@@ -201,6 +203,8 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved }
               <div><label className={labelCls}>面接対策時間</label><input className={inputCls} value={form.interviewPrepTime as string} onChange={(e) => set("interviewPrepTime", e.target.value)} placeholder="10:00" /></div>
               <div><label className={labelCls}>一次面接日</label><input type="date" className={inputCls} value={form.firstInterviewDate as string} onChange={(e) => set("firstInterviewDate", e.target.value)} /></div>
               <div><label className={labelCls}>一次面接時間</label><input className={inputCls} value={form.firstInterviewTime as string} onChange={(e) => set("firstInterviewTime", e.target.value)} placeholder="14:00" /></div>
+              <div><label className={labelCls}>二次面接日</label><input type="date" className={inputCls} value={form.secondInterviewDate as string} onChange={(e) => set("secondInterviewDate", e.target.value)} /></div>
+              <div><label className={labelCls}>二次面接時間</label><input className={inputCls} value={form.secondInterviewTime as string} onChange={(e) => set("secondInterviewTime", e.target.value)} placeholder="14:00" /></div>
               <div><label className={labelCls}>最終面接日</label><input type="date" className={inputCls} value={form.finalInterviewDate as string} onChange={(e) => set("finalInterviewDate", e.target.value)} /></div>
               <div><label className={labelCls}>最終面接時間</label><input className={inputCls} value={form.finalInterviewTime as string} onChange={(e) => set("finalInterviewTime", e.target.value)} placeholder="14:00" /></div>
               <div><label className={labelCls}>内定日</label><input type="date" className={inputCls} value={form.offerDate as string} onChange={(e) => set("offerDate", e.target.value)} /></div>
