@@ -1328,6 +1328,7 @@ export default function InterviewForm({
                         columnLabels={["職種大", "職種中", "職種小"]}
                         searchPlaceholder="職種を検索..."
                         modalTitle="職種検索"
+                        enableUnspecifiedExclusive
                       />
                       <div className="mt-1.5"><Fld value={d.desiredJobType1Memo} onChange={(v) => setDetail("desiredJobType1Memo", v)} type="textarea" rows={2} placeholder="職種に関する所感・詳細メモ" /></div>
                     </div>
@@ -1350,6 +1351,7 @@ export default function InterviewForm({
                         columnLabels={["業種大", "業種中", "業種小"]}
                         searchPlaceholder="業種を検索..."
                         modalTitle="業種検索"
+                        enableUnspecifiedExclusive
                       />
                       <div className="mt-1.5"><Fld value={d.desiredIndustry1Memo} onChange={(v) => setDetail("desiredIndustry1Memo", v)} type="textarea" rows={2} placeholder="業種に関する所感・詳細メモ" /></div>
                     </div>

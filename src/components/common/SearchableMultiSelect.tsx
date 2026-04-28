@@ -17,6 +17,7 @@ interface Props {
   searchPlaceholder?: string;
   modalTitle?: string;
   disabled?: boolean;
+  enableUnspecifiedExclusive?: boolean;
 }
 
 function itemKey(item: FlatItem) {
@@ -31,6 +32,7 @@ export default function SearchableMultiSelect({
   searchPlaceholder = "検索...",
   modalTitle = "検索",
   disabled,
+  enableUnspecifiedExclusive,
 }: Props) {
   const [allItems, setAllItems] = useState<FlatItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -88,10 +90,16 @@ export default function SearchableMultiSelect({
     );
   }, [allItems, query]);
 
+  const isUnspecified = (it: FlatItem) => it.large === "指定なし";
+
   const toggleItem = (item: FlatItem) => {
     const key = itemKey(item);
     if (tempKeys.has(key)) {
       setTempSelected((prev) => prev.filter((s) => itemKey(s) !== key));
+    } else if (enableUnspecifiedExclusive && isUnspecified(item)) {
+      setTempSelected([item]);
+    } else if (enableUnspecifiedExclusive && tempSelected.some(isUnspecified)) {
+      setTempSelected([item]);
     } else if (tempSelected.length < maxSelect) {
       setTempSelected((prev) => [...prev, item]);
     }
