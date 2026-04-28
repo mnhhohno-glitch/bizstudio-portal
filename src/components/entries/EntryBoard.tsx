@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import EntryTable from "./EntryTable";
 import EntryDetailModal from "./EntryDetailModal";
@@ -158,6 +158,55 @@ export default function EntryBoard() {
   }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  // Phase 3: Auto-progress — after entries load, check interview times and auto-update flags
+  const autoProgressRan = useRef(false);
+  useEffect(() => {
+    if (loading || entries.length === 0 || autoProgressRan.current) return;
+    autoProgressRan.current = true;
+
+    const now = Date.now();
+    const ONE_HOUR = 60 * 60 * 1000;
+
+    const combineDateTime = (dateIso: string | null, time: string | null): number | null => {
+      if (!dateIso || !time) return null;
+      const [hh, mm] = time.split(":");
+      if (!hh || !mm) return null;
+      const d = new Date(dateIso);
+      d.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+      return d.getTime();
+    };
+
+    type AutoUpdate = { id: string; entryFlagDetail: string; companyFlag: string };
+    const updates: AutoUpdate[] = [];
+
+    const checks: { dateField: keyof Entry; timeField: keyof Entry; pre: string; post: string }[] = [
+      { dateField: "firstInterviewDate", timeField: "firstInterviewTime", pre: "一次面接実施前", post: "一次面接選考中" },
+      { dateField: "secondInterviewDate", timeField: "secondInterviewTime", pre: "二次面接実施前", post: "二次面接選考中" },
+      { dateField: "finalInterviewDate", timeField: "finalInterviewTime", pre: "最終面接実施前", post: "最終面接選考中" },
+    ];
+
+    for (const entry of entries) {
+      for (const chk of checks) {
+        if (entry.entryFlagDetail !== chk.pre) continue;
+        const ts = combineDateTime(entry[chk.dateField] as string | null, entry[chk.timeField] as string | null);
+        if (ts && now > ts + ONE_HOUR) {
+          updates.push({ id: entry.id, entryFlagDetail: chk.post, companyFlag: "所感報告前" });
+          break;
+        }
+      }
+    }
+
+    if (updates.length > 0) {
+      fetch("/api/entries/auto-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      }).then((res) => {
+        if (res.ok) fetchEntries();
+      });
+    }
+  }, [loading, entries, fetchEntries]);
 
   // Refresh only tab counts (no loading state, no entry replacement)
   const refreshCounts = useCallback(async () => {

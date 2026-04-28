@@ -545,12 +545,18 @@ export default function EntryTable({
         );
       case "interviewPrep":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.interviewPrepDate} timeValue={entry.interviewPrepTime} entryId={entry.id} dateField="interviewPrepDate" timeField="interviewPrepTime" onUpdate={onFieldUpdate} /></td>;
-      case "firstInterview":
-        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
-      case "secondInterview":
-        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
-      case "finalInterview":
-        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
+      case "firstInterview": {
+        const warn = entry.entryFlagDetail === "一次面接実施前" && (!entry.firstInterviewDate || !entry.firstInterviewTime);
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
+      }
+      case "secondInterview": {
+        const warn = entry.entryFlagDetail === "二次面接実施前" && (!entry.secondInterviewDate || !entry.secondInterviewTime);
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
+      }
+      case "finalInterview": {
+        const warn = entry.entryFlagDetail === "最終面接実施前" && (!entry.finalInterviewDate || !entry.finalInterviewTime);
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
+      }
       case "offerDate":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.offerDate} entryId={entry.id} field="offerDate" onUpdate={onFieldUpdate} /></td>;
       case "offerDeadline":
