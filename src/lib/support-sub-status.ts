@@ -36,12 +36,18 @@ export async function calculateSubStatus(candidateId: string): Promise<string> {
   if (entries.some((e) => e.entryFlag === "書類選考")) return "書類選考";
   // 5. エントリー
   if (entries.some((e) => e.entryFlag === "エントリー")) return "エントリー";
-  // 6. 求人紹介（JobEntryにentryFlag="求人紹介"のレコードがある）
+  // 6. 求人紹介（JobEntry or 出力済BOOKMARK）
   if (entries.some((e) => e.entryFlag === "求人紹介")) return "求人紹介";
+  const [exportedBookmarkCount, bookmarkCount] = await Promise.all([
+    prisma.candidateFile.count({
+      where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } },
+    }),
+    prisma.candidateFile.count({
+      where: { candidateId, category: "BOOKMARK" },
+    }),
+  ]);
+  if (exportedBookmarkCount > 0) return "求人紹介";
   // 7. BM（BOOKMARKファイルがある）
-  const bookmarkCount = await prisma.candidateFile.count({
-    where: { candidateId, category: "BOOKMARK" },
-  });
   if (bookmarkCount > 0) return "BM";
   // 8. 該当なし
   return "求人紹介前";

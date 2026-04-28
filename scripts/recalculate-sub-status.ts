@@ -20,9 +20,15 @@ async function calculateSubStatus(candidateId: string): Promise<string> {
   if (entries.some((e) => e.entryFlag === "エントリー")) return "エントリー";
   if (entries.some((e) => e.entryFlag === "求人紹介")) return "求人紹介";
 
-  const bookmarkCount = await prisma.candidateFile.count({
-    where: { candidateId, category: "BOOKMARK" },
-  });
+  const [exportedBookmarkCount, bookmarkCount] = await Promise.all([
+    prisma.candidateFile.count({
+      where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } },
+    }),
+    prisma.candidateFile.count({
+      where: { candidateId, category: "BOOKMARK" },
+    }),
+  ]);
+  if (exportedBookmarkCount > 0) return "求人紹介";
   if (bookmarkCount > 0) return "BM";
 
   return "求人紹介前";
