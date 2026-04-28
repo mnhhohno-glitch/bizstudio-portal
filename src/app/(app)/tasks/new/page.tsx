@@ -229,6 +229,9 @@ export default function TaskNewPage() {
   // step 1 - accordion
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
 
+  // step 4 - 対応方針（面談不参加共有カテゴリのみ）
+  const [responsePlan, setResponsePlan] = useState("");
+
   // step 5
   const [submitting, setSubmitting] = useState(false);
 
@@ -252,7 +255,8 @@ export default function TaskNewPage() {
   const isRirekisho = effectiveCategory?.name === RIREKISHO_CATEGORY;
   const isShokumu = effectiveCategory?.name === SHOKUMU_CATEGORY;
   const isSalesJob = SALES_MAJORS.includes(is3pointSet ? jobState3pt.majorName : selectedMajorName);
-  const isMendanFusanka = selectedCategory?.name === MENDAN_FUSANKA_CATEGORY;
+  const isMendanFusanka = selectedCategory?.name?.startsWith(MENDAN_FUSANKA_CATEGORY) ?? false;
+  const isDeclinePrefill = searchParams.get("prefill") === "interview-decline";
   const isMensetsuTaisaku = selectedCategory?.name === MENSETSU_TAISAKU_CATEGORY;
   const isNaitei = selectedCategory?.name === NAITEI_CATEGORY;
   const isNyusha = selectedCategory?.name === NYUSHA_CATEGORY;
@@ -396,6 +400,42 @@ export default function TaskNewPage() {
     }
 
     entryPrefillApplied.current = true;
+  }, [loading, categories, employees, candidates, searchParams]);
+
+  // 面談不参加共有プリセット (prefill=interview-decline)
+  const declinePrefillApplied = useRef(false);
+  useEffect(() => {
+    if (declinePrefillApplied.current) return;
+    if (searchParams.get("prefill") !== "interview-decline") return;
+    if (loading) return;
+    if (categories.length === 0 || employees.length === 0 || candidates.length === 0) return;
+
+    const catId = searchParams.get("categoryId");
+    if (catId) {
+      const cat = categories.find((c) => c.id === catId);
+      if (cat) setCategoryId(cat.id);
+    }
+
+    const candId = searchParams.get("candidateId");
+    if (candId) {
+      const found = candidates.find((c) => c.id === candId);
+      if (found) {
+        setWithCandidate(true);
+        setCandidateId(found.id);
+        setCandidateSearch(found.name);
+      }
+    }
+
+    const assigneeId = searchParams.get("assigneeId");
+    if (assigneeId) {
+      setAssigneeIds([assigneeId]);
+    }
+
+    const pt = searchParams.get("title");
+    if (pt) setTitle(pt);
+
+    setStep(4);
+    declinePrefillApplied.current = true;
   }, [loading, categories, employees, candidates, searchParams]);
 
   /* ----- job category cascading ----- */
@@ -559,6 +599,7 @@ export default function TaskNewPage() {
       case 3:
         return assigneeIds.length > 0;
       case 4:
+        if (isMendanFusanka && !responsePlan) return false;
         return is3pointSet || !!title.trim();
       default:
         return true;
@@ -790,12 +831,22 @@ export default function TaskNewPage() {
 
       const allFieldValues = [...normalFieldValues, ...extraFieldValues];
 
+      const RESPONSE_PLAN_LABELS: Record<string, string> = {
+        "1": "1. 通常フロー（追いかけて返信がくれば設定）",
+        "2": "2. 形式的に追いかけるが、返信がきても先々の日程で設定",
+        "3": "3. 追いかけ不要",
+      };
+      const finalDescription = [
+        description.trim(),
+        responsePlan ? `対応方針: ${RESPONSE_PLAN_LABELS[responsePlan]}` : "",
+      ].filter(Boolean).join("\n\n");
+
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
-          description: description.trim() || null,
+          description: finalDescription || null,
           categoryId,
           candidateId: withCandidate ? candidateId : null,
           status: "NOT_STARTED",
@@ -1988,6 +2039,31 @@ export default function TaskNewPage() {
                   className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
                 />
               </div>
+              )}
+              {isMendanFusanka && (
+                <div>
+                  <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                    対応方針<span className="ml-1 text-red-500">*</span>
+                  </label>
+                  <div className="space-y-2">
+                    {[
+                      { value: "1", label: "1. 通常フロー（追いかけて返信がくれば設定）" },
+                      { value: "2", label: "2. 形式的に追いかけるが、返信がきても先々の日程で設定" },
+                      { value: "3", label: "3. 追いかけ不要" },
+                    ].map((opt) => (
+                      <label key={opt.value} className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="responsePlan"
+                          checked={responsePlan === opt.value}
+                          onChange={() => setResponsePlan(opt.value)}
+                          className="accent-[#2563EB]"
+                        />
+                        <span className="text-[14px] text-[#374151]">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               )}
               <div>
                 <label className="mb-1 block text-[13px] font-medium text-[#374151]">

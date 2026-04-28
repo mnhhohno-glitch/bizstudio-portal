@@ -1,10 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
 import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
 import { TimeInput } from "@/components/ui/TimeInput";
+
+const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
+const OKADA_EMPLOYEE_ID = "cmlqr5jzu0006tg4f3ypb8kz7";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -344,6 +348,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 export default function InterviewForm({
   interviewId, candidateId, currentUser, onSaved, onDeleted,
 }: InterviewFormProps) {
+  const router = useRouter();
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<AnyRecord>({});
@@ -1075,7 +1080,23 @@ export default function InterviewForm({
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
-                <Fld value={form.resultFlag} onChange={(v) => setField("resultFlag", v)} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "辞退"]} />
+                <Fld value={form.resultFlag} onChange={(v) => {
+                  setField("resultFlag", v);
+                  if (v === "連絡なし辞退" || v === "連絡あり辞退") {
+                    const ok = window.confirm("「面談不参加共有」のタスクを作成しますか？");
+                    if (ok) {
+                      const name = candidate?.name || "";
+                      const params = new URLSearchParams({
+                        prefill: "interview-decline",
+                        candidateId,
+                        categoryId: MENDAN_FUSANKA_CATEGORY_ID,
+                        assigneeId: OKADA_EMPLOYEE_ID,
+                        title: `面談不参加共有 - ${name}`,
+                      });
+                      router.push(`/tasks/new?${params.toString()}`);
+                    }
+                  }
+                }} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>最新</span>
