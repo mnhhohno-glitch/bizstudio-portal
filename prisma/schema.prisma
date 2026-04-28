@@ -1410,6 +1410,7 @@ model InterviewDetail {
   educationFlag       String? @map("education_flag")
   educationMemo       String? @map("education_memo")
   graduationDate      String? @map("graduation_date")
+  graduationStatus    String? @map("graduation_status")
   companyName         String? @map("company_name")
   businessContent     String? @map("business_content")
   tenure              String?

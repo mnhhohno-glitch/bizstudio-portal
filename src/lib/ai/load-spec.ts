@@ -33,7 +33,7 @@ export type Spec01 = {
   };
   three_step_reasoning?: {
     step_1_fact_collection?: { name?: string; description?: string; output_to?: string };
-    step_2_contradiction_resolution?: { name?: string; description?: string; output_to?: string };
+    step_2_information_source_priority?: { name?: string; description?: string; output_to?: string };
     step_3_inference?: { name?: string; description?: string; output_to?: string };
   };
   resignation_category_guide?: Record<string, unknown>;
@@ -192,9 +192,9 @@ export function buildCommonAnalysisPrompt(
 ${threeStep.step_1_fact_collection?.description ?? "PDFの建前データとログの本音データを分離抽出する。"}
 出力先: ${threeStep.step_1_fact_collection?.output_to ?? "analysis_thought.evidence_clues"}
 
-【ステップ2：${threeStep.step_2_contradiction_resolution?.name ?? "矛盾解消"}】
-${threeStep.step_2_contradiction_resolution?.description ?? "PDFと面談ログに食い違いがある場合、ログ（本音）を優先して判定する。"}
-出力先: ${threeStep.step_2_contradiction_resolution?.output_to ?? "analysis_thought.pdf_vs_interview_gap"}
+【ステップ2：${threeStep.step_2_information_source_priority?.name ?? "情報源の優先順位"}】
+${threeStep.step_2_information_source_priority?.description ?? "PDFに明記された情報はPDFを優先し、面談ログからは退職理由・希望条件等を補完する。"}
+出力先: ${threeStep.step_2_information_source_priority?.output_to ?? "analysis_thought.pdf_vs_interview_gap"}
 
 【ステップ3：${threeStep.step_3_inference?.name ?? "妥当値推論"}】
 ${threeStep.step_3_inference?.description ?? "資料に直接記述がない項目も、周囲の文脈から最も妥当な値をプロとして推論する。"}

@@ -1126,7 +1126,7 @@ export default function InterviewForm({
               <Fld value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
               <div className="flex items-center gap-1 shrink-0" style={{ width: 186 }}>
                 <Fld value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} style={{ width: 92 }} placeholder="2016年3月" />
-                <Fld value={d.employmentStatus} onChange={(v) => setDetail("employmentStatus", v)} type="select" options={["卒業", "中退", "在職中", "離職中", "退職予定"]} style={{ flex: 1 }} />
+                <Fld value={d.graduationStatus} onChange={(v) => setDetail("graduationStatus", v)} type="select" options={["卒業", "卒業予定", "在学中", "中退", "修了", "その他"]} style={{ flex: 1 }} />
               </div>
             </Row>
           </div>

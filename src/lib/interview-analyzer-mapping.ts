@@ -11,6 +11,7 @@ export const EXCEL_TO_DETAIL_MAP: Record<string, string> = {
   "学歴フラグ": "educationFlag",
   "学歴メモ": "educationMemo",
   "卒業年月": "graduationDate",
+  "卒業区分": "graduationStatus",
   "希望職種フラグ": "desiredJobType1",
   "希望職種フラグ2": "desiredJobType2",
   "希望職種メモ": "desiredJobType1Memo",
@@ -73,6 +74,21 @@ const LANGUAGE_SKILL_MAP: Record<string, string> = {
 
 const INT_FIELDS = new Set(["currentApplicationCount", "currentSalary", "desiredSalaryMin", "desiredSalaryMax"]);
 
+function normalizeGraduationDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value
+    .replace(/\s*卒業見込み?\s*/g, "")
+    .replace(/\s*卒業予定\s*/g, "")
+    .replace(/\s*卒業\s*/g, "")
+    .replace(/\s*修了\s*/g, "")
+    .replace(/\s*中退\s*/g, "")
+    .replace(/\s*在学中?\s*/g, "")
+    .replace(/\s*既卒\s*/g, "")
+    .replace(/[（(].*?[)）]/g, "")
+    .trim();
+  return cleaned || null;
+}
+
 export function mapFilemakerToDetail(
   fmMapping: Record<string, unknown>,
 ): { detailUpdates: Record<string, unknown>; interviewMemo: string | null } {
@@ -111,6 +127,10 @@ export function mapFilemakerToDetail(
     } else {
       result[portalField] = String(value);
     }
+  }
+
+  if (result.graduationDate) {
+    result.graduationDate = normalizeGraduationDate(String(result.graduationDate));
   }
 
   if (result.desiredJobType1) {
