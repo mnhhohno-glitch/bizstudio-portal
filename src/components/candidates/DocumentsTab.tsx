@@ -199,12 +199,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error || "failed");
         }
-        const data = await res.json();
-        if (data.pdfUpdated) {
-          toast.success("docxを置き換え、PDFも再生成しました");
-        } else {
-          toast.success("docxを置き換えました（PDF変換はスキップされました）");
-        }
+        await res.json();
+        toast.success("docxを置き換えました");
         setEditingDocxIds((prev) => {
           const next = new Set(prev);
           next.delete(file.id);

@@ -4,7 +4,6 @@ import { getSessionUser } from "@/lib/auth";
 import {
   uploadFileToDrive,
   deletePdfFromDrive,
-  convertDocxToPdf,
 } from "@/lib/google-drive";
 
 const DOCX_MIME =
@@ -90,59 +89,10 @@ export async function POST(
       include: { uploadedBy: { select: { id: true, name: true } } },
     });
 
-    // 4. 同じベース名の PDF を探して再生成
-    let pdfUpdated = false;
-    const baseName = existing.fileName.replace(/\.docx$/i, "");
-    const pdfRecord = await prisma.candidateFile.findFirst({
-      where: {
-        candidateId,
-        fileName: `${baseName}.pdf`,
-        id: { not: fileId },
-      },
-    });
-
-    try {
-      const pdfResult = await convertDocxToPdf({
-        driveFileId: newDriveId,
-        pdfFileName: `${baseName}.pdf`,
-        folderId,
-      });
-
-      if (pdfRecord) {
-        await deletePdfFromDrive(pdfRecord.driveFileId);
-        await prisma.candidateFile.update({
-          where: { id: pdfRecord.id },
-          data: {
-            fileSize: pdfResult.fileSize,
-            driveFileId: pdfResult.fileId,
-            driveViewUrl: pdfResult.webViewLink,
-          },
-        });
-      } else {
-        await prisma.candidateFile.create({
-          data: {
-            candidateId,
-            category: existing.category,
-            fileName: `${baseName}.pdf`,
-            fileSize: pdfResult.fileSize,
-            mimeType: "application/pdf",
-            driveFileId: pdfResult.fileId,
-            driveViewUrl: pdfResult.webViewLink,
-            driveFolderId: folderId,
-            memo: "Word編集後のPDF自動変換",
-            uploadedByUserId: user.id,
-          },
-        });
-      }
-      pdfUpdated = true;
-    } catch (pdfErr) {
-      console.error("[replace-docx] PDF conversion failed:", pdfErr);
-    }
-
     return NextResponse.json({
       success: true,
       file: updated,
-      pdfUpdated,
+      pdfUpdated: false,
     });
   } catch (e) {
     console.error("[replace-docx] Error:", e);

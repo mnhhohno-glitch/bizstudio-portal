@@ -405,9 +405,15 @@ export default function EntryBoard() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     };
 
-    // コメント欄に入れる企業一覧
-    const buildComment = (es: Entry[]): string =>
-      es.map((e) => `■ ${e.companyName}${e.jobDb ? `（${e.jobDb}）` : ""}`).join("\n");
+    const buildDescription = (es: Entry[]): string => {
+      const lines = es.map((e) => {
+        const db = e.entryRoute || e.jobDb || "";
+        const jobId = e.entryJobId || e.externalJobNo;
+        const idPart = jobId ? `｜ID:${jobId}` : "";
+        return `${db}｜${e.companyName}｜${e.jobTitle || ""}${idPart}`;
+      }).join("\n");
+      return `以下企業へエントリー対応お願いします\n\n${lines}`;
+    };
 
     // 1名のみ: タスク作成画面へ遷移
     if (byCandidate.size === 1) {
@@ -420,7 +426,7 @@ export default function EntryBoard() {
         title: `エントリー対応依頼 - ${info.name}`,
         entryDate: latestEntryDate(info.entries),
         entryCount: String(info.entries.length),
-        entryComment: buildComment(info.entries),
+        entryDescription: buildDescription(info.entries),
         step: "5",
       });
       window.location.href = `/tasks/new?${params.toString()}`;
@@ -458,7 +464,6 @@ export default function EntryBoard() {
       // テンプレートフィールドのID解決
       const entryDateField = category.fields.find((f) => f.label === "エントリー日");
       const entryCountField = category.fields.find((f) => f.label === "エントリー件数");
-      const commentField = category.fields.find((f) => f.label === "コメント");
 
       let ok = 0;
       let fail = 0;
@@ -466,7 +471,6 @@ export default function EntryBoard() {
         const fieldValues: { fieldId: string; value: string }[] = [];
         if (entryDateField) fieldValues.push({ fieldId: entryDateField.id, value: latestEntryDate(info.entries) });
         if (entryCountField) fieldValues.push({ fieldId: entryCountField.id, value: String(info.entries.length) });
-        if (commentField) fieldValues.push({ fieldId: commentField.id, value: buildComment(info.entries) });
 
         try {
           const res = await fetch("/api/tasks", {
@@ -474,6 +478,7 @@ export default function EntryBoard() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               title: `エントリー対応依頼 - ${info.name}`,
+              description: buildDescription(info.entries),
               categoryId: category.id,
               candidateId: cid,
               priority: "MEDIUM",

@@ -368,21 +368,23 @@ export default function TaskNewPage() {
     const pt = searchParams.get("title");
     if (pt) setTitle(pt);
 
-    // テンプレートフィールド（エントリー日 / エントリー件数 / コメント）をラベルで紐付け
+    // テンプレートフィールド（エントリー日 / エントリー件数）をラベルで紐付け
     if (selectedCat) {
       const entryDateVal = searchParams.get("entryDate");
       const entryCountVal = searchParams.get("entryCount");
-      const entryCommentVal = searchParams.get("entryComment");
       const updates: Record<string, string> = {};
       for (const field of selectedCat.fields) {
         if (field.label === "エントリー日" && entryDateVal) updates[field.id] = entryDateVal;
         else if (field.label === "エントリー件数" && entryCountVal) updates[field.id] = entryCountVal;
-        else if (field.label === "コメント" && entryCommentVal) updates[field.id] = entryCommentVal;
       }
       if (Object.keys(updates).length > 0) {
         setFieldValues((prev) => ({ ...prev, ...updates }));
       }
     }
+
+    // 詳細メモにエントリー情報を自動入力
+    const entryDesc = searchParams.get("entryDescription");
+    if (entryDesc) setDescription(entryDesc);
 
     // ステップ指定（1-indexed → 0-indexed）
     const stepStr = searchParams.get("step");
