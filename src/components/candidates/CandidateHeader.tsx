@@ -15,7 +15,6 @@ type Candidate = {
   gender: string | null;
   supportStatus: string;
   supportSubStatus: string | null;
-  supportSubStatusManual: boolean;
   supportEndReason: string | null;
   supportEndComment: string | null;
   employeeId: string | null;
@@ -26,7 +25,6 @@ type Candidate = {
 interface CandidateHeaderProps {
   candidate: Candidate;
   onStatusChange: (status: string) => void;
-  onSubStatusChange: (subStatus: string) => void;
   onEditBasicInfo: () => void;
   onGuideUrlCopy: () => void;
   onScheduleOpen: () => void;
@@ -37,8 +35,6 @@ interface CandidateHeaderProps {
   jobOutputLoading: boolean;
   supportEndReasonLabel?: string;
   onSupportEndClick: () => void;
-  subStatusOptions: string[];
-  isSubStatusFixed: boolean;
 }
 
 function genderLabel(g: string | null) {
@@ -111,7 +107,6 @@ function CopyableText({
 export default function CandidateHeader({
   candidate,
   onStatusChange,
-  onSubStatusChange,
   onEditBasicInfo,
   onGuideUrlCopy,
   onScheduleOpen,
@@ -122,8 +117,6 @@ export default function CandidateHeader({
   jobOutputLoading,
   supportEndReasonLabel,
   onSupportEndClick,
-  subStatusOptions,
-  isSubStatusFixed,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
@@ -214,25 +207,9 @@ export default function CandidateHeader({
                   <option value="ENDED">支援終了</option>
                 </select>
 
-                {isSubStatusFixed || subStatusOptions.length <= 1 ? (
-                  <span className="inline-flex items-center justify-center w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border bg-gray-50 text-gray-700 border-gray-200 truncate">
-                    {candidate.supportSubStatus || subStatusOptions[0] || "-"}
-                  </span>
-                ) : (
-                  <select
-                    aria-label="ステータス"
-                    value={candidate.supportSubStatus || ""}
-                    onChange={(e) => onSubStatusChange(e.target.value)}
-                    className="w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer bg-white text-gray-700 border-gray-300"
-                  >
-                    {!candidate.supportSubStatus && (
-                      <option value="" disabled>-</option>
-                    )}
-                    {subStatusOptions.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                )}
+                <span className="inline-flex items-center justify-center w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border bg-gray-50 text-gray-700 border-gray-200 truncate">
+                  {candidate.supportSubStatus || "-"}
+                </span>
               </>
             )}
             <button

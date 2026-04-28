@@ -13,10 +13,6 @@ import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
-import {
-  SUPPORT_SUB_STATUS_MAP,
-  isSubStatusFixed as isSubStatusFixedFn,
-} from "@/lib/support-status-constants";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -76,7 +72,6 @@ type Candidate = {
   birthday: string | null;
   supportStatus: string;
   supportSubStatus: string | null;
-  supportSubStatusManual: boolean;
   supportEndReason: string | null;
   supportEndComment: string | null;
   employeeId: string | null;
@@ -1704,14 +1699,6 @@ function CandidateDetailPageBody() {
               });
               fetchCandidate();
             }}
-            onSubStatusChange={async (val) => {
-              await fetch(`/api/candidates/${candidate.id}/update`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ supportSubStatus: val }),
-              });
-              fetchCandidate();
-            }}
             onEditBasicInfo={() => setEditModalOpen(true)}
             onGuideUrlCopy={() => {
               const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
@@ -1734,8 +1721,6 @@ function CandidateDetailPageBody() {
             jobOutputLoading={jobOutputLoading}
             supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
             onSupportEndClick={() => setShowEndModal(true)}
-            subStatusOptions={SUPPORT_SUB_STATUS_MAP[candidate.supportStatus] || []}
-            isSubStatusFixed={isSubStatusFixedFn(candidate.supportStatus)}
           />
 
           {/* サブタブバー */}

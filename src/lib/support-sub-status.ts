@@ -64,17 +64,15 @@ export async function resetSubStatusForStatus(
 
 /**
  * 自動判定トリガー: エントリーフラグ変更 / BOOKMARK追加・削除 などから呼ぶ。
- * - supportStatus が ACTIVE でない場合は何もしない
- * - supportSubStatusManual が true の場合は手動優先で何もしない
+ * supportStatus が ACTIVE の場合のみ再計算を実行する。
  */
 export async function recalculateSubStatusIfAuto(candidateId: string): Promise<void> {
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { supportStatus: true, supportSubStatusManual: true },
+    select: { supportStatus: true },
   });
   if (!candidate) return;
   if (candidate.supportStatus !== "ACTIVE") return;
-  if (candidate.supportSubStatusManual) return;
 
   const next = await calculateSubStatus(candidateId);
   await prisma.candidate.update({
