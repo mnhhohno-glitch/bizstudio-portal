@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { INACTIVE_TRIGGERS } from "@/lib/constants/entry-flag-rules";
+import { INACTIVE_TRIGGERS, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export async function PATCH(req: NextRequest) {
   const user = await getSessionUser();
@@ -48,10 +49,26 @@ export async function PATCH(req: NextRequest) {
     data.isActive = false;
   }
 
+  const transformedData = applyEntryFlagAutoTransitions(data);
+
+  const affectedEntries = await prisma.jobEntry.findMany({
+    where: { id: { in: entryIds } },
+    select: { candidateId: true },
+  });
+  const uniqueCandidateIds = [...new Set(affectedEntries.map((e) => e.candidateId))];
+
   const result = await prisma.jobEntry.updateMany({
     where: { id: { in: entryIds } },
-    data,
+    data: transformedData,
   });
+
+  for (const candidateId of uniqueCandidateIds) {
+    try {
+      await recalculateSubStatusIfAuto(candidateId);
+    } catch (e) {
+      console.error("[bulk-flags.PATCH] recalculateSubStatusIfAuto failed:", e);
+    }
+  }
 
   return NextResponse.json({
     updated: result.count,

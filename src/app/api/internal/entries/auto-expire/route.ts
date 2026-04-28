@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export async function POST(request: NextRequest) {
   if (!validateInternalApiKey(request)) {
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
     },
     select: {
       id: true,
+      candidateId: true,
       companyName: true,
       entryDate: true,
       candidate: { select: { name: true, candidateNumber: true } },
@@ -55,6 +57,15 @@ export async function POST(request: NextRequest) {
       },
     });
     expired = result.count;
+
+    const candidateIds = [...new Set(toExpire.map((t) => t.candidateId))];
+    for (const candidateId of candidateIds) {
+      try {
+        await recalculateSubStatusIfAuto(candidateId);
+      } catch (e) {
+        console.error("[auto-expire] recalculateSubStatusIfAuto failed:", e);
+      }
+    }
   } else if (dryRun) {
     expired = toExpire.length;
   }

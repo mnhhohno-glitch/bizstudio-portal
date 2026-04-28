@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 
 export async function GET(
   _req: NextRequest,
@@ -62,9 +63,11 @@ export async function PATCH(
     }
   }
 
+  const transformedData = applyEntryFlagAutoTransitions(data);
+
   const entry = await prisma.jobEntry.update({
     where: { id: entryId },
-    data,
+    data: transformedData,
     include: {
       candidate: {
         select: {
@@ -79,7 +82,7 @@ export async function PATCH(
   });
 
   // entryFlag / personFlag / hasJoined の変更は中項目の自動判定トリガー
-  if ("entryFlag" in data || "personFlag" in data || "hasJoined" in data) {
+  if ("entryFlag" in transformedData || "personFlag" in transformedData || "hasJoined" in transformedData) {
     try {
       await recalculateSubStatusIfAuto(entry.candidateId);
     } catch (e) {

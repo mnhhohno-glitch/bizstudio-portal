@@ -43,3 +43,27 @@ export const INACTIVE_TRIGGERS = {
   personFlags: ["見送り通知送信済", "見送り通知済み", "入社済"],
   companyFlags: ["辞退報告済"],
 };
+
+export function applyEntryFlagAutoTransitions<T extends {
+  entryFlag?: string | null;
+  entryFlagDetail?: string | null;
+  companyFlag?: string | null;
+  personFlag?: string | null;
+  isActive?: boolean;
+}>(data: T): T {
+  const result = { ...data };
+
+  if (result.personFlag === "入社済") {
+    result.entryFlag = "入社済";
+    result.entryFlagDetail = null;
+  }
+
+  if (
+    (result.personFlag && INACTIVE_TRIGGERS.personFlags.includes(result.personFlag)) ||
+    (result.companyFlag && INACTIVE_TRIGGERS.companyFlags.includes(result.companyFlag))
+  ) {
+    result.isActive = false;
+  }
+
+  return result;
+}

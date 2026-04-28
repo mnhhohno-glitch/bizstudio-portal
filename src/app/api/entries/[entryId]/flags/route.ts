@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, INACTIVE_TRIGGERS } from "@/lib/constants/entry-flag-rules";
+import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, INACTIVE_TRIGGERS, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export async function PATCH(
   req: NextRequest,
@@ -55,9 +56,11 @@ export async function PATCH(
   if (companyFlag !== undefined) data.companyFlag = companyFlag;
   if (personFlag !== undefined) data.personFlag = personFlag;
 
+  const transformedData = applyEntryFlagAutoTransitions(data);
+
   const entry = await prisma.jobEntry.update({
     where: { id: entryId },
-    data,
+    data: transformedData,
     include: {
       candidate: {
         select: {
@@ -70,6 +73,14 @@ export async function PATCH(
       },
     },
   });
+
+  if ("entryFlag" in transformedData || "personFlag" in transformedData) {
+    try {
+      await recalculateSubStatusIfAuto(entry.candidateId);
+    } catch (e) {
+      console.error("[flags.PATCH] recalculateSubStatusIfAuto failed:", e);
+    }
+  }
 
   return NextResponse.json({ entry });
 }
