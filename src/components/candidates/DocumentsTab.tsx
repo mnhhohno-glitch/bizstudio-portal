@@ -70,6 +70,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingDocxIds, setEditingDocxIds] = useState<Set<string>>(new Set());
+  const [editingXlsxIds, setEditingXlsxIds] = useState<Set<string>>(new Set());
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<{ url: string; files: string[]; expiresAt: string } | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -167,6 +168,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     f.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
     f.fileName.toLowerCase().endsWith(".docx");
 
+  const isXlsxFile = (f: CandidateFile) =>
+    f.mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    f.fileName.toLowerCase().endsWith(".xlsx");
+
   const handleWordEdit = (file: CandidateFile) => {
     window.open(
       `https://drive.google.com/uc?export=download&id=${file.driveFileId}`,
@@ -219,6 +224,64 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
   const handleCancelEdit = (fileId: string) => {
     setEditingDocxIds((prev) => {
+      const next = new Set(prev);
+      next.delete(fileId);
+      return next;
+    });
+  };
+
+  const handleExcelEdit = (file: CandidateFile) => {
+    window.open(
+      `https://drive.google.com/uc?export=download&id=${file.driveFileId}`,
+      "_blank",
+    );
+    setEditingXlsxIds((prev) => new Set(prev).add(file.id));
+    toast.success(`${file.fileName} をダウンロードしました。ローカルのExcelで編集してください`);
+  };
+
+  const handleUploadEditedXlsx = (file: CandidateFile) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx";
+    input.onchange = async (e) => {
+      const newFile = (e.target as HTMLInputElement).files?.[0];
+      if (!newFile) return;
+      if (!newFile.name.toLowerCase().endsWith(".xlsx")) {
+        toast.error(".xlsxファイルを選択してください");
+        return;
+      }
+      setReplacingId(file.id);
+      try {
+        const formData = new FormData();
+        formData.append("file", newFile);
+        const res = await fetch(
+          `/api/candidates/${candidateId}/files/${file.id}/replace-xlsx`,
+          { method: "POST", body: formData },
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "failed");
+        }
+        await res.json();
+        toast.success("xlsxを置き換えました");
+        setEditingXlsxIds((prev) => {
+          const next = new Set(prev);
+          next.delete(file.id);
+          return next;
+        });
+        fetchFiles();
+        fetchCounts();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "アップロードに失敗しました");
+      } finally {
+        setReplacingId(null);
+      }
+    };
+    input.click();
+  };
+
+  const handleCancelEditXlsx = (fileId: string) => {
+    setEditingXlsxIds((prev) => {
       const next = new Set(prev);
       next.delete(fileId);
       return next;
@@ -590,7 +653,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {file.memo && (
                   <p className="text-xs text-gray-500 mt-1 italic">メモ: {file.memo}</p>
                 )}
-                {/* 編集中インジケーター */}
+                {/* Word編集中インジケーター */}
                 {editingDocxIds.has(file.id) && (
                   <div className="mt-2 flex items-center gap-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
                     <span>編集中</span>
@@ -610,6 +673,26 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                     </button>
                   </div>
                 )}
+                {/* Excel編集中インジケーター */}
+                {editingXlsxIds.has(file.id) && (
+                  <div className="mt-2 flex items-center gap-2 rounded bg-green-50 px-3 py-1.5 text-xs text-green-700">
+                    <span>編集中</span>
+                    <button
+                      onClick={() => handleUploadEditedXlsx(file)}
+                      disabled={replacingId === file.id}
+                      className="ml-auto rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
+                    </button>
+                    <button
+                      onClick={() => handleCancelEditXlsx(file.id)}
+                      disabled={replacingId === file.id}
+                      className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                )}
                 {/* アクション */}
                 <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
                   <div className="ml-auto flex gap-2">
@@ -619,6 +702,14 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                         className="text-amber-600 hover:text-amber-700 text-sm font-medium"
                       >
                         Word編集
+                      </button>
+                    )}
+                    {isXlsxFile(file) && !editingXlsxIds.has(file.id) && (
+                      <button
+                        onClick={() => handleExcelEdit(file)}
+                        className="text-green-600 hover:text-green-700 text-sm font-medium"
+                      >
+                        Excel編集
                       </button>
                     )}
                     {activeSubTab === "BS_DOCUMENT" && (

@@ -1,0 +1,101 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
+import {
+  uploadFileToDrive,
+  deletePdfFromDrive,
+} from "@/lib/google-drive";
+
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ candidateId: string; fileId: string }> },
+) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  const { candidateId, fileId } = await params;
+
+  const existing = await prisma.candidateFile.findFirst({
+    where: { id: fileId, candidateId },
+  });
+  if (!existing) {
+    return NextResponse.json(
+      { error: "ファイルが見つかりません" },
+      { status: 404 },
+    );
+  }
+
+  const formData = await req.formData();
+  const file = formData.get("file") as File | null;
+  if (!file) {
+    return NextResponse.json(
+      { error: "ファイルは必須です" },
+      { status: 400 },
+    );
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    return NextResponse.json(
+      { error: "ファイルサイズは20MB以内にしてください" },
+      { status: 400 },
+    );
+  }
+
+  if (
+    file.type !== XLSX_MIME &&
+    !file.name.toLowerCase().endsWith(".xlsx")
+  ) {
+    return NextResponse.json(
+      { error: ".xlsxファイルを選択してください" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const folderId = existing.driveFolderId;
+    if (!folderId) {
+      return NextResponse.json(
+        { error: "アップロード先フォルダが不明です" },
+        { status: 500 },
+      );
+    }
+
+    await deletePdfFromDrive(existing.driveFileId);
+
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const { fileId: newDriveId, webViewLink } = await uploadFileToDrive(
+      existing.fileName,
+      fileBuffer,
+      folderId,
+      XLSX_MIME,
+    );
+
+    const updated = await prisma.candidateFile.update({
+      where: { id: fileId },
+      data: {
+        fileSize: file.size,
+        driveFileId: newDriveId,
+        driveViewUrl: webViewLink,
+      },
+      include: { uploadedBy: { select: { id: true, name: true } } },
+    });
+
+    return NextResponse.json({
+      success: true,
+      file: updated,
+      pdfUpdated: false,
+    });
+  } catch (e) {
+    console.error("[replace-xlsx] Error:", e);
+    return NextResponse.json(
+      { error: "ファイルの置き換えに失敗しました" },
+      { status: 500 },
+    );
+  }
+}
