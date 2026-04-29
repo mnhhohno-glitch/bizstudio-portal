@@ -6,6 +6,11 @@ import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
 import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
 import { TimeInput } from "@/components/ui/TimeInput";
+import {
+  RESIGN_REASON_LARGE_OPTIONS,
+  getMediumOptions,
+  getSmallOptions,
+} from "@/constants/resign-reason-hierarchy";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 const OKADA_EMPLOYEE_ID = "cmlqr5jzu0006tg4f3ypb8kz7";
@@ -1158,9 +1163,9 @@ export default function InterviewForm({
                     </div>
                   </div>
                   <Row label="退社理由">
-                    <Fld value={wh.resignReasonLarge} onChange={(v) => setWH(idx, "resignReasonLarge", v)} type="select" options={["過去型", "未来型", "現職"]} style={{ width: 90, flex: "none" }} />
-                    <Fld value={wh.resignReasonMedium} onChange={(v) => setWH(idx, "resignReasonMedium", v)} type="select" options={["環境要因", "キャリア要因", "待遇要因"]} style={{ width: 100, flex: "none" }} />
-                    <Fld value={wh.resignReasonSmall} onChange={(v) => setWH(idx, "resignReasonSmall", v)} />
+                    <Fld value={wh.resignReasonLarge} onChange={(v) => { setWH(idx, "resignReasonLarge", v); setWH(idx, "resignReasonMedium", ""); setWH(idx, "resignReasonSmall", ""); }} type="select" options={[...RESIGN_REASON_LARGE_OPTIONS]} style={{ width: 90, flex: "none" }} />
+                    <Fld value={wh.resignReasonMedium} onChange={(v) => { setWH(idx, "resignReasonMedium", v); setWH(idx, "resignReasonSmall", ""); }} type="select" options={(() => { const opts = getMediumOptions(wh.resignReasonLarge); return wh.resignReasonMedium && !opts.includes(wh.resignReasonMedium) ? [...opts, wh.resignReasonMedium] : opts; })()} readOnly={!wh.resignReasonLarge} style={{ width: 110, flex: "none" }} />
+                    <Fld value={wh.resignReasonSmall} onChange={(v) => setWH(idx, "resignReasonSmall", v)} type="select" options={(() => { const opts = getSmallOptions(wh.resignReasonMedium); return wh.resignReasonSmall && !opts.includes(wh.resignReasonSmall) ? [...opts, wh.resignReasonSmall] : opts; })()} readOnly={!wh.resignReasonMedium} style={{ flex: 1 }} />
                   </Row>
                   <div className="flex items-start gap-1.5">
                     <span className="shrink-0 pt-1" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>詳細</span>
