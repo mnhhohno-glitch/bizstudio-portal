@@ -1270,7 +1270,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
-export default function HistoryTab({ candidateId }: { candidateId: string }) {
+export default function HistoryTab({ candidateId, candidateName }: { candidateId: string; candidateName?: string }) {
   const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries">("bookmark");
   const [bookmarkCount, setBookmarkCount] = useState(0);
 
@@ -1306,6 +1306,9 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
   const [editingDate, setEditingDate] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [entrySearch, setEntrySearch] = useState("");
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set());
+  const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [bulkReverting, setBulkReverting] = useState(false);
 
   // Bookmark ratings for cross-referencing with jobs
   const [bookmarkRatings, setBookmarkRatings] = useState<Map<string, { wish: string; pass: string; overall: string }>>(new Map());
@@ -1512,6 +1515,72 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
       fetchEntries();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "更新に失敗しました");
+    }
+  };
+
+  const handleRevertEntry = async (entryId: string) => {
+    if (!confirm("このエントリーを求人紹介に戻しますか？")) return;
+    setRevertingId(entryId);
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/entries/revert-bulk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entryIds: [entryId] }),
+        }
+      );
+      if (!res.ok) throw new Error("戻す処理に失敗しました");
+      toast.success("求人紹介に戻しました");
+      fetchEntries();
+      fetchJobs();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "戻す処理に失敗しました");
+    } finally {
+      setRevertingId(null);
+    }
+  };
+
+  const handleBulkRevertEntries = async () => {
+    if (selectedEntryIds.size === 0) return;
+    if (!confirm(`${selectedEntryIds.size}件を求人紹介に戻しますか？`)) return;
+    setBulkReverting(true);
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/entries/revert-bulk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entryIds: Array.from(selectedEntryIds) }),
+        }
+      );
+      if (!res.ok) throw new Error("一括戻す処理に失敗しました");
+      const data = await res.json();
+      toast.success(data.message || `${selectedEntryIds.size}件を求人紹介に戻しました`);
+      setSelectedEntryIds(new Set());
+      fetchEntries();
+      fetchJobs();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "一括戻す処理に失敗しました");
+    } finally {
+      setBulkReverting(false);
+    }
+  };
+
+  const toggleEntrySelection = (entryId: string) => {
+    setSelectedEntryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  };
+
+  const toggleAllEntries = () => {
+    if (selectedEntryIds.size === filteredEntries.length) {
+      setSelectedEntryIds(new Set());
+    } else {
+      setSelectedEntryIds(new Set(filteredEntries.map((e) => e.id)));
     }
   };
 
@@ -1838,6 +1907,23 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                 </button>
               )}
             </div>
+            {selectedEntryIds.size > 0 && (
+              <button
+                onClick={handleBulkRevertEntries}
+                disabled={bulkReverting}
+                className="shrink-0 rounded-md bg-amber-50 border border-amber-300 px-3 py-1 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+              >
+                {bulkReverting ? "処理中..." : `選択を求人紹介に戻す（${selectedEntryIds.size}件）`}
+              </button>
+            )}
+            <a
+              href={`/entries${candidateName ? `?candidateName=${encodeURIComponent(candidateName)}` : ""}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 ml-auto text-[12px] text-[#2563EB] hover:underline"
+            >
+              エントリー管理画面へ &rarr;
+            </a>
           </div>
 
           {/* コンテンツ */}
@@ -1858,14 +1944,30 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
               className="overflow-y-auto"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
+              {/* 全選択 */}
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <input
+                  type="checkbox"
+                  checked={filteredEntries.length > 0 && selectedEntryIds.size === filteredEntries.length}
+                  onChange={toggleAllEntries}
+                  className="h-3.5 w-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB]"
+                />
+                <span className="text-[12px] text-gray-500">全選択</span>
+              </div>
               <div className="grid grid-cols-1 gap-3">
                 {filteredEntries.map((entry) => (
                   <div
                     key={entry.id}
-                    className="rounded-lg border border-gray-200 p-3 hover:shadow-sm transition-shadow"
+                    className={`rounded-lg border p-3 hover:shadow-sm transition-shadow ${selectedEntryIds.has(entry.id) ? "border-amber-300 bg-amber-50/30" : "border-gray-200"}`}
                   >
-                    {/* 1行目: 会社名 + バッジ + DB/タイプ */}
+                    {/* 1行目: チェックボックス + 会社名 + バッジ + DB/タイプ */}
                     <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedEntryIds.has(entry.id)}
+                        onChange={() => toggleEntrySelection(entry.id)}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB]"
+                      />
                       <span className="font-semibold text-sm text-[#374151] truncate">
                         {entry.companyName}
                       </span>
@@ -1923,6 +2025,14 @@ export default function HistoryTab({ candidateId }: { candidateId: string }) {
                         <span className="text-xs text-gray-400">
                           (紹介日: {formatDateJST(entry.introducedAt)})
                         </span>
+                        <button
+                          onClick={() => handleRevertEntry(entry.id)}
+                          disabled={revertingId === entry.id}
+                          className="text-xs text-amber-600 hover:text-amber-800 border border-amber-300 rounded px-1.5 py-0.5 hover:bg-amber-50 transition-colors disabled:opacity-50"
+                          title="求人紹介に戻す"
+                        >
+                          {revertingId === entry.id ? "..." : "戻す"}
+                        </button>
                         <button
                           onClick={() => handleDeleteEntry(entry.id)}
                           disabled={deletingId === entry.id}

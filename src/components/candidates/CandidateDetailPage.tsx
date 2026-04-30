@@ -1751,7 +1751,7 @@ function CandidateDetailPageBody() {
               <CandidateTasksTab candidateId={candidateId} employees={employees} />
             )}
             {activeTab === "history" && (
-              <HistoryTab candidateId={candidateId} />
+              <HistoryTab candidateId={candidateId} candidateName={candidate.name} />
             )}
             {activeTab === "notes" && (
               <NotesTab

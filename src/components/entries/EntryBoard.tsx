@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import EntryTable from "./EntryTable";
 import EntryDetailModal from "./EntryDetailModal";
@@ -83,16 +84,19 @@ const TABS = [
 ];
 
 export default function EntryBoard() {
+  const searchParams = useSearchParams();
+  const initialCandidateName = useMemo(() => searchParams.get("candidateName") ?? "", [searchParams]);
+
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("エントリー");
+  const [activeTab, setActiveTab] = useState(initialCandidateName ? "全件" : "エントリー");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [flagData, setFlagData] = useState<FlagData | null>(null);
 
   // Filters
-  const [candidateName, setCandidateName] = useState("");
+  const [candidateName, setCandidateName] = useState(initialCandidateName);
   const [companyName, setCompanyName] = useState("");
   const [caFilter, setCaFilter] = useState("");
   const [caOptions, setCaOptions] = useState<string[]>([]);
