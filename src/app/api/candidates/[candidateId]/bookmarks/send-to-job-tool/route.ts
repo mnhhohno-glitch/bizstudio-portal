@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
+import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -360,6 +361,7 @@ export async function POST(
           lastExportedTo: dbType === "circus" ? "circus" : "hito-link",
         },
       });
+      try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
     }
 
     return NextResponse.json({
