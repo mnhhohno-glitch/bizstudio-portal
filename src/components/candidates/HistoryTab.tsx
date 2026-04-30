@@ -640,25 +640,48 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     if (selectedIds.size === 0) return;
     setMovingToJobs(true);
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileIds: Array.from(selectedIds),
-          dbType: "hito_mynavi",
-          targetAreas: ["首都圏"],
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success(`${data.uploadedCount}件のPDFを求人紹介に送信しました`);
-        setSelectedIds(new Set());
-        onSwitchToJobs?.();
-      } else {
-        toast.error(data.error || "送信に失敗しました");
+      const selected = files.filter((f) => selectedIds.has(f.id));
+      const exportedIds = selected.filter((f) => f.lastExportedAt).map((f) => f.id);
+      const notExportedIds = selected.filter((f) => !f.lastExportedAt).map((f) => f.id);
+
+      let restoredCount = 0;
+      let sentCount = 0;
+      const messages: string[] = [];
+
+      if (exportedIds.length > 0) {
+        const res = await fetch(`/api/candidates/${candidateId}/bookmarks/restore-jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds: exportedIds }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "復活処理に失敗しました");
+        restoredCount = data.restored ?? 0;
+        if (data.notMatched?.length) messages.push(`照合失敗: ${data.notMatched.length}件`);
+        if (data.notExcluded?.length) messages.push(`既に有効: ${data.notExcluded.length}件`);
       }
-    } catch {
-      toast.error("通信エラーが発生しました");
+
+      if (notExportedIds.length > 0) {
+        const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds: notExportedIds, dbType: "hito_mynavi", targetAreas: ["首都圏"] }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "送信に失敗しました");
+        sentCount = data.uploadedCount ?? notExportedIds.length;
+      }
+
+      const parts: string[] = [];
+      if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
+      if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
+      if (messages.length) parts.push(messages.join(" / "));
+      toast.success(parts.length ? parts.join("、") + "しました" : "処理が完了しました");
+
+      setSelectedIds(new Set());
+      onSwitchToJobs?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
       setMovingToJobs(false);
     }
