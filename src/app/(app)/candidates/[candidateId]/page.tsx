@@ -1559,14 +1559,6 @@ function CandidateDetailPageBody() {
   }, [candidateId]);
 
   useEffect(() => {
-    if (candidate?.name) {
-      document.title = activeView === "interview"
-        ? `面談履歴_${candidate.name} - Bizstudio`
-        : `${candidate.name} - Bizstudio`;
-    }
-  }, [candidate?.name, activeView]);
-
-  useEffect(() => {
     fetchCandidate();
     fetchGuideData();
     fetchJimuSessions();
@@ -1642,8 +1634,15 @@ function CandidateDetailPageBody() {
     );
   }
 
+  const pageTitle = candidate?.name
+    ? activeView === "interview"
+      ? `面談履歴_${candidate.name} - Bizstudio`
+      : `${candidate.name} - Bizstudio`
+    : undefined;
+
   return (
     <div>
+      {pageTitle && <title>{pageTitle}</title>}
       <Toaster position="bottom-center" richColors />
 
       {/* ヘッダー1行: タブ（左） + 戻る・検索（右） */}
