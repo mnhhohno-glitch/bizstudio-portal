@@ -1560,11 +1560,9 @@ function CandidateDetailPageBody() {
 
   useEffect(() => {
     if (candidate?.name) {
-      document.title = activeView === "interview"
-        ? `面談履歴_${candidate.name} - Bizstudio`
-        : `${candidate.name} - Bizstudio`;
+      document.title = `${candidate.name} - Bizstudio`;
     }
-  }, [candidate?.name, activeView]);
+  }, [candidate?.name, searchParams]);
 
   useEffect(() => {
     fetchCandidate();
