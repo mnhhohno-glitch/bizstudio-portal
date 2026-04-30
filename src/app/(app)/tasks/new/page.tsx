@@ -146,7 +146,7 @@ export default function TaskNewPage() {
   const [subStep3pt, setSubStep3pt] = useState(0); // 0=履歴書, 1=職務経歴書, 2=推薦状
   const [fieldValues3pt, setFieldValues3pt] = useState<Record<string, string>[]>([{}, {}, {}]);
   const [motivState3pt, setMotivState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] as string[] });
-  const [jobState3pt, setJobState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minorId: "", minorName: "" });
+  const [jobAxes3pt, setJobAxes3pt] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [careerSummary3pt, setCareerSummary3pt] = useState("");
 
   // step 2
@@ -162,6 +162,9 @@ export default function TaskNewPage() {
   const [selectedMajorName, setSelectedMajorName] = useState("");
   const [selectedMiddleName, setSelectedMiddleName] = useState("");
   const [selectedMinorName, setSelectedMinorName] = useState("");
+
+  // step 2 - 応募職種 複数選択 (応募書類タスク用)
+  const [shokumuJobAxes, setShokumuJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
 
   // step 2 - 志望動機選択 (履歴書作成用)
   const [motivMajors, setMotivMajors] = useState<JobCatItem[]>([]);
@@ -254,7 +257,9 @@ export default function TaskNewPage() {
 
   const isRirekisho = effectiveCategory?.name === RIREKISHO_CATEGORY;
   const isShokumu = effectiveCategory?.name === SHOKUMU_CATEGORY;
-  const isSalesJob = SALES_MAJORS.includes(is3pointSet ? jobState3pt.majorName : selectedMajorName);
+  const isSalesJob = SALES_MAJORS.includes(
+    is3pointSet ? (jobAxes3pt[0]?.major ?? "") : (shokumuJobAxes[0]?.major ?? "")
+  );
   const isMendanFusanka = selectedCategory?.name?.startsWith(MENDAN_FUSANKA_CATEGORY) ?? false;
   const isDeclinePrefill = searchParams.get("prefill") === "interview-decline";
   const isMensetsuTaisaku = selectedCategory?.name === MENSETSU_TAISAKU_CATEGORY;
@@ -577,9 +582,9 @@ export default function TaskNewPage() {
         if (isRirekisho) {
           if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
         }
-        // 職務経歴書: 職種大分類は必須
+        // 職務経歴書: 第1職種の大分類は必須
         if (isShokumu) {
-          if (!selectedMajorName) return false;
+          if (!shokumuJobAxes[0]?.major) return false;
         }
         // 求人検索: 第1軸の大項目は必須
         if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
@@ -681,14 +686,13 @@ export default function TaskNewPage() {
           if (middleField && motivState3pt.middleName) extra.push({ fieldId: middleField.id, value: motivState3pt.middleName });
           if (minorField && motivState3pt.minors.length > 0) extra.push({ fieldId: minorField.id, value: JSON.stringify(motivState3pt.minors) });
         } else if (catIdx === 1) {
-          // 職務経歴書: 応募職種
+          // 職務経歴書: 応募職種（複数選択JSON）
           const shokuField = cat.fields.find((f) => f.label === "応募職種");
-          if (shokuField) {
-            const name = jobState3pt.minorName || jobState3pt.middleName || jobState3pt.majorName;
-            if (name) extra.push({ fieldId: shokuField.id, value: name });
+          if (shokuField && jobAxes3pt[0]?.major) {
+            extra.push({ fieldId: shokuField.id, value: JSON.stringify(jobAxes3pt.filter(a => a.major)) });
           }
           // 非営業: 経歴概要 → その他実績
-          if (!SALES_MAJORS.includes(jobState3pt.majorName) && careerSummary3pt.trim()) {
+          if (!SALES_MAJORS.includes(jobAxes3pt[0]?.major ?? "") && careerSummary3pt.trim()) {
             const otherField = cat.fields.find((f) => f.label === "その他実績");
             if (otherField) extra.push({ fieldId: otherField.id, value: careerSummary3pt.trim() });
           }
@@ -776,17 +780,13 @@ export default function TaskNewPage() {
         }
       }
 
-      // 応募職種フィールドに職種名をセット
+      // 応募職種フィールドにJSON配列をセット
       if (isShokumu && selectedCategory) {
         const shokuField = selectedCategory.fields.find(
           (f) => f.label === "応募職種"
         );
-        if (shokuField && selectedMinorName) {
-          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMinorName });
-        } else if (shokuField && selectedMiddleName) {
-          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMiddleName });
-        } else if (shokuField && selectedMajorName) {
-          extraFieldValues.push({ fieldId: shokuField.id, value: selectedMajorName });
+        if (shokuField && shokumuJobAxes[0]?.major) {
+          extraFieldValues.push({ fieldId: shokuField.id, value: JSON.stringify(shokumuJobAxes.filter(a => a.major)) });
         }
       }
 
@@ -968,11 +968,7 @@ export default function TaskNewPage() {
         minors: [...selectedMotivMinors],
       });
     } else if (sub === 1) {
-      setJobState3pt({
-        majorId: selectedMajorId, majorName: selectedMajorName,
-        middleId: selectedMiddleId, middleName: selectedMiddleName,
-        minorId: selectedMinorId, minorName: selectedMinorName,
-      });
+      setJobAxes3pt([...shokumuJobAxes]);
       setCareerSummary3pt(careerSummary);
     }
   };
@@ -984,25 +980,16 @@ export default function TaskNewPage() {
       setMotivMiddleId(motivState3pt.middleId);
       setMotivMiddleName(motivState3pt.middleName);
       setSelectedMotivMinors([...motivState3pt.minors]);
-      setSelectedMajorId(""); setSelectedMajorName("");
-      setSelectedMiddleId(""); setSelectedMiddleName("");
-      setSelectedMinorId(""); setSelectedMinorName("");
+      setShokumuJobAxes([{ axis: 1, major: "", middle: null, minor: null }]);
       setCareerSummary("");
     } else if (sub === 1) {
-      setSelectedMajorId(jobState3pt.majorId);
-      setSelectedMajorName(jobState3pt.majorName);
-      setSelectedMiddleId(jobState3pt.middleId);
-      setSelectedMiddleName(jobState3pt.middleName);
-      setSelectedMinorId(jobState3pt.minorId);
-      setSelectedMinorName(jobState3pt.minorName);
+      setShokumuJobAxes([...jobAxes3pt]);
       setCareerSummary(careerSummary3pt);
       setMotivMajorId(""); setMotivMajorName("");
       setMotivMiddleId(""); setMotivMiddleName("");
       setSelectedMotivMinors([]);
     } else if (sub === 2) {
-      setSelectedMajorId(""); setSelectedMajorName("");
-      setSelectedMiddleId(""); setSelectedMiddleName("");
-      setSelectedMinorId(""); setSelectedMinorName("");
+      setShokumuJobAxes([{ axis: 1, major: "", middle: null, minor: null }]);
       setMotivMajorId(""); setMotivMajorName("");
       setMotivMiddleId(""); setMotivMiddleName("");
       setSelectedMotivMinors([]);
@@ -1264,7 +1251,7 @@ export default function TaskNewPage() {
                 setSubStep3pt(0);
                 setFieldValues3pt([{}, {}, {}]);
                 setMotivState3pt({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] });
-                setJobState3pt({ majorId: "", majorName: "", middleId: "", middleName: "", minorId: "", minorName: "" });
+                setJobAxes3pt([{ axis: 1, major: "", middle: null, minor: null }]);
                 setCareerSummary3pt("");
               };
 
@@ -1499,93 +1486,19 @@ export default function TaskNewPage() {
               </div>
             )}
 
-            {/* 職務経歴書: 職種カスケード選択 */}
+            {/* 職務経歴書: 応募職種 複数選択（最大5） */}
             {isShokumu && (
               <div className="mb-6 space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
                 <p className="text-[13px] font-bold text-[#374151]">
                   応募職種<span className="ml-1 text-red-500">*</span>
+                  <span className="ml-2 text-[12px] font-normal text-[#6B7280]">（最大5つまで選択可能）</span>
                 </p>
-                {/* 大分類 */}
-                <div>
-                  <label className="mb-1 block text-[12px] text-[#6B7280]">
-                    職種（大分類）
-                  </label>
-                  <select
-                    value={selectedMajorId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedMajorId(id);
-                      const name = jobMajors.find((m) => m.id === id)?.name ?? "";
-                      setSelectedMajorName(name);
-                    }}
-                    className={selectCls}
-                  >
-                    <option value="">選択してください</option>
-                    {jobMajors.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {/* 中分類 */}
-                {selectedMajorId && (
-                  <div>
-                    <label className="mb-1 block text-[12px] text-[#6B7280]">
-                      職種（中分類）
-                    </label>
-                    <select
-                      value={selectedMiddleId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setSelectedMiddleId(id);
-                        const name = jobMiddles.find((m) => m.id === id)?.name ?? "";
-                        setSelectedMiddleName(name);
-                      }}
-                      className={selectCls}
-                    >
-                      <option value="">選択してください</option>
-                      {jobMiddles.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {/* 小分類 */}
-                {selectedMiddleId && jobMinors.length > 0 && (
-                  <div>
-                    <label className="mb-1 block text-[12px] text-[#6B7280]">
-                      職種（小分類）
-                    </label>
-                    <select
-                      value={selectedMinorId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setSelectedMinorId(id);
-                        const name = jobMinors.find((m) => m.id === id)?.name ?? "";
-                        setSelectedMinorName(name);
-                      }}
-                      className={selectCls}
-                    >
-                      <option value="">選択してください</option>
-                      {jobMinors.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {/* 選択結果 */}
-                {selectedMajorName && (
-                  <p className="text-[12px] text-[#2563EB]">
-                    選択中: {selectedMajorName}
-                    {selectedMiddleName ? ` > ${selectedMiddleName}` : ""}
-                    {selectedMinorName ? ` > ${selectedMinorName}` : ""}
-                  </p>
-                )}
+                <JobCategorySelector
+                  value={shokumuJobAxes}
+                  onChange={setShokumuJobAxes}
+                  labelPrefix="職種"
+                  maxCount={5}
+                />
               </div>
             )}
 
@@ -1765,7 +1678,7 @@ export default function TaskNewPage() {
                   })}
 
                   {/* 非営業: 経歴・実績の概要 */}
-                  {isShokumu && selectedMajorName && !isSalesJob && (
+                  {isShokumu && shokumuJobAxes[0]?.major && !isSalesJob && (
                     <div>
                       <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                         経歴・実績の概要
@@ -2301,22 +2214,32 @@ export default function TaskNewPage() {
               )}
               {/* 職種情報 */}
               {is3pointSet ? (
-                jobState3pt.majorName ? (
-                  <ConfirmRow
-                    label="応募職種"
-                    value={[jobState3pt.majorName, jobState3pt.middleName, jobState3pt.minorName]
-                      .filter(Boolean)
-                      .join(" > ")}
-                  />
+                jobAxes3pt[0]?.major ? (
+                  <div>
+                    <dt className="text-[12px] font-medium text-[#6B7280]">応募職種</dt>
+                    <dd className="mt-1 space-y-0.5">
+                      {jobAxes3pt.filter(a => a.major).map((a) => (
+                        <div key={a.axis} className="text-[13px] text-[#374151]">
+                          <span className="text-[12px] text-[#9CA3AF] mr-1">第{a.axis}職種:</span>
+                          {[a.major, a.middle, a.minor].filter(Boolean).join(" > ")}
+                        </div>
+                      ))}
+                    </dd>
+                  </div>
                 ) : null
               ) : (
-                isShokumu && selectedMajorName && (
-                  <ConfirmRow
-                    label="応募職種"
-                    value={[selectedMajorName, selectedMiddleName, selectedMinorName]
-                      .filter(Boolean)
-                      .join(" > ")}
-                  />
+                isShokumu && shokumuJobAxes[0]?.major && (
+                  <div>
+                    <dt className="text-[12px] font-medium text-[#6B7280]">応募職種</dt>
+                    <dd className="mt-1 space-y-0.5">
+                      {shokumuJobAxes.filter(a => a.major).map((a) => (
+                        <div key={a.axis} className="text-[13px] text-[#374151]">
+                          <span className="text-[12px] text-[#9CA3AF] mr-1">第{a.axis}職種:</span>
+                          {[a.major, a.middle, a.minor].filter(Boolean).join(" > ")}
+                        </div>
+                      ))}
+                    </dd>
+                  </div>
                 )
               )}
               <ConfirmRow
@@ -2334,7 +2257,7 @@ export default function TaskNewPage() {
                 <ConfirmRow label="詳細メモ" value={description} />
               )}
               {/* 経歴概要（非営業・3pt） */}
-              {is3pointSet && !SALES_MAJORS.includes(jobState3pt.majorName) && careerSummary3pt && (
+              {is3pointSet && !SALES_MAJORS.includes(jobAxes3pt[0]?.major ?? "") && careerSummary3pt && (
                 <ConfirmRow label="経歴・実績の概要" value={careerSummary3pt} />
               )}
               {!is3pointSet && isShokumu && !isSalesJob && careerSummary && (

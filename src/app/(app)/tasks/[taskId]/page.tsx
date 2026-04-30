@@ -428,11 +428,11 @@ export default function TaskDetailPage() {
                 }
 
                 // 職種: パンくず表示
-                if (field.label === "職種" && value.startsWith("[")) {
+                if ((field.label === "職種" || field.label === "応募職種") && value.startsWith("[")) {
                   return (
                     <div key={i}>
                       <dt className="text-[12px] font-medium text-[#6B7280]">{field.label}</dt>
-                      <dd className="mt-1"><JobCategoryDisplay value={value} /></dd>
+                      <dd className="mt-1"><JobCategoryDisplay value={value} labelPrefix={field.label === "応募職種" ? "職種" : "軸"} /></dd>
                     </div>
                   );
                 }

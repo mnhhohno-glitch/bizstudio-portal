@@ -14,12 +14,14 @@ export type JobAxis = {
 type Props = {
   value: JobAxis[];
   onChange: (axes: JobAxis[]) => void;
+  labelPrefix?: string;
+  maxCount?: number;
 };
 
 const selectCls =
   "w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
 
-export default function JobCategorySelector({ value, onChange }: Props) {
+export default function JobCategorySelector({ value, onChange, labelPrefix = "軸", maxCount = 10 }: Props) {
   const [majors, setMajors] = useState<JobCatItem[]>([]);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function JobCategorySelector({ value, onChange }: Props) {
   };
 
   const addAxis = () => {
-    if (axes.length >= 10) return;
+    if (axes.length >= maxCount) return;
     onChange([...axes, { axis: axes.length + 1, major: "", middle: null, minor: null }]);
   };
 
@@ -56,11 +58,12 @@ export default function JobCategorySelector({ value, onChange }: Props) {
           index={idx}
           majors={majors}
           canDelete={axes.length > 1}
+          labelPrefix={labelPrefix}
           onUpdate={(updated) => updateAxis(idx, updated)}
           onRemove={() => removeAxis(idx)}
         />
       ))}
-      {axes.length < 10 && (
+      {axes.length < maxCount && (
         <button
           type="button"
           onClick={addAxis}
@@ -78,6 +81,7 @@ function AxisRow({
   index,
   majors,
   canDelete,
+  labelPrefix,
   onUpdate,
   onRemove,
 }: {
@@ -85,6 +89,7 @@ function AxisRow({
   index: number;
   majors: JobCatItem[];
   canDelete: boolean;
+  labelPrefix: string;
   onUpdate: (updated: Partial<JobAxis>) => void;
   onRemove: () => void;
 }) {
@@ -154,7 +159,7 @@ function AxisRow({
   return (
     <div className="rounded-[6px] border border-[#E5E7EB] bg-[#F9FAFB] p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[12px] font-medium text-[#6B7280]">第{index + 1}軸</span>
+        <span className="text-[12px] font-medium text-[#6B7280]">第{index + 1}{labelPrefix}</span>
         {canDelete && (
           <button
             type="button"
@@ -207,7 +212,7 @@ function AxisRow({
 }
 
 /** タスク詳細画面用: パンくず表示 */
-export function JobCategoryDisplay({ value }: { value: string }) {
+export function JobCategoryDisplay({ value, labelPrefix = "軸" }: { value: string; labelPrefix?: string }) {
   let axes: JobAxis[] = [];
   try {
     axes = JSON.parse(value);
@@ -223,7 +228,7 @@ export function JobCategoryDisplay({ value }: { value: string }) {
     <div className="space-y-1">
       {axes.map((ax, i) => (
         <div key={i} className="text-[14px] text-[#374151]">
-          <span className="text-[12px] text-[#9CA3AF] mr-1.5">第{ax.axis}軸:</span>
+          <span className="text-[12px] text-[#9CA3AF] mr-1.5">第{ax.axis}{labelPrefix}:</span>
           {[ax.major, ax.middle, ax.minor].filter(Boolean).join(" > ")}
         </div>
       ))}
