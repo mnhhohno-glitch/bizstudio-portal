@@ -374,6 +374,7 @@ export default function InterviewForm({
   const [desiredSub, setDesiredSub] = useState("st-job");
   const [aiOrganizeLoading, setAiOrganizeLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
   const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
@@ -668,6 +669,29 @@ export default function InterviewForm({
       }
     } catch {
       toast.error("削除に失敗しました");
+    }
+  };
+
+  /* ---- Attachment download ---- */
+  const handleDownloadAttachment = async (att: AttachmentRecord) => {
+    if (downloadingAttId) return;
+    setDownloadingAttId(att.id);
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/attachments/${att.id}?url=true`);
+      if (!res.ok) throw new Error("URL取得に失敗しました");
+      const data = await res.json();
+      const a = document.createElement("a");
+      a.href = data.signedUrl;
+      a.download = att.fileName;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ダウンロードに失敗しました");
+    } finally {
+      setDownloadingAttId(null);
     }
   };
 
@@ -1591,6 +1615,7 @@ export default function InterviewForm({
                           <BtnMini variant="danger" onClick={() => handleDeleteAttachment(att.id)}>🗑 削除</BtnMini>
                           <span style={{ fontSize: 18, flexShrink: 0 }}>{att.mimeType?.startsWith("audio") ? "🎙️" : "📄"}</span>
                           <span className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: "var(--im-fg)" }}>{att.fileName}</span>
+                          <BtnMini onClick={() => handleDownloadAttachment(att)} disabled={downloadingAttId === att.id}>{downloadingAttId === att.id ? "..." : "⬇ DL"}</BtnMini>
                           <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>{(att.fileSize / 1024).toFixed(0)} KB</span>
                         </div>
                       </div>
