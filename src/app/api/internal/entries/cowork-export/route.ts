@@ -11,10 +11,11 @@ type Target = {
   flagDetail: string;
 };
 
-function detectPlatform(jobDb: string): "hito-link" | "circus" | "mynavi-job" | null {
+function detectPlatform(jobDb: string): "hito-link" | "circus" | "mynavi-job" | "bee" | null {
   if (/hito/i.test(jobDb)) return "hito-link";
   if (/circus/i.test(jobDb)) return "circus";
   if (/マイナビ/.test(jobDb)) return "mynavi-job";
+  if (/bee/i.test(jobDb)) return "bee";
   return null;
 }
 
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
             { jobDb: { contains: "HITO", mode: "insensitive" } },
             { jobDb: { contains: "Circus", mode: "insensitive" } },
             { jobDb: { contains: "マイナビ" } },
+            { jobDb: { contains: "Bee", mode: "insensitive" } },
           ],
         },
         {
@@ -48,10 +50,11 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const batches: Record<"hito-link" | "circus" | "mynavi-job", Target[]> = {
+  const batches: Record<"hito-link" | "circus" | "mynavi-job" | "bee", Target[]> = {
     "hito-link": [],
     "circus": [],
     "mynavi-job": [],
+    "bee": [],
   };
 
   for (const entry of entries) {
@@ -77,7 +80,8 @@ export async function GET(request: NextRequest) {
       "hito-link": batches["hito-link"].length,
       "circus": batches["circus"].length,
       "mynavi-job": batches["mynavi-job"].length,
-      total: batches["hito-link"].length + batches["circus"].length + batches["mynavi-job"].length,
+      "bee": batches["bee"].length,
+      total: batches["hito-link"].length + batches["circus"].length + batches["mynavi-job"].length + batches["bee"].length,
     },
   });
 }
