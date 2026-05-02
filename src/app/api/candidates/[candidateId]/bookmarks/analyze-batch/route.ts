@@ -180,6 +180,9 @@ function extractSearchNames(fileName: string): string[] {
   const p3 = name.match(/^(.+?)_No\d+$/i);
   if (p3) names.push(p3[1]);
 
+  const pBee = name.match(/^(.+?)[：:]\d+$/);
+  if (pBee && pBee[1]) names.push(pBee[1].trim());
+
   const p4 = name.match(/^求人票[_]?(.+)$/);
   if (p4 && !names.includes(p4[1])) names.push(p4[1]);
 

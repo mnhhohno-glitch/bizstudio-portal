@@ -14,9 +14,12 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = AP
 
 function normalizePortalFileName(fileName: string): string {
   return fileName
-    .replace(/^求人票_/, "")
     .replace(/\.pdf$/i, "")
+    .replace(/^求人票_/, "")
+    .replace(/^\d+_/, "")
     .replace(/_\d{14,}$/, "")
+    .replace(/[：:]\d+$/, "")
+    .replace(/_No\d+$/i, "")
     .trim();
 }
 
