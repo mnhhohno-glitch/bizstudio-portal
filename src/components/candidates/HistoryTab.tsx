@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
+import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -355,14 +356,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const extractTriggered = useRef(false);
 
   const findJobResponse = useCallback((fileName: string): string | null => {
-    const key = normalize(
-      fileName
-        .replace(/\.pdf$/i, "")
-        .replace(/^求人票[_]?/, "")
-        .replace(/_\d{10,}$/, "")
-        .replace(/株式会社|有限会社|合同会社/g, "")
-        .trim()
-    );
+    const key = normalize(stripCorpSuffixes(stripFileMetadata(fileName)));
     if (!key) return null;
     for (const [cn, response] of jobResponseMap) {
       if (key.includes(cn) || cn.includes(key)) return response;
@@ -1322,7 +1316,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
     if (!jobsData?.jobs) return map;
     for (const job of jobsData.jobs) {
       if (!job.candidate_response) continue;
-      const cn = normalize(job.company_name.replace(/株式会社|有限会社|合同会社/g, "").trim());
+      const cn = normalize(stripCorpSuffixes(job.company_name));
       if (cn) map.set(cn, job.candidate_response);
     }
     return map;

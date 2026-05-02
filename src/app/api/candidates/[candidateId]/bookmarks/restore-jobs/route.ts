@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { stripFileMetadata } from "@/lib/normalize-filename";
 
 const API_TIMEOUT_MS = 15000;
 const RESTORE_BATCH_SIZE = 50;
@@ -13,14 +14,7 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = AP
 }
 
 function normalizePortalFileName(fileName: string): string {
-  return fileName
-    .replace(/\.pdf$/i, "")
-    .replace(/^求人票_/, "")
-    .replace(/^\d+_/, "")
-    .replace(/_\d{14,}$/, "")
-    .replace(/[：:]\d+$/, "")
-    .replace(/_No\d+$/i, "")
-    .trim();
+  return stripFileMetadata(fileName);
 }
 
 function normalizeKyuujinCompanyName(name: string): string {
