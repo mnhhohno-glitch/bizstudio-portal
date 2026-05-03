@@ -279,8 +279,9 @@ export async function POST(
           .map((f) => {
             if (!f.aiAnalysisComment || !f.aiMatchRating) return null;
             const jobNumMatch = f.fileName.match(/_No(\d+)/i);
-            // Circus形式は求人番号、HITO形式はdriveFileId、それ以外はfileNameで照合
-            if (!jobNumMatch && !f.driveFileId && !f.fileName) return null;
+            const beeMatch = !jobNumMatch ? f.fileName.match(/[：:](\d+)\.pdf$/i) : null;
+            // Circus形式は求人番号、Bee形式は末尾番号、HITO形式はdriveFileId、それ以外はfileNameで照合
+            if (!jobNumMatch && !beeMatch && !f.driveFileId && !f.fileName) return null;
             const commentBody = extractCandidateFacingComment(f.aiAnalysisComment);
             if (!commentBody) return null;
             const entry: { job_number?: string; drive_file_id?: string; file_name?: string; match_label: string; comment: string } = {
@@ -289,6 +290,7 @@ export async function POST(
               file_name: f.fileName,
             };
             if (jobNumMatch) entry.job_number = jobNumMatch[1];
+            else if (beeMatch) entry.job_number = beeMatch[1];
             if (f.driveFileId) entry.drive_file_id = f.driveFileId;
             return entry;
           })

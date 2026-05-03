@@ -20,6 +20,7 @@ function normalizePortalFileName(fileName: string): string {
 function normalizeKyuujinCompanyName(name: string): string {
   return name
     .replace(/_\d{14,}$/, "")
+    .replace(/[：:]\d+$/, "")
     .trim();
 }
 

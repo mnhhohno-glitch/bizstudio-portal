@@ -1142,7 +1142,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                   <div className="space-y-1.5">
                     <label className="flex items-center gap-2 text-[13px] cursor-pointer">
                       <input type="radio" name="dbType" value="hito_mynavi" checked={sendDbType === "hito_mynavi"} onChange={() => setSendDbType("hito_mynavi")} className="accent-[#2563EB]" />
-                      HITO-Link / マイナビ（自動処理）
+                      HITO-Link / マイナビ / Bee（自動処理）
                     </label>
                     <label className="flex items-center gap-2 text-[13px] cursor-pointer">
                       <input type="radio" name="dbType" value="circus" checked={sendDbType === "circus"} onChange={() => setSendDbType("circus")} className="accent-[#2563EB]" />
