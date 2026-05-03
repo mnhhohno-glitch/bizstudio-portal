@@ -47,15 +47,25 @@ export async function GET(
   const { candidateId } = await params;
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category");
+  const archivedParam = searchParams.get("archived");
 
   const where: Prisma.CandidateFileWhereInput = { candidateId };
   if (category) {
     where.category = category as Prisma.EnumCandidateFileCategoryFilter;
   }
+  if (archivedParam === "true") {
+    where.archivedAt = { not: null };
+  } else if (archivedParam === "all") {
+    // no filter on archivedAt
+  } else {
+    where.archivedAt = null;
+  }
 
   const files = await prisma.candidateFile.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy: archivedParam === "true"
+      ? { archivedAt: "desc" }
+      : { createdAt: "desc" },
     select: {
       id: true,
       candidateId: true,
@@ -76,7 +86,12 @@ export async function GET(
       aiAnalyzedAt: true,
       lastExportedAt: true,
       lastExportedTo: true,
+      archivedAt: true,
+      archivedReason: true,
+      archivedNote: true,
+      archivedById: true,
       uploadedBy: { select: { id: true, name: true } },
+      archivedBy: { select: { id: true, name: true } },
     },
   });
 

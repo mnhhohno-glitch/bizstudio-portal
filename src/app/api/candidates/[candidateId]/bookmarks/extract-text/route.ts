@@ -47,6 +47,7 @@ export async function POST(
       id: { in: fileIds },
       candidateId,
       category: "BOOKMARK",
+      archivedAt: null,
     },
   });
 

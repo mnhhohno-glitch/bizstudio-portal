@@ -270,7 +270,87 @@ type BookmarkFile = {
   lastExportedTo: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
+  archivedAt?: string | null;
+  archivedReason?: string | null;
+  archivedNote?: string | null;
+  archivedBy?: { id: string; name: string } | null;
 };
+
+const ARCHIVE_REASONS = [
+  "重複",
+  "希望条件不一致",
+  "求職者意向",
+  "選考終了",
+  "その他",
+] as const;
+
+/* ---------- Archive Modal ---------- */
+function ArchiveModal({
+  count,
+  fileName,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  count: number;
+  fileName?: string;
+  onConfirm: (reason: string | null, note: string | null) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [reason, setReason] = useState<string>("");
+  const [note, setNote] = useState<string>("");
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={busy ? undefined : onCancel}>
+      <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[15px] font-bold text-[#374151]">紹介保留に移動</h2>
+          <button onClick={onCancel} disabled={busy} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none disabled:opacity-50">×</button>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          {fileName ? <><span className="font-medium">{fileName}</span> を紹介保留に移動します。</> : `${count}件のブックマークを紹介保留に移動します。`}
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">削除理由（任意）</label>
+            <select
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+              disabled={busy}
+            >
+              <option value="">（選択しない）</option>
+              {ARCHIVE_REASONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-[#374151] mb-1">メモ（任意）</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={3}
+              placeholder="補足があれば入力..."
+              disabled={busy}
+              className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] resize-none"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 pt-4">
+          <button onClick={onCancel} disabled={busy} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
+          <button
+            onClick={() => onConfirm(reason || null, note.trim() || null)}
+            disabled={busy}
+            className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+          >
+            {busy ? "処理中..." : "保留に移動"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const RATING_STYLES: Record<string, string> = {
   A: "bg-green-100 text-green-800 border-green-300",
@@ -325,15 +405,16 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs, onArchivedChange }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkArchiving, setBulkArchiving] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<{ kind: "single"; file: BookmarkFile } | { kind: "bulk"; ids: string[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
   const [sortField, setSortField] = useState<"name" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date" | null>(null);
@@ -453,29 +534,72 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     triggerExtraction(uploadedFileIds, ":upload");
   };
 
-  const handleDelete = async (fileId: string) => {
-    if (!confirm("このファイルを削除します。よろしいですか？")) return;
-    setDeletingId(fileId);
-    try {
-      await fetch(`/api/candidates/${candidateId}/files/${fileId}`, { method: "DELETE" });
-      setSelectedIds((prev) => { const n = new Set(prev); n.delete(fileId); return n; });
-      fetchFiles();
-    } catch { /* */ }
-    finally { setDeletingId(null); }
+  const handleArchiveConfirm = async (reason: string | null, note: string | null) => {
+    if (!archiveTarget) return;
+    if (archiveTarget.kind === "single") {
+      const fileId = archiveTarget.file.id;
+      setArchivingId(fileId);
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/archive`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason, note }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "保留化に失敗しました");
+        }
+        toast.success("紹介保留に移動しました");
+        setSelectedIds((prev) => { const n = new Set(prev); n.delete(fileId); return n; });
+        setArchiveTarget(null);
+        fetchFiles();
+        onArchivedChange?.();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "保留化に失敗しました");
+      } finally {
+        setArchivingId(null);
+      }
+    } else {
+      const ids = archiveTarget.ids;
+      setBulkArchiving(true);
+      try {
+        const results = await Promise.allSettled(
+          ids.map((fileId) =>
+            fetch(`/api/candidates/${candidateId}/files/${fileId}/archive`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ reason, note }),
+            }).then(async (res) => {
+              if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                throw new Error(data?.error || `failed: ${fileId}`);
+              }
+            })
+          )
+        );
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          toast.error(`${failed}件の保留化に失敗しました`);
+        } else {
+          toast.success(`${ids.length}件を紹介保留に移動しました`);
+        }
+        setSelectedIds(new Set());
+        setArchiveTarget(null);
+        fetchFiles();
+        onArchivedChange?.();
+      } finally {
+        setBulkArchiving(false);
+      }
+    }
   };
 
-  const handleBulkDelete = async () => {
+  const handleArchive = (file: BookmarkFile) => {
+    setArchiveTarget({ kind: "single", file });
+  };
+
+  const handleBulkArchive = () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`選択した ${selectedIds.size} 件のファイルを削除しますか？`)) return;
-    setBulkDeleting(true);
-    try {
-      for (const fileId of selectedIds) {
-        await fetch(`/api/candidates/${candidateId}/files/${fileId}`, { method: "DELETE" });
-      }
-      setSelectedIds(new Set());
-      fetchFiles();
-    } catch { /* */ }
-    finally { setBulkDeleting(false); }
+    setArchiveTarget({ kind: "bulk", ids: Array.from(selectedIds) });
   };
 
   const handleBulkDownload = async () => {
@@ -760,11 +884,11 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             {selectedIds.size > 0 && (
               <>
                 <button
-                  onClick={handleBulkDelete}
-                  disabled={bulkDeleting}
-                  className="text-[12px] text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+                  onClick={handleBulkArchive}
+                  disabled={bulkArchiving}
+                  className="text-[12px] text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
                 >
-                  🗑️ 選択を削除（{selectedIds.size}件）
+                  📦 紹介保留に移動（{selectedIds.size}件）
                 </button>
                 <button
                   onClick={handleBulkDownload}
@@ -943,12 +1067,12 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                     ⬇
                   </a>
                   <button
-                    onClick={() => handleDelete(file.id)}
-                    disabled={deletingId === file.id}
-                    className="text-gray-400 hover:text-red-500 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors disabled:opacity-50"
-                    title="削除"
+                    onClick={() => handleArchive(file)}
+                    disabled={archivingId === file.id}
+                    className="text-gray-400 hover:text-amber-600 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors disabled:opacity-50"
+                    title="紹介保留に移動"
                   >
-                    🗑
+                    📦
                   </button>
                 </span>
               </div>
@@ -1257,6 +1381,330 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
           </div>
         </div>
       )}
+
+      {/* Archive (紹介保留に移動) modal */}
+      {archiveTarget && (
+        <ArchiveModal
+          count={archiveTarget.kind === "bulk" ? archiveTarget.ids.length : 1}
+          fileName={archiveTarget.kind === "single" ? archiveTarget.file.fileName : undefined}
+          onConfirm={handleArchiveConfirm}
+          onCancel={() => setArchiveTarget(null)}
+          busy={archivingId !== null || bulkArchiving}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Archived Bookmark Section ---------- */
+function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: string; onCountChange?: (count: number) => void }) {
+  const [files, setFiles] = useState<BookmarkFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<"name" | "wish" | "pass" | "overall" | "archivedBy" | "archivedAt" | null>("archivedAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [permanentDeletingId, setPermanentDeletingId] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<BookmarkFile | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<BookmarkFile | null>(null);
+
+  const fetchFiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK&archived=true`);
+      if (res.ok) {
+        const data = await res.json();
+        const f = (data.files || []) as BookmarkFile[];
+        setFiles(f);
+        onCountChange?.(f.length);
+      }
+    } catch { /* */ }
+    finally { setLoading(false); }
+  }, [candidateId, onCountChange]);
+
+  useEffect(() => { fetchFiles(); }, [fetchFiles]);
+
+  const handleRestore = async (file: BookmarkFile) => {
+    setRestoringId(file.id);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/${file.id}/restore`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "復元に失敗しました");
+      }
+      toast.success("復元しました");
+      setConfirmRestore(null);
+      fetchFiles();
+      window.dispatchEvent(new CustomEvent("bookmark-archived-changed"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "復元に失敗しました");
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  const handlePermanentDelete = async (file: BookmarkFile) => {
+    setPermanentDeletingId(file.id);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/${file.id}/permanent`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "完全削除に失敗しました");
+      }
+      toast.success("完全削除しました");
+      setConfirmDelete(null);
+      fetchFiles();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "完全削除に失敗しました");
+    } finally {
+      setPermanentDeletingId(null);
+    }
+  };
+
+  const handleSort = (field: "name" | "wish" | "pass" | "overall" | "archivedBy" | "archivedAt") => {
+    if (sortField === field) {
+      if (sortDir === "asc") setSortDir("desc");
+      else { setSortField(null); setSortDir("asc"); }
+    } else {
+      setSortField(field);
+      setSortDir(field === "archivedAt" ? "desc" : "asc");
+    }
+  };
+
+  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+  const filteredFiles = (() => {
+    let result = files.filter((f) => {
+      if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+    if (sortField) {
+      const dir = sortDir === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        if (sortField === "name") return a.fileName.localeCompare(b.fileName) * dir;
+        if (sortField === "wish" || sortField === "pass" || sortField === "overall") {
+          const axisA = parse3AxisRatings(a.aiAnalysisComment);
+          const axisB = parse3AxisRatings(b.aiAnalysisComment);
+          const key = sortField;
+          const va = axisA ? (ratingOrder[axisA[key]] ?? 4) : 4;
+          const vb = axisB ? (ratingOrder[axisB[key]] ?? 4) : 4;
+          return (va - vb) * dir;
+        }
+        if (sortField === "archivedBy") {
+          return (a.archivedBy?.name || "").localeCompare(b.archivedBy?.name || "") * dir;
+        }
+        if (sortField === "archivedAt") {
+          const ta = a.archivedAt ? new Date(a.archivedAt).getTime() : 0;
+          const tb = b.archivedAt ? new Date(b.archivedAt).getTime() : 0;
+          return (ta - tb) * dir;
+        }
+        return 0;
+      });
+    }
+    return result;
+  })();
+
+  const shortDate = (iso?: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  const reasonText = (file: BookmarkFile): string => {
+    const r = file.archivedReason;
+    const n = file.archivedNote;
+    if (r && n) return `${r}: ${n}`;
+    if (r) return r;
+    if (n) return n;
+    return "—";
+  };
+
+  const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[14px] font-semibold text-[#374151]">📦 紹介保留</h3>
+        </div>
+        <p className="text-[12px] text-gray-500">紹介を保留にしたブックマークの一覧。復元または完全削除できます。</p>
+
+        {files.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="🔍 ファイル名で検索..."
+                className="w-full border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {files.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+          <span
+            onClick={() => handleSort("name")}
+            className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "name" ? "text-[#2563EB]" : ""}`}
+          >
+            会社名
+            <SortIcon field="name" current={sortField} dir={sortDir} />
+          </span>
+          <span onClick={() => handleSort("wish")}
+            className={`w-[44px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "wish" ? "text-[#2563EB]" : ""}`}>
+            希望<SortIcon field="wish" current={sortField} dir={sortDir} />
+          </span>
+          <span onClick={() => handleSort("pass")}
+            className={`w-[44px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "pass" ? "text-[#2563EB]" : ""}`}>
+            通過<SortIcon field="pass" current={sortField} dir={sortDir} />
+          </span>
+          <span onClick={() => handleSort("overall")}
+            className={`w-[44px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "overall" ? "text-[#2563EB]" : ""}`}>
+            総合<SortIcon field="overall" current={sortField} dir={sortDir} />
+          </span>
+          <span
+            onClick={() => handleSort("archivedAt")}
+            className={`w-[64px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 whitespace-nowrap ${sortField === "archivedAt" ? "text-[#2563EB]" : ""}`}
+          >
+            保留日
+            <SortIcon field="archivedAt" current={sortField} dir={sortDir} />
+          </span>
+          <span
+            onClick={() => handleSort("archivedBy")}
+            className={`w-[80px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "archivedBy" ? "text-[#2563EB]" : ""}`}
+          >
+            保留者
+            <SortIcon field="archivedBy" current={sortField} dir={sortDir} />
+          </span>
+          <span className="w-[160px] shrink-0">保留理由</span>
+          <span className="w-[110px] shrink-0" />
+        </div>
+      )}
+
+      <div className="max-h-[500px] overflow-y-auto">
+        {loading ? (
+          <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
+        ) : files.length === 0 ? (
+          <div className="py-8 text-center text-[13px] text-gray-400">紹介保留中のブックマークはありません</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filteredFiles.length === 0 ? (
+              <div className="py-6 text-center text-[13px] text-gray-400">該当するファイルが見つかりません</div>
+            ) : filteredFiles.map((file) => {
+              const axis = parse3AxisRatings(file.aiAnalysisComment);
+              const badge = (v: string | undefined) => {
+                if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
+                const s = RATING_STYLES[v];
+                return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
+              };
+              return (
+                <div key={file.id} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors">
+                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                    <span className="shrink-0 text-sm">📄</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
+                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
+                      title={file.fileName}
+                    >{file.fileName}</button>
+                  </div>
+                  <span className="w-[44px] shrink-0 text-center">{badge(axis?.wish)}</span>
+                  <span className="w-[44px] shrink-0 text-center">{badge(axis?.pass)}</span>
+                  <span className="w-[44px] shrink-0 text-center">{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
+                  <span className="w-[64px] shrink-0 text-[11px] text-gray-500 whitespace-nowrap">{shortDate(file.archivedAt)}</span>
+                  <span className="w-[80px] shrink-0 text-[11px] text-gray-500 truncate">{file.archivedBy?.name || "—"}</span>
+                  <span className="w-[160px] shrink-0 text-[11px] text-gray-600 truncate" title={reasonText(file)}>{reasonText(file)}</span>
+                  <span className="w-[110px] shrink-0 flex items-center gap-1 justify-end">
+                    <button
+                      onClick={() => setConfirmRestore(file)}
+                      disabled={restoringId === file.id}
+                      className="text-[11px] text-blue-600 hover:text-blue-800 border border-blue-300 rounded px-2 py-0.5 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                      title="復元"
+                    >
+                      {restoringId === file.id ? "..." : "復元"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(file)}
+                      disabled={permanentDeletingId === file.id}
+                      className="text-[11px] text-red-600 hover:text-red-800 border border-red-300 rounded px-2 py-0.5 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      title="完全削除"
+                    >
+                      {permanentDeletingId === file.id ? "..." : "削除"}
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Restore confirm modal */}
+      {confirmRestore && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setConfirmRestore(null)}>
+          <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[15px] font-bold text-[#374151] mb-3">紹介保留から復元</h2>
+            <p className="text-sm text-gray-600 mb-4"><span className="font-medium">{confirmRestore.fileName}</span> をブックマークに復元します。</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmRestore(null)} disabled={restoringId === confirmRestore.id} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
+              <button
+                onClick={() => handleRestore(confirmRestore)}
+                disabled={restoringId === confirmRestore.id}
+                className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                {restoringId === confirmRestore.id ? "復元中..." : "復元する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Permanent delete confirm modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[15px] font-bold text-red-600 mb-3">⚠️ 完全削除</h2>
+            <div className="text-sm text-gray-700 mb-4 space-y-2">
+              <p><span className="font-medium">{confirmDelete.fileName}</span> を完全に削除します。</p>
+              <p className="text-red-600 font-medium">DB と Google Drive から完全に削除されます。元に戻せません。本当に削除しますか？</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} disabled={permanentDeletingId === confirmDelete.id} className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
+              <button
+                onClick={() => handlePermanentDelete(confirmDelete)}
+                disabled={permanentDeletingId === confirmDelete.id}
+                className="flex-1 bg-red-600 text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {permanentDeletingId === confirmDelete.id ? "削除中..." : "完全削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Preview popup */}
+      {previewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
+          <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
+              <span className="text-[13px] font-medium truncate">{previewFile.fileName}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <a href={getPreviewUrl(previewFile.driveViewUrl)} target="_blank" rel="noopener noreferrer"
+                  className="text-[12px] text-blue-600 hover:underline">新しいタブで開く</a>
+                <button onClick={() => setPreviewFile(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0">
+              <iframe src={getPreviewUrl(previewFile.driveViewUrl)} className="w-full h-full border-0" title={previewFile.fileName} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1265,8 +1713,9 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 /*  Main Component                                                      */
 /* ================================================================== */
 export default function HistoryTab({ candidateId, candidateName }: { candidateId: string; candidateName?: string }) {
-  const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries">("bookmark");
+  const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries" | "archived">("bookmark");
   const [bookmarkCount, setBookmarkCount] = useState(0);
+  const [archivedCount, setArchivedCount] = useState(0);
 
   // Jobs state
   const [jobsData, setJobsData] = useState<JobsResponse | null>(null);
@@ -1387,11 +1836,27 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
     }
   }, [candidateId]);
 
+  const fetchArchivedCount = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK&archived=true`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setArchivedCount((data.files || []).length);
+    } catch { /* silent */ }
+  }, [candidateId]);
+
   useEffect(() => {
     fetchJobs();
     fetchEntries();
     fetchBookmarkRatings();
-  }, [fetchJobs, fetchEntries, fetchBookmarkRatings]);
+    fetchArchivedCount();
+  }, [fetchJobs, fetchEntries, fetchBookmarkRatings, fetchArchivedCount]);
+
+  useEffect(() => {
+    const handler = () => fetchArchivedCount();
+    window.addEventListener("bookmark-archived-changed", handler);
+    return () => window.removeEventListener("bookmark-archived-changed", handler);
+  }, [fetchArchivedCount]);
 
   useEffect(() => {
     const handler = () => fetchBookmarkRatings();
@@ -1703,11 +2168,29 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
             <span className="ml-1.5 text-xs text-gray-400">({entries.length})</span>
           )}
         </button>
+        <button
+          onClick={() => setActiveSubTab("archived")}
+          className={`px-4 py-2 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+            activeSubTab === "archived"
+              ? "bg-white text-[#2563EB] shadow-sm"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          紹介保留
+          {archivedCount > 0 && (
+            <span className="ml-1.5 text-xs text-gray-400">({archivedCount})</span>
+          )}
+        </button>
       </div>
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} />
+      )}
+
+      {/* ===== 紹介保留サブタブ ===== */}
+      {activeSubTab === "archived" && (
+        <ArchivedBookmarkSection candidateId={candidateId} onCountChange={setArchivedCount} />
       )}
 
       {/* ===== 求人紹介サブタブ ===== */}

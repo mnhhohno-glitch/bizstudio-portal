@@ -53,7 +53,7 @@ export async function POST(
   }
 
   const bookmarkFiles = await prisma.candidateFile.findMany({
-    where: { id: { in: fileIds }, category: "BOOKMARK" },
+    where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
     select: { id: true, fileName: true, lastExportedAt: true },
   });
 

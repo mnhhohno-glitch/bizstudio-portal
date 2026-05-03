@@ -197,6 +197,10 @@ export async function DELETE(
 
   const { fileId } = await params;
 
+  console.warn(
+    "[DEPRECATED] Direct DELETE /candidates/[candidateId]/files/[fileId] is deprecated for BOOKMARK. Use /archive (then /permanent) instead."
+  );
+
   const file = await prisma.candidateFile.findUnique({ where: { id: fileId } });
   if (!file) {
     return withCors(

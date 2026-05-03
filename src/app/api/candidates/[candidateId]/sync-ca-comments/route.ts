@@ -41,6 +41,7 @@ export async function POST(
     where: {
       candidateId,
       category: "BOOKMARK",
+      archivedAt: null,
       aiAnalysisComment: { not: null },
       aiMatchRating: { not: null },
     },

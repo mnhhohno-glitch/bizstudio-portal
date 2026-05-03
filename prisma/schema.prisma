@@ -128,6 +128,7 @@ model User {
   rpaErrorNotes            RpaErrorNote[]            @relation("RpaErrorNoteUser")
   rpaErrorAssignments      RpaErrorLog[]             @relation("RpaErrorAssignee")
   candidateFiles           CandidateFile[]           @relation("UserCandidateFiles")
+  archivedCandidateFiles   CandidateFile[]           @relation("CandidateFileArchivedBy")
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
   dailySchedules           DailySchedule[]
   googleCalendarConnection GoogleCalendarConnection?
@@ -1038,9 +1039,15 @@ model CandidateFile {
   lastExportedTo    String?               @map("last_exported_to")
   uploadedByUserId  String                @map("uploaded_by_user_id")
   uploadedBy        User                  @relation("UserCandidateFiles", fields: [uploadedByUserId], references: [id])
+  archivedAt        DateTime?             @map("archived_at")
+  archivedReason    String?               @map("archived_reason")
+  archivedNote      String?               @map("archived_note") @db.Text
+  archivedById      String?               @map("archived_by_id")
+  archivedBy        User?                 @relation("CandidateFileArchivedBy", fields: [archivedById], references: [id])
   createdAt         DateTime              @default(now()) @map("created_at")
   updatedAt         DateTime              @updatedAt @map("updated_at")
 
+  @@index([candidateId, category, archivedAt])
   @@map("candidate_files")
 }
 

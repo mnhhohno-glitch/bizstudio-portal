@@ -190,6 +190,7 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     where: {
       candidateId,
       category: "BOOKMARK",
+      archivedAt: null,
       extractedText: { not: null },
     },
     select: {

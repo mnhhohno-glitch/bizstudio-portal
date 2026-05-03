@@ -263,6 +263,7 @@ export async function POST(
     candidateId,
     category: "BOOKMARK",
     extractedText: { not: null },
+    archivedAt: null,
   };
   if (sinceDate) {
     whereClause.createdAt = { gt: new Date(sinceDate) };
