@@ -1102,17 +1102,14 @@ export default function InterviewForm({
               {/* Row 5: 担当CA | 担当 | ランク・最新 */}
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>担当</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
-              <div className="col-span-2 flex items-center gap-2 min-w-0">
-                <div className="flex-1 flex items-center gap-1 min-w-0">
-                  <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)" }}>ランク</span>
+              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>ランク/最新</span>
+                <div className="flex gap-0.5 flex-1 min-w-0">
                   <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                     {r.overallRank ? (
                       <span className="inline-flex items-center rounded-[10px] px-3 py-0.5" style={{ fontSize: 13, fontWeight: 500, background: rankColor(r.overallRank).bg, color: rankColor(r.overallRank).fg }}>{r.overallRank}</span>
                     ) : <span style={{ fontSize: 12, color: "var(--im-fg3)" }}>-</span>}
                   </div>
-                </div>
-                <div className="flex-1 flex items-center gap-1 min-w-0">
-                  <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)" }}>最新</span>
                   <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                     <Chip text="最新" variant="ok" />
                   </div>
@@ -1149,16 +1146,7 @@ export default function InterviewForm({
                   }
                 }} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} />
               </div>
-              <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>フラグ</span>
-                <span
-                  className="inline-flex items-center px-2.5 py-0.5 rounded-full"
-                  style={{ fontSize: 11, background: "var(--im-bg2)", color: "var(--im-fg)" }}
-                  title="求職者の現在フラグ（自動更新）"
-                >
-                  {formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)}
-                </span>
-              </div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>
           </div>
 
