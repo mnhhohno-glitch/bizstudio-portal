@@ -390,6 +390,7 @@ export default function InterviewForm({
   const [pdfLoading, setPdfLoading] = useState(false);
   const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [expandedMemoId, setExpandedMemoId] = useState<string | null>(null);
   const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
   const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
 
@@ -719,7 +720,7 @@ export default function InterviewForm({
         body: JSON.stringify({
           title: "新規メモ",
           flag: "初回面談",
-          date: now.toISOString(),
+          date: now.toLocaleDateString('sv-SE'),
           time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
           content: "",
         }),
@@ -1306,7 +1307,7 @@ export default function InterviewForm({
                             {MEMO_FLAGS.map((f) => <option key={f} value={f}>{f}</option>)}
                           </select>
                           <input
-                            type="date" value={memo.date ? new Date(memo.date).toISOString().slice(0, 10) : ""}
+                            type="date" value={memo.date ? new Date(memo.date).toLocaleDateString('sv-SE') : ""}
                             onChange={(e) => handleUpdateMemo(memo.id, "date", e.target.value)}
                             style={{ width: 116, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
                           />
@@ -1315,6 +1316,11 @@ export default function InterviewForm({
                             onChange={(v) => handleUpdateMemo(memo.id, "time", v)}
                             style={{ width: 78, fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)" }}
                           />
+                          <button
+                            type="button"
+                            onClick={() => setExpandedMemoId(memo.id)}
+                            style={{ fontSize: 11, padding: "4px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg-info, #2563EB)", cursor: "pointer" }}
+                          >全体表示</button>
                         </div>
                         <textarea
                           value={memo.content} onChange={(e) => handleUpdateMemo(memo.id, "content", e.target.value)}
@@ -1642,6 +1648,31 @@ export default function InterviewForm({
           </div>
         </div>
       </div>
+
+      {expandedMemoId && (() => {
+        const targetMemo = memos.find(m => m.id === expandedMemoId);
+        if (!targetMemo) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setExpandedMemoId(null)}>
+            <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg shadow-xl" style={{ background: "var(--im-bg, #fff)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center p-4" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--im-fg)" }}>{targetMemo.title || "メモ編集"}</span>
+                <button type="button" onClick={() => setExpandedMemoId(null)} style={{ fontSize: 20, lineHeight: 1, color: "var(--im-fg3)", background: "none", border: "none", cursor: "pointer", padding: "4px 8px" }} aria-label="閉じる">×</button>
+              </div>
+              <div className="flex-1 overflow-auto p-4">
+                <textarea
+                  value={targetMemo.content || ""}
+                  onChange={(e) => handleUpdateMemo(targetMemo.id, "content", e.target.value)}
+                  rows={20}
+                  autoFocus
+                  style={{ width: "100%", fontSize: 13, padding: "10px 12px", borderRadius: 6, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)", resize: "vertical", lineHeight: 1.6 }}
+                />
+              </div>
+              <div className="p-3 text-center" style={{ borderTop: "0.5px solid var(--im-bdr)", fontSize: 11, color: "var(--im-fg3)" }}>編集は自動保存されます</div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
