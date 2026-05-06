@@ -1103,7 +1103,7 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>担当CA</span><RoField v={candidate?.employee?.employeeNumber ? `BS${candidate.employee.employeeNumber}` : ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>担当</span><RoField v={candidate?.employee?.name || form.interviewer?.name || ""} /></div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
-                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>ランク/最新</span>
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>ランク/最新</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                     {r.overallRank ? (
@@ -1146,7 +1146,7 @@ export default function InterviewForm({
                   }
                 }} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} />
               </div>
-              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
+              <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>
           </div>
 
