@@ -1324,7 +1324,7 @@ export default function InterviewForm({
                         </div>
                         <textarea
                           value={memo.content} onChange={(e) => handleUpdateMemo(memo.id, "content", e.target.value)}
-                          rows={4}
+                          rows={8}
                           style={{ width: "100%", fontSize: 12, padding: "5px 8px", borderRadius: 5, border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", color: "var(--im-fg)", resize: "vertical", lineHeight: 1.5 }}
                         />
                       </div>
