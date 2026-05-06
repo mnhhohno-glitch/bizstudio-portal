@@ -11,6 +11,7 @@ import {
   getMediumOptions,
   getSmallOptions,
 } from "@/constants/resign-reason-hierarchy";
+import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 const OKADA_EMPLOYEE_ID = "cmlqr5jzu0006tg4f3ypb8kz7";
@@ -77,6 +78,8 @@ type CandidateInfo = {
   gender: string | null;
   address: string | null;
   employee: { name: string; employeeNumber: string } | null;
+  supportStatus?: string;
+  supportSubStatus?: string | null;
 };
 
 interface InterviewFormProps {
@@ -85,6 +88,17 @@ interface InterviewFormProps {
   currentUser: SessionUser | null;
   onSaved?: () => void;
   onDeleted?: () => void;
+}
+
+function formatCandidateFlagBadge(
+  supportStatus?: string,
+  supportSubStatus?: string | null
+): string {
+  if (!supportStatus) return "未設定";
+  const statusLabel = SUPPORT_STATUS_LABEL[supportStatus] ?? supportStatus;
+  if (!supportSubStatus) return statusLabel;
+  if (statusLabel === supportSubStatus) return statusLabel;
+  return `${statusLabel} / ${supportSubStatus}`;
 }
 
 /* ================================================================== */
@@ -1132,6 +1146,18 @@ export default function InterviewForm({
                 <div className="flex-1 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                   <Chip text="最新" variant="ok" />
                 </div>
+              </div>
+
+              {/* Row 7: 求職者フラグ */}
+              <div className="col-span-6 flex items-center gap-1.5 min-w-0">
+                <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>フラグ</span>
+                <span
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full"
+                  style={{ fontSize: 11, background: "var(--im-bg2)", color: "var(--im-fg)" }}
+                  title="求職者の現在フラグ（自動更新）"
+                >
+                  {formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)}
+                </span>
               </div>
             </div>
           </div>
