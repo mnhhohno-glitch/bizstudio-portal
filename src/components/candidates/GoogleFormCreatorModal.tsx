@@ -27,7 +27,7 @@ type StageState = "pending" | "running" | "done" | "failed";
 type ModalStep = "idle" | "processing" | "selectCompany" | "completed" | "error";
 
 type WorkHistoryEntry = {
-  company_name?: string;
+  company?: string;
   period?: string;
   [key: string]: unknown;
 };
@@ -190,7 +190,7 @@ export default function GoogleFormCreatorModal({
       const key = String(i);
       const value = companyCategoryMap[key];
       if (!value) {
-        const name = workHistory[i].company_name || `会社 ${i + 1}`;
+        const name = workHistory[i].company || `会社 ${i + 1}`;
         return `${name} のカテゴリが未選択です`;
       }
     }
@@ -624,7 +624,7 @@ export default function GoogleFormCreatorModal({
                       <div key={key} className="border border-gray-200 rounded-md p-3">
                         <div className="text-[13px] font-medium text-[#374151] mb-2 flex items-center gap-2 flex-wrap">
                           <span className="truncate">
-                            {company.company_name || `会社 ${index + 1}`}
+                            {company.company || `会社 ${index + 1}`}
                           </span>
                           {company.period && (
                             <span className="text-[11px] text-gray-500 font-normal">
