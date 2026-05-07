@@ -75,6 +75,18 @@ portal モーダルが Phase 4 で更新されたため、現在は常に `compa
 - candidate-intake staging: 3a0a5b4
 - portal master: fdb20a9
 
+### generate_form のサブカテゴリ管理
+
+- 管理ファイル: candidate-intake の `specs/generate_form_prompt.yaml`
+- 構造: `target_subcategories` リスト + `subcategories` セクション（各サブカテゴリは `duties_choices` / `mindset_choices` / `kpi_questions` を持つ）
+- `kpi_questions` の type 値: `short_text` / `long_text`
+- portal 側との連携: `bizstudio-portal/src/constants/google-form-categories.ts` の SERVICE 等カテゴリ定数とサブカテゴリコードを揃える必要あり
+- 新サブカテゴリ追加時の影響範囲: candidate-intake YAML + bizstudio-portal `google-form-categories.ts` の **両方を同期更新**
+
+#### サブカテゴリ追加履歴
+
+- 2026/5/8 (T-036): `service_ground_staff`（空港グランドスタッフ）を SERVICE グループに追加
+
 ## ai-resume-generator
 
 履歴書・職務経歴書の自動生成。TypeScript / Gemini / LibreOffice。
