@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { toJST, dayjs, TZ } from "./timezone";
+import { countBusinessDays } from "./business-days";
 
 export type RecordStatus = "WORKING" | "FINISHED" | "NOT_STARTED" | "PAID_LEAVE" | "CORRECTED";
 
@@ -34,6 +35,9 @@ export type MonthlySummary = {
   workDays: number;
   paidLeaveDays: number;
   offDays: number;
+  projectedOvertime: number | null;
+  avgDailyOvertime: number | null;
+  businessDays: number;
 };
 
 function formatHM(seconds: number): string {
@@ -79,7 +83,7 @@ export async function getMonthlyRecords(
   const corrSet = new Set(corrections.map((c) => toJST(c.targetDate).format("YYYY-MM-DD")));
 
   const records: MonthlyRecord[] = [];
-  const summary: MonthlySummary = {
+  const summary = {
     totalBreak: 0, totalInterrupt: 0, totalOvertime: 0,
     totalWork: 0, totalNightTime: 0, workDays: 0, paidLeaveDays: 0, offDays: 0,
   };
@@ -151,7 +155,21 @@ export async function getMonthlyRecords(
     });
   }
 
-  return { records, summary };
+  const businessDays = countBusinessDays(year, month);
+  let projectedOvertime: number | null = null;
+  let avgDailyOvertime: number | null = null;
+
+  if (summary.workDays > 0 && businessDays > 0) {
+    const avgDailyWork = summary.totalWork / summary.workDays;
+    const projectedTotalWork = avgDailyWork * businessDays;
+    projectedOvertime = Math.round(projectedTotalWork - 28800 * businessDays);
+    avgDailyOvertime = Math.round(projectedOvertime / businessDays);
+  }
+
+  return {
+    records,
+    summary: { ...summary, projectedOvertime, avgDailyOvertime, businessDays },
+  };
 }
 
 export async function getAvailableMonths(employeeId: string): Promise<{ year: number; month: number }[]> {
