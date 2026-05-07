@@ -432,7 +432,7 @@ export default function GoogleFormCreatorModal({
             {/* カテゴリ選択 */}
             <div className="mb-4">
               <label className="block text-[13px] font-medium text-[#374151] mb-2">
-                職種カテゴリ <span className="text-red-500">*</span>
+                経験職種カテゴリ <span className="text-red-500">*</span>
               </label>
               <div className="flex gap-2 mb-2">
                 <select
