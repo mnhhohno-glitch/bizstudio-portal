@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Alert, AlertType } from "./types";
 import { nowJST, toJST, dateForDB } from "./timezone";
+import { isBusinessDay } from "./business-days";
 
 /**
  * 当月分の未打刻アラートを検知して返す
@@ -47,7 +48,7 @@ export async function getAlerts(employeeId: string): Promise<Alert[]> {
     const dateStr = cursor.format("YYYY-MM-DD");
     const dayOfWeek = cursor.day();
 
-    if (dayOfWeek === 0 || dayOfWeek === 6) { cursor = cursor.add(1, "day"); continue; }
+    if (!isBusinessDay(cursor.toDate())) { cursor = cursor.add(1, "day"); continue; }
     if (leaveSet.has(dateStr)) { cursor = cursor.add(1, "day"); continue; }
 
     const attendance = attendanceMap.get(dateStr);
