@@ -287,8 +287,12 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     if (!modalStartTime) { toast.error("開始時間を入力してください"); return; }
     setModalSubmitting(true);
 
-    const interviewerUserId = currentEmployeeId || employees[0]?.id;
-    if (!interviewerUserId) { toast.error("面談担当者が特定できません"); setModalSubmitting(false); return; }
+    if (!currentEmployeeId) {
+      toast.error("社員情報がアカウントに紐づいていません。管理者にお問い合わせください。");
+      setModalSubmitting(false);
+      return;
+    }
+    const interviewerUserId = currentEmployeeId;
 
     try {
       const res = await fetch("/api/interviews", {

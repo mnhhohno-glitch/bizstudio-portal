@@ -73,6 +73,21 @@ export async function POST(req: Request) {
     },
   });
 
+  // 同名で未リンクの Employee があれば自動リンク（1:1 のみ、複数該当なら何もしない）
+  const matchingEmployees = await prisma.employee.findMany({
+    where: { name, userId: null, status: "active" },
+  });
+  if (matchingEmployees.length === 1) {
+    try {
+      await prisma.employee.update({
+        where: { id: matchingEmployees[0].id },
+        data: { userId: user.id },
+      });
+    } catch {
+      // リンク失敗時もユーザー作成は成功とする
+    }
+  }
+
   await prisma.invite.update({
     where: { id: invite.id },
     data: { usedAt: new Date() },

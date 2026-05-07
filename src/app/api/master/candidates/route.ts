@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatName, validateName } from "@/lib/formatName";
 import { getSessionUser } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 // GET: 求職者一覧取得
@@ -14,9 +15,28 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const includeEmployee = searchParams.get("include") === "employee";
+    const search = searchParams.get("search")?.trim() || "";
+    const limitParam = parseInt(searchParams.get("limit") || "", 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, 500)
+      : undefined;
+
+    const where: Prisma.CandidateWhereInput = search
+      ? {
+          OR: [
+            { name: { contains: search } },
+            { nameKana: { contains: search } },
+            { candidateNumber: { contains: search } },
+            { phone: { contains: search } },
+            { email: { contains: search } },
+          ],
+        }
+      : {};
 
     const candidates = await prisma.candidate.findMany({
+      where,
       orderBy: { candidateNumber: "desc" },
+      ...(limit ? { take: limit } : {}),
       ...(includeEmployee && {
         include: { employee: { select: { id: true, name: true } } },
       }),

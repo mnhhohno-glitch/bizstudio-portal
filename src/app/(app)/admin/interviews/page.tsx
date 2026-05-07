@@ -11,11 +11,11 @@ export default async function InterviewManagementPage() {
   const employees = await prisma.employee.findMany({
     where: { status: "active" },
     orderBy: { employeeNumber: "asc" },
-    select: { id: true, employeeNumber: true, name: true },
+    select: { id: true, employeeNumber: true, name: true, userId: true },
   });
 
   const currentEmployee = actor
-    ? employees.find((e) => e.name === actor.name)
+    ? employees.find((e) => e.userId === actor.id)
     : null;
 
   return (

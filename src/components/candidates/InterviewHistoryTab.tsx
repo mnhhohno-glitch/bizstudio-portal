@@ -82,32 +82,30 @@ export default function InterviewHistoryTab({
 
   useEffect(() => {
     if (!currentUser) return;
-    console.log("[DEBUG-EMP-1] Fetching employees for userId:", currentUser.id);
     fetch("/api/employees")
       .then((r) => r.json())
       .then((data: { id: string; userId: string | null }[]) => {
-        console.log("[DEBUG-EMP-2] employees response:", Array.isArray(data) ? `${data.length} items` : typeof data, data);
         if (!Array.isArray(data)) return;
         const match = data.find((e) => e.userId === currentUser.id);
-        console.log("[DEBUG-EMP-3] match:", match);
         if (match) setCurrentEmployeeId(match.id);
       })
-      .catch((err) => {
-        console.error("[DEBUG-EMP-4] employees fetch error:", err);
-      });
+      .catch(() => {});
   }, [currentUser]);
 
   const handleCreateInterview = async () => {
-    console.log("[DEBUG-1] handleCreateInterview called", { creating, currentUser: currentUser?.id, currentEmployeeId });
-    if (creating || !currentUser || !currentEmployeeId) {
-      console.log("[DEBUG-2] EARLY RETURN", { creating, hasUser: !!currentUser, currentEmployeeId });
+    if (creating) return;
+    if (!currentUser) {
+      toast.error("ログインセッションが取得できません。再ログインしてください。");
+      return;
+    }
+    if (!currentEmployeeId) {
+      toast.error("社員情報がアカウントに紐づいていません。管理者にお問い合わせください。");
       return;
     }
     setCreating(true);
     try {
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      console.log("[DEBUG-3] POST /api/interviews", { candidateId, currentEmployeeId, timeStr });
       const res = await fetch("/api/interviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -122,21 +120,15 @@ export default function InterviewHistoryTab({
           status: "draft",
         }),
       });
-      console.log("[DEBUG-4] API response status:", res.status);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error("[DEBUG-5] API error:", err);
         throw new Error(err.error || "作成に失敗しました");
       }
       const data = await res.json();
-      console.log("[DEBUG-6] API response data:", data);
       toast.success("新規面談を作成しました");
       setSelectedId(data.record.id);
-      console.log("[DEBUG-7] setSelectedId:", data.record.id);
       await fetchInterviews();
-      console.log("[DEBUG-8] fetchInterviews complete");
     } catch (e) {
-      console.error("[DEBUG-9] catch:", e);
       toast.error(e instanceof Error ? e.message : "新規面談の作成に失敗しました");
     } finally {
       setCreating(false);
