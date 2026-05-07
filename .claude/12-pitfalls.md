@@ -120,3 +120,21 @@ JSON で送ると 400 エラー or 想定外の動作。
 - 既存 analyze-with-intake の base64 JSON パターンを流用しないこと（別系統）
 
 **関連ケース**: T-029 Phase D-2 portal API extract-resume/route.ts 実装時に判明
+
+## 29. 業界混在候補者で AI Google フォームが全社同じテンプレ展開される
+
+**罠**: T-029 Phase D-2 で実装した AI Google フォーム生成は、候補者単位で 1 つの achievementCategory だけ受け取る仕様だったため、業界混在候補者（西さん 5004292 のグランドスタッフ + 事務 等）で全社に同じ業務内容テンプレが展開されてミスマッチ発生。
+
+**結果**:
+- 全社で同じ duties_choices（11 項目）/ kpi_questions が出る
+- 1 業界キャリアの候補者では問題ないが、複数業界経験ある候補者で実態と乖離
+
+**対処（T-035 で実装済み）**:
+- portal モーダルで会社別カテゴリ選択（会社ごとにドロップダウン、デフォルトを各社初期値に適用、変更したい社のみ変える）
+- portal API proxy が `companyCategoryMap` を candidate-intake へ転送
+- candidate-intake が `companyCategoryMap` で各社のテンプレを per-company 解決
+- mindset_section は defaultCategory（achievementCategory）流用、"other" 自由記述はグローバル 1 つを共有
+
+**関連コミット**:
+- candidate-intake staging: 3a0a5b4
+- portal master: fdb20a9

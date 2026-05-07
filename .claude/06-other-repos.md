@@ -39,6 +39,42 @@
 - create-form は成功時に InterviewRecord（isLatest=true）に `google_form_*` を update
 - 関連: `12-pitfalls.md` 罠ポイント #28（extract_resume の multipart 必須）
 
+### generate_form API の per-company 対応（T-035）
+
+候補者単位の単一 `achievementCategory` だけでなく、会社別 `companyCategoryMap` を受け取って per-company にテンプレ展開できる。
+
+#### 入力
+
+```typescript
+type GenerateFormInput = {
+  candidateId: string;
+  candidateName: string;
+  resumeData: ResumeData;
+  interviewLog: string;
+  achievementCategory: string;                    // デフォルトカテゴリ（必須）
+  achievementCategoryOtherLabel: string | null;   // "other" 自由記述（グローバル 1 つ）
+  companyCategoryMap?: Record<string, string>;    // T-035 追加（optional）
+};
+```
+
+#### companyCategoryMap の挙動
+
+- キー: work_history 配列インデックスの文字列（例: `"0"`, `"1"`, `"2"`）
+- 値: サブカテゴリコード（例: `"sales_corporate"`, `"office_general"`, `"other"`）
+- undefined / `{}` / 該当キー無し → `achievementCategory`（default）にフォールバック
+- `mindset_section` は会社単位ではなく defaultCategory（`achievementCategory`）を流用
+- `"other"` の自由記述はグローバル `achievementCategoryOtherLabel` を共有
+
+#### 後方互換性
+
+`companyCategoryMap` 未指定時は T-029 Phase D-2 と完全に同じ出力。
+portal モーダルが Phase 4 で更新されたため、現在は常に `companyCategoryMap` が送信される運用だが、API 側で旧形式互換を維持。
+
+#### 関連コミット
+
+- candidate-intake staging: 3a0a5b4
+- portal master: fdb20a9
+
 ## ai-resume-generator
 
 履歴書・職務経歴書の自動生成。TypeScript / Gemini / LibreOffice。

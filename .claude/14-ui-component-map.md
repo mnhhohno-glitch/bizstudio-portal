@@ -281,6 +281,42 @@ type Props = {
 | `resumeData` / `questionsJson` / `formResult` | API 結果保持（リトライ時に再利用）|
 | `interviewLogText` | string | extract-resume レスポンスから保持、generate-form で再送 |
 
+### selectCompany ステップ（T-035 追加）
+
+extract 成功後、generate_form 呼出前に表示される会社別カテゴリ選択画面。
+
+#### state
+
+| state | 型 | 用途 |
+|--|--|--|
+| `companyCategoryMap` | `Record<string, string>` | キー=work_history 配列インデックス文字列、値=サブカテゴリコード（API payload に含める）|
+| `companyGroupMap` | `Record<string, string>` | キー=同上、値=大項目キー（UI 内部状態のみ、payload 非含）|
+
+#### 初期化タイミング
+
+extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupKey, defaultCategoryValue)` を呼び、全社にデフォルトカテゴリを適用。
+
+#### UI 構造
+
+各 work_history 要素にカードを動的生成:
+- 会社名 + 在籍期間表示
+- 大項目ドロップダウン（7 大項目から選択）
+- サブカテゴリドロップダウン（大項目に応じて選択肢が変わる、大項目未選択時は disabled）
+- デフォルトと異なる場合「変更済み」バッジ表示
+
+#### 「質問生成 開始」ボタンの payload
+
+`companyCategoryMap` を payload に追加し、portal API proxy 経由で candidate-intake へ転送。`achievementCategory` / `achievementCategoryOtherLabel` は既存仕様のまま維持。
+
+#### バリデーション
+
+`validateBeforeGenerate()` で全社のサブカテゴリ選択必須チェック、未選択あれば toast エラー。"other" 選択社がある場合は `achievementCategoryOtherLabel`（グローバル 1 つ）も必須。
+
+#### 「戻る」ボタン挙動
+
+`setStep("idle")` で Step 1 に戻る。companyCategoryMap / companyGroupMap は state に残す（編集内容を保護）。
+ただし extract を再実行すると companyCategoryMap は再初期化される（work_history が変わる可能性のため）。
+
 ### 関連 API
 
 - POST `/api/candidates/[candidateId]/google-form/extract-resume` (multipart 内部)
