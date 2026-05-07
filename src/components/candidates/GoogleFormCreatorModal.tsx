@@ -183,7 +183,7 @@ export default function GoogleFormCreatorModal({
     setCompanyGroupMap(initialGroupMap);
   };
 
-  // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
+  // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須 + グローバル "other" ラベル必須）
   const validateBeforeGenerate = (resume: unknown): string | null => {
     const workHistory = getWorkHistory(resume);
     for (let i = 0; i < workHistory.length; i++) {
@@ -193,10 +193,12 @@ export default function GoogleFormCreatorModal({
         const name = workHistory[i].company_name || `会社 ${i + 1}`;
         return `${name} のカテゴリが未選択です`;
       }
-      if (value === "other" && otherLabel.trim().length === 0) {
-        const name = workHistory[i].company_name || `会社 ${i + 1}`;
-        return `${name}: 「その他」選択時は自由記述を入力してください`;
-      }
+    }
+    // T-035 hotfix: "other" のラベルチェックは会社単位ではなくグローバルに 1 度だけ
+    // (otherLabel は全社で共有する単一フィールドのため)
+    const hasOther = Object.values(companyCategoryMap).includes("other");
+    if (hasOther && otherLabel.trim().length === 0) {
+      return "「その他」を選択した会社があります。画面下部の自由記述を入力してください";
     }
     return null;
   };
@@ -246,8 +248,13 @@ export default function GoogleFormCreatorModal({
             resumeData: resume,
             interviewLog: log,
             achievementCategory: categoryValue,
+            // T-035 hotfix: いずれかの会社で "other" 選択 OR Step 1 デフォルトが "other" のときに送る
+            // (candidate-intake 側で全 "other" 会社にこの単一ラベルが共通展開される)
             achievementCategoryOtherLabel:
-              categoryValue === "other" ? otherLabel.trim() : null,
+              categoryValue === "other" ||
+              Object.values(companyCategoryMap).includes("other")
+                ? otherLabel.trim()
+                : null,
             // T-035: 会社別カテゴリマップ（空 / undefined は candidate-intake が後方互換動作）
             companyCategoryMap,
           }),
@@ -677,6 +684,25 @@ export default function GoogleFormCreatorModal({
                 </div>
               );
             })()}
+
+            {/* T-035 hotfix: いずれかの会社で "other" 選択時、グローバル自由記述欄を表示 */}
+            {Object.values(companyCategoryMap).includes("other") && (
+              <div className="mb-4 rounded-md border border-yellow-300 bg-yellow-50 p-3">
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                  「その他」選択会社の自由記述
+                  <span className="ml-2 text-[11px] text-gray-600 font-normal">
+                    ※「その他」を選んだ会社全てで共有されます
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={otherLabel}
+                  onChange={(e) => setOtherLabel(e.target.value)}
+                  placeholder="例: 空港グランドスタッフ、医療事務 等"
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                />
+              </div>
+            )}
 
             <div className="flex gap-2 pt-2 border-t border-gray-200">
               <button
