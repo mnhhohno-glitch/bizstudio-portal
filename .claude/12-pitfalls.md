@@ -41,4 +41,40 @@ value={memo.date ? new Date(memo.date).toLocaleDateString('sv-SE') : ""}
 - 室岡ほのかさん（5004405）2回目面談メモで該当（JST 5/7 06:15 作成 → 5/6 表示 → 修正後 5/7 表示）
 - Phase C cleanup script 実装時にも JST タイムゾーン関連で発覚
 
+### サーバー側の罠: Railway UTC 環境での `Date.getDay()` ずれ（追加事例）
+
+上記まではブラウザ側（クライアント）で発生する TZ ずれの話。サーバー側でも別パターンの罠がある。
+
+**症状**: サーバー（Railway 本番）で生成した `Date` から `getDay()` で曜日判定すると、JST の土曜が金曜扱いされる等のずれが発生。Windows/Mac のローカル開発環境（JST）では動いても、本番（Railway UTC）で壊れる。
+
+**原因**: Railway 本番は UTC で動作。`Date.getDay()` はサーバーのローカル TZ 基準で曜日を返すため、UTC 環境では UTC 曜日を返す。JST 5/2 0:00 = UTC 5/1 15:00 → UTC では金曜（day=5）と判定され、土日除外を逃れる。
+
+**対処パターン**: 入力 Date に +9h 補正してから `getUTCDay()` を使う。`src/lib/attendance/business-days.ts` の `isBusinessDay()` がリファレンス実装:
+
+```typescript
+import holiday_jp from "@holiday-jp/holiday_jp";
+
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+export function isBusinessDay(date: Date): boolean {
+  const jstDate = new Date(date.getTime() + JST_OFFSET_MS);
+  const day = jstDate.getUTCDay();  // JST 基準の曜日
+  if (day === 0 || day === 6) return false;
+  if (holiday_jp.isHoliday(jstDate)) return false;
+  return true;
+}
+```
+
+`@holiday-jp/holiday_jp` の `isHoliday()` も同様に補正済の `jstDate` を渡す（ライブラリは Date をローカル TZ 解釈するため、JST 補正後の Date を渡すのが安全）。
+
+**サーバー側 TZ ずれ チェックリスト**（既存「新機能で日付フィールド追加時のチェックリスト」とは別物）:
+- サーバーサイドで `Date.getDay()` / `getDate()` / `getMonth()` を **直接呼んでいる箇所は要確認**（特に営業日・祝日・曜日判定）
+- `new Date(year, month-1, d)` もサーバーローカル TZ 依存（Railway では UTC 0:00 が生成される）
+- 営業日・祝日・曜日判定は原則 `src/lib/attendance/business-days.ts` の `isBusinessDay()` 経由に統一する
+- ローカル開発（JST）で動作確認 OK でも、本番（Railway UTC）で動かない可能性を必ず疑う
+- `dayjs` の `cursor.day()` / `cursor.toDate().getDay()` も同じ罠あり、JST 補正必要
+
+**関連ケース（サーバー側）**:
+- T-033 緊急修正（commit `1a2b06a`, 2026/5/7）: Phase 4 で `isBusinessDay()` を導入したが初版が `date.getDay()` 直接呼び出しで、本番 Railway UTC 環境で 5/2 (土) が未打刻アラートに表示されるバグ発生。`+9h` 補正 + `getUTCDay()` で解決。
+
 **詳細**: `03-portal-spec.md` の Memo 節参照
