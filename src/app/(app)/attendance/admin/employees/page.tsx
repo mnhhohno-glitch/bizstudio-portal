@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Toaster, toast } from "sonner";
 
-type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number; isExemptFromAttendance: boolean };
+type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number; isExemptFromAttendance: boolean; salaryRange: "SALES" | "OFFICE" };
 
 export default function AttendanceEmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -55,6 +55,7 @@ export default function AttendanceEmployeesPage() {
                 <th className="px-4 py-3">社員NO</th>
                 <th className="px-4 py-3">氏名</th>
                 <th className="px-4 py-3">有給残日数</th>
+                <th className="px-4 py-3">レンジ</th>
                 <th className="px-4 py-3">打刻</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
@@ -76,6 +77,25 @@ export default function AttendanceEmployeesPage() {
                     ) : (
                       <span className="font-medium">{emp.paidLeave}日</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={emp.salaryRange}
+                      onChange={async (e) => {
+                        try {
+                          await fetch("/api/attendance/admin/employees", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ employeeId: emp.id, salaryRange: e.target.value }),
+                          });
+                          fetchData();
+                        } catch { toast.error("更新に失敗しました"); }
+                      }}
+                      className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px]"
+                    >
+                      <option value="SALES">営業 (30h)</option>
+                      <option value="OFFICE">事務 (15h)</option>
+                    </select>
                   </td>
                   <td className="px-4 py-3">
                     <button
