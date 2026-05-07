@@ -35,6 +35,9 @@ interface CandidateHeaderProps {
   jobOutputLoading: boolean;
   supportEndReasonLabel?: string;
   onSupportEndClick: () => void;
+  onGoogleFormCreate?: () => void;
+  googleFormDisabled?: boolean;
+  googleFormDisabledReason?: string;
 }
 
 function genderLabel(g: string | null) {
@@ -117,6 +120,9 @@ export default function CandidateHeader({
   jobOutputLoading,
   supportEndReasonLabel,
   onSupportEndClick,
+  onGoogleFormCreate,
+  googleFormDisabled,
+  googleFormDisabledReason,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
@@ -302,6 +308,16 @@ export default function CandidateHeader({
           >
             {jobOutputLoading ? "読み込み中..." : "求人出力"}
           </button>
+          {onGoogleFormCreate && (
+            <button
+              onClick={onGoogleFormCreate}
+              disabled={googleFormDisabled}
+              title={googleFormDisabled ? googleFormDisabledReason : undefined}
+              className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Google フォーム作成
+            </button>
+          )}
         </div>
       </div>
     </div>
