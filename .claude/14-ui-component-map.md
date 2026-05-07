@@ -119,12 +119,178 @@ Row 6: 回数/状態(col-span-2) | 結果(col-span-2) | フラグ(col-span-2)
 
 ---
 
-## CandidateDetailPage.tsx（未着手、将来追加枠）
+## CandidateDetailPage.tsx
 
+### 基本情報
 - パス: `src/components/candidates/CandidateDetailPage.tsx`
-- 用途: 求職者詳細ページ全体
+- 行数: 1991+ 行（頻出修正対象、肥大化注意）
+- 用途: 求職者詳細ページ全体（基本タブ + 面談履歴タブ）
+- 親: `/app/(app)/candidates/[id]/page.tsx`
 
-⚠️ **構造マップ未作成**。次回修正時に追記。
+### 全体レイアウト
+
+```
+CandidateDetailPage
+  ├─ TOP_VIEWS: [{key:"basic", label:"基本"}, {key:"interview", label:"面談履歴"}]
+  ├─ activeView === "interview"
+  │   └─ <InterviewHistoryTab candidateId currentUser />
+  └─ activeView === "basic"
+      ├─ <CandidateHeader ... />
+      └─ サブタブバー (SUB_TABS) + 各タブコンテンツ
+          - history → <HistoryTab>
+          - documents → <DocumentsTab>
+          - tasks → <CandidateTasksTab>
+          - support → <SupportTab>
+          - notes → <NotesTab>
+```
+
+### 主要 state（抜粋）
+
+| state | 用途 |
+|--|--|
+| `candidate` | Candidate データ |
+| `currentUser` | ログインユーザー |
+| `activeView` | "basic" / "interview" タブ切替 |
+| `activeTab` | basic 内のサブタブ（history / documents / tasks / support / notes） |
+| `editModalOpen` | 基本情報編集モーダル |
+| `mypageModalOpen` | 求人マイページ URL モーダル（インライン実装、L1777-1843）|
+| `scheduleModalOpen` | 日程調整 URL モーダル（インライン実装、L1845-1961）|
+| `googleFormModalOpen` | T-029 Phase D-2: Google フォーム作成モーダル |
+| `meetingFiles` | T-029 Phase D-2: MEETING サブタブのファイル一覧（モーダル内ファイル選択用） |
+
+### モーダル一覧
+
+- `editModalOpen` → `<EditModal>` 別コンポーネント
+- `mypageModalOpen` → インライン実装（求人マイページ URL 表示）
+- `scheduleModalOpen` → インライン実装（日程調整 URL 生成）
+- `showEndModal` → `<SupportEndModal>` 別コンポーネント
+- `googleFormModalOpen` → `<GoogleFormCreatorModal>` 別コンポーネント（T-029 Phase D-2）
+- `<InterviewUrlModal>` → CandidateHeader 経由で別コンポーネント
+
+### 注意
+
+CandidateDetailPage が 1991+ 行と肥大化しているため、新機能追加時は **必ず別コンポーネント化**する。
+インラインモーダル実装（mypageModal / scheduleModal）が肥大化の主因。
+
+---
+
+## CandidateHeader.tsx
+
+### 基本情報
+- パス: `src/components/candidates/CandidateHeader.tsx`
+- 用途: 求職者詳細ページのヘッダー領域（氏名、ID、生年月日、性別、住所、URL/資料ボタン群）
+- 親: `CandidateDetailPage.tsx`
+
+### Row 構成
+
+| Row | 内容 |
+|--|--|
+| Row 1 | 求職者氏名 + ID + 登録日 + 担当者 |
+| Row 2 | 生年月日 + 性別 + 連絡先 + 住所 |
+| Row 3 | URL・資料ボタン群（求人マイページ / ガイドURL / 日程調整URL / 求人出力 / **Google フォーム作成**）|
+
+### Row 3 の Props（T-029 Phase D-2 で追加）
+
+```typescript
+type Props = {
+  // 既存 props
+  onMypageOpen: () => void;
+  onScheduleOpen: () => void;
+  onJobOutput: () => void;
+  hasGuideUrl: boolean;
+  // ... 他
+
+  // T-029 Phase D-2 追加
+  onGoogleFormCreate?: () => void;
+  googleFormDisabled?: boolean;
+  googleFormDisabledReason?: string;  // tooltip 文言
+};
+```
+
+### Row 3 のレイアウト
+
+```tsx
+<div className="px-6 pb-3">
+  <div className="flex items-center gap-2 flex-wrap">
+    <span className="text-[12px] text-gray-400 mr-1">URL・資料:</span>
+    {/* 既存ボタン... */}
+    {/* T-029 Phase D-2: 末尾に Google フォーム作成ボタン追加 */}
+    <button
+      onClick={onGoogleFormCreate}
+      disabled={googleFormDisabled}
+      title={googleFormDisabledReason}
+      className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      Google フォーム作成
+    </button>
+  </div>
+</div>
+```
+
+---
+
+## GoogleFormCreatorModal.tsx
+
+### 基本情報
+- パス: `src/components/candidates/GoogleFormCreatorModal.tsx`
+- 用途: T-029 Phase D-2 で新規追加。AI Google フォーム自動生成モーダル
+- 親: `CandidateDetailPage.tsx`
+
+### Props
+
+```typescript
+type Props = {
+  candidateId: string;          // Candidate.id (cuid)
+  candidateNumber: string;      // 5004379 等
+  candidateName: string;
+  isOpen: boolean;
+  onClose: () => void;
+  meetingFiles: CandidateFile[]; // MEETING サブタブのファイル一覧
+};
+```
+
+### 全体レイアウト（マルチステップモーダル）
+
+```
+モーダル本体（max-w-2xl, bg-white rounded-xl）
+  ├─ ヘッダー: Google フォーム作成 + ステップインジケーター + ×
+  ├─ Step 1 (idle): 入力フォーム
+  │   ├─ PDF ラジオボタン（最新を初期選択）
+  │   ├─ 面談ログ .txt ラジオボタン（最新を初期選択）
+  │   ├─ 経験職種カテゴリ（大項目→サブカテゴリ 2 段階ドロップダウン）
+  │   └─ [生成開始] ボタン
+  ├─ Step 2 (processing): 進行中
+  │   └─ 3 段階プログレスバー（解析 / 生成 / 作成）
+  ├─ Step 3 (completed): 結果表示
+  │   ├─ ✓ 作成完了
+  │   ├─ 編集 URL（コピー + 「編集を開く ↗」）
+  │   ├─ 回答用 URL（コピー）
+  │   └─ 保存状態表示（DB 保存済み or ブラウザ保持中）
+  └─ error 状態: エラー表示 + [再試行] / [初めからやり直す]
+```
+
+### 主要 state
+
+| state | 型 | 用途 |
+|--|--|--|
+| `step` | "idle" / "processing" / "completed" / "error" | ステップ状態 |
+| `currentStage` | "extract" / "generate" / "create" / null | プログレスバー描画用 |
+| `stageStatus` | { extract, generate, create: "pending" / "running" / "done" / "failed" } | 各段階の状態 |
+| `selectedPdfFileId` / `selectedTxtFileId` | string \| null | ファイル選択 |
+| `groupKey` / `categoryValue` / `otherLabel` | string | 経験職種カテゴリ選択 |
+| `resumeData` / `questionsJson` / `formResult` | API 結果保持（リトライ時に再利用）|
+| `interviewLogText` | string | extract-resume レスポンスから保持、generate-form で再送 |
+
+### 関連 API
+
+- POST `/api/candidates/[candidateId]/google-form/extract-resume` (multipart 内部)
+- POST `/api/candidates/[candidateId]/google-form/generate-form` (JSON)
+- POST `/api/candidates/[candidateId]/google-form/create-form` (JSON、InterviewRecord 永続化込み)
+
+### 既存「📝 面談登録 ↗」との関係
+
+- 既存ボタン: `DocumentsTab.tsx:558-564` に残置中
+- T-029 Phase C で削除予定（candidate-intake のフロント `/register` 削除と同時）
 
 ---
 

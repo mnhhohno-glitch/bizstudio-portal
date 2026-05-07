@@ -78,3 +78,45 @@ export function isBusinessDay(date: Date): boolean {
 - T-033 緊急修正（commit `1a2b06a`, 2026/5/7）: Phase 4 で `isBusinessDay()` を導入したが初版が `date.getDay()` 直接呼び出しで、本番 Railway UTC 環境で 5/2 (土) が未打刻アラートに表示されるバグ発生。`+9h` 補正 + `getUTCDay()` で解決。
 
 **詳細**: `03-portal-spec.md` の Memo 節参照
+
+## 26. 面談モデル名は `InterviewRecord`（`Interview` ではない）
+
+**罠**: schema.prisma の面談記録モデルは `InterviewRecord`。コード探索時に `Interview` で grep すると見つからない / 別モデルにヒットする。
+
+**対処**:
+- `prisma.interviewRecord.findFirst(...)` のように Prisma Client では `interviewRecord`（キャメルケース）
+- DB テーブル名は `interview_records`（snake_case）
+- 関連モデル: `InterviewAttachment` / `InterviewMemo` / `InterviewDetail` / `InterviewRating`（こちらは Interview プレフィックス）
+- コンポーネント名は `InterviewForm.tsx` / `InterviewHistoryTab` 等（コンポーネント命名は別系統、変更不要）
+
+**関連ケース**: T-029 Phase D-1 調査時にドキュメント上 `Interview` 表記としていたが、実装は `InterviewRecord`。Phase D-2 完了時にナレッジ修正。
+
+## 27. ファイルストレージ二系統（CandidateFile = Drive、InterviewAttachment = Supabase）
+
+**罠**: portal にはファイルストレージが 2 系統あり、用途・ダウンロード関数が完全に違う。混同するとコードが動かない。
+
+| | CandidateFile | InterviewAttachment |
+|--|--|--|
+| ストレージ | Google Drive | Supabase Storage |
+| ID フィールド | `driveFileId` | `filePath` |
+| ダウンロード | `downloadFileFromDrive(driveFileId)` | Supabase SDK |
+
+**対処**:
+- portal → candidate-intake の連携で送るファイルがどちらの系統か必ず確認
+- T-029 Phase D-2: CandidateFile 系統（Google Drive）
+- 既存 analyze-with-intake: InterviewAttachment 系統（Supabase）
+
+**詳細**: `02-data-sources.md`「ファイルストレージの二系統」参照
+
+## 28. candidate-intake `extract_resume` は multipart/form-data 必須
+
+**罠**: candidate-intake の `/api/intake/extract_resume` は **multipart/form-data 形式**で受け取る。
+他の API（`/generate_form`、`/create_form_v2`、既存の `/api/portal/analyze-interview`）は JSON。
+JSON で送ると 400 エラー or 想定外の動作。
+
+**対処**:
+- portal API ラッパーで FormData + Blob を組み立てて送信
+- `pdf` キーに Blob (application/pdf)、`interviewLog` キーに Blob (text/plain)、`candidateId` キーに string を append
+- 既存 analyze-with-intake の base64 JSON パターンを流用しないこと（別系統）
+
+**関連ケース**: T-029 Phase D-2 portal API extract-resume/route.ts 実装時に判明

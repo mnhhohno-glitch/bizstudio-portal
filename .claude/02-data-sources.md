@@ -17,10 +17,11 @@
 
 | データ | source of truth | 備考 |
 |--|--|--|
-| 面談ログ・添付ファイル | portal `Interview`, `InterviewAttachment` (Supabase Storage) | |
-| 面談 AI 解析結果 | candidate-intake で生成 → portal の `Interview` フィールドに保存 | 解析実体は intake 側、portal 側のYAMLは無効 |
+| 面談ログ・添付ファイル | portal `InterviewRecord`, `InterviewAttachment` (Supabase Storage) | |
+| 面談 AI 解析結果 | candidate-intake で生成 → portal の `InterviewRecord` フィールドに保存 | 解析実体は intake 側、portal 側のYAMLは無効 |
 | 職務経歴 | portal `WorkHistory` | |
-| 退職理由（大・中・小）| portal `Interview.resignReason*` | 3段連動セレクタ、enum 定義あり |
+| 退職理由（大・中・小）| portal `InterviewRecord.resignReason*` | 3段連動セレクタ、enum 定義あり |
+| Google フォーム formId / editUrl / viewUrl | portal `InterviewRecord`（isLatest=true）の `googleForm*` カラム | T-029 Phase D-2 で追加、isLatest=true がない場合は永続化スキップ（フロント保持） |
 
 ## 求人・ブックマーク関連
 
@@ -33,6 +34,32 @@
 | **Circus 案件の詳細住所（番地レベル）** | **Circus URL の `__NEXT_DATA__.addressDetail`** | PDF からは抽出困難。未活用、T-028 候補。`13-data-source-paths.md` 参照 |
 | AI 評価ランク（A/B/C/D）| portal `CandidateFile.aiMatchRating` | analyze-batch で保存 |
 | AI アドバイザーコメント | portal の `advisorChatMessage` テーブル | |
+
+## ファイルストレージの二系統
+
+portal は CandidateFile と InterviewAttachment で **完全に異なるストレージ** を使う。混同しないこと。
+
+| | CandidateFile | InterviewAttachment |
+|--|--|--|
+| ストレージ | Google Drive | Supabase Storage |
+| ID フィールド | `driveFileId` | `filePath`（Supabase バケットパス）|
+| ダウンロード関数 | `downloadFileFromDrive(driveFileId)` (`src/lib/google-drive.ts`) | `supabase.storage.from("interview-attachments").download(filePath)` |
+| テーブル | `candidate_files` | `interview_attachments` |
+| 用途 | 求職者関連書類全般（原本、BS書類、面談議事録、ブックマーク等）| InterviewRecord に紐づく添付（Notta ログ、履歴書 PDF 等）|
+
+### 重要な含意
+
+- T-029 Phase D-2 の Google フォーム作成は **CandidateFile（Drive）** から PDF/.txt を取得（書類タブ → 面談サブタブの category=MEETING）
+- 既存 `analyze-with-intake/route.ts` は **InterviewAttachment（Supabase）** から取得（実装パターンが異なる）
+- Phase D-2 の portal API（extract-resume）は CandidateFile + downloadFileFromDrive 経路を使う
+
+## 面談関連の AI 自動生成（T-029）
+
+| データ | source of truth | 備考 |
+|--|--|--|
+| Google フォーム formId / editUrl / viewUrl | InterviewRecord（isLatest=true） | T-029 Phase D-2 で追加、isLatest=true がない場合は永続化スキップ（フロント保持） |
+| AI 質問テンプレ | candidate-intake の `specs/generate_form_prompt.yaml` | 21 サブカテゴリ × 業界別、決定論展開（Phase B-1.5）|
+| 21 サブカテゴリ value/label | candidate-intake が source of truth、portal の `src/constants/google-form-categories.ts` は同期コピー | 同期更新ルール: candidate-intake 側更新時は portal も更新 |
 
 ## マイページ回答（応募したい/気になる）
 
