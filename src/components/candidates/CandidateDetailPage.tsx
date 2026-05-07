@@ -11,6 +11,7 @@ import HistoryTab from "@/components/candidates/HistoryTab";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
+import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 
@@ -1490,6 +1491,8 @@ function CandidateDetailPageBody() {
   const [mypageLoading, setMypageLoading] = useState(true);
   const [mypageModalOpen, setMypageModalOpen] = useState(false);
   const [mypageCopied, setMypageCopied] = useState(false);
+  const [googleFormModalOpen, setGoogleFormModalOpen] = useState(false);
+  const [meetingFiles, setMeetingFiles] = useState<GoogleFormMeetingFile[]>([]);
 
   const handleOpenJobOutput = async () => {
     if (jobOutputLoading) return;
@@ -1589,7 +1592,21 @@ function CandidateDetailPageBody() {
         console.error("[mypage-client] fetch error:", e);
       })
       .finally(() => setMypageLoading(false));
+    fetch(`/api/candidates/${candidateId}/files?category=MEETING`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data?.files)) setMeetingFiles(data.files);
+        else setMeetingFiles([]);
+      })
+      .catch(() => setMeetingFiles([]));
   }, [fetchCandidate, fetchGuideData, fetchJimuSessions, candidateId]);
+
+  const googleFormPdfCount = meetingFiles.filter((f) => f.fileName.toLowerCase().endsWith(".pdf")).length;
+  const googleFormTxtCount = meetingFiles.filter((f) => f.fileName.toLowerCase().endsWith(".txt")).length;
+  const googleFormDisabled = googleFormPdfCount === 0 || googleFormTxtCount === 0;
+  const googleFormDisabledReason = googleFormDisabled
+    ? `書類タブの面談サブタブに PDF と .txt を各1つ以上配置してください（現在 PDF: ${googleFormPdfCount} 件、テキスト: ${googleFormTxtCount} 件）`
+    : undefined;
 
   const handleViewChange = (view: TopViewKey) => {
     const params = new URLSearchParams();
@@ -1715,6 +1732,9 @@ function CandidateDetailPageBody() {
             jobOutputLoading={jobOutputLoading}
             supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
             onSupportEndClick={() => setShowEndModal(true)}
+            onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
+            googleFormDisabled={googleFormDisabled}
+            googleFormDisabledReason={googleFormDisabledReason}
           />
 
           {/* サブタブバー */}
@@ -1986,6 +2006,15 @@ function CandidateDetailPageBody() {
           onSaved={fetchCandidate}
         />
       )}
+
+      <GoogleFormCreatorModal
+        candidateId={candidate.id}
+        candidateNumber={candidate.candidateNumber}
+        candidateName={candidate.name}
+        isOpen={googleFormModalOpen}
+        onClose={() => setGoogleFormModalOpen(false)}
+        meetingFiles={meetingFiles}
+      />
     </div>
   );
 }

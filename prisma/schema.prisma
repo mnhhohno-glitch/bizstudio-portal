@@ -1350,6 +1350,14 @@ model InterviewRecord {
   aiAnalysisResult Json?     @map("ai_analysis_result")
   aiAnalysisAt     DateTime? @map("ai_analysis_at")
 
+  // T-029 Phase D-2: Google Form 自動生成
+  googleFormId        String?   @map("google_form_id")
+  googleFormEditUrl   String?   @map("google_form_edit_url") @db.Text
+  googleFormViewUrl   String?   @map("google_form_view_url") @db.Text
+  googleFormCreatedAt DateTime? @map("google_form_created_at")
+  googleFormStatus    String?   @map("google_form_status")
+  googleFormError     String?   @map("google_form_error") @db.Text
+
   // Phase 3: 自動保存メタ
   lastSavedAt   DateTime? @map("last_saved_at")
   lastEditedBy  String?   @map("last_edited_by")
