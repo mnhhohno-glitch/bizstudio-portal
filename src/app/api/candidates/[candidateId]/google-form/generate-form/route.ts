@@ -22,6 +22,11 @@ export async function POST(
     const interviewLog: string | undefined = body?.interviewLog;
     const achievementCategory: string | undefined = body?.achievementCategory;
     const achievementCategoryOtherLabel: string | null = body?.achievementCategoryOtherLabel ?? null;
+    // T-035: 会社別カテゴリマップ（optional、undefined / 空 / 部分指定すべて candidate-intake が後方互換動作）
+    const companyCategoryMap: Record<string, string> | undefined =
+      body?.companyCategoryMap && typeof body.companyCategoryMap === "object"
+        ? (body.companyCategoryMap as Record<string, string>)
+        : undefined;
 
     if (!resumeData || !interviewLog || !achievementCategory) {
       return NextResponse.json(
@@ -51,8 +56,9 @@ export async function POST(
       return NextResponse.json({ error: "求職者が見つかりません" }, { status: 404 });
     }
 
+    const companyCategoryMapKeyCount = companyCategoryMap ? Object.keys(companyCategoryMap).length : 0;
     console.log(
-      `[google-form/generate-form] start candidateId=${candidateId} category=${achievementCategory}`,
+      `[google-form/generate-form] start candidateId=${candidateId} category=${achievementCategory} companyCategoryMap_keys=${companyCategoryMapKeyCount}`,
     );
 
     const upstreamUrl = `${intakeUrl}/api/intake/generate_form`;
@@ -72,6 +78,8 @@ export async function POST(
           interviewLog,
           achievementCategory,
           achievementCategoryOtherLabel,
+          // T-035: companyCategoryMap が指定されているときだけ送る（candidate-intake は undefined を後方互換処理）
+          ...(companyCategoryMap !== undefined && { companyCategoryMap }),
         }),
       });
     } catch (e) {

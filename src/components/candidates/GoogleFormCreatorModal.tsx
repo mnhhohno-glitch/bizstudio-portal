@@ -24,7 +24,13 @@ type Props = {
 
 type Stage = "extract" | "generate" | "create";
 type StageState = "pending" | "running" | "done" | "failed";
-type ModalStep = "idle" | "processing" | "completed" | "error";
+type ModalStep = "idle" | "processing" | "selectCompany" | "completed" | "error";
+
+type WorkHistoryEntry = {
+  company_name?: string;
+  period?: string;
+  [key: string]: unknown;
+};
 
 const STAGE_LABELS: Record<Stage, string> = {
   extract: "履歴書解析",
@@ -96,6 +102,13 @@ export default function GoogleFormCreatorModal({
   const [editUrlCopied, setEditUrlCopied] = useState(false);
   const [viewUrlCopied, setViewUrlCopied] = useState(false);
 
+  // T-035: 会社別カテゴリマップ
+  // キー: work_history 配列インデックスの文字列（"0", "1", "2"...）
+  // 値: subcategory コード（candidate-intake が受け取る "sales_corporate" 等）
+  const [companyCategoryMap, setCompanyCategoryMap] = useState<Record<string, string>>({});
+  // 大項目 label を保持する内部 state（UI の 2 階層ドロップダウン用、API には送らない）
+  const [companyGroupMap, setCompanyGroupMap] = useState<Record<string, string>>({});
+
   const pdfCandidates = useMemo(
     () =>
       meetingFiles
@@ -143,6 +156,49 @@ export default function GoogleFormCreatorModal({
     setInterviewLogText("");
     setQuestionsJson(null);
     setFormResult(null);
+    setCompanyCategoryMap({});
+    setCompanyGroupMap({});
+  };
+
+  // T-035: work_history を取り出すヘルパー（resumeData は unknown）
+  const getWorkHistory = (resume: unknown): WorkHistoryEntry[] => {
+    const wh = (resume as { work_history?: unknown } | null)?.work_history;
+    return Array.isArray(wh) ? (wh as WorkHistoryEntry[]) : [];
+  };
+
+  // T-035: extract 直後に各社にデフォルトカテゴリを初期適用
+  const initializeCompanyCategoryMap = (
+    workHistory: WorkHistoryEntry[],
+    defaultGroupLabel: string,
+    defaultCategoryValue: string,
+  ) => {
+    const initialMap: Record<string, string> = {};
+    const initialGroupMap: Record<string, string> = {};
+    workHistory.forEach((_, index) => {
+      const key = String(index);
+      initialMap[key] = defaultCategoryValue;
+      initialGroupMap[key] = defaultGroupLabel;
+    });
+    setCompanyCategoryMap(initialMap);
+    setCompanyGroupMap(initialGroupMap);
+  };
+
+  // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
+  const validateBeforeGenerate = (resume: unknown): string | null => {
+    const workHistory = getWorkHistory(resume);
+    for (let i = 0; i < workHistory.length; i++) {
+      const key = String(i);
+      const value = companyCategoryMap[key];
+      if (!value) {
+        const name = workHistory[i].company_name || `会社 ${i + 1}`;
+        return `${name} のカテゴリが未選択です`;
+      }
+      if (value === "other" && otherLabel.trim().length === 0) {
+        const name = workHistory[i].company_name || `会社 ${i + 1}`;
+        return `${name}: 「その他」選択時は自由記述を入力してください`;
+      }
+    }
+    return null;
   };
 
   const runExtract = async (): Promise<{ resumeData: unknown; interviewLogText: string } | null> => {
@@ -192,6 +248,8 @@ export default function GoogleFormCreatorModal({
             achievementCategory: categoryValue,
             achievementCategoryOtherLabel:
               categoryValue === "other" ? otherLabel.trim() : null,
+            // T-035: 会社別カテゴリマップ（空 / undefined は candidate-intake が後方互換動作）
+            companyCategoryMap,
           }),
         },
       );
@@ -244,7 +302,8 @@ export default function GoogleFormCreatorModal({
     }
   };
 
-  const handleStart = async () => {
+  // T-035: 履歴書解析 開始（extract のみ実行 → 会社別選択画面へ遷移）
+  const handleStartExtract = async () => {
     if (!canStart) return;
     setStep("processing");
     setErrorMessage(null);
@@ -253,13 +312,32 @@ export default function GoogleFormCreatorModal({
     setInterviewLogText("");
     setQuestionsJson(null);
     setFormResult(null);
+    setCompanyCategoryMap({});
+    setCompanyGroupMap({});
 
     const e1 = await runExtract();
     if (!e1) {
       setStep("error");
       return;
     }
-    const e2 = await runGenerate(e1.resumeData, e1.interviewLogText);
+    initializeCompanyCategoryMap(getWorkHistory(e1.resumeData), groupKey, categoryValue);
+    setStep("selectCompany");
+  };
+
+  // T-035: 質問生成 開始（バリデーション後、generate + create を一気に実行）
+  const handleStartGenerate = async () => {
+    const validationError = validateBeforeGenerate(resumeData);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setStep("processing");
+    setErrorMessage(null);
+    setStageStatus((s) => ({ ...s, generate: "pending", create: "pending" }));
+    setQuestionsJson(null);
+    setFormResult(null);
+
+    const e2 = await runGenerate(resumeData, interviewLogText);
     if (!e2) {
       setStep("error");
       return;
@@ -278,21 +356,26 @@ export default function GoogleFormCreatorModal({
     setErrorMessage(null);
     setStep("processing");
 
-    let resume: unknown = resumeData;
-    let log: string = interviewLogText;
-
+    // extract が失敗していた場合: extract 再実行 → selectCompany 画面へ戻す
     if (stageStatus.extract === "failed") {
+      setStageStatus({ extract: "pending", generate: "pending", create: "pending" });
       const r = await runExtract();
       if (!r) {
         setStep("error");
         return;
       }
-      resume = r.resumeData;
-      log = r.interviewLogText;
+      initializeCompanyCategoryMap(getWorkHistory(r.resumeData), groupKey, categoryValue);
+      setStep("selectCompany");
+      return;
     }
 
+    // generate / create が失敗していた場合: 必要なステージから再開
+    const resume: unknown = resumeData;
+    const log: string = interviewLogText;
     let questions: unknown = questionsJson;
-    if (stageStatus.generate === "failed" || (resume !== resumeData && questions === null)) {
+
+    if (stageStatus.generate === "failed") {
+      setStageStatus((s) => ({ ...s, generate: "pending", create: "pending" }));
       const r = await runGenerate(resume, log);
       if (!r) {
         setStep("error");
@@ -302,6 +385,7 @@ export default function GoogleFormCreatorModal({
     }
 
     if (stageStatus.create === "failed" || (questions !== questionsJson && !formResult)) {
+      setStageStatus((s) => ({ ...s, create: "pending" }));
       const r = await runCreate(questions);
       if (!r) {
         setStep("error");
@@ -485,14 +569,130 @@ export default function GoogleFormCreatorModal({
                 キャンセル
               </button>
               <button
-                onClick={handleStart}
+                onClick={handleStartExtract}
                 disabled={!canStart}
                 className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                生成開始
+                履歴書解析 開始
               </button>
             </div>
           </>
+        )}
+
+        {/* Step 1.5: selectCompany - 会社別カテゴリ選択（T-035） */}
+        {step === "selectCompany" && (
+          <div>
+            <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-[12px] text-blue-800">
+              ✓ 履歴書解析が完了しました。会社ごとに業種カテゴリを設定してください。
+            </div>
+            <div className="mb-3">
+              <h3 className="text-[13px] font-semibold text-[#374151] mb-1">
+                会社ごとの業種カテゴリ
+              </h3>
+              <p className="text-[11px] text-gray-600">
+                デフォルトカテゴリ「{groupKey} &gt;{" "}
+                {selectedGroup?.options.find((o) => o.value === categoryValue)?.label ?? "—"}」を全社に適用しています。業種が異なる会社は変更してください。
+              </p>
+            </div>
+
+            {(() => {
+              const workHistory = getWorkHistory(resumeData);
+              if (workHistory.length === 0) {
+                return (
+                  <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">
+                    履歴書から職歴が抽出できませんでした。デフォルトカテゴリのみで生成します。
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-2 mb-4 max-h-[55vh] overflow-y-auto pr-1">
+                  {workHistory.map((company, index) => {
+                    const key = String(index);
+                    const currentGroup = companyGroupMap[key] ?? "";
+                    const currentCategory = companyCategoryMap[key] ?? "";
+                    const groupForCategory = groups.find((g) => g.label === currentGroup);
+                    const isChanged = currentCategory !== categoryValue;
+
+                    return (
+                      <div key={key} className="border border-gray-200 rounded-md p-3">
+                        <div className="text-[13px] font-medium text-[#374151] mb-2 flex items-center gap-2 flex-wrap">
+                          <span className="truncate">
+                            {company.company_name || `会社 ${index + 1}`}
+                          </span>
+                          {company.period && (
+                            <span className="text-[11px] text-gray-500 font-normal">
+                              {company.period}
+                            </span>
+                          )}
+                          {isChanged && (
+                            <span className="text-[11px] text-blue-600 font-normal">
+                              変更済み
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <select
+                            value={currentGroup}
+                            onChange={(e) => {
+                              const newGroup = e.target.value;
+                              setCompanyGroupMap((prev) => ({ ...prev, [key]: newGroup }));
+                              const firstSubInGroup =
+                                groups.find((g) => g.label === newGroup)?.options[0]?.value ?? "";
+                              setCompanyCategoryMap((prev) => ({
+                                ...prev,
+                                [key]: firstSubInGroup,
+                              }));
+                            }}
+                            className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                          >
+                            <option value="">大項目を選択...</option>
+                            {groups.map((g) => (
+                              <option key={g.label} value={g.label}>
+                                {g.label}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={currentCategory}
+                            onChange={(e) =>
+                              setCompanyCategoryMap((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                            disabled={!currentGroup}
+                            className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+                          >
+                            <option value="">サブカテゴリを選択...</option>
+                            {groupForCategory?.options.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            <div className="flex gap-2 pt-2 border-t border-gray-200">
+              <button
+                onClick={() => setStep("idle")}
+                className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50"
+              >
+                戻る
+              </button>
+              <button
+                onClick={handleStartGenerate}
+                className="flex-1 bg-[#2563EB] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]"
+              >
+                質問生成 開始
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Step 2: processing / Step 4: error */}
