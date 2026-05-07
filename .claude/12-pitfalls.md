@@ -138,3 +138,23 @@ JSON で送ると 400 エラー or 想定外の動作。
 **関連コミット**:
 - candidate-intake staging: 3a0a5b4
 - portal master: fdb20a9
+
+## 30. supportSubStatus の自動更新で手動値が消える
+
+**罠**: `Candidate.supportSubStatus` は `recalculateSubStatusIfAuto()` で自動再計算される。手動で上書きした値も、次の自動再計算トリガー（ブックマーク追加・エントリー更新等）で上書きされうる。
+
+**対処**: `supportSubStatusManual` フラグが true のレコードは自動再計算をスキップするガード実装が存在する。
+
+### 運用方針（T-031 で確定、2026/5/8）
+
+**`supportSubStatusManual` は使わない**。
+自動再計算ロジック（`recalculateSubStatusIfAuto()`）に全面的に任せる運用とする。
+
+理由:
+- 手動上書きを行わない限り、本罠ポイントで懸念される「手動値が自動再計算で消える」シナリオは原理的に起こらない
+- T-031（保護実装）は仕様判断（手動上書きしない方針）でクローズ済み
+
+実装上の注意:
+- 新規実装で `supportSubStatusManual = true` を設定する処理を追加しないこと
+- 既存の Manual フラグ参照箇所は残置（過去データの整合性維持のため）
+- CA 向け UI でも「手動上書き」操作は提供しない方針
