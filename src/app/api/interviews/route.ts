@@ -46,10 +46,10 @@ export async function GET(req: NextRequest) {
     andClauses.push({
       OR: [
         { candidate: { name: { contains: search } } },
+        { candidate: { nameKana: { contains: search } } },
         { candidate: { candidateNumber: { contains: search } } },
         { candidate: { phone: { contains: search } } },
-        { interviewer: { name: { contains: search } } },
-        { candidate: { employee: { name: { contains: search } } } },
+        { candidate: { email: { contains: search } } },
       ],
     });
   }
