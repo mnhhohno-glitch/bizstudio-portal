@@ -7,10 +7,22 @@ import { getAvailableActions } from "@/lib/attendance/state";
 import type { AttendanceStatus, PunchType } from "@prisma/client";
 import TimeDisplay from "@/components/attendance/TimeDisplay";
 import AlertBanner from "@/components/attendance/AlertBanner";
+import OvertimeProjectionCard from "@/components/attendance/OvertimeProjectionCard";
+
+type OvertimeProjection = {
+  projectedOvertime: number | null;
+  avgDailyOvertime: number | null;
+  businessDays: number;
+  workDays: number;
+  totalOvertime: number;
+  salaryRange: "SALES" | "OFFICE";
+};
 
 type AttendanceData = {
   employee: { id: string; name: string } | null;
   userRole?: string;
+  isExemptFromAttendance?: boolean;
+  overtimeProjection?: OvertimeProjection | null;
   attendance: {
     id: string;
     status: string;
@@ -227,6 +239,11 @@ export default function AttendancePage() {
               </>
             )}
           </div>
+
+          {/* Overtime Projection Card */}
+          {!data.isExemptFromAttendance && (
+            <OvertimeProjectionCard data={data.overtimeProjection ?? null} />
+          )}
         </div>
 
         {/* Right column */}

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { todayForDB } from "@/lib/attendance/timezone";
+import { todayForDB, nowJST } from "@/lib/attendance/timezone";
+import { getMonthlyRecords } from "@/lib/attendance/records";
 
 export async function GET() {
   const user = await getSessionUser();
@@ -10,7 +11,7 @@ export async function GET() {
   const employee = await prisma.employee.findFirst({
     where: { name: user.name, status: "active" },
   });
-  if (!employee) return NextResponse.json({ employee: null, attendance: null, punches: [], userRole: user.role });
+  if (!employee) return NextResponse.json({ employee: null, attendance: null, punches: [], userRole: user.role, overtimeProjection: null });
 
   const today = todayForDB();
 
@@ -19,9 +20,25 @@ export async function GET() {
     include: { punchEvents: { orderBy: { timestamp: "asc" } } },
   });
 
+  let overtimeProjection = null;
+  if (!employee.isExemptFromAttendance) {
+    const now = nowJST();
+    const { summary } = await getMonthlyRecords(employee.id, now.year(), now.month() + 1);
+    overtimeProjection = {
+      projectedOvertime: summary.projectedOvertime,
+      avgDailyOvertime: summary.avgDailyOvertime,
+      businessDays: summary.businessDays,
+      workDays: summary.workDays,
+      totalOvertime: summary.totalOvertime,
+      salaryRange: employee.salaryRange,
+    };
+  }
+
   return NextResponse.json({
     userRole: user.role,
     employee: { id: employee.id, name: employee.name },
+    isExemptFromAttendance: employee.isExemptFromAttendance,
+    overtimeProjection,
     attendance: attendance
       ? {
           id: attendance.id,
