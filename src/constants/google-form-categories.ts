@@ -61,6 +61,7 @@ export const GOOGLE_FORM_CATEGORY_GROUPS: GoogleFormCategoryGroup[] = [
     options: [
       { value: "service_sales", label: "販売・接客" },
       { value: "service_cs", label: "カスタマーサポート" },
+      { value: "service_ground_staff", label: "空港グランドスタッフ" },
     ],
   },
   {
