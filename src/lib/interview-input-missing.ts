@@ -53,14 +53,13 @@ const isDateEmpty = (v: unknown): boolean => {
   return false;
 };
 
-// Group A — InterviewRecord business fields. interviewMemo is included per spec
-// even though there is no direct UI input (auto-fill via AI populates it).
+// Group A — InterviewRecord business fields.
+// interviewMemo excluded: AI auto-fill only, no manual UI input.
 const FORM_STRING_FIELDS = [
   "startTime",
   "endTime",
   "interviewTool",
   "resultFlag",
-  "interviewMemo",
 ] as const;
 
 // Group B — 転職活動状況
@@ -109,7 +108,6 @@ const DETAIL_GROUP_D_STRING = [
   "contactMethod",
   "jobReferralFlag",
   "nextInterviewFlag",
-  "nextInterviewTime",
   "nextInterviewMemo",
   "nextAction",
   "freeMemo",
@@ -173,8 +171,10 @@ export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResu
     for (const f of DETAIL_GROUP_D_STRING) {
       if (isStringEmpty(detail[f])) missing.push(`d.${f}`);
     }
-    if (isDateEmpty(detail.nextInterviewDate)) {
-      missing.push("d.nextInterviewDate");
+    // nextInterviewDate / nextInterviewTime: only required when nextInterviewFlag === "設定済"
+    if (detail.nextInterviewFlag === "設定済") {
+      if (isDateEmpty(detail.nextInterviewDate)) missing.push("d.nextInterviewDate");
+      if (isStringEmpty(detail.nextInterviewTime)) missing.push("d.nextInterviewTime");
     }
   } else {
     // Detail row is missing entirely — flag every business field so the form
@@ -185,18 +185,15 @@ export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResu
     for (const f of DETAIL_GROUP_C_INT) missing.push(`d.${f}`);
     for (const f of DETAIL_GROUP_C_STRING) missing.push(`d.${f}`);
     for (const f of DETAIL_GROUP_D_STRING) missing.push(`d.${f}`);
-    missing.push("d.nextInterviewDate");
   }
 
-  // Group E — rating
+  // Group E — rating (overallRank excluded: auto-calculated from 15 items)
   if (rating) {
     for (const f of RATING_INT_FIELDS) {
       if (isIntEmpty(rating[f])) missing.push(`r.${f}`);
     }
-    if (isStringEmpty(rating.overallRank)) missing.push("r.overallRank");
   } else {
     for (const f of RATING_INT_FIELDS) missing.push(`r.${f}`);
-    missing.push("r.overallRank");
   }
 
   // Group F — workHistories (count only)
