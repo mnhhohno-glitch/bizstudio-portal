@@ -673,6 +673,12 @@ export default function InterviewForm({
     }
   };
 
+  const handleUploadMultiple = async (files: File[]) => {
+    for (const file of files) {
+      await handleUpload(file);
+    }
+  };
+
   /* ---- Attachment delete (existing logic) ---- */
   const handleDeleteAttachment = async (attachmentId: string) => {
     if (!confirm("この添付ファイルを削除しますか？")) return;
@@ -1603,12 +1609,12 @@ export default function InterviewForm({
                     style={{ border: "0.5px dashed var(--im-bdr2)", borderRadius: 8, padding: 20, background: "var(--im-bg2)" }}
                     onClick={() => fileInputRef.current?.click()}
                     onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const files = Array.from(e.dataTransfer.files); if (files.length > 0) handleUploadMultiple(files); }}
                   >
                     <input
-                      ref={fileInputRef} type="file" className="hidden"
+                      ref={fileInputRef} type="file" multiple className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.docx,.xlsx,.csv,.txt,.mp3,.m4a"
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }}
+                      onChange={(e) => { const files = Array.from(e.target.files ?? []); if (files.length > 0) handleUploadMultiple(files); e.target.value = ""; }}
                     />
                     {uploading ? (
                       <p style={{ fontSize: 13, color: "var(--im-fg2)" }}>アップロード中...</p>
