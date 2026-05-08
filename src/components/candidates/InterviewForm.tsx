@@ -175,6 +175,70 @@ function cleanRelationFields(obj: AnyRecord): AnyRecord {
   return copy;
 }
 
+function buildAutosaveBody(
+  f: AnyRecord,
+  d: AnyRecord,
+  r: AnyRecord,
+  wh: WorkHistoryRecord[],
+  currentUserId: string | undefined,
+  forceComplete: boolean,
+  token: string | null,
+) {
+  const pT = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
+  const cT = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
+  const cdT = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
+  const ratingData = {
+    ...cleanRelationFields(r),
+    personalityTotal: pT || null,
+    careerTotal: cT || null,
+    conditionTotal: cdT || null,
+    grandTotal: (pT + cT + cdT) || null,
+  };
+
+  const detailData = cleanRelationFields(d);
+  if (wh.length > 0) {
+    const first = [...wh].sort((a, b) => a.order - b.order)[0];
+    detailData.companyName = first.companyName;
+    detailData.businessContent = first.businessContent;
+    const tenure = [
+      first.tenureYear != null ? `${first.tenureYear}年` : null,
+      first.tenureMonth != null ? `${first.tenureMonth}ヶ月` : null,
+    ].filter(Boolean).join("");
+    detailData.tenure = tenure || null;
+    detailData.jobTypeFlag = first.jobTypeFlag;
+    detailData.jobTypeMemo = first.jobTypeMemo;
+    detailData.resignReasonLarge = first.resignReasonLarge;
+    detailData.resignReasonMedium = first.resignReasonMedium;
+    detailData.resignReasonSmall = first.resignReasonSmall;
+    detailData.jobChangeReasonMemo = first.jobChangeReasonMemo;
+    detailData.careerSummary = wh
+      .map((w, i) => {
+        const t = [w.tenureYear != null ? `${w.tenureYear}年` : null, w.tenureMonth != null ? `${w.tenureMonth}ヶ月` : null].filter(Boolean).join("");
+        return `【${i + 1}社目】${w.companyName ?? ""}（${w.businessContent ?? ""}）${t} / ${w.jobTypeFlag ?? ""}`;
+      })
+      .join("\n");
+  }
+
+  return {
+    interviewDate: f.interviewDate || undefined,
+    startTime: f.startTime || undefined,
+    endTime: f.endTime || undefined,
+    interviewTool: f.interviewTool || undefined,
+    interviewType: f.interviewType || undefined,
+    // T-044: send empty string as null so the user can reset the dropdown to "-".
+    // The previous `f.resultFlag || undefined` coerced "" to undefined, which the
+    // API treated as "no change" and left the stale value in the DB.
+    resultFlag: f.resultFlag === undefined ? undefined : (f.resultFlag || null),
+    interviewMemo: f.interviewMemo || undefined,
+    summaryText: f.summaryText || undefined,
+    status: forceComplete ? "complete" : (f.status || undefined),
+    lastEditedBy: currentUserId,
+    autosaveToken: token || undefined,
+    detail: Object.keys(detailData).length > 0 ? detailData : undefined,
+    rating: Object.keys(ratingData).length > 0 ? ratingData : undefined,
+  };
+}
+
 function calcAge(bd: string | null): number | null {
   if (!bd) return null;
   const today = new Date();
@@ -517,65 +581,39 @@ export default function InterviewForm({
   const whDirtyRef = useRef(false);
   const forceCompleteRef = useRef(false);
 
-  const doAutoSave = useCallback(async () => {
+  // T-044: refs mirroring latest state so the unmount/beforeunload flush
+  // can see post-edit values without falling into stale-closure traps.
+  const formRef = useRef<AnyRecord>({});
+  const detailRef = useRef<AnyRecord>({});
+  const ratingRef = useRef<AnyRecord>({});
+  const workHistoriesRef = useRef<WorkHistoryRecord[]>([]);
+  const isDirtyRef = useRef(false);
+  const autosaveTokenRef = useRef<string | null>(null);
+  const interviewIdRef = useRef<string>("");
+  const currentUserIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    formRef.current = form;
+    detailRef.current = detail;
+    ratingRef.current = rating;
+    workHistoriesRef.current = workHistories;
+    isDirtyRef.current = isDirty;
+    autosaveTokenRef.current = autosaveToken;
+    interviewIdRef.current = interviewId;
+    currentUserIdRef.current = currentUser?.id;
+  });
+
+  const doAutoSave = useCallback(async (overrides: Partial<AnyRecord> = {}) => {
     if (!interviewId || savingRef.current) return;
     savingRef.current = true;
     setSaveStatus("saving");
     try {
-      const r = rating;
-      const pT = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
-      const cT = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
-      const cdT = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
-      const ratingData = {
-        ...cleanRelationFields(r),
-        personalityTotal: pT || null,
-        careerTotal: cT || null,
-        conditionTotal: cdT || null,
-        grandTotal: (pT + cT + cdT) || null,
-      };
-
-      const detailData = cleanRelationFields(detail);
-      if (workHistories.length > 0) {
-        const first = [...workHistories].sort((a, b) => a.order - b.order)[0];
-        detailData.companyName = first.companyName;
-        detailData.businessContent = first.businessContent;
-        const tenure = [
-          first.tenureYear != null ? `${first.tenureYear}年` : null,
-          first.tenureMonth != null ? `${first.tenureMonth}ヶ月` : null,
-        ].filter(Boolean).join("");
-        detailData.tenure = tenure || null;
-        detailData.jobTypeFlag = first.jobTypeFlag;
-        detailData.jobTypeMemo = first.jobTypeMemo;
-        detailData.resignReasonLarge = first.resignReasonLarge;
-        detailData.resignReasonMedium = first.resignReasonMedium;
-        detailData.resignReasonSmall = first.resignReasonSmall;
-        detailData.jobChangeReasonMemo = first.jobChangeReasonMemo;
-        detailData.careerSummary = workHistories
-          .map((w, i) => {
-            const t = [w.tenureYear != null ? `${w.tenureYear}年` : null, w.tenureMonth != null ? `${w.tenureMonth}ヶ月` : null].filter(Boolean).join("");
-            return `【${i + 1}社目】${w.companyName ?? ""}（${w.businessContent ?? ""}）${t} / ${w.jobTypeFlag ?? ""}`;
-          })
-          .join("\n");
-      }
+      const f = { ...form, ...overrides };
+      const body = buildAutosaveBody(f, detail, rating, workHistories, currentUser?.id, forceCompleteRef.current, autosaveToken);
 
       const res = await fetch(`/api/interviews/${interviewId}/autosave`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          interviewDate: form.interviewDate || undefined,
-          startTime: form.startTime || undefined,
-          endTime: form.endTime || undefined,
-          interviewTool: form.interviewTool || undefined,
-          interviewType: form.interviewType || undefined,
-          resultFlag: form.resultFlag || undefined,
-          interviewMemo: form.interviewMemo || undefined,
-          summaryText: form.summaryText || undefined,
-          status: forceCompleteRef.current ? "complete" : (form.status || undefined),
-          lastEditedBy: currentUser?.id,
-          autosaveToken: autosaveToken || undefined,
-          detail: Object.keys(detailData).length > 0 ? detailData : undefined,
-          rating: Object.keys(ratingData).length > 0 ? ratingData : undefined,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (res.ok) {
@@ -617,14 +655,61 @@ export default function InterviewForm({
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [isDirty, interviewId, form, detail, rating, workHistories, doAutoSave]);
 
-  /* ---- beforeunload (existing logic) ---- */
+  // T-044: fire a fire-and-forget keepalive PATCH using the latest state from refs.
+  // sendBeacon doesn't support PATCH, so we rely on `keepalive: true`.
+  const flushPendingSave = useCallback(() => {
+    if (!isDirtyRef.current) return;
+    const id = interviewIdRef.current;
+    if (!id) return;
+    try {
+      const body = buildAutosaveBody(
+        formRef.current,
+        detailRef.current,
+        ratingRef.current,
+        workHistoriesRef.current,
+        currentUserIdRef.current,
+        false,
+        autosaveTokenRef.current,
+      );
+      fetch(`/api/interviews/${id}/autosave`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // best-effort only
+    }
+  }, []);
+
+  /* ---- T-044: unmount flush (covers router.push and SPA navigation) ---- */
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      flushPendingSave();
+    };
+  }, [flushPendingSave]);
+
+  /* ---- beforeunload (existing logic + T-044 flush) ---- */
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) { e.preventDefault(); e.returnValue = ""; }
+      if (!isDirty) return;
+      // T-044: cancel pending debounce and flush via keepalive fetch so the
+      // change persists even if the user clicks "Leave" on the prompt.
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      flushPendingSave();
+      e.preventDefault();
+      e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
+  }, [isDirty, flushPendingSave]);
 
   /* ---- Tick for time-ago display ---- */
   useEffect(() => {
@@ -1135,9 +1220,24 @@ export default function InterviewForm({
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>結果</span>
-                <Fld value={form.resultFlag} onChange={(v) => {
+                <Fld value={form.resultFlag} onChange={async (v) => {
                   setField("resultFlag", v);
                   if (v === "連絡なし辞退" || v === "連絡あり辞退") {
+                    // T-044: cancel pending debounce and force a synchronous save so the
+                    // resultFlag change is durable before router.push unmounts the form
+                    // (or before the user reloads after canceling the confirm dialog).
+                    if (saveTimerRef.current) {
+                      clearTimeout(saveTimerRef.current);
+                      saveTimerRef.current = null;
+                    }
+                    try {
+                      await doAutoSave({ resultFlag: v });
+                    } catch (err) {
+                      console.error("[T-044] resultFlag autosave failed", err);
+                      window.alert("結果の保存に失敗しました。再度お試しください。");
+                      return;
+                    }
+
                     const ok = window.confirm("「面談不参加共有」のタスクを作成しますか？");
                     if (ok) {
                       const name = candidate?.name || "";
