@@ -32,6 +32,17 @@ type WorkHistoryEntry = {
   [key: string]: unknown;
 };
 
+// T-038: モーダル open 時に既存 URL チェックで使う最小型
+type InterviewRecordForGoogleForm = {
+  id: string;
+  isLatest: boolean;
+  googleFormId: string | null;
+  googleFormEditUrl: string | null;
+  googleFormViewUrl: string | null;
+  googleFormCreatedAt: string | null;
+  googleFormStatus: string | null;
+};
+
 const STAGE_LABELS: Record<Stage, string> = {
   extract: "履歴書解析",
   generate: "質問生成",
@@ -102,6 +113,10 @@ export default function GoogleFormCreatorModal({
   const [editUrlCopied, setEditUrlCopied] = useState(false);
   const [viewUrlCopied, setViewUrlCopied] = useState(false);
 
+  // T-038: 既存 URL 再表示
+  const [hasCheckedExistingUrl, setHasCheckedExistingUrl] = useState(false);
+  const [formCreatedAt, setFormCreatedAt] = useState<string | null>(null);
+
   // T-035: 会社別カテゴリマップ
   // キー: work_history 配列インデックスの文字列（"0", "1", "2"...）
   // 値: subcategory コード（candidate-intake が受け取る "sales_corporate" 等）
@@ -135,6 +150,45 @@ export default function GoogleFormCreatorModal({
     }
   }, [isOpen, pdfCandidates, txtCandidates, selectedPdfFileId, selectedTxtFileId]);
 
+  // T-038: モーダル open 時に既存 Google フォーム URL をチェック → あれば completed へジャンプ
+  useEffect(() => {
+    if (!isOpen) {
+      setHasCheckedExistingUrl(false);
+      return;
+    }
+    if (hasCheckedExistingUrl) return;
+    if (formResult) {
+      // 同一セッション内で既に作成済み or DB から復元済み → 再 fetch 不要
+      setHasCheckedExistingUrl(true);
+      return;
+    }
+    setHasCheckedExistingUrl(true);
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/interviews`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const records: InterviewRecordForGoogleForm[] = data.records || [];
+        const latest = records.find((r) => r.isLatest);
+
+        if (latest?.googleFormEditUrl && latest?.googleFormViewUrl) {
+          setFormResult({
+            formId: latest.googleFormId || "",
+            editUrl: latest.googleFormEditUrl,
+            viewUrl: latest.googleFormViewUrl,
+            persisted: true,
+          });
+          setFormCreatedAt(latest.googleFormCreatedAt);
+          setStep("completed");
+        }
+      } catch (err) {
+        // サイレントに idle 表示（通常の新規作成フローにフォールバック）
+        console.warn("[GoogleFormCreatorModal] Failed to check existing URL:", err);
+      }
+    })();
+  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId]);
+
   const groups = GOOGLE_FORM_CATEGORY_GROUPS;
   const selectedGroup = groups.find((g) => g.label === groupKey) ?? null;
 
@@ -156,8 +210,20 @@ export default function GoogleFormCreatorModal({
     setInterviewLogText("");
     setQuestionsJson(null);
     setFormResult(null);
+    setFormCreatedAt(null);
     setCompanyCategoryMap({});
     setCompanyGroupMap({});
+  };
+
+  // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
+  const handleStartFresh = () => {
+    const confirmed = window.confirm(
+      "既存の Google フォームはそのままに、新しいフォームを作成し直します。\n" +
+        "既に求職者へ URL を共有済みの場合、共有 URL は引き続き有効ですが、新規作成後は別 URL になります。\n\n" +
+        "本当に作り直しますか?",
+    );
+    if (!confirmed) return;
+    handleResetAll();
   };
 
   // T-035: work_history を取り出すヘルパー（resumeData は unknown）
@@ -300,6 +366,7 @@ export default function GoogleFormCreatorModal({
         persisted: !!data.persisted,
       };
       setFormResult(result);
+      setFormCreatedAt(new Date().toISOString());
       setStageStatus((s) => ({ ...s, create: "done" }));
       return result;
     } catch (e) {
@@ -843,7 +910,26 @@ export default function GoogleFormCreatorModal({
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-gray-200">
+            {/* T-038: 作成日時表示（JST、罠ポイント #17 準拠で sv-SE ロケール使用）*/}
+            {formCreatedAt && (
+              <div className="text-[11px] text-gray-500 mb-4">
+                作成日時: {new Date(formCreatedAt).toLocaleDateString("sv-SE")}{" "}
+                {new Date(formCreatedAt).toLocaleTimeString("ja-JP", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-2 border-t border-gray-200 gap-2">
+              {/* T-038: 「新しく作り直す」ボタン（confirm 付き）*/}
+              <button
+                type="button"
+                onClick={handleStartFresh}
+                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
+              >
+                新しく作り直す
+              </button>
               <button
                 onClick={handleClose}
                 className="border border-gray-300 bg-white text-gray-700 rounded-md px-5 py-2 text-[13px] font-medium hover:bg-gray-50"

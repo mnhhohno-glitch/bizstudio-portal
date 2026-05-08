@@ -265,21 +265,65 @@ type Props = {
   │   ├─ ✓ 作成完了
   │   ├─ 編集 URL（コピー + 「編集を開く ↗」）
   │   ├─ 回答用 URL（コピー）
-  │   └─ 保存状態表示（DB 保存済み or ブラウザ保持中）
+  │   ├─ 保存状態表示（DB 保存済み or ブラウザ保持中）
+  │   ├─ 作成日時表示（T-038、`googleFormCreatedAt` を JST 表示）
+  │   └─ ボタン: [新しく作り直す（confirm）] / [閉じる]（T-038）
   └─ error 状態: エラー表示 + [再試行] / [初めからやり直す]
 ```
+
+### URL 再表示機能（T-038 追加）
+
+#### useEffect による open 時の既存 URL チェック
+
+モーダル open 時に `/api/candidates/[candidateId]/interviews` を fetch し、`isLatest=true` レコードの `googleFormEditUrl` & `googleFormViewUrl` が両方存在すれば即 `setStep("completed")` + `setFormResult(...)` で完了画面にジャンプ。
+
+#### 判定ロジック
+
+URL の **存在有無** で判定する（`googleFormStatus` は補助情報、URL があれば status が null/未設定でも completed 扱い）。
+
+#### 「新しく作り直す」ボタン
+
+`handleStartFresh()` で `window.confirm()` 表示 → OK で `handleResetAll()` 呼び出し（idle にリセット）。
+DB 上の既存 URL は残置されるが、新規作成完了時に `create-form/route.ts` L104-126 の update で上書きされる仕様（DB 整合性問題なし）。
+
+#### state（T-038 追加分）
+
+| state | 型 | 用途 |
+|--|--|--|
+| `hasCheckedExistingUrl` | `boolean` | open ごとに 1 回だけ fetch するためのフラグ。`isOpen` が false に戻ると初期化 |
+| `formCreatedAt` | `string \| null` | フォーム作成日時（DB から取得 or 新規作成時に `new Date().toISOString()`）|
+
+#### 内部型定義
+
+```typescript
+type InterviewRecordForGoogleForm = {
+  id: string;
+  isLatest: boolean;
+  googleFormId: string | null;
+  googleFormEditUrl: string | null;
+  googleFormViewUrl: string | null;
+  googleFormCreatedAt: string | null;
+  googleFormStatus: string | null;
+};
+```
+
+⚠️ `InterviewHistoryTab` 側の `InterviewRecord` 型（同名ファイル内別定義）は本タスクでは拡張せず、モーダル内ローカル型として独立。 API レスポンス自体には `include` のみで `googleForm*` カラム全て含有済（`/api/candidates/[candidateId]/interviews/route.ts`）。
+
+⚠️ JST タイムゾーン罠（`12-pitfalls.md` #17）厳守: 日付抽出は `toLocaleDateString('sv-SE')`、時刻は `toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })`。`toISOString().slice(0,10)` 禁止。
 
 ### 主要 state
 
 | state | 型 | 用途 |
 |--|--|--|
-| `step` | "idle" / "processing" / "completed" / "error" | ステップ状態 |
+| `step` | "idle" / "processing" / "selectCompany" / "completed" / "error" | ステップ状態（T-035 で `selectCompany` 追加）|
 | `currentStage` | "extract" / "generate" / "create" / null | プログレスバー描画用 |
 | `stageStatus` | { extract, generate, create: "pending" / "running" / "done" / "failed" } | 各段階の状態 |
 | `selectedPdfFileId` / `selectedTxtFileId` | string \| null | ファイル選択 |
 | `groupKey` / `categoryValue` / `otherLabel` | string | 経験職種カテゴリ選択 |
 | `resumeData` / `questionsJson` / `formResult` | API 結果保持（リトライ時に再利用）|
 | `interviewLogText` | string | extract-resume レスポンスから保持、generate-form で再送 |
+| `hasCheckedExistingUrl` | boolean | T-038: 既存 URL チェック済みフラグ（open ごと 1 回 fetch）|
+| `formCreatedAt` | string \| null | T-038: フォーム作成日時（DB or 新規作成時の Date）|
 
 ### selectCompany ステップ（T-035 追加）
 
