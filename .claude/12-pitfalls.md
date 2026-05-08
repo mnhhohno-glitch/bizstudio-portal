@@ -158,3 +158,55 @@ JSON で送ると 400 エラー or 想定外の動作。
 - 新規実装で `supportSubStatusManual = true` を設定する処理を追加しないこと
 - 既存の Manual フラグ参照箇所は残置（過去データの整合性維持のため）
 - CA 向け UI でも「手動上書き」操作は提供しない方針
+
+## 31. D&D ハンドラと `<input multiple>` 属性のセット漏れ
+
+**罠**: 新規 D&D UI 実装時、以下のセット漏れが頻発する。
+- `onDrop` ハンドラで `e.dataTransfer.files[0]` のみ拾い、複数ファイル D&D で最初の1件しか処理されない
+- `<input type="file">` に `multiple` 属性が付いておらず、ファイル選択ダイアログでも複数選択不可
+- `onChange` ハンドラも `e.target.files?.[0]` のみ拾い、複数選択しても1件しか処理されない
+
+3点はセットで発生しがち。1つだけ修正しても他2つが残ると複数ファイル対応にならない。
+
+**結果**:
+- 業務効率低下（CA が1ファイルずつ D&D する手間）
+- 「複数ファイル添付できない」というバグ報告が表面化するまで気付かれない（単一ファイルでは正常動作するため）
+
+**対処（推奨実装パターン）**:
+
+1. `<input type="file" multiple>` 属性を必ず付ける
+2. `onDrop` で `Array.from(e.dataTransfer.files)` してループ処理
+3. `onChange` で `Array.from(e.target.files ?? [])` してループ処理
+4. アップロード自体は API 単一ファイル前提でよい、フロント側で個別 POST を逐次ループ（並列は API 負荷リスク・順序保証なしのため非推奨、`for...of` + `await` で逐次実行）
+
+```typescript
+// 推奨パターン
+const handleUploadMultiple = async (files: File[]) => {
+  for (const file of files) {
+    await handleUpload(file);
+  }
+};
+
+const onDrop = (e: React.DragEvent) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length > 0) handleUploadMultiple(files);
+};
+
+const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const files = Array.from(e.target.files ?? []);
+  if (files.length > 0) handleUploadMultiple(files);
+};
+
+// JSX
+<input type="file" multiple onChange={onChange} />
+```
+
+**該当しうる画面**:
+- `bizstudio-portal`: `InterviewForm.tsx` の添付タブ（T-041 で修正済み）、`DocumentsTab.tsx` の面談サブタブ・ブックマークタブ
+- `kyuujin-pdf-tool`: フロントエンドのファイルアップロード画面
+
+新規 D&D UI 実装時、または既存 D&D UI を改修するときは必ずこのパターンに揃えること。
+
+**関連ケース**:
+- T-041（2026/5/8）: InterviewForm 添付タブで3点同時に該当、master commit cde6530 で全て修正

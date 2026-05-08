@@ -59,6 +59,49 @@ CandidateDetailPage (100% width, no max-width)
     └─ リアルタイム保存（onChange で handleUpdateMemo 呼び出し）
 ```
 
+### 添付タブ（line ~1604-1612）
+
+`rightTab === "attachments"` のときのみ表示。面談ログ・録音・履歴書 PDF 等の D&D + ファイル選択アップロード UI。
+
+#### 構造
+
+```
+ドロップ領域 div（onDrop / onDragOver 付き）
+├─ アイコン（📎）
+├─ 「Notta ログ / 録音 / 履歴書 PDF 等をドラッグ＆ドロップ」テキスト
+├─ 「ファイルを選択」ボタン
+│   └─ <input type="file" multiple>（hidden、ボタンクリックで起動）
+└─ 対応形式注記（.txt / .pdf / .docx / .xlsx / .mp3 / .m4a / .png / .jpg、最大 20MB）
+
+添付ファイル一覧（既にアップ済みのファイル）
+├─ 「ログを解析して各カラムへ自動入力」ボタン
+└─ ファイル行（削除ボタン + ファイル名 + DL ボタン + サイズ）の繰り返し
+```
+
+#### 添付タブ handler
+
+| handler | シグネチャ | 用途 | 行 |
+|--|--|--|--|
+| `handleUpload(file)` | File 1引数 | 単一ファイル POST（FormData ベース） | L656-674 |
+| `handleUploadMultiple(files)` | File[] 1引数 | 逐次 await ループで `handleUpload` 呼び出し（T-041 で追加） | L674-678 |
+| `onDrop(e)` | DragEvent インライン | `Array.from(e.dataTransfer.files)` を `handleUploadMultiple` へ | L1606 |
+| `onChange(e)` | ChangeEvent インライン | `Array.from(e.target.files ?? [])` を `handleUploadMultiple` へ | L1611 |
+
+#### 重要な実装パターン（T-041 の修正で確立）
+
+複数ファイル D&D / 選択を扱う場合、以下3点を**セットで実装する**:
+
+1. `<input type="file" multiple>` 属性を必ず付ける
+2. `onDrop` / `onChange` 両方で `Array.from(...)` してループ処理
+3. アップロード自体は API 単一ファイル前提のままでよく、フロント側ループで個別 POST する逐次パターン
+
+`files[0]` だけ拾う実装は典型的な D&D バグの温床。新規 UI 実装時のテンプレとしてこのパターンを採用すること（罠ポイント #31 参照）。
+
+#### 関連ファイル
+
+- API: `src/app/api/interviews/[id]/attachments` 配下（単一ファイル POST、複数対応はフロント側ループで実現）
+- T-041 修正: master commit cde6530、staging merge 済み
+
 ### 面談基本情報グリッド（line ~1053）
 
 6列グリッド（`repeat(6, minmax(0, 1fr))`）。各行は col-span-2 セルで構成。
