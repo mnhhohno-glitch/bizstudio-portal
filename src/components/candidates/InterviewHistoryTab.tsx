@@ -111,7 +111,7 @@ export default function InterviewHistoryTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           candidateId,
-          interviewDate: now.toISOString(),
+          interviewDate: now.toLocaleDateString("sv-SE"),
           startTime: timeStr,
           endTime: timeStr,
           interviewTool: "電話",
