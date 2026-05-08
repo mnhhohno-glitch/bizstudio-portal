@@ -143,6 +143,118 @@ Row 6: 回数/状態(col-span-2) | 結果(col-span-2) | フラグ(col-span-2)
 
 ---
 
+## InterviewHistoryTab.tsx
+
+### 基本情報
+- パス: `src/components/candidates/InterviewHistoryTab.tsx`
+- 行数: ~260 行
+- 用途: 面談履歴タブ全体（面談一覧バー + 選択面談のフォーム表示）
+- 親: `CandidateDetailPage.tsx`（`activeView === "interview"` のとき表示）
+
+### Props
+
+```typescript
+type Props = {
+  candidateId: string;
+  currentUser: SessionUser | null;  // { id, name, email, role }
+};
+```
+
+### 全体レイアウト
+
+```
+InterviewHistoryTab
+  ├─ Toaster (sonner)
+  ├─ 面談一覧バー（白背景、border、p-3 mb-3）
+  │   ├─ 「面談:」ラベル
+  │   ├─ 面談ボタン群（先頭5件 = visibleInterviews）
+  │   │   └─ 各ボタン: StatusDot + "{N}回目" + 日付（M/D）
+  │   ├─ 「すべて(N)」ドロップダウン（6件以上ある場合のみ表示）
+  │   │   └─ 展開時: 全面談リスト（StatusDot + 回数 + 日付 + 担当者名）
+  │   ├─ 「+ 新規面談」ボタン ⚠️ 罠あり（後述）
+  │   └─ 選択中面談の情報（ml-auto: 面談種別 | 担当者名）
+  └─ 面談フォーム領域
+      ├─ selectedInterview あり → <InterviewForm />
+      └─ selectedInterview なし → 空状態（「+ 新規面談を作成」ボタン）
+```
+
+### StatusDot コンポーネント
+
+| status | lastSavedAt | 表示 | title |
+|--|--|--|--|
+| `"complete"` | any | 🟢 緑 | 完了 |
+| other | truthy | 🟡 黄 | 下書き(保存あり) |
+| other | null | 🔴 赤 | 未入力 |
+
+### 「＋新規面談」ボタンの draft 作成パス
+
+`handleCreateInterview()` → POST `/api/interviews` でドラフト InterviewRecord を作成。
+
+⚠️ **罠ポイント #17 サブパターン（ソート順崩れ）該当箇所**:
+- L114: `interviewDate` は `now.toLocaleDateString("sv-SE")` で送信（T-042 follow-up で修正済み、commit ab108b9）
+- 修正前は `now.toISOString()` でフルタイムスタンプが DB に入り、面談管理一覧のソートが崩壊していた
+- 他フィールド（startTime, endTime）は `HH:MM` 文字列で送信（問題なし）
+
+#### POST body 構造
+
+```typescript
+{
+  candidateId,
+  interviewDate: now.toLocaleDateString("sv-SE"),   // "YYYY-MM-DD" ⚠️ toISOString() 禁止
+  startTime: timeStr,                                // "HH:MM"
+  endTime: timeStr,                                  // "HH:MM"
+  interviewTool: "電話",
+  interviewerUserId: currentEmployeeId,              // Employee.id（User.id ではない）
+  interviewType: interviews.length === 0 ? "初回面談" : "フォロー面談",
+  status: "draft",
+}
+```
+
+#### 前提条件チェック
+
+1. `currentUser` が null → toast エラー「再ログインしてください」
+2. `currentEmployeeId` が null → toast エラー「社員情報がアカウントに紐づいていません」
+3. `currentEmployeeId` は useEffect 内で `/api/employees` → `userId` マッチで取得
+
+### 主要 state
+
+| state | 型 | 用途 |
+|--|--|--|
+| `interviews` | `InterviewRecord[]` | 面談一覧（interviewCount 昇順ソート） |
+| `selectedId` | `string \| null` | 選択中の面談 ID |
+| `creating` | `boolean` | 新規面談作成中フラグ |
+| `dropdownOpen` | `boolean` | 「すべて」ドロップダウン開閉 |
+| `currentEmployeeId` | `string \| null` | ログインユーザーに紐づく Employee.id |
+
+### InterviewRecord 型（ローカル定義）
+
+```typescript
+type InterviewRecord = {
+  id: string;
+  interviewDate: string;
+  interviewCount: number;
+  status: string;
+  isLatest: boolean;
+  lastSavedAt: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  interviewTool: string | null;
+  interviewType: string | null;
+  interviewer: { name: string } | null;
+  rating: { overallRank: string | null; grandTotal: number | null } | null;
+  _count: { memos: number; attachments: number };
+};
+```
+
+### 関連ファイル
+
+- API (一覧): `src/app/api/candidates/[candidateId]/interviews/route.ts`
+- API (作成): `src/app/api/interviews/route.ts` POST
+- 子: `<InterviewForm>` (`src/components/candidates/InterviewForm.tsx`)
+- 親: `CandidateDetailPage.tsx`
+
+---
+
 ## HistoryTab.tsx（未着手、将来追加枠）
 
 - パス: `src/components/candidates/HistoryTab.tsx`
