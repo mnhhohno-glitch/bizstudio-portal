@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { supabase } from "@/lib/supabase";
 import { randomUUID } from "crypto";
+import { checkInputMissing } from "@/lib/interview-input-missing";
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
@@ -82,6 +83,7 @@ export async function GET(req: NextRequest) {
         interviewType: true,
         interviewCount: true,
         resultFlag: true,
+        interviewMemo: true,
         status: true,
         candidate: {
           select: {
@@ -97,18 +99,97 @@ export async function GET(req: NextRequest) {
           },
         },
         interviewer: { select: { id: true, employeeNumber: true, name: true } },
-        detail: { select: { jobChangeTimeline: true, desiredPrefecture: true, desiredJobType1: true } },
-        rating: { select: { overallRank: true } },
+        // T-046: pull all the fields we need for input-missing detection.
+        // The list view itself only renders a subset, but the extra columns
+        // are needed by `checkInputMissing` to compute `hasInputMissing`.
+        detail: {
+          select: {
+            jobChangeTimeline: true,
+            desiredPrefecture: true,
+            desiredJobType1: true,
+            agentUsageFlag: true,
+            activityPeriod: true,
+            applicationTypeFlag: true,
+            currentApplicationCount: true,
+            educationFlag: true,
+            graduationDate: true,
+            graduationStatus: true,
+            desiredJobTypes: true,
+            desiredIndustries: true,
+            desiredAreas: true,
+            currentSalary: true,
+            desiredSalaryMin: true,
+            desiredSalaryMax: true,
+            desiredDayOff: true,
+            desiredOvertimeMax: true,
+            desiredTransfer: true,
+            driverLicenseFlag: true,
+            languageSkillFlag: true,
+            japaneseSkillFlag: true,
+            typingFlag: true,
+            excelFlag: true,
+            wordFlag: true,
+            pptFlag: true,
+            documentStatusFlag: true,
+            documentSupportFlag: true,
+            contactMethod: true,
+            jobReferralFlag: true,
+            nextInterviewFlag: true,
+            nextInterviewDate: true,
+            nextInterviewTime: true,
+            nextInterviewMemo: true,
+            nextAction: true,
+            freeMemo: true,
+            initialSummary: true,
+          },
+        },
+        rating: {
+          select: {
+            overallRank: true,
+            personalityMotivation: true,
+            personalityCommunication: true,
+            personalityManner: true,
+            personalityIntelligence: true,
+            personalityHumanity: true,
+            careerJobType: true,
+            careerExperience: true,
+            careerJobChangeCount: true,
+            careerAchievement: true,
+            careerQualification: true,
+            conditionJobType: true,
+            conditionSalary: true,
+            conditionHoliday: true,
+            conditionArea: true,
+            conditionFlexibility: true,
+          },
+        },
+        _count: { select: { workHistories: true } },
       },
     }),
     prisma.interviewRecord.count({ where }),
   ]);
 
-  const serialized = interviews.map((r) => ({
-    ...r,
-    interviewDate: r.interviewDate.toISOString(),
-    candidateBirthday: r.candidate.birthday?.toISOString() ?? null,
-  }));
+  const serialized = interviews.map((r) => {
+    const { hasMissing } = checkInputMissing({
+      form: {
+        interviewDate: r.interviewDate,
+        startTime: r.startTime,
+        endTime: r.endTime,
+        interviewTool: r.interviewTool,
+        resultFlag: r.resultFlag,
+        interviewMemo: r.interviewMemo,
+      },
+      detail: r.detail as Record<string, unknown> | null,
+      rating: r.rating as Record<string, unknown> | null,
+      workHistoriesCount: r._count.workHistories,
+    });
+    return {
+      ...r,
+      interviewDate: r.interviewDate.toISOString(),
+      candidateBirthday: r.candidate.birthday?.toISOString() ?? null,
+      hasInputMissing: hasMissing,
+    };
+  });
 
   return NextResponse.json({ interviews: serialized, total, page, pageSize });
 }

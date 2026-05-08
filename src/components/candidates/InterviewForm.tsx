@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
@@ -12,6 +12,7 @@ import {
   getSmallOptions,
 } from "@/constants/resign-reason-hierarchy";
 import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
+import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 const OKADA_EMPLOYEE_ID = "cmlqr5jzu0006tg4f3ypb8kz7";
@@ -312,7 +313,7 @@ function RoField({ v, copyable }: { v: string; copyable?: boolean }) {
 }
 
 function Fld({
-  value, onChange, type = "text", options, rows, placeholder, style: extraStyle, className, readOnly,
+  value, onChange, type = "text", options, rows, placeholder, style: extraStyle, className, readOnly, isMissing,
 }: {
   value: unknown;
   onChange: (v: string) => void;
@@ -323,10 +324,14 @@ function Fld({
   style?: React.CSSProperties;
   className?: string;
   readOnly?: boolean;
+  // T-046: highlight when the field is empty in the input-missing audit.
+  isMissing?: boolean;
 }) {
   const base: React.CSSProperties = {
     flex: "1 1 auto", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5,
-    color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: readOnly ? "var(--im-bg2)" : "var(--im-bg)",
+    color: "var(--im-fg)",
+    border: isMissing ? "1px solid #dc2626" : "0.5px solid var(--im-bdr)",
+    background: isMissing ? "#fef2f2" : (readOnly ? "var(--im-bg2)" : "var(--im-bg)"),
     fontFamily: "inherit", width: "100%", ...extraStyle,
   };
 
@@ -364,7 +369,7 @@ function Fld({
   );
 }
 
-function TimeStampField({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
+function TimeStampField({ value, onChange, isMissing }: { value: unknown; onChange: (v: string) => void; isMissing?: boolean }) {
   const stamp = () => {
     const now = new Date();
     onChange(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
@@ -374,7 +379,7 @@ function TimeStampField({ value, onChange }: { value: unknown; onChange: (v: str
       <TimeInput
         value={value != null ? String(value) : ""}
         onChange={onChange}
-        style={{ flex: "1 1 0%", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5, color: "var(--im-fg)", border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)", fontFamily: "inherit", width: "100%" }}
+        style={{ flex: "1 1 0%", minWidth: 0, fontSize: 12, padding: "5px 8px", borderRadius: 5, color: "var(--im-fg)", border: isMissing ? "1px solid #dc2626" : "0.5px solid var(--im-bdr)", background: isMissing ? "#fef2f2" : "var(--im-bg)", fontFamily: "inherit", width: "100%" }}
       />
       <button
         type="button"
@@ -1010,6 +1015,19 @@ export default function InterviewForm({
   const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileType === "pdf");
   const d = detail;
   const r = rating;
+
+  // T-046: live input-missing check. The set is what the JSX consults via
+  // `miss.has("d.agentUsageFlag")` to decide whether to draw a red border.
+  const miss = useMemo(() => {
+    const { missingFields } = checkInputMissing({
+      form,
+      detail,
+      rating,
+      workHistoriesCount: workHistories.length,
+    });
+    return buildMissingSet(missingFields);
+  }, [form, detail, rating, workHistories.length]);
+
   const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
   const cTotal = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
   const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
@@ -1146,7 +1164,7 @@ export default function InterviewForm({
               {/* Row 1: 面談日 | 時刻 | 時間/手法 */}
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>面談日</span>
-                <Fld value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" />
+                <Fld value={form.interviewDate} onChange={(v) => setField("interviewDate", v)} type="date" isMissing={miss.has("form.interviewDate")} />
                 {form.interviewDate && (
                   <button type="button" className="shrink-0 p-0.5 transition-colors" style={{ color: "var(--im-fg3, #9CA3AF)" }} title="日付をコピー"
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--im-fg, #374151)"; }}
@@ -1159,15 +1177,15 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 30 }}>時刻</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <TimeStampField value={form.startTime} onChange={(v) => setField("startTime", v)} />
-                  <TimeStampField value={form.endTime} onChange={(v) => setField("endTime", v)} />
+                  <TimeStampField value={form.startTime} onChange={(v) => setField("startTime", v)} isMissing={miss.has("form.startTime")} />
+                  <TimeStampField value={form.endTime} onChange={(v) => setField("endTime", v)} isMissing={miss.has("form.endTime")} />
                 </div>
               </div>
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>時間/手法</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
                   <RoField v={duration} />
-                  <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} style={{ flex: "1 1 0%" }} />
+                  <Fld value={form.interviewTool} onChange={(v) => setField("interviewTool", v)} type="select" options={["電話", "オンライン", "対面"]} style={{ flex: "1 1 0%" }} isMissing={miss.has("form.interviewTool")} />
                 </div>
               </div>
 
@@ -1254,7 +1272,7 @@ export default function InterviewForm({
                       router.push(`/tasks/new?${params.toString()}`);
                     }
                   }
-                }} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} />
+                }} type="select" options={["求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} isMissing={miss.has("form.resultFlag")} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>
@@ -1263,23 +1281,23 @@ export default function InterviewForm({
           {/* --- 転職活動状況 --- */}
           <div className="mb-4">
             <SectionHd title="転職活動状況" />
-            <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
-            <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={["すぐにでも", "3カ月以内", "半年以内", "1年以内", "未定"]} style={{ width: 110, flex: "none" }} /><Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
-            <Row label="活動期間"><Fld value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)} type="select" options={["1週間以内", "1カ月以内", "3カ月以内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} /></Row>
+            <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.agentUsageFlag")} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
+            <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={["すぐにでも", "3カ月以内", "半年以内", "1年以内", "未定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.jobChangeTimeline")} /><Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
+            <Row label="活動期間"><Fld value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)} type="select" options={["1週間以内", "1カ月以内", "3カ月以内"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.activityPeriod")} /><Fld value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} /></Row>
             <Row label="他社応募">
-              <Fld value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)} type="select" options={["検討中", "応募中", "選考中", "なし"]} style={{ width: 110, flex: "none" }} />
+              <Fld value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)} type="select" options={["検討中", "応募中", "選考中", "なし"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.applicationTypeFlag")} />
               <Fld value={d.applicationMemo} onChange={(v) => setDetail("applicationMemo", v)} />
               <div className="flex items-center gap-1 shrink-0" style={{ width: 80 }}>
-                <Fld value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" style={{ width: 48, textAlign: "center", flex: "none" }} />
+                <Fld value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" style={{ width: 48, textAlign: "center", flex: "none" }} isMissing={miss.has("d.currentApplicationCount")} />
                 <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>社</span>
               </div>
             </Row>
             <Row label="最終学歴">
-              <Fld value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)} type="select" options={["大学卒", "大学院卒", "短大卒", "専門卒", "高卒"]} style={{ width: 110, flex: "none" }} />
+              <Fld value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)} type="select" options={["大学卒", "大学院卒", "短大卒", "専門卒", "高卒"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.educationFlag")} />
               <Fld value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
               <div className="flex items-center gap-1 shrink-0" style={{ width: 186 }}>
-                <Fld value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} style={{ width: 92 }} placeholder="2016年3月" />
-                <Fld value={d.graduationStatus} onChange={(v) => setDetail("graduationStatus", v)} type="select" options={["卒業", "卒業予定", "在学中", "中退", "修了", "その他"]} style={{ flex: 1 }} />
+                <Fld value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} style={{ width: 92 }} placeholder="2016年3月" isMissing={miss.has("d.graduationDate")} />
+                <Fld value={d.graduationStatus} onChange={(v) => setDetail("graduationStatus", v)} type="select" options={["卒業", "卒業予定", "在学中", "中退", "修了", "その他"]} style={{ flex: 1 }} isMissing={miss.has("d.graduationStatus")} />
               </div>
             </Row>
           </div>
@@ -1321,7 +1339,9 @@ export default function InterviewForm({
                   </div>
                 </div>
               ))}
-              {workHistories.length === 0 && <p style={{ fontSize: 11, color: "var(--im-fg3)", fontStyle: "italic", textAlign: "center", padding: 12 }}>職歴データなし</p>}
+              {workHistories.length === 0 && (
+                <p style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, textAlign: "center", padding: 12 }}>職歴未入力</p>
+              )}
             </div>
             <button
               type="button" onClick={addWorkHistory}
@@ -1469,7 +1489,7 @@ export default function InterviewForm({
                     ))}
                   </div>
                   {desiredSub === "st-job" && (
-                    <div>
+                    <div style={miss.has("d.desiredJobTypes") ? { border: "1px solid #dc2626", borderRadius: 6, padding: 4, background: "#fef2f2" } : undefined}>
                       <SearchableMultiSelect
                         apiUrl="/api/job-categories/all"
                         selected={Array.isArray(d.desiredJobTypes) ? d.desiredJobTypes as FlatItem[] : []}
@@ -1492,7 +1512,7 @@ export default function InterviewForm({
                     </div>
                   )}
                   {desiredSub === "st-industry" && (
-                    <div>
+                    <div style={miss.has("d.desiredIndustries") ? { border: "1px solid #dc2626", borderRadius: 6, padding: 4, background: "#fef2f2" } : undefined}>
                       <SearchableMultiSelect
                         apiUrl="/api/industry-categories/all"
                         selected={Array.isArray(d.desiredIndustries) ? d.desiredIndustries as FlatItem[] : []}
@@ -1515,7 +1535,7 @@ export default function InterviewForm({
                     </div>
                   )}
                   {desiredSub === "st-area" && (
-                    <div>
+                    <div style={miss.has("d.desiredAreas") ? { border: "1px solid #dc2626", borderRadius: 6, padding: 4, background: "#fef2f2" } : undefined}>
                       <SearchableMultiSelect
                         apiUrl="/api/area-categories/all"
                         selected={Array.isArray(d.desiredAreas) ? (d.desiredAreas as Array<Record<string, string>>).map((a) => ({ large: a.area || a.large || "", medium: a.prefecture || a.medium || "", small: a.city || a.small || "" })) : []}
@@ -1543,23 +1563,23 @@ export default function InterviewForm({
 
                 <div className="mb-4">
                   <SectionHd title="年収・勤務条件" />
-                  <Row label="現年収"><Fld value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} /></Row>
-                  <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
-                  <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
-                  <Row label="希望休日"><Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={["土日祝休み", "完全週休2日", "シフト制"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} /></Row>
-                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["20時間以内", "30時間以内", "45時間以内"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
-                  <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={["なし", "可", "要相談"]} style={{ width: 110, flex: "none" }} /><Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
+                  <Row label="現年収"><Fld value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.currentSalary")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} /></Row>
+                  <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMin")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
+                  <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMax")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
+                  <Row label="希望休日"><Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={["土日祝休み", "完全週休2日", "シフト制"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredDayOff")} /><Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} /></Row>
+                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["20時間以内", "30時間以内", "45時間以内"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredOvertimeMax")} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
+                  <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={["なし", "可", "要相談"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredTransfer")} /><Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
                 </div>
 
                 <div className="mb-4">
                   <SectionHd title="スキル" />
-                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予定"]} style={{ width: 110, flex: "none" }} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
-                  <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={["不可", "日常会話", "ビジネス", "ネイティブ"]} style={{ width: 110, flex: "none" }} /><Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
-                  <Row label="日本語"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
-                  <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={["ブラインドタッチ可", "中級", "初級"]} style={{ width: 110, flex: "none" }} /><Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
-                  <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
-                  <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
-                  <Row label="PPT"><Fld value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} /><Fld value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} /></Row>
+                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.driverLicenseFlag")} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
+                  <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={["不可", "日常会話", "ビジネス", "ネイティブ"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.languageSkillFlag")} /><Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
+                  <Row label="日本語"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.japaneseSkillFlag")} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
+                  <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={["ブラインドタッチ可", "中級", "初級"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.typingFlag")} /><Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
+                  <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.excelFlag")} /><Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
+                  <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.wordFlag")} /><Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
+                  <Row label="PPT"><Fld value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.pptFlag")} /><Fld value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} /></Row>
                 </div>
 
                 <div className="mb-4">
@@ -1625,7 +1645,7 @@ export default function InterviewForm({
                           <tr key={item.key}>
                             <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)" }}>{item.label}</td>
                             <td style={{ padding: "6px 10px", borderBottom: "0.5px solid var(--im-bdr)" }}>
-                              <div className="flex gap-0.5">
+                              <div className="flex gap-0.5" style={miss.has(`r.${item.key}`) ? { border: "1px solid #dc2626", borderRadius: 4, padding: 2, background: "#fef2f2", display: "inline-flex" } : undefined}>
                                 {[1, 2, 3, 4, 5].map((n) => (
                                   <button
                                     key={n} type="button"
@@ -1672,24 +1692,24 @@ export default function InterviewForm({
               <div className="flex flex-col flex-1">
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>応募書類状況</div>
-                  <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
-                  <Row label="サポート"><Fld value={d.documentSupportFlag} onChange={(v) => setDetail("documentSupportFlag", v)} type="select" options={["マイナビWEB履歴書から作成", "本人作成書類から作成", "ヤギッシュ作成依頼", "テンプレ送付のみ"]} style={{ width: 110, flex: "none" }} /><Fld value={d.documentSupportMemo} onChange={(v) => setDetail("documentSupportMemo", v)} /></Row>
+                  <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.documentStatusFlag")} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
+                  <Row label="サポート"><Fld value={d.documentSupportFlag} onChange={(v) => setDetail("documentSupportFlag", v)} type="select" options={["マイナビWEB履歴書から作成", "本人作成書類から作成", "ヤギッシュ作成依頼", "テンプレ送付のみ"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.documentSupportFlag")} /><Fld value={d.documentSupportMemo} onChange={(v) => setDetail("documentSupportMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>連絡方法</div>
-                  <Row label="連絡手段"><Fld value={d.contactMethod} onChange={(v) => setDetail("contactMethod", v)} type="select" options={["LINE", "メール", "電話", "LINE WORKS"]} style={{ width: 110, flex: "none" }} /><Fld value={d.contactMemo} onChange={(v) => setDetail("contactMemo", v)} /></Row>
+                  <Row label="連絡手段"><Fld value={d.contactMethod} onChange={(v) => setDetail("contactMethod", v)} type="select" options={["LINE", "メール", "電話", "LINE WORKS"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.contactMethod")} /><Fld value={d.contactMemo} onChange={(v) => setDetail("contactMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>求人送付／送付期限</div>
-                  <Row label="送付予定"><Fld value={d.jobReferralFlag} onChange={(v) => setDetail("jobReferralFlag", v)} type="select" options={["週明け月曜日", "今週中", "未定", "送付済"]} style={{ width: 110, flex: "none" }} /><Fld value={d.jobReferralMemo} onChange={(v) => setDetail("jobReferralMemo", v)} /></Row>
+                  <Row label="送付予定"><Fld value={d.jobReferralFlag} onChange={(v) => setDetail("jobReferralFlag", v)} type="select" options={["週明け月曜日", "今週中", "未定", "送付済"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.jobReferralFlag")} /><Fld value={d.jobReferralMemo} onChange={(v) => setDetail("jobReferralMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>次回面談予定</div>
                   <Row label="日時">
-                    <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={["設定済", "調整中", "未設定"]} style={{ width: 110, flex: "none" }} />
-                    <Fld value={d.nextInterviewDate ? new Date(d.nextInterviewDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("nextInterviewDate", v)} type="date" style={{ width: 116, flex: "none" }} />
-                    <Fld value={d.nextInterviewTime} onChange={(v) => setDetail("nextInterviewTime", v)} type="time" style={{ width: 78, flex: "none" }} />
-                    <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" />
+                    <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={["設定済", "調整中", "未設定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.nextInterviewFlag")} />
+                    <Fld value={d.nextInterviewDate ? new Date(d.nextInterviewDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("nextInterviewDate", v)} type="date" style={{ width: 116, flex: "none" }} isMissing={miss.has("d.nextInterviewDate")} />
+                    <Fld value={d.nextInterviewTime} onChange={(v) => setDetail("nextInterviewTime", v)} type="time" style={{ width: 78, flex: "none" }} isMissing={miss.has("d.nextInterviewTime")} />
+                    <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" isMissing={miss.has("d.nextInterviewMemo")} />
                   </Row>
                 </div>
                 <div className="flex flex-col flex-1">
@@ -1697,7 +1717,7 @@ export default function InterviewForm({
                     <span>ネクストアクション</span>
                     <BtnMini variant="ai" onClick={handleAiOrganize} disabled={aiOrganizeLoading}>{aiOrganizeLoading ? "AI整理中..." : "✨ AI整理"}</BtnMini>
                   </div>
-                  <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} style={{ flex: "1 1 auto", minHeight: 560 }} />
+                  <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} style={{ flex: "1 1 auto", minHeight: 560 }} isMissing={miss.has("d.nextAction") && miss.has("d.freeMemo") && miss.has("d.initialSummary")} />
                 </div>
               </div>
             )}

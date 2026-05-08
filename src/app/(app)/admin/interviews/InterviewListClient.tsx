@@ -36,6 +36,7 @@ type InterviewRow = {
   interviewer: Employee;
   detail: { jobChangeTimeline: string | null; desiredPrefecture: string | null; desiredJobType1: string | null } | null;
   rating: { overallRank: string | null } | null;
+  hasInputMissing: boolean;
 };
 
 /* ------------------------------------------------------------------ */
@@ -527,6 +528,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   <td className="px-2 py-2 overflow-hidden">
                     <div className="text-[13px]">{r.interviewCount != null ? `${r.interviewCount}回` : "-"}</div>
                     {rb && <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium ${rb.cls}`}>{rb.label}</span>}
+                    {r.hasInputMissing && (
+                      <div className="text-[11px] font-bold mt-0.5 text-red-600">入力漏れ</div>
+                    )}
                   </td>
                   {/* 求職者氏名 */}
                   <td className="px-2 py-2 overflow-hidden" title={`${r.candidate.name} (${r.candidate.candidateNumber})`}>
