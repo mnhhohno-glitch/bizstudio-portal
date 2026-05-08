@@ -416,9 +416,10 @@ export default function TaskNewPage() {
     if (categories.length === 0 || employees.length === 0 || candidates.length === 0) return;
 
     const catId = searchParams.get("categoryId");
+    let resolvedCat: Category | null = null;
     if (catId) {
-      const cat = categories.find((c) => c.id === catId);
-      if (cat) setCategoryId(cat.id);
+      resolvedCat = categories.find((c) => c.id === catId) ?? null;
+      if (resolvedCat) setCategoryId(resolvedCat.id);
     }
 
     const candId = searchParams.get("candidateId");
@@ -438,6 +439,20 @@ export default function TaskNewPage() {
 
     const pt = searchParams.get("title");
     if (pt) setTitle(pt);
+
+    // T-043: 面談日・時刻を Step 3 の「面談日」DATE フィールドに自動セット
+    // 値形式は L2659 の onChange と同じ "YYYY-MM-DD HH:MM"（半角スペース区切り）
+    const qInterviewDate = searchParams.get("interviewDate");
+    const qStartTime = searchParams.get("startTime");
+    if (resolvedCat && (qInterviewDate || qStartTime)) {
+      const meetingDateField = resolvedCat.fields.find((f) => f.label === "面談日");
+      if (meetingDateField) {
+        const composed = `${qInterviewDate ?? ""} ${qStartTime ?? ""}`.trim();
+        if (composed) {
+          setFieldValues((prev) => ({ ...prev, [meetingDateField.id]: composed }));
+        }
+      }
+    }
 
     setStep(4);
     declinePrefillApplied.current = true;

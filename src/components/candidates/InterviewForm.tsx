@@ -1148,6 +1148,9 @@ export default function InterviewForm({
                         assigneeId: OKADA_EMPLOYEE_ID,
                         title: `面談不参加共有 - ${name}`,
                       });
+                      // T-043: 面談日・時刻を Step 3 の「面談日」フィールドに自動セットするため転送
+                      if (form.interviewDate) params.set("interviewDate", form.interviewDate);
+                      if (form.startTime) params.set("startTime", form.startTime);
                       router.push(`/tasks/new?${params.toString()}`);
                     }
                   }
