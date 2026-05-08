@@ -55,8 +55,8 @@ export async function GET(req: NextRequest) {
   }
   if (andClauses.length > 0) where.AND = andClauses;
 
-  const orderByMap: Record<string, Prisma.InterviewRecordOrderByWithRelationInput> = {
-    interviewDate: { interviewDate: sortOrder },
+  const orderByMap: Record<string, Prisma.InterviewRecordOrderByWithRelationInput | Prisma.InterviewRecordOrderByWithRelationInput[]> = {
+    interviewDate: [{ interviewDate: sortOrder }, { startTime: "asc" }],
     rcName: { interviewer: { name: sortOrder } },
     caName: { candidate: { employee: { name: sortOrder } } },
     startTime: { startTime: sortOrder },
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     age: { candidate: { birthday: sortOrder === "asc" ? "desc" : "asc" } },
     desiredPrefecture: { detail: { desiredPrefecture: sortOrder } },
   };
-  const orderBy = orderByMap[sortBy] || { interviewDate: "desc" };
+  const orderBy = orderByMap[sortBy] || [{ interviewDate: "desc" }, { startTime: "asc" }];
 
   const [interviews, total] = await Promise.all([
     prisma.interviewRecord.findMany({
