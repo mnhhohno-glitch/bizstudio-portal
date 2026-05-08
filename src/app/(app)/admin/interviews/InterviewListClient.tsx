@@ -486,7 +486,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
               const rank = r.rating?.overallRank;
               const isDeclined = r.resultFlag === "連絡なし辞退" || r.resultFlag === "連絡あり辞退";
               return (
-                <tr key={r.id} className={`border-t border-[#E5E7EB] hover:bg-[#F9FAFB] ${isDeclined ? "opacity-50" : ""}`}>
+                <tr key={r.id} className={`border-t border-[#E5E7EB] hover:bg-[#F9FAFB] ${isDeclined ? "bg-[#E5E7EB]" : ""}`}>
                   {/* 操作 */}
                   <td className="px-2 py-2 text-center whitespace-nowrap">
                     <Link
