@@ -551,9 +551,9 @@ export default function InterviewForm({
         detailData.resignReasonSmall = first.resignReasonSmall;
         detailData.jobChangeReasonMemo = first.jobChangeReasonMemo;
         detailData.careerSummary = workHistories
-          .map((w) => {
+          .map((w, i) => {
             const t = [w.tenureYear != null ? `${w.tenureYear}年` : null, w.tenureMonth != null ? `${w.tenureMonth}ヶ月` : null].filter(Boolean).join("");
-            return `【${w.order}社目】${w.companyName ?? ""}（${w.businessContent ?? ""}）${t} / ${w.jobTypeFlag ?? ""}`;
+            return `【${i + 1}社目】${w.companyName ?? ""}（${w.businessContent ?? ""}）${t} / ${w.jobTypeFlag ?? ""}`;
           })
           .join("\n");
       }
@@ -1182,7 +1182,7 @@ export default function InterviewForm({
               {workHistories.map((wh, idx) => (
                 <div key={wh.id ?? idx} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>{wh.order} 社目</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", minWidth: 50 }}>{idx + 1} 社目</span>
                     <span style={{ fontSize: 11, color: "var(--im-fg2)" }}>企業名</span>
                     <Fld value={wh.companyName} onChange={(v) => setWH(idx, "companyName", v)} />
                     <div className="flex items-center gap-0.5 shrink-0">
