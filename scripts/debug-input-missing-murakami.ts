@@ -2,10 +2,11 @@ import { prisma } from "../src/lib/prisma";
 import { checkInputMissing } from "../src/lib/interview-input-missing";
 
 async function main() {
+  const candidateNumber = process.argv[2] || "5005695";
   const candidate = await prisma.candidate.findFirst({
-    where: { candidateNumber: "5005695" },
+    where: { candidateNumber },
   });
-  if (!candidate) throw new Error("Candidate not found (5005695)");
+  if (!candidate) throw new Error("Candidate not found (" + candidateNumber + ")");
 
   const interview = await prisma.interviewRecord.findFirst({
     where: { candidateId: candidate.id },
@@ -18,10 +19,11 @@ async function main() {
   });
   if (!interview) throw new Error("Interview not found");
 
-  console.log("=== 村上元基さん 面談 #" + interview.interviewCount + " 入力漏れ判定 ===");
+  console.log("=== " + candidate.name + " さん 面談 #" + interview.interviewCount + " 入力漏れ判定 ===");
   console.log("Candidate:", candidate.name, "(" + candidate.candidateNumber + ")");
   console.log("Interview ID:", interview.id);
   console.log("Status:", interview.status);
+  console.log("resultFlag:", interview.resultFlag);
   console.log("isLatest:", interview.isLatest);
   console.log("workHistories count:", interview.workHistories.length);
   console.log("");

@@ -134,17 +134,38 @@ const RATING_INT_FIELDS = [
   "conditionFlexibility",
 ] as const;
 
+// Result flags that mean the interview never actually took place. When the
+// resultFlag has one of these values, business-field validation is skipped:
+// only resultFlag itself is required.
+const SKIP_BUSINESS_FIELDS_RESULTS = ["面談前", "連絡なし辞退", "連絡あり辞退"];
+
 export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResult {
   const missing: MissingFieldKey[] = [];
   const form = args.form ?? {};
   const detail = args.detail;
   const rating = args.rating;
 
+  // resultFlag is always required — if it's missing the row is incomplete.
+  const resultFlagRaw = (form as Record<string, unknown>).resultFlag;
+  if (isStringEmpty(resultFlagRaw)) {
+    missing.push("form.resultFlag");
+  }
+
+  // When resultFlag indicates the interview never happened, skip every
+  // downstream business field check.
+  if (typeof resultFlagRaw === "string" && SKIP_BUSINESS_FIELDS_RESULTS.includes(resultFlagRaw)) {
+    return {
+      hasMissing: missing.length > 0,
+      missingFields: missing,
+    };
+  }
+
   // Group A
   if (isDateEmpty((form as Record<string, unknown>).interviewDate)) {
     missing.push("form.interviewDate");
   }
   for (const f of FORM_STRING_FIELDS) {
+    if (f === "resultFlag") continue; // already handled above
     if (isStringEmpty((form as Record<string, unknown>)[f])) {
       missing.push(`form.${f}`);
     }

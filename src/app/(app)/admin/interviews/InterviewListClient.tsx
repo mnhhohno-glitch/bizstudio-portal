@@ -51,6 +51,7 @@ const RESULT_BADGE: Record<string, { label: string; cls: string }> = {
   pass: { label: "合格", cls: "bg-green-100 text-green-700" },
   fail: { label: "不合格", cls: "bg-red-100 text-red-600" },
   pending: { label: "保留", cls: "bg-yellow-100 text-yellow-700" },
+  "面談前": { label: "面談前", cls: "bg-blue-100 text-blue-700" },
 };
 
 const RANK_BADGE: Record<string, string> = {
