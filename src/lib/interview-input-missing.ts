@@ -101,7 +101,11 @@ const DETAIL_GROUP_C_INT = [
   "desiredSalaryMax",
 ] as const;
 
-// Group D — アクション (string)
+// Group D — アクション (string).
+// nextAction / freeMemo / initialSummary excluded from this list and handled
+// as a combined group below: the form renders all three through one textarea
+// (`d.nextAction || d.freeMemo || d.initialSummary || ...`), so they should
+// only count as missing when all three are empty.
 const DETAIL_GROUP_D_STRING = [
   "documentStatusFlag",
   "documentSupportFlag",
@@ -109,9 +113,6 @@ const DETAIL_GROUP_D_STRING = [
   "jobReferralFlag",
   "nextInterviewFlag",
   "nextInterviewMemo",
-  "nextAction",
-  "freeMemo",
-  "initialSummary",
 ] as const;
 
 // Group E — InterviewRating 15 項目 (schema.prisma fields)
@@ -176,6 +177,17 @@ export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResu
       if (isDateEmpty(detail.nextInterviewDate)) missing.push("d.nextInterviewDate");
       if (isStringEmpty(detail.nextInterviewTime)) missing.push("d.nextInterviewTime");
     }
+    // nextAction / freeMemo / initialSummary: combined group — all three share
+    // one textarea in the form, so only flag when all three are empty.
+    const nextActionGroupAllEmpty =
+      isStringEmpty(detail.nextAction) &&
+      isStringEmpty(detail.freeMemo) &&
+      isStringEmpty(detail.initialSummary);
+    if (nextActionGroupAllEmpty) {
+      missing.push("d.nextAction");
+      missing.push("d.freeMemo");
+      missing.push("d.initialSummary");
+    }
   } else {
     // Detail row is missing entirely — flag every business field so the form
     // surfaces every empty cell rather than swallowing them silently.
@@ -185,6 +197,9 @@ export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResu
     for (const f of DETAIL_GROUP_C_INT) missing.push(`d.${f}`);
     for (const f of DETAIL_GROUP_C_STRING) missing.push(`d.${f}`);
     for (const f of DETAIL_GROUP_D_STRING) missing.push(`d.${f}`);
+    missing.push("d.nextAction");
+    missing.push("d.freeMemo");
+    missing.push("d.initialSummary");
   }
 
   // Group E — rating (overallRank excluded: auto-calculated from 15 items)
@@ -210,4 +225,86 @@ export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResu
 /** Convenience for client-side: stable Set check is faster for large forms. */
 export function buildMissingSet(missingFields: MissingFieldKey[]): Set<MissingFieldKey> {
   return new Set(missingFields);
+}
+
+/**
+ * Japanese labels for missing-field keys, used by the list-page hover tooltip
+ * and the form's missing-summary popover.
+ */
+export const FIELD_LABELS: Record<string, string> = {
+  // form (InterviewRecord)
+  "form.interviewDate": "面談日",
+  "form.startTime": "開始時間",
+  "form.endTime": "終了時間",
+  "form.interviewTool": "手法",
+  "form.resultFlag": "結果",
+  // detail — 転職活動状況
+  "d.agentUsageFlag": "他AG状況",
+  "d.jobChangeTimeline": "転職時期",
+  "d.activityPeriod": "活動期間",
+  "d.applicationTypeFlag": "他社応募",
+  "d.currentApplicationCount": "現在応募数",
+  "d.educationFlag": "最終学歴",
+  "d.graduationDate": "卒業年月",
+  "d.graduationStatus": "卒業状況",
+  // detail — 希望条件
+  "d.desiredJobTypes": "希望職種",
+  "d.desiredIndustries": "希望業種",
+  "d.desiredAreas": "希望エリア",
+  "d.currentSalary": "現年収",
+  "d.desiredSalaryMin": "希望年収(下限)",
+  "d.desiredSalaryMax": "希望年収(上限)",
+  "d.desiredDayOff": "希望休日",
+  "d.desiredOvertimeMax": "希望残業",
+  "d.desiredTransfer": "転勤可否",
+  "d.driverLicenseFlag": "運転免許",
+  "d.languageSkillFlag": "語学",
+  "d.japaneseSkillFlag": "日本語",
+  "d.typingFlag": "Typing",
+  "d.excelFlag": "Excel",
+  "d.wordFlag": "Word",
+  "d.pptFlag": "PPT",
+  // detail — アクション
+  "d.documentStatusFlag": "書類状況",
+  "d.documentSupportFlag": "サポート",
+  "d.contactMethod": "連絡手段",
+  "d.jobReferralFlag": "求人送付予定",
+  "d.nextInterviewFlag": "次回面談予定",
+  "d.nextInterviewDate": "次回面談日付",
+  "d.nextInterviewTime": "次回面談時刻",
+  "d.nextInterviewMemo": "次回面談メモ",
+  "d.nextAction": "ネクストアクション",
+  "d.freeMemo": "自由メモ",
+  "d.initialSummary": "初期サマリ",
+  // rating — 15 評価項目 (schema.prisma の field 名)
+  "r.personalityMotivation": "転職意欲",
+  "r.personalityCommunication": "コミュニケーション",
+  "r.personalityManner": "ビジネスマナー",
+  "r.personalityIntelligence": "地頭",
+  "r.personalityHumanity": "人間性",
+  "r.careerJobType": "希望職種(キャリア)",
+  "r.careerExperience": "社会人経験",
+  "r.careerJobChangeCount": "転職回数",
+  "r.careerAchievement": "実績",
+  "r.careerQualification": "語学・資格",
+  "r.conditionJobType": "希望職種(条件)",
+  "r.conditionSalary": "希望年収",
+  "r.conditionHoliday": "休日・シフト",
+  "r.conditionArea": "エリア",
+  "r.conditionFlexibility": "柔軟性",
+  // workHistories
+  "workHistories.__empty__": "職歴",
+};
+
+export function getFieldLabel(key: MissingFieldKey): string {
+  return FIELD_LABELS[key] ?? key;
+}
+
+/**
+ * Deduplicate missing field labels (the nextAction/freeMemo/initialSummary
+ * combined group emits 3 keys but represents a single UI textarea).
+ */
+export function getMissingFieldLabels(missingFields: MissingFieldKey[]): string[] {
+  const labels = missingFields.map(getFieldLabel);
+  return Array.from(new Set(labels));
 }

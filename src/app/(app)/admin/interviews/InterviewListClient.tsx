@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { TimeInput } from "@/components/ui/TimeInput";
+import { getMissingFieldLabels } from "@/lib/interview-input-missing";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -37,6 +38,7 @@ type InterviewRow = {
   detail: { jobChangeTimeline: string | null; desiredPrefecture: string | null; desiredJobType1: string | null } | null;
   rating: { overallRank: string | null } | null;
   hasInputMissing: boolean;
+  missingFields?: string[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -529,7 +531,16 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                     <div className="text-[13px]">{r.interviewCount != null ? `${r.interviewCount}回` : "-"}</div>
                     {rb && <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium ${rb.cls}`}>{rb.label}</span>}
                     {r.hasInputMissing && (
-                      <div className="text-[11px] font-bold mt-0.5 text-red-600">入力漏れ</div>
+                      <div
+                        className="text-[11px] font-bold mt-0.5 text-red-600 cursor-help"
+                        title={
+                          r.missingFields && r.missingFields.length > 0
+                            ? "漏れ項目: " + getMissingFieldLabels(r.missingFields).join(", ")
+                            : "入力漏れあり"
+                        }
+                      >
+                        入力漏れ
+                      </div>
                     )}
                   </td>
                   {/* 求職者氏名 */}

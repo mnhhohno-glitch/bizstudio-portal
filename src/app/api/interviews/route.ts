@@ -170,7 +170,7 @@ export async function GET(req: NextRequest) {
   ]);
 
   const serialized = interviews.map((r) => {
-    const { hasMissing } = checkInputMissing({
+    const { hasMissing, missingFields } = checkInputMissing({
       form: {
         interviewDate: r.interviewDate,
         startTime: r.startTime,
@@ -188,6 +188,7 @@ export async function GET(req: NextRequest) {
       interviewDate: r.interviewDate.toISOString(),
       candidateBirthday: r.candidate.birthday?.toISOString() ?? null,
       hasInputMissing: hasMissing,
+      missingFields,
     };
   });
 
