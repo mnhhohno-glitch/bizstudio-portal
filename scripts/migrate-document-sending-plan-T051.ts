@@ -7,6 +7,8 @@ const MAPPING: Record<string, string | null> = {
   "今週中": "送付予定",
   "未定": null,
   "送付済": null,
+  // AI解析が candidate-flags.ts の「求人送付フラグ」を書き込んでいた残骸
+  "求人送付予定": "送付予定",
 };
 
 async function main() {
