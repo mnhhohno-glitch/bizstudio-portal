@@ -224,3 +224,29 @@ const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 
 **関連ケース**:
 - T-041（2026/5/8）: InterviewForm 添付タブで3点同時に該当、master commit cde6530 で全て修正
+
+## 32. AI フラグ定数の二重 SSoT（candidate-intake flags.ts ↔ portal candidate-flags.ts）
+
+**罠**: AI 解析で使うフラグ enum は candidate-intake `src/constants/flags.ts` と portal `src/constants/candidate-flags.ts` の 2 ファイルに**同一内容が独立管理**されている。片方だけ更新すると AI 出力と UI 選択肢が乖離し、A-1 パターン（AI値が UI に出ない）が発生する。
+
+**さらに FLAG_LIST_TSV も同期必須**: `FLAG_DEFINITIONS` の enum 配列とは別に、`FLAG_LIST_TSV` という TSV 文字列が Gemini プロンプトに直接渡される（`loadSpec.ts` L282）。FLAG_DEFINITIONS だけ更新して FLAG_LIST_TSV を忘れると、Gemini が古い TSV を参照して旧値を出力する。
+
+**対処**:
+- フラグ選択肢変更時は必ず 4 箇所を同時更新: (1) candidate-intake FLAG_DEFINITIONS (2) candidate-intake FLAG_LIST_TSV (3) portal FLAG_DEFINITIONS (4) portal FLAG_LIST_TSV
+- 詳細手順は `06-other-repos.md`「SSoT 同期警告」参照
+
+**関連ケース**: T-051 Step 2（2026/5/10）
+
+## 33. interview-analyzer-mapping.ts のフィールド名マッピングに注意
+
+**罠**: AI 解析結果の日本語キー（例: `LINE設定フラグ`）が DB のどのカラムに書き込まれるかは `src/lib/interview-analyzer-mapping.ts` で定義される。UI のドロップダウンラベルと AI のマッピング先が異なるケースがある。
+
+**具体例**:
+- `LINE設定フラグ` → `lineSetupFlag`（contactMethod ではない）
+- `求人送付フラグ` → `jobReferralFlag`
+
+UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに保存されるが、AI は `lineSetupFlag` に書き込む。つまり AI は contactMethod に直接書き込まない。
+
+**対処**: フラグ変更時は mapping ファイルでカラム名を確認してから AI 側の定数を変更すること。
+
+**関連ケース**: T-051 Step 2 調査で判明（2026/5/10）
