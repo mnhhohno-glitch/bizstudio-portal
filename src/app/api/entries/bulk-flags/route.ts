@@ -36,6 +36,7 @@ export async function PATCH(req: NextRequest) {
   // Determine isActive based on new flags
   const effectivePersonFlag = data.personFlag;
   const effectiveCompanyFlag = data.companyFlag;
+  const effectiveEntryFlagDetail = data.entryFlagDetail;
 
   let shouldDeactivate = false;
   if (effectivePersonFlag && INACTIVE_TRIGGERS.personFlags.includes(effectivePersonFlag)) {
@@ -43,6 +44,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (effectiveCompanyFlag && INACTIVE_TRIGGERS.companyFlags.includes(effectiveCompanyFlag)) {
     shouldDeactivate = true;
+  }
+  if (effectiveEntryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(effectiveEntryFlagDetail)) {
+    shouldDeactivate = true; // T-048: 本人辞退時に自動無効化
   }
 
   if (shouldDeactivate) {

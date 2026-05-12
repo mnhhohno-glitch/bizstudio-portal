@@ -40,6 +40,7 @@ export async function PATCH(
   // Determine isActive based on flags
   const effectivePersonFlag = personFlag !== undefined ? personFlag : (await prisma.jobEntry.findUnique({ where: { id: entryId }, select: { personFlag: true } }))?.personFlag;
   const effectiveCompanyFlag = companyFlag !== undefined ? companyFlag : (await prisma.jobEntry.findUnique({ where: { id: entryId }, select: { companyFlag: true } }))?.companyFlag;
+  const effectiveEntryFlagDetail = entryFlagDetail !== undefined ? entryFlagDetail : (await prisma.jobEntry.findUnique({ where: { id: entryId }, select: { entryFlagDetail: true } }))?.entryFlagDetail;
 
   let isActive = true;
   if (effectivePersonFlag && INACTIVE_TRIGGERS.personFlags.includes(effectivePersonFlag)) {
@@ -47,6 +48,9 @@ export async function PATCH(
   }
   if (effectiveCompanyFlag && INACTIVE_TRIGGERS.companyFlags.includes(effectiveCompanyFlag)) {
     isActive = false;
+  }
+  if (effectiveEntryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(effectiveEntryFlagDetail)) {
+    isActive = false; // T-048: 本人辞退時に自動無効化
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

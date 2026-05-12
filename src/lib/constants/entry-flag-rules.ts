@@ -42,6 +42,7 @@ export const SELECTION_ENDED_DETAILS = [
 export const INACTIVE_TRIGGERS = {
   personFlags: ["見送り通知送信済", "見送り通知済み", "入社済"],
   companyFlags: ["辞退報告済"],
+  entryFlagDetails: ["本人辞退", "本人辞退_他社決", "本人辞退_自社他"], // T-048: 本人辞退時に自動無効化
 };
 
 export function applyEntryFlagAutoTransitions<T extends {
@@ -60,7 +61,8 @@ export function applyEntryFlagAutoTransitions<T extends {
 
   if (
     (result.personFlag && INACTIVE_TRIGGERS.personFlags.includes(result.personFlag)) ||
-    (result.companyFlag && INACTIVE_TRIGGERS.companyFlags.includes(result.companyFlag))
+    (result.companyFlag && INACTIVE_TRIGGERS.companyFlags.includes(result.companyFlag)) ||
+    (result.entryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(result.entryFlagDetail))
   ) {
     result.isActive = false;
   }
