@@ -134,6 +134,25 @@ function isPersonFlagRed(entry: Entry): boolean {
   return false;
 }
 
+// T-048: 面接日超過判定。entryFlagDetail が "{stage}面接実施前" の状態で
+// 面接日が今日より過去なら true。JST 日付ベース比較（罠 #17 準拠）。
+function isInterviewOverdue(entry: Entry, stage: "first" | "second" | "final"): boolean {
+  const detailMap = {
+    first: "一次面接実施前",
+    second: "二次面接実施前",
+    final: "最終面接実施前",
+  };
+  if (entry.entryFlagDetail !== detailMap[stage]) return false;
+  const dateRaw =
+    stage === "first" ? entry.firstInterviewDate :
+    stage === "second" ? entry.secondInterviewDate :
+    entry.finalInterviewDate;
+  if (!dateRaw) return false;
+  const interview = new Date(dateRaw).toLocaleDateString("sv-SE");
+  const today = new Date().toLocaleDateString("sv-SE");
+  return interview < today;
+}
+
 function getFieldValue(entry: Entry, key: string): string | null {
   switch (key) {
     case "candidate": return entry.candidate.name;
@@ -547,15 +566,18 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><InlineDateTimeCell dateValue={entry.interviewPrepDate} timeValue={entry.interviewPrepTime} entryId={entry.id} dateField="interviewPrepDate" timeField="interviewPrepTime" onUpdate={onFieldUpdate} /></td>;
       case "firstInterview": {
         const warn = entry.entryFlagDetail === "一次面接実施前" && (!entry.firstInterviewDate || !entry.firstInterviewTime);
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        const overdue = isInterviewOverdue(entry, "first");
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
       }
       case "secondInterview": {
         const warn = entry.entryFlagDetail === "二次面接実施前" && (!entry.secondInterviewDate || !entry.secondInterviewTime);
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        const overdue = isInterviewOverdue(entry, "second");
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
       }
       case "finalInterview": {
         const warn = entry.entryFlagDetail === "最終面接実施前" && (!entry.finalInterviewDate || !entry.finalInterviewTime);
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""}`}><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        const overdue = isInterviewOverdue(entry, "final");
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
       }
       case "offerDate":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.offerDate} entryId={entry.id} field="offerDate" onUpdate={onFieldUpdate} /></td>;
