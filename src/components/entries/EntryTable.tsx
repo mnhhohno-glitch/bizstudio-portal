@@ -512,12 +512,21 @@ export default function EntryTable({
                   updates.personFlag = "見送り通知未送信";
                 }
                 if (newDetail === "本人辞退") {
-                  updates.companyFlag = "辞退報告前";
                   updates.personFlag = "辞退受付済";
+                  // companyFlag="辞退報告前" は親フラグが許可している場合のみセット。
+                  // COMPANY_FLAG_RULES では "求人紹介"/"エントリー" 親は companyFlag を持たない (=[])。
+                  // 親で許可されていない値を送ると flags API の validate で 400 になり保存失敗する。
+                  if (currentFlag === "書類選考" || currentFlag === "面接" || currentFlag === "内定") {
+                    updates.companyFlag = "辞退報告前";
+                  }
                 }
                 onFlagUpdate(entry.id, updates);
               }}
-              className="w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] text-gray-500">
+              className={`w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${
+                isInterviewOverdue(entry, "first") || isInterviewOverdue(entry, "second") || isInterviewOverdue(entry, "final")
+                  ? "text-red-600 font-bold"
+                  : "text-gray-500"
+              }`}>
               <option value="">-</option>
               {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
