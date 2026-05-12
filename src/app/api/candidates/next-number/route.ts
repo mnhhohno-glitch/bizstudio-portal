@@ -21,9 +21,9 @@ export async function GET() {
   let nextNumber: number;
   if (candidates.length > 0) {
     const maxNum = parseInt(candidates[0].candidateNumber, 10);
-    nextNumber = maxNum + 100;
+    nextNumber = maxNum + 1;
   } else {
-    nextNumber = 5000100;
+    nextNumber = 5000001;
   }
 
   // 空き番号を確認（衝突回避）
