@@ -14,6 +14,18 @@
 - portal の `src/constants/candidate-flags.ts` と AI解析の選択肢が連動
 - PDF Vision フォールバック実装（閾値200文字未満で起動）
 
+### ⚠️ SSoT 同期警告: flags.ts ↔ candidate-flags.ts
+
+candidate-intake `src/constants/flags.ts` と portal `src/constants/candidate-flags.ts` は**同一内容の独立コピー**。
+片方だけ更新すると AI 解析結果と UI 選択肢が乖離する。
+
+**更新時の必須手順**:
+1. FLAG_DEFINITIONS の enum 配列を両ファイルで同一に揃える
+2. FLAG_LIST_TSV の該当行も両ファイルで同時更新する（Gemini プロンプトに TSV が直接渡されるため）
+3. candidate-intake は master push でデプロイ、portal は staging merge でデプロイ — 両方デプロイして初めて同期完了
+
+**関連ケース**: T-051 Step 2（2026/5/10）で 4 フラグ + 6 TSV行を両ファイル同時更新
+
 ### portal → candidate-intake の連携パターン
 
 #### 既存パターン: analyze-with-intake/route.ts
