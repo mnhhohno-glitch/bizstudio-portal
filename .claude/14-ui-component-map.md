@@ -59,6 +59,20 @@ CandidateDetailPage (100% width, no max-width)
     └─ リアルタイム保存（onChange で handleUpdateMemo 呼び出し）
 ```
 
+### 主要ドロップダウンの行番号マップ
+
+T-051 で整理した面談入力フォームのドロップダウン定義位置。選択肢配列はインライン定義（外部定数なし）。
+
+| ラベル | 行 | state field | DB column | タブ |
+|--|--|--|--|--|
+| 活動期間 | L1286 | `d.activityPeriod` | `activity_period` | LEFT/転職活動状況 |
+| 希望休日 | L1569 | `d.desiredDayOff` | `desired_day_off` | desired（希望条件）|
+| 希望残業 | L1570 | `d.desiredOvertimeMax` | `desired_overtime_max` | desired（希望条件）|
+| 連絡手段 | L1700 | `d.contactMethod` | `contact_method` | action（アクション）|
+| 送付予定 | L1704 | `d.jobReferralFlag` | `job_referral_flag` | action（アクション）|
+
+選択肢を変更する際は、`src/constants/candidate-flags.ts`(AI解析側)との不一致による罠（罠 #5 / `08-bug-patterns.md` A-1）に注意。AI側の同期は candidate-intake 側で別途行う。
+
 ### 添付タブ（line ~1604-1612）
 
 `rightTab === "attachments"` のときのみ表示。面談ログ・録音・履歴書 PDF 等の D&D + ファイル選択アップロード UI。
