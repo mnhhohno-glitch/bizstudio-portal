@@ -269,3 +269,26 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - 採番ロジックを修正した時、**過去に流通済みの番号を振り直さない判断**を最初に固める(外部連携先がある場合)
 
 **関連バグ**: `08-bug-patterns.md` カテゴリH 1 件目
+
+## SKILL.md の更新は2箇所への反映が必要
+
+**罠**: `job-matching-advisor` スキルの SKILL.md を更新する場合、以下の両方を更新しないと一部の機能が古いまま残る。
+
+1. **Claude.ai プロジェクトの SKILL.md**（Claude.ai での個人開発会話に影響）
+2. **portal リポジトリの `src/skills/job-matching-advisor/SKILL.md`**（portal AIアドバイザー画面に影響）
+
+片方だけ更新すると、Claude.ai 上では新版で動くが、portal AIアドバイザー（チャット + 全件分析）は古いままになる。
+
+**更新時のチェックリスト**:
+- [ ] `C:\claude\skill\SKILL.md` を編集
+- [ ] `C:\claude\skill\references\middle-career.md` を編集（変更がある場合）
+- [ ] Claude.ai プロジェクト設定で「置き換え」実行
+- [ ] portal リポジトリの `src/skills/job-matching-advisor/SKILL.md` にも反映（コピー or 直接編集）
+- [ ] portal リポジトリの `src/skills/job-matching-advisor/references/middle-career.md` にも反映
+- [ ] portal で commit → master push → staging merge → push
+
+**反映確認**:
+- portal は staging push でしか本番デプロイされない（master push 単独では反映されない）
+- ヘルパー関数 `src/lib/load-job-matching-skill.ts` がモジュールロード時にキャッシュするため、Railway 再デプロイ後に新内容が反映される
+
+**関連**: T-056（2026/5/14）で portal への SKILL.md 反映の仕組みを構築、`06-other-repos.md` の job-matching-skill セクション参照
