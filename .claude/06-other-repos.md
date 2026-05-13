@@ -118,3 +118,40 @@ portal モーダルが Phase 4 で更新されたため、現在は常に `compa
 ## offerbox-scout-generator
 
 OfferBox スカウト文章生成。Railway。master 直 push。
+
+## job-matching-skill
+
+CA求人マッチングスキル。Claude.ai プロジェクトと bizstudio-portal の両方で使用される。
+
+### 基本情報
+- 開発用ローカルパス: `C:\claude\skill\`（Claude.ai プロジェクトに登録するスキルの編集用）
+- portal リポジトリ内コピー: `src/skills/job-matching-advisor/SKILL.md` + `src/skills/job-matching-advisor/references/middle-career.md`
+- 構成: SKILL.md + references/middle-career.md + data/cases/
+
+### 利用箇所
+1. Claude.ai プロジェクト `job-matching-advisor` スキル（個人開発時のClaude会話で使用）
+2. bizstudio-portal の AIアドバイザー チャット API（`src/app/api/candidates/[candidateId]/advisor/sessions/[sessionId]/messages/route.ts`）
+3. bizstudio-portal の全件分析 API（`src/app/api/candidates/[candidateId]/bookmarks/analyze-batch/route.ts`）
+4. bizstudio-portal の挨拶文生成 API は SKILL.md を使用しない（関連性低のため対象外）
+
+### 読み込みヘルパー
+- `src/lib/load-job-matching-skill.ts` — `getJobMatchingSkill()` でモジュールロード時1回だけ `fs.readFileSync`、メモリにキャッシュ
+- SKILL.md と references/middle-career.md を結合して返す（references は付録として末尾に追加）
+
+### 反映フロー
+1. `C:\claude\skill\` で SKILL.md を編集
+2. Claude.ai プロジェクトの「置き換え」操作で更新
+3. portal リポジトリの `src/skills/job-matching-advisor/SKILL.md`（および references/middle-career.md）に同内容をコピー
+4. portal で commit → master push → staging へ merge → push で本番反映
+5. 更新頻度: 1〜2ヶ月に1回程度（エントリー実績の蓄積に応じて）
+
+### 主要機能
+- 7-phase CA matching framework
+- 6タイプ志向性分析
+- ABCDマトリックスによるマッチング評価
+- 検索戦略・面談テクニック
+- 実績データに基づく予測精度（2026年4月時点で本人希望ランクの方向性確認済み）
+
+### 関連
+- 12-pitfalls.md の罠「SKILL.md の更新は2箇所への反映が必要」を必ず参照
+- T-056 で portal への SKILL.md 反映の仕組みを構築（2026/5/14）
