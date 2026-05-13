@@ -285,9 +285,20 @@ export async function POST(
 
   const useSkill = needsSkillPrompt(content || "", !!file);
   console.log(`[Advisor] Skill mode: ${useSkill ? "FULL" : "LIGHT"}`);
-  const systemPromptText = useSkill
-    ? ADVISOR_PERSONA_PROMPT + getJobMatchingSkill() + CANDIDATE_DATA_HEADER + context
-    : LIGHT_SYSTEM_PROMPT + context;
+  let systemPromptText: string;
+  if (useSkill) {
+    const skillContent = getJobMatchingSkill();
+    console.log("[Advisor] Skill content length:", skillContent.length);
+    console.log("[Advisor] Skill content contains '19.2%':", skillContent.includes("19.2%"));
+    systemPromptText = ADVISOR_PERSONA_PROMPT + skillContent + CANDIDATE_DATA_HEADER + context;
+  } else {
+    systemPromptText = LIGHT_SYSTEM_PROMPT + context;
+  }
+  console.log("[Advisor] Final system prompt length:", systemPromptText.length);
+  console.log("[Advisor] Final system prompt contains '19.2%':", systemPromptText.includes("19.2%"));
+  console.log("[Advisor] Final system prompt contains 'Aランクでも進まない理由':", systemPromptText.includes("Aランクでも進まない理由"));
+  console.log("[Advisor] pastMessages count:", pastMessages.length);
+  console.log("[Advisor] pastMessages last assistant snippet:", pastMessages.filter(m => m.role === "assistant").slice(-1)[0]?.content?.substring(0, 200) || "(none)");
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
