@@ -1,9 +1,9 @@
 /**
- * AI マッチング精度検証スクリプト v3（読み取り専用・5月以降フィルタ版）
+ * AI マッチング精度検証スクリプト v4（読み取り専用・4月のみフィルタ版）
  *
- * 変更点 (v2 → v3):
- * - 母数に日付フィルタ追加: lastExportedAt >= 2026-05-01
- * - 前回 (v2) との比較セクションを追加
+ * 変更点 (v3 → v4):
+ * - 日付フィルタを 4月のみ に変更: lastExportedAt >= 2026-04-01 AND < 2026-05-01
+ * - v2/v3 両方との比較セクション
  *
  * Usage:
  *   npx tsx scripts/skill_update_research.ts
@@ -22,7 +22,8 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-const DATE_FILTER = new Date("2026-05-01T00:00:00.000Z");
+const DATE_FILTER_START = new Date("2026-04-01T00:00:00.000Z");
+const DATE_FILTER_END = new Date("2026-05-01T00:00:00.000Z");
 
 type Rating = "A" | "B" | "C" | "D";
 type Axis = { wish: Rating | null; pass: Rating | null; overall: Rating | null };
@@ -182,8 +183,8 @@ async function main() {
   const archivedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", archivedAt: { not: null } } });
   const exportedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { not: null } } });
   const exportedAnalyzedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { not: null }, aiAnalysisComment: { not: null } } });
-  const filteredExportedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER } } });
-  const filteredExportedAnalyzedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER }, aiAnalysisComment: { not: null } } });
+  const filteredExportedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER_START, lt: DATE_FILTER_END } } });
+  const filteredExportedAnalyzedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER_START, lt: DATE_FILTER_END }, aiAnalysisComment: { not: null } } });
   const totalEntries = await prisma.jobEntry.count();
 
   const entryFlagDist = await prisma.jobEntry.groupBy({ by: ["entryFlag"], _count: true, orderBy: { _count: { entryFlag: "desc" } } });
@@ -195,7 +196,7 @@ async function main() {
 
   // Fetch exported + analyzed bookmarks with date filter (the correct denominator)
   const rawBk = await prisma.candidateFile.findMany({
-    where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER }, aiAnalysisComment: { not: null } },
+    where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER_START, lt: DATE_FILTER_END }, aiAnalysisComment: { not: null } },
     select: {
       id: true, candidateId: true, fileName: true,
       aiAnalysisComment: true, aiMatchRating: true,
@@ -457,8 +458,8 @@ async function main() {
     return `[${bk.candidate.candidateNumber}-${bk.candidate.name}] | ${attr} | ${jobInfo} | ${ratings} | ${result} | 「${excerpt}…」`;
   };
 
-  let md = `# AIマッチング判定精度 実績検証結果（5月以降フィルタ版）\n\n`;
-  md += `## 適用フィルタ\n- 求人解析実施日: 2026-05-01 以降（\`CandidateFile.lastExportedAt >= '2026-05-01'\`）\n- 集計時点: ${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}\n\n`;
+  let md = `# AIマッチング判定精度 実績検証結果（4月のみフィルタ版）\n\n`;
+  md += `## 適用フィルタ\n- 求人解析実施日: 2026-04-01 〜 2026-04-30（4月のみ）\n- 集計時点: ${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}\n\n`;
 
   // ----- Phase 0 section -----
   md += `## Phase 0: 運用フローのDB実装確認結果\n\n`;
@@ -596,19 +597,19 @@ async function main() {
   md += `- 本人希望A空振り: ${cat1.length}件 / 求人紹介A: ${wA.total}件\n`;
   md += `- 通過率A書類落ち: ${cat2.length}件 / 通過率Aエントリー: ${pA.entryN}件\n`;
 
-  // ----- Comparison with v2 (commit 2598957) -----
+  // ----- Comparison with v2 and v3 -----
   const wB = wishStats["B"];
-  md += `\n## 前回比較（コミット 2598957 との差分）\n\n`;
-  md += `| 指標 | 前回（全期間） | 今回（5月以降） | 差分 |\n`;
-  md += `|--|--:|--:|--|\n`;
-  md += `| 求人紹介母数（全ランク） | 529 | ${cleanBk.length} | ${cleanBk.length - 529} |\n`;
-  md += `| 本人希望A 母数 | 162 | ${wA.total} | ${wA.total - 162} |\n`;
-  const prevWishA = 8.6, curWishA = wA.total > 0 ? (wA.entryMoved / wA.total * 100) : 0;
-  md += `| 本人希望A エントリー移行率 | 8.6% | ${curWishA.toFixed(1)}% | ${curWishA - prevWishA >= 0 ? "+" : ""}${(curWishA - prevWishA).toFixed(1)} pt |\n`;
-  const prevWishB = 5.8, curWishB = wB.total > 0 ? (wB.entryMoved / wB.total * 100) : 0;
-  md += `| 本人希望B エントリー移行率 | 5.8% | ${curWishB.toFixed(1)}% | ${curWishB - prevWishB >= 0 ? "+" : ""}${(curWishB - prevWishB).toFixed(1)} pt |\n`;
-  md += `| 通過率A エントリー数 | 13 | ${pA.entryN} | ${pA.entryN - 13} |\n`;
-  md += `| 通過率A 内定到達数 | 0 | ${pA.naiteiReached} | ${pA.naiteiReached > 0 ? "+" + pA.naiteiReached : "—"} |\n`;
+  const curWishA = wA.total > 0 ? (wA.entryMoved / wA.total * 100) : 0;
+  const curWishB = wB.total > 0 ? (wB.entryMoved / wB.total * 100) : 0;
+  md += `\n## 前回比較\n\n`;
+  md += `| 指標 | v2 全期間 | v3 5月以降 | v4 4月のみ |\n`;
+  md += `|--|--:|--:|--:|\n`;
+  md += `| 求人紹介母数 | 529 | 275 | ${cleanBk.length} |\n`;
+  md += `| 本人希望A 母数 | 162 | 91 | ${wA.total} |\n`;
+  md += `| 本人希望A 移行率 | 8.6% | 2.2% | ${curWishA.toFixed(1)}% |\n`;
+  md += `| 本人希望B 移行率 | 5.8% | 4.0% | ${curWishB.toFixed(1)}% |\n`;
+  md += `| 通過率A エントリー数 | 13 | 2 | ${pA.entryN} |\n`;
+  md += `| 通過率A 内定到達数 | 0 | 0 | ${pA.naiteiReached} |\n`;
 
   // Write output
   const outDir = path.join(process.cwd(), "tmp");
