@@ -292,3 +292,13 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - ヘルパー関数 `src/lib/load-job-matching-skill.ts` がモジュールロード時にキャッシュするため、Railway 再デプロイ後に新内容が反映される
 
 **関連**: T-056（2026/5/14）で portal への SKILL.md 反映の仕組みを構築、`06-other-repos.md` の job-matching-skill セクション参照
+
+## SKILL.md 更新後は AIアドバイザーのチャット履歴クリアが必要
+
+**罠**: portal の AIアドバイザーは直近20件の過去メッセージを `pastMessages` として毎回 LLM に送信する。SKILL.md を更新・デプロイしても、過去の応答が履歴に残っていると LLM が few-shot learning 効果で旧版の応答パターンを模倣し、新しい SKILL.md の内容が反映されないように見える（**Pattern G: 過去チャット履歴汚染**）。
+
+**対処**: SKILL.md 更新後、内容が変わった候補者のアドバイザーセッションは「チャットクリア」で履歴をリセットしてから検証すること。
+
+**確認方法**: 履歴クリア後に新 SKILL.md 固有のキーワード（例: 統計数値）を含む質問をし、新版の数値が返ることを確認する。
+
+**関連**: T-056（2026/5/14）で原因特定。`06-other-repos.md` の job-matching-skill 反映フロー参照

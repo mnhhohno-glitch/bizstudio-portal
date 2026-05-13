@@ -143,7 +143,8 @@ CA求人マッチングスキル。Claude.ai プロジェクトと bizstudio-por
 2. Claude.ai プロジェクトの「置き換え」操作で更新
 3. portal リポジトリの `src/skills/job-matching-advisor/SKILL.md`（および references/middle-career.md）に同内容をコピー
 4. portal で commit → master push → staging へ merge → push で本番反映
-5. 更新頻度: 1〜2ヶ月に1回程度（エントリー実績の蓄積に応じて）
+5. AIアドバイザーのチャット履歴をクリアして検証（過去履歴の few-shot 汚染を回避、詳細は `12-pitfalls.md` 参照）
+6. 更新頻度: 1〜2ヶ月に1回程度（エントリー実績の蓄積に応じて）
 
 ### 主要機能
 - 7-phase CA matching framework
@@ -153,5 +154,5 @@ CA求人マッチングスキル。Claude.ai プロジェクトと bizstudio-por
 - 実績データに基づく予測精度（2026年4月時点で本人希望ランクの方向性確認済み）
 
 ### 関連
-- 12-pitfalls.md の罠「SKILL.md の更新は2箇所への反映が必要」を必ず参照
+- 12-pitfalls.md の罠「SKILL.md の更新は2箇所への反映が必要」「SKILL.md 更新後はチャット履歴クリアが必要」を必ず参照
 - T-056 で portal への SKILL.md 反映の仕組みを構築（2026/5/14）
