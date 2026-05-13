@@ -877,7 +877,11 @@ function InterviewHistory({ candidateId }: { candidateId: string }) {
   useEffect(() => {
     fetch(`/api/candidates/${candidateId}/interviews`)
       .then((r) => r.json())
-      .then((d) => setRecords(d.records || []))
+      .then((d) => {
+        const recs = (d.records || []) as typeof records;
+        recs.sort((a, b) => new Date(a.interviewDate).getTime() - new Date(b.interviewDate).getTime() || a.id.localeCompare(b.id));
+        setRecords(recs);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [candidateId]);
@@ -889,14 +893,14 @@ function InterviewHistory({ candidateId }: { candidateId: string }) {
     <div className="mt-6">
       <h3 className="text-[14px] font-bold text-[#374151] mb-3">面談履歴（{records.length}件）</h3>
       <div className="space-y-2">
-        {records.map((rec) => (
+        {records.map((rec, idx) => (
           <a key={rec.id} href={`/interviews/${rec.id}`}
             className="block bg-white rounded-lg border border-gray-200 p-3 hover:shadow-sm hover:border-[#2563EB] transition-all">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-medium">{new Date(rec.interviewDate).toLocaleDateString("ja-JP")}</span>
                 <span className="text-[12px] bg-blue-50 text-[#2563EB] rounded px-2 py-0.5">{rec.interviewType}</span>
-                <span className="text-[12px] text-gray-500">#{rec.interviewCount}</span>
+                <span className="text-[12px] text-gray-500">#{idx + 1}</span>
                 <span className="text-[12px] text-gray-500">{rec.interviewer.name}</span>
               </div>
               {rec.rating?.overallRank && (

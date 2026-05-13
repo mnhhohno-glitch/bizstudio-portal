@@ -431,6 +431,9 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [editingComment, setEditingComment] = useState(false);
   const [editedCommentText, setEditedCommentText] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  const [wishRating, setWishRating] = useState<string>("");
+  const [passRating, setPassRating] = useState<string>("");
+  const [overallRating, setOverallRating] = useState<string>("");
   const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -501,6 +504,43 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       triggerExtraction(filesWithoutText.map((f) => f.id), ":auto");
     }
   }, [files, loading]);
+
+  // Initialize 3-axis rating state when analysis modal opens for a new file
+  useEffect(() => {
+    if (!selectedAnalysis) return;
+    const axis = parse3AxisRatings(selectedAnalysis.comment);
+    setWishRating(axis?.wish && axis.wish !== "—" ? axis.wish : "");
+    setPassRating(axis?.pass && axis.pass !== "—" ? axis.pass : "");
+    setOverallRating(axis?.overall && axis.overall !== "—" ? axis.overall : selectedAnalysis.rating || "");
+  }, [selectedAnalysis?.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateRatingMarker = (axis: "wish" | "pass" | "overall", newValue: string) => {
+    const label = axis === "wish" ? "本人希望" : axis === "pass" ? "通過率" : "総合";
+    const setRating = axis === "wish" ? setWishRating : axis === "pass" ? setPassRating : setOverallRating;
+    const baseText = editingComment ? editedCommentText : (selectedAnalysis?.comment || "");
+    setRating(newValue);
+
+    const markerLineRe = new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*$`, "m");
+    let newText: string;
+    if (newValue === "") {
+      newText = markerLineRe.test(baseText)
+        ? baseText.replace(new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*\\n?`, "m"), "")
+        : baseText;
+    } else if (markerLineRe.test(baseText)) {
+      newText = baseText.replace(markerLineRe, `■ ${label}: ${newValue}`);
+    } else {
+      const otherMarkerRe = /^[ \t]*■\s*(?:本人希望|通過率|総合)[：:]\s*[ABCD]?\s*$/m;
+      const m = baseText.match(otherMarkerRe);
+      if (m && m.index !== undefined) {
+        const insertPos = m.index + m[0].length;
+        newText = baseText.slice(0, insertPos) + `\n■ ${label}: ${newValue}` + baseText.slice(insertPos);
+      } else {
+        newText = `■ ${label}: ${newValue}\n${baseText}`;
+      }
+    }
+    setEditedCommentText(newText);
+    setEditingComment(true);
+  };
 
   const uploadFiles = async (fileList: File[]) => {
     const valid = fileList.filter((f) => ALLOWED_TYPES.has(f.type) && f.size <= 20 * 1024 * 1024);
@@ -1301,6 +1341,31 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
               </div>
               <button onClick={() => { setSelectedAnalysis(null); setEditingComment(false); }} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
             </div>
+            <div className="px-4 py-2 border-b bg-white shrink-0 flex items-center gap-4 text-xs">
+              {(["wish", "pass", "overall"] as const).map((axis) => {
+                const label = axis === "wish" ? "希望" : axis === "pass" ? "通過" : "総合";
+                const value = axis === "wish" ? wishRating : axis === "pass" ? passRating : overallRating;
+                const styleCls = value && RATING_STYLES[value]
+                  ? RATING_STYLES[value]
+                  : "bg-white text-gray-500 border-gray-300";
+                return (
+                  <label key={axis} className="flex items-center gap-1.5">
+                    <span className="text-gray-600 font-medium">{label}:</span>
+                    <select
+                      value={value}
+                      onChange={(e) => updateRatingMarker(axis, e.target.value)}
+                      className={`rounded border px-2 py-0.5 text-xs font-bold cursor-pointer ${styleCls}`}
+                    >
+                      <option value="">—</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                      <option value="D">D</option>
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
             <div className="p-4 overflow-y-auto flex-1">
               {editingComment ? (
                 <textarea
@@ -1340,10 +1405,14 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                           body: JSON.stringify({ aiAnalysisComment: editedCommentText }),
                         });
                         if (!res.ok) throw new Error();
+                        const data = await res.json().catch(() => null);
+                        const updatedRating: string | null = data?.file?.aiMatchRating ?? null;
                         toast.success("コメントを保存しました");
-                        // Update local state
-                        setFiles((prev) => prev.map((f) => f.id === selectedAnalysis.fileId ? { ...f, aiAnalysisComment: editedCommentText } : f));
-                        setSelectedAnalysis({ ...selectedAnalysis, comment: editedCommentText });
+                        // Update local state (aiAnalysisComment + aiMatchRating sync)
+                        setFiles((prev) => prev.map((f) => f.id === selectedAnalysis.fileId
+                          ? { ...f, aiAnalysisComment: editedCommentText, aiMatchRating: updatedRating ?? f.aiMatchRating }
+                          : f));
+                        setSelectedAnalysis({ ...selectedAnalysis, comment: editedCommentText, rating: updatedRating ?? selectedAnalysis.rating });
                         setEditingComment(false);
                         setEditedCommentText("");
                       } catch {
