@@ -1,12 +1,9 @@
 /**
- * AI マッチング精度検証スクリプト v2（読み取り専用・再集計版）
+ * AI マッチング精度検証スクリプト v3（読み取り専用・5月以降フィルタ版）
  *
- * 変更点 (v1 → v2):
- * - 母数を「ブックマーク全件」→「求人紹介（lastExportedAt IS NOT NULL）」に修正
- * - AI 再評価ケース（選考結果を見て再分析したもの）を除外
- * - 求人番号 (_NoXXX) マッチングを追加
- * - 異常ケースカテゴリを仕様に合わせて刷新
- * - 候補者属性（年齢・性別）を出力
+ * 変更点 (v2 → v3):
+ * - 母数に日付フィルタ追加: lastExportedAt >= 2026-05-01
+ * - 前回 (v2) との比較セクションを追加
  *
  * Usage:
  *   npx tsx scripts/skill_update_research.ts
@@ -24,6 +21,8 @@ import "dotenv/config";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
+
+const DATE_FILTER = new Date("2026-05-01T00:00:00.000Z");
 
 type Rating = "A" | "B" | "C" | "D";
 type Axis = { wish: Rating | null; pass: Rating | null; overall: Rating | null };
@@ -183,17 +182,20 @@ async function main() {
   const archivedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", archivedAt: { not: null } } });
   const exportedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { not: null } } });
   const exportedAnalyzedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { not: null }, aiAnalysisComment: { not: null } } });
+  const filteredExportedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER } } });
+  const filteredExportedAnalyzedBk = await prisma.candidateFile.count({ where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER }, aiAnalysisComment: { not: null } } });
   const totalEntries = await prisma.jobEntry.count();
 
   const entryFlagDist = await prisma.jobEntry.groupBy({ by: ["entryFlag"], _count: true, orderBy: { _count: { entryFlag: "desc" } } });
   const entryFlagDetailDist = await prisma.jobEntry.groupBy({ by: ["entryFlagDetail"], _count: true, orderBy: { _count: { entryFlagDetail: "desc" } } });
 
   console.log(`  BK total=${totalBk} nonArch=${nonArchivedBk} arch=${archivedBk} exported=${exportedBk} exp+analyzed=${exportedAnalyzedBk}`);
+  console.log(`  Filtered(>=5/1): exported=${filteredExportedBk} exp+analyzed=${filteredExportedAnalyzedBk}`);
   console.log(`  Entries total=${totalEntries}`);
 
-  // Fetch exported + analyzed bookmarks (the correct denominator)
+  // Fetch exported + analyzed bookmarks with date filter (the correct denominator)
   const rawBk = await prisma.candidateFile.findMany({
-    where: { category: "BOOKMARK", lastExportedAt: { not: null }, aiAnalysisComment: { not: null } },
+    where: { category: "BOOKMARK", lastExportedAt: { gte: DATE_FILTER }, aiAnalysisComment: { not: null } },
     select: {
       id: true, candidateId: true, fileName: true,
       aiAnalysisComment: true, aiMatchRating: true,
@@ -455,8 +457,8 @@ async function main() {
     return `[${bk.candidate.candidateNumber}-${bk.candidate.name}] | ${attr} | ${jobInfo} | ${ratings} | ${result} | 「${excerpt}…」`;
   };
 
-  let md = `# AIマッチング判定精度 実績検証結果（再集計版）\n\n`;
-  md += `## 集計実行日時\n${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}\n\n`;
+  let md = `# AIマッチング判定精度 実績検証結果（5月以降フィルタ版）\n\n`;
+  md += `## 適用フィルタ\n- 求人解析実施日: 2026-05-01 以降（\`CandidateFile.lastExportedAt >= '2026-05-01'\`）\n- 集計時点: ${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}\n\n`;
 
   // ----- Phase 0 section -----
   md += `## Phase 0: 運用フローのDB実装確認結果\n\n`;
@@ -485,21 +487,21 @@ async function main() {
   }
 
   md += `### 母数の件数（全候補者合計）\n\n`;
-  md += `| 項目 | 件数 |\n|---|---:|\n`;
-  md += `| ブックマーク総数 | ${totalBk} |\n`;
-  md += `| うち未アーカイブ | ${nonArchivedBk} |\n`;
-  md += `| うちアーカイブ済（紹介保留） | ${archivedBk} |\n`;
-  md += `| うち求人出力済（lastExportedAt NOT NULL） | ${exportedBk} |\n`;
-  md += `| うち求人出力済 + AI分析済 | ${exportedAnalyzedBk} |\n`;
-  md += `| うち3軸マーカー有効 | ${allBk.length} |\n`;
-  md += `| 3軸マーカー欠落 | ${noAxisCount} |\n`;
-  md += `| AI再評価で除外 | ${totalReEval} |\n`;
-  md += `| **求人紹介された求人（本人希望の母数）** | **${cleanBk.length}** |\n`;
-  md += `| 対象候補者数 | ${candidateIds.length} |\n`;
-  md += `| JobEntry 総数 | ${totalEntries} |\n`;
-  md += `| 対象候補者の Entry 数 | ${entries.length} |\n`;
-  md += `| BK↔Entry 突合成功 | ${matchedN} |\n`;
-  md += `| 突合失敗 | ${unmatchedN} |\n\n`;
+  md += `| 項目 | 全期間 | 5月以降のみ |\n|---|---:|---:|\n`;
+  md += `| ブックマーク総数 | ${totalBk} | — |\n`;
+  md += `| うち未アーカイブ | ${nonArchivedBk} | — |\n`;
+  md += `| うちアーカイブ済（紹介保留） | ${archivedBk} | — |\n`;
+  md += `| うち求人出力済 | ${exportedBk} | ${filteredExportedBk} |\n`;
+  md += `| うち求人出力済 + AI分析済 | ${exportedAnalyzedBk} | ${filteredExportedAnalyzedBk} |\n`;
+  md += `| うち3軸マーカー有効 | — | ${allBk.length} |\n`;
+  md += `| 3軸マーカー欠落 | — | ${noAxisCount} |\n`;
+  md += `| AI再評価で除外 | — | ${totalReEval} |\n`;
+  md += `| **求人紹介された求人（本人希望の母数）** | **529** | **${cleanBk.length}** |\n`;
+  md += `| 対象候補者数 | 39 | ${candidateIds.length} |\n`;
+  md += `| JobEntry 総数 | ${totalEntries} | — |\n`;
+  md += `| 対象候補者の Entry 数 | — | ${entries.length} |\n`;
+  md += `| BK↔Entry 突合成功 | 36 | ${matchedN} |\n`;
+  md += `| 突合失敗 | 493 | ${unmatchedN} |\n\n`;
 
   // Validation candidates
   md += `### 検証候補者（UI突合用）\n\n`;
@@ -593,6 +595,20 @@ async function main() {
   md += `- 通過率A のエントリーからの内定到達率: ${pct(pA.naiteiReached, pA.entryN)}（${pA.naiteiReached}/${pA.entryN}）\n`;
   md += `- 本人希望A空振り: ${cat1.length}件 / 求人紹介A: ${wA.total}件\n`;
   md += `- 通過率A書類落ち: ${cat2.length}件 / 通過率Aエントリー: ${pA.entryN}件\n`;
+
+  // ----- Comparison with v2 (commit 2598957) -----
+  const wB = wishStats["B"];
+  md += `\n## 前回比較（コミット 2598957 との差分）\n\n`;
+  md += `| 指標 | 前回（全期間） | 今回（5月以降） | 差分 |\n`;
+  md += `|--|--:|--:|--|\n`;
+  md += `| 求人紹介母数（全ランク） | 529 | ${cleanBk.length} | ${cleanBk.length - 529} |\n`;
+  md += `| 本人希望A 母数 | 162 | ${wA.total} | ${wA.total - 162} |\n`;
+  const prevWishA = 8.6, curWishA = wA.total > 0 ? (wA.entryMoved / wA.total * 100) : 0;
+  md += `| 本人希望A エントリー移行率 | 8.6% | ${curWishA.toFixed(1)}% | ${curWishA - prevWishA >= 0 ? "+" : ""}${(curWishA - prevWishA).toFixed(1)} pt |\n`;
+  const prevWishB = 5.8, curWishB = wB.total > 0 ? (wB.entryMoved / wB.total * 100) : 0;
+  md += `| 本人希望B エントリー移行率 | 5.8% | ${curWishB.toFixed(1)}% | ${curWishB - prevWishB >= 0 ? "+" : ""}${(curWishB - prevWishB).toFixed(1)} pt |\n`;
+  md += `| 通過率A エントリー数 | 13 | ${pA.entryN} | ${pA.entryN - 13} |\n`;
+  md += `| 通過率A 内定到達数 | 0 | ${pA.naiteiReached} | ${pA.naiteiReached > 0 ? "+" + pA.naiteiReached : "—"} |\n`;
 
   // Write output
   const outDir = path.join(process.cwd(), "tmp");
