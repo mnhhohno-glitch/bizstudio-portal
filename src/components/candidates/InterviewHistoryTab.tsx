@@ -62,7 +62,7 @@ export default function InterviewHistoryTab({
       if (res.ok) {
         const data = await res.json();
         const records = (data.records || []) as InterviewRecord[];
-        records.sort((a, b) => a.interviewCount - b.interviewCount);
+        records.sort((a, b) => new Date(a.interviewDate).getTime() - new Date(b.interviewDate).getTime() || a.id.localeCompare(b.id));
         setInterviews(records);
         if (!selectedId && records.length > 0) {
           const latest = records.find((r) => r.isLatest) || records[records.length - 1];
@@ -156,7 +156,7 @@ export default function InterviewHistoryTab({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[13px] font-medium text-gray-500 mr-1">面談:</span>
 
-          {visibleInterviews.map((iv) => (
+          {visibleInterviews.map((iv, idx) => (
             <button
               key={iv.id}
               onClick={() => setSelectedId(iv.id)}
@@ -167,7 +167,7 @@ export default function InterviewHistoryTab({
               }`}
             >
               <StatusDot status={iv.status} lastSavedAt={iv.lastSavedAt} />
-              <span>{iv.interviewCount}回目</span>
+              <span>{idx + 1}回目</span>
               <span className="text-gray-400">{formatShortDate(iv.interviewDate)}</span>
             </button>
           ))}
@@ -187,7 +187,7 @@ export default function InterviewHistoryTab({
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
                   <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 min-w-[200px] max-h-60 overflow-y-auto">
-                    {interviews.map((iv) => (
+                    {interviews.map((iv, idx) => (
                       <button
                         key={iv.id}
                         onClick={() => {
@@ -199,7 +199,7 @@ export default function InterviewHistoryTab({
                         }`}
                       >
                         <StatusDot status={iv.status} lastSavedAt={iv.lastSavedAt} />
-                        <span className="font-medium">{iv.interviewCount}回目</span>
+                        <span className="font-medium">{idx + 1}回目</span>
                         <span className="text-gray-400">{formatShortDate(iv.interviewDate)}</span>
                         {iv.interviewer && (
                           <span className="text-gray-400 ml-auto">{iv.interviewer.name}</span>
@@ -236,6 +236,7 @@ export default function InterviewHistoryTab({
           interviewId={selectedInterview.id}
           candidateId={candidateId}
           currentUser={currentUser}
+          interviewSeq={interviews.findIndex((i) => i.id === selectedInterview.id) + 1}
           onSaved={() => fetchInterviews()}
           onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
         />

@@ -87,6 +87,7 @@ interface InterviewFormProps {
   interviewId: string;
   candidateId: string;
   currentUser: SessionUser | null;
+  interviewSeq?: number;
   onSaved?: () => void;
   onDeleted?: () => void;
 }
@@ -434,7 +435,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 /* ================================================================== */
 
 export default function InterviewForm({
-  interviewId, candidateId, currentUser, onSaved, onDeleted,
+  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted,
 }: InterviewFormProps) {
   const router = useRouter();
   /* ---- State ---- */
@@ -1088,7 +1089,7 @@ export default function InterviewForm({
         <div className="flex items-center gap-3">
           <span style={{ fontSize: 15, fontWeight: 500 }}>面談履歴入力</span>
           <span style={{ fontSize: 12, color: "var(--im-fg2)" }}>
-            求職者詳細 / {candidate?.name || "..."} / 面談 #{form.interviewCount || "?"}
+            求職者詳細 / {candidate?.name || "..."} / 面談 #{interviewSeq || form.interviewCount || "?"}
           </span>
           {/* Save status indicator */}
           <span className="flex items-center gap-1.5" style={{ fontSize: 11 }}>
@@ -1230,7 +1231,7 @@ export default function InterviewForm({
               <div className="col-span-2 flex items-center gap-1.5 min-w-0">
                 <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 64 }}>回数/状態</span>
                 <div className="flex gap-0.5 flex-1 min-w-0">
-                  <RoField v={form.interviewCount ? `${form.interviewCount}回` : ""} />
+                  <RoField v={interviewSeq ? `${interviewSeq}回` : form.interviewCount ? `${form.interviewCount}回` : ""} />
                   <div className="flex-1 min-w-0 flex items-center justify-center rounded-[5px] py-0.5" style={{ background: "var(--im-bg2)" }}>
                     <Chip text={form.status === "complete" ? "入力済" : "下書き"} variant={form.status === "complete" ? "warn" : "info"} />
                   </div>
