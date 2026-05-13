@@ -269,13 +269,90 @@ type InterviewRecord = {
 
 ---
 
-## HistoryTab.tsx（未着手、将来追加枠）
+## HistoryTab.tsx
 
+### 基本情報
 - パス: `src/components/candidates/HistoryTab.tsx`
-- 行数: 1700+ 行
-- 用途: 紹介履歴タブ全体（ブックマーク / 求人紹介 / エントリーの3タブ）
+- 行数: 1900+ 行
+- 用途: 紹介履歴タブ全体（ブックマーク / 求人紹介 / エントリーの 3 タブ）
+- 親: `CandidateDetailPage.tsx` → `activeTab === "history"`
 
-⚠️ **構造マップ未作成**。次回修正時に Phase 1 調査で構造を把握し、ここに追記すること。
+### 全体レイアウト
+
+```
+HistoryTab
+  ├─ タブバー: bookmark / jobs / entries
+  ├─ bookmark タブ → BookmarkSection（行 408〜、インライン関数コンポーネント）
+  │   ├─ ファイルアップロード D&D 領域
+  │   ├─ ツールバー（検索 / 日付フィルタ / ソート / AI 分析 / 送信ボタン）
+  │   ├─ ヘッダー行（チェック / ファイル名 / 希望 / 通過 / 総合 / 担当 / 日時）
+  │   ├─ ファイル一覧（filteredFiles.map、行 ~1005）
+  │   │   └─ 各行: チェック + ファイル名 + 3 軸バッジ + 担当 + 日時 + DL/ 保留ボタン
+  │   ├─ 紹介保留セクション（アコーディオン、行 ~1400）
+  │   ├─ 送信モーダル（求人出力ツール送信、行 ~1085）
+  │   ├─ PDF プレビューポップアップ（行 ~1253）
+  │   ├─ AI 分析コメントモーダル（行 ~1289、T-055 で 3 軸セレクト追加）
+  │   │   ├─ ヘッダー: aiMatchRating バッジ + ファイル名
+  │   │   ├─ 3 軸セレクト UI（希望 / 通過 / 総合、A/B/C/D ドロップダウン）
+  │   │   ├─ 本文: 表示モード / 編集モード（textarea）
+  │   │   └─ フッター: 編集 / コピー / 保存 / キャンセル
+  │   └─ アーカイブモーダル（行 ~288、別関数 ArchiveModal）
+  ├─ jobs タブ → 求人紹介一覧（kyuujinPDF 連携）
+  └─ entries タブ → エントリー一覧
+```
+
+### 評価データフロー（★重要★）
+
+```
+AI 分析実行 (analyze-batch)
+  └→ DB 保存: aiMatchRating(総合 A/B/C/D) + aiAnalysisComment(テキスト全文、3 軸マーカー含む)
+
+一覧バッジ表示
+  ├─ 希望: parse3AxisRatings(aiAnalysisComment).wish    (テキストパース)
+  ├─ 通過: parse3AxisRatings(aiAnalysisComment).pass    (テキストパース)
+  └─ 総合: parse3AxisRatings(aiAnalysisComment).overall || aiMatchRating  (フォールバック)
+
+モーダル編集→保存 (T-055 修正後)
+  └→ PATCH /files/[fileId]
+      ├─ aiAnalysisComment 更新（テキスト本文）
+      └─ aiMatchRating 同時更新（テキストから "■ 総合: X" を正規表現抽出）
+```
+
+### 主要 state（BookmarkSection 内）
+
+| state | 型 | 用途 |
+|--|--|--|
+| `files` | `BookmarkFile[]` | ブックマーク一覧 |
+| `selectedIds` | `Set<string>` | チェック済みファイル ID |
+| `selectedAnalysis` | `{ fileId, fileName, rating, comment } \| null` | AI 分析モーダルの対象 |
+| `editingComment` | `boolean` | テキスト編集モード |
+| `editedCommentText` | `string` | 編集中テキスト |
+| `wishRating` / `passRating` / `overallRating` | `string` | 3 軸セレクト state（T-055 追加） |
+| `savingComment` | `boolean` | 保存中フラグ |
+| `previewFile` | `BookmarkFile \| null` | PDF プレビュー対象 |
+| `sortField` | `"name" \| "rating" \| "wish" \| "pass" \| "overall" \| "uploader" \| "date" \| null` | ソートカラム |
+
+### 主要 handler
+
+| handler | シグネチャ | 用途 | 行 |
+|--|--|--|--|
+| `openAnalysis(e)` | `(e: React.MouseEvent) => void` | バッジクリック → モーダル open + セレクト初期値設定 | L1046 |
+| `updateRatingMarker(axis, value)` | `(axis: "wish" \| "pass" \| "overall", value: string) => void` | セレクト変更 → テキスト内マーカー書換 + state 更新（T-055 追加） | 新規 |
+| 保存ボタン onClick | inline | PATCH API → local state 更新（aiAnalysisComment + aiMatchRating） | L1334 |
+| `fetchBookmarkRatings()` | 引数なし | 求人紹介タブ用に 3 軸評価 Map 構築 | L1775 |
+| `parse3AxisRatings(comment)` | `(comment: string \| null) => { wish, pass, overall } \| null` | テキストから 3 軸パース（表示専用） | L365 |
+
+### 関連 API
+
+- 一覧取得: `src/app/api/candidates/[candidateId]/files/route.ts`
+- 個別 PATCH: `src/app/api/candidates/[candidateId]/files/[fileId]/route.ts`（T-055 で aiMatchRating 同期追加）
+- AI 分析: `src/app/api/candidates/[candidateId]/bookmarks/analyze-batch/route.ts`
+- マイページ送信: `src/app/api/candidates/[candidateId]/bookmarks/send-to-job-tool/route.ts`
+
+### 関連ユーティリティ
+
+- `parse3AxisRatings(comment)`: HistoryTab.tsx L365、表示専用
+- `comment-split.ts` の `RATING_LINE_RE`: マイページ送信時に評価行を除去
 
 ---
 

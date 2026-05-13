@@ -125,10 +125,16 @@ export async function PATCH(
     );
   }
 
-  // 1. DB保存
+  // 1. DB保存（テキストから "■ 総合: X" を抽出して aiMatchRating も同期）
+  const ratingMatch = aiAnalysisComment.match(/■\s*総合[：:]\s*([ABCD])/)
+                   || aiAnalysisComment.match(/総合[：:]\s*([ABCD])/);
+  const updateData: { aiAnalysisComment: string; aiMatchRating?: string } = { aiAnalysisComment };
+  if (ratingMatch) {
+    updateData.aiMatchRating = ratingMatch[1];
+  }
   const file = await prisma.candidateFile.update({
     where: { id: fileId },
-    data: { aiAnalysisComment },
+    data: updateData,
   });
 
   if (file.candidateId !== candidateId) {
