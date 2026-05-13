@@ -1341,32 +1341,32 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
               </div>
               <button onClick={() => { setSelectedAnalysis(null); setEditingComment(false); }} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
             </div>
-            <div className="px-4 py-2 border-b bg-white shrink-0 flex items-center gap-4 text-xs">
-              {(["wish", "pass", "overall"] as const).map((axis) => {
-                const label = axis === "wish" ? "希望" : axis === "pass" ? "通過" : "総合";
-                const value = axis === "wish" ? wishRating : axis === "pass" ? passRating : overallRating;
-                const styleCls = value && RATING_STYLES[value]
-                  ? RATING_STYLES[value]
-                  : "bg-white text-gray-500 border-gray-300";
-                return (
-                  <label key={axis} className="flex items-center gap-1.5">
-                    <span className="text-gray-600 font-medium">{label}:</span>
-                    <select
-                      value={value}
-                      onChange={(e) => updateRatingMarker(axis, e.target.value)}
-                      className={`rounded border px-2 py-0.5 text-xs font-bold cursor-pointer ${styleCls}`}
-                    >
-                      <option value="">—</option>
-                      <option value="A">A</option>
-                      <option value="B">B</option>
-                      <option value="C">C</option>
-                      <option value="D">D</option>
-                    </select>
-                  </label>
-                );
-              })}
-            </div>
             <div className="p-4 overflow-y-auto flex-1">
+              <div className="font-mono text-sm mb-3 space-y-1">
+                {(["wish", "pass", "overall"] as const).map((axis) => {
+                  const label = axis === "wish" ? "本人希望：" : axis === "pass" ? "通過率　：" : "総合　　：";
+                  const value = axis === "wish" ? wishRating : axis === "pass" ? passRating : overallRating;
+                  const styleCls = value && RATING_STYLES[value]
+                    ? RATING_STYLES[value]
+                    : "bg-white text-gray-500 border-gray-300";
+                  return (
+                    <div key={axis} className="flex items-center">
+                      <span className="whitespace-pre">{label}</span>
+                      <select
+                        value={value}
+                        onChange={(e) => updateRatingMarker(axis, e.target.value)}
+                        className={`ml-1 rounded border px-2 py-0.5 text-xs font-bold cursor-pointer ${styleCls}`}
+                      >
+                        <option value="">—</option>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
               {editingComment ? (
                 <textarea
                   value={editedCommentText}
@@ -1380,6 +1380,9 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                     .replace(/\*\*/g, "")
                     .replace(/^###?\s+/gm, "")
                     .replace(/^-{3,}\s*$/gm, "")
+                    .split("\n")
+                    .filter((line) => !/^\s*■\s*(本人希望|通過率|総合)[：:]/.test(line))
+                    .join("\n")
                     .replace(/\n{3,}/g, "\n\n")
                     .trim()}
                 </div>
