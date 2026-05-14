@@ -1480,6 +1480,11 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
   const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BookmarkFile | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<BookmarkFile | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkRestoring, setBulkRestoring] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -1534,6 +1539,78 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
     }
   };
 
+  const handleBulkRestore = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkRestoring(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((fileId) =>
+          fetch(`/api/candidates/${candidateId}/files/${fileId}/restore`, { method: "POST" }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => null);
+              throw new Error(data?.error || `failed: ${fileId}`);
+            }
+          })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        toast.success(`${succeeded}件を復元しました`);
+      } else if (succeeded === 0) {
+        toast.error(`${failed}件すべての復元に失敗しました`);
+      } else {
+        toast.error(`${ids.length}件中${succeeded}件成功、${failed}件失敗`);
+      }
+      setSelectedIds(new Set());
+      fetchFiles();
+      window.dispatchEvent(new CustomEvent("bookmark-archived-changed"));
+    } finally {
+      setBulkRestoring(false);
+    }
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((fileId) =>
+          fetch(`/api/candidates/${candidateId}/files/${fileId}/permanent`, { method: "DELETE" }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => null);
+              throw new Error(data?.error || `failed: ${fileId}`);
+            }
+          })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        toast.success(`${succeeded}件を完全削除しました`);
+      } else if (succeeded === 0) {
+        toast.error(`${failed}件すべての削除に失敗しました`);
+      } else {
+        toast.error(`${ids.length}件中${succeeded}件成功、${failed}件失敗`);
+      }
+      setSelectedIds(new Set());
+      setShowBulkDeleteConfirm(false);
+      fetchFiles();
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const toggleSelect = (fileId: string) => {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(fileId)) n.delete(fileId); else n.add(fileId);
+      return n;
+    });
+  };
+
   const handleSort = (field: "name" | "wish" | "pass" | "overall" | "archivedBy" | "archivedAt") => {
     if (sortField === field) {
       if (sortDir === "asc") setSortDir("desc");
@@ -1576,6 +1653,33 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
     return result;
   })();
 
+  const toggleAll = () => {
+    const ids = filteredFiles.map((f) => f.id);
+    if (ids.length === 0) return;
+    if (ids.every((id) => selectedIds.has(id))) {
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.delete(id);
+        return n;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.add(id);
+        return n;
+      });
+    }
+  };
+
+  const allChecked = filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.has(f.id));
+  const someChecked = filteredFiles.some((f) => selectedIds.has(f.id)) && !allChecked;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someChecked;
+    }
+  }, [someChecked]);
+
   const shortDate = (iso?: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -1598,6 +1702,24 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
       <div className="px-4 py-3 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-[14px] font-semibold text-[#374151]">📦 紹介保留</h3>
+          {files.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBulkRestore}
+                disabled={selectedIds.size === 0 || bulkRestoring || bulkDeleting}
+                className="text-[12px] text-blue-600 border border-blue-300 rounded-md px-3 py-1 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {bulkRestoring ? "復元中..." : `一括復元${selectedIds.size > 0 ? ` (${selectedIds.size}件)` : ""}`}
+              </button>
+              <button
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                disabled={selectedIds.size === 0 || bulkRestoring || bulkDeleting}
+                className="text-[12px] text-red-600 border border-red-300 rounded-md px-3 py-1 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {`一括削除${selectedIds.size > 0 ? ` (${selectedIds.size}件)` : ""}`}
+              </button>
+            </div>
+          )}
         </div>
         <p className="text-[12px] text-gray-500">紹介を保留にしたブックマークの一覧。復元または完全削除できます。</p>
 
@@ -1621,6 +1743,16 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 
       {files.length > 0 && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+          <span className="w-[18px] shrink-0 flex items-center">
+            <input
+              ref={headerCheckboxRef}
+              type="checkbox"
+              checked={allChecked}
+              onChange={toggleAll}
+              className="cursor-pointer"
+              aria-label="全選択"
+            />
+          </span>
           <span
             onClick={() => handleSort("name")}
             className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "name" ? "text-[#2563EB]" : ""}`}
@@ -1677,6 +1809,15 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
               };
               return (
                 <div key={file.id} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors">
+                  <span className="w-[18px] shrink-0 flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(file.id)}
+                      onChange={() => toggleSelect(file.id)}
+                      className="cursor-pointer"
+                      aria-label="選択"
+                    />
+                  </span>
                   <div className="flex-1 min-w-0 flex items-center gap-1.5">
                     <span className="shrink-0 text-sm">📄</span>
                     <button
@@ -1753,6 +1894,35 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
                 className="flex-1 bg-red-600 text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-red-700 disabled:opacity-50"
               >
                 {permanentDeletingId === confirmDelete.id ? "削除中..." : "完全削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk delete confirm modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={bulkDeleting ? undefined : () => setShowBulkDeleteConfirm(false)}>
+          <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[15px] font-bold text-red-600 mb-3">⚠️ 一括削除</h2>
+            <div className="text-sm text-gray-700 mb-4 space-y-2">
+              <p>選択した <span className="font-medium">{selectedIds.size}件</span> の紹介保留を削除します。よろしいですか？</p>
+              <p className="text-red-600 font-medium">DB と Google Drive から完全に削除されます。元に戻せません。</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                disabled={bulkDeleting}
+                className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleBulkDeleteConfirm}
+                disabled={bulkDeleting}
+                className="flex-1 bg-red-600 text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {bulkDeleting ? "削除中..." : "削除する"}
               </button>
             </div>
           </div>
