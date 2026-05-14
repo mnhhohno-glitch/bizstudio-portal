@@ -273,15 +273,15 @@ type InterviewRecord = {
 
 ### 基本情報
 - パス: `src/components/candidates/HistoryTab.tsx`
-- 行数: 1900+ 行
-- 用途: 紹介履歴タブ全体（ブックマーク / 求人紹介 / エントリーの 3 タブ）
+- 行数: 2700+ 行（頻出修正対象）
+- 用途: 紹介履歴タブ全体（ブックマーク / 求人紹介 / エントリー / 紹介保留の 4 サブタブ）
 - 親: `CandidateDetailPage.tsx` → `activeTab === "history"`
 
 ### 全体レイアウト
 
 ```
 HistoryTab
-  ├─ タブバー: bookmark / jobs / entries
+  ├─ タブバー: bookmark / jobs / entries / archived
   ├─ bookmark タブ → BookmarkSection（行 408〜、インライン関数コンポーネント）
   │   ├─ ファイルアップロード D&D 領域
   │   ├─ ツールバー（検索 / 日付フィルタ / ソート / AI 分析 / 送信ボタン）
@@ -298,7 +298,8 @@ HistoryTab
   │   │   └─ フッター: 編集 / コピー / 保存 / キャンセル
   │   └─ アーカイブモーダル（行 ~288、別関数 ArchiveModal）
   ├─ jobs タブ → 求人紹介一覧（kyuujinPDF 連携）
-  └─ entries タブ → エントリー一覧
+  ├─ entries タブ → エントリー一覧
+  └─ archived タブ → ArchivedBookmarkSection（紹介保留、L1471〜1782）
 ```
 
 ### 評価データフロー（★重要★）
@@ -353,6 +354,51 @@ AI 分析実行 (analyze-batch)
 
 - `parse3AxisRatings(comment)`: HistoryTab.tsx L365、表示専用
 - `comment-split.ts` の `RATING_LINE_RE`: マイページ送信時に評価行を除去
+
+### ArchivedBookmarkSection（紹介保留）
+
+#### 位置
+- 行範囲: L1471〜1782
+- 同ファイル内のインライン関数コンポーネント
+
+#### データモデル（CandidateFile）
+
+紹介保留は CandidateFile レコードに対する**論理的なステータス**で、以下の 4 フィールドで管理:
+
+| フィールド | 型 | 意味 |
+|--|--|--|
+| `archivedAt` | Date \| null | null でないとき紹介保留中 |
+| `archivedReason` | string \| null | 保留理由（例: 「希望条件不一致」）|
+| `archivedNote` | string \| null | 自由記述メモ |
+| `archivedById` | string \| null | 保留操作した CA の ID |
+
+復元時は上記 4 フィールドをすべて null クリアする。
+
+#### 関連 API
+
+| 操作 | エンドポイント | 副作用 |
+|--|--|--|
+| 復元 | `POST /api/candidates/[candidateId]/files/[fileId]/restore` | archive 解除 + AuditLog(`BOOKMARK_RESTORE`) + supportSubStatus 再計算 |
+| 完全削除 | `DELETE /api/candidates/[candidateId]/files/[fileId]/permanent` | Drive 削除（`deletePdfFromDrive`）+ DB レコード削除 + AuditLog(`BOOKMARK_PERMANENT_DELETE`) + supportSubStatus 再計算 |
+
+#### 一括操作（2026/5/15 追加）
+
+- 一括復元・一括削除: `Promise.allSettled` で既存個別 API をループ呼び出し
+- チェックボックス + 全選択（indeterminate 対応）+ 確認モーダル（削除時）
+- 同ファイル BookmarkSection L606–619 の一括化先例に倣ったパターン
+
+#### 関連ファイル
+
+- API:
+  - `src/app/api/candidates/[candidateId]/files/[fileId]/restore/route.ts`
+  - `src/app/api/candidates/[candidateId]/files/[fileId]/permanent/route.ts`
+- Drive 削除ユーティリティ: `deletePdfFromDrive`（`src/lib/google-drive.ts`）
+- モデル: `prisma/schema.prisma` の `CandidateFile`
+- 関連罠: AuditLog（罠 #15）、supportSubStatus 自動再計算（罠 #11）、Drive 二重保存（罠 #13）
+
+### 修正履歴
+
+- 2026/5/15: ArchivedBookmarkSection に一括復元・一括削除機能追加（master 3f1c9d5 / staging 3af1c8b）
 
 ---
 
