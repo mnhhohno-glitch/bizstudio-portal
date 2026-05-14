@@ -15,7 +15,7 @@ import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
-const OKADA_EMPLOYEE_ID = "cmlqr5jzu0006tg4f3ypb8kz7";
+const INTERVIEW_DECLINE_ASSIGNEES = "1000007,1000004,1000025";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -1264,7 +1264,7 @@ export default function InterviewForm({
                         prefill: "interview-decline",
                         candidateId,
                         categoryId: MENDAN_FUSANKA_CATEGORY_ID,
-                        assigneeId: OKADA_EMPLOYEE_ID,
+                        assignees: INTERVIEW_DECLINE_ASSIGNEES,
                         title: `面談不参加共有 - ${name}`,
                       });
                       // T-043: 面談日・時刻を Step 3 の「面談日」フィールドに自動セットするため転送

@@ -432,9 +432,18 @@ export default function TaskNewPage() {
       }
     }
 
-    const assigneeId = searchParams.get("assigneeId");
-    if (assigneeId) {
-      setAssigneeIds([assigneeId]);
+    const assigneesCsv = searchParams.get("assignees");
+    if (assigneesCsv) {
+      const nums = assigneesCsv.split(",").map((s) => s.trim()).filter(Boolean);
+      const ids = nums
+        .map((n) => employees.find((e) => e.employeeNo === n)?.id)
+        .filter((id): id is string => !!id);
+      if (ids.length > 0) setAssigneeIds(ids);
+    } else {
+      const assigneeId = searchParams.get("assigneeId");
+      if (assigneeId) {
+        setAssigneeIds([assigneeId]);
+      }
     }
 
     const pt = searchParams.get("title");
