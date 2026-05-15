@@ -12,8 +12,13 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+import "dotenv/config";
 
-const prisma = new PrismaClient();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 // kyuujinPDF 側で修正された Job.id（portal 側の externalJobId と一致）
 const TARGET_EXTERNAL_JOB_IDS = [4559, 4560, 4570, 4572, 4574, 4575, 4579];
@@ -94,4 +99,5 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
+    await pool.end();
   });
