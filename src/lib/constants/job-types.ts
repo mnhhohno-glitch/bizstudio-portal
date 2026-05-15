@@ -3,7 +3,7 @@ export const JOB_TYPE_BY_ROUTE: Record<string, string[]> = {
   "Circus": ["自社求人", "事務局求人", "直接求人", "share求人"],
   "マイナビJOB": ["ダイレクト求人", "事務局求人"],
   "HITO-Link": ["DODA求人", "パーソル求人"],
-  "Bee": ["DODA求人", "パーソル求人"],
+  "Bee": ["ネオキャリア求人"],
 };
 
 // 全媒体の求人種別を重複排除したユニオン（媒体未設定時やマッピング外の媒体で使用）
@@ -15,6 +15,7 @@ export const JOB_TYPE_OPTIONS = [
   "ダイレクト求人",
   "DODA求人",
   "パーソル求人",
+  "ネオキャリア求人",
 ] as const;
 
 export type JobType = (typeof JOB_TYPE_OPTIONS)[number];

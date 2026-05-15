@@ -22,6 +22,7 @@ const BADGE_STYLES: Record<string, { bg: string; border: string; text: string; l
 
 export default function OvertimeProjectionCard({ data }: { data: OvertimeProjection | null }) {
   if (!data) return null;
+  if (data.salaryRange === "PART_TIME" || data.salaryRange === "MANAGEMENT") return null;
 
   const { badge, message } = getOvertimeBadge(data.projectedOvertime, data.workDays, data.salaryRange);
   const style = BADGE_STYLES[badge];

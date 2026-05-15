@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Toaster, toast } from "sonner";
 
-type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number; isExemptFromAttendance: boolean; salaryRange: "SALES" | "OFFICE" };
+type Employee = { id: string; employeeNumber: string; name: string; paidLeave: number; isExemptFromAttendance: boolean; salaryRange: "SALES" | "OFFICE" | "PART_TIME" | "MANAGEMENT" };
 
 export default function AttendanceEmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -95,6 +95,8 @@ export default function AttendanceEmployeesPage() {
                     >
                       <option value="SALES">営業 (30h)</option>
                       <option value="OFFICE">事務 (15h)</option>
+                      <option value="PART_TIME">アルバイト</option>
+                      <option value="MANAGEMENT">管理職</option>
                     </select>
                   </td>
                   <td className="px-4 py-3">

@@ -33,7 +33,12 @@ export async function PATCH(request: Request) {
   const data: Record<string, unknown> = {};
   if (paidLeave !== undefined) data.paidLeave = Number(paidLeave);
   if (isExemptFromAttendance !== undefined) data.isExemptFromAttendance = Boolean(isExemptFromAttendance);
-  if (salaryRange !== undefined && (salaryRange === "SALES" || salaryRange === "OFFICE")) data.salaryRange = salaryRange;
+  if (salaryRange !== undefined) {
+    if (!["SALES", "OFFICE", "PART_TIME", "MANAGEMENT"].includes(salaryRange)) {
+      return NextResponse.json({ error: "Invalid salaryRange" }, { status: 400 });
+    }
+    data.salaryRange = salaryRange;
+  }
 
   await prisma.employee.update({ where: { id: employeeId }, data });
 

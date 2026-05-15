@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "SalaryRange" ADD VALUE 'PART_TIME';
+ALTER TYPE "SalaryRange" ADD VALUE 'MANAGEMENT';
