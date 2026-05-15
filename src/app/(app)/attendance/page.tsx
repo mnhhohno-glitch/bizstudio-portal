@@ -15,7 +15,7 @@ type OvertimeProjection = {
   businessDays: number;
   workDays: number;
   totalOvertime: number;
-  salaryRange: "SALES" | "OFFICE";
+  salaryRange: "SALES" | "OFFICE" | "PART_TIME" | "MANAGEMENT";
 };
 
 type AttendanceData = {

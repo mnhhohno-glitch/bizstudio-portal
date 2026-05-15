@@ -2,9 +2,11 @@ import type { SalaryRange } from "@prisma/client";
 
 export type OvertimeBadge = "green" | "yellow" | "red" | "darkred" | "gray";
 
-const THRESHOLDS: Record<SalaryRange, [number, number, number]> = {
+const THRESHOLDS: Record<SalaryRange, [number, number, number] | null> = {
   SALES: [10, 20, 30],
   OFFICE: [5, 12, 15],
+  PART_TIME: null,
+  MANAGEMENT: null,
 };
 
 const MESSAGES: Record<OvertimeBadge, string> = {
@@ -26,8 +28,12 @@ export function getOvertimeBadge(
   if (projectedOvertime < 0) {
     return { badge: "green", message: MESSAGES.green };
   }
+  const thresholds = THRESHOLDS[salaryRange];
+  if (!thresholds) {
+    return { badge: "gray", message: MESSAGES.gray };
+  }
   const hours = projectedOvertime / 3600;
-  const [g, y, r] = THRESHOLDS[salaryRange];
+  const [g, y, r] = thresholds;
   if (hours <= g) return { badge: "green", message: MESSAGES.green };
   if (hours <= y) return { badge: "yellow", message: MESSAGES.yellow };
   if (hours <= r) return { badge: "red", message: MESSAGES.red };

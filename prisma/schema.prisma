@@ -59,6 +59,8 @@ enum EmployeeStatus {
 enum SalaryRange {
   SALES
   OFFICE
+  PART_TIME
+  MANAGEMENT
 }
 
 enum GuideType {
