@@ -9,6 +9,25 @@
 | Bee | PDF | Google Drive auto-process | Gemini Vision → regex | `hito_mynavi` |
 | **Circus** | **PDF + メモ帳** | local upload + memo import | Gemini Vision → Circus regex | `circus` |
 
+## 注意: portal 側に未整理の jobDb 値が混在
+
+T-028 Phase 1 調査（2026/5/15）で portal の `JobEntry.jobDb` に上記マトリクス記載の媒体以外の値が混在していることが判明:
+
+| jobDb 値 | 件数（2026/5/15 時点）| ナレッジ整理状況 |
+|--|--|--|
+| Circus | 17,610 | ✅ 上記マトリクスに記載 |
+| HITO-Link | 5,677 | ✅ 上記マトリクスに記載 |
+| **agentbank** | 2,921 | ⚠️ 未整理 |
+| マイナビJOB | 750 | ✅ 上記マトリクスに記載 |
+| **クラウドエージェント** | 749 | ⚠️ 未整理 |
+| **DODA求人** | 73 | ⚠️ 未整理（HITO-Link 配下の求人種別と混同の可能性あり）|
+| **エーナビ** | 32 | ⚠️ 未整理 |
+| Bee | 7（T-028 後） | ✅ T-028 で整理 |
+
+上記マトリクスは kyuujinPDF が source of truth として扱う媒体だが、portal にはそれ以外の媒体値が手入力等で混在している。新媒体追加・整理タスクの際にはこれらの存在も考慮要。
+
+別タスク化候補（T-028 で記録）: portal jobDb の未知媒体整理（agentbank / クラウドエージェント / DODA求人 / エーナビ）
+
 ## Circus の特殊仕様
 
 - PDF を持つ（Gemini Vision にも渡される）

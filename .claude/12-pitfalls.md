@@ -302,3 +302,21 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 **確認方法**: 履歴クリア後に新 SKILL.md 固有のキーワード（例: 統計数値）を含む質問をし、新版の数値が返ることを確認する。
 
 **関連**: T-056（2026/5/14）で原因特定。`06-other-repos.md` の job-matching-skill 反映フロー参照
+
+## 35. kyuujinPDF と portal の JobEntry は一方向コピーで同期しない
+
+**罠**: portal の `JobEntry` レコードは、CA がエントリー操作した時点で kyuujinPDF の Job データをコピーして作られる。コピー後は **再同期されない**。kyuujinPDF 側で `Job.job_db` や `Job.company_name` や `Job.job_type` を修正しても portal の対応カラムは古いまま残る。
+
+**結果**:
+- kyuujinPDF の DB マイグレーションだけで Job を修正しても、エントリー管理画面では古い値が表示され続ける
+- 「kyuujinPDF を直せば portal も直る」と誤認しがち（実際は両方の DB を更新する必要がある）
+- 逆に CA がエントリー操作していない求人は portal の JobEntry に存在しないため、portal 側マイグレーション対象が 0 件になることもある（正常）
+
+**対処**:
+- kyuujinPDF Job の修正と portal JobEntry の修正は両方マイグレーションする
+- portal 側 JobEntry の `externalJobId` が kyuujinPDF の `Job.id` を参照しているので、これをキーにして両者を同期して更新
+- portal 側マイグレーション結果が 0 件でも異常ではない（該当求人を CA がエントリー化していなければ正常）
+
+**関連ケース**:
+- T-028: kyuujinPDF Job 7 件を修正したが、対応する portal JobEntry は 0 件だった
+- 修正コミット: portal 9b22b94
