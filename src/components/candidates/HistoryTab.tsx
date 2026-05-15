@@ -279,6 +279,7 @@ type BookmarkFile = {
 const ARCHIVE_REASONS = [
   "重複",
   "希望条件不一致",
+  "応募条件不足",
   "求職者意向",
   "選考終了",
   "その他",
