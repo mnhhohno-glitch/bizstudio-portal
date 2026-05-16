@@ -58,6 +58,10 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const pdf = form.get("pdf");
     batchId = String(form.get("batchId") || "") || req.nextUrl.searchParams.get("batchId") || "";
+    // 担当RC（スカウト配信者名）: URLクエリ優先、multipart form フィールドもフォールバック対応
+    const recruiterName =
+      (form.get("recruiterName") ? String(form.get("recruiterName")) : null)
+      ?? req.nextUrl.searchParams.get("recruiterName");
 
     if (!batchId) {
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
@@ -184,6 +188,7 @@ export async function POST(req: NextRequest) {
         ...(parsed.email ? { email: parsed.email } : {}),
         ...(phoneNormalized ? { phone: phoneNormalized } : {}),
         ...(parsed.address ? { address: parsed.address } : {}),
+        ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
         birthday: parsed.birthDate,
       },
     });

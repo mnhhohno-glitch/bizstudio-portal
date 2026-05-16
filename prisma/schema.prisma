@@ -249,6 +249,9 @@ model Candidate {
   employeeId String?   @map("employee_id")
   employee   Employee? @relation(fields: [employeeId], references: [id])
 
+  // 担当RC（スカウト配信者名）。マイナビRPA・手動登録で記録。例: "藤本 なつみ"
+  recruiterName String? @map("recruiter_name")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   jimuSessions           JimuSession[]

@@ -19,6 +19,7 @@ type Candidate = {
   supportEndComment: string | null;
   employeeId: string | null;
   employee: { id: string; name: string } | null;
+  recruiterName: string | null;
   createdAt: string;
 };
 
@@ -164,6 +165,8 @@ export default function CandidateHeader({
                 <span>登録日:{formatRegistrationDate(candidate.createdAt)}</span>
                 <span className="text-gray-300">|</span>
                 <span>担当:{candidate.employee?.name || "未設定"}</span>
+                <span className="text-gray-300">|</span>
+                <span>担当RC:{candidate.recruiterName || "未設定"}</span>
               </div>
             </div>
           </div>

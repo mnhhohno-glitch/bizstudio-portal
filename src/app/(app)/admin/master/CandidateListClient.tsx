@@ -38,6 +38,7 @@ type CandidateRow = {
   nameKana: string | null;
   gender: string | null;
   employee: { id: string; name: string } | null;
+  recruiterName: string | null;
   createdAt: string;
   supportStatus: string;
   supportSubStatus: string | null;
@@ -567,6 +568,7 @@ export default function CandidateListClient({
                 <col style={{ width: "10%" }} />
                 <col style={{ width: "4%" }} />
                 <col style={{ width: "7%" }} />
+                <col style={{ width: "9%" }} />
                 <col style={{ width: "13%" }} />
                 <col style={{ width: "13%" }} />
                 <col style={{ width: "13%" }} />
@@ -586,6 +588,7 @@ export default function CandidateListClient({
                   <Th>フリガナ</Th>
                   <Th>性別</Th>
                   <Th>担当CA</Th>
+                  <Th>担当RC</Th>
                   <Th>登録日時</Th>
                   <Th>支援状況</Th>
                   <Th>ステータス</Th>
@@ -632,6 +635,11 @@ export default function CandidateListClient({
                       </div>
                     </Td>
                     <Td className="overflow-hidden">
+                      <div className="truncate text-[13px]" title={cand.recruiterName || ""}>
+                        {cand.recruiterName || "-"}
+                      </div>
+                    </Td>
+                    <Td className="overflow-hidden">
                       <div className="truncate font-mono text-[12px] text-[#374151]/70">
                         {formatDate(cand.createdAt)}
                       </div>
@@ -674,7 +682,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

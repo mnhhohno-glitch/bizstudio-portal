@@ -55,6 +55,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.assignedEmployeeId !== undefined) {
     updateData.employeeId = body.assignedEmployeeId || null;
   }
+  if (body.recruiterName !== undefined) {
+    updateData.recruiterName = body.recruiterName?.trim() || null;
+  }
   if (body.birthday !== undefined) {
     updateData.birthday = body.birthday ? new Date(body.birthday) : null;
   }
