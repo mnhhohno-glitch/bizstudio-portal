@@ -1,10 +1,10 @@
 /**
- * candidate-intake の extract_resume が返す resumeData から
- * Candidate 登録・送信可否判定に必要なフィールドを柔軟に抽出する。
+ * Gemini API（gemini-resume-parser）が返す履歴書 JSON から
+ * Candidate 登録・送信可否判定に必要なフィールドを抽出する。
  *
- * resumeData のスキーマは candidate-intake 側に依存し変動しうるため、
- * 想定されるキー名を複数候補で探索する。抽出できなければ null を返し、
- * 呼び出し側で AI_FAILED として扱う。
+ * Gemini レスポンスは name / furigana / birthday / gender / phone / address /
+ * email を含む。キー名のゆらぎにも対応するため複数候補で探索する。
+ * 抽出できなければ null を返し、呼び出し側で AI_FAILED として扱う。
  */
 
 export type ParsedResumeFields = {
