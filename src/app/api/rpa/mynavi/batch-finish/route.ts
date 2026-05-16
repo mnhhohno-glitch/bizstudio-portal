@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { notifyMynaviBatchCompletion, notifyMynaviError } from "@/lib/mynavi-rpa/notify";
+import { parseRpaRequestBody } from "@/lib/mynavi-rpa/parse-request-body";
 
 export const runtime = "nodejs";
 
@@ -15,22 +16,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const url = new URL(req.url);
-    let body: Record<string, unknown> = {};
-    try {
-      body = await req.json();
-    } catch (jsonErr) {
-      console.warn("[rpa/mynavi/batch-finish] JSON parse failed, falling back to query params:", jsonErr);
-    }
+    const body = await parseRpaRequestBody(req);
 
-    const batchId: string =
-      String(body?.batchId || "") || url.searchParams.get("batchId") || "";
+    const batchId: string = String(body?.batchId || "");
     const errorMessage: string | null = body?.errorMessage
       ? String(body.errorMessage)
-      : (url.searchParams.get("errorMessage") || null);
+      : null;
 
     if (!batchId) {
-      console.error("[rpa/mynavi/batch-finish] batchId missing. body:", JSON.stringify(body), "query:", url.search);
+      console.error("[rpa/mynavi/batch-finish] batchId missing. body:", JSON.stringify(body));
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
     }
 

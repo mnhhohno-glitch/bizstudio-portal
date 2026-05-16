@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { notifyMynaviError } from "@/lib/mynavi-rpa/notify";
+import { parseRpaRequestBody } from "@/lib/mynavi-rpa/parse-request-body";
 
 export const runtime = "nodejs";
 
@@ -31,22 +32,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const url = new URL(req.url);
-    let body: Record<string, unknown> = {};
-    try {
-      body = await req.json();
-    } catch (jsonErr) {
-      console.warn("[rpa/mynavi/reply-sent] JSON parse failed, falling back to query params:", jsonErr);
-    }
+    const body = await parseRpaRequestBody(req);
 
-    const processingLogId: string =
-      String(body?.processingLogId || "") || url.searchParams.get("processingLogId") || "";
+    const processingLogId: string = String(body?.processingLogId || "");
     const sendResult: string =
-      (body?.sendResult || url.searchParams.get("sendResult")) === "FAILURE" ? "FAILURE" : "SUCCESS";
-    const sentAt: Date = parseDateLoose(body?.sentAt || url.searchParams.get("sentAt"));
+      body?.sendResult === "FAILURE" ? "FAILURE" : "SUCCESS";
+    const sentAt: Date = parseDateLoose(body?.sentAt);
 
     if (!processingLogId) {
-      console.error("[rpa/mynavi/reply-sent] processingLogId missing. body:", JSON.stringify(body), "query:", url.search);
+      console.error("[rpa/mynavi/reply-sent] processingLogId missing. body:", JSON.stringify(body));
       return NextResponse.json(
         { error: "processingLogId は必須です" },
         { status: 400 },
@@ -65,9 +59,7 @@ export async function POST(req: Request) {
     }
 
     const candidateId: string | null =
-      (body?.candidateId ? String(body.candidateId) : null)
-      || url.searchParams.get("candidateId")
-      || log.candidateId;
+      (body?.candidateId ? String(body.candidateId) : null) || log.candidateId;
 
     await prisma.mynaviRpaProcessingLog.update({
       where: { id: processingLogId },
