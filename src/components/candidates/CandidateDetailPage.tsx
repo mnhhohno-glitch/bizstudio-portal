@@ -11,6 +11,7 @@ import HistoryTab from "@/components/candidates/HistoryTab";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
+import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
@@ -104,6 +105,7 @@ const SUB_TABS = [
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
   { key: "notes", label: "メモ" },
+  { key: "settings-history", label: "設定履歴" },
 ] as const;
 
 type SubTabKey = (typeof SUB_TABS)[number]["key"];
@@ -1779,6 +1781,9 @@ function CandidateDetailPageBody() {
                 currentUser={currentUser}
                 onRefresh={fetchCandidate}
               />
+            )}
+            {activeTab === "settings-history" && (
+              <SettingsHistoryTab candidateId={candidateId} />
             )}
           </div>
         </>

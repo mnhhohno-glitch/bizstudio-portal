@@ -8,6 +8,7 @@ const tabs = [
   { label: "エラー一覧", href: "/rpa-error/logs" },
   { label: "既知エラー管理", href: "/rpa-error/known-errors" },
   { label: "統計", href: "/rpa-error/stats" },
+  { label: "実行履歴", href: "/rpa-error/executions" },
 ];
 
 export default function RpaErrorNav() {

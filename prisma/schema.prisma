@@ -261,6 +261,8 @@ model Candidate {
   shareLinks             FileShareLink[]
   interviewRecords       InterviewRecord[]
   candidateMemos         CandidateMemo[]
+  settingsHistories      CandidateSettingsHistory[]
+  mynaviProcessingLogs   MynaviRpaProcessingLog[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1010,6 +1012,79 @@ model RpaKnownError {
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
   @@map("rpa_known_errors")
+}
+
+// ========================================
+// マイナビRPA新フロー（T-062）
+// ========================================
+
+// RPA実行バッチ（1回のRPA実行 = 1バッチ）
+model RpaExecutionBatch {
+  id                 String                   @id @default(cuid())
+  machineNumber      Int                      @map("machine_number")
+  flowName           String                   @map("flow_name")
+  startedAt          DateTime                 @map("started_at")
+  finishedAt         DateTime?                @map("finished_at")
+  status             String                   @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED"
+  totalCount         Int                      @default(0) @map("total_count")
+  normalCount        Int                      @default(0) @map("normal_count")
+  ageNgCount         Int                      @default(0) @map("age_ng_count")
+  foreignNgCount     Int                      @default(0) @map("foreign_ng_count")
+  aiFailedCount      Int                      @default(0) @map("ai_failed_count")
+  duplicateSkipCount Int                      @default(0) @map("duplicate_skip_count")
+  errorCount         Int                      @default(0) @map("error_count")
+  errorMessage       String?                  @map("error_message") @db.Text
+  processingLogs     MynaviRpaProcessingLog[]
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
+
+  @@index([startedAt])
+  @@index([machineNumber, startedAt])
+  @@map("rpa_execution_batches")
+}
+
+// マイナビRPA処理ログ（1応募分の処理結果）
+model MynaviRpaProcessingLog {
+  id              String            @id @default(cuid())
+  batchId         String            @map("batch_id")
+  batch           RpaExecutionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  candidateId     String?           @map("candidate_id")
+  candidate       Candidate?        @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  phoneNormalized String?           @map("phone_normalized")
+  candidateName   String?           @map("candidate_name")
+  candidateAge    Int?              @map("candidate_age")
+  status          String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIP" | "ERROR"
+  reason          String?           @db.Text
+  canSendReply    Boolean           @default(false) @map("can_send_reply")
+  replySentAt     DateTime?         @map("reply_sent_at")
+  replyResult     String?           @map("reply_result") // "SUCCESS" | "FAILURE"
+  pdfFileName     String?           @map("pdf_file_name")
+  pdfFileId       String?           @map("pdf_file_id")
+  errorMessage    String?           @map("error_message") @db.Text
+  processedAt     DateTime          @default(now()) @map("processed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  @@index([phoneNormalized, processedAt])
+  @@index([batchId])
+  @@index([candidateId])
+  @@map("mynavi_rpa_processing_logs")
+}
+
+// 求職者 設定履歴（一次返信送信履歴）
+model CandidateSettingsHistory {
+  id           String    @id @default(cuid())
+  candidateId  String    @map("candidate_id")
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  sentAt       DateTime  @map("sent_at")
+  sendType     String    @map("send_type") // "MYNAVI_FIRST_REPLY"
+  sendResult   String    @map("send_result") // "SUCCESS" | "FAILURE"
+  templateName String    @map("template_name")
+  senderName   String    @map("sender_name")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([candidateId, sentAt])
+  @@map("candidate_settings_histories")
 }
 
 // ========================================
