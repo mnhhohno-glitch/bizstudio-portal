@@ -15,13 +15,22 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const batchId: string = String(body?.batchId || "");
+    const url = new URL(req.url);
+    let body: Record<string, unknown> = {};
+    try {
+      body = await req.json();
+    } catch (jsonErr) {
+      console.warn("[rpa/mynavi/batch-finish] JSON parse failed, falling back to query params:", jsonErr);
+    }
+
+    const batchId: string =
+      String(body?.batchId || "") || url.searchParams.get("batchId") || "";
     const errorMessage: string | null = body?.errorMessage
       ? String(body.errorMessage)
-      : null;
+      : (url.searchParams.get("errorMessage") || null);
 
     if (!batchId) {
+      console.error("[rpa/mynavi/batch-finish] batchId missing. body:", JSON.stringify(body), "query:", url.search);
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
     }
 
