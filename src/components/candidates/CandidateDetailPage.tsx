@@ -95,6 +95,7 @@ type SessionUser = {
 const TOP_VIEWS = [
   { key: "basic", label: "基本" },
   { key: "interview", label: "面談履歴" },
+  { key: "settings-history", label: "設定履歴" },
 ] as const;
 
 type TopViewKey = (typeof TOP_VIEWS)[number]["key"];
@@ -105,7 +106,6 @@ const SUB_TABS = [
   { key: "tasks", label: "タスク" },
   { key: "support", label: "対策・サポート" },
   { key: "notes", label: "メモ" },
-  { key: "settings-history", label: "設定履歴" },
 ] as const;
 
 type SubTabKey = (typeof SUB_TABS)[number]["key"];
@@ -1699,6 +1699,8 @@ function CandidateDetailPageBody() {
           candidateId={candidateId}
           currentUser={currentUser}
         />
+      ) : activeView === "settings-history" ? (
+        <SettingsHistoryTab candidateId={candidateId} />
       ) : (
         <>
           {/* 基本タブ: 候補者ヘッダー */}
@@ -1781,9 +1783,6 @@ function CandidateDetailPageBody() {
                 currentUser={currentUser}
                 onRefresh={fetchCandidate}
               />
-            )}
-            {activeTab === "settings-history" && (
-              <SettingsHistoryTab candidateId={candidateId} />
             )}
           </div>
         </>
