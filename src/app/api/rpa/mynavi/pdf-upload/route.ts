@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { parseResumeData } from "@/lib/mynavi-rpa/parse-resume-data";
@@ -49,7 +49,7 @@ function deriveNameParts(
  * POST /api/rpa/mynavi/pdf-upload
  * RPA から 1 応募分の PDF を受領し、AI 解析 → 判定 → Candidate 登録までを行う。
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   if (!verifyRpaSecret(req)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
@@ -58,10 +58,10 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const pdf = form.get("pdf");
-    batchId = String(form.get("batchId") || "");
-    const mynaviApplicantNumber = form.get("mynaviApplicantNumber")
-      ? String(form.get("mynaviApplicantNumber"))
-      : null;
+    batchId = String(form.get("batchId") || "") || req.nextUrl.searchParams.get("batchId") || "";
+    const mynaviApplicantNumber =
+      (form.get("mynaviApplicantNumber") ? String(form.get("mynaviApplicantNumber")) : null)
+      ?? req.nextUrl.searchParams.get("mynaviApplicantNumber");
 
     if (!batchId) {
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
