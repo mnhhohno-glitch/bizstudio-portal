@@ -100,15 +100,24 @@ export async function parseResumeWithGemini(
     throw new Error("Gemini レスポンスが空です");
   }
 
-  const jsonStr = rawText
-    .replace(/^```json\s*/, "")
-    .replace(/\s*```$/, "")
-    .trim();
-
   let parsed: Record<string, unknown>;
   try {
+    // Gemini が ```json ... ``` ラッパーや前文テキストを付与する場合がある
+    // 1) マークダウンコードブロック内の JSON を抽出
+    const codeBlockMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    // 2) コードブロックがなければ最初の { から最後の } までを抽出
+    const jsonStr = codeBlockMatch
+      ? codeBlockMatch[1].trim()
+      : rawText.substring(
+          rawText.indexOf("{"),
+          rawText.lastIndexOf("}") + 1,
+        );
     parsed = JSON.parse(jsonStr);
   } catch {
+    console.error(
+      "[gemini-resume-parser] JSON parse failed. rawText (500 chars):",
+      rawText.substring(0, 500),
+    );
     throw new Error("Gemini レスポンスのJSON解析に失敗しました");
   }
 
