@@ -8,6 +8,19 @@ export const runtime = "nodejs";
 const TEMPLATE_NAME = "【日程調整】初回メッセージ";
 const SENDER_NAME = "藤本 夏海";
 
+function parseDateLoose(value: unknown): Date {
+  if (!value) return new Date();
+  const s = String(value).trim();
+  if (!s) return new Date();
+  const slashMatch = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (slashMatch) {
+    const [, y, mo, d, h, mi, sec] = slashMatch;
+    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec));
+  }
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 /**
  * POST /api/rpa/mynavi/reply-sent
  * RPA が一次返信を送信した後の完了通知。処理ログを更新し設定履歴を追加する。
@@ -18,13 +31,22 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const processingLogId: string = String(body?.processingLogId || "");
+    const url = new URL(req.url);
+    let body: Record<string, unknown> = {};
+    try {
+      body = await req.json();
+    } catch (jsonErr) {
+      console.warn("[rpa/mynavi/reply-sent] JSON parse failed, falling back to query params:", jsonErr);
+    }
+
+    const processingLogId: string =
+      String(body?.processingLogId || "") || url.searchParams.get("processingLogId") || "";
     const sendResult: string =
-      body?.sendResult === "FAILURE" ? "FAILURE" : "SUCCESS";
-    const sentAt: Date = body?.sentAt ? new Date(body.sentAt) : new Date();
+      (body?.sendResult || url.searchParams.get("sendResult")) === "FAILURE" ? "FAILURE" : "SUCCESS";
+    const sentAt: Date = parseDateLoose(body?.sentAt || url.searchParams.get("sentAt"));
 
     if (!processingLogId) {
+      console.error("[rpa/mynavi/reply-sent] processingLogId missing. body:", JSON.stringify(body), "query:", url.search);
       return NextResponse.json(
         { error: "processingLogId は必須です" },
         { status: 400 },
@@ -42,9 +64,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const candidateId: string | null = body?.candidateId
-      ? String(body.candidateId)
-      : log.candidateId;
+    const candidateId: string | null =
+      (body?.candidateId ? String(body.candidateId) : null)
+      || url.searchParams.get("candidateId")
+      || log.candidateId;
 
     await prisma.mynaviRpaProcessingLog.update({
       where: { id: processingLogId },
