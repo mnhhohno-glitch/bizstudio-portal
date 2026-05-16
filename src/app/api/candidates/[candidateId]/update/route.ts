@@ -58,6 +58,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.recruiterName !== undefined) {
     updateData.recruiterName = body.recruiterName?.trim() || null;
   }
+  if (body.applicationRoute !== undefined) {
+    updateData.applicationRoute = body.applicationRoute?.trim() || null;
+  }
+  if (body.mediaSource !== undefined) {
+    updateData.mediaSource = body.mediaSource?.trim() || null;
+  }
   if (body.birthday !== undefined) {
     updateData.birthday = body.birthday ? new Date(body.birthday) : null;
   }

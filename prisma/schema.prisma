@@ -252,6 +252,10 @@ model Candidate {
   // 担当RC（スカウト配信者名）。マイナビRPA・手動登録で記録。例: "藤本 なつみ"
   recruiterName String? @map("recruiter_name")
 
+  // 経路（スカウト / 応募）・媒体（マイナビ転職 等）。マイナビRPA・手動登録で記録
+  applicationRoute String? @map("application_route")
+  mediaSource      String? @map("media_source")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   jimuSessions           JimuSession[]
