@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { parseResumeData } from "@/lib/mynavi-rpa/parse-resume-data";
+import { parseResumeWithGemini, type GeminiResumeResult } from "@/lib/gemini-resume-parser";
 import { normalizePhoneNumber } from "@/lib/phone-normalize";
 import { checkDuplicateProcessing } from "@/lib/mynavi-rpa/duplicate-check";
 import { isAgeNg, isForeignNg, calculateAge } from "@/lib/mynavi-rpa/judgment";
@@ -12,8 +13,6 @@ import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const HARDCODED_INTAKE_URL = "https://candidate-intake-production.up.railway.app";
 
 /** CandidateFile.uploadedByUserId 用のシステムユーザーを解決する */
 async function resolveSystemUserId(): Promise<string | null> {
@@ -59,9 +58,6 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const pdf = form.get("pdf");
     batchId = String(form.get("batchId") || "") || req.nextUrl.searchParams.get("batchId") || "";
-    const mynaviApplicantNumber =
-      (form.get("mynaviApplicantNumber") ? String(form.get("mynaviApplicantNumber")) : null)
-      ?? req.nextUrl.searchParams.get("mynaviApplicantNumber");
 
     if (!batchId) {
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
@@ -79,46 +75,15 @@ export async function POST(req: NextRequest) {
     }
 
     const pdfBuffer = Buffer.from(await pdf.arrayBuffer());
-    const originalFileName = pdf.name || "mynavi.pdf";
 
-    // ---- candidate-intake で履歴書解析 ----
-    let resumeData: unknown = null;
+    // ---- Gemini API で履歴書解析（求職者新規登録モーダルと同一経路）----
+    let resumeData: GeminiResumeResult | null = null;
     let aiErrorDetail: string | null = null;
     try {
-      const intakeUrl =
-        process.env.CANDIDATE_INTAKE_URL ||
-        process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL ||
-        HARDCODED_INTAKE_URL;
-      const secret = process.env.PORTAL_SHARED_SECRET;
-      if (!secret) throw new Error("PORTAL_SHARED_SECRET が設定されていません");
-
-      const fd = new FormData();
-      fd.append("candidateId", mynaviApplicantNumber || "MYNAVI_RPA");
-      fd.append(
-        "pdf",
-        new Blob([new Uint8Array(pdfBuffer)], { type: "application/pdf" }),
-        originalFileName,
-      );
-      fd.append(
-        "interviewLog",
-        new Blob([new Uint8Array(Buffer.from("", "utf-8"))], { type: "text/plain" }),
-        "empty.txt",
-      );
-
-      const upstream = await fetch(`${intakeUrl}/api/intake/extract_resume`, {
-        method: "POST",
-        headers: { "x-portal-secret": secret },
-        body: fd,
-      });
-      if (!upstream.ok) {
-        const errBody = await upstream.json().catch(() => ({ error: upstream.statusText }));
-        throw new Error(`extract_resume ${upstream.status}: ${errBody?.error || upstream.statusText}`);
-      }
-      const data = await upstream.json();
-      resumeData = data?.resumeData ?? data;
+      resumeData = await parseResumeWithGemini(pdfBuffer);
     } catch (e) {
       aiErrorDetail = e instanceof Error ? e.message : String(e);
-      console.error("[rpa/mynavi/pdf-upload] intake error:", aiErrorDetail);
+      console.error("[rpa/mynavi/pdf-upload] Gemini error:", aiErrorDetail);
     }
 
     const parsed = parseResumeData(resumeData);
@@ -126,7 +91,7 @@ export async function POST(req: NextRequest) {
     // ---- AI 解析失敗（氏名 or 生年月日 が取得できない）----
     if (aiErrorDetail || !parsed.name || !parsed.birthDate) {
       const reason = aiErrorDetail
-        ? `AI解析失敗（intake接続エラー）`
+        ? `AI解析失敗（Gemini解析エラー）`
         : "AI解析失敗";
       const log = await prisma.mynaviRpaProcessingLog.create({
         data: {
