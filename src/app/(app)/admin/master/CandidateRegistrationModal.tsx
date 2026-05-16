@@ -39,6 +39,7 @@ export default function CandidateRegistrationModal({
   const [gender, setGender] = useState("");
   const [birthday, setBirthday] = useState("");
   const [employeeId, setEmployeeId] = useState("");
+  const [recruiterName, setRecruiterName] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -84,6 +85,7 @@ export default function CandidateRegistrationModal({
     setGender("");
     setBirthday("");
     setEmployeeId("");
+    setRecruiterName("");
     setPdfFile(null);
     setErrors({});
     onClose();
@@ -156,6 +158,7 @@ export default function CandidateRegistrationModal({
           gender,
           birthday: birthday || undefined,
           employeeId,
+          recruiterName: recruiterName.trim() || undefined,
         }),
       });
 
@@ -377,6 +380,10 @@ export default function CandidateRegistrationModal({
           <div className="col-span-2">
             <label className="text-[13px] font-medium text-[#374151]">住所</label>
             <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-[13px] font-medium text-[#374151]">担当RC</label>
+            <input type="text" placeholder="例: 藤本 なつみ（スカウト配信者）" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} className={inputClass} />
           </div>
         </div>
 

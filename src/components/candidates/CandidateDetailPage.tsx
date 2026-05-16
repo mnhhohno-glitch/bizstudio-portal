@@ -78,6 +78,7 @@ type Candidate = {
   supportEndComment: string | null;
   employeeId: string | null;
   employee: Employee | null;
+  recruiterName: string | null;
   guideEntries: GuideEntry[];
   notes: Note[];
   createdAt: string;
@@ -161,6 +162,7 @@ function EditModal({
   const [assignedEmployeeId, setAssignedEmployeeId] = useState(
     candidate.employeeId || ""
   );
+  const [recruiterName, setRecruiterName] = useState(candidate.recruiterName || "");
   const [saving, setSaving] = useState(false);
 
   const calcAge = (bd: string) => {
@@ -190,6 +192,7 @@ function EditModal({
           gender: gender || null,
           birthday: birthday || null,
           assignedEmployeeId: assignedEmployeeId || null,
+          recruiterName: recruiterName.trim() || null,
         }),
       });
       if (!res.ok) throw new Error();
@@ -300,6 +303,10 @@ function EditModal({
             <div>
               <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
               <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
+              <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ（スカウト配信者）" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
             </div>
           </div>
           <div className="flex gap-3 justify-end mt-6">

@@ -82,6 +82,7 @@ const createSchema = z.object({
   }),
   birthday: z.string().optional(),
   employeeId: z.string().min(1, "担当キャリアアドバイザーを選択してください"),
+  recruiterName: z.string().optional().or(z.literal("")),
 });
 
 export async function POST(request: NextRequest) {
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId } = parsed.data;
+    const { candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId, recruiterName } = parsed.data;
 
     // 氏名バリデーション
     const nameValidation = validateName(name);
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest) {
         ...(address ? { address: address.trim() } : {}),
         gender,
         ...(birthday ? { birthday: new Date(birthday + "T12:00:00.000Z") } : {}),
+        ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
         employeeId,
       },
     });
