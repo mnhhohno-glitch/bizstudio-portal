@@ -79,6 +79,8 @@ type Candidate = {
   employeeId: string | null;
   employee: Employee | null;
   recruiterName: string | null;
+  applicationRoute: string | null;
+  mediaSource: string | null;
   guideEntries: GuideEntry[];
   notes: Note[];
   createdAt: string;
@@ -110,6 +112,16 @@ const SUB_TABS = [
 ] as const;
 
 type SubTabKey = (typeof SUB_TABS)[number]["key"];
+
+const ROUTE_OPTIONS = ["スカウト", "応募"];
+const MEDIA_OPTIONS = [
+  "マイナビ転職",
+  "indeed",
+  "日経HR",
+  "自社HP",
+  "dodaMaps",
+  "マイナビエージェント",
+];
 
 /* ---------- Helpers ---------- */
 function formatDate(iso: string) {
@@ -163,6 +175,8 @@ function EditModal({
     candidate.employeeId || ""
   );
   const [recruiterName, setRecruiterName] = useState(candidate.recruiterName || "");
+  const [applicationRoute, setApplicationRoute] = useState(candidate.applicationRoute || "");
+  const [mediaSource, setMediaSource] = useState(candidate.mediaSource || "");
   const [saving, setSaving] = useState(false);
 
   const calcAge = (bd: string) => {
@@ -193,6 +207,8 @@ function EditModal({
           birthday: birthday || null,
           assignedEmployeeId: assignedEmployeeId || null,
           recruiterName: recruiterName.trim() || null,
+          applicationRoute: applicationRoute || null,
+          mediaSource: mediaSource || null,
         }),
       });
       if (!res.ok) throw new Error();
@@ -307,6 +323,22 @@ function EditModal({
             <div>
               <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
               <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ（スカウト配信者）" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">経路</label>
+                <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">媒体</label>
+                <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
             </div>
           </div>
           <div className="flex gap-3 justify-end mt-6">

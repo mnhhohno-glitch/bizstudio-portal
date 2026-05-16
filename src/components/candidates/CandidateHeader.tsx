@@ -20,6 +20,8 @@ type Candidate = {
   employeeId: string | null;
   employee: { id: string; name: string } | null;
   recruiterName: string | null;
+  applicationRoute: string | null;
+  mediaSource: string | null;
   createdAt: string;
 };
 
@@ -167,6 +169,10 @@ export default function CandidateHeader({
                 <span>担当:{candidate.employee?.name || "未設定"}</span>
                 <span className="text-gray-300">|</span>
                 <span>担当RC:{candidate.recruiterName || "未設定"}</span>
+                <span className="text-gray-300">|</span>
+                <span>経路:{candidate.applicationRoute || "-"}</span>
+                <span className="text-gray-300">|</span>
+                <span>媒体:{candidate.mediaSource || "-"}</span>
               </div>
             </div>
           </div>

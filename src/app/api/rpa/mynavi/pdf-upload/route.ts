@@ -189,6 +189,9 @@ export async function POST(req: NextRequest) {
         ...(phoneNormalized ? { phone: phoneNormalized } : {}),
         ...(parsed.address ? { address: parsed.address } : {}),
         ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
+        // マイナビRPA新フローは経路・媒体が固定
+        applicationRoute: "スカウト",
+        mediaSource: "マイナビ転職",
         birthday: parsed.birthDate,
       },
     });

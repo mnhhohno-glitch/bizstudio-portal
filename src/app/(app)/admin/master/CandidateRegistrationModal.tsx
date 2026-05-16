@@ -22,6 +22,16 @@ function normalizeName(name: string): string {
   return name.replace(/\u3000/g, " ").replace(/\s+/g, " ").trim();
 }
 
+const ROUTE_OPTIONS = ["\u30b9\u30ab\u30a6\u30c8", "\u5fdc\u52df"];
+const MEDIA_OPTIONS = [
+  "\u30de\u30a4\u30ca\u30d3\u8ee2\u8077",
+  "indeed",
+  "\u65e5\u7d4cHR",
+  "\u81ea\u793eHP",
+  "dodaMaps",
+  "\u30de\u30a4\u30ca\u30d3\u30a8\u30fc\u30b8\u30a7\u30f3\u30c8",
+];
+
 export default function CandidateRegistrationModal({
   isOpen,
   onClose,
@@ -40,6 +50,8 @@ export default function CandidateRegistrationModal({
   const [birthday, setBirthday] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [recruiterName, setRecruiterName] = useState("");
+  const [applicationRoute, setApplicationRoute] = useState("");
+  const [mediaSource, setMediaSource] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -86,6 +98,8 @@ export default function CandidateRegistrationModal({
     setBirthday("");
     setEmployeeId("");
     setRecruiterName("");
+    setApplicationRoute("");
+    setMediaSource("");
     setPdfFile(null);
     setErrors({});
     onClose();
@@ -159,6 +173,8 @@ export default function CandidateRegistrationModal({
           birthday: birthday || undefined,
           employeeId,
           recruiterName: recruiterName.trim() || undefined,
+          applicationRoute: applicationRoute || undefined,
+          mediaSource: mediaSource || undefined,
         }),
       });
 
@@ -380,6 +396,20 @@ export default function CandidateRegistrationModal({
           <div className="col-span-2">
             <label className="text-[13px] font-medium text-[#374151]">住所</label>
             <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className="text-[13px] font-medium text-[#374151]">経路</label>
+            <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className={inputClass}>
+              <option value="">選択してください</option>
+              {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[13px] font-medium text-[#374151]">媒体</label>
+            <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className={inputClass}>
+              <option value="">選択してください</option>
+              {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
           <div className="col-span-2">
             <label className="text-[13px] font-medium text-[#374151]">担当RC</label>
