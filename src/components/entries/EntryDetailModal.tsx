@@ -129,7 +129,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved }
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{entry.candidate.name}</span>
             <span className="text-xs text-gray-400">({entry.candidate.candidateNumber})</span>
-            <Link href={`/candidates/${entry.candidateId}`} className="text-xs text-[#2563EB] hover:underline ml-auto">
+            <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#2563EB] hover:underline ml-auto">
               求職者詳細へ →
             </Link>
           </div>
@@ -229,7 +229,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved }
 
         {/* Footer */}
         <div className="sticky bottom-0 bg-white border-t px-5 py-3 flex items-center gap-2">
-          <Link href={`/candidates/${entry.candidateId}`} className="text-sm text-[#2563EB] hover:underline">
+          <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="text-sm text-[#2563EB] hover:underline">
             求職者詳細へ →
           </Link>
           <div className="ml-auto flex gap-2">

@@ -389,7 +389,7 @@ export default function EntryTable({
       case "candidate":
         return (
           <td key={col.key} className="px-2 py-1.5 whitespace-nowrap">
-            <Link href={`/candidates/${entry.candidateId}`} className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
+            <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
               {entry.candidate.name}
             </Link>
             <div className="text-gray-400 text-[10px]">{entry.candidate.candidateNumber}</div>
