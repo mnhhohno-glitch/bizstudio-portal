@@ -76,6 +76,7 @@ export async function GET(
       driveFileId: true,
       driveViewUrl: true,
       driveFolderId: true,
+      folderId: true,
       memo: true,
       uploadedByUserId: true,
       createdAt: true,

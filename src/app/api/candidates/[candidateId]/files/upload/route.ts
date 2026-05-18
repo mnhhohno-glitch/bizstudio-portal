@@ -83,6 +83,7 @@ export async function POST(
   const file = formData.get("file") as File | null;
   const category = formData.get("category") as string | null;
   const memo = formData.get("memo") as string | null;
+  const folderIdRaw = formData.get("folderId") as string | null;
 
   if (!file || !category) {
     return withCors(NextResponse.json({ error: "ファイルとカテゴリは必須です" }, { status: 400 }), origin);
@@ -105,6 +106,19 @@ export async function POST(
   const validCategories = Object.values(CandidateFileCategory);
   if (!validCategories.includes(category as CandidateFileCategory)) {
     return withCors(NextResponse.json({ error: "無効なカテゴリです" }, { status: 400 }), origin);
+  }
+
+  // BS作成書類のみフォルダ指定を許可。それ以外のカテゴリでは folderId は無視（ルート直下扱い）
+  let folderId: string | null = null;
+  if (category === "BS_DOCUMENT" && folderIdRaw && folderIdRaw.trim()) {
+    const folder = await prisma.bSDocumentFolder.findFirst({
+      where: { id: folderIdRaw.trim(), candidateId },
+      select: { id: true },
+    });
+    if (!folder) {
+      return withCors(NextResponse.json({ error: "指定されたフォルダが見つかりません" }, { status: 400 }), origin);
+    }
+    folderId = folder.id;
   }
 
   try {
@@ -130,6 +144,7 @@ export async function POST(
       data: {
         candidateId,
         category: category as CandidateFileCategory,
+        folderId,
         fileName: file.name,
         fileSize: file.size,
         mimeType: file.type,

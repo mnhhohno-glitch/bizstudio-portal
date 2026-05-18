@@ -36,17 +36,24 @@ function getIcon(mimeType: string): string {
 export default function FileUploadModal({
   candidateId,
   defaultCategory,
+  folders = [],
+  defaultFolderId = "",
   onClose,
   onSuccess,
 }: {
   candidateId: string;
   defaultCategory: string;
+  folders?: { id: string; name: string }[];
+  defaultFolderId?: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [category, setCategory] = useState(defaultCategory);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [memo, setMemo] = useState("");
+  // BS作成書類のフォルダ選択: "" = ルート直下 / folderId / "__new__" = 新規作成
+  const [folderSelection, setFolderSelection] = useState(defaultFolderId);
+  const [newFolderName, setNewFolderName] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
@@ -100,8 +107,39 @@ export default function FileUploadModal({
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return;
-    setIsUploading(true);
     setError("");
+
+    // BS作成書類はフォルダ指定可。新規フォルダ選択時は先に作成して folderId を得る
+    let effectiveFolderId: string | null = null;
+    if (category === "BS_DOCUMENT") {
+      if (folderSelection === "__new__") {
+        const fname = newFolderName.trim();
+        if (!fname) {
+          setError("新規フォルダ名を入力してください");
+          return;
+        }
+        try {
+          const res = await fetch(`/api/candidates/${candidateId}/bs-folders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: fname }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setError(data.error || "フォルダの作成に失敗しました");
+            return;
+          }
+          effectiveFolderId = data.id as string;
+        } catch {
+          setError("フォルダの作成に失敗しました");
+          return;
+        }
+      } else if (folderSelection) {
+        effectiveFolderId = folderSelection;
+      }
+    }
+
+    setIsUploading(true);
     let successCount = 0;
     let errorCount = 0;
 
@@ -111,6 +149,7 @@ export default function FileUploadModal({
         const formData = new FormData();
         formData.append("file", selectedFiles[i]);
         formData.append("category", category);
+        if (effectiveFolderId) formData.append("folderId", effectiveFolderId);
         if (memo.trim()) formData.append("memo", memo.trim());
 
         const res = await fetch(`/api/candidates/${candidateId}/files/upload`, {
@@ -163,6 +202,34 @@ export default function FileUploadModal({
               ))}
             </select>
           </div>
+
+          {/* フォルダ選択（BS作成書類のみ） */}
+          {category === "BS_DOCUMENT" && (
+            <div>
+              <label className="block text-sm font-medium text-[#374151] mb-1">フォルダ</label>
+              <select
+                value={folderSelection}
+                onChange={(e) => setFolderSelection(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
+              >
+                <option value="">（ルート直下）</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+                <option value="__new__">＋ 新規フォルダ作成</option>
+              </select>
+              {folderSelection === "__new__" && (
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="新規フォルダ名を入力..."
+                  maxLength={100}
+                  className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
+                />
+              )}
+            </div>
+          )}
 
           {/* ドロップエリア（常時表示） */}
           <div

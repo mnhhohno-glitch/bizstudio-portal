@@ -12,9 +12,17 @@ type CandidateFile = {
   mimeType: string;
   driveFileId: string;
   driveViewUrl: string;
+  folderId: string | null;
   memo: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
+};
+
+type BSFolder = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  fileCount: number;
 };
 
 type TemplateFile = {
@@ -89,6 +97,17 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [attaching, setAttaching] = useState(false);
 
+  // BS作成書類 サブフォルダ
+  const [folders, setFolders] = useState<BSFolder[]>([]);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameFolderName, setRenameFolderName] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  // ドロップ先ハイライト: フォルダID または "__root__"
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
   // D&D for meeting sub-tab file area
   const [isAreaDragging, setIsAreaDragging] = useState(false);
   const [areaUploading, setAreaUploading] = useState(false);
@@ -98,6 +117,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesError, setTemplatesError] = useState(false);
   const [downloadingTemplateId, setDownloadingTemplateId] = useState<string | null>(null);
+
+  const isBSDoc = activeSubTab === "BS_DOCUMENT";
 
   const fetchFiles = useCallback(async () => {
     setIsLoading(true);
@@ -124,6 +145,16 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     } catch { /* */ }
   }, [candidateId]);
 
+  const fetchFolders = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bs-folders`);
+      if (res.ok) {
+        const data = await res.json();
+        setFolders(data.folders || []);
+      }
+    } catch { /* */ }
+  }, [candidateId]);
+
   const fetchTemplates = useCallback(async () => {
     setTemplatesLoading(true);
     setTemplatesError(false);
@@ -144,6 +175,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
   useEffect(() => { fetchCounts(); }, [fetchCounts]);
+  useEffect(() => { fetchFolders(); }, [fetchFolders]);
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
   const handleDelete = async (fileId: string) => {
@@ -154,6 +186,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
       if (res.ok) {
         fetchFiles();
         fetchCounts();
+        fetchFolders();
       }
     } catch { /* */ }
     finally { setDeletingId(null); }
@@ -162,6 +195,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const handleUploadSuccess = () => {
     fetchFiles();
     fetchCounts();
+    fetchFolders();
   };
 
   const isDocxFile = (f: CandidateFile) =>
@@ -309,7 +343,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     window.open(url, "_blank");
   };
 
-  const handleAreaDrop = async (fileList: FileList) => {
+  // フォルダエリアへの D&D アップロード。folderId 未指定はルート直下扱い
+  const handleAreaDrop = async (fileList: FileList, folderId?: string) => {
     const valid = Array.from(fileList).filter(
       (f) => (ALLOWED_TYPES_SET.has(f.type) || f.name.endsWith(".txt")) && f.size <= 20 * 1024 * 1024
     );
@@ -323,6 +358,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         const formData = new FormData();
         formData.append("file", file);
         formData.append("category", activeSubTab);
+        if (isBSDoc && folderId) formData.append("folderId", folderId);
         await fetch(`/api/candidates/${candidateId}/files/upload`, {
           method: "POST",
           body: formData,
@@ -331,6 +367,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
       toast.success(`${valid.length}件のファイルをアップロードしました`);
       fetchFiles();
       fetchCounts();
+      fetchFolders();
     } catch {
       toast.error("アップロードに失敗しました");
     } finally {
@@ -338,8 +375,14 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     }
   };
 
-  // Reset selection when switching tabs
-  useEffect(() => { setSelectedFileIds(new Set()); }, [activeSubTab]);
+  // Reset selection / folder edit state when switching tabs
+  useEffect(() => {
+    setSelectedFileIds(new Set());
+    setCreatingFolder(false);
+    setNewFolderName("");
+    setRenamingFolderId(null);
+    setRenameFolderName("");
+  }, [activeSubTab]);
 
   const toggleFileSelect = (id: string) => setSelectedFileIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allFilesSelected = files.length > 0 && files.every((f) => selectedFileIds.has(f.id));
@@ -349,7 +392,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     const idx = name.lastIndexOf(".");
     return idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
   };
-  const sortedFiles = [...files].sort((a, b) => {
+  const sortFilesArr = (arr: CandidateFile[]) => [...arr].sort((a, b) => {
     let cmp = 0;
     if (sortField === "fileName") {
       cmp = a.fileName.localeCompare(b.fileName, "ja");
@@ -363,6 +406,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
+  const sortedFiles = sortFilesArr(files);
+  const sortedFolders = [...folders].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const rootFiles = sortFilesArr(files.filter((f) => !f.folderId));
+
   const toggleSort = (field: "fileName" | "ext" | "date") => {
     if (sortField === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -374,8 +421,85 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const sortArrow = (field: "fileName" | "ext" | "date") =>
     sortField === field ? (sortDir === "asc" ? "↑" : "↓") : "↕";
 
+  const toggleFolderCollapse = (id: string) =>
+    setCollapsedFolders((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    setFolderBusy(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bs-folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "フォルダの作成に失敗しました");
+        return;
+      }
+      toast.success("フォルダを作成しました");
+      setCreatingFolder(false);
+      setNewFolderName("");
+      fetchFolders();
+    } catch {
+      toast.error("フォルダの作成に失敗しました");
+    } finally {
+      setFolderBusy(false);
+    }
+  };
+
+  const handleRenameFolder = async (folderId: string) => {
+    const name = renameFolderName.trim();
+    if (!name) return;
+    setFolderBusy(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bs-folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "フォルダ名の変更に失敗しました");
+        return;
+      }
+      toast.success("フォルダ名を変更しました");
+      setRenamingFolderId(null);
+      setRenameFolderName("");
+      fetchFolders();
+    } catch {
+      toast.error("フォルダ名の変更に失敗しました");
+    } finally {
+      setFolderBusy(false);
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    if (!confirm("この空フォルダを削除しますか？")) return;
+    setFolderBusy(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bs-folders/${folderId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "フォルダの削除に失敗しました");
+        return;
+      }
+      toast.success("フォルダを削除しました");
+      fetchFolders();
+    } catch {
+      toast.error("フォルダの削除に失敗しました");
+    } finally {
+      setFolderBusy(false);
+    }
+  };
+
   const handleBulkFileDownload = async () => {
     setBulkDLing(true);
+    // 選択ファイルに同名があるか事前チェック（ZIP内で自動連番が付く旨を通知）
+    const selectedNames = files.filter((f) => selectedFileIds.has(f.id)).map((f) => f.fileName);
+    const hasDuplicateName = new Set(selectedNames).size < selectedNames.length;
     try {
       const res = await fetch(`/api/candidates/${candidateId}/files/bulk-download`, {
         method: "POST",
@@ -390,6 +514,9 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
       a.download = `files_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      if (hasDuplicateName) {
+        toast.warning("同名ファイルがあったため、ZIP内で自動連番を付与しました（同梱の README.txt 参照）");
+      }
     } catch { toast.error("ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。"); }
     finally { setBulkDLing(false); }
   };
@@ -402,6 +529,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     setSelectedFileIds(new Set());
     fetchFiles();
     fetchCounts();
+    fetchFolders();
     toast.success("削除しました");
   };
 
@@ -479,6 +607,116 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
   const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
 
+  // ファイルカード1件分の描画（フラット表示・フォルダ表示で共用）
+  const renderFileCard = (file: CandidateFile) => (
+    <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+      {/* チェックボックス + ファイル名 */}
+      <div className="flex items-center gap-2">
+        <input type="checkbox" checked={selectedFileIds.has(file.id)} onChange={() => toggleFileSelect(file.id)} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] shrink-0" />
+        <span className="text-lg">{getFileIcon(file.mimeType)}</span>
+        <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
+      </div>
+      {/* 情報 */}
+      <p className="text-xs text-gray-500 mt-1">
+        {formatFileSize(file.fileSize)} ・ {file.uploadedBy.name} ・ {formatDate(file.createdAt)}
+      </p>
+      {/* メモ */}
+      {file.memo && (
+        <p className="text-xs text-gray-500 mt-1 italic">メモ: {file.memo}</p>
+      )}
+      {/* Word編集中インジケーター */}
+      {editingDocxIds.has(file.id) && (
+        <div className="mt-2 flex items-center gap-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+          <span>編集中</span>
+          <button
+            onClick={() => handleUploadEdited(file)}
+            disabled={replacingId === file.id}
+            className="ml-auto rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
+          </button>
+          <button
+            onClick={() => handleCancelEdit(file.id)}
+            disabled={replacingId === file.id}
+            className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+          >
+            キャンセル
+          </button>
+        </div>
+      )}
+      {/* Excel編集中インジケーター */}
+      {editingXlsxIds.has(file.id) && (
+        <div className="mt-2 flex items-center gap-2 rounded bg-green-50 px-3 py-1.5 text-xs text-green-700">
+          <span>編集中</span>
+          <button
+            onClick={() => handleUploadEditedXlsx(file)}
+            disabled={replacingId === file.id}
+            className="ml-auto rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
+          </button>
+          <button
+            onClick={() => handleCancelEditXlsx(file.id)}
+            disabled={replacingId === file.id}
+            className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+          >
+            キャンセル
+          </button>
+        </div>
+      )}
+      {/* アクション */}
+      <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
+        <div className="ml-auto flex gap-2">
+          {isDocxFile(file) && !editingDocxIds.has(file.id) && (
+            <button
+              onClick={() => handleWordEdit(file)}
+              className="text-amber-600 hover:text-amber-700 text-sm font-medium"
+            >
+              Word編集
+            </button>
+          )}
+          {isXlsxFile(file) && !editingXlsxIds.has(file.id) && (
+            <button
+              onClick={() => handleExcelEdit(file)}
+              className="text-green-600 hover:text-green-700 text-sm font-medium"
+            >
+              Excel編集
+            </button>
+          )}
+          {activeSubTab === "BS_DOCUMENT" && (
+            <button
+              onClick={() => handleShareUrl([file.id])}
+              disabled={sharing}
+              className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium disabled:opacity-50"
+            >
+              🔗 URL発行
+            </button>
+          )}
+          <button
+            onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
+            className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium"
+          >
+            👁 プレビュー
+          </button>
+          <a
+            href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+            download
+            className="text-gray-500 hover:text-gray-700 text-sm font-medium"
+          >
+            ⬇ DL
+          </a>
+          <button
+            onClick={() => handleDelete(file.id)}
+            disabled={deletingId === file.id}
+            className="text-red-400 hover:text-red-600 text-sm font-medium disabled:opacity-50"
+          >
+            🗑 削除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div>
       {/* サブタブバー */}
@@ -555,6 +793,14 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {sharing ? "発行中..." : "🔗 一括URL発行"}
               </button>
             )}
+            {activeSubTab === "BS_DOCUMENT" && !creatingFolder && (
+              <button
+                onClick={() => { setCreatingFolder(true); setNewFolderName(""); }}
+                className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-gray-50 transition-colors"
+              >
+                + フォルダ作成
+              </button>
+            )}
             {activeSubTab === "MEETING" && (
               <button
                 onClick={handleOpenIntake}
@@ -572,6 +818,35 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           </div>
         </div>
         <p className="text-sm text-gray-500 mb-4">{DESCRIPTIONS[activeSubTab]}</p>
+
+        {/* フォルダ作成インライン入力（BS作成書類のみ） */}
+        {isBSDoc && creatingFolder && (
+          <div className="mb-4 flex items-center gap-2">
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreateFolder(); if (e.key === "Escape") { setCreatingFolder(false); setNewFolderName(""); } }}
+              placeholder="フォルダ名を入力..."
+              maxLength={100}
+              autoFocus
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm flex-1 max-w-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <button
+              onClick={handleCreateFolder}
+              disabled={folderBusy || !newFolderName.trim()}
+              className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+            >
+              作成
+            </button>
+            <button
+              onClick={() => { setCreatingFolder(false); setNewFolderName(""); }}
+              className="text-gray-500 hover:text-gray-700 text-[13px] font-medium"
+            >
+              キャンセル
+            </button>
+          </div>
+        )}
 
         {/* D&D hint */}
         {isAreaDragging && (
@@ -592,13 +867,14 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         >
         {isLoading ? (
           <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
-        ) : files.length === 0 ? (
+        ) : !isBSDoc && files.length === 0 ? (
           <div className="py-16 text-center text-[13px] text-gray-400">
             ファイルをドラッグ＆ドロップ、または「+ アップロード」ボタンをクリック
           </div>
         ) : (
           <div className="space-y-3">
             {/* Select all + bulk action bar */}
+            {files.length > 0 && (
             <div className="flex items-center gap-3 flex-wrap">
               <label className="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer">
                 <input type="checkbox" checked={allFilesSelected} onChange={() => allFilesSelected ? setSelectedFileIds(new Set()) : setSelectedFileIds(new Set(files.map((f) => f.id)))} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
@@ -637,114 +913,122 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 </>
               )}
             </div>
-            {sortedFiles.map((file) => (
-              <div key={file.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
-                {/* チェックボックス + ファイル名 */}
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={selectedFileIds.has(file.id)} onChange={() => toggleFileSelect(file.id)} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] shrink-0" />
-                  <span className="text-lg">{getFileIcon(file.mimeType)}</span>
-                  <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
-                </div>
-                {/* 情報 */}
-                <p className="text-xs text-gray-500 mt-1">
-                  {formatFileSize(file.fileSize)} ・ {file.uploadedBy.name} ・ {formatDate(file.createdAt)}
-                </p>
-                {/* メモ */}
-                {file.memo && (
-                  <p className="text-xs text-gray-500 mt-1 italic">メモ: {file.memo}</p>
-                )}
-                {/* Word編集中インジケーター */}
-                {editingDocxIds.has(file.id) && (
-                  <div className="mt-2 flex items-center gap-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                    <span>編集中</span>
-                    <button
-                      onClick={() => handleUploadEdited(file)}
-                      disabled={replacingId === file.id}
-                      className="ml-auto rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            )}
+
+            {isBSDoc ? (
+              /* ===== BS作成書類: フォルダ階層表示 ===== */
+              <div className="space-y-3">
+                {sortedFolders.map((folder) => {
+                  const folderFiles = sortFilesArr(files.filter((f) => f.folderId === folder.id));
+                  const collapsed = collapsedFolders.has(folder.id);
+                  const isRenaming = renamingFolderId === folder.id;
+                  return (
+                    <div
+                      key={folder.id}
+                      className={`border rounded-lg transition-colors ${dragOverFolderId === folder.id ? "border-[#2563EB] bg-blue-50" : "border-gray-200"}`}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(folder.id); }}
+                      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files, folder.id); }}
                     >
-                      {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
-                    </button>
-                    <button
-                      onClick={() => handleCancelEdit(file.id)}
-                      disabled={replacingId === file.id}
-                      className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                    >
-                      キャンセル
-                    </button>
+                      {/* フォルダヘッダー */}
+                      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
+                        <button
+                          onClick={() => toggleFolderCollapse(folder.id)}
+                          className="text-gray-400 hover:text-gray-600 text-xs w-4"
+                        >
+                          {collapsed ? "▶" : "▼"}
+                        </button>
+                        {isRenaming ? (
+                          <>
+                            <input
+                              type="text"
+                              value={renameFolderName}
+                              onChange={(e) => setRenameFolderName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") handleRenameFolder(folder.id); if (e.key === "Escape") { setRenamingFolderId(null); setRenameFolderName(""); } }}
+                              maxLength={100}
+                              autoFocus
+                              className="border border-gray-300 rounded px-2 py-1 text-sm flex-1 max-w-xs focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                            />
+                            <button
+                              onClick={() => handleRenameFolder(folder.id)}
+                              disabled={folderBusy || !renameFolderName.trim()}
+                              className="text-[12px] text-[#2563EB] hover:underline disabled:opacity-50"
+                            >
+                              保存
+                            </button>
+                            <button
+                              onClick={() => { setRenamingFolderId(null); setRenameFolderName(""); }}
+                              className="text-[12px] text-gray-500 hover:underline"
+                            >
+                              キャンセル
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm font-medium text-gray-700">📁 {folder.name}</span>
+                            <span className="text-xs text-gray-400">({folderFiles.length})</span>
+                            <button
+                              onClick={() => { setRenamingFolderId(folder.id); setRenameFolderName(folder.name); }}
+                              title="フォルダ名を変更"
+                              className="text-gray-400 hover:text-[#2563EB] text-xs"
+                            >
+                              ✎
+                            </button>
+                            {folderFiles.length === 0 && (
+                              <button
+                                onClick={() => handleDeleteFolder(folder.id)}
+                                disabled={folderBusy}
+                                title="空フォルダを削除"
+                                className="text-gray-400 hover:text-red-500 text-xs disabled:opacity-50"
+                              >
+                                🗑
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {/* フォルダ内ファイル */}
+                      {!collapsed && (
+                        <div className="p-3 space-y-3">
+                          {folderFiles.length === 0 ? (
+                            <p className="text-[13px] text-gray-400 text-center py-4">（このフォルダは空です）</p>
+                          ) : (
+                            folderFiles.map(renderFileCard)
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* ルート直下（フォルダなし） */}
+                <div
+                  className={`border rounded-lg transition-colors ${dragOverFolderId === "__root__" ? "border-[#2563EB] bg-blue-50" : "border-gray-200"}`}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId("__root__"); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
+                >
+                  <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
+                    <span className="text-sm font-medium text-gray-600">📂 （フォルダなし）</span>
+                    <span className="text-xs text-gray-400">({rootFiles.length})</span>
                   </div>
-                )}
-                {/* Excel編集中インジケーター */}
-                {editingXlsxIds.has(file.id) && (
-                  <div className="mt-2 flex items-center gap-2 rounded bg-green-50 px-3 py-1.5 text-xs text-green-700">
-                    <span>編集中</span>
-                    <button
-                      onClick={() => handleUploadEditedXlsx(file)}
-                      disabled={replacingId === file.id}
-                      className="ml-auto rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {replacingId === file.id ? "アップロード中..." : "編集済みをアップロード"}
-                    </button>
-                    <button
-                      onClick={() => handleCancelEditXlsx(file.id)}
-                      disabled={replacingId === file.id}
-                      className="rounded bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                )}
-                {/* アクション */}
-                <div className="flex items-center mt-3 pt-3 border-t border-gray-100">
-                  <div className="ml-auto flex gap-2">
-                    {isDocxFile(file) && !editingDocxIds.has(file.id) && (
-                      <button
-                        onClick={() => handleWordEdit(file)}
-                        className="text-amber-600 hover:text-amber-700 text-sm font-medium"
-                      >
-                        Word編集
-                      </button>
+                  <div className="p-3 space-y-3">
+                    {rootFiles.length === 0 ? (
+                      <p className="text-[13px] text-gray-400 text-center py-4">
+                        ファイルはありません。ドラッグ＆ドロップ、または「+ アップロード」で追加できます
+                      </p>
+                    ) : (
+                      rootFiles.map(renderFileCard)
                     )}
-                    {isXlsxFile(file) && !editingXlsxIds.has(file.id) && (
-                      <button
-                        onClick={() => handleExcelEdit(file)}
-                        className="text-green-600 hover:text-green-700 text-sm font-medium"
-                      >
-                        Excel編集
-                      </button>
-                    )}
-                    {activeSubTab === "BS_DOCUMENT" && (
-                      <button
-                        onClick={() => handleShareUrl([file.id])}
-                        disabled={sharing}
-                        className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium disabled:opacity-50"
-                      >
-                        🔗 URL発行
-                      </button>
-                    )}
-                    <button
-                      onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
-                      className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium"
-                    >
-                      👁 プレビュー
-                    </button>
-                    <a
-                      href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
-                      download
-                      className="text-gray-500 hover:text-gray-700 text-sm font-medium"
-                    >
-                      ⬇ DL
-                    </a>
-                    <button
-                      onClick={() => handleDelete(file.id)}
-                      disabled={deletingId === file.id}
-                      className="text-red-400 hover:text-red-600 text-sm font-medium disabled:opacity-50"
-                    >
-                      🗑 削除
-                    </button>
                   </div>
                 </div>
               </div>
-            ))}
+            ) : (
+              /* ===== その他カテゴリ: フラット表示 ===== */
+              sortedFiles.map(renderFileCard)
+            )}
           </div>
         )}
         </div>
@@ -760,6 +1044,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         <FileUploadModal
           candidateId={candidateId}
           defaultCategory={activeSubTab}
+          folders={folders.map((f) => ({ id: f.id, name: f.name }))}
           onClose={() => setShowUploadModal(false)}
           onSuccess={handleUploadSuccess}
         />

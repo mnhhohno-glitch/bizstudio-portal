@@ -270,6 +270,7 @@ model Candidate {
   candidateMemos         CandidateMemo[]
   settingsHistories      CandidateSettingsHistory[]
   mynaviProcessingLogs   MynaviRpaProcessingLog[]
+  bsDocumentFolders      BSDocumentFolder[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1112,6 +1113,8 @@ model CandidateFile {
   id                String                @id @default(cuid())
   candidateId       String                @map("candidate_id")
   candidate         Candidate             @relation(fields: [candidateId], references: [id])
+  folderId          String?               @map("folder_id")
+  folder            BSDocumentFolder?     @relation(fields: [folderId], references: [id], onDelete: SetNull)
   category          CandidateFileCategory
   fileName          String                @map("file_name")
   fileSize          Int                   @map("file_size")
@@ -1138,7 +1141,27 @@ model CandidateFile {
   updatedAt         DateTime              @updatedAt @map("updated_at")
 
   @@index([candidateId, category, archivedAt])
+  @@index([folderId])
   @@map("candidate_files")
+}
+
+// ========================================
+// BS作成書類フォルダ（サブフォルダ機能）
+// ========================================
+
+model BSDocumentFolder {
+  id          String   @id @default(cuid())
+  candidateId String   @map("candidate_id")
+  name        String
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  candidate Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  files     CandidateFile[]
+
+  @@index([candidateId])
+  @@map("bs_document_folders")
 }
 
 // ========================================
