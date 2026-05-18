@@ -1002,7 +1002,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                   );
                 })}
 
-                {/* ルート直下（フォルダなし） */}
+                {/* ルート直下（BS作成書類） */}
                 <div
                   className={`border rounded-lg transition-colors ${dragOverFolderId === "__root__" ? "border-[#2563EB] bg-blue-50" : "border-gray-200"}`}
                   onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -1011,7 +1011,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                   onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
                 >
                   <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
-                    <span className="text-sm font-medium text-gray-600">📂 （フォルダなし）</span>
+                    <span className="text-sm font-medium text-gray-600">📂 BS作成書類</span>
                     <span className="text-xs text-gray-400">({rootFiles.length})</span>
                   </div>
                   <div className="p-3 space-y-3">
