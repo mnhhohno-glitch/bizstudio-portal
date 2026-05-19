@@ -17,6 +17,8 @@ import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missin
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 const INTERVIEW_DECLINE_ASSIGNEES = "1000007,1000004,1000025";
 
+const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
+
 /* ================================================================== */
 /*  Types                                                              */
 /* ================================================================== */
@@ -1029,6 +1031,8 @@ export default function InterviewForm({
     return buildMissingSet(missingFields);
   }, [form, detail, rating, workHistories.length]);
 
+  const isTerminated = TERMINATED_RESULTS.includes(form.resultFlag || "");
+
   const pTotal = (r.personalityMotivation || 0) + (r.personalityCommunication || 0) + (r.personalityManner || 0) + (r.personalityIntelligence || 0) + (r.personalityHumanity || 0);
   const cTotal = (r.careerJobType || 0) + (r.careerExperience || 0) + (r.careerJobChangeCount || 0) + (r.careerAchievement || 0) + (r.careerQualification || 0);
   const condTotal = (r.conditionJobType || 0) + (r.conditionSalary || 0) + (r.conditionHoliday || 0) + (r.conditionArea || 0) + (r.conditionFlexibility || 0);
@@ -1273,14 +1277,14 @@ export default function InterviewForm({
                       router.push(`/tasks/new?${params.toString()}`);
                     }
                   }
-                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退"]} isMissing={miss.has("form.resultFlag")} />
+                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "対象外", "継続", "保留", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>
           </div>
 
           {/* --- 転職活動状況 --- */}
-          <div className="mb-4">
+          <div className="mb-4" style={isTerminated ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
             <SectionHd title="転職活動状況" />
             <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.agentUsageFlag")} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
             <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={["すぐにでも", "3カ月以内", "半年以内", "1年以内", "未定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.jobChangeTimeline")} /><Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
@@ -1304,7 +1308,7 @@ export default function InterviewForm({
           </div>
 
           {/* --- 職務経歴 --- */}
-          <div className="mb-2">
+          <div className="mb-2" style={isTerminated ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
             <SectionHd title="職務経歴" />
             <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
               {workHistories.map((wh, idx) => (
@@ -1353,7 +1357,7 @@ export default function InterviewForm({
         </div>
 
         {/* ======== RIGHT COLUMN ======== */}
-        <div className="flex flex-col" style={{ background: "var(--im-bg)" }}>
+        <div className="flex flex-col" style={{ background: "var(--im-bg)", ...(isTerminated ? { opacity: 0.4, pointerEvents: "none" } as React.CSSProperties : {}) }}>
 
           {/* Tabs */}
           <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>

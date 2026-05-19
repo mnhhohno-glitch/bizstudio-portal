@@ -487,7 +487,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
               const age = calcAge(r.candidateBirthday);
               const rb = r.resultFlag ? RESULT_BADGE[r.resultFlag] : null;
               const rank = r.rating?.overallRank;
-              const isDeclined = r.resultFlag === "連絡なし辞退" || r.resultFlag === "連絡あり辞退";
+              const isDeclined = r.resultFlag === "連絡なし辞退" || r.resultFlag === "連絡あり辞退" || r.resultFlag === "支援終了_当社判断" || r.resultFlag === "支援終了_本人希望";
               return (
                 <tr key={r.id} className={`border-t border-[#E5E7EB] hover:bg-[#F9FAFB] ${isDeclined ? "bg-[#E5E7EB]" : ""}`}>
                   {/* 操作 */}

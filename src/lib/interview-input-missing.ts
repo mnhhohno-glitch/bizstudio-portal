@@ -137,7 +137,7 @@ const RATING_INT_FIELDS = [
 // Result flags that mean the interview never actually took place. When the
 // resultFlag has one of these values, business-field validation is skipped:
 // only resultFlag itself is required.
-const SKIP_BUSINESS_FIELDS_RESULTS = ["面談前", "連絡なし辞退", "連絡あり辞退"];
+const SKIP_BUSINESS_FIELDS_RESULTS = ["面談前", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
 export function checkInputMissing(args: CheckInputMissingArgs): InputMissingResult {
   const missing: MissingFieldKey[] = [];
