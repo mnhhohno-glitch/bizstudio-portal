@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { randomUUID } from "crypto";
 import { checkInputMissing } from "@/lib/interview-input-missing";
 
+const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
+
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -215,11 +217,11 @@ export async function POST(req: Request) {
   const existingCount = await prisma.interviewRecord.count({ where: { candidateId } });
   const interviewCount = existingCount + 1;
 
-  // 前回面談メモ取得
+  // 前回面談メモ・結果取得
   const lastRecord = await prisma.interviewRecord.findFirst({
     where: { candidateId },
     orderBy: { interviewDate: "desc" },
-    select: { interviewMemo: true },
+    select: { interviewMemo: true, resultFlag: true },
   });
 
   // duration計算
@@ -246,7 +248,7 @@ export async function POST(req: Request) {
       interviewerUserId,
       interviewType,
       interviewCount,
-      resultFlag: resultFlag || null,
+      resultFlag: resultFlag || (lastRecord?.resultFlag && !TERMINATED_RESULTS.includes(lastRecord.resultFlag) ? lastRecord.resultFlag : null),
       interviewMemo: interviewMemo || null,
       previousMemo: lastRecord?.interviewMemo || null,
       rawTranscript: rawTranscript || null,
