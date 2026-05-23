@@ -454,14 +454,14 @@ export default function CandidateRegistrationModal({
           {/* 右カラム: 希望条件 */}
           <div>
             <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-            <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[13px] font-medium text-[#374151]">希望職種（第1希望）</label>
-                <input type="text" placeholder="例: 営業事務・営業アシスタント" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
+                <input type="text" placeholder="例: 営業事務" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
               </div>
               <div>
                 <label className="text-[13px] font-medium text-[#374151]">希望職種（第2希望）</label>
-                <input type="text" placeholder="例: 一般事務・庶務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
+                <input type="text" placeholder="例: 一般事務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
               </div>
               <div>
                 <label className="text-[13px] font-medium text-[#374151]">希望業種</label>
