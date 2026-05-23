@@ -86,7 +86,10 @@ type Candidate = {
   desiredJobType1: string | null;
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
-  desiredPrefecture: string | null;
+  scoutNumber: string | null;
+  desiredPrefecture1: string | null;
+  desiredPrefecture2: string | null;
+  desiredIndustry2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
   guideEntries: GuideEntry[];
@@ -185,10 +188,13 @@ function EditModal({
   const [recruiterName, setRecruiterName] = useState(candidate.recruiterName || "");
   const [applicationRoute, setApplicationRoute] = useState(candidate.applicationRoute || "");
   const [mediaSource, setMediaSource] = useState(candidate.mediaSource || "");
+  const [scoutNumber, setScoutNumber] = useState(candidate.scoutNumber || "");
   const [desiredJobType1, setDesiredJobType1] = useState(candidate.desiredJobType1 || "");
   const [desiredJobType2, setDesiredJobType2] = useState(candidate.desiredJobType2 || "");
   const [desiredIndustry1, setDesiredIndustry1] = useState(candidate.desiredIndustry1 || "");
-  const [desiredPrefecture, setDesiredPrefecture] = useState(candidate.desiredPrefecture || "");
+  const [desiredIndustry2, setDesiredIndustry2] = useState(candidate.desiredIndustry2 || "");
+  const [desiredPrefecture1, setDesiredPrefecture1] = useState(candidate.desiredPrefecture1 || "");
+  const [desiredPrefecture2, setDesiredPrefecture2] = useState(candidate.desiredPrefecture2 || "");
   const [desiredEmploymentType, setDesiredEmploymentType] = useState(candidate.desiredEmploymentType || "");
   const [desiredSalaryMin, setDesiredSalaryMin] = useState<string>(
     candidate.desiredSalaryMin != null ? String(candidate.desiredSalaryMin) : ""
@@ -225,10 +231,13 @@ function EditModal({
           recruiterName: recruiterName.trim() || null,
           applicationRoute: applicationRoute || null,
           mediaSource: mediaSource || null,
+          scoutNumber: scoutNumber.trim() || null,
           desiredJobType1: desiredJobType1.trim() || null,
           desiredJobType2: desiredJobType2.trim() || null,
           desiredIndustry1: desiredIndustry1.trim() || null,
-          desiredPrefecture: desiredPrefecture || null,
+          desiredIndustry2: desiredIndustry2.trim() || null,
+          desiredPrefecture1: desiredPrefecture1 || null,
+          desiredPrefecture2: desiredPrefecture2 || null,
           desiredEmploymentType: desiredEmploymentType || null,
           desiredSalaryMin: desiredSalaryMin.trim() ? parseInt(desiredSalaryMin, 10) : null,
         }),
@@ -264,148 +273,173 @@ function EditModal({
           </button>
         </div>
         <div className="p-6">
-          <div className="grid grid-cols-2 gap-6">
-            {/* 左カラム: 基本情報 */}
-            <div>
-              <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
-              <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                担当CA <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={assignedEmployeeId}
-                onChange={(e) => setAssignedEmployeeId(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-              >
-                <option value="">選択してください</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                氏名 <span className="text-red-500">*</span>
-              </label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                フリガナ <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={furigana}
-                onCompositionStart={() => setIsFuriganaComposing(true)}
-                onCompositionEnd={(e) => { setIsFuriganaComposing(false); setFurigana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
-                onChange={(e) => setFurigana(isFuriganaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">生年月日</label>
-              <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">年齢</label>
-              <input type="text" value={calcAge(birthday)} readOnly disabled className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-100 text-gray-500" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                性別 <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-              >
-                <option value="">選択してください</option>
-                <option value="male">男性</option>
-                <option value="female">女性</option>
-                <option value="other">その他</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
-              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
-                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
-                  <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ（スカウト配信者）" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[13px] font-medium text-[#374151] mb-1">経路</label>
-                    <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                      <option value="">選択してください</option>
-                      {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-[#374151] mb-1">媒体</label>
-                    <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                      <option value="">選択してください</option>
-                      {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                </div>
+          {/* 基本情報 */}
+          <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
+                <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                  担当CA <span className="text-red-500">*</span>
+                </label>
+                <select value={assignedEmployeeId} onChange={(e) => setAssignedEmployeeId(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
+                <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
               </div>
             </div>
-            {/* 右カラム: 希望条件 */}
-            <div>
-              <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
-                  <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
-                  <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種</label>
-                  <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地</label>
-                  <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                    <option value="">選択してください</option>
-                    {REGIONS.map((region) => (
-                      <optgroup key={region.name} label={region.name}>
-                        {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望雇用形態</label>
-                  <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                    <option value="">選択してください</option>
-                    {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望年収（万円）</label>
-                  <input type="number" min="0" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} placeholder="例: 450" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-                </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                  氏名 <span className="text-red-500">*</span>
+                </label>
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                  フリガナ <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={furigana}
+                  onCompositionStart={() => setIsFuriganaComposing(true)}
+                  onCompositionEnd={(e) => { setIsFuriganaComposing(false); setFurigana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+                  onChange={(e) => setFurigana(isFuriganaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">
+                  性別 <span className="text-red-500">*</span>
+                </label>
+                <select value={gender} onChange={(e) => setGender(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  <option value="male">男性</option>
+                  <option value="female">女性</option>
+                  <option value="other">その他</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">生年月日</label>
+                <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">年齢</label>
+                <input type="text" value={calcAge(birthday)} readOnly disabled className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
+                <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
+                <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">スカウトNO</label>
+                <input type="text" value={scoutNumber} onChange={(e) => setScoutNumber(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">経路</label>
+                <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">媒体</label>
+                <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* 希望条件 */}
+          <h3 className="text-[14px] font-semibold text-[#374151] mt-5 mb-3 pt-4 border-t border-gray-200">希望条件</h3>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
+                <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
+                <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種（第1希望）</label>
+                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種（第2希望）</label>
+                <input type="text" value={desiredIndustry2} onChange={(e) => setDesiredIndustry2(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地（第1希望）</label>
+                <select value={desiredPrefecture1} onChange={(e) => setDesiredPrefecture1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {REGIONS.map((region) => (
+                    <optgroup key={region.name} label={region.name}>
+                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地（第2希望）</label>
+                <select value={desiredPrefecture2} onChange={(e) => setDesiredPrefecture2(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {REGIONS.map((region) => (
+                    <optgroup key={region.name} label={region.name}>
+                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望雇用形態</label>
+                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望年収（万円）</label>
+                <input type="number" min="0" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} placeholder="例: 450" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
               </div>
             </div>
           </div>

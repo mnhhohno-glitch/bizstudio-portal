@@ -23,7 +23,9 @@ export type ParsedResumeFields = {
   desiredJobType1: string | null;
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
-  desiredPrefecture: string | null;
+  desiredIndustry2: string | null;
+  desiredPrefecture1: string | null;
+  desiredPrefecture2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
 };
@@ -103,7 +105,9 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
       desiredJobType1: null,
       desiredJobType2: null,
       desiredIndustry1: null,
-      desiredPrefecture: null,
+      desiredIndustry2: null,
+      desiredPrefecture1: null,
+      desiredPrefecture2: null,
       desiredEmploymentType: null,
       desiredSalaryMin: null,
     };
@@ -224,11 +228,32 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     "希望業種1",
   ]);
 
-  const desiredPrefecture = pickString(flat, [
+  const desiredIndustry2 = pickString(flat, [
+    "desiredIndustry2",
+    "desired_industry_2",
+    "desired_industry2",
+    "希望業種2",
+    "希望業種_第2希望",
+  ]);
+
+  const desiredPrefecture1 = pickString(flat, [
+    "desiredPrefecture1",
     "desiredPrefecture",
+    "desired_prefecture_1",
+    "desired_prefecture1",
     "desired_prefecture",
     "希望勤務地",
+    "希望勤務地1",
     "希望都道府県",
+    "希望都道府県1",
+  ]);
+
+  const desiredPrefecture2 = pickString(flat, [
+    "desiredPrefecture2",
+    "desired_prefecture_2",
+    "desired_prefecture2",
+    "希望勤務地2",
+    "希望都道府県2",
   ]);
 
   const desiredEmploymentType = pickString(flat, [
@@ -265,7 +290,9 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     desiredJobType1,
     desiredJobType2,
     desiredIndustry1,
-    desiredPrefecture,
+    desiredIndustry2,
+    desiredPrefecture1,
+    desiredPrefecture2,
     desiredEmploymentType,
     desiredSalaryMin,
   };
