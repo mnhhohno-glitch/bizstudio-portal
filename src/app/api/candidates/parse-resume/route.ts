@@ -69,6 +69,8 @@ export async function POST(request: Request) {
 
 ## 抽出項目（応募情報 - 該当セクションがあれば）
 - consultantName: コンサルタント名（スカウト配信者の氏名、例「藤本なつみ」）
+- applicationRoute: 応募経路（マイナビ転職スカウト経由なら「スカウト」、それ以外は推定可能なら値、不明なら null）
+- mediaSource: 媒体名（PDFが「マイナビ転職」のWEB履歴書なら「マイナビ転職」、それ以外は推定可能なら値、不明なら null）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -118,6 +120,8 @@ export async function POST(request: Request) {
       desiredEmploymentType: parsed.desiredEmploymentType || null,
       desiredSalaryMin: typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,
       consultantName: parsed.consultantName || null,
+      applicationRoute: parsed.applicationRoute || null,
+      mediaSource: parsed.mediaSource || null,
     });
   } catch (error) {
     console.error("Parse resume error:", error);
