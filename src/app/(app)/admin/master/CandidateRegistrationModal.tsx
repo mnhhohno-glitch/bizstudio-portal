@@ -129,8 +129,8 @@ export default function CandidateRegistrationModal({
       if (data.phone) setPhone(data.phone);
       if (data.address) setAddress(data.address);
       if (data.consultantName) setRecruiterName(data.consultantName);
-      if (data.applicationRoute) setApplicationRoute(data.applicationRoute);
-      if (data.mediaSource) setMediaSource(data.mediaSource);
+      setApplicationRoute(data.applicationRoute || "スカウト");
+      setMediaSource(data.mediaSource || "マイナビ転職");
       toast.success("履歴書の解析が完了しました");
     } catch {
       toast.error("PDF解析に失敗しました");
