@@ -256,6 +256,14 @@ model Candidate {
   applicationRoute String? @map("application_route")
   mediaSource      String? @map("media_source")
 
+  // 希望条件（T-064: AI 自動取込 + CA 編集可）
+  desiredJobType1       String? @map("desired_job_type_1")
+  desiredJobType2       String? @map("desired_job_type_2")
+  desiredIndustry1      String? @map("desired_industry_1")
+  desiredPrefecture     String? @map("desired_prefecture")
+  desiredEmploymentType String? @map("desired_employment_type")
+  desiredSalaryMin      Int?    @map("desired_salary_min")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   jimuSessions           JimuSession[]

@@ -22,6 +22,12 @@ type Candidate = {
   recruiterName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  desiredJobType1: string | null;
+  desiredJobType2: string | null;
+  desiredIndustry1: string | null;
+  desiredPrefecture: string | null;
+  desiredEmploymentType: string | null;
+  desiredSalaryMin: number | null;
   createdAt: string;
 };
 
@@ -279,6 +285,52 @@ export default function CandidateHeader({
           )}
         </div>
       </div>
+
+      {/* Row 2.5: 希望条件サマリ（全 null なら非表示） */}
+      {(candidate.desiredJobType1 ||
+        candidate.desiredJobType2 ||
+        candidate.desiredIndustry1 ||
+        candidate.desiredPrefecture ||
+        candidate.desiredEmploymentType ||
+        candidate.desiredSalaryMin != null) && (
+        <div className="px-6 pb-2">
+          <div className="flex items-center gap-2 text-[13px] text-gray-600 flex-wrap">
+            <span className="text-gray-400">希望:</span>
+            {(candidate.desiredJobType1 || candidate.desiredJobType2) && (
+              <span>
+                職種:
+                {[candidate.desiredJobType1, candidate.desiredJobType2]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </span>
+            )}
+            {candidate.desiredIndustry1 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>業種:{candidate.desiredIndustry1}</span>
+              </>
+            )}
+            {candidate.desiredPrefecture && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>勤務地:{candidate.desiredPrefecture}</span>
+              </>
+            )}
+            {candidate.desiredEmploymentType && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>雇用形態:{candidate.desiredEmploymentType}</span>
+              </>
+            )}
+            {candidate.desiredSalaryMin != null && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>年収:{candidate.desiredSalaryMin}万円〜</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Row 3: URL / Resource buttons */}
       <div className="px-6 pb-3">

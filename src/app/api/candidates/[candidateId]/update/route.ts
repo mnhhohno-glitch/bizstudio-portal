@@ -64,6 +64,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.mediaSource !== undefined) {
     updateData.mediaSource = body.mediaSource?.trim() || null;
   }
+  if (body.desiredJobType1 !== undefined) {
+    updateData.desiredJobType1 = body.desiredJobType1?.trim() || null;
+  }
+  if (body.desiredJobType2 !== undefined) {
+    updateData.desiredJobType2 = body.desiredJobType2?.trim() || null;
+  }
+  if (body.desiredIndustry1 !== undefined) {
+    updateData.desiredIndustry1 = body.desiredIndustry1?.trim() || null;
+  }
+  if (body.desiredPrefecture !== undefined) {
+    updateData.desiredPrefecture = body.desiredPrefecture?.trim() || null;
+  }
+  if (body.desiredEmploymentType !== undefined) {
+    updateData.desiredEmploymentType = body.desiredEmploymentType?.trim() || null;
+  }
+  if (body.desiredSalaryMin !== undefined) {
+    updateData.desiredSalaryMin = typeof body.desiredSalaryMin === "number" ? body.desiredSalaryMin : null;
+  }
   if (body.birthday !== undefined) {
     updateData.birthday = body.birthday ? new Date(body.birthday) : null;
   }
