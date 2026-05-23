@@ -17,7 +17,9 @@ export type GeminiResumeResult = {
   desiredJobType1: string | null;
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
-  desiredPrefecture: string | null;
+  desiredIndustry2: string | null;
+  desiredPrefecture1: string | null;
+  desiredPrefecture2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
   consultantName: string | null;
@@ -41,7 +43,9 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 - desiredJobType1: 希望職種の第1希望（例 営業事務・営業アシスタント）
 - desiredJobType2: 希望職種の第2希望（例 一般事務・庶務）
 - desiredIndustry1: 希望業種の第1希望
-- desiredPrefecture: 希望勤務地の都道府県（例 神奈川県）
+- desiredIndustry2: 希望業種の第2希望
+- desiredPrefecture1: 希望勤務地の第1希望（都道府県、例 神奈川県）
+- desiredPrefecture2: 希望勤務地の第2希望（都道府県、例 東京都）
 - desiredEmploymentType: 希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他 のいずれか）
 - desiredSalaryMin: 希望年収の下限（万円単位の整数、例 450）
 
@@ -140,7 +144,9 @@ export async function parseResumeWithGemini(
     desiredJobType1: (parsed.desiredJobType1 as string) || null,
     desiredJobType2: (parsed.desiredJobType2 as string) || null,
     desiredIndustry1: (parsed.desiredIndustry1 as string) || null,
-    desiredPrefecture: (parsed.desiredPrefecture as string) || null,
+    desiredIndustry2: (parsed.desiredIndustry2 as string) || null,
+    desiredPrefecture1: (parsed.desiredPrefecture1 as string) || null,
+    desiredPrefecture2: (parsed.desiredPrefecture2 as string) || null,
     desiredEmploymentType: (parsed.desiredEmploymentType as string) || null,
     desiredSalaryMin:
       typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,

@@ -21,17 +21,28 @@ interface CandidateRegistrationModalProps {
 }
 
 function normalizeName(name: string): string {
-  return name.replace(/\u3000/g, " ").replace(/\s+/g, " ").trim();
+  return name.replace(/　/g, " ").replace(/\s+/g, " ").trim();
 }
 
-const ROUTE_OPTIONS = ["\u30b9\u30ab\u30a6\u30c8", "\u5fdc\u52df"];
+function calculateAge(birthdayStr: string): string {
+  if (!birthdayStr) return "";
+  const birth = new Date(birthdayStr);
+  if (isNaN(birth.getTime())) return "";
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age >= 0 ? `${age}歳` : "";
+}
+
+const ROUTE_OPTIONS = ["スカウト", "応募"];
 const MEDIA_OPTIONS = [
-  "\u30de\u30a4\u30ca\u30d3\u8ee2\u8077",
+  "マイナビ転職",
   "indeed",
-  "\u65e5\u7d4cHR",
-  "\u81ea\u793eHP",
+  "日経HR",
+  "自社HP",
   "dodaMaps",
-  "\u30de\u30a4\u30ca\u30d3\u30a8\u30fc\u30b8\u30a7\u30f3\u30c8",
+  "マイナビエージェント",
 ];
 
 export default function CandidateRegistrationModal({
@@ -54,10 +65,13 @@ export default function CandidateRegistrationModal({
   const [recruiterName, setRecruiterName] = useState("");
   const [applicationRoute, setApplicationRoute] = useState("");
   const [mediaSource, setMediaSource] = useState("");
+  const [scoutNumber, setScoutNumber] = useState("");
   const [desiredJobType1, setDesiredJobType1] = useState("");
   const [desiredJobType2, setDesiredJobType2] = useState("");
   const [desiredIndustry1, setDesiredIndustry1] = useState("");
-  const [desiredPrefecture, setDesiredPrefecture] = useState("");
+  const [desiredIndustry2, setDesiredIndustry2] = useState("");
+  const [desiredPrefecture1, setDesiredPrefecture1] = useState("");
+  const [desiredPrefecture2, setDesiredPrefecture2] = useState("");
   const [desiredEmploymentType, setDesiredEmploymentType] = useState("");
   const [desiredSalaryMin, setDesiredSalaryMin] = useState("");
   const [loading, setLoading] = useState(false);
@@ -108,10 +122,13 @@ export default function CandidateRegistrationModal({
     setRecruiterName("");
     setApplicationRoute("");
     setMediaSource("");
+    setScoutNumber("");
     setDesiredJobType1("");
     setDesiredJobType2("");
     setDesiredIndustry1("");
-    setDesiredPrefecture("");
+    setDesiredIndustry2("");
+    setDesiredPrefecture1("");
+    setDesiredPrefecture2("");
     setDesiredEmploymentType("");
     setDesiredSalaryMin("");
     setPdfFile(null);
@@ -148,7 +165,9 @@ export default function CandidateRegistrationModal({
       if (data.desiredJobType1) setDesiredJobType1(data.desiredJobType1);
       if (data.desiredJobType2) setDesiredJobType2(data.desiredJobType2);
       if (data.desiredIndustry1) setDesiredIndustry1(data.desiredIndustry1);
-      if (data.desiredPrefecture) setDesiredPrefecture(data.desiredPrefecture);
+      if (data.desiredIndustry2) setDesiredIndustry2(data.desiredIndustry2);
+      if (data.desiredPrefecture1) setDesiredPrefecture1(data.desiredPrefecture1);
+      if (data.desiredPrefecture2) setDesiredPrefecture2(data.desiredPrefecture2);
       if (data.desiredEmploymentType) setDesiredEmploymentType(data.desiredEmploymentType);
       if (typeof data.desiredSalaryMin === "number") setDesiredSalaryMin(String(data.desiredSalaryMin));
       toast.success("履歴書の解析が完了しました");
@@ -198,10 +217,13 @@ export default function CandidateRegistrationModal({
           recruiterName: recruiterName.trim() || undefined,
           applicationRoute: applicationRoute || undefined,
           mediaSource: mediaSource || undefined,
+          scoutNumber: scoutNumber.trim() || undefined,
           desiredJobType1: desiredJobType1.trim() || undefined,
           desiredJobType2: desiredJobType2.trim() || undefined,
           desiredIndustry1: desiredIndustry1.trim() || undefined,
-          desiredPrefecture: desiredPrefecture || undefined,
+          desiredIndustry2: desiredIndustry2.trim() || undefined,
+          desiredPrefecture1: desiredPrefecture1 || undefined,
+          desiredPrefecture2: desiredPrefecture2 || undefined,
           desiredEmploymentType: desiredEmploymentType || undefined,
           desiredSalaryMin: desiredSalaryMin.trim() ? parseInt(desiredSalaryMin, 10) : undefined,
         }),
@@ -370,125 +392,167 @@ export default function CandidateRegistrationModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-6">
-          {/* 左カラム: 基本情報 */}
-          <div>
-            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
-            <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">求職者番号 <span className="text-red-500">*</span></label>
-            <input type="text" inputMode="numeric" placeholder="例: 5001234" maxLength={7} value={candidateNumber} onInput={(e) => setCandidateNumber((e.target as HTMLInputElement).value.replace(/\D/g, ""))} className={errors.candidateNumber ? errorInputClass : inputClass} />
-            <p className="mt-0.5 text-[11px] text-[#6B7280]">※ 自動生成（編集可）</p>
-            {errors.candidateNumber && <p className="text-red-500 text-xs mt-0.5">{errors.candidateNumber}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">担当CA <span className="text-red-500">*</span></label>
-            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
-              <option value="">選択してください</option>
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-            </select>
-            {errors.employeeId && <p className="text-red-500 text-xs mt-0.5">{errors.employeeId}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">氏名 <span className="text-red-500">*</span></label>
-            <input type="text" placeholder="例: 山田 太郎" value={candidateName} onChange={(e) => setCandidateName(e.target.value)} className={errors.candidateName ? errorInputClass : inputClass} />
-            {errors.candidateName && <p className="text-red-500 text-xs mt-0.5">{errors.candidateName}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">フリガナ <span className="text-red-500">*</span></label>
-            <input type="text" placeholder="例: ヤマダ タロウ" value={nameKana}
-              onCompositionStart={() => setIsKanaComposing(true)}
-              onCompositionEnd={(e) => { setIsKanaComposing(false); setNameKana(e.currentTarget.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
-              onChange={(e) => setNameKana(isKanaComposing ? e.target.value : e.target.value.replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
-              className={errors.nameKana ? errorInputClass : inputClass} />
-            {errors.nameKana && <p className="text-red-500 text-xs mt-0.5">{errors.nameKana}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">性別 <span className="text-red-500">*</span></label>
-            <select value={gender} onChange={(e) => setGender(e.target.value)} className={errors.gender ? errorInputClass : inputClass}>
-              <option value="">選択してください</option>
-              <option value="male">男性</option>
-              <option value="female">女性</option>
-              <option value="other">その他</option>
-            </select>
-            {errors.gender && <p className="text-red-500 text-xs mt-0.5">{errors.gender}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">生年月日</label>
-            <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">メールアドレス</label>
-            <input type="email" placeholder="例: yamada@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={errors.email ? errorInputClass : inputClass} />
-            {errors.email && <p className="text-red-500 text-xs mt-0.5">{errors.email}</p>}
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">電話番号</label>
-            <input type="tel" placeholder="例: 08012345678" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
-          </div>
-          <div className="col-span-2">
-            <label className="text-[13px] font-medium text-[#374151]">住所</label>
-            <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">経路</label>
-            <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className={inputClass}>
-              <option value="">選択してください</option>
-              {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[13px] font-medium text-[#374151]">媒体</label>
-            <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className={inputClass}>
-              <option value="">選択してください</option>
-              {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="text-[13px] font-medium text-[#374151]">担当RC</label>
-            <input type="text" placeholder="例: 藤本 なつみ（スカウト配信者）" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} className={inputClass} />
-          </div>
+        {/* 基本情報 */}
+        <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">求職者番号 <span className="text-red-500">*</span></label>
+              <input type="text" inputMode="numeric" placeholder="例: 5001234" maxLength={7} value={candidateNumber} onInput={(e) => setCandidateNumber((e.target as HTMLInputElement).value.replace(/\D/g, ""))} className={errors.candidateNumber ? errorInputClass : inputClass} />
+              <p className="mt-0.5 text-[11px] text-[#6B7280]">※ 自動生成（編集可）</p>
+              {errors.candidateNumber && <p className="text-red-500 text-xs mt-0.5">{errors.candidateNumber}</p>}
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">担当CA <span className="text-red-500">*</span></label>
+              <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
+                <option value="">選択してください</option>
+                {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+              </select>
+              {errors.employeeId && <p className="text-red-500 text-xs mt-0.5">{errors.employeeId}</p>}
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">担当RC</label>
+              <input type="text" placeholder="例: 藤本 なつみ" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} className={inputClass} />
             </div>
           </div>
 
-          {/* 右カラム: 希望条件 */}
-          <div>
-            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望職種（第1希望）</label>
-                <input type="text" placeholder="例: 営業事務" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望職種（第2希望）</label>
-                <input type="text" placeholder="例: 一般事務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望業種</label>
-                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className={inputClass} />
-              </div>
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望勤務地</label>
-                <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className={inputClass}>
-                  <option value="">選択してください</option>
-                  {REGIONS.map((region) => (
-                    <optgroup key={region.name} label={region.name}>
-                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望雇用形態</label>
-                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className={inputClass}>
-                  <option value="">選択してください</option>
-                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[13px] font-medium text-[#374151]">希望年収（万円）</label>
-                <input type="number" min="0" placeholder="例: 450" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} className={inputClass} />
-              </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">氏名 <span className="text-red-500">*</span></label>
+              <input type="text" placeholder="例: 山田 太郎" value={candidateName} onChange={(e) => setCandidateName(e.target.value)} className={errors.candidateName ? errorInputClass : inputClass} />
+              {errors.candidateName && <p className="text-red-500 text-xs mt-0.5">{errors.candidateName}</p>}
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">フリガナ <span className="text-red-500">*</span></label>
+              <input type="text" placeholder="例: ヤマダ タロウ" value={nameKana}
+                onCompositionStart={() => setIsKanaComposing(true)}
+                onCompositionEnd={(e) => { setIsKanaComposing(false); setNameKana(e.currentTarget.value.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60))); }}
+                onChange={(e) => setNameKana(isKanaComposing ? e.target.value : e.target.value.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60)))}
+                className={errors.nameKana ? errorInputClass : inputClass} />
+              {errors.nameKana && <p className="text-red-500 text-xs mt-0.5">{errors.nameKana}</p>}
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">性別 <span className="text-red-500">*</span></label>
+              <select value={gender} onChange={(e) => setGender(e.target.value)} className={errors.gender ? errorInputClass : inputClass}>
+                <option value="">選択してください</option>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+                <option value="other">その他</option>
+              </select>
+              {errors.gender && <p className="text-red-500 text-xs mt-0.5">{errors.gender}</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">生年月日</label>
+              <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">年齢</label>
+              <input type="text" value={calculateAge(birthday)} readOnly disabled placeholder="生年月日から自動計算" className="mt-1 w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-[13px] text-gray-500" />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">電話番号</label>
+              <input type="tel" placeholder="例: 08012345678" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">住所</label>
+              <input type="text" placeholder="例: 埼玉県三郷市谷中" value={address} onChange={(e) => setAddress(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">メールアドレス</label>
+              <input type="email" placeholder="例: yamada@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={errors.email ? errorInputClass : inputClass} />
+              {errors.email && <p className="text-red-500 text-xs mt-0.5">{errors.email}</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">スカウトNO</label>
+              <input type="text" value={scoutNumber} onChange={(e) => setScoutNumber(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">経路</label>
+              <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">媒体</label>
+              <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* 希望条件 */}
+        <h3 className="text-[14px] font-semibold text-[#374151] mt-5 mb-3 pt-4 border-t border-gray-200">希望条件</h3>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望職種（第1希望）</label>
+              <input type="text" placeholder="例: 営業事務" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望職種（第2希望）</label>
+              <input type="text" placeholder="例: 一般事務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望業種（第1希望）</label>
+              <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望業種（第2希望）</label>
+              <input type="text" value={desiredIndustry2} onChange={(e) => setDesiredIndustry2(e.target.value)} className={inputClass} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望勤務地（第1希望）</label>
+              <select value={desiredPrefecture1} onChange={(e) => setDesiredPrefecture1(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                {REGIONS.map((region) => (
+                  <optgroup key={region.name} label={region.name}>
+                    {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望勤務地（第2希望）</label>
+              <select value={desiredPrefecture2} onChange={(e) => setDesiredPrefecture2(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                {REGIONS.map((region) => (
+                  <optgroup key={region.name} label={region.name}>
+                    {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望雇用形態</label>
+              <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">希望年収（万円）</label>
+              <input type="number" min="0" placeholder="例: 450" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} className={inputClass} />
             </div>
           </div>
         </div>

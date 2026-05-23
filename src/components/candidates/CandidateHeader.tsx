@@ -22,10 +22,13 @@ type Candidate = {
   recruiterName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  scoutNumber: string | null;
   desiredJobType1: string | null;
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
-  desiredPrefecture: string | null;
+  desiredIndustry2: string | null;
+  desiredPrefecture1: string | null;
+  desiredPrefecture2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
   createdAt: string;
@@ -290,7 +293,7 @@ export default function CandidateHeader({
       {(candidate.desiredJobType1 ||
         candidate.desiredJobType2 ||
         candidate.desiredIndustry1 ||
-        candidate.desiredPrefecture ||
+        candidate.desiredPrefecture1 ||
         candidate.desiredEmploymentType ||
         candidate.desiredSalaryMin != null) && (
         <div className="px-6 pb-2">
@@ -310,10 +313,10 @@ export default function CandidateHeader({
                 <span>業種:{candidate.desiredIndustry1}</span>
               </>
             )}
-            {candidate.desiredPrefecture && (
+            {candidate.desiredPrefecture1 && (
               <>
                 <span className="text-gray-300">|</span>
-                <span>勤務地:{candidate.desiredPrefecture}</span>
+                <span>勤務地:{candidate.desiredPrefecture1}</span>
               </>
             )}
             {candidate.desiredEmploymentType && (

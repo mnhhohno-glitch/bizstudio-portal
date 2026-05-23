@@ -63,7 +63,9 @@ export async function POST(request: Request) {
 - desiredJobType1: 希望職種の第1希望（例 営業事務・営業アシスタント）
 - desiredJobType2: 希望職種の第2希望（例 一般事務・庶務）
 - desiredIndustry1: 希望業種の第1希望
-- desiredPrefecture: 希望勤務地の都道府県（例 神奈川県）
+- desiredIndustry2: 希望業種の第2希望
+- desiredPrefecture1: 希望勤務地の第1希望（都道府県、例 神奈川県）
+- desiredPrefecture2: 希望勤務地の第2希望（都道府県、例 東京都）
 - desiredEmploymentType: 希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他 のいずれか）
 - desiredSalaryMin: 希望年収の下限（万円単位の整数、例 450）
 
@@ -126,7 +128,9 @@ export async function POST(request: Request) {
       desiredJobType1: parsed.desiredJobType1 || null,
       desiredJobType2: parsed.desiredJobType2 || null,
       desiredIndustry1: parsed.desiredIndustry1 || null,
-      desiredPrefecture: parsed.desiredPrefecture || null,
+      desiredIndustry2: parsed.desiredIndustry2 || null,
+      desiredPrefecture1: parsed.desiredPrefecture1 || null,
+      desiredPrefecture2: parsed.desiredPrefecture2 || null,
       desiredEmploymentType: parsed.desiredEmploymentType || null,
       desiredSalaryMin: typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,
       consultantName: parsed.consultantName || null,
