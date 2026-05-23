@@ -370,7 +370,7 @@ export default function CandidateRegistrationModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-[1fr,1fr] gap-6">
+        <div className="grid grid-cols-2 gap-6">
           {/* 左カラム: 基本情報 */}
           <div>
             <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
