@@ -92,7 +92,7 @@ export async function parseResumeWithGemini(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 2000,
+          maxOutputTokens: 4000,
         },
       }),
     },

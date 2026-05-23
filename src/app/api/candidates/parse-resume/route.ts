@@ -83,7 +83,7 @@ export async function POST(request: Request) {
           ],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 2000,
+            maxOutputTokens: 4000,
           },
         }),
       }
@@ -103,7 +103,17 @@ export async function POST(request: Request) {
 
     // JSONをパース（```jsonラッパーがある場合も対応）
     const jsonStr = rawText.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(jsonStr);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error("Parse resume JSON parse failed:", {
+        error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        rawTextLength: rawText.length,
+        rawTextTail: rawText.slice(-200),
+      });
+      return NextResponse.json({ error: "PDF解析に失敗しました（応答形式エラー）" }, { status: 500 });
+    }
 
     return NextResponse.json({
       name: parsed.name || null,
