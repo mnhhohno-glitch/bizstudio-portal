@@ -249,7 +249,7 @@ function EditModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-[8px] w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl"
+        className="bg-white rounded-[8px] w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">

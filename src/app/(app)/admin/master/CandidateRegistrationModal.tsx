@@ -330,7 +330,7 @@ export default function CandidateRegistrationModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[16px] font-bold text-[#374151]">求職者を新規登録</h2>
           <button onClick={handleClose} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
