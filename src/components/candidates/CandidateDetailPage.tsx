@@ -264,14 +264,19 @@ function EditModal({
           </button>
         </div>
         <div className="p-6">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-[1fr,1fr] gap-6">
+            {/* 左カラム: 基本情報 */}
             <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
+              <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[13px] font-medium text-[#374151] mb-1">求職者番号</label>
               <input type="text" value={candidateNo} onChange={(e) => setCandidateNo(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                担当キャリアアドバイザー <span className="text-red-500">*</span>
+                担当CA <span className="text-red-500">*</span>
               </label>
               <select
                 value={assignedEmployeeId}
@@ -332,73 +337,75 @@ function EditModal({
               <label className="block text-[13px] font-medium text-[#374151] mb-1">電話番号</label>
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
             </div>
-          </div>
-          <div className="mt-4 space-y-4">
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
+                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
+                  <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ（スカウト配信者）" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[13px] font-medium text-[#374151] mb-1">経路</label>
+                    <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                      <option value="">選択してください</option>
+                      {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-medium text-[#374151] mb-1">媒体</label>
+                    <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                      <option value="">選択してください</option>
+                      {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* 右カラム: 希望条件 */}
             <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">住所</label>
-              <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-[#374151] mb-1">担当RC</label>
-              <input type="text" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} placeholder="例: 藤本 なつみ（スカウト配信者）" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">経路</label>
-                <select value={applicationRoute} onChange={(e) => setApplicationRoute(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                  <option value="">選択してください</option>
-                  {ROUTE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">媒体</label>
-                <select value={mediaSource} onChange={(e) => setMediaSource(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                  <option value="">選択してください</option>
-                  {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
-                <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務・営業アシスタント" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
-                <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務・庶務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種</label>
-                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地</label>
-                <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                  <option value="">選択してください</option>
-                  {REGIONS.map((region) => (
-                    <optgroup key={region.name} label={region.name}>
-                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望雇用形態</label>
-                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
-                  <option value="">選択してください</option>
-                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望年収（万円）</label>
-                <input type="number" min="0" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} placeholder="例: 450" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
+                  <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務・営業アシスタント" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
+                  <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務・庶務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種</label>
+                  <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地</label>
+                  <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                    <option value="">選択してください</option>
+                    {REGIONS.map((region) => (
+                      <optgroup key={region.name} label={region.name}>
+                        {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望雇用形態</label>
+                  <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                    <option value="">選択してください</option>
+                    {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-[#374151] mb-1">希望年収（万円）</label>
+                  <input type="number" min="0" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} placeholder="例: 450" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                </div>
               </div>
             </div>
           </div>

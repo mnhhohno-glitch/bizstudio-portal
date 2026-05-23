@@ -370,7 +370,11 @@ export default function CandidateRegistrationModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-[1fr,1fr] gap-6">
+          {/* 左カラム: 基本情報 */}
+          <div>
+            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">基本情報</h3>
+            <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-[13px] font-medium text-[#374151]">求職者番号 <span className="text-red-500">*</span></label>
             <input type="text" inputMode="numeric" placeholder="例: 5001234" maxLength={7} value={candidateNumber} onInput={(e) => setCandidateNumber((e.target as HTMLInputElement).value.replace(/\D/g, ""))} className={errors.candidateNumber ? errorInputClass : inputClass} />
@@ -378,7 +382,7 @@ export default function CandidateRegistrationModal({
             {errors.candidateNumber && <p className="text-red-500 text-xs mt-0.5">{errors.candidateNumber}</p>}
           </div>
           <div>
-            <label className="text-[13px] font-medium text-[#374151]">担当キャリアアドバイザー <span className="text-red-500">*</span></label>
+            <label className="text-[13px] font-medium text-[#374151]">担当CA <span className="text-red-500">*</span></label>
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
               <option value="">選択してください</option>
               {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
@@ -444,44 +448,47 @@ export default function CandidateRegistrationModal({
             <label className="text-[13px] font-medium text-[#374151]">担当RC</label>
             <input type="text" placeholder="例: 藤本 なつみ（スカウト配信者）" value={recruiterName} onChange={(e) => setRecruiterName(e.target.value)} className={inputClass} />
           </div>
-        </div>
+            </div>
+          </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望職種（第1希望）</label>
-              <input type="text" placeholder="例: 営業事務・営業アシスタント" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
-            </div>
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望職種（第2希望）</label>
-              <input type="text" placeholder="例: 一般事務・庶務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
-            </div>
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望業種</label>
-              <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className={inputClass} />
-            </div>
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望勤務地</label>
-              <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className={inputClass}>
-                <option value="">選択してください</option>
-                {REGIONS.map((region) => (
-                  <optgroup key={region.name} label={region.name}>
-                    {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望雇用形態</label>
-              <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className={inputClass}>
-                <option value="">選択してください</option>
-                {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[13px] font-medium text-[#374151]">希望年収（万円）</label>
-              <input type="number" min="0" placeholder="例: 450" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} className={inputClass} />
+          {/* 右カラム: 希望条件 */}
+          <div>
+            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望職種（第1希望）</label>
+                <input type="text" placeholder="例: 営業事務・営業アシスタント" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望職種（第2希望）</label>
+                <input type="text" placeholder="例: 一般事務・庶務" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望業種</label>
+                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望勤務地</label>
+                <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className={inputClass}>
+                  <option value="">選択してください</option>
+                  {REGIONS.map((region) => (
+                    <optgroup key={region.name} label={region.name}>
+                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望雇用形態</label>
+                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className={inputClass}>
+                  <option value="">選択してください</option>
+                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[13px] font-medium text-[#374151]">希望年収（万円）</label>
+                <input type="number" min="0" placeholder="例: 450" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} className={inputClass} />
+              </div>
             </div>
           </div>
         </div>
