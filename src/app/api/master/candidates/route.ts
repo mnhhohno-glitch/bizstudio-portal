@@ -85,6 +85,12 @@ const createSchema = z.object({
   recruiterName: z.string().optional().or(z.literal("")),
   applicationRoute: z.string().optional().or(z.literal("")),
   mediaSource: z.string().optional().or(z.literal("")),
+  desiredJobType1: z.string().optional().nullable(),
+  desiredJobType2: z.string().optional().nullable(),
+  desiredIndustry1: z.string().optional().nullable(),
+  desiredPrefecture: z.string().optional().nullable(),
+  desiredEmploymentType: z.string().optional().nullable(),
+  desiredSalaryMin: z.number().int().optional().nullable(),
 });
 
 export async function POST(request: NextRequest) {
@@ -104,7 +110,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { candidateNumber, name, nameKana, email, phone, address, gender, birthday, employeeId, recruiterName, applicationRoute, mediaSource } = parsed.data;
+    const {
+      candidateNumber,
+      name,
+      nameKana,
+      email,
+      phone,
+      address,
+      gender,
+      birthday,
+      employeeId,
+      recruiterName,
+      applicationRoute,
+      mediaSource,
+      desiredJobType1,
+      desiredJobType2,
+      desiredIndustry1,
+      desiredPrefecture,
+      desiredEmploymentType,
+      desiredSalaryMin,
+    } = parsed.data;
 
     // 氏名バリデーション
     const nameValidation = validateName(name);
@@ -152,6 +177,12 @@ export async function POST(request: NextRequest) {
         ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
         ...(applicationRoute?.trim() ? { applicationRoute: applicationRoute.trim() } : {}),
         ...(mediaSource?.trim() ? { mediaSource: mediaSource.trim() } : {}),
+        ...(desiredJobType1?.trim() ? { desiredJobType1: desiredJobType1.trim() } : {}),
+        ...(desiredJobType2?.trim() ? { desiredJobType2: desiredJobType2.trim() } : {}),
+        ...(desiredIndustry1?.trim() ? { desiredIndustry1: desiredIndustry1.trim() } : {}),
+        ...(desiredPrefecture?.trim() ? { desiredPrefecture: desiredPrefecture.trim() } : {}),
+        ...(desiredEmploymentType?.trim() ? { desiredEmploymentType: desiredEmploymentType.trim() } : {}),
+        ...(typeof desiredSalaryMin === "number" ? { desiredSalaryMin } : {}),
         employeeId,
       },
     });

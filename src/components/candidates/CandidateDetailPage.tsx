@@ -15,6 +15,8 @@ import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
+import { REGIONS } from "@/lib/constants/prefectures";
+import { EMPLOYMENT_TYPES } from "@/lib/constants/employment-types";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -81,6 +83,12 @@ type Candidate = {
   recruiterName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  desiredJobType1: string | null;
+  desiredJobType2: string | null;
+  desiredIndustry1: string | null;
+  desiredPrefecture: string | null;
+  desiredEmploymentType: string | null;
+  desiredSalaryMin: number | null;
   guideEntries: GuideEntry[];
   notes: Note[];
   createdAt: string;
@@ -177,6 +185,14 @@ function EditModal({
   const [recruiterName, setRecruiterName] = useState(candidate.recruiterName || "");
   const [applicationRoute, setApplicationRoute] = useState(candidate.applicationRoute || "");
   const [mediaSource, setMediaSource] = useState(candidate.mediaSource || "");
+  const [desiredJobType1, setDesiredJobType1] = useState(candidate.desiredJobType1 || "");
+  const [desiredJobType2, setDesiredJobType2] = useState(candidate.desiredJobType2 || "");
+  const [desiredIndustry1, setDesiredIndustry1] = useState(candidate.desiredIndustry1 || "");
+  const [desiredPrefecture, setDesiredPrefecture] = useState(candidate.desiredPrefecture || "");
+  const [desiredEmploymentType, setDesiredEmploymentType] = useState(candidate.desiredEmploymentType || "");
+  const [desiredSalaryMin, setDesiredSalaryMin] = useState<string>(
+    candidate.desiredSalaryMin != null ? String(candidate.desiredSalaryMin) : ""
+  );
   const [saving, setSaving] = useState(false);
 
   const calcAge = (bd: string) => {
@@ -209,6 +225,12 @@ function EditModal({
           recruiterName: recruiterName.trim() || null,
           applicationRoute: applicationRoute || null,
           mediaSource: mediaSource || null,
+          desiredJobType1: desiredJobType1.trim() || null,
+          desiredJobType2: desiredJobType2.trim() || null,
+          desiredIndustry1: desiredIndustry1.trim() || null,
+          desiredPrefecture: desiredPrefecture || null,
+          desiredEmploymentType: desiredEmploymentType || null,
+          desiredSalaryMin: desiredSalaryMin.trim() ? parseInt(desiredSalaryMin, 10) : null,
         }),
       });
       if (!res.ok) throw new Error();
@@ -338,6 +360,45 @@ function EditModal({
                   <option value="">選択してください</option>
                   {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
+                <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務・営業アシスタント" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
+                <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務・庶務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種</label>
+                <input type="text" value={desiredIndustry1} onChange={(e) => setDesiredIndustry1(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望勤務地</label>
+                <select value={desiredPrefecture} onChange={(e) => setDesiredPrefecture(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {REGIONS.map((region) => (
+                    <optgroup key={region.name} label={region.name}>
+                      {region.prefectures.map((pref) => <option key={pref} value={pref}>{pref}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望雇用形態</label>
+                <select value={desiredEmploymentType} onChange={(e) => setDesiredEmploymentType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">希望年収（万円）</label>
+                <input type="number" min="0" value={desiredSalaryMin} onChange={(e) => setDesiredSalaryMin(e.target.value)} placeholder="例: 450" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
               </div>
             </div>
           </div>

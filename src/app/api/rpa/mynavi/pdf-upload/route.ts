@@ -198,6 +198,12 @@ export async function POST(req: NextRequest) {
         applicationRoute: "スカウト",
         mediaSource: "マイナビ転職",
         birthday: parsed.birthDate,
+        ...(parsed.desiredJobType1 ? { desiredJobType1: parsed.desiredJobType1 } : {}),
+        ...(parsed.desiredJobType2 ? { desiredJobType2: parsed.desiredJobType2 } : {}),
+        ...(parsed.desiredIndustry1 ? { desiredIndustry1: parsed.desiredIndustry1 } : {}),
+        ...(parsed.desiredPrefecture ? { desiredPrefecture: parsed.desiredPrefecture } : {}),
+        ...(parsed.desiredEmploymentType ? { desiredEmploymentType: parsed.desiredEmploymentType } : {}),
+        ...(typeof parsed.desiredSalaryMin === "number" ? { desiredSalaryMin: parsed.desiredSalaryMin } : {}),
       },
     });
 

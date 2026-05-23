@@ -20,6 +20,12 @@ export type ParsedResumeFields = {
   consultantName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  desiredJobType1: string | null;
+  desiredJobType2: string | null;
+  desiredIndustry1: string | null;
+  desiredPrefecture: string | null;
+  desiredEmploymentType: string | null;
+  desiredSalaryMin: number | null;
 };
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -94,6 +100,12 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
       consultantName: null,
       applicationRoute: null,
       mediaSource: null,
+      desiredJobType1: null,
+      desiredJobType2: null,
+      desiredIndustry1: null,
+      desiredPrefecture: null,
+      desiredEmploymentType: null,
+      desiredSalaryMin: null,
     };
   }
 
@@ -191,6 +203,52 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     "媒体名",
   ]);
 
+  const desiredJobType1 = pickString(flat, [
+    "desiredJobType1",
+    "desired_job_type_1",
+    "希望職種1",
+    "希望職種_第1希望",
+  ]);
+
+  const desiredJobType2 = pickString(flat, [
+    "desiredJobType2",
+    "desired_job_type_2",
+    "希望職種2",
+    "希望職種_第2希望",
+  ]);
+
+  const desiredIndustry1 = pickString(flat, [
+    "desiredIndustry1",
+    "desired_industry_1",
+    "希望業種",
+    "希望業種1",
+  ]);
+
+  const desiredPrefecture = pickString(flat, [
+    "desiredPrefecture",
+    "desired_prefecture",
+    "希望勤務地",
+    "希望都道府県",
+  ]);
+
+  const desiredEmploymentType = pickString(flat, [
+    "desiredEmploymentType",
+    "desired_employment_type",
+    "希望雇用形態",
+  ]);
+
+  const desiredSalaryRaw = flat.desiredSalaryMin ?? flat.desired_salary_min ?? flat["希望年収"];
+  let desiredSalaryMin: number | null = null;
+  if (typeof desiredSalaryRaw === "number" && Number.isFinite(desiredSalaryRaw)) {
+    desiredSalaryMin = Math.trunc(desiredSalaryRaw);
+  } else if (typeof desiredSalaryRaw === "string") {
+    const numMatch = desiredSalaryRaw.match(/\d+/);
+    if (numMatch) {
+      const parsed = parseInt(numMatch[0], 10);
+      if (Number.isFinite(parsed)) desiredSalaryMin = parsed;
+    }
+  }
+
   return {
     name,
     nameKana,
@@ -204,5 +262,11 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     consultantName,
     applicationRoute,
     mediaSource,
+    desiredJobType1,
+    desiredJobType2,
+    desiredIndustry1,
+    desiredPrefecture,
+    desiredEmploymentType,
+    desiredSalaryMin,
   };
 }
