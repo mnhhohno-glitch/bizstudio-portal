@@ -128,6 +128,7 @@ export default function CandidateRegistrationModal({
       if (data.email) setEmail(data.email);
       if (data.phone) setPhone(data.phone);
       if (data.address) setAddress(data.address);
+      if (data.consultantName) setRecruiterName(data.consultantName);
       toast.success("履歴書の解析が完了しました");
     } catch {
       toast.error("PDF解析に失敗しました");
