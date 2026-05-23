@@ -371,14 +371,14 @@ function EditModal({
             {/* 右カラム: 希望条件 */}
             <div>
               <h3 className="text-[14px] font-semibold text-[#374151] mb-3">希望条件</h3>
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第1希望）</label>
-                  <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務・営業アシスタント" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                  <input type="text" value={desiredJobType1} onChange={(e) => setDesiredJobType1(e.target.value)} placeholder="例: 営業事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">希望職種（第2希望）</label>
-                  <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務・庶務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+                  <input type="text" value={desiredJobType2} onChange={(e) => setDesiredJobType2(e.target.value)} placeholder="例: 一般事務" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-[13px] font-medium text-[#374151] mb-1">希望業種</label>
