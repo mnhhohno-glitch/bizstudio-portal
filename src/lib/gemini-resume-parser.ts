@@ -20,6 +20,7 @@ export type GeminiResumeResult = {
   desiredPrefecture: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
+  consultantName: string | null;
 };
 
 const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）のPDFから抽出したテキストです。
@@ -41,6 +42,9 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 - desiredPrefecture: 希望勤務地の都道府県（例 神奈川県）
 - desiredEmploymentType: 希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他 のいずれか）
 - desiredSalaryMin: 希望年収の下限（万円単位の整数、例 450）
+
+## 抽出項目（応募情報 - 該当セクションがあれば）
+- consultantName: コンサルタント名（スカウト配信者の氏名、例「藤本なつみ」）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -136,5 +140,6 @@ export async function parseResumeWithGemini(
     desiredEmploymentType: (parsed.desiredEmploymentType as string) || null,
     desiredSalaryMin:
       typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,
+    consultantName: (parsed.consultantName as string) || null,
   };
 }

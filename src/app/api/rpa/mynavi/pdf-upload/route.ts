@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     const pdf = form.get("pdf");
     batchId = String(form.get("batchId") || "") || req.nextUrl.searchParams.get("batchId") || "";
     // 担当RC（スカウト配信者名）: URLクエリ優先、multipart form フィールドもフォールバック対応
-    const recruiterName =
+    const recruiterNameFromRequest =
       (form.get("recruiterName") ? String(form.get("recruiterName")) : null)
       ?? req.nextUrl.searchParams.get("recruiterName");
 
@@ -121,6 +121,11 @@ export async function POST(req: NextRequest) {
         status: "AI_FAILED",
       });
     }
+
+    // ---- recruiterName: リクエストパラメータ優先、AI抽出 consultantName でフォールバック ----
+    const recruiterName = recruiterNameFromRequest?.trim()
+      ? recruiterNameFromRequest.trim()
+      : (parsed.consultantName?.trim() || null);
 
     // ---- 二重処理チェック ----
     const phoneNormalized = normalizePhoneNumber(parsed.phone);

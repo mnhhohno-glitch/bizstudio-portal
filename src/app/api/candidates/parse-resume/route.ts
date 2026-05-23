@@ -67,6 +67,9 @@ export async function POST(request: Request) {
 - desiredEmploymentType: 希望雇用形態（正社員/契約社員/派遣社員/パート・アルバイト/業務委託/その他 のいずれか）
 - desiredSalaryMin: 希望年収の下限（万円単位の整数、例 450）
 
+## 抽出項目（応募情報 - 該当セクションがあれば）
+- consultantName: コンサルタント名（スカウト配信者の氏名、例「藤本なつみ」）
+
 ## ルール
 - テキストに含まれない項目はnullにする
 - 推測で値を補完しない
@@ -114,6 +117,7 @@ export async function POST(request: Request) {
       desiredPrefecture: parsed.desiredPrefecture || null,
       desiredEmploymentType: parsed.desiredEmploymentType || null,
       desiredSalaryMin: typeof parsed.desiredSalaryMin === "number" ? parsed.desiredSalaryMin : null,
+      consultantName: parsed.consultantName || null,
     });
   } catch (error) {
     console.error("Parse resume error:", error);

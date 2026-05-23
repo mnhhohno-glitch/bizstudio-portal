@@ -17,6 +17,7 @@ export type ParsedResumeFields = {
   address: string | null;
   gender: string | null;
   email: string | null;
+  consultantName: string | null;
 };
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -88,6 +89,7 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
       address: null,
       gender: null,
       email: null,
+      consultantName: null,
     };
   }
 
@@ -166,6 +168,12 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     "ふりがな",
   ]);
 
+  const consultantName = pickString(flat, [
+    "consultantName",
+    "consultant_name",
+    "コンサルタント名",
+  ]);
+
   return {
     name,
     nameKana,
@@ -176,5 +184,6 @@ export function parseResumeData(resumeData: unknown): ParsedResumeFields {
     address,
     gender,
     email,
+    consultantName,
   };
 }
