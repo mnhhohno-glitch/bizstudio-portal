@@ -123,9 +123,25 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- recruiterName: リクエストパラメータ優先、AI抽出 consultantName でフォールバック ----
-    const recruiterName = recruiterNameFromRequest?.trim()
+    const recruiterNameRaw = recruiterNameFromRequest?.trim()
       ? recruiterNameFromRequest.trim()
       : (parsed.consultantName?.trim() || null);
+
+    // T-064 Phase A: ScoutMachineMaster で正規化（マッチしたら正規名を使う）
+    let recruiterName = recruiterNameRaw;
+    if (recruiterNameRaw) {
+      const machine = await prisma.scoutMachineMaster.findFirst({
+        where: {
+          OR: [
+            { recruiterName: recruiterNameRaw },
+            // 半角/全角スペース揺れ吸収
+            { recruiterName: recruiterNameRaw.replace(/\s+/g, " ") },
+            { recruiterName: recruiterNameRaw.replace(/\s+/g, "　") },
+          ],
+        },
+      });
+      if (machine) recruiterName = machine.recruiterName;
+    }
 
     // ---- 二重処理チェック ----
     const phoneNormalized = normalizePhoneNumber(parsed.phone);
