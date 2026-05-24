@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parseSlotDate } from "@/lib/scout/slot-helpers";
+import { createSlotsForDate } from "@/lib/scout/slot-creator";
 
 export interface AggregatedDataItem {
   machineNumber: number;
@@ -12,6 +13,7 @@ export interface AggregatedImportResult {
   targetDate: string;
   successCount: number;
   skippedCount: number;
+  slotsAutoCreated?: number;
   errors: Array<{
     machineNumber: number;
     hourSlot: number;
@@ -22,6 +24,7 @@ export interface AggregatedImportResult {
 export async function importAggregatedScoutData(params: {
   targetDate: string;
   data: AggregatedDataItem[];
+  autoCreateSlots?: boolean;
 }): Promise<AggregatedImportResult> {
   const targetDate = parseSlotDate(params.targetDate);
 
@@ -34,7 +37,9 @@ export async function importAggregatedScoutData(params: {
   });
 
   try {
-    const slots = await prisma.scoutDeliverySlot.findMany({
+    let slotsAutoCreated: number | undefined;
+
+    let slots = await prisma.scoutDeliverySlot.findMany({
       where: {
         deliveryDate: targetDate,
         isMachine: true,
@@ -43,9 +48,21 @@ export async function importAggregatedScoutData(params: {
     });
 
     if (slots.length === 0) {
-      throw new Error(
-        `対象日 ${params.targetDate} の配信枠が存在しません。先に配信枠を作成してください。`,
-      );
+      if (params.autoCreateSlots) {
+        const createResult = await createSlotsForDate(params.targetDate);
+        slotsAutoCreated = createResult.createdCount;
+        slots = await prisma.scoutDeliverySlot.findMany({
+          where: {
+            deliveryDate: targetDate,
+            isMachine: true,
+          },
+          include: { machine: true },
+        });
+      } else {
+        throw new Error(
+          `対象日 ${params.targetDate} の配信枠が存在しません。先に配信枠を作成してください。`,
+        );
+      }
     }
 
     const machines = await prisma.scoutMachineMaster.findMany({
@@ -111,6 +128,7 @@ export async function importAggregatedScoutData(params: {
       targetDate: params.targetDate,
       successCount,
       skippedCount,
+      ...(slotsAutoCreated !== undefined && { slotsAutoCreated }),
       errors: errors.slice(0, 20),
     };
   } catch (e) {

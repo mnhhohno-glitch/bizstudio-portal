@@ -27,9 +27,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { targetDate, data } = body as {
+    const { targetDate, data, autoCreateSlots } = body as {
       targetDate?: string;
       data?: unknown[];
+      autoCreateSlots?: boolean;
     };
 
     if (!targetDate || typeof targetDate !== "string" || !/^\d{4}-\d{1,2}-\d{1,2}$/.test(targetDate.trim())) {
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
     const result = await importAggregatedScoutData({
       targetDate: targetDate.trim(),
       data: validatedData,
+      autoCreateSlots: autoCreateSlots === true,
     });
 
     return NextResponse.json(result);

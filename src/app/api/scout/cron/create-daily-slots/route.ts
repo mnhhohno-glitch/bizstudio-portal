@@ -12,11 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
-import {
-  createDailySlots,
-  parseSlotDate,
-  getTomorrowJst,
-} from "@/lib/scout/slot-helpers";
+import { getTomorrowJst } from "@/lib/scout/slot-helpers";
+import { createSlotsForDate } from "@/lib/scout/slot-creator";
 
 export const runtime = "nodejs";
 
@@ -27,43 +24,50 @@ export async function POST(req: NextRequest) {
 
   const log = await prisma.scoutImportLog.create({
     data: {
-      importType: "DAILY_EXCEL", // 配信枠作成は import ではないが共通ログで管理
+      importType: "DAILY_EXCEL",
       status: "RUNNING",
     },
   });
 
   try {
     const body = await req.json().catch(() => ({}));
-    const targetDate =
+    const targetDateStr =
       typeof body?.targetDate === "string" && body.targetDate.trim()
-        ? parseSlotDate(body.targetDate)
-        : getTomorrowJst();
+        ? body.targetDate.trim()
+        : getTomorrowJst().toISOString().slice(0, 10);
 
     await prisma.scoutImportLog.update({
       where: { id: log.id },
-      data: { targetDate, importType: "MANUAL" },
+      data: {
+        targetDate: new Date(targetDateStr + "T00:00:00Z"),
+        importType: "MANUAL",
+      },
     });
 
-    const result = await createDailySlots(targetDate);
+    const result = await createSlotsForDate(targetDateStr);
 
     await prisma.scoutImportLog.update({
       where: { id: log.id },
       data: {
         status: "COMPLETED",
-        totalRows: result.created,
-        successCount: result.created,
+        totalRows: result.createdCount,
+        successCount: result.createdCount,
         finishedAt: new Date(),
-        errorMessage: result.skipped ? "既に配信枠が存在するためスキップ" : null,
+        errorMessage:
+          result.status === "SKIPPED"
+            ? "既に配信枠が存在するためスキップ"
+            : null,
       },
     });
 
     return NextResponse.json({
-      status: result.skipped ? "SKIPPED" : "CREATED",
-      targetDate: targetDate.toISOString().slice(0, 10),
-      created: result.created,
-      message: result.skipped
-        ? "Slots already exist for this date"
-        : `Created ${result.created} slots`,
+      status: result.status,
+      targetDate: result.targetDate,
+      created: result.createdCount,
+      message:
+        result.status === "SKIPPED"
+          ? "Slots already exist for this date"
+          : `Created ${result.createdCount} slots`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
