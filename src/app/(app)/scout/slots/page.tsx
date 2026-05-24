@@ -90,6 +90,12 @@ function daysFromNow(n: number): string {
   return jst.toISOString().slice(0, 10);
 }
 
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 type CreateForm = {
   deliveryDate: string;
   hourSlot: number;
@@ -164,8 +170,8 @@ export default function ScoutSlotsPage() {
   // === レコード一覧タブ用 state ===
   const [listRows, setListRows] = useState<ListRow[]>([]);
   const [listLoading, setListLoading] = useState(true);
-  const [startDate, setStartDate] = useState(daysAgo(7));
-  const [endDate, setEndDate] = useState(daysFromNow(1));
+  const [startDate, setStartDate] = useState(today());
+  const [endDate, setEndDate] = useState(today());
   const [fLarge, setFLarge] = useState("");
   const [fMedium, setFMedium] = useState("");
   const [fMachine, setFMachine] = useState("");
@@ -471,6 +477,21 @@ export default function ScoutSlotsPage() {
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white p-3">
             <div className="flex items-center gap-1 text-[12px]">
               <label className="text-[#6B7280]">期間</label>
+              <div className="flex rounded-md border border-[#E5E7EB]">
+                <button
+                  onClick={() => { setStartDate(shiftDate(startDate, -1)); setEndDate(shiftDate(endDate, -1)); }}
+                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-l-md"
+                >◀</button>
+                <button
+                  onClick={() => { setStartDate(today()); setEndDate(today()); }}
+                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] border-x border-[#E5E7EB]"
+                  title="当日に戻る"
+                >⌂</button>
+                <button
+                  onClick={() => { setStartDate(shiftDate(startDate, 1)); setEndDate(shiftDate(endDate, 1)); }}
+                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-r-md"
+                >▶</button>
+              </div>
               <input
                 type="date"
                 value={startDate}
