@@ -24,6 +24,31 @@ type Slot = {
   machine: { id: string; recruiterName: string; machineLabel: string; machineNumber: number | null; isActive: boolean; isMachine: boolean } | null;
 };
 
+type ListRow = {
+  id: string;
+  scoutNumber: string;
+  deliveryCategoryLarge: string;
+  deliveryCategoryMedium: string | null;
+  deliveryCategorySmall: string | null;
+  mediaSource: string;
+  machineId: string | null;
+  machine: { id: string; recruiterName: string; machineLabel: string; isMachine: boolean; isActive: boolean } | null;
+  deliveryDate: string;
+  dayOfWeek: string;
+  hourSlot: number;
+  timeBlock: string;
+  deliveryCount: number;
+  openCount: number;
+  openRate: number;
+  applyCount: number;
+  applyRate1: number;
+  applyRate2: number;
+  searchConditionName: string | null;
+  isAggregationTarget: boolean;
+  isMachine: boolean;
+  ageGroups: { "20s": number; "30s": number; "40s": number; "50s": number };
+};
+
 type Machine = {
   id: string;
   recruiterName: string;
@@ -47,6 +72,20 @@ function today(): string {
   return jst.toISOString().slice(0, 10);
 }
 
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
+function daysFromNow(n: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + n);
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
 type CreateForm = {
   deliveryDate: string;
   hourSlot: number;
@@ -66,7 +105,13 @@ type DuplicateForm = {
   deliveryCategorySmall: "検索条件指定" | "検索条件未指定";
 };
 
+type Tab = "list" | "matrix";
+type SortKey = "deliveryDate" | "hourSlot" | "deliveryCount" | "openCount" | "applyCount" | "scoutNumber";
+
 export default function ScoutSlotsPage() {
+  const [tab, setTab] = useState<Tab>("list");
+
+  // === マトリクスタブ用 state ===
   const [date, setDate] = useState(today());
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +120,7 @@ export default function ScoutSlotsPage() {
   const [creating, setCreating] = useState(false);
 
   const [staffMachines, setStaffMachines] = useState<Machine[]>([]);
+  const [allMachines, setAllMachines] = useState<Machine[]>([]);
   const [activeMedia, setActiveMedia] = useState<Media[]>([]);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -91,7 +137,7 @@ export default function ScoutSlotsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [submittingCreate, setSubmittingCreate] = useState(false);
 
-  const [duplicateSource, setDuplicateSource] = useState<Slot | null>(null);
+  const [duplicateSource, setDuplicateSource] = useState<ListRow | Slot | null>(null);
   const [duplicateForm, setDuplicateForm] = useState<DuplicateForm>({
     deliveryDate: today(),
     hourSlot: 14,
@@ -101,6 +147,18 @@ export default function ScoutSlotsPage() {
   });
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [submittingDuplicate, setSubmittingDuplicate] = useState(false);
+
+  // === レコード一覧タブ用 state ===
+  const [listRows, setListRows] = useState<ListRow[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [startDate, setStartDate] = useState(daysAgo(7));
+  const [endDate, setEndDate] = useState(daysFromNow(1));
+  const [fLarge, setFLarge] = useState("");
+  const [fMedium, setFMedium] = useState("");
+  const [fMachine, setFMachine] = useState("");
+  const [fMedia, setFMedia] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("deliveryDate");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,15 +170,44 @@ export default function ScoutSlotsPage() {
     setLoading(false);
   }, [date]);
 
+  const loadList = useCallback(async () => {
+    setListLoading(true);
+    try {
+      const params = new URLSearchParams({
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder,
+      });
+      if (fLarge) params.set("deliveryCategoryLarge", fLarge);
+      if (fMedium) params.set("deliveryCategoryMedium", fMedium);
+      if (fMachine) params.set("machineId", fMachine);
+      if (fMedia) params.set("mediaSource", fMedia);
+      const res = await fetch(`/api/scout/slots/list?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setListRows(data.slots || []);
+      }
+    } finally {
+      setListLoading(false);
+    }
+  }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, sortBy, sortOrder]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    if (tab === "matrix") load();
+  }, [load, tab]);
+
+  useEffect(() => {
+    if (tab === "list") loadList();
+  }, [loadList, tab]);
 
   useEffect(() => {
     fetch("/api/scout/masters").then(async (res) => {
       if (res.ok) {
         const data = await res.json();
-        const staff = (data.machines || []).filter((m: Machine) => !m.isMachine && m.isActive);
+        const all = (data.machines || []) as Machine[];
+        setAllMachines(all);
+        const staff = all.filter((m) => !m.isMachine && m.isActive);
         setStaffMachines(staff);
         setActiveMedia((data.media || []).filter((m: Media) => m.isActive));
         if (staff.length > 0) {
@@ -184,7 +271,7 @@ export default function ScoutSlotsPage() {
     }
   };
 
-  const openDuplicateModal = (slot: Slot) => {
+  const openDuplicateModal = (slot: Slot | ListRow) => {
     setDuplicateSource(slot);
     setDuplicateForm({
       deliveryDate: slot.deliveryDate.slice(0, 10),
@@ -220,7 +307,8 @@ export default function ScoutSlotsPage() {
       }
       toast.success(`複製しました（${data.slot?.scoutNumber || ""}）`);
       setDuplicateSource(null);
-      load();
+      if (tab === "matrix") load();
+      else loadList();
     } finally {
       setSubmittingDuplicate(false);
     }
@@ -252,26 +340,29 @@ export default function ScoutSlotsPage() {
       }
       toast.success(`作成しました（${data.slot?.scoutNumber || ""}）`);
       setShowCreateModal(false);
-      // フォーム初期化（machineId は維持）
-      setCreateForm((prev) => ({
-        ...prev,
-        deliveryCount: 0,
-        searchConditionName: "",
-      }));
-      // 作成日 = 表示日なら再読込
-      if (createForm.deliveryDate === date) {
-        load();
+      setCreateForm((prev) => ({ ...prev, deliveryCount: 0, searchConditionName: "" }));
+      if (tab === "matrix") {
+        if (createForm.deliveryDate === date) load();
+        else setDate(createForm.deliveryDate);
       } else {
-        setDate(createForm.deliveryDate);
+        loadList();
       }
     } finally {
       setSubmittingCreate(false);
     }
   };
 
-  // machineId ごとにグループ化（machineId が同じものを1列として扱う）
-  // 同じ machineId で複数行（個別配信・一斉配信など）がある場合は machineId+medium で分けて表示
-  type ColumnKey = string; // `${machineId}|${categoryMedium ?? "_"}`
+  const toggleSort = (key: SortKey) => {
+    if (sortBy === key) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(key);
+      setSortOrder("desc");
+    }
+  };
+
+  // === マトリクス用カラム計算 ===
+  type ColumnKey = string;
   type ColumnInfo = { key: ColumnKey; machine: Machine; categoryMedium: string | null };
   const columnsMap = new Map<ColumnKey, ColumnInfo>();
   for (const s of slots) {
@@ -285,7 +376,6 @@ export default function ScoutSlotsPage() {
       });
     }
   }
-  // ソート: RPA(isMachine) 先頭 → machineNumber 昇順 → 社員は最後
   const columns = Array.from(columnsMap.values()).sort((a, b) => {
     if (a.machine.isMachine !== b.machine.isMachine) {
       return a.machine.isMachine ? -1 : 1;
@@ -302,15 +392,9 @@ export default function ScoutSlotsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-[20px] font-bold text-[#374151]">配信枠管理</h1>
         <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px]"
-          />
           <button
             onClick={() => {
-              setCreateForm((prev) => ({ ...prev, deliveryDate: date }));
+              setCreateForm((prev) => ({ ...prev, deliveryDate: today() }));
               setCreateError(null);
               setShowCreateModal(true);
             }}
@@ -318,185 +402,373 @@ export default function ScoutSlotsPage() {
           >
             + 一斉配信レコードを新規作成
           </button>
-          <button
-            onClick={createDailySlots}
-            disabled={creating}
-            className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
-          >
-            この日の枠を自動作成
-          </button>
         </div>
       </div>
 
-      {loading ? (
-        <p className="mt-6 text-[#9CA3AF]">読み込み中...</p>
-      ) : slots.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-6 text-center">
-          <p className="text-[#9CA3AF]">この日の配信枠はまだ作成されていません</p>
-          <p className="mt-2 text-[12px] text-[#9CA3AF]">
-            「この日の枠を自動作成」ボタン または Power Automate からの自動作成をお試しください
-          </p>
-        </div>
-      ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
-          <table className="w-full text-[12px]">
-            <thead className="bg-[#F9FAFB] text-[#6B7280]">
-              <tr>
-                <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">時刻</th>
-                {columns.map((c) => (
-                  <th key={c.key} className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
-                    <div>{c.machine.machineLabel}</div>
-                    <div className="text-[10px] text-[#9CA3AF]">{c.machine.recruiterName}</div>
-                    {c.categoryMedium && (
-                      <div className="text-[10px] text-[#3B82F6]">{c.categoryMedium}</div>
-                    )}
-                    {!c.machine.isActive && <div className="text-[10px] text-[#DC2626]">停止中</div>}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {HOURS.map((hour) => (
-                <tr key={hour} className="border-t border-[#F3F4F6]">
-                  <td className="px-2 py-2 font-medium text-[#374151] border-r border-[#E5E7EB]">
-                    {hour}:00
-                  </td>
-                  {columns.map((c) => {
-                    const slot = slots.find(
-                      (s) =>
-                        s.machineId === c.machine.id &&
-                        s.hourSlot === hour &&
-                        (s.deliveryCategoryMedium ?? "_") === (c.categoryMedium ?? "_"),
-                    );
-                    if (!slot) {
-                      return <td key={c.key} className="px-2 py-2 text-center text-[#9CA3AF] border-r border-[#E5E7EB]">-</td>;
-                    }
-                    const editing = editingId === slot.id;
-                    const isReadOnly = slot.isMachine;
-                    return (
-                      <td
-                        key={c.key}
-                        className={`px-2 py-1.5 border-r border-[#E5E7EB] text-center align-top ${
-                          slot.isAggregationTarget ? "" : "bg-[#FAFAFA]"
-                        }`}
-                      >
-                        {editing ? (
-                          <div className="space-y-1">
-                            <input
-                              type="number"
-                              value={editValues.deliveryCount ?? 0}
-                              onChange={(e) =>
-                                setEditValues({ ...editValues, deliveryCount: parseInt(e.target.value, 10) || 0 })
-                              }
-                              className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[12px]"
-                            />
-                            <select
-                              value={editValues.deliveryCategoryMedium || ""}
-                              onChange={(e) =>
-                                setEditValues({ ...editValues, deliveryCategoryMedium: e.target.value })
-                              }
-                              className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                            >
-                              <option value="">中項目</option>
-                              <option value="個別配信">個別配信</option>
-                              <option value="一斉配信">一斉配信</option>
-                            </select>
-                            <select
-                              value={editValues.deliveryCategorySmall || ""}
-                              onChange={(e) =>
-                                setEditValues({ ...editValues, deliveryCategorySmall: e.target.value })
-                              }
-                              className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                            >
-                              <option value="">小項目</option>
-                              <option value="検索条件指定">検索条件指定</option>
-                              <option value="検索条件未指定">検索条件未指定</option>
-                            </select>
-                            <input
-                              type="text"
-                              placeholder="検索条件名"
-                              value={editValues.searchConditionName || ""}
-                              onChange={(e) =>
-                                setEditValues({ ...editValues, searchConditionName: e.target.value })
-                              }
-                              className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                            />
-                            <label className="flex items-center gap-1 text-[10px] text-[#6B7280]">
-                              <input
-                                type="checkbox"
-                                checked={editValues.isAggregationTarget ?? true}
-                                onChange={(e) =>
-                                  setEditValues({ ...editValues, isAggregationTarget: e.target.checked })
-                                }
-                              />
-                              集計対象
-                            </label>
-                            <div className="flex gap-1">
-                              <button
-                                onClick={saveEdit}
-                                className="flex-1 rounded bg-[#2563EB] px-1 py-0.5 text-[11px] text-white"
-                              >
-                                保存
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingId(null);
-                                  setEditValues({});
-                                }}
-                                className="flex-1 rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px] text-[#6B7280]"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className={`font-medium ${slot.deliveryCount > 0 ? "text-[#374151]" : "text-[#9CA3AF]"}`}>
-                              {slot.deliveryCount}
-                            </div>
-                            {slot.openCount > 0 && (
-                              <div className="text-[10px] text-[#6B7280]">開封 {slot.openCount}</div>
-                            )}
-                            {slot.searchConditionName && (
-                              <div className="text-[10px] text-[#6B7280] truncate" title={slot.searchConditionName}>
-                                {slot.searchConditionName}
-                              </div>
-                            )}
-                            <div className="text-[10px] text-[#9CA3AF] truncate" title={slot.scoutNumber}>
-                              {slot.scoutNumber}
-                            </div>
-                            {!isReadOnly && (
-                              <div className="mt-1 flex flex-wrap justify-center gap-1">
-                                <button
-                                  onClick={() => startEdit(slot)}
-                                  className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
-                                >
-                                  編集
-                                </button>
-                                <button
-                                  onClick={() => openDuplicateModal(slot)}
-                                  className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
-                                >
-                                  複製
-                                </button>
-                              </div>
-                            )}
-                          </div>
+      {/* タブ */}
+      <div className="mt-4 flex border-b border-[#E5E7EB]">
+        <button
+          onClick={() => setTab("list")}
+          className={`px-4 py-2 text-[13px] font-medium ${
+            tab === "list"
+              ? "border-b-2 border-[#2563EB] text-[#2563EB]"
+              : "text-[#6B7280] hover:text-[#374151]"
+          }`}
+        >
+          レコード一覧
+        </button>
+        <button
+          onClick={() => setTab("matrix")}
+          className={`px-4 py-2 text-[13px] font-medium ${
+            tab === "matrix"
+              ? "border-b-2 border-[#2563EB] text-[#2563EB]"
+              : "text-[#6B7280] hover:text-[#374151]"
+          }`}
+        >
+          マトリクス表示
+        </button>
+      </div>
+
+      {/* レコード一覧タブ */}
+      {tab === "list" && (
+        <div className="mt-4">
+          {/* フィルタ */}
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white p-3">
+            <div className="flex items-center gap-1 text-[12px]">
+              <label className="text-[#6B7280]">期間</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+              />
+              <span className="text-[#9CA3AF]">〜</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+              />
+            </div>
+            <select
+              value={fLarge}
+              onChange={(e) => setFLarge(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+            >
+              <option value="">配信種別（全て）</option>
+              <option value="RPA">RPA</option>
+              <option value="社員">社員</option>
+            </select>
+            <select
+              value={fMedium}
+              onChange={(e) => setFMedium(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+            >
+              <option value="">中フラグ（全て）</option>
+              <option value="個別配信">個別配信</option>
+              <option value="一斉配信">一斉配信</option>
+            </select>
+            <select
+              value={fMachine}
+              onChange={(e) => setFMachine(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+            >
+              <option value="">配信者（全て）</option>
+              {allMachines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.machineLabel} / {m.recruiterName}
+                </option>
+              ))}
+            </select>
+            <select
+              value={fMedia}
+              onChange={(e) => setFMedia(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+            >
+              <option value="">媒体（全て）</option>
+              {activeMedia.map((m) => (
+                <option key={m.id} value={m.mediaName}>{m.mediaName}</option>
+              ))}
+            </select>
+            <span className="ml-auto text-[11px] text-[#9CA3AF]">
+              {listLoading ? "読み込み中..." : `${listRows.length}件`}
+            </span>
+          </div>
+
+          {/* テーブル */}
+          <div className="mt-3 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+            <table className="w-full text-[11px]">
+              <thead className="bg-[#F9FAFB] text-[#6B7280]">
+                <tr>
+                  <SortableTh label="スカウトNO" k="scoutNumber" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("scoutNumber")} />
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">配信種別</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">中</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">小</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">媒体</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">配信者</th>
+                  <SortableTh label="配信日" k="deliveryDate" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("deliveryDate")} />
+                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">曜日</th>
+                  <SortableTh label="時間" k="hourSlot" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("hourSlot")} />
+                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">時間帯</th>
+                  <SortableTh label="配信数" k="deliveryCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("deliveryCount")} align="right" />
+                  <SortableTh label="開封" k="openCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("openCount")} align="right" />
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">開封率</th>
+                  <SortableTh label="応募" k="applyCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("applyCount")} align="right" />
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">応募率①</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">応募率②</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">検索条件名</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">20代</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">30代</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">40代</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">50代</th>
+                  <th className="px-2 py-2 text-center font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={22} className="px-3 py-6 text-center text-[#9CA3AF]">
+                      該当するレコードがありません
+                    </td>
+                  </tr>
+                ) : (
+                  listRows.map((r) => (
+                    <tr key={r.id} className="border-t border-[#F3F4F6] hover:bg-[#F9FAFB]">
+                      <td className="px-2 py-1.5 font-mono text-[#374151] border-r border-[#E5E7EB]">{r.scoutNumber}</td>
+                      <td className={`px-2 py-1.5 border-r border-[#E5E7EB] ${r.deliveryCategoryLarge === "RPA" ? "text-[#2563EB]" : "text-[#16A34A]"}`}>{r.deliveryCategoryLarge}</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryCategoryMedium ?? "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryCategorySmall ?? "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.mediaSource}</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.machine?.recruiterName ?? "—"}</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryDate}</td>
+                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.dayOfWeek}</td>
+                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.hourSlot}:00</td>
+                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.timeBlock}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.deliveryCount.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openCount.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openRate.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyCount.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate1.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate2.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] max-w-[160px] truncate" title={r.searchConditionName ?? ""}>{r.searchConditionName ?? "—"}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["20s"]}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["30s"]}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["40s"]}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["50s"]}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        {!r.isMachine && (
+                          <button
+                            onClick={() => openDuplicateModal(r)}
+                            className="rounded border border-[#E5E7EB] px-2 py-0.5 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
+                          >
+                            複製
+                          </button>
                         )}
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-3 text-[11px] text-[#9CA3AF]">
+            応募率①= 応募数 / 配信数、応募率②= 応募数 / 開封数。年代別カウントは「応募日（Candidate.createdAt）」基準。<br />
+            列ヘッダ（▲/▼付き）クリックで並び替え。
+          </p>
         </div>
       )}
 
-      <p className="mt-4 text-[12px] text-[#9CA3AF]">
-        グレーの背景セル: 集計対象外（停止中号機、または社員枠で未入力）<br />
-        RPA枠（1〜6号機）の配信数は OneDrive エクセル取り込みで自動更新されます。社員枠（藤本 夏海・大野 望）は手入力 / 新規作成 / 複製で管理します。
-      </p>
+      {/* マトリクス表示タブ */}
+      {tab === "matrix" && (
+        <>
+          <div className="mt-4 flex items-center gap-2">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px]"
+            />
+            <button
+              onClick={createDailySlots}
+              disabled={creating}
+              className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+            >
+              この日の枠を自動作成
+            </button>
+          </div>
+
+          {loading ? (
+            <p className="mt-6 text-[#9CA3AF]">読み込み中...</p>
+          ) : slots.length === 0 ? (
+            <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-6 text-center">
+              <p className="text-[#9CA3AF]">この日の配信枠はまだ作成されていません</p>
+              <p className="mt-2 text-[12px] text-[#9CA3AF]">
+                「この日の枠を自動作成」ボタン または Power Automate からの自動作成をお試しください
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+              <table className="w-full text-[12px]">
+                <thead className="bg-[#F9FAFB] text-[#6B7280]">
+                  <tr>
+                    <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">時刻</th>
+                    {columns.map((c) => (
+                      <th key={c.key} className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
+                        <div>{c.machine.machineLabel}</div>
+                        <div className="text-[10px] text-[#9CA3AF]">{c.machine.recruiterName}</div>
+                        {c.categoryMedium && (
+                          <div className="text-[10px] text-[#3B82F6]">{c.categoryMedium}</div>
+                        )}
+                        {!c.machine.isActive && <div className="text-[10px] text-[#DC2626]">停止中</div>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {HOURS.map((hour) => (
+                    <tr key={hour} className="border-t border-[#F3F4F6]">
+                      <td className="px-2 py-2 font-medium text-[#374151] border-r border-[#E5E7EB]">
+                        {hour}:00
+                      </td>
+                      {columns.map((c) => {
+                        const slot = slots.find(
+                          (s) =>
+                            s.machineId === c.machine.id &&
+                            s.hourSlot === hour &&
+                            (s.deliveryCategoryMedium ?? "_") === (c.categoryMedium ?? "_"),
+                        );
+                        if (!slot) {
+                          return <td key={c.key} className="px-2 py-2 text-center text-[#9CA3AF] border-r border-[#E5E7EB]">-</td>;
+                        }
+                        const editing = editingId === slot.id;
+                        const isReadOnly = slot.isMachine;
+                        return (
+                          <td
+                            key={c.key}
+                            className={`px-2 py-1.5 border-r border-[#E5E7EB] text-center align-top ${
+                              slot.isAggregationTarget ? "" : "bg-[#FAFAFA]"
+                            }`}
+                          >
+                            {editing ? (
+                              <div className="space-y-1">
+                                <input
+                                  type="number"
+                                  value={editValues.deliveryCount ?? 0}
+                                  onChange={(e) =>
+                                    setEditValues({ ...editValues, deliveryCount: parseInt(e.target.value, 10) || 0 })
+                                  }
+                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[12px]"
+                                />
+                                <select
+                                  value={editValues.deliveryCategoryMedium || ""}
+                                  onChange={(e) =>
+                                    setEditValues({ ...editValues, deliveryCategoryMedium: e.target.value })
+                                  }
+                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
+                                >
+                                  <option value="">中項目</option>
+                                  <option value="個別配信">個別配信</option>
+                                  <option value="一斉配信">一斉配信</option>
+                                </select>
+                                <select
+                                  value={editValues.deliveryCategorySmall || ""}
+                                  onChange={(e) =>
+                                    setEditValues({ ...editValues, deliveryCategorySmall: e.target.value })
+                                  }
+                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
+                                >
+                                  <option value="">小項目</option>
+                                  <option value="検索条件指定">検索条件指定</option>
+                                  <option value="検索条件未指定">検索条件未指定</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  placeholder="検索条件名"
+                                  value={editValues.searchConditionName || ""}
+                                  onChange={(e) =>
+                                    setEditValues({ ...editValues, searchConditionName: e.target.value })
+                                  }
+                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
+                                />
+                                <label className="flex items-center gap-1 text-[10px] text-[#6B7280]">
+                                  <input
+                                    type="checkbox"
+                                    checked={editValues.isAggregationTarget ?? true}
+                                    onChange={(e) =>
+                                      setEditValues({ ...editValues, isAggregationTarget: e.target.checked })
+                                    }
+                                  />
+                                  集計対象
+                                </label>
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={saveEdit}
+                                    className="flex-1 rounded bg-[#2563EB] px-1 py-0.5 text-[11px] text-white"
+                                  >
+                                    保存
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingId(null);
+                                      setEditValues({});
+                                    }}
+                                    className="flex-1 rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px] text-[#6B7280]"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className={`font-medium ${slot.deliveryCount > 0 ? "text-[#374151]" : "text-[#9CA3AF]"}`}>
+                                  {slot.deliveryCount}
+                                </div>
+                                {slot.openCount > 0 && (
+                                  <div className="text-[10px] text-[#6B7280]">開封 {slot.openCount}</div>
+                                )}
+                                {slot.searchConditionName && (
+                                  <div className="text-[10px] text-[#6B7280] truncate" title={slot.searchConditionName}>
+                                    {slot.searchConditionName}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-[#9CA3AF] truncate" title={slot.scoutNumber}>
+                                  {slot.scoutNumber}
+                                </div>
+                                {!isReadOnly && (
+                                  <div className="mt-1 flex flex-wrap justify-center gap-1">
+                                    <button
+                                      onClick={() => startEdit(slot)}
+                                      className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
+                                    >
+                                      編集
+                                    </button>
+                                    <button
+                                      onClick={() => openDuplicateModal(slot)}
+                                      className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
+                                    >
+                                      複製
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="mt-4 text-[12px] text-[#9CA3AF]">
+            グレーの背景セル: 集計対象外（停止中号機、または社員枠で未入力）<br />
+            RPA枠（1〜6号機）の配信数は OneDrive エクセル取り込みで自動更新されます。社員枠（藤本 夏海・大野 望）は手入力 / 新規作成 / 複製で管理します。
+          </p>
+        </>
+      )}
 
       {/* 新規作成モーダル */}
       {showCreateModal && (
@@ -764,5 +1036,33 @@ export default function ScoutSlotsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function SortableTh({
+  label,
+  k,
+  sortBy,
+  sortOrder,
+  onClick,
+  align = "left",
+}: {
+  label: string;
+  k: SortKey;
+  sortBy: SortKey;
+  sortOrder: "asc" | "desc";
+  onClick: () => void;
+  align?: "left" | "right" | "center";
+}) {
+  const active = sortBy === k;
+  const arrow = active ? (sortOrder === "asc" ? "▲" : "▼") : "";
+  return (
+    <th
+      onClick={onClick}
+      className={`px-2 py-2 font-medium border-r border-[#E5E7EB] cursor-pointer hover:bg-[#F3F4F6] text-${align}`}
+    >
+      {label}
+      <span className="ml-1 text-[10px] text-[#9CA3AF]">{arrow}</span>
+    </th>
   );
 }
