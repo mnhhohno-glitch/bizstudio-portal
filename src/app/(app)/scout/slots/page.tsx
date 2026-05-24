@@ -480,16 +480,16 @@ export default function ScoutSlotsPage() {
               <div className="flex rounded-md border border-[#E5E7EB]">
                 <button
                   onClick={() => { setStartDate(shiftDate(startDate, -1)); setEndDate(shiftDate(endDate, -1)); }}
-                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-l-md"
+                  className="w-[30px] h-[30px] flex items-center justify-center text-[14px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-l-md"
                 >◀</button>
                 <button
                   onClick={() => { setStartDate(today()); setEndDate(today()); }}
-                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] border-x border-[#E5E7EB]"
+                  className="w-[30px] h-[30px] flex items-center justify-center text-[14px] text-[#6B7280] hover:bg-[#F9FAFB] border-x border-[#E5E7EB]"
                   title="当日に戻る"
                 >⌂</button>
                 <button
                   onClick={() => { setStartDate(shiftDate(startDate, 1)); setEndDate(shiftDate(endDate, 1)); }}
-                  className="px-1.5 py-1 text-[12px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-r-md"
+                  className="w-[30px] h-[30px] flex items-center justify-center text-[14px] text-[#6B7280] hover:bg-[#F9FAFB] rounded-r-md"
                 >▶</button>
               </div>
               <input
