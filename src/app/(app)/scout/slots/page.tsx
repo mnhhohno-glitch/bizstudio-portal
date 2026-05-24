@@ -46,7 +46,11 @@ type ListRow = {
   searchConditionName: string | null;
   isAggregationTarget: boolean;
   isMachine: boolean;
-  ageGroups: { "20s": number; "30s": number; "40s": number; "50s": number };
+  ageGroups: { "20s": number; "30s": number; "40s": number; "50s": number; foreign: number };
+  validApplyCount: number;
+  invalidApplyCount: number;
+  validApplyRate: number;
+  invalidApplyRate: number;
 };
 
 type Machine = {
@@ -106,7 +110,16 @@ type DuplicateForm = {
 };
 
 type Tab = "list" | "matrix";
-type SortKey = "deliveryDate" | "hourSlot" | "deliveryCount" | "openCount" | "applyCount" | "scoutNumber";
+type SortKey =
+  | "deliveryCategoryLarge"
+  | "machineId"
+  | "deliveryDate"
+  | "hourSlot"
+  | "openCount"
+  | "openRate"
+  | "applyCount"
+  | "applyRate1";
+type SortSpec = { column: SortKey; order: "asc" | "desc" };
 
 export default function ScoutSlotsPage() {
   const [tab, setTab] = useState<Tab>("list");
@@ -157,8 +170,10 @@ export default function ScoutSlotsPage() {
   const [fMedium, setFMedium] = useState("");
   const [fMachine, setFMachine] = useState("");
   const [fMedia, setFMedia] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("deliveryDate");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [sortSpecs, setSortSpecs] = useState<SortSpec[]>([
+    { column: "deliveryDate", order: "desc" },
+    { column: "hourSlot", order: "desc" },
+  ]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,9 +191,10 @@ export default function ScoutSlotsPage() {
       const params = new URLSearchParams({
         startDate,
         endDate,
-        sortBy,
-        sortOrder,
       });
+      if (sortSpecs.length > 0) {
+        params.set("sortBy", sortSpecs.map((s) => `${s.column}:${s.order}`).join(","));
+      }
       if (fLarge) params.set("deliveryCategoryLarge", fLarge);
       if (fMedium) params.set("deliveryCategoryMedium", fMedium);
       if (fMachine) params.set("machineId", fMachine);
@@ -191,7 +207,7 @@ export default function ScoutSlotsPage() {
     } finally {
       setListLoading(false);
     }
-  }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, sortBy, sortOrder]);
+  }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, sortSpecs]);
 
   useEffect(() => {
     if (tab === "matrix") load();
@@ -352,13 +368,26 @@ export default function ScoutSlotsPage() {
     }
   };
 
+  // 複合ソート: 未ソート → 昇順 → 降順 → 未ソート（同じ列を3回クリック）
   const toggleSort = (key: SortKey) => {
-    if (sortBy === key) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-    } else {
-      setSortBy(key);
-      setSortOrder("desc");
-    }
+    setSortSpecs((prev) => {
+      const idx = prev.findIndex((s) => s.column === key);
+      if (idx === -1) {
+        return [...prev, { column: key, order: "asc" }];
+      }
+      const cur = prev[idx];
+      if (cur.order === "asc") {
+        const next = [...prev];
+        next[idx] = { column: key, order: "desc" };
+        return next;
+      }
+      // 降順 → 削除
+      return prev.filter((s) => s.column !== key);
+    });
+  };
+
+  const clearSort = () => {
+    setSortSpecs([]);
   };
 
   // === マトリクス用カラム計算 ===
@@ -495,66 +524,127 @@ export default function ScoutSlotsPage() {
             </span>
           </div>
 
+          {/* ソート状態表示 */}
+          {sortSpecs.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-[#6B7280]">ソート:</span>
+              {sortSpecs.map((s, i) => (
+                <span
+                  key={s.column}
+                  className="inline-flex items-center gap-1 rounded-md bg-[#EEF2FF] px-2 py-0.5 text-[#2563EB]"
+                >
+                  <sup>{i + 1}</sup>
+                  {SORT_LABELS[s.column]}
+                  {s.order === "asc" ? "▲" : "▼"}
+                </span>
+              ))}
+              <button
+                onClick={clearSort}
+                className="ml-1 rounded border border-[#E5E7EB] px-2 py-0.5 text-[#6B7280] hover:bg-[#F9FAFB]"
+              >
+                ソートをクリア
+              </button>
+            </div>
+          )}
+
           {/* テーブル */}
           <div className="mt-3 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
-            <table className="w-full text-[11px]">
+            <table className="text-[11px]" style={{ minWidth: 1800 }}>
               <thead className="bg-[#F9FAFB] text-[#6B7280]">
                 <tr>
-                  <SortableTh label="スカウトNO" k="scoutNumber" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("scoutNumber")} />
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">配信種別</th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">中</th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">小</th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">媒体</th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">配信者</th>
-                  <SortableTh label="配信日" k="deliveryDate" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("deliveryDate")} />
-                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">曜日</th>
-                  <SortableTh label="時間" k="hourSlot" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("hourSlot")} />
-                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">時間帯</th>
-                  <SortableTh label="配信数" k="deliveryCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("deliveryCount")} align="right" />
-                  <SortableTh label="開封" k="openCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("openCount")} align="right" />
-                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">開封率</th>
-                  <SortableTh label="応募" k="applyCount" sortBy={sortBy} sortOrder={sortOrder} onClick={() => toggleSort("applyCount")} align="right" />
-                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">応募率①</th>
-                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">応募率②</th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">検索条件名</th>
-                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">20代</th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                    <div>スカウトNO</div>
+                    <div className="text-[10px] text-[#9CA3AF]">配信種別</div>
+                  </th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                    <SortableThV2 label="中" k="deliveryCategoryLarge" sortSpecs={sortSpecs} onClick={() => toggleSort("deliveryCategoryLarge")} />
+                    <div className="text-[10px] text-[#9CA3AF]">小</div>
+                  </th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                    <div>媒体</div>
+                    <SortableThV2 label="配信者" k="machineId" sortSpecs={sortSpecs} onClick={() => toggleSort("machineId")} dim />
+                  </th>
+                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                    <SortableThV2 label="配信日" k="deliveryDate" sortSpecs={sortSpecs} onClick={() => toggleSort("deliveryDate")} />
+                    <div className="text-[10px] text-[#9CA3AF]">曜日</div>
+                  </th>
+                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
+                    <div>時間帯</div>
+                    <SortableThV2 label="時間" k="hourSlot" sortSpecs={sortSpecs} onClick={() => toggleSort("hourSlot")} dim center />
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">配信数</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">
+                    <SortableThV2 label="開封数" k="openCount" sortSpecs={sortSpecs} onClick={() => toggleSort("openCount")} right />
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">
+                    <SortableThV2 label="開封率" k="openRate" sortSpecs={sortSpecs} onClick={() => toggleSort("openRate")} right />
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">
+                    <SortableThV2 label="応募数" k="applyCount" sortSpecs={sortSpecs} onClick={() => toggleSort("applyCount")} right />
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">
+                    <SortableThV2 label={<>応募率<br />(配信)</>} k="applyRate1" sortSpecs={sortSpecs} onClick={() => toggleSort("applyRate1")} right />
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">
+                    応募率<br />(開封)
+                  </th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">〜20代</th>
                   <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">30代</th>
                   <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">40代</th>
-                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">50代</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">50代〜</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">外国籍</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募数</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募数</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募率</th>
+                  <th className="px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募率</th>
                   <th className="px-2 py-2 text-center font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {listRows.length === 0 ? (
                   <tr>
-                    <td colSpan={22} className="px-3 py-6 text-center text-[#9CA3AF]">
+                    <td colSpan={21} className="px-3 py-6 text-center text-[#9CA3AF]">
                       該当するレコードがありません
                     </td>
                   </tr>
                 ) : (
                   listRows.map((r) => (
-                    <tr key={r.id} className="border-t border-[#F3F4F6] hover:bg-[#F9FAFB]">
-                      <td className="px-2 py-1.5 font-mono text-[#374151] border-r border-[#E5E7EB]">{r.scoutNumber}</td>
-                      <td className={`px-2 py-1.5 border-r border-[#E5E7EB] ${r.deliveryCategoryLarge === "RPA" ? "text-[#2563EB]" : "text-[#16A34A]"}`}>{r.deliveryCategoryLarge}</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryCategoryMedium ?? "—"}</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryCategorySmall ?? "—"}</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.mediaSource}</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.machine?.recruiterName ?? "—"}</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB]">{r.deliveryDate}</td>
-                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.dayOfWeek}</td>
-                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.hourSlot}:00</td>
-                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB]">{r.timeBlock}</td>
+                    <tr key={r.id} className="border-t border-[#F3F4F6] hover:bg-[#F9FAFB] align-middle" style={{ height: 56 }}>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] whitespace-nowrap">
+                        <div className="font-mono text-[#374151]">{r.scoutNumber}</div>
+                        <div className={`text-[10px] ${r.deliveryCategoryLarge === "RPA" ? "text-[#2563EB]" : "text-[#16A34A]"}`}>{r.deliveryCategoryLarge}</div>
+                      </td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] whitespace-nowrap">
+                        <div>{r.deliveryCategoryMedium ?? "—"}</div>
+                        <div className="text-[10px] text-[#6B7280]">{r.deliveryCategorySmall ?? "—"}</div>
+                      </td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] whitespace-nowrap">
+                        <div>{r.mediaSource}</div>
+                        <div className="text-[10px] text-[#6B7280]">{r.machine?.recruiterName ?? "—"}</div>
+                      </td>
+                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] whitespace-nowrap">
+                        <div>{r.deliveryDate}</div>
+                        <div className="text-[10px] text-[#6B7280]">{r.dayOfWeek}</div>
+                      </td>
+                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB] whitespace-nowrap">
+                        <div>{r.timeBlock}</div>
+                        <div className="text-[10px] text-[#6B7280]">{r.hourSlot}:00</div>
+                      </td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.deliveryCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openRate.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate1.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate2.toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 border-r border-[#E5E7EB] max-w-[160px] truncate" title={r.searchConditionName ?? ""}>{r.searchConditionName ?? "—"}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["20s"]}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["30s"]}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["40s"]}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["50s"]}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups.foreign}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#16A34A]">{r.validApplyCount}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#DC2626]">{r.invalidApplyCount}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#16A34A]">{r.validApplyRate.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#DC2626]">{r.invalidApplyRate.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-center">
                         {!r.isMachine && (
                           <button
@@ -573,8 +663,10 @@ export default function ScoutSlotsPage() {
           </div>
 
           <p className="mt-3 text-[11px] text-[#9CA3AF]">
-            応募率①= 応募数 / 配信数、応募率②= 応募数 / 開封数。年代別カウントは「応募日（Candidate.createdAt）」基準。<br />
-            列ヘッダ（▲/▼付き）クリックで並び替え。
+            応募率(配信)= 応募数 / 配信数、応募率(開封)= 応募数 / 開封数。年代別カウントは「応募日（Candidate.createdAt）」基準。〜20代は30未満、50代〜は50以上。<br />
+            有効応募数 = 〜20代 + 30代、無効応募数 = 40代 + 50代〜 + 外国籍。<br />
+            外国籍判定: 氏名（姓名）がカタカナ/英字のみの応募者を外国籍として集計（mynavi-rpa/judgment の isForeignNg と同一ロジック）。<br />
+            並び替え: ソート可能ヘッダクリックで「未ソート → 昇順 → 降順 → 解除」の順。複数列クリックで複合ソート。
           </p>
         </div>
       )}
@@ -1039,30 +1131,49 @@ export default function ScoutSlotsPage() {
   );
 }
 
-function SortableTh({
+const SORT_LABELS: Record<SortKey, string> = {
+  deliveryCategoryLarge: "配信種別",
+  machineId: "配信者",
+  deliveryDate: "配信日",
+  hourSlot: "時間",
+  openCount: "開封数",
+  openRate: "開封率",
+  applyCount: "応募数",
+  applyRate1: "応募率(配信)",
+};
+
+function SortableThV2({
   label,
   k,
-  sortBy,
-  sortOrder,
+  sortSpecs,
   onClick,
-  align = "left",
+  dim = false,
+  right = false,
+  center = false,
 }: {
-  label: string;
+  label: React.ReactNode;
   k: SortKey;
-  sortBy: SortKey;
-  sortOrder: "asc" | "desc";
+  sortSpecs: SortSpec[];
   onClick: () => void;
-  align?: "left" | "right" | "center";
+  dim?: boolean;
+  right?: boolean;
+  center?: boolean;
 }) {
-  const active = sortBy === k;
-  const arrow = active ? (sortOrder === "asc" ? "▲" : "▼") : "";
+  const idx = sortSpecs.findIndex((s) => s.column === k);
+  const spec = idx >= 0 ? sortSpecs[idx] : null;
+  const arrow = !spec ? "↕" : spec.order === "asc" ? "▲" : "▼";
+  const color = spec ? "text-[#2563EB]" : "text-[#9CA3AF]";
+  const align = right ? "text-right" : center ? "text-center" : "text-left";
   return (
-    <th
+    <div
       onClick={onClick}
-      className={`px-2 py-2 font-medium border-r border-[#E5E7EB] cursor-pointer hover:bg-[#F3F4F6] text-${align}`}
+      className={`${dim ? "text-[10px] text-[#9CA3AF]" : ""} ${align} cursor-pointer hover:opacity-80 select-none`}
     >
       {label}
-      <span className="ml-1 text-[10px] text-[#9CA3AF]">{arrow}</span>
-    </th>
+      <span className={`ml-1 text-[10px] ${color}`}>
+        {arrow}
+        {spec && <sup>{idx + 1}</sup>}
+      </span>
+    </div>
   );
 }
