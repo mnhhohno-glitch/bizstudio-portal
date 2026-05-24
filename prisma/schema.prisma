@@ -1812,7 +1812,7 @@ model ScoutDeliverySlot {
   isStaff   Boolean @default(false) @map("is_staff")
 
   // 配信種別3階層
-  deliveryCategoryLarge  String  @map("delivery_category_large") // "機械" / "社員"
+  deliveryCategoryLarge  String  @map("delivery_category_large") // "RPA" / "社員"
   deliveryCategoryMedium String? @map("delivery_category_medium") // "個別配信" / "一斉配信"
   deliveryCategorySmall  String? @map("delivery_category_small") // "検索条件指定" / "検索条件未指定"
 
@@ -1834,7 +1834,7 @@ model ScoutDeliverySlot {
 
   linkedCandidates Candidate[]
 
-  @@unique([deliveryDate, hourSlot, machineId])
+  @@unique([deliveryDate, hourSlot, machineId, deliveryCategoryLarge, deliveryCategoryMedium], map: "scout_slot_unique_per_category")
   @@index([deliveryDate])
   @@index([deliveryDate, hourSlot])
   @@index([machineId])
