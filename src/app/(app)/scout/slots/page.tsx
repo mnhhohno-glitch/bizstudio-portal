@@ -574,9 +574,9 @@ export default function ScoutSlotsPage() {
                     <SortableThV2 label="配信日" k="deliveryDate" sortSpecs={sortSpecs} onClick={() => toggleSort("deliveryDate")} />
                     <div className="text-[10px] text-[#9CA3AF]">曜日</div>
                   </th>
-                  <th className="w-[120px] px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[80px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <div>時間帯</div>
-                    <SortableThV2 label="時間" k="hourSlot" sortSpecs={sortSpecs} onClick={() => toggleSort("hourSlot")} dim center />
+                    <SortableThV2 label="時間" k="hourSlot" sortSpecs={sortSpecs} onClick={() => toggleSort("hourSlot")} dim />
                   </th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">配信数</th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">
@@ -603,7 +603,7 @@ export default function ScoutSlotsPage() {
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募数</th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募率</th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募率</th>
-                  <th className="px-2 py-2 text-center font-medium">操作</th>
+                  <th className="w-[52px] px-2 py-2 text-center font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -652,7 +652,7 @@ export default function ScoutSlotsPage() {
                         <div>{r.deliveryDate}</div>
                         <div className="text-[10px] text-[#6B7280]">{r.dayOfWeek}</div>
                       </td>
-                      <td className="px-2 py-1.5 text-center border-r border-[#E5E7EB] whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-left border-r border-[#E5E7EB] whitespace-nowrap">
                         <div>{r.timeBlock}</div>
                         <div className="text-[10px] text-[#6B7280]">{r.hourSlot}:00</div>
                       </td>
@@ -675,7 +675,7 @@ export default function ScoutSlotsPage() {
                         {!r.isMachine && (
                           <button
                             onClick={() => openDuplicateModal(r)}
-                            className="rounded border border-[#E5E7EB] px-2 py-0.5 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
+                            className="rounded border border-[#E5E7EB] px-1 py-0.5 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
                           >
                             複製
                           </button>
