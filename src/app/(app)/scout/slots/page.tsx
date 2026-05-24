@@ -558,23 +558,23 @@ export default function ScoutSlotsPage() {
             <table className="text-[11px]" style={{ minWidth: 1800 }}>
               <thead className="bg-[#F9FAFB] text-[#6B7280]">
                 <tr>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <div>スカウトNO</div>
                     <div className="text-[10px] text-[#9CA3AF]">種別 | 媒体</div>
                   </th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <SortableThV2 label="中" k="deliveryCategoryLarge" sortSpecs={sortSpecs} onClick={() => toggleSort("deliveryCategoryLarge")} />
                     <div className="text-[10px] text-[#9CA3AF]">小</div>
                   </th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <SortableThV2 label="配信者" k="machineId" sortSpecs={sortSpecs} onClick={() => toggleSort("machineId")} />
                     <div className="text-[10px] text-[#9CA3AF]">号機</div>
                   </th>
-                  <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <SortableThV2 label="配信日" k="deliveryDate" sortSpecs={sortSpecs} onClick={() => toggleSort("deliveryDate")} />
                     <div className="text-[10px] text-[#9CA3AF]">曜日</div>
                   </th>
-                  <th className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
+                  <th className="w-[120px] px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
                     <div>時間帯</div>
                     <SortableThV2 label="時間" k="hourSlot" sortSpecs={sortSpecs} onClick={() => toggleSort("hourSlot")} dim center />
                   </th>
@@ -594,13 +594,13 @@ export default function ScoutSlotsPage() {
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">
                     応募率<br />(開封)
                   </th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">〜20代</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">30代</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">40代</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">50代〜</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">外国籍</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募数</th>
-                  <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募数</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">〜20代</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">30代</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">40代</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">50代〜</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB]">外国籍</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募数</th>
+                  <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募数</th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">有効<br />応募率</th>
                   <th className="w-[52px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募率</th>
                   <th className="px-2 py-2 text-center font-medium">操作</th>
