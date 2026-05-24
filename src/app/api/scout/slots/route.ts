@@ -1,6 +1,6 @@
 /**
  * GET /api/scout/slots?date=YYYY-MM-DD
- *   指定日の配信枠を全件返す（機械含む全枠）
+ *   指定日の配信枠を全件返す（RPA含む全枠）
  *
  * PATCH /api/scout/slots
  *   body: { id, deliveryCount?, deliveryCategoryLarge?, deliveryCategoryMedium?,

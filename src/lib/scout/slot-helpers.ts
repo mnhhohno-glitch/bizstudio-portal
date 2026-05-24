@@ -56,11 +56,11 @@ export async function createDailySlots(targetDate: Date): Promise<{
         machineId: m.id,
         isMachine: m.isMachine,
         isStaff,
-        deliveryCategoryLarge: m.isMachine ? "機械" : "社員",
+        deliveryCategoryLarge: m.isMachine ? "RPA" : "社員",
         deliveryCategoryMedium: m.isMachine ? "個別配信" : null,
         deliveryCategorySmall: m.isMachine ? "検索条件指定" : null,
         mediaSource: "マイナビ転職",
-        // 機械: 稼働中のみ集計対象 / 社員: 後で入力されたら true へ
+        // RPA: 稼働中のみ集計対象 / 社員: 後で入力されたら true へ
         isAggregationTarget: m.isMachine ? m.isActive : false,
       });
     }

@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
             isMachine,
             isStaff: !isMachine,
             deliveryCategoryLarge:
-              String(data.deliveryCategoryLarge || (isMachine ? "機械" : "社員")),
+              String(data.deliveryCategoryLarge || (isMachine ? "RPA" : "社員")),
             deliveryCategoryMedium:
               data.deliveryCategoryMedium != null
                 ? String(data.deliveryCategoryMedium) || null
