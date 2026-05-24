@@ -269,6 +269,13 @@ model Candidate {
   desiredEmploymentType String? @map("desired_employment_type")
   desiredSalaryMin      Int?    @map("desired_salary_min")
 
+  // T-064 Phase A: スカウト配信枠との紐付け
+  scoutDeliverySlotId String?            @map("scout_delivery_slot_id")
+  scoutDeliverySlot   ScoutDeliverySlot? @relation(fields: [scoutDeliverySlotId], references: [id])
+  scoutLinkedAt       DateTime?          @map("scout_linked_at")
+  scoutLinkedById     String?            @map("scout_linked_by_id")
+  mynaviScoutSentAt   DateTime?          @map("mynavi_scout_sent_at") // マイナビPDFから取れる「スカウト送信時刻」（将来自動取得用）
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   jimuSessions           JimuSession[]
@@ -288,6 +295,7 @@ model Candidate {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@index([scoutDeliverySlotId])
   @@map("candidates")
 }
 
@@ -1785,4 +1793,117 @@ model CandidateMemo {
 
   @@index([candidateId])
   @@map("candidate_memos")
+}
+
+// ============================================================================
+// T-064 Phase A: スカウト運用集計機能
+// ============================================================================
+
+model ScoutDeliverySlot {
+  id           String   @id @default(cuid())
+  scoutNumber  String   @unique @map("scout_number") // SC + 8桁数字
+  deliveryDate DateTime @map("delivery_date") @db.Date
+  hourSlot     Int      @map("hour_slot") // 8〜19（開始時刻）
+
+  machineId String?             @map("machine_id")
+  machine   ScoutMachineMaster? @relation(fields: [machineId], references: [id])
+
+  isMachine Boolean @default(true) @map("is_machine")
+  isStaff   Boolean @default(false) @map("is_staff")
+
+  // 配信種別3階層
+  deliveryCategoryLarge  String  @map("delivery_category_large") // "機械" / "社員"
+  deliveryCategoryMedium String? @map("delivery_category_medium") // "個別配信" / "一斉配信"
+  deliveryCategorySmall  String? @map("delivery_category_small") // "検索条件指定" / "検索条件未指定"
+
+  mediaSource String @default("マイナビ転職") @map("media_source")
+
+  searchConditionName String? @map("search_condition_name")
+
+  deliveryCount Int @default(0) @map("delivery_count")
+  openCount     Int @default(0) @map("open_count")
+
+  isAggregationTarget Boolean @default(true) @map("is_aggregation_target")
+
+  memo String? @db.Text
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById String?  @map("created_by_id")
+  updatedById String?  @map("updated_by_id")
+
+  linkedCandidates Candidate[]
+
+  @@unique([deliveryDate, hourSlot, machineId])
+  @@index([deliveryDate])
+  @@index([deliveryDate, hourSlot])
+  @@index([machineId])
+  @@index([mediaSource])
+  @@map("scout_delivery_slots")
+}
+
+model ScoutMachineMaster {
+  id            String  @id @default(cuid())
+  recruiterName String  @map("recruiter_name") // マイナビPDFに記載される担当者名
+  machineNumber Int?    @map("machine_number") // 1〜6（社員の場合 null）
+  machineLabel  String  @map("machine_label") // "1号機" / "2号機" / "人（社員）"
+  isMachine     Boolean @default(true) @map("is_machine")
+  isActive      Boolean @default(true) @map("is_active")
+
+  validFrom DateTime  @default(now()) @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  slots ScoutDeliverySlot[]
+
+  @@unique([recruiterName, validFrom])
+  @@index([machineNumber])
+  @@index([isActive])
+  @@map("scout_machine_masters")
+}
+
+model ScoutMediaMaster {
+  id           String  @id @default(cuid())
+  mediaName    String  @unique @map("media_name")
+  displayOrder Int     @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([displayOrder])
+  @@index([isActive])
+  @@map("scout_media_masters")
+}
+
+model ScoutImportLog {
+  id         String    @id @default(cuid())
+  importType String    @map("import_type") // "DAILY_EXCEL" / "FILEMAKER_LEGACY" / "MANUAL"
+  fileName   String?   @map("file_name")
+  targetDate DateTime? @map("target_date") @db.Date
+
+  totalRows    Int @default(0) @map("total_rows")
+  successCount Int @default(0) @map("success_count")
+  failureCount Int @default(0) @map("failure_count")
+
+  status       String  // "RUNNING" / "COMPLETED" / "FAILED"
+  errorMessage String? @map("error_message") @db.Text
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([targetDate])
+  @@index([importType, startedAt])
+  @@map("scout_import_logs")
+}
+
+model ScoutSequence {
+  id         String @id @default(cuid())
+  lastNumber Int    @map("last_number") // 最後に採番した番号（8桁数字部分）
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("scout_sequences")
 }

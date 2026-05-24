@@ -13,6 +13,7 @@ import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
 import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
+import ScoutLinkPanel from "@/components/scout/ScoutLinkPanel";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { REGIONS } from "@/lib/constants/prefectures";
@@ -83,6 +84,8 @@ type Candidate = {
   recruiterName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  scoutDeliverySlotId: string | null;
+  scoutLinkedAt: string | null;
   desiredJobType1: string | null;
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
@@ -1880,6 +1883,17 @@ function CandidateDetailPageBody() {
             onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
             googleFormDisabled={googleFormDisabled}
             googleFormDisabledReason={googleFormDisabledReason}
+          />
+
+          {/* T-064: スカウト紐付けパネル（applicationRoute === "スカウト" の時のみ表示） */}
+          <ScoutLinkPanel
+            candidateId={candidate.id}
+            applicationRoute={candidate.applicationRoute}
+            currentScoutNumber={candidate.scoutNumber}
+            recruiterName={candidate.recruiterName}
+            scoutLinkedAt={candidate.scoutLinkedAt}
+            scoutDeliverySlotId={candidate.scoutDeliverySlotId}
+            onLinked={fetchCandidate}
           />
 
           {/* サブタブバー */}

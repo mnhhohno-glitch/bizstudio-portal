@@ -51,6 +51,8 @@ export default async function CandidateMasterPage() {
     gender: c.gender,
     employee: c.employee,
     recruiterName: c.recruiterName,
+    applicationRoute: c.applicationRoute,
+    mediaSource: c.mediaSource,
     createdAt: c.createdAt.toISOString(),
     supportStatus: (c.supportStatus as string) || "BEFORE",
     supportSubStatus: (c.supportSubStatus as string | null) ?? null,

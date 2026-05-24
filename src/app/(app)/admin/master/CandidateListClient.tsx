@@ -39,6 +39,8 @@ type CandidateRow = {
   gender: string | null;
   employee: { id: string; name: string } | null;
   recruiterName: string | null;
+  applicationRoute: string | null;
+  mediaSource: string | null;
   createdAt: string;
   supportStatus: string;
   supportSubStatus: string | null;
@@ -107,6 +109,9 @@ export default function CandidateListClient({
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
   const [endReasonFilter, setEndReasonFilter] = useState("ALL");
+  // T-064: スカウト関連フィルター
+  const [routeFilter, setRouteFilter] = useState("ALL");
+  const [mediaFilter, setMediaFilter] = useState("ALL");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
@@ -160,8 +165,14 @@ export default function CandidateListClient({
     if (endReasonFilter !== "ALL") {
       result = result.filter((c) => c.supportEndReason === endReasonFilter);
     }
+    if (routeFilter !== "ALL") {
+      result = result.filter((c) => (c.applicationRoute || "") === routeFilter);
+    }
+    if (mediaFilter !== "ALL") {
+      result = result.filter((c) => (c.mediaSource || "") === mediaFilter);
+    }
     return result;
-  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter]);
+  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter, routeFilter, mediaFilter]);
 
   const tabCounts = useMemo(() => {
     // Apply all filters except supportTab so counts reflect current filter state
@@ -490,8 +501,40 @@ export default function CandidateListClient({
           </div>
         )}
 
+        {/* T-064: 経路 */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">経路</label>
+          <select
+            value={routeFilter}
+            onChange={(e) => { setRouteFilter(e.target.value); setCurrentPage(1); }}
+            className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          >
+            <option value="ALL">ALL</option>
+            <option value="スカウト">スカウト</option>
+            <option value="応募">応募</option>
+          </select>
+        </div>
+
+        {/* T-064: 媒体 */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">媒体</label>
+          <select
+            value={mediaFilter}
+            onChange={(e) => { setMediaFilter(e.target.value); setCurrentPage(1); }}
+            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+          >
+            <option value="ALL">ALL</option>
+            <option value="マイナビ転職">マイナビ転職</option>
+            <option value="マイナビエージェント">マイナビエージェント</option>
+            <option value="indeed">indeed</option>
+            <option value="日経HR">日経HR</option>
+            <option value="自社HP">自社HP</option>
+            <option value="dodaMaps">dodaMaps</option>
+          </select>
+        </div>
+
         {/* クリアボタン */}
-        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL") && (
+        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL") && (
           <button
             onClick={() => {
               setCaFilter("ALL");
@@ -499,6 +542,8 @@ export default function CandidateListClient({
               setDateTo("");
               setGenderFilter("ALL");
               setEndReasonFilter("ALL");
+              setRouteFilter("ALL");
+              setMediaFilter("ALL");
               setCurrentPage(1);
             }}
             className="text-sm text-[#2563EB] hover:text-[#1D4ED8] hover:underline py-1.5"
