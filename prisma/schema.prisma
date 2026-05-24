@@ -1090,6 +1090,9 @@ model MynaviRpaProcessingLog {
   pdfFileName     String?           @map("pdf_file_name")
   pdfFileId       String?           @map("pdf_file_id")
   errorMessage    String?           @map("error_message") @db.Text
+  // T-064: 自動紐付け結果（matched / no_recruiter_name / no_machine_master / no_candidate_today / no_candidate_yesterday / error）
+  scoutLinkResult    String? @map("scout_link_result")
+  scoutLinkedSlotId  String? @map("scout_linked_slot_id")
   processedAt     DateTime          @default(now()) @map("processed_at")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
