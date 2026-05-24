@@ -10,6 +10,7 @@ import { notifyMynaviDuplicateSkip, notifyMynaviError } from "@/lib/mynavi-rpa/n
 import { generateNextCandidateNumber } from "@/lib/candidate-number";
 import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -266,6 +267,22 @@ export async function POST(req: NextRequest) {
       console.error("[rpa/mynavi/pdf-upload] Drive/CandidateFile error:", fileWarning);
     }
 
+    // ---- T-064: スカウト配信枠 自動紐付け ----
+    let scoutLinkResult: string | null = null;
+    let scoutLinkedSlotId: string | null = null;
+    try {
+      const linkRes = await autoLinkCandidateToSlot({
+        candidateId: candidate.id,
+        recruiterName: recruiterName?.trim() ?? null,
+        applicationDate: candidate.createdAt,
+      });
+      scoutLinkResult = linkRes.reason;
+      scoutLinkedSlotId = linkRes.slotId ?? null;
+    } catch (e) {
+      console.error("[rpa/mynavi/pdf-upload] autoLinkCandidateToSlot failed:", e);
+      scoutLinkResult = "error";
+    }
+
     const log = await prisma.mynaviRpaProcessingLog.create({
       data: {
         batchId,
@@ -279,6 +296,8 @@ export async function POST(req: NextRequest) {
         pdfFileName,
         pdfFileId,
         errorMessage: fileWarning,
+        scoutLinkResult,
+        scoutLinkedSlotId,
       },
     });
 
@@ -295,6 +314,8 @@ export async function POST(req: NextRequest) {
       canSendReply,
       reason,
       status,
+      scoutLinkResult,
+      scoutLinkedSlotId,
     });
   } catch (e) {
     console.error("[rpa/mynavi/pdf-upload] unexpected error:", e);
