@@ -224,9 +224,59 @@ npx tsx scripts/backfill-scout-link.ts | tee scripts/backfill-result.log
 
 ---
 
-## 11. 次のターンで実施すること
+## 11. ~~次のターンで実施すること~~ → 完了
 
-将幸さんから本実行の OK が出たら:
-1. `npx tsx scripts/backfill-scout-link.ts | tee scripts/backfill-result.log`
-2. 本報告書に「12. 本番実行結果」セクションを追記
-3. 未紐付け 29件（no_recruiter_name 28 + no_machine_master 1）の傾向を確認、必要なら ScoutMachineMaster に「大野 将幸」を追加して再実行
+~~将幸さんから本実行の OK が出たら:~~
+- ~~`npx tsx scripts/backfill-scout-link.ts | tee scripts/backfill-result.log`~~
+- ~~本報告書に「12. 本番実行結果」セクションを追記~~
+
+**→ 2026-05-25 00:10 UTC に本番実行完了。下記セクション 12 参照。**
+
+---
+
+## 12. 本番実行結果（2026-05-25 00:10 UTC）
+
+```
+モード: 本番実行（DB書き込み）
+対象期間: 2026-01-11T00:00:00.000Z 以降
+開始時刻: 2026-05-25T00:09:54.579Z
+
+対象 Candidate: 42件
+
+紐付け成功 (matched):       13件
+担当者マスタ未マッチ:        1件
+同日スロット無し:            0件
+前日も無し:                  0件
+recruiterName 空:           28件
+エラー:                      0件
+
+所要時間: 13.0秒
+```
+
+ファイル: `scripts/backfill-result.log`
+
+### DRY RUN v2 → 本番 比較
+
+| カテゴリ | DRY RUN v2 | 本番実行 | 差分 |
+|--|--|--|--|
+| 対象件数 | 41 | 42 | +1（新規 Candidate） |
+| **matched** | **12** | **13** | **+1** |
+| no_machine_master | 0 | 1 | +1 |
+| no_candidate_today | 0 | 0 | 0 |
+| no_candidate_yesterday | 1 | 0 | -1 |
+| no_recruiter_name | 28 | 28 | 0 |
+| error | 0 | 0 | 0 |
+
+### 結果分析
+
+- **13件が DB に紐付け書き込み完了**（scoutDeliverySlotId, scoutNumber, scoutLinkedAt 設定済）
+- DRY RUN v2 より +1件多いのは、DRY RUN 後に新規 Candidate が追加されたため
+- DRY RUN v2 で `no_candidate_yesterday` だった 1件が `no_machine_master` に分類変更（`autoLinkCandidateToSlot` の分類ロジックが `findMatchingSlot` と異なるため、マスタ未マッチを先に返す）
+- **エラー 0件**: 全件正常処理
+
+### 未紐付け 29件の内訳と対応
+
+| カテゴリ | 件数 | 対応 |
+|--|--|--|
+| recruiterName 空 | 28件 | T-064 以前の旧データ。ScoutLinkPanel で手動紐付け |
+| no_machine_master | 1件 | マスタに存在しない担当者名。必要に応じマスタ追加 |
