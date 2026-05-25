@@ -41,19 +41,29 @@ function addDays(date: Date, days: number): Date {
   return d;
 }
 
-/** ScoutMachineMaster で recruiterName をマッチさせる（スペース揺れ吸収） */
+/** スペース（半角・全角）を全て除去して小文字化 */
+function normalizeRecruiterName(s: string): string {
+  return s.replace(/[\s　]+/g, "").toLowerCase();
+}
+
+/**
+ * ScoutMachineMaster で recruiterName をマッチさせる。
+ *  - 半角/全角スペースを全削除して比較（"藤本 なつみ" == "藤本なつみ"）
+ *  - aliases 配列も同様に正規化して比較（"RPA1号機" == "RPA 1号機"）
+ *
+ * マスタは 10件程度なので全件取得 → JS で比較する。
+ */
 async function findMachineByRecruiterName(recruiterName: string) {
   const trimmed = recruiterName.trim();
   if (!trimmed) return null;
-  return prisma.scoutMachineMaster.findFirst({
-    where: {
-      OR: [
-        { recruiterName: trimmed },
-        { recruiterName: trimmed.replace(/\s+/g, " ") },
-        { recruiterName: trimmed.replace(/\s+/g, "　") },
-      ],
-    },
-  });
+  const target = normalizeRecruiterName(trimmed);
+
+  const machines = await prisma.scoutMachineMaster.findMany();
+  for (const m of machines) {
+    if (normalizeRecruiterName(m.recruiterName) === target) return m;
+    if (m.aliases.some((a) => normalizeRecruiterName(a) === target)) return m;
+  }
+  return null;
 }
 
 /** machineId × deliveryDate (UTC 00:00) のスロットから1件選ぶ */

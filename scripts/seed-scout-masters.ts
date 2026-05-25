@@ -21,14 +21,14 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 const MACHINE_MASTERS = [
-  { recruiterName: "藤本 なつみ", machineNumber: 1, machineLabel: "1号機", isMachine: true, isActive: true },
-  { recruiterName: "岡田 かなこ", machineNumber: 2, machineLabel: "2号機", isMachine: true, isActive: true },
-  { recruiterName: "上原 ちはる", machineNumber: 3, machineLabel: "3号機", isMachine: true, isActive: true },
-  { recruiterName: "上原 千遥", machineNumber: 4, machineLabel: "4号機", isMachine: true, isActive: true },
-  { recruiterName: "岡田 愛子", machineNumber: 5, machineLabel: "5号機", isMachine: true, isActive: true },
-  { recruiterName: "安藤 嘉富", machineNumber: 6, machineLabel: "6号機", isMachine: true, isActive: false },
-  { recruiterName: "大野 望", machineNumber: null, machineLabel: "人（社員）", isMachine: false, isActive: true },
-  { recruiterName: "藤本 夏海", machineNumber: null, machineLabel: "人（社員）", isMachine: false, isActive: true },
+  { recruiterName: "藤本 なつみ", aliases: ["RPA 1号機", "RPA1号機", "RPA-1号機", "1号機"], machineNumber: 1, machineLabel: "1号機", isMachine: true, isActive: true },
+  { recruiterName: "岡田 かなこ", aliases: ["RPA 2号機", "RPA2号機", "RPA-2号機", "2号機"], machineNumber: 2, machineLabel: "2号機", isMachine: true, isActive: true },
+  { recruiterName: "上原 ちはる", aliases: ["RPA 3号機", "RPA3号機", "RPA-3号機", "3号機"], machineNumber: 3, machineLabel: "3号機", isMachine: true, isActive: true },
+  { recruiterName: "上原 千遥", aliases: ["RPA 4号機", "RPA4号機", "RPA-4号機", "4号機"], machineNumber: 4, machineLabel: "4号機", isMachine: true, isActive: true },
+  { recruiterName: "岡田 愛子", aliases: ["RPA 5号機", "RPA5号機", "RPA-5号機", "5号機"], machineNumber: 5, machineLabel: "5号機", isMachine: true, isActive: true },
+  { recruiterName: "安藤 嘉富", aliases: ["RPA 6号機", "RPA6号機", "RPA-6号機", "6号機"], machineNumber: 6, machineLabel: "6号機", isMachine: true, isActive: false },
+  { recruiterName: "大野 望", aliases: [], machineNumber: null, machineLabel: "人（社員）", isMachine: false, isActive: true },
+  { recruiterName: "藤本 夏海", aliases: [], machineNumber: null, machineLabel: "人（社員）", isMachine: false, isActive: true },
 ];
 
 const MEDIA_MASTERS = [
@@ -56,6 +56,7 @@ async function main() {
       await prisma.scoutMachineMaster.update({
         where: { id: existing.id },
         data: {
+          aliases: m.aliases,
           machineNumber: m.machineNumber,
           machineLabel: m.machineLabel,
           isMachine: m.isMachine,
