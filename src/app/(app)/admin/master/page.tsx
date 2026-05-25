@@ -76,6 +76,7 @@ export default async function CandidateMasterPage() {
           name: e.name,
         }))}
         currentEmployeeId={currentEmployee?.id ?? null}
+        isAdmin={actor?.role === "admin"}
       />
     </div>
   );
