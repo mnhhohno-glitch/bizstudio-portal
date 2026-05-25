@@ -1846,12 +1846,13 @@ model ScoutDeliverySlot {
 }
 
 model ScoutMachineMaster {
-  id            String  @id @default(cuid())
-  recruiterName String  @map("recruiter_name") // マイナビPDFに記載される担当者名
-  machineNumber Int?    @map("machine_number") // 1〜6（社員の場合 null）
-  machineLabel  String  @map("machine_label") // "1号機" / "2号機" / "人（社員）"
-  isMachine     Boolean @default(true) @map("is_machine")
-  isActive      Boolean @default(true) @map("is_active")
+  id            String   @id @default(cuid())
+  recruiterName String   @map("recruiter_name") // マイナビPDFに記載される担当者名
+  aliases       String[] @default([]) @map("aliases") // 別表記エイリアス（RPA●号機 / ひらがな等）
+  machineNumber Int?     @map("machine_number") // 1〜6（社員の場合 null）
+  machineLabel  String   @map("machine_label") // "1号機" / "2号機" / "人（社員）"
+  isMachine     Boolean  @default(true) @map("is_machine")
+  isActive      Boolean  @default(true) @map("is_active")
 
   validFrom DateTime  @default(now()) @map("valid_from")
   validTo   DateTime? @map("valid_to")

@@ -253,6 +253,104 @@ async function main() {
   check("linked=false", res6.linked === false);
   check("reason=no_candidate_yesterday", res6.reason === "no_candidate_yesterday");
 
+  // ---- Case 7: エイリアス・スペース揺れマッチ ----
+  console.log("\n[7] エイリアス・スペース揺れマッチ");
+  // 当日にスロットを1件作成（社員枠 = staff）
+  const seq7 = await generateScoutNumber();
+  const slot7 = await prisma.scoutDeliverySlot.create({
+    data: {
+      scoutNumber: seq7,
+      deliveryDate: dateUtc,
+      hourSlot: 14,
+      machineId: staff.id,
+      isMachine: false,
+      isStaff: true,
+      deliveryCategoryLarge: "社員",
+      deliveryCategoryMedium: "一斉配信",
+      deliveryCategorySmall: "検索条件指定",
+      mediaSource: "マイナビ転職",
+      deliveryCount: 30,
+      isAggregationTarget: true,
+    },
+  });
+
+  // 7-a: スペース無し
+  const nameNoSpace = staff.recruiterName.replace(/[\s　]+/g, "");
+  const matchNoSpace = await findMatchingSlot({
+    recruiterName: nameNoSpace,
+    applicationDate: baseDate,
+  });
+  check(`スペース無し "${nameNoSpace}" でマッチ`, matchNoSpace?.slotId === slot7.id);
+
+  // 7-b: 全角スペース
+  const nameFullSpace = staff.recruiterName.replace(/[\s　]+/g, "　");
+  const matchFullSpace = await findMatchingSlot({
+    recruiterName: nameFullSpace,
+    applicationDate: baseDate,
+  });
+  check(`全角スペース "${nameFullSpace}" でマッチ`, matchFullSpace?.slotId === slot7.id);
+
+  // 7-c: 半角スペース（既存）
+  const matchHalfSpace = await findMatchingSlot({
+    recruiterName: staff.recruiterName,
+    applicationDate: baseDate,
+  });
+  check(`半角スペース "${staff.recruiterName}" でマッチ`, matchHalfSpace?.slotId === slot7.id);
+
+  // 7-d: 完全に無関係な名前はマッチしない
+  const matchNone = await findMatchingSlot({
+    recruiterName: "存在しないXYZ太郎",
+    applicationDate: baseDate,
+  });
+  check("無効な名前はマッチしない", matchNone === null);
+
+  // 7-e: RPA号機エイリアス（マスタに aliases=['RPA 1号機'] が登録されていれば 1号機担当者にマッチ）
+  // 1号機マスタの存在確認（テスト環境でマスタが投入済の前提）
+  const rpa1 = await prisma.scoutMachineMaster.findFirst({
+    where: { machineLabel: "1号機" },
+  });
+  if (rpa1) {
+    // 念のため既存 RPA1 のスロットを削除（過去テスト残りなど）
+    await prisma.scoutDeliverySlot.deleteMany({
+      where: { deliveryDate: dateUtc, machineId: rpa1.id },
+    });
+    // 1号機担当者の slot を当日に作成
+    const seqRpa = await generateScoutNumber();
+    const slotRpa = await prisma.scoutDeliverySlot.create({
+      data: {
+        scoutNumber: seqRpa,
+        deliveryDate: dateUtc,
+        hourSlot: 9,
+        machineId: rpa1.id,
+        isMachine: true,
+        isStaff: false,
+        deliveryCategoryLarge: "RPA",
+        deliveryCategoryMedium: "一斉配信",
+        deliveryCategorySmall: "検索条件指定",
+        mediaSource: "マイナビ転職",
+        deliveryCount: 50,
+        isAggregationTarget: true,
+      },
+    });
+    const matchAlias1 = await findMatchingSlot({
+      recruiterName: "RPA 1号機",
+      applicationDate: baseDate,
+    });
+    check(`"RPA 1号機" がエイリアスで 1号機担当者にマッチ`, matchAlias1?.slotId === slotRpa.id);
+
+    const matchAlias2 = await findMatchingSlot({
+      recruiterName: "RPA1号機",
+      applicationDate: baseDate,
+    });
+    check(`"RPA1号機"（スペース無し）でも 1号機担当者にマッチ`, matchAlias2?.slotId === slotRpa.id);
+
+    await prisma.scoutDeliverySlot.delete({ where: { id: slotRpa.id } });
+  } else {
+    console.log("  (1号機マスタが未登録のため alias テストはスキップ)");
+  }
+
+  await prisma.scoutDeliverySlot.delete({ where: { id: slot7.id } });
+
   // クリーンアップ
   await prisma.candidate.deleteMany({ where: { id: { in: createdCandidates } } });
   await prisma.scoutDeliverySlot.deleteMany({
