@@ -68,7 +68,30 @@ interface CandidateListClientProps {
   initialTotalCount: number;
   employees: Employee[];
   currentEmployeeId?: string | null;
+  isAdmin?: boolean;
 }
+
+type FileBreakdown = Record<string, number>;
+
+type DeletionImpactItem = {
+  candidateId: string;
+  candidateNumber: string;
+  fullName: string;
+  counts: {
+    interviews: number;
+    files: number;
+    fileBreakdown: FileBreakdown;
+    entries: number;
+    jobResponses: number;
+    tasks: number;
+  };
+  hasAnyData: boolean;
+};
+
+type DeletionImpactResponse = {
+  items: DeletionImpactItem[];
+  summary: { total: number; withData: number; clean: number };
+};
 
 const PAGE_SIZE = 20;
 
@@ -95,6 +118,7 @@ export default function CandidateListClient({
   initialTotalCount,
   employees,
   currentEmployeeId,
+  isAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
@@ -118,6 +142,11 @@ export default function CandidateListClient({
   const [bulkStatusValue, setBulkStatusValue] = useState("");
   const [bulkEndReasons, setBulkEndReasons] = useState<Record<string, string>>({});
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [hardDeleteModalOpen, setHardDeleteModalOpen] = useState(false);
+  const [hardDeleteImpact, setHardDeleteImpact] =
+    useState<DeletionImpactResponse | null>(null);
+  const [hardDeleteAck, setHardDeleteAck] = useState(false);
+  const [hardDeleteLoading, setHardDeleteLoading] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -315,6 +344,68 @@ export default function CandidateListClient({
     )
       return;
     executeBulkAction("change_status", { newStatus: "ACTIVE" });
+  };
+
+  const handleHardDeleteClick = async () => {
+    if (selectedIds.length === 0) return;
+    setHardDeleteLoading(true);
+    try {
+      const res = await fetch(
+        "/api/admin/candidates/check-deletion-impact",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateIds: selectedIds }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "事前チェックに失敗しました");
+        return;
+      }
+      setHardDeleteImpact(data as DeletionImpactResponse);
+      setHardDeleteAck(false);
+      setHardDeleteModalOpen(true);
+    } catch {
+      toast.error("事前チェックに失敗しました");
+    } finally {
+      setHardDeleteLoading(false);
+    }
+  };
+
+  const executeHardDelete = async () => {
+    if (!hardDeleteImpact) return;
+    const hasWithData = hardDeleteImpact.summary.withData > 0;
+    if (hasWithData && !hardDeleteAck) {
+      toast.error("確認チェックボックスにチェックしてください");
+      return;
+    }
+    setHardDeleteLoading(true);
+    try {
+      const res = await fetch("/api/admin/candidates/hard-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateIds: hardDeleteImpact.items.map((i) => i.candidateId),
+          confirmedHasData: hasWithData,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "完全削除に失敗しました");
+        return;
+      }
+      toast.success(`${data.deletedCount}件を完全削除しました`);
+      setHardDeleteModalOpen(false);
+      setHardDeleteImpact(null);
+      setHardDeleteAck(false);
+      setSelectedIds([]);
+      refreshCandidates();
+    } catch {
+      toast.error("完全削除に失敗しました");
+    } finally {
+      setHardDeleteLoading(false);
+    }
   };
 
   const submitBulkAssignee = (newAssigneeUserId: string) => {
@@ -584,13 +675,24 @@ export default function CandidateListClient({
               </button>
             </>
           ) : (
-            <button
-              onClick={handleBulkUnarchive}
-              disabled={bulkLoading}
-              className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
-            >
-              アーカイブ解除（支援中に戻す）
-            </button>
+            <>
+              <button
+                onClick={handleBulkUnarchive}
+                disabled={bulkLoading}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                アーカイブ解除（支援中に戻す）
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={handleHardDeleteClick}
+                  disabled={bulkLoading || hardDeleteLoading || selectedIds.length === 0}
+                  className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+                >
+                  完全削除
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={() => setSelectedIds([])}
@@ -981,6 +1083,112 @@ export default function CandidateListClient({
                   {bulkStatusValue === "ENDED"
                     ? "支援終了に変更"
                     : "変更する"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 完全削除確認モーダル */}
+      {hardDeleteModalOpen && hardDeleteImpact && (() => {
+        const total = hardDeleteImpact.summary.total;
+        const withData = hardDeleteImpact.summary.withData;
+        const hasWithData = withData > 0;
+        const itemsWithData = hardDeleteImpact.items.filter((i) => i.hasAnyData);
+        const canSubmit = !hasWithData || hardDeleteAck;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[640px] max-h-[85vh] overflow-y-auto">
+              {hasWithData ? (
+                <h3 className="text-base font-semibold mb-3 text-red-700">
+                  ⚠️ 関連データが残っている求職者が含まれています
+                </h3>
+              ) : (
+                <h3 className="text-base font-semibold mb-3">
+                  {total}件を完全削除します
+                </h3>
+              )}
+
+              {hasWithData ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-700">
+                    以下の求職者には関連データ（面談記録・書類・エントリー等）が残っています。
+                    この操作は<span className="font-semibold text-red-600">元に戻せません</span>。
+                  </p>
+                  <p className="text-sm text-gray-700">
+                    関連データを持つ求職者: <span className="font-semibold">{withData}名</span>
+                    （全{total}件中）
+                  </p>
+                  <div className="border border-gray-200 rounded-md overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left font-medium text-gray-600">求職者番号</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-gray-600">氏名</th>
+                          <th className="px-2 py-1.5 text-right font-medium text-gray-600">面談</th>
+                          <th className="px-2 py-1.5 text-right font-medium text-gray-600">書類</th>
+                          <th className="px-2 py-1.5 text-right font-medium text-gray-600">エントリー</th>
+                          <th className="px-2 py-1.5 text-right font-medium text-gray-600">マイページ回答</th>
+                          <th className="px-2 py-1.5 text-right font-medium text-gray-600">タスク</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemsWithData.map((i) => (
+                          <tr key={i.candidateId} className="border-t border-gray-200">
+                            <td className="px-2 py-1.5 font-mono">{i.candidateNumber}</td>
+                            <td className="px-2 py-1.5">{i.fullName}</td>
+                            <td className="px-2 py-1.5 text-right">{i.counts.interviews}</td>
+                            <td className="px-2 py-1.5 text-right">{i.counts.files}</td>
+                            <td className="px-2 py-1.5 text-right">{i.counts.entries}</td>
+                            <td className="px-2 py-1.5 text-right">{i.counts.jobResponses}</td>
+                            <td className="px-2 py-1.5 text-right">{i.counts.tasks}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <label className="flex items-start gap-2 mt-4 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hardDeleteAck}
+                      onChange={(e) => setHardDeleteAck(e.target.checked)}
+                      className="mt-0.5 cursor-pointer"
+                    />
+                    <span className="text-sm text-gray-700">
+                      関連データが残っていることを理解した上で削除する
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-700">
+                  この操作は<span className="font-semibold text-red-600">元に戻せません</span>。続けますか？
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2 mt-6">
+                <button
+                  onClick={() => {
+                    setHardDeleteModalOpen(false);
+                    setHardDeleteImpact(null);
+                    setHardDeleteAck(false);
+                  }}
+                  disabled={hardDeleteLoading}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={executeHardDelete}
+                  disabled={!canSubmit || hardDeleteLoading}
+                  className={`px-4 py-2 text-sm rounded-md text-white ${
+                    canSubmit && !hardDeleteLoading
+                      ? "bg-red-600 hover:bg-red-700"
+                      : "bg-gray-300 cursor-not-allowed"
+                  }`}
+                >
+                  {hardDeleteLoading ? "削除中..." : hasWithData ? "全て完全削除する" : "完全削除する"}
                 </button>
               </div>
             </div>
