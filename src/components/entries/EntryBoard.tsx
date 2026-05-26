@@ -593,13 +593,25 @@ export default function EntryBoard() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <input
-          type="text"
-          value={candidateName}
-          onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
-          placeholder="求職者名で検索"
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
-        />
+        <div className="relative w-40">
+          <input
+            type="text"
+            value={candidateName}
+            onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
+            placeholder="求職者名で検索"
+            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-full pr-7"
+          />
+          {candidateName && (
+            <button
+              type="button"
+              onClick={() => { setCandidateName(""); setPage(1); }}
+              className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xs leading-none"
+              aria-label="クリア"
+            >
+              ×
+            </button>
+          )}
+        </div>
         <select
           value={caFilter}
           onChange={(e) => { setCaFilter(e.target.value); setPage(1); }}
@@ -608,13 +620,25 @@ export default function EntryBoard() {
           <option value="">担当CA（全員）</option>
           {caOptions.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
-        <input
-          type="text"
-          value={companyName}
-          onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
-          placeholder="企業名で検索"
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-40"
-        />
+        <div className="relative w-40">
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
+            placeholder="企業名で検索"
+            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-full pr-7"
+          />
+          {companyName && (
+            <button
+              type="button"
+              onClick={() => { setCompanyName(""); setPage(1); }}
+              className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xs leading-none"
+              aria-label="クリア"
+            >
+              ×
+            </button>
+          )}
+        </div>
         <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
           <input
             type="checkbox"
