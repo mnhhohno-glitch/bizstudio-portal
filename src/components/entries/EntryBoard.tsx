@@ -11,6 +11,7 @@ import BulkEndFlagModal from "./BulkEndFlagModal";
 import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
+import CalendarSyncConfirmDialog, { type SyncSlot } from "./CalendarSyncConfirmDialog";
 
 export type Entry = {
   id: string;
@@ -64,7 +65,31 @@ export type Entry = {
   introducedAt: string;
   createdAt: string;
   updatedAt: string;
+  // T-066: Google カレンダー連携用イベントID
+  firstInterviewGcalId?: string | null;
+  secondInterviewGcalId?: string | null;
+  finalInterviewGcalId?: string | null;
 };
+
+// T-066: 面接日時表示用フォーマッタ。Date→"YYYY/MM/DD" は JST 経由（罠 #17）。
+function formatInterviewDateTime(dateIso: string | null, time: string | null): string {
+  if (!dateIso || !time) return "";
+  const date = new Date(dateIso);
+  const ymd = date.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD"
+  return `${ymd.replace(/-/g, "/")} ${time}`;
+}
+
+const INTERVIEW_SLOT_DEFS: { slot: "first" | "second" | "final"; label: string; dateField: keyof Entry; timeField: keyof Entry }[] = [
+  { slot: "first", label: "一次面接", dateField: "firstInterviewDate", timeField: "firstInterviewTime" },
+  { slot: "second", label: "二次面接", dateField: "secondInterviewDate", timeField: "secondInterviewTime" },
+  { slot: "final", label: "最終面接", dateField: "finalInterviewDate", timeField: "finalInterviewTime" },
+];
+
+const INTERVIEW_DATE_TIME_FIELDS = new Set([
+  "firstInterviewDate", "firstInterviewTime",
+  "secondInterviewDate", "secondInterviewTime",
+  "finalInterviewDate", "finalInterviewTime",
+]);
 
 export type FlagData = {
   entryFlags: string[];
@@ -134,6 +159,13 @@ export default function EntryBoard() {
 
   // Entry edit modal
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
+
+  // T-066: Google カレンダー連携状態 / 同期ダイアログ
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncDialogSlots, setSyncDialogSlots] = useState<SyncSlot[]>([]);
+  const [syncDialogEntryId, setSyncDialogEntryId] = useState<string | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     if (!sessionLoaded) return;
@@ -232,6 +264,15 @@ export default function EntryBoard() {
     } catch { /* */ }
   }, [candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
 
+  // T-066: Google カレンダー連携状態を取得（既存の /api/calendar/events を流用）
+  useEffect(() => {
+    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    fetch(`/api/calendar/events?date=${today}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && typeof d.connected === "boolean") setCalendarConnected(d.connected); })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetch("/api/entry-flags")
       .then((r) => r.json())
@@ -298,11 +339,106 @@ export default function EntryBoard() {
         return;
       }
       const data = await res.json();
-      setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
+      const updatedEntry: Entry = data.entry;
+      setEntries((prev) => prev.map((e) => (e.id === entryId ? updatedEntry : e)));
+
+      // T-066: 面接日時が更新され、date+time が揃った slot を抽出してダイアログ表示
+      if (!calendarConnected) return;
+      const touchedInterview = Object.keys(fields).some((k) => INTERVIEW_DATE_TIME_FIELDS.has(k));
+      if (!touchedInterview) return;
+      const slots: SyncSlot[] = [];
+      for (const def of INTERVIEW_SLOT_DEFS) {
+        const date = updatedEntry[def.dateField] as string | null;
+        const time = updatedEntry[def.timeField] as string | null;
+        // 当該 slot のフィールドが今回の更新に含まれている場合のみ候補化
+        if (!(def.dateField in fields || def.timeField in fields)) continue;
+        if (!date || !time) continue;
+        slots.push({
+          slot: def.slot,
+          label: def.label,
+          datetime: formatInterviewDateTime(date, time),
+        });
+      }
+      if (slots.length > 0) {
+        setSyncDialogEntryId(entryId);
+        setSyncDialogSlots(slots);
+        setSyncDialogOpen(true);
+      }
     } catch {
       toast.error("更新に失敗しました");
     }
   };
+
+  // T-066: 同期ダイアログ確認時に各 slot に対し sync-calendar API を順次呼ぶ
+  const handleSyncConfirm = useCallback(async () => {
+    if (!syncDialogEntryId || syncDialogSlots.length === 0) return;
+    setSyncLoading(true);
+    let okCount = 0;
+    let errCount = 0;
+    try {
+      for (const s of syncDialogSlots) {
+        try {
+          const res = await fetch(`/api/entries/${syncDialogEntryId}/sync-calendar`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slot: s.slot }),
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data?.success) {
+            okCount++;
+          } else if (data?.skipped) {
+            // 想定外: incomplete 等。サイレントに無視
+          } else {
+            errCount++;
+          }
+        } catch {
+          errCount++;
+        }
+      }
+      if (okCount > 0 && errCount === 0) {
+        toast.success(`${okCount}件をカレンダーに同期しました`);
+      } else if (okCount > 0 && errCount > 0) {
+        toast.error(`${okCount}件同期しましたが、${errCount}件失敗しました`);
+      } else if (errCount > 0) {
+        toast.error("カレンダー同期に失敗しました");
+      }
+    } finally {
+      setSyncLoading(false);
+      setSyncDialogOpen(false);
+      setSyncDialogSlots([]);
+      setSyncDialogEntryId(null);
+      // gcalId 更新を反映するため再取得
+      fetchEntries();
+    }
+  }, [syncDialogEntryId, syncDialogSlots, fetchEntries]);
+
+  // T-066: モーダル保存などからも呼び出せる発火ヘルパー
+  const openSyncDialogForEntry = useCallback(
+    (entryId: string, before: Entry | null, after: Entry) => {
+      if (!calendarConnected) return;
+      const slots: SyncSlot[] = [];
+      for (const def of INTERVIEW_SLOT_DEFS) {
+        const dateAfter = after[def.dateField] as string | null;
+        const timeAfter = after[def.timeField] as string | null;
+        if (!dateAfter || !timeAfter) continue;
+        const dateBefore = (before?.[def.dateField] as string | null) ?? null;
+        const timeBefore = (before?.[def.timeField] as string | null) ?? null;
+        const changed = dateBefore !== dateAfter || timeBefore !== timeAfter;
+        if (!changed) continue;
+        slots.push({
+          slot: def.slot,
+          label: def.label,
+          datetime: formatInterviewDateTime(dateAfter, timeAfter),
+        });
+      }
+      if (slots.length > 0) {
+        setSyncDialogEntryId(entryId);
+        setSyncDialogSlots(slots);
+        setSyncDialogOpen(true);
+      }
+    },
+    [calendarConnected]
+  );
 
   const openUrlEditModal = (entryId: string, currentUrl: string | null) => {
     setUrlModalEntryId(entryId);
@@ -811,6 +947,8 @@ export default function EntryBoard() {
           flagData={flagData}
           onClose={() => setDetailEntryId(null)}
           onSaved={fetchEntries}
+          calendarConnected={calendarConnected}
+          onRequestSync={(entryId, before, after) => openSyncDialogForEntry(entryId, before, after)}
         />
       )}
 
@@ -876,6 +1014,20 @@ export default function EntryBoard() {
           }}
         />
       )}
+
+      {/* T-066: Google カレンダー同期確認ダイアログ */}
+      <CalendarSyncConfirmDialog
+        open={syncDialogOpen}
+        slots={syncDialogSlots}
+        loading={syncLoading}
+        onConfirm={handleSyncConfirm}
+        onCancel={() => {
+          if (syncLoading) return;
+          setSyncDialogOpen(false);
+          setSyncDialogSlots([]);
+          setSyncDialogEntryId(null);
+        }}
+      />
     </div>
   );
 }
