@@ -131,7 +131,8 @@ export async function POST(
     const title = buildTitle(dateCol, timeCol);
     const result = await createTask(user.id, { title, due: dateStr });
     if (!result.ok) {
-      return NextResponse.json({ success: false, error: result.reason }, { status: result.reason === "scope_insufficient" ? 403 : 500 });
+      const status = result.reason === "scope_insufficient" || result.reason === "api_disabled" ? 403 : 500;
+      return NextResponse.json({ success: false, error: result.reason, message: result.message }, { status });
     }
     await prisma.jobEntry.update({
       where: { id: entryId },
@@ -151,7 +152,8 @@ export async function POST(
     const title = buildTitle(dateCol, timeCol);
     const result = await updateTask(user.id, gtaskId, { title, due: dateStr });
     if (!result.ok) {
-      return NextResponse.json({ success: false, error: result.reason }, { status: result.reason === "scope_insufficient" ? 403 : 500 });
+      const status = result.reason === "scope_insufficient" || result.reason === "api_disabled" ? 403 : 500;
+      return NextResponse.json({ success: false, error: result.reason, message: result.message }, { status });
     }
     return NextResponse.json({ success: true, action: "updated", taskId: gtaskId });
   }
