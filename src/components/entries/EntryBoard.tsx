@@ -432,6 +432,8 @@ export default function EntryBoard() {
     let okCount = 0;
     let errCount = 0;
     let scopeError = false;
+    let apiDisabled = false;
+    let lastErrorMessage: string | null = null;
     try {
       for (const s of taskDialogSlots) {
         try {
@@ -448,14 +450,21 @@ export default function EntryBoard() {
           } else if (res.status === 403 && data?.error === "scope_insufficient") {
             scopeError = true;
             errCount++;
+          } else if (res.status === 403 && data?.error === "api_disabled") {
+            apiDisabled = true;
+            if (data?.message) lastErrorMessage = data.message;
+            errCount++;
           } else {
+            if (data?.message) lastErrorMessage = data.message;
             errCount++;
           }
         } catch {
           errCount++;
         }
       }
-      if (scopeError) {
+      if (apiDisabled) {
+        toast.error("Google Tasks API が未有効です。Google Cloud Console で Tasks API を有効化してください。", { duration: 10000 });
+      } else if (scopeError) {
         toast.error("Google 再認証が必要です。ダッシュボードの「再認証」から再連携してください。");
       } else if (okCount > 0 && errCount === 0) {
         const verb = taskDialogAction === "create" ? "追加" : taskDialogAction === "update" ? "変更" : "完了";
@@ -463,7 +472,7 @@ export default function EntryBoard() {
       } else if (okCount > 0 && errCount > 0) {
         toast.error(`${okCount}件成功、${errCount}件失敗しました`);
       } else if (errCount > 0) {
-        toast.error("Google ToDo の同期に失敗しました");
+        toast.error(lastErrorMessage || "Google ToDo の同期に失敗しました");
       }
     } finally {
       setTaskLoading(false);
