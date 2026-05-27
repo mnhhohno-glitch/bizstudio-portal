@@ -20,16 +20,6 @@ function toJstDateString(d: Date): string {
   return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
-// "HH:mm" を 60分加算した "HH:mm" に変換。24時超は 23:59 で頭打ち
-function addOneHour(time: string): string {
-  const m = time.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return time;
-  const hh = parseInt(m[1], 10);
-  const mm = parseInt(m[2], 10);
-  const endHh = hh + 1;
-  if (endHh >= 24) return "23:59";
-  return `${String(endHh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
 
 export async function POST(
   req: NextRequest,
@@ -99,9 +89,7 @@ export async function POST(
 
   const dateStr = toJstDateString(dateCol);
   const startTime = timeCol.length === 4 ? `0${timeCol}` : timeCol; // "9:30" -> "09:30"
-  const endTime = addOneHour(startTime);
-  const summary = `[${SLOT_LABEL[slot]}] ${entry.candidate.name} / ${entry.companyName}`;
-  const description = "";
+  const summary = `[${SLOT_LABEL[slot]}] ${entry.candidate.name} / ${entry.companyName}｜${startTime}〜`;
 
   let eventId: string | null = null;
   let action: "created" | "updated";
@@ -110,7 +98,8 @@ export async function POST(
     await updateCalendarEvent(user.id, gcalId, dateStr, {
       summary,
       startTime,
-      endTime,
+      endTime: startTime,
+      allDay: true,
     });
     eventId = gcalId;
     action = "updated";
@@ -118,8 +107,8 @@ export async function POST(
     eventId = await createCalendarEvent(user.id, dateStr, {
       summary,
       startTime,
-      endTime,
-      description,
+      endTime: startTime,
+      allDay: true,
     });
     if (!eventId) {
       return NextResponse.json(
