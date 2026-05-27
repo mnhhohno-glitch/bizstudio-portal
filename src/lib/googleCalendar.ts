@@ -134,21 +134,37 @@ function toRFC3339(date: string, time: string): string {
   return `${date}T${time}:00+09:00`;
 }
 
+function addOneDay(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 1);
+  return dt.toLocaleDateString("sv-SE");
+}
+
 export async function createCalendarEvent(
   userId: string,
   date: string,
-  eventData: { summary: string; startTime: string; endTime: string; description?: string }
+  eventData: { summary: string; startTime: string; endTime: string; description?: string; allDay?: boolean }
 ): Promise<string | null> {
   try {
     const auth = await getAuthenticatedCalendar(userId);
     if (!auth) return null;
 
+    const startEnd = eventData.allDay
+      ? {
+          start: { date },
+          end: { date: addOneDay(date) },
+        }
+      : {
+          start: { dateTime: toRFC3339(date, eventData.startTime), timeZone: "Asia/Tokyo" },
+          end: { dateTime: toRFC3339(date, eventData.endTime), timeZone: "Asia/Tokyo" },
+        };
+
     const res = await auth.calendar.events.insert({
       calendarId: auth.calendarId,
       requestBody: {
         summary: eventData.summary,
-        start: { dateTime: toRFC3339(date, eventData.startTime), timeZone: "Asia/Tokyo" },
-        end: { dateTime: toRFC3339(date, eventData.endTime), timeZone: "Asia/Tokyo" },
+        ...startEnd,
         description: eventData.description || undefined,
       },
     });
@@ -164,7 +180,7 @@ export async function updateCalendarEvent(
   userId: string,
   calendarEventId: string,
   date: string,
-  eventData: { summary?: string; startTime?: string; endTime?: string }
+  eventData: { summary?: string; startTime?: string; endTime?: string; allDay?: boolean }
 ): Promise<void> {
   try {
     const auth = await getAuthenticatedCalendar(userId);
@@ -173,8 +189,14 @@ export async function updateCalendarEvent(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const requestBody: any = {};
     if (eventData.summary !== undefined) requestBody.summary = eventData.summary;
-    if (eventData.startTime !== undefined) requestBody.start = { dateTime: toRFC3339(date, eventData.startTime), timeZone: "Asia/Tokyo" };
-    if (eventData.endTime !== undefined) requestBody.end = { dateTime: toRFC3339(date, eventData.endTime), timeZone: "Asia/Tokyo" };
+
+    if (eventData.allDay) {
+      requestBody.start = { date };
+      requestBody.end = { date: addOneDay(date) };
+    } else {
+      if (eventData.startTime !== undefined) requestBody.start = { dateTime: toRFC3339(date, eventData.startTime), timeZone: "Asia/Tokyo" };
+      if (eventData.endTime !== undefined) requestBody.end = { dateTime: toRFC3339(date, eventData.endTime), timeZone: "Asia/Tokyo" };
+    }
 
     await auth.calendar.events.patch({
       calendarId: auth.calendarId,
