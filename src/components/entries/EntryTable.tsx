@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
+import { normalizeTimeInput } from "@/lib/timeFormat";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -252,7 +253,8 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
   };
 
   const handleTimeBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const v = e.target.value.trim();
+    const v = normalizeTimeInput(e.target.value);
+    if (v !== e.target.value) e.target.value = v;
     if (v !== (timeValue || "")) onUpdate(entryId, { [timeField]: v || null });
     setEditTime(false);
   };

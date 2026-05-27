@@ -4,6 +4,15 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import type { Entry, FlagData } from "./EntryBoard";
+import { normalizeTimeInput } from "@/lib/timeFormat";
+
+const TIME_FIELDS = [
+  "interviewPrepTime",
+  "firstInterviewTime",
+  "secondInterviewTime",
+  "finalInterviewTime",
+  "offerMeetingTime",
+] as const;
 
 type Props = {
   entryId: string;
@@ -77,10 +86,16 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
   const handleSave = async () => {
     setSaving(true);
     try {
+      // 保険: onBlur が走らずに保存される経路への対策。時刻フィールドを正規化。
+      const normalizedForm = { ...form };
+      for (const field of TIME_FIELDS) {
+        const v = normalizedForm[field];
+        if (typeof v === "string") normalizedForm[field] = normalizeTimeInput(v);
+      }
       const res = await fetch(`/api/entries/${entryId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(normalizedForm),
       });
       if (!res.ok) throw new Error();
       const data = await res.json().catch(() => null);
@@ -209,17 +224,17 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
                 <div className="flex-1"><label className={labelCls}>期限</label><input type="date" className={inputCls} value={form.aptitudeTestDeadline as string} onChange={(e) => set("aptitudeTestDeadline", e.target.value)} /></div>
               </div>
               <div><label className={labelCls}>面接対策日</label><input type="date" className={inputCls} value={form.interviewPrepDate as string} onChange={(e) => set("interviewPrepDate", e.target.value)} /></div>
-              <div><label className={labelCls}>面接対策時間</label><input className={inputCls} value={form.interviewPrepTime as string} onChange={(e) => set("interviewPrepTime", e.target.value)} placeholder="10:00" /></div>
+              <div><label className={labelCls}>面接対策時間</label><input className={inputCls} value={form.interviewPrepTime as string} onChange={(e) => set("interviewPrepTime", e.target.value)} onBlur={(e) => set("interviewPrepTime", normalizeTimeInput(e.target.value))} placeholder="10:00" /></div>
               <div><label className={labelCls}>一次面接日</label><input type="date" className={inputCls} value={form.firstInterviewDate as string} onChange={(e) => set("firstInterviewDate", e.target.value)} /></div>
-              <div><label className={labelCls}>一次面接時間</label><input className={inputCls} value={form.firstInterviewTime as string} onChange={(e) => set("firstInterviewTime", e.target.value)} placeholder="14:00" /></div>
+              <div><label className={labelCls}>一次面接時間</label><input className={inputCls} value={form.firstInterviewTime as string} onChange={(e) => set("firstInterviewTime", e.target.value)} onBlur={(e) => set("firstInterviewTime", normalizeTimeInput(e.target.value))} placeholder="14:00" /></div>
               <div><label className={labelCls}>二次面接日</label><input type="date" className={inputCls} value={form.secondInterviewDate as string} onChange={(e) => set("secondInterviewDate", e.target.value)} /></div>
-              <div><label className={labelCls}>二次面接時間</label><input className={inputCls} value={form.secondInterviewTime as string} onChange={(e) => set("secondInterviewTime", e.target.value)} placeholder="14:00" /></div>
+              <div><label className={labelCls}>二次面接時間</label><input className={inputCls} value={form.secondInterviewTime as string} onChange={(e) => set("secondInterviewTime", e.target.value)} onBlur={(e) => set("secondInterviewTime", normalizeTimeInput(e.target.value))} placeholder="14:00" /></div>
               <div><label className={labelCls}>最終面接日</label><input type="date" className={inputCls} value={form.finalInterviewDate as string} onChange={(e) => set("finalInterviewDate", e.target.value)} /></div>
-              <div><label className={labelCls}>最終面接時間</label><input className={inputCls} value={form.finalInterviewTime as string} onChange={(e) => set("finalInterviewTime", e.target.value)} placeholder="14:00" /></div>
+              <div><label className={labelCls}>最終面接時間</label><input className={inputCls} value={form.finalInterviewTime as string} onChange={(e) => set("finalInterviewTime", e.target.value)} onBlur={(e) => set("finalInterviewTime", normalizeTimeInput(e.target.value))} placeholder="14:00" /></div>
               <div><label className={labelCls}>内定日</label><input type="date" className={inputCls} value={form.offerDate as string} onChange={(e) => set("offerDate", e.target.value)} /></div>
               <div><label className={labelCls}>承諾期限</label><input type="date" className={inputCls} value={form.offerDeadline as string} onChange={(e) => set("offerDeadline", e.target.value)} /></div>
               <div><label className={labelCls}>オファー面談日</label><input type="date" className={inputCls} value={form.offerMeetingDate as string} onChange={(e) => set("offerMeetingDate", e.target.value)} /></div>
-              <div><label className={labelCls}>オファー面談時間</label><input className={inputCls} value={form.offerMeetingTime as string} onChange={(e) => set("offerMeetingTime", e.target.value)} placeholder="10:00" /></div>
+              <div><label className={labelCls}>オファー面談時間</label><input className={inputCls} value={form.offerMeetingTime as string} onChange={(e) => set("offerMeetingTime", e.target.value)} onBlur={(e) => set("offerMeetingTime", normalizeTimeInput(e.target.value))} placeholder="10:00" /></div>
               <div><label className={labelCls}>承諾日</label><input type="date" className={inputCls} value={form.acceptanceDate as string} onChange={(e) => set("acceptanceDate", e.target.value)} /></div>
               <div><label className={labelCls}>入社日</label><input type="date" className={inputCls} value={form.joinDate as string} onChange={(e) => set("joinDate", e.target.value)} /></div>
             </div>
