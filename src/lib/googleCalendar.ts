@@ -14,7 +14,10 @@ export function getAuthUrl(state?: string): string {
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/calendar.events"],
+    scope: [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/tasks",
+    ],
     state: state || "",
   });
 }
@@ -96,8 +99,10 @@ function formatTimeJST(isoString: string): string {
   });
 }
 
-// Helper: get authenticated calendar client for a user (with token refresh)
-async function getAuthenticatedCalendar(userId: string) {
+// Shared: get an authenticated OAuth2 client for a user (with token refresh).
+// Used by both Calendar and Tasks helpers. Returns null when the user is not connected
+// or token refresh fails.
+export async function getAuthenticatedOAuth2Client(userId: string) {
   const connection = await prisma.googleCalendarConnection.findUnique({ where: { userId } });
   if (!connection) return null;
 
@@ -126,7 +131,14 @@ async function getAuthenticatedCalendar(userId: string) {
     }
   }
 
-  return { calendar: google.calendar({ version: "v3", auth: oauth2Client }), calendarId: connection.calendarId };
+  return { oauth2Client, calendarId: connection.calendarId };
+}
+
+// Helper: get authenticated calendar client for a user (with token refresh)
+async function getAuthenticatedCalendar(userId: string) {
+  const auth = await getAuthenticatedOAuth2Client(userId);
+  if (!auth) return null;
+  return { calendar: google.calendar({ version: "v3", auth: auth.oauth2Client }), calendarId: auth.calendarId };
 }
 
 function toRFC3339(date: string, time: string): string {

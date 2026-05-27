@@ -10,9 +10,9 @@ type Props = {
   flagData: FlagData;
   onClose: () => void;
   onSaved: () => void;
-  // T-066: Google カレンダー連携状態と同期要求コールバック（任意）
+  // T-066 Phase 4: Google 連携状態と Tasks 同期要求コールバック（任意）
   calendarConnected?: boolean;
-  onRequestSync?: (entryId: string, before: Entry | null, after: Entry) => void;
+  onRequestTaskSync?: (entryId: string, before: Entry | null, after: Entry) => void;
 };
 
 function toInputDate(iso: string | null) {
@@ -20,7 +20,7 @@ function toInputDate(iso: string | null) {
   return new Date(iso).toISOString().slice(0, 10);
 }
 
-export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, calendarConnected, onRequestSync }: Props) {
+export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, calendarConnected, onRequestTaskSync }: Props) {
   const [entry, setEntry] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -88,9 +88,9 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
       toast.success("保存しました");
       onSaved();
       onClose();
-      // T-066: 保存直後に面接日時の変更があれば同期ダイアログをリクエスト
-      if (calendarConnected && onRequestSync && updatedEntry && entry) {
-        onRequestSync(entryId, entry, updatedEntry);
+      // T-066 Phase 4: 保存直後に面接日時の変更があれば Tasks 同期ダイアログをリクエスト
+      if (calendarConnected && onRequestTaskSync && updatedEntry && entry) {
+        onRequestTaskSync(entryId, entry, updatedEntry);
       }
     } catch {
       toast.error("保存に失敗しました");

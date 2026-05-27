@@ -1306,10 +1306,10 @@ model JobEntry {
   // === FileMaker参照用 ===
   fmEntryNo String? @map("fm_entry_no")
 
-  // === T-066: Google カレンダー連携用イベントID ===
-  firstInterviewGcalId  String? @map("first_interview_gcal_id")
-  secondInterviewGcalId String? @map("second_interview_gcal_id")
-  finalInterviewGcalId  String? @map("final_interview_gcal_id")
+  // === T-066: Google ToDo（Tasks）連携用タスクID ===
+  firstInterviewGtaskId  String? @map("first_interview_gtask_id")
+  secondInterviewGtaskId String? @map("second_interview_gtask_id")
+  finalInterviewGtaskId  String? @map("final_interview_gtask_id")
 
   @@index([candidateId])
   @@index([externalJobId])

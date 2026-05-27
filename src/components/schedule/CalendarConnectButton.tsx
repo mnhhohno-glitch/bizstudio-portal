@@ -28,7 +28,14 @@ export default function CalendarConnectButton({
   if (isConnected) {
     return (
       <div className="flex items-center gap-2 text-[11px]">
-        <span className="text-green-600">✅ Googleカレンダー連携中</span>
+        <span className="text-green-600">✅ Googleカレンダー / ToDo 連携中</span>
+        <button
+          onClick={onConnect}
+          className="text-[#2563EB] hover:underline"
+          title="権限スコープが更新された場合に再認証します"
+        >
+          再認証
+        </button>
         <button
           onClick={handleDisconnect}
           disabled={disconnecting}
@@ -45,7 +52,7 @@ export default function CalendarConnectButton({
       onClick={onConnect}
       className="text-[11px] text-gray-500 hover:text-[#2563EB] transition-colors"
     >
-      🔗 Googleカレンダーを連携
+      🔗 Googleカレンダー / ToDo を連携
     </button>
   );
 }
