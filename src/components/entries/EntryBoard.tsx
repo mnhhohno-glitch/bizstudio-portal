@@ -11,7 +11,7 @@ import BulkEndFlagModal from "./BulkEndFlagModal";
 import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
-import CalendarSyncConfirmDialog, { type SyncSlot } from "./CalendarSyncConfirmDialog";
+import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
 
 export type Entry = {
   id: string;
@@ -65,11 +65,17 @@ export type Entry = {
   introducedAt: string;
   createdAt: string;
   updatedAt: string;
-  // T-066: Google カレンダー連携用イベントID
-  firstInterviewGcalId?: string | null;
-  secondInterviewGcalId?: string | null;
-  finalInterviewGcalId?: string | null;
+  // T-066: Google ToDo（Tasks）連携用タスクID
+  firstInterviewGtaskId?: string | null;
+  secondInterviewGtaskId?: string | null;
+  finalInterviewGtaskId?: string | null;
 };
+
+// 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
+const END_FLAG_DETAILS = new Set(["書類見送り", "面接見送り", "本人辞退"]);
+function isEndFlagDetail(value: unknown): boolean {
+  return typeof value === "string" && END_FLAG_DETAILS.has(value);
+}
 
 // T-066: 面接日時表示用フォーマッタ。Date→"YYYY/MM/DD" は JST 経由（罠 #17）。
 function formatInterviewDateTime(dateIso: string | null, time: string | null): string {
@@ -79,10 +85,10 @@ function formatInterviewDateTime(dateIso: string | null, time: string | null): s
   return `${ymd.replace(/-/g, "/")} ${time}`;
 }
 
-const INTERVIEW_SLOT_DEFS: { slot: "first" | "second" | "final"; label: string; dateField: keyof Entry; timeField: keyof Entry }[] = [
-  { slot: "first", label: "一次面接", dateField: "firstInterviewDate", timeField: "firstInterviewTime" },
-  { slot: "second", label: "二次面接", dateField: "secondInterviewDate", timeField: "secondInterviewTime" },
-  { slot: "final", label: "最終面接", dateField: "finalInterviewDate", timeField: "finalInterviewTime" },
+const INTERVIEW_SLOT_DEFS: { slot: "first" | "second" | "final"; label: string; dateField: keyof Entry; timeField: keyof Entry; gtaskField: keyof Entry }[] = [
+  { slot: "first", label: "一次面接", dateField: "firstInterviewDate", timeField: "firstInterviewTime", gtaskField: "firstInterviewGtaskId" },
+  { slot: "second", label: "二次面接", dateField: "secondInterviewDate", timeField: "secondInterviewTime", gtaskField: "secondInterviewGtaskId" },
+  { slot: "final", label: "最終面接", dateField: "finalInterviewDate", timeField: "finalInterviewTime", gtaskField: "finalInterviewGtaskId" },
 ];
 
 const INTERVIEW_DATE_TIME_FIELDS = new Set([
@@ -160,12 +166,13 @@ export default function EntryBoard() {
   // Entry edit modal
   const [editEntry, setEditEntry] = useState<Entry | null>(null);
 
-  // T-066: Google カレンダー連携状態 / 同期ダイアログ
+  // T-066: Google 連携状態 / Tasks 同期ダイアログ
   const [calendarConnected, setCalendarConnected] = useState(false);
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
-  const [syncDialogSlots, setSyncDialogSlots] = useState<SyncSlot[]>([]);
-  const [syncDialogEntryId, setSyncDialogEntryId] = useState<string | null>(null);
-  const [syncLoading, setSyncLoading] = useState(false);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [taskDialogAction, setTaskDialogAction] = useState<TaskSyncAction>("create");
+  const [taskDialogSlots, setTaskDialogSlots] = useState<TaskSyncSlot[]>([]);
+  const [taskDialogEntryId, setTaskDialogEntryId] = useState<string | null>(null);
+  const [taskLoading, setTaskLoading] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     if (!sessionLoaded) return;
@@ -307,6 +314,66 @@ export default function EntryBoard() {
     if (tab !== "書類選考" && tab !== "面接") setUrlMissingOnly(false);
   };
 
+  // 共通: 面接日時の保存前後差分から (action, slots) を組み立てる
+  const computeTaskSync = useCallback((before: Entry, after: Entry): { action: TaskSyncAction; slots: TaskSyncSlot[] } | null => {
+    const creates: TaskSyncSlot[] = [];
+    const updates: TaskSyncSlot[] = [];
+    const completes: TaskSyncSlot[] = [];
+    for (const def of INTERVIEW_SLOT_DEFS) {
+      const dateBefore = (before[def.dateField] as string | null) ?? null;
+      const timeBefore = (before[def.timeField] as string | null) ?? null;
+      const dateAfter = (after[def.dateField] as string | null) ?? null;
+      const timeAfter = (after[def.timeField] as string | null) ?? null;
+      const gtaskAfter = (after[def.gtaskField] as string | null) ?? null;
+      const completeBefore = !!dateBefore && !!timeBefore;
+      const completeAfter = !!dateAfter && !!timeAfter;
+
+      if (!completeBefore && completeAfter) {
+        creates.push({ slot: def.slot, label: def.label, detail: formatInterviewDateTime(dateAfter, timeAfter) });
+      } else if (completeBefore && completeAfter) {
+        const changed = dateBefore !== dateAfter || timeBefore !== timeAfter;
+        if (changed && gtaskAfter) {
+          updates.push({ slot: def.slot, label: def.label, detail: formatInterviewDateTime(dateAfter, timeAfter) });
+        } else if (changed) {
+          // 既存タスクが無いので新規作成扱い
+          creates.push({ slot: def.slot, label: def.label, detail: formatInterviewDateTime(dateAfter, timeAfter) });
+        }
+      } else if (completeBefore && !completeAfter && gtaskAfter) {
+        completes.push({ slot: def.slot, label: def.label, detail: def.label });
+      }
+    }
+    if (updates.length > 0) return { action: "update", slots: updates };
+    if (creates.length > 0) return { action: "create", slots: creates };
+    if (completes.length > 0) return { action: "complete", slots: completes };
+    return null;
+  }, []);
+
+  const openTaskDialogForEntry = useCallback((entryId: string, before: Entry | null, after: Entry) => {
+    if (!calendarConnected || !before) return;
+    const result = computeTaskSync(before, after);
+    if (!result) return;
+    setTaskDialogEntryId(entryId);
+    setTaskDialogAction(result.action);
+    setTaskDialogSlots(result.slots);
+    setTaskDialogOpen(true);
+  }, [calendarConnected, computeTaskSync]);
+
+  // 選考終了系フラグへ変更されたとき、当該 entry に gtaskId が残っている slot を完了化ダイアログへ
+  const maybeOpenCompleteForEndFlag = useCallback((entry: Entry, flags: Record<string, string | null>) => {
+    if (!calendarConnected) return;
+    if (!isEndFlagDetail(flags.entryFlagDetail)) return;
+    const completes: TaskSyncSlot[] = [];
+    for (const def of INTERVIEW_SLOT_DEFS) {
+      const gtaskId = (entry[def.gtaskField] as string | null) ?? null;
+      if (gtaskId) completes.push({ slot: def.slot, label: def.label, detail: def.label });
+    }
+    if (completes.length === 0) return;
+    setTaskDialogEntryId(entry.id);
+    setTaskDialogAction("complete");
+    setTaskDialogSlots(completes);
+    setTaskDialogOpen(true);
+  }, [calendarConnected]);
+
   const handleFlagUpdate = async (entryId: string, flags: Record<string, string | null>) => {
     try {
       const res = await fetch(`/api/entries/${entryId}/flags`, {
@@ -322,6 +389,7 @@ export default function EntryBoard() {
       const data = await res.json();
       setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
       refreshCounts();
+      maybeOpenCompleteForEndFlag(data.entry as Entry, flags);
     } catch {
       toast.error("更新に失敗しました");
     }
@@ -329,6 +397,7 @@ export default function EntryBoard() {
 
   const handleFieldUpdate = async (entryId: string, fields: Record<string, unknown>) => {
     try {
+      const before = entries.find((e) => e.id === entryId) || null;
       const res = await fetch(`/api/entries/${entryId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -342,52 +411,43 @@ export default function EntryBoard() {
       const updatedEntry: Entry = data.entry;
       setEntries((prev) => prev.map((e) => (e.id === entryId ? updatedEntry : e)));
 
-      // T-066: 面接日時が更新され、date+time が揃った slot を抽出してダイアログ表示
-      if (!calendarConnected) return;
+      if (!calendarConnected || !before) return;
       const touchedInterview = Object.keys(fields).some((k) => INTERVIEW_DATE_TIME_FIELDS.has(k));
       if (!touchedInterview) return;
-      const slots: SyncSlot[] = [];
-      for (const def of INTERVIEW_SLOT_DEFS) {
-        const date = updatedEntry[def.dateField] as string | null;
-        const time = updatedEntry[def.timeField] as string | null;
-        // 当該 slot のフィールドが今回の更新に含まれている場合のみ候補化
-        if (!(def.dateField in fields || def.timeField in fields)) continue;
-        if (!date || !time) continue;
-        slots.push({
-          slot: def.slot,
-          label: def.label,
-          datetime: formatInterviewDateTime(date, time),
-        });
-      }
-      if (slots.length > 0) {
-        setSyncDialogEntryId(entryId);
-        setSyncDialogSlots(slots);
-        setSyncDialogOpen(true);
-      }
+      const result = computeTaskSync(before, updatedEntry);
+      if (!result) return;
+      setTaskDialogEntryId(entryId);
+      setTaskDialogAction(result.action);
+      setTaskDialogSlots(result.slots);
+      setTaskDialogOpen(true);
     } catch {
       toast.error("更新に失敗しました");
     }
   };
 
-  // T-066: 同期ダイアログ確認時に各 slot に対し sync-calendar API を順次呼ぶ
-  const handleSyncConfirm = useCallback(async () => {
-    if (!syncDialogEntryId || syncDialogSlots.length === 0) return;
-    setSyncLoading(true);
+  // T-066 Phase 4: タスク同期ダイアログ確認時に各 slot に対し sync-task API を順次呼ぶ
+  const handleTaskConfirm = useCallback(async () => {
+    if (!taskDialogEntryId || taskDialogSlots.length === 0) return;
+    setTaskLoading(true);
     let okCount = 0;
     let errCount = 0;
+    let scopeError = false;
     try {
-      for (const s of syncDialogSlots) {
+      for (const s of taskDialogSlots) {
         try {
-          const res = await fetch(`/api/entries/${syncDialogEntryId}/sync-calendar`, {
+          const res = await fetch(`/api/entries/${taskDialogEntryId}/sync-task`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ slot: s.slot }),
+            body: JSON.stringify({ slot: s.slot, action: taskDialogAction }),
           });
           const data = await res.json().catch(() => null);
           if (res.ok && data?.success) {
             okCount++;
           } else if (data?.skipped) {
-            // 想定外: incomplete 等。サイレントに無視
+            // incomplete 等。サイレントに無視
+          } else if (res.status === 403 && data?.error === "scope_insufficient") {
+            scopeError = true;
+            errCount++;
           } else {
             errCount++;
           }
@@ -395,50 +455,24 @@ export default function EntryBoard() {
           errCount++;
         }
       }
-      if (okCount > 0 && errCount === 0) {
-        toast.success(`${okCount}件をカレンダーに同期しました`);
+      if (scopeError) {
+        toast.error("Google 再認証が必要です。ダッシュボードの「再認証」から再連携してください。");
+      } else if (okCount > 0 && errCount === 0) {
+        const verb = taskDialogAction === "create" ? "追加" : taskDialogAction === "update" ? "変更" : "完了";
+        toast.success(`${okCount}件のタスクを${verb}しました`);
       } else if (okCount > 0 && errCount > 0) {
-        toast.error(`${okCount}件同期しましたが、${errCount}件失敗しました`);
+        toast.error(`${okCount}件成功、${errCount}件失敗しました`);
       } else if (errCount > 0) {
-        toast.error("カレンダー同期に失敗しました");
+        toast.error("Google ToDo の同期に失敗しました");
       }
     } finally {
-      setSyncLoading(false);
-      setSyncDialogOpen(false);
-      setSyncDialogSlots([]);
-      setSyncDialogEntryId(null);
-      // gcalId 更新を反映するため再取得
+      setTaskLoading(false);
+      setTaskDialogOpen(false);
+      setTaskDialogSlots([]);
+      setTaskDialogEntryId(null);
       fetchEntries();
     }
-  }, [syncDialogEntryId, syncDialogSlots, fetchEntries]);
-
-  // T-066: モーダル保存などからも呼び出せる発火ヘルパー
-  const openSyncDialogForEntry = useCallback(
-    (entryId: string, before: Entry | null, after: Entry) => {
-      if (!calendarConnected) return;
-      const slots: SyncSlot[] = [];
-      for (const def of INTERVIEW_SLOT_DEFS) {
-        const dateAfter = after[def.dateField] as string | null;
-        const timeAfter = after[def.timeField] as string | null;
-        if (!dateAfter || !timeAfter) continue;
-        const dateBefore = (before?.[def.dateField] as string | null) ?? null;
-        const timeBefore = (before?.[def.timeField] as string | null) ?? null;
-        const changed = dateBefore !== dateAfter || timeBefore !== timeAfter;
-        if (!changed) continue;
-        slots.push({
-          slot: def.slot,
-          label: def.label,
-          datetime: formatInterviewDateTime(dateAfter, timeAfter),
-        });
-      }
-      if (slots.length > 0) {
-        setSyncDialogEntryId(entryId);
-        setSyncDialogSlots(slots);
-        setSyncDialogOpen(true);
-      }
-    },
-    [calendarConnected]
-  );
+  }, [taskDialogEntryId, taskDialogSlots, taskDialogAction, fetchEntries]);
 
   const openUrlEditModal = (entryId: string, currentUrl: string | null) => {
     setUrlModalEntryId(entryId);
@@ -948,7 +982,7 @@ export default function EntryBoard() {
           onClose={() => setDetailEntryId(null)}
           onSaved={fetchEntries}
           calendarConnected={calendarConnected}
-          onRequestSync={(entryId, before, after) => openSyncDialogForEntry(entryId, before, after)}
+          onRequestTaskSync={(entryId, before, after) => openTaskDialogForEntry(entryId, before, after)}
         />
       )}
 
@@ -1015,17 +1049,18 @@ export default function EntryBoard() {
         />
       )}
 
-      {/* T-066: Google カレンダー同期確認ダイアログ */}
-      <CalendarSyncConfirmDialog
-        open={syncDialogOpen}
-        slots={syncDialogSlots}
-        loading={syncLoading}
-        onConfirm={handleSyncConfirm}
+      {/* T-066 Phase 4: Google ToDo 同期確認ダイアログ */}
+      <TaskSyncConfirmDialog
+        open={taskDialogOpen}
+        action={taskDialogAction}
+        slots={taskDialogSlots}
+        loading={taskLoading}
+        onConfirm={handleTaskConfirm}
         onCancel={() => {
-          if (syncLoading) return;
-          setSyncDialogOpen(false);
-          setSyncDialogSlots([]);
-          setSyncDialogEntryId(null);
+          if (taskLoading) return;
+          setTaskDialogOpen(false);
+          setTaskDialogSlots([]);
+          setTaskDialogEntryId(null);
         }}
       />
     </div>
