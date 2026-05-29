@@ -29,21 +29,12 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import "dotenv/config";
-import { uploadFileToDrive, getOrCreateFolder } from "../src/lib/google-drive";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (or anon key) が設定されていません");
-  process.exit(1);
-}
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const BUCKET = "interview-attachments";
 const PARENT_FOLDER_ID = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
@@ -66,9 +57,27 @@ async function main() {
     process.exit(1);
   }
 
-  if (isExecute && !PARENT_FOLDER_ID) {
-    console.error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID が設定されていません（--execute には必須）");
-    process.exit(1);
+  // execute 時のみ Supabase / Drive を初期化（dry-run では DB しか触らない）
+  let supabase: SupabaseClient | null = null;
+  let uploadFileToDrive: typeof import("../src/lib/google-drive").uploadFileToDrive | null = null;
+  let getOrCreateFolder: typeof import("../src/lib/google-drive").getOrCreateFolder | null = null;
+
+  if (isExecute) {
+    if (!PARENT_FOLDER_ID) {
+      console.error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID が設定されていません（--execute には必須）");
+      process.exit(1);
+    }
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      console.error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が設定されていません（--execute には必須）");
+      process.exit(1);
+    }
+    const { createClient } = await import("@supabase/supabase-js");
+    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const drive = await import("../src/lib/google-drive");
+    uploadFileToDrive = drive.uploadFileToDrive;
+    getOrCreateFolder = drive.getOrCreateFolder;
   }
 
   // 一括取得して逐次処理
@@ -148,7 +157,7 @@ async function main() {
     // execute モード
     try {
       // 1. Supabase から実体ダウンロード
-      const { data: fileData, error: downloadError } = await supabase.storage
+      const { data: fileData, error: downloadError } = await supabase!.storage
         .from(BUCKET)
         .download(att.filePath);
       if (downloadError || !fileData) {
@@ -159,13 +168,13 @@ async function main() {
       // 2. Drive 求職者フォルダを取得 or 作成（キャッシュ利用）
       let folderId = driveFolderCache.get(candidateId);
       if (!folderId) {
-        folderId = await getOrCreateFolder(candidateId, PARENT_FOLDER_ID!);
+        folderId = await getOrCreateFolder!(candidateId, PARENT_FOLDER_ID!);
         driveFolderCache.set(candidateId, folderId);
       }
 
       // 3. Drive にアップロード
       const mimeType = att.mimeType || "application/octet-stream";
-      const { fileId, webViewLink } = await uploadFileToDrive(
+      const { fileId, webViewLink } = await uploadFileToDrive!(
         att.fileName,
         buffer,
         folderId,
