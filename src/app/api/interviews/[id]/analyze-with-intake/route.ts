@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
+import { downloadFileFromDrive } from "@/lib/google-drive";
 import {
   mapFilemakerToDetail,
   mapWorkHistoryArray,
@@ -11,7 +11,9 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const BUCKET = "interview-attachments";
+// T-067 Phase 5: 解析対象ファイルの source of truth を
+// InterviewAttachment(Supabase) → CandidateFile(category=MEETING, Google Drive) に変更。
+// ファイル取得は candidateId 経由で Drive から実体ダウンロードする。
 
 export async function POST(
   req: NextRequest,
@@ -28,7 +30,7 @@ export async function POST(
     if (!secret) {
       console.error("[analyze-with-intake] PORTAL_SHARED_SECRET is not configured");
       return NextResponse.json(
-        { error: "PORTAL_SHARED_SECRET\u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002Railway\u74B0\u5883\u5909\u6570\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002" },
+        { error: "PORTAL_SHARED_SECRETが設定されていません。Railway環境変数を確認してください。" },
         { status: 500 },
       );
     }
@@ -39,26 +41,36 @@ export async function POST(
     const record = await prisma.interviewRecord.findUnique({
       where: { id: interviewId },
       include: {
-        attachments: true,
-        candidate: { select: { candidateNumber: true } },
+        candidate: { select: { id: true, candidateNumber: true } },
       },
     });
     if (!record) {
       return NextResponse.json({ error: "面談レコードが見つかりません" }, { status: 404 });
     }
 
-    console.log(`[analyze-with-intake] Found ${record.attachments.length} attachments`);
+    // T-067: CandidateFile(category=MEETING) から txt/pdf を取得
+    const meetingFiles = await prisma.candidateFile.findMany({
+      where: {
+        candidateId: record.candidate.id,
+        category: "MEETING",
+        archivedAt: null,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    console.log(`[analyze-with-intake] Found ${meetingFiles.length} MEETING files`);
 
-    const txtAtts = record.attachments
-      .filter((a) => a.fileType === "txt" || a.mimeType?.startsWith("text/"))
-      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-    const pdfAtts = record.attachments
-      .filter((a) => a.fileType === "pdf" || a.mimeType === "application/pdf")
-      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    const isTxt = (f: typeof meetingFiles[number]) =>
+      f.mimeType.startsWith("text/") || f.fileName.toLowerCase().endsWith(".txt");
+    const isPdf = (f: typeof meetingFiles[number]) =>
+      f.mimeType === "application/pdf" || f.fileName.toLowerCase().endsWith(".pdf");
 
-    console.log(`[analyze-with-intake] txt=${txtAtts.length}, pdf=${pdfAtts.length}`);
+    // 最新を優先（findMany が createdAt desc なので先頭が最新）
+    const txtFiles = meetingFiles.filter(isTxt);
+    const pdfFiles = meetingFiles.filter(isPdf);
 
-    if (txtAtts.length === 0 && pdfAtts.length === 0) {
+    console.log(`[analyze-with-intake] txt=${txtFiles.length}, pdf=${pdfFiles.length}`);
+
+    if (txtFiles.length === 0 && pdfFiles.length === 0) {
       return NextResponse.json(
         { error: "Nottaログ(.txt)または履歴書PDFを添付してください" },
         { status: 400 },
@@ -68,26 +80,30 @@ export async function POST(
     let interviewLog = "";
     let pdfBuffer = "";
 
-    if (txtAtts.length > 0) {
-      console.log(`[analyze-with-intake] Downloading txt: ${txtAtts[0].filePath}`);
-      const { data, error } = await supabase.storage.from(BUCKET).download(txtAtts[0].filePath);
-      if (error || !data) {
-        console.error("[analyze-with-intake] txt download error:", error);
+    if (txtFiles.length > 0) {
+      const target = txtFiles[0];
+      console.log(`[analyze-with-intake] Downloading txt from Drive: ${target.fileName} (${target.driveFileId})`);
+      try {
+        const { base64 } = await downloadFileFromDrive(target.driveFileId);
+        interviewLog = Buffer.from(base64, "base64").toString("utf-8");
+        console.log(`[analyze-with-intake] txt loaded: ${interviewLog.length} chars`);
+      } catch (e) {
+        console.error("[analyze-with-intake] txt download error:", e);
         return NextResponse.json({ error: "面談ログのダウンロードに失敗しました" }, { status: 500 });
       }
-      interviewLog = Buffer.from(await data.arrayBuffer()).toString("utf-8");
-      console.log(`[analyze-with-intake] txt loaded: ${interviewLog.length} chars`);
     }
 
-    if (pdfAtts.length > 0) {
-      console.log(`[analyze-with-intake] Downloading pdf: ${pdfAtts[0].filePath}`);
-      const { data, error } = await supabase.storage.from(BUCKET).download(pdfAtts[0].filePath);
-      if (error || !data) {
-        console.error("[analyze-with-intake] pdf download error:", error);
+    if (pdfFiles.length > 0) {
+      const target = pdfFiles[0];
+      console.log(`[analyze-with-intake] Downloading pdf from Drive: ${target.fileName} (${target.driveFileId})`);
+      try {
+        const { base64 } = await downloadFileFromDrive(target.driveFileId);
+        pdfBuffer = base64;
+        console.log(`[analyze-with-intake] pdf loaded: ${pdfBuffer.length} base64 chars`);
+      } catch (e) {
+        console.error("[analyze-with-intake] pdf download error:", e);
         return NextResponse.json({ error: "PDFのダウンロードに失敗しました" }, { status: 500 });
       }
-      pdfBuffer = Buffer.from(await data.arrayBuffer()).toString("base64");
-      console.log(`[analyze-with-intake] pdf loaded: ${pdfBuffer.length} base64 chars`);
     }
 
     if (!interviewLog && !pdfBuffer) {

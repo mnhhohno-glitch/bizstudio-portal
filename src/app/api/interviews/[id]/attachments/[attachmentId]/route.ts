@@ -1,3 +1,8 @@
+// T-067 Phase 5: DEPRECATED。
+// 面談添付の source of truth は CandidateFile(category=MEETING) / Google Drive に統合済み。
+// 個別取得・削除はフロントから `/api/candidates/[candidateId]/files/[fileId]` を使用する。
+// 移行完了後の別タスクで削除予定。
+
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";

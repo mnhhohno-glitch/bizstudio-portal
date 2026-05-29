@@ -28,20 +28,17 @@ type SessionUser = { id: string; name: string; email: string; role: string };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
+// T-067 Phase 5: 添付の source of truth を CandidateFile(MEETING) に統合。
+// 旧 InterviewAttachment 形式から CandidateFile 形式へ型を差し替え。
 type AttachmentRecord = {
   id: string;
   fileName: string;
-  fileType: string;
-  filePath: string;
   fileSize: number;
-  mimeType: string | null;
-  analysisStatus: string;
-  analysisResult: unknown;
-  analysisError: string | null;
-  analyzedAt: string | null;
+  mimeType: string;
+  driveFileId: string;
+  driveViewUrl: string;
   memo: string | null;
-  uploadedAt: string;
-  uploadedBy: string | null;
+  createdAt: string;
 };
 
 type MemoRecord = {
@@ -507,7 +504,7 @@ export default function InterviewForm({
       setRatingState(rec.rating || {});
       setAutosaveToken(rec.autosaveToken || null);
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
-      setAttachments(rec.attachments || []);
+      // T-067: 添付は CandidateFile(MEETING) から別 fetch（fetchMeetingFiles）で取得
       setMemos(rec.memos || []);
       const wh = rec.workHistories || [];
       if (wh.length > 0) {
@@ -745,19 +742,37 @@ export default function InterviewForm({
     }
   };
 
-  /* ---- Attachment upload (existing logic) ---- */
+  /* ---- T-067: Attachment fetch/upload/delete/download via CandidateFile(MEETING) ---- */
+
+  // CandidateFile(MEETING) の一覧取得。書類タブ「面談」サブタブと共通の source of truth
+  const fetchMeetingFiles = useCallback(async () => {
+    if (!candidateId) return;
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=MEETING`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setAttachments(data.files || []);
+    } catch {
+      // silent
+    }
+  }, [candidateId]);
+
+  useEffect(() => { fetchMeetingFiles(); }, [fetchMeetingFiles]);
+
   const handleUpload = async (file: File) => {
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/interviews/${interviewId}/attachments`, { method: "POST", body: fd });
+      fd.append("category", "MEETING");
+      const res = await fetch(`/api/candidates/${candidateId}/files/upload`, { method: "POST", body: fd });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "アップロードに失敗しました");
       }
-      const att = await res.json();
-      setAttachments((prev) => [att, ...prev]);
+      const data = await res.json();
+      const att = data.file;
+      if (att) setAttachments((prev) => [att, ...prev]);
       toast.success(`${file.name} をアップロードしました`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "アップロードに失敗しました");
@@ -772,11 +787,10 @@ export default function InterviewForm({
     }
   };
 
-  /* ---- Attachment delete (existing logic) ---- */
   const handleDeleteAttachment = async (attachmentId: string) => {
     if (!confirm("この添付ファイルを削除しますか？")) return;
     try {
-      const res = await fetch(`/api/interviews/${interviewId}/attachments/${attachmentId}`, { method: "DELETE" });
+      const res = await fetch(`/api/candidates/${candidateId}/files/${attachmentId}`, { method: "DELETE" });
       if (res.ok) {
         setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
         toast.success("削除しました");
@@ -786,24 +800,12 @@ export default function InterviewForm({
     }
   };
 
-  /* ---- Attachment download ---- */
+  // CandidateFile は Google Drive の webViewLink を持つので新タブで開くだけ
   const handleDownloadAttachment = async (att: AttachmentRecord) => {
     if (downloadingAttId) return;
     setDownloadingAttId(att.id);
     try {
-      const res = await fetch(`/api/interviews/${interviewId}/attachments/${att.id}?url=true`);
-      if (!res.ok) throw new Error("URL取得に失敗しました");
-      const data = await res.json();
-      const a = document.createElement("a");
-      a.href = data.signedUrl;
-      a.download = att.fileName;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "ダウンロードに失敗しました");
+      window.open(att.driveViewUrl, "_blank", "noopener,noreferrer");
     } finally {
       setDownloadingAttId(null);
     }
@@ -887,8 +889,8 @@ export default function InterviewForm({
   const handlePdfExport = async () => {
     if (pdfLoading) return;
     const pdfFiles = attachments
-      .filter((a) => a.mimeType === "application/pdf" || a.fileType === "pdf")
-      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+      .filter((a) => a.mimeType === "application/pdf" || a.fileName.toLowerCase().endsWith(".pdf"))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     if (pdfFiles.length === 0) {
       toast.error("PDFが添付されていません");
       return;
@@ -896,10 +898,7 @@ export default function InterviewForm({
     setPdfLoading(true);
     try {
       const latest = pdfFiles[0];
-      const res = await fetch(`/api/interviews/${interviewId}/attachments/${latest.id}?url=true`);
-      if (!res.ok) throw new Error("PDFのURL取得に失敗しました");
-      const data = await res.json();
-      window.open(data.signedUrl, "_blank");
+      window.open(latest.driveViewUrl, "_blank", "noopener,noreferrer");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "PDFの表示に失敗しました");
     } finally {
@@ -1015,7 +1014,7 @@ export default function InterviewForm({
   };
 
   /* ---- Computed ---- */
-  const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileType === "pdf");
+  const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileName.toLowerCase().endsWith(".pdf"));
   const d = detail;
   const r = rating;
 
