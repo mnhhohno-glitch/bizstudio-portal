@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import FileUploadModal from "./FileUploadModal";
 
@@ -108,8 +108,9 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   // ドロップ先ハイライト: フォルダID または "__root__"
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
-  // D&D for meeting sub-tab file area
-  const [isAreaDragging, setIsAreaDragging] = useState(false);
+  // D&D for tab-wide drop zone
+  const dragCounter = useRef(0);
+  const [isTabDragging, setIsTabDragging] = useState(false);
   const [areaUploading, setAreaUploading] = useState(false);
 
   // Template state
@@ -718,7 +719,26 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   );
 
   return (
-    <div>
+    <div
+      className="relative"
+      onDragEnter={(e) => {
+        e.preventDefault();
+        if (!e.dataTransfer.types?.includes("Files")) return;
+        dragCounter.current += 1;
+        if (dragCounter.current > 0) setIsTabDragging(true);
+      }}
+      onDragOver={(e) => { e.preventDefault(); }}
+      onDragLeave={() => {
+        dragCounter.current = Math.max(0, dragCounter.current - 1);
+        if (dragCounter.current <= 0) setIsTabDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragCounter.current = 0;
+        setIsTabDragging(false);
+        if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files);
+      }}
+    >
       {/* サブタブバー */}
       <div className="bg-gray-50 rounded-lg p-1 inline-flex gap-1 mb-6 flex-wrap">
         {SUB_TABS.map((tab) => (
@@ -848,23 +868,12 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
           </div>
         )}
 
-        {/* D&D hint */}
-        {isAreaDragging && (
-          <div className="mb-3 border-2 border-dashed border-[#2563EB] bg-blue-50 rounded-lg p-12 text-center">
-            <p className="text-[#2563EB] font-medium text-sm">ここにファイルをドロップしてアップロード</p>
-          </div>
-        )}
         {areaUploading && (
           <div className="mb-3 text-center text-sm text-gray-500 animate-pulse">アップロード中...</div>
         )}
 
         {/* ファイル一覧 */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(true); }}
-          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsAreaDragging(false); }}
-          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsAreaDragging(false); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
-        >
+        <div>
         {isLoading ? (
           <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
         ) : !isBSDoc && files.length === 0 ? (
@@ -926,10 +935,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                     <div
                       key={folder.id}
                       className={`border rounded-lg transition-colors ${dragOverFolderId === folder.id ? "border-[#2563EB] bg-blue-50" : "border-gray-200"}`}
-                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(folder.id); }}
-                      onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
-                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files, folder.id); }}
+                      onDragOver={(e) => { e.preventDefault(); }}
+                      onDragEnter={(e) => { e.preventDefault(); setDragOverFolderId(folder.id); }}
+                      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); dragCounter.current = 0; setIsTabDragging(false); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files, folder.id); }}
                     >
                       {/* フォルダヘッダー */}
                       <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
@@ -1005,10 +1014,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {/* ルート直下（BS作成書類） */}
                 <div
                   className={`border rounded-lg transition-colors ${dragOverFolderId === "__root__" ? "border-[#2563EB] bg-blue-50" : "border-gray-200"}`}
-                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId("__root__"); }}
-                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
-                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
+                  onDragOver={(e) => { e.preventDefault(); }}
+                  onDragEnter={(e) => { e.preventDefault(); setDragOverFolderId("__root__"); }}
+                  onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverFolderId(null); }}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverFolderId(null); dragCounter.current = 0; setIsTabDragging(false); if (e.dataTransfer.files?.length) handleAreaDrop(e.dataTransfer.files); }}
                 >
                   <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-t-lg">
                     <span className="text-sm font-medium text-gray-600">📂 BS作成書類</span>
@@ -1142,6 +1151,15 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 {attaching ? "添付中..." : "添付"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* タブ全体ドロップ オーバーレイ（pointer-events-none でレイアウト非侵襲） */}
+      {isTabDragging && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-[#2563EB] bg-blue-50/60">
+          <div className="rounded-lg bg-white px-6 py-4 shadow-md">
+            <p className="text-[#2563EB] font-medium text-sm">ここにドロップしてアップロード</p>
           </div>
         </div>
       )}
