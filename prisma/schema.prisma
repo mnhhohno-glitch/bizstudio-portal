@@ -1311,6 +1311,11 @@ model JobEntry {
   secondInterviewGtaskId String? @map("second_interview_gtask_id")
   finalInterviewGtaskId  String? @map("final_interview_gtask_id")
 
+  // === T-066 Phase 5: Google カレンダー予定（イベント）ID。ToDo と同時生成 ===
+  firstInterviewGcalId  String? @map("first_interview_gcal_id")
+  secondInterviewGcalId String? @map("second_interview_gcal_id")
+  finalInterviewGcalId  String? @map("final_interview_gcal_id")
+
   @@index([candidateId])
   @@index([externalJobId])
   @@index([entryFlag])
