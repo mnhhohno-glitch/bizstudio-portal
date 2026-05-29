@@ -431,6 +431,7 @@ export default function EntryBoard() {
     setTaskLoading(true);
     let okCount = 0;
     let errCount = 0;
+    let partialCount = 0;
     let scopeError = false;
     let apiDisabled = false;
     let lastErrorMessage: string | null = null;
@@ -445,6 +446,7 @@ export default function EntryBoard() {
           const data = await res.json().catch(() => null);
           if (res.ok && data?.success) {
             okCount++;
+            if (data?.partial) partialCount++;
           } else if (data?.skipped) {
             // incomplete 等。サイレントに無視
           } else if (res.status === 403 && data?.error === "scope_insufficient") {
@@ -468,7 +470,11 @@ export default function EntryBoard() {
         toast.error("Google 再認証が必要です。ダッシュボードの「再認証」から再連携してください。");
       } else if (okCount > 0 && errCount === 0) {
         const verb = taskDialogAction === "create" ? "追加" : taskDialogAction === "update" ? "変更" : "完了";
-        toast.success(`${okCount}件のタスクを${verb}しました`);
+        if (partialCount > 0) {
+          toast.warning(`${okCount}件を${verb}しましたが、一部（カレンダー予定 / タスクのいずれか）は同期できませんでした`);
+        } else {
+          toast.success(`${okCount}件のカレンダー予定とタスクを${verb}しました`);
+        }
       } else if (okCount > 0 && errCount > 0) {
         toast.error(`${okCount}件成功、${errCount}件失敗しました`);
       } else if (errCount > 0) {

@@ -18,21 +18,21 @@ type Props = {
 };
 
 const TITLE_MAP: Record<TaskSyncAction, string> = {
-  create: "Google ToDoにタスクを追加しますか?",
-  update: "Google ToDoのタスクを変更しますか?",
-  complete: "Google ToDoのタスクを完了しますか?",
+  create: "Googleカレンダーとタスクに追加しますか?",
+  update: "Googleカレンダーの予定とタスクを変更しますか?",
+  complete: "Googleカレンダーの予定を削除し、タスクを完了しますか?",
 };
 
 const BUTTON_MAP: Record<TaskSyncAction, string> = {
   create: "追加する",
   update: "変更する",
-  complete: "完了する",
+  complete: "実行する",
 };
 
 const LOADING_MAP: Record<TaskSyncAction, string> = {
   create: "追加中...",
   update: "変更中...",
-  complete: "完了中...",
+  complete: "実行中...",
 };
 
 export default function TaskSyncConfirmDialog({
