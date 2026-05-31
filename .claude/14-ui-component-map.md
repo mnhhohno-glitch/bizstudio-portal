@@ -402,12 +402,225 @@ AI 分析実行 (analyze-batch)
 
 ---
 
-## EntryBoard.tsx（未着手、将来追加枠）
+## DocumentsTab.tsx
 
+### 基本情報
+- パス: `src/components/candidates/DocumentsTab.tsx`
+- 行数: 1226 行
+- 用途: 求職者詳細「書類」タブ（5サブタブでファイル管理。原本 ORIGINAL / BS作成書類 BS_DOCUMENT / 応募企業 APPLICATION / 面接対策 INTERVIEW_PREP / 面談 MEETING）
+- 親: `CandidateDetailPage.tsx`（`activeTab === "documents"`）
+
+### 全体レイアウト
+
+```
+DocumentsTab (1226 行)
+  ├─ ルートコンテナ div.relative（タブ全体 D&D 受付、L730-748、dragCounter ref）
+  ├─ サブタブバー（L749-766）: ORIGINAL / BS_DOCUMENT / APPLICATION / INTERVIEW_PREP / MEETING
+  │    state: activeSubTab（初期 "ORIGINAL"）
+  ├─ テンプレートセクション（L768-803、原本タブのみ）
+  ├─ カテゴリヘッダー（L806-862）
+  │    ├─ タイトル（📁 原本 / BS作成書類 / ...）
+  │    ├─ ボタン群（タブ別）:
+  │    │    BS_DOCUMENT: [一括URL発行][+ フォルダ作成]
+  │    │    MEETING: [📝 面談登録 ↗]（candidate-intake /register へ遷移）
+  │    │    共通: [+ アップロード]
+  │    └─ 説明文（DESCRIPTIONS[activeSubTab]）
+  ├─ ファイル一覧領域（L873-1056）
+  │    ├─ ローディング / 空状態
+  │    ├─ 全選択 + ソート（ファイル名/形式/日時）+ 一括操作（DL/URL発行/タスク添付/削除）
+  │    ├─ BS_DOCUMENT: フォルダ階層表示
+  │    └─ その他: フラット表示（renderFileCard）
+  ├─ 面談履歴一覧（L1059-1062、MEETING タブのみ）→ <InterviewHistory candidateId />（L1174-1230）
+  ├─ モーダル群（L1064-1170）: FileUploadModal / 共有URL結果 / タスク添付
+  └─ タブ全体ドロップ オーバーレイ（L1172-1178、isTabDragging 時）
+```
+
+### 主要 handler シグネチャ
+
+| handler | 行 | シグネチャ | 用途 |
+|--|--|--|--|
+| `handleAreaDrop` | L348 | `(fileList: FileList, folderId?: string) => void` | D&D アップロード。`activeSubTab` を category として送信 |
+| `handleDelete` | L181 | `(fileId: string) => void` | `DELETE /api/candidates/[candidateId]/files/[fileId]` → Drive+DB 削除 |
+| `handleUploadSuccess` | L195 | `() => void` | ファイル・カウント・フォルダ再取得 |
+| `handleOpenIntake` | L337 | `() => void` | candidate-intake `/register` を新タブで開く（MEETING のみ） |
+| `fetchFiles` | L123 | `async () => void` | `GET /api/candidates/[candidateId]/files?category=${activeSubTab}` |
+
+### 主要 state
+
+| state | 型 | 行 | 用途 |
+|--|--|--|--|
+| `activeSubTab` | `string` | L74 | サブタブ切替（"ORIGINAL" 等の enum 値） |
+| `files` | `CandidateFile[]` | L75 | 現タブのファイル一覧 |
+| `counts` | `Record<string, number>` | L76 | 各サブタブのファイル数 |
+| `isTabDragging` | `boolean` | L113 | タブ全体 D&D 状態（dragCounter ref で管理） |
+| `dragCounter` | `useRef(0)` | L112 | D&D enter/leave カウンタ |
+| `showUploadModal` | `boolean` | L78 | FileUploadModal 表示 |
+| `selectedFileIds` | `Set<string>` | L92 | 一括操作用選択 |
+| `dragOverFolderId` | `string \| null` | L109 | BS作成書類フォルダ別 D&D ハイライト |
+
+### 関連ファイル
+
+| ファイル | 役割 |
+|--|--|
+| `src/app/api/candidates/[candidateId]/files/route.ts` | 一覧取得（GET） |
+| `src/app/api/candidates/[candidateId]/files/upload/route.ts` | アップロード（POST → Google Drive） |
+| `src/app/api/candidates/[candidateId]/files/[fileId]/route.ts` | 個別取得/更新/削除 |
+| `src/app/api/candidates/[candidateId]/files/counts/route.ts` | サブタブ別件数 |
+| `src/components/candidates/FileUploadModal.tsx` | アップロードモーダル |
+| `prisma/schema.prisma` `CandidateFile` + `CandidateFileCategory` enum | モデル |
+
+### T-067 補足（面談添付統合との関係）
+
+- MEETING サブタブが面談ログ・資料の source of truth（T-067）
+- 面談入力画面 InterviewForm.tsx の「添付」タブも同じ `CandidateFile`(MEETING) を参照（両画面が常に一致）
+- 面談AI解析（analyze-with-intake）も MEETING カテゴリのファイルを読む
+
+---
+
+## EntryBoard.tsx
+
+### 基本情報
 - パス: `src/components/entries/EntryBoard.tsx`
-- 用途: エントリー管理画面
+- 行数: 1083 行
+- 用途: エントリー管理画面（全フラグタブ + フィルタ + テーブル + モーダル群 + Google 同期ダイアログ）
+- 親: `/app/(app)/entries/page.tsx`
 
-⚠️ **構造マップ未作成**。次回修正時に追記。
+### 全体レイアウト
+
+```
+EntryBoard (1083 行)
+  ├─ ヘッダー（L738-755）: "エントリー管理" + [新規登録] + [CSV]
+  ├─ タブバー（L757-777）: 求人紹介 / エントリー / 書類選考 / 面接 / 内定 / 入社済 / 全件
+  ├─ フィルタバー（L779-856）: 求職者名 / 担当CA / 企業名 / 無効も表示 / アーカイブも表示 / URL未入力のみ
+  ├─ 一括操作バー（L858-907、selectedIds.size > 0 時）:
+  │     一括フラグ変更 / 選考終了案内 / 選考終了(フラグのみ) / タスク作成 / アーカイブ / 選択解除
+  ├─ <EntryTable />（L915-936）: テーブル本体（面接日時のインライン編集あり）
+  ├─ ページネーション（L938-959）
+  ├─ モーダル群（L961-1065）:
+  │     URL編集 / EntryDetailModal / EntryCreateModal / BulkFlagChangeModal
+  │     / EndNoticeModal / BulkEndFlagModal / EntryEditModal / EntryRouteSwitchModal
+  └─ TaskSyncConfirmDialog（L1068-1080）: Google 同期確認ダイアログ
+```
+
+### 面接 Google 同期セクション（T-066 Phase 4/5）
+
+面接日時の保存/変更/消去/選考終了フラグ変更時に、Google カレンダー予定と Google ToDo タスクを同時に作成・更新・削除する。
+
+#### トリガー検知と API 呼び出しの流れ
+
+```
+面接日時変更
+  ├─ インライン onBlur（EntryTable 内） → handleFieldUpdate (L398)
+  │     → INTERVIEW_DATE_TIME_FIELDS に含まれるか判定 (L415)
+  │     → computeTaskSync(before, after) (L417)
+  │     → TaskSyncConfirmDialog を open
+  │
+  ├─ モーダル一括保存（EntryDetailModal 内） → handleSave (L86)
+  │     → onRequestTaskSync(entryId, before, after) props 経由 (L107)
+  │     → EntryBoard.openTaskDialogForEntry (L351)
+  │     → computeTaskSync → TaskSyncConfirmDialog を open
+  │
+  └─ 選考終了フラグ変更
+        → handleFlagUpdate (L377)
+        → maybeOpenCompleteForEndFlag (L362)
+        → gtaskId が残っている slot を complete ダイアログへ
+
+ダイアログ確認
+  → handleTaskConfirm (L429)
+  → for (slot of slots): POST /api/entries/[entryId]/sync-task { slot, action }
+  → 結果に応じてトースト表示（成功/partial/エラー/scope不足/API未有効）
+```
+
+#### トリガー別の操作対応表
+
+| トリガー | dialog action | カレンダー予定 | ToDo タスク |
+|--|--|--|--|
+| 日付+時間が新規に揃った | create | `createCalendarEvent` → `gcalId` 保存 | `createTask` → `gtaskId` 保存 |
+| 既存日時を変更 | update | `gcalId` あれば `updateCalendarEvent`、無ければ `createCalendarEvent`（フォールバック） | `updateTask` |
+| 日時を空にした | complete | `deleteCalendarEvent` → `gcalId` を null | `completeTask` → `gtaskId` を null |
+| 選考終了系フラグへ変更 | complete | `deleteCalendarEvent` → `gcalId` を null | `completeTask` → `gtaskId` を null |
+
+⚠️ **非対称ポイント**: dialog action は3種（create/update/complete）だが、カレンダー予定には「完了」概念が無いため、タスクの complete はカレンダー側では **delete** に対応する。次に同期系を触る人が「complete なのに予定を削除しているのは何故か」で混乱しやすい箇所。
+
+#### カレンダー予定の仕様
+
+- 予定タイトル: `[一次面接] {求職者氏名} / {企業名}`（二次/最終はラベル差し替え）
+- 開始 = 面接時刻、終了 = 開始 + 60分（24時超は 23:59 頭打ち。日跨ぎさせない）
+- タイムゾーン: `Asia/Tokyo`
+- 同期対象: 一次面接 / 二次面接 / 最終面接（面接対策は対象外）
+
+#### フェイルソフト
+
+予定とタスクは**独立処理**。片方失敗してもロールバックしない。
+
+- 両方成功 → `{ success: true, taskId, eventId }`
+- 片方失敗 → `{ success: true, partial: true, failed: "task"|"calendar" }`（200）→ フロント warning トースト
+- 両方失敗 → `{ success: false }` (500)
+- scope 不足 → 403 → 再認証導線トースト
+
+### API
+
+`POST /api/entries/[entryId]/sync-task`（1ルートで予定＋タスク両方を処理）
+
+- リクエスト: `{ slot: "first"|"second"|"final", action: "create"|"update"|"complete" }`
+- フォールバック: `action=create` だが `gtaskId` 既存 → `update` に解決。`action=update` だが `gtaskId` 無し → `create` に解決。`action=update` だが日時消失 → `complete` に解決。
+
+### 主要 handler シグネチャ
+
+| handler | 行 | シグネチャ | 用途 |
+|--|--|--|--|
+| `computeTaskSync` | L318 | `(before: Entry, after: Entry) => { action, slots } \| null` | 保存前後差分から同期 action と対象 slot を算出 |
+| `openTaskDialogForEntry` | L351 | `(entryId: string, before: Entry \| null, after: Entry) => void` | `computeTaskSync` 呼び出し → ダイアログ open（EntryDetailModal 用コールバック） |
+| `maybeOpenCompleteForEndFlag` | L362 | `(entry: Entry, flags: Record<string, string \| null>) => void` | 選考終了系フラグ検知 → gtaskId が残る slot を complete ダイアログへ |
+| `handleFieldUpdate` | L398 | `(entryId: string, fields: Record<string, unknown>) => void` | インライン面接日時 onBlur → PATCH → 面接フィールド変更検知 → `computeTaskSync` |
+| `handleFlagUpdate` | L377 | `(entryId: string, flags: Record<string, string \| null>) => void` | フラグ更新 → `maybeOpenCompleteForEndFlag` |
+| `handleTaskConfirm` | L429 | `() => Promise<void>` | ダイアログ確認 → slot ループで `sync-task` API 呼び出し → トースト |
+| `handleBulkArchive` | L497 | `(selectedEntries: Entry[]) => void` | 一括アーカイブ |
+| `handleCreateTasks` | L568 | `(selectedEntries: Entry[]) => void` | エントリー対応タスク作成（単数→遷移 / 複数→API一括） |
+
+### 主要 state
+
+| state | 型 | 行 | 用途 |
+|--|--|--|--|
+| `entries` | `Entry[]` | L121 | エントリー一覧 |
+| `activeTab` | `string` | L123 | フラグタブ切替（求人紹介〜全件） |
+| `selectedIds` | `Set<string>` | L149 | 一括操作用の選択 |
+| `calendarConnected` | `boolean` | L170 | Google 連携状態（useEffect で `/api/calendar/events` から取得） |
+| `taskDialogOpen` | `boolean` | L171 | Google 同期確認ダイアログの表示 |
+| `taskDialogAction` | `TaskSyncAction` | L172 | "create" / "update" / "complete" |
+| `taskDialogSlots` | `TaskSyncSlot[]` | L173 | ダイアログに表示する slot 一覧（{slot, label, detail}） |
+| `taskDialogEntryId` | `string \| null` | L174 | 同期対象エントリーID |
+| `taskLoading` | `boolean` | L175 | sync-task API 呼び出し中 |
+| `detailEntryId` | `string \| null` | L152 | EntryDetailModal 表示対象 |
+| `routeModalEntry` | `Entry \| null` | L164 | EntryRouteSwitchModal 表示対象 |
+
+### 関連定数
+
+| 定数 | 行 | 用途 |
+|--|--|--|
+| `END_FLAG_DETAILS` | L75 | 選考終了系フラグ値 Set（"書類見送り", "面接見送り", "本人辞退"） |
+| `INTERVIEW_SLOT_DEFS` | L88 | slot/label/dateField/timeField/gtaskField の定義配列 |
+| `INTERVIEW_DATE_TIME_FIELDS` | L94 | 面接日時フィールド名 Set（6フィールド） |
+| `TABS` | L107 | タブ定義（求人紹介〜全件の7タブ） |
+
+### 関連ファイル
+
+| ファイル | 役割 |
+|--|--|
+| `src/app/api/entries/[entryId]/sync-task/route.ts` | 同期 API（1ルートで予定＋タスク両方を処理） |
+| `src/lib/googleCalendar.ts` | カレンダー予定 CRUD（`createCalendarEvent` / `updateCalendarEvent` / `deleteCalendarEvent`）。ScheduleEntry 同期と共用 |
+| `src/lib/googleTasks.ts` | ToDo タスク CRUD（`createTask` / `updateTask` / `completeTask`） |
+| `src/components/entries/TaskSyncConfirmDialog.tsx` | ダイアログ UI（props: `open`, `action`, `slots`, `loading`, `onConfirm`, `onCancel`） |
+| `src/components/entries/EntryDetailModal.tsx` | モーダル一括保存経路（`onRequestTaskSync` props 経由で EntryBoard に委譲、L107） |
+| `src/components/entries/EntryTable.tsx` | テーブル本体（面接日時のインライン onBlur → `onFieldUpdate` で EntryBoard に委譲） |
+| `prisma/schema.prisma` の `JobEntry` | `*InterviewGtaskId` 3列（L1310-1312）+ `*InterviewGcalId` 3列（L1315-1317） |
+
+### JST 罠の所在
+
+- 予定の開始/終了 dateTime: `sync-task/route.ts` の `toJstDateString()` で `d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })` を使用
+- タスクの due: 同上
+- `toISOString().slice(0,10)` は **禁止**（JST 9時間ずれで前日になる。詳細は `12-pitfalls.md` 参照）
+- `formatInterviewDateTime()` (EntryBoard L81): ダイアログ表示用の日時整形も同じ `sv-SE` + `Asia/Tokyo` パターン
 
 ---
 
