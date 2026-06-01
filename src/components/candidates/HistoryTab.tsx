@@ -2369,7 +2369,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
     : entries;
 
   return (
-    <div>
+    <div className="min-w-0">
       {/* サブタブバー */}
       <div className="bg-gray-50 rounded-lg p-1 inline-flex gap-1 mb-6">
         <button
@@ -2438,7 +2438,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
 
       {/* ===== 求人紹介サブタブ ===== */}
       {activeSubTab === "jobs" && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-6 min-w-0">
           {/* ヘッダー */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <h3 className="text-[14px] font-semibold text-[#374151] shrink-0">
@@ -2515,11 +2515,11 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
             </div>
           ) : (
             <div
-              className="overflow-y-auto overflow-x-hidden"
+              className="overflow-y-auto overflow-x-hidden min-w-0"
               style={{ maxHeight: "calc(100vh - 400px)" }}
             >
               {/* 列ヘッダー */}
-              <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+              <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none min-w-0">
                 <span className="w-4 shrink-0" />
                 <span className="flex-1 min-w-0">会社名</span>
                 <span onClick={() => handleJobSort("wish")}
@@ -2552,7 +2552,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
                   return (
                     <div
                       key={job.id}
-                      className={`flex items-center gap-2 px-4 py-2 hover:bg-gray-50 ${
+                      className={`flex items-center gap-2 px-4 py-2 hover:bg-gray-50 min-w-0 ${
                         isSelected ? "bg-blue-50/40" : ""
                       }`}
                     >
@@ -2567,7 +2567,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
                         />
                       )}
                       <div className="flex-1 min-w-0 group/job relative">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-[13px] font-medium text-[#374151] truncate">{job.company_name}</span>
                           {job.candidate_response && RESPONSE_BADGE[job.candidate_response] && (
                             <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${RESPONSE_BADGE[job.candidate_response].cls}`}>
