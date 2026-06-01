@@ -13,6 +13,7 @@ const ALLOWED_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "image/jpeg",
   "image/png",
+  "image/gif",
   "image/webp",
   "text/plain",
 ]);
@@ -254,7 +255,7 @@ export default function FileUploadModal({
               type="file"
               multiple
               className="hidden"
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.txt"
               onChange={(e) => {
                 if (e.target.files?.length) {
                   validateAndAddFiles(e.target.files);

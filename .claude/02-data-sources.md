@@ -17,7 +17,7 @@
 
 | データ | source of truth | 備考 |
 |--|--|--|
-| 面談ログ・添付ファイル | portal `InterviewRecord`, `InterviewAttachment` (Supabase Storage) | |
+| 面談ログ・添付ファイル | portal `CandidateFile` (category=MEETING) / Google Drive | T-067 で統合。紐付けは candidateId（面談レコード不要で添付可）。面談入力「添付」タブと書類タブ「面談」サブタブは同一データ参照 |
 | 面談 AI 解析結果 | candidate-intake で生成 → portal の `InterviewRecord` フィールドに保存 | 解析実体は intake 側、portal 側のYAMLは無効 |
 | 職務経歴 | portal `WorkHistory` | |
 | 退職理由（大・中・小）| portal `InterviewRecord.resignReason*` | 3段連動セレクタ、enum 定義あり |
@@ -35,23 +35,21 @@
 | AI 評価ランク（A/B/C/D）| portal `CandidateFile.aiMatchRating` | analyze-batch で保存 |
 | AI アドバイザーコメント | portal の `advisorChatMessage` テーブル | |
 
-## ファイルストレージの二系統
+## ファイルストレージ
 
-portal は CandidateFile と InterviewAttachment で **完全に異なるストレージ** を使う。混同しないこと。
+T-067 以降、面談ログ・添付ファイルを含む全ての求職者関連ファイルは **`CandidateFile` / Google Drive** に統一されている。
 
-| | CandidateFile | InterviewAttachment |
-|--|--|--|
-| ストレージ | Google Drive | Supabase Storage |
-| ID フィールド | `driveFileId` | `filePath`（Supabase バケットパス）|
-| ダウンロード関数 | `downloadFileFromDrive(driveFileId)` (`src/lib/google-drive.ts`) | `supabase.storage.from("interview-attachments").download(filePath)` |
-| テーブル | `candidate_files` | `interview_attachments` |
-| 用途 | 求職者関連書類全般（原本、BS書類、面談議事録、ブックマーク等）| InterviewRecord に紐づく添付（Notta ログ、履歴書 PDF 等）|
+| テーブル | ストレージ | ID フィールド | ダウンロード関数 | 状態 |
+|--|--|--|--|--|
+| `candidate_files` | Google Drive | `driveFileId` | `downloadFileFromDrive(driveFileId)` (`src/lib/google-drive.ts`) | **現行（全カテゴリの source of truth）** |
+| `interview_attachments` | Supabase Storage | `filePath`（バケットパス）| `supabase.storage.from("interview-attachments").download(filePath)` | **T-067 で凍結。旧 API 残置（非推奨）。新規の読み書きは通らない** |
 
-### 重要な含意
+### T-067 統合の要点
 
-- T-029 Phase D-2 の Google フォーム作成は **CandidateFile（Drive）** から PDF/.txt を取得（書類タブ → 面談サブタブの category=MEETING）
-- 既存 `analyze-with-intake/route.ts` は **InterviewAttachment（Supabase）** から取得（実装パターンが異なる）
-- Phase D-2 の portal API（extract-resume）は CandidateFile + downloadFileFromDrive 経路を使う
+- 面談ログ・添付は `CandidateFile`（category=MEETING）/ Google Drive が source of truth
+- `analyze-with-intake/route.ts` も `CandidateFile`(MEETING) + `downloadFileFromDrive` 経由で解析対象を取得
+- T-029 Phase D-2 の Google フォーム作成（extract-resume）も同じ CandidateFile + Drive 経路
+- 旧 `/api/interviews/[id]/attachments` 系 API は残置のみ（将来削除予定）
 
 ## 面談関連の AI 自動生成（T-029）
 
