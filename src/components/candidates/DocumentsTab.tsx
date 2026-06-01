@@ -329,6 +329,10 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
     "text/plain",
   ]);
 

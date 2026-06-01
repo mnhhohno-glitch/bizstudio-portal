@@ -19,13 +19,14 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "image/jpeg",
   "image/png",
+  "image/gif",
   "image/webp",
   "text/plain",
 ]);
 
 const ALLOWED_EXTENSIONS = new Set([
   ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-  ".jpg", ".jpeg", ".png", ".webp",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp",
   ".txt",
 ]);
 
