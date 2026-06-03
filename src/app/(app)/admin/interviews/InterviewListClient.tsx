@@ -65,6 +65,11 @@ const RANK_BADGE: Record<string, string> = {
 const TOOL_OPTIONS = ["電話", "オンライン", "対面"];
 const TYPE_OPTIONS = ["新規面談", "既存面談", "フォロー面談", "面接対策"];
 
+// 一覧フィルタ用の確定選択肢。TOOL_OPTIONS / TYPE_OPTIONS は新規登録モーダルでも参照されているため
+// フィルタの選択肢調整はモーダルに影響しないよう別定数で持つ。
+const TOOL_FILTER_OPTIONS = ["オンライン", "電話", "対面"];
+const TYPE_FILTER_OPTIONS = ["新規面談", "既存面談"];
+
 const COL_WIDTHS = [60, 100, 100, 110, 90, 100, 130, 80, 130, 220, 110, 110, 180];
 
 /* ------------------------------------------------------------------ */
@@ -462,7 +467,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           title="面談種別"
         >
           <option value="">種別: すべて</option>
-          {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+          {TYPE_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <select
           value={toolFilter}
@@ -471,7 +476,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           title="面談方法"
         >
           <option value="">方法: すべて</option>
-          {TOOL_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+          {TOOL_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <input
           type="text"
