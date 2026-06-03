@@ -622,6 +622,15 @@ EntryBoard (1083 行)
 - `toISOString().slice(0,10)` は **禁止**（JST 9時間ずれで前日になる。詳細は `12-pitfalls.md` 参照）
 - `formatInterviewDateTime()` (EntryBoard L81): ダイアログ表示用の日時整形も同じ `sv-SE` + `Asia/Tokyo` パターン
 
+### EntryTable: 本人辞退時の対応フラグ表示フィルタ
+
+- `EntryTable.tsx` の `companyFlag`（企業対応）／`personFlag`（本人対応）dropdown は、`entryFlagDetail` が「本人辞退」系（`本人辞退` / `本人辞退_他社決` / `本人辞退_自社他`、`startsWith("本人辞退")` で判定）のとき、ラベルに「辞退」を含む選択肢のみ表示。それ以外のときは「辞退」を含む選択肢を非表示にする
+- これは `COMPANY_FLAG_RULES` / `PERSON_FLAG_RULES`（`entry-flag-rules.ts`）のホワイトリストとは別レイヤーの**描画時フィルタ**。保存値・DB スキーマ・API は一切変更しない（filter は受信した options 配列を絞り込むだけ）
+- 例外（常に表示）: 空文字／プレースホルダ option、行が現在保存している値（既存データ保護のため、フィルタ条件外でも消えない）
+- 関連関数（EntryTable.tsx 内）: `isWithdrawalDetail` / `isWithdrawalOption` / `filterFlagOptions`
+- 適用箇所: `renderCell()` 冒頭で `rawCompanyOptions`／`rawPersonOptions` を `filterFlagOptions(..., entry.entryFlagDetail, entry.companyFlag|personFlag)` に通してから `statusFlags` セルで描画
+- 副作用: `書類選考` ステージは `COMPANY_FLAG_RULES` がもともと `["辞退報告前","辞退報告済"]` の辞退系のみのため、`entryFlagDetail` が本人辞退以外のとき企業対応 dropdown は空になり `-` 表示に縮退する（仕様通り）
+
 ---
 
 ## CandidateDetailPage.tsx
