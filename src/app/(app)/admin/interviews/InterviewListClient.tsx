@@ -129,6 +129,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
   const [candidateName, setCandidateName] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // T-068: クライアント側フィルタ（サーバ query は変更しない方針）
+  const [typeFilter, setTypeFilter] = useState("");
+  const [toolFilter, setToolFilter] = useState("");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Date nav
@@ -234,8 +237,21 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     setCaName("");
     setCandidateName("");
     setSearch("");
+    setTypeFilter("");
+    setToolFilter("");
     setPage(1);
   };
+
+  // T-068: クライアント側で interviewType / interviewTool を AND 絞り込み。
+  // サマリの「新規 / 既存」件数も同じフィルタ後の集合から算出するため、
+  // テーブル描画と件数表示の両方で displayedInterviews を参照する。
+  const displayedInterviews = interviews.filter((r) => {
+    if (typeFilter && r.interviewType !== typeFilter) return false;
+    if (toolFilter && r.interviewTool !== toolFilter) return false;
+    return true;
+  });
+  const newCount = displayedInterviews.filter((r) => r.interviewType === "新規面談").length;
+  const existingCount = displayedInterviews.filter((r) => r.interviewType === "既存面談").length;
 
   // Sort handler
   const handleSort = (col: string) => {
@@ -439,6 +455,24 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
           className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
         />
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="w-[120px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="面談種別"
+        >
+          <option value="">種別: すべて</option>
+          {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select
+          value={toolFilter}
+          onChange={(e) => setToolFilter(e.target.value)}
+          className="w-[120px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="面談方法"
+        >
+          <option value="">方法: すべて</option>
+          {TOOL_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
         <input
           type="text"
           placeholder="求職者名"
@@ -453,6 +487,11 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           onChange={(e) => setSearch(e.target.value)}
           className="w-[180px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
         />
+        <span className="ml-auto inline-flex items-center gap-2 rounded-md border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-1.5 text-[12px] text-[#374151]">
+          <span className="font-medium">新規面談 <span className="text-[#2563EB]">{newCount}</span> 件</span>
+          <span className="text-gray-300">｜</span>
+          <span className="font-medium">既存面談 <span className="text-[#2563EB]">{existingCount}</span> 件</span>
+        </span>
       </div>
 
       {/* Table */}
@@ -481,9 +520,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           <tbody>
             {loading ? (
               <tr><td colSpan={13} className="py-12 text-center text-gray-400">読み込み中...</td></tr>
-            ) : interviews.length === 0 ? (
+            ) : displayedInterviews.length === 0 ? (
               <tr><td colSpan={13} className="py-12 text-center text-gray-400">該当する面談記録がありません</td></tr>
-            ) : interviews.map((r) => {
+            ) : displayedInterviews.map((r) => {
               const age = calcAge(r.candidateBirthday);
               const rb = r.resultFlag ? RESULT_BADGE[r.resultFlag] : null;
               const rank = r.rating?.overallRank;
