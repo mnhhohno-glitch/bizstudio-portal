@@ -135,6 +135,24 @@ function isPersonFlagRed(entry: Entry): boolean {
   return false;
 }
 
+const isWithdrawalDetail = (entryFlagDetail?: string | null): boolean =>
+  !!entryFlagDetail && entryFlagDetail.startsWith("本人辞退");
+
+const isWithdrawalOption = (label: string): boolean => label.includes("辞退");
+
+function filterFlagOptions(
+  allOptions: string[],
+  entryFlagDetail: string | null | undefined,
+  currentValue: string | null | undefined
+): string[] {
+  const wd = isWithdrawalDetail(entryFlagDetail);
+  return allOptions.filter((opt) => {
+    if (!opt) return true;
+    if (opt === currentValue) return true;
+    return wd ? isWithdrawalOption(opt) : !isWithdrawalOption(opt);
+  });
+}
+
 // T-048: 面接日超過判定。entryFlagDetail が "{stage}面接実施前" の状態で
 // 面接日が今日より過去なら true。JST 日付ベース比較（罠 #17 準拠）。
 function isInterviewOverdue(entry: Entry, stage: "first" | "second" | "final"): boolean {
@@ -384,8 +402,10 @@ export default function EntryTable({
   const minWidth = 36 + cols.reduce((sum, c) => sum + c.width, 0);
 
   function renderCell(entry: Entry, col: ColConfig) {
-    const companyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
-    const personOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
+    const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
+    const rawPersonOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
+    const companyOptions = filterFlagOptions(rawCompanyOptions, entry.entryFlagDetail, entry.companyFlag);
+    const personOptions = filterFlagOptions(rawPersonOptions, entry.entryFlagDetail, entry.personFlag);
 
     switch (col.key) {
       case "candidate":
