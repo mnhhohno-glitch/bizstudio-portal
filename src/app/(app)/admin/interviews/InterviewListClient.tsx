@@ -247,16 +247,19 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     setPage(1);
   };
 
-  // T-068: クライアント側で interviewType / interviewTool を AND 絞り込み。
-  // サマリの「新規 / 既存」件数も同じフィルタ後の集合から算出するため、
-  // テーブル描画と件数表示の両方で displayedInterviews を参照する。
+  // T-068: クライアント側で 回数(interviewCount) / interviewTool を AND 絞り込み。
+  // 種別フィールド(interviewType)は未入力が多いため、業務定義に従い「1回目=新規 / 2回目以降=既存」
+  // を回数ベースで判定する。サマリも同じ判定式を共有する。
+  const isNew = (r: InterviewRow) => r.interviewCount === 1;
+  const isExisting = (r: InterviewRow) => r.interviewCount !== null && r.interviewCount >= 2;
   const displayedInterviews = interviews.filter((r) => {
-    if (typeFilter && r.interviewType !== typeFilter) return false;
+    if (typeFilter === "新規面談" && !isNew(r)) return false;
+    if (typeFilter === "既存面談" && !isExisting(r)) return false;
     if (toolFilter && r.interviewTool !== toolFilter) return false;
     return true;
   });
-  const newCount = displayedInterviews.filter((r) => r.interviewType === "新規面談").length;
-  const existingCount = displayedInterviews.filter((r) => r.interviewType === "既存面談").length;
+  const newCount = displayedInterviews.filter(isNew).length;
+  const existingCount = displayedInterviews.filter(isExisting).length;
 
   // Sort handler
   const handleSort = (col: string) => {
