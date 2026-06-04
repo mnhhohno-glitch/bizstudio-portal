@@ -10,12 +10,13 @@ type Props = {
   onDone: () => void;
 };
 
-type EndReason = "書類見送り" | "面接見送り" | "本人辞退";
+type EndReason = "書類見送り" | "面接見送り" | "本人辞退" | "求人クローズ";
 
 const REASON_OPTIONS: { value: EndReason; label: string }[] = [
   { value: "書類見送り", label: "書類見送り" },
   { value: "面接見送り", label: "面接見送り" },
   { value: "本人辞退", label: "本人辞退" },
+  { value: "求人クローズ", label: "求人クローズ" },
 ];
 
 function buildFlagPatch(reason: EndReason): Record<string, unknown> {
@@ -39,6 +40,13 @@ function buildFlagPatch(reason: EndReason): Record<string, unknown> {
         entryFlagDetail: "本人辞退",
         companyFlag: "辞退報告前",
         personFlag: "辞退受付済",
+        isActive: false,
+      };
+    case "求人クローズ":
+      return {
+        entryFlagDetail: "求人クローズ",
+        companyFlag: null,
+        personFlag: "見送り通知未送信",
         isActive: false,
       };
   }
