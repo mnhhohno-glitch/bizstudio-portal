@@ -9,6 +9,7 @@ import ScheduleReviewDrawer from "./ScheduleReviewDrawer";
 import ScheduleProgressBar from "./ScheduleProgressBar";
 import CalendarConnectButton from "./CalendarConnectButton";
 import type { EditEntryData } from "./ScheduleEntryFormModal";
+import DailyReportEntryButton from "@/components/dailyReport/DailyReportEntryButton";
 
 type ScheduleEntry = {
   id: string;
@@ -77,7 +78,17 @@ function isToday(date: Date): boolean {
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
 }
 
-export default function SchedulePanel() {
+interface SchedulePanelProps {
+  /**
+   * T-066: 日報フロー導線（「📝 日報を作る」ボタン）を表示するか。
+   * page.tsx 側で feature flag `DAILY_REPORT_ENABLED` を判定して渡す。
+   * 選択中の日付（currentDate）が SchedulePanel ローカル state にあるため、
+   * ボタンも内部に置いて props で受け渡しなしで連動させる。
+   */
+  enableDailyReport?: boolean;
+}
+
+export default function SchedulePanel({ enableDailyReport = false }: SchedulePanelProps = {}) {
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [loading, setLoading] = useState(true);
@@ -550,6 +561,10 @@ export default function SchedulePanel() {
           >
             🌙 1日を振り返る
           </button>
+        )}
+        {enableDailyReport && (
+          // T-066: 選択中の currentDate を "YYYY-MM-DD" で渡す。本日固定にしない。
+          <DailyReportEntryButton date={toDateString(currentDate)} />
         )}
       </div>
 
