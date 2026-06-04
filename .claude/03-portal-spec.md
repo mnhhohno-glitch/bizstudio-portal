@@ -136,3 +136,61 @@ model InterviewMemo {
 - 面談メモ更新 API: `src/app/api/interviews/[id]/memos/[memoId]/route.ts`
 - Google Form 自動生成: `src/components/candidates/GoogleFormCreatorModal.tsx` + `src/app/api/candidates/[candidateId]/google-form/*`
 - 経験職種カテゴリ定数: `src/constants/google-form-categories.ts`（21 サブカテゴリ × 7 大項目、candidate-intake `specs/generate_form_prompt.yaml` と同期）
+
+---
+
+## T-066: 日報・予実管理機能
+
+### スケジュール SSoT は portal
+
+- `DailySchedule` + `ScheduleEntry` が予定の唯一の正。Google Calendar は外部ミラー（calendarEventId で紐付け）。
+- 完了状態は `ScheduleEntry.isCompleted`（portal DB）。Calendar 側には完了概念を持たせない。
+- 進捗バーはクライアント計算（永続化なし）。
+
+### 面談実施判定（厳守）
+
+- `InterviewRecord.resultFlag` は合否ではなく「紹介ステータス／辞退」の混合。約30% が null。
+- 「辞退系」は **`連絡なし辞退`／`連絡あり辞退`／`辞退`** の 3 値（定数 `INTERVIEW_DECLINED_FLAGS`）。
+- それ以外（**null を含む**）は実施扱い。空欄は入力漏れだが「実施はした」と見なす。
+- 初回/既存判定は `interviewCount`（=1 初回、>=2 既存）。`interviewType` 文字列で判定しない（UI 定数外の "初回面談" が大量混在）。
+- 面接対策のみ `interviewType === "面接対策"` で抽出（種別でしか取れないため例外的）。
+
+### CA 数値の集計テーブル早見
+
+| 指標 | 算出元 | 集計フィールド | 紐づきキー | 窓 |
+|--|--|--|--|--|
+| 初回面談 予定/実施 | InterviewRecord (interviewCount=1) | interviewDate | interviewerUserId=Employee.id | 当日（＋実施率は当月も） |
+| 既存面談 | InterviewRecord (interviewCount>=2, 辞退系除く) | interviewDate | 同上 | 当日 |
+| 面接対策 | InterviewRecord (interviewType="面接対策") | interviewDate | 同上 | 当日 |
+| 求人検索 | CandidateFile (category=BOOKMARK, archivedAt=null) | createdAt | uploadedByUserId=User.id | 当日（＋紹介率は当月） |
+| 求人紹介 | CandidateFile (category=BOOKMARK, lastExportedAt≠null) | lastExportedAt | 同上 | 当日（＋紹介率は当月） |
+| エントリー | JobEntry | entryDate | careerAdvisorId=User.id | 当日（＋率は当月） |
+| 書類通過 | JobEntry | documentPassDate | 同上 | 当日（＋率は当月） |
+| 内定 | JobEntry | offerDate | 同上 | 当日（＋率は当月） |
+| 承諾 | JobEntry | acceptanceDate | 同上 | 当日（＋率は当月） |
+
+集計実装は `src/lib/dailyReport/metrics.ts:computeCaMetrics`。JST 境界は `src/lib/dailyReport/jstDate.ts` 経由のみ（罠 #36 参照）。
+
+### モデル
+
+- `EmployeeJobCategory` enum（`CA`/`MARKETING`/`OFFICE_AND_MGMT`）。`Employee.jobCategory` に nullable で持つ。NULL はコメントのみフォーマットへフォールバック。
+- `DailyReport`：1 ユーザー × 1 日。`numbers`(Json) に metrics スナップショット、`comment` に社員入力、`aiBody` に AI 生成本文。`jobCategory` を保存時点でスナップショットして将来の職種変更後も過去日報のフォーマットを凍結。
+- `DailyReportChat`：AI 会話履歴（ScheduleChat と同じパターン）。
+
+### AI 入力ルール
+
+- AI には `metrics.ts` で算出済みの**集計値**と予実サマリのみを渡す（仕様 #10 厳守）。
+- 生の `InterviewRecord` / `JobEntry` / `Candidate` を AI に流してはいけない（数字の整合・PII 双方の事故源）。
+- model は `claude-sonnet-4-20250514` 固定（schedule/chat と揃える）。
+
+### 関連ファイル
+
+- `src/lib/dailyReport/constants.ts`：辞退系定数、職種→フォーマット解決
+- `src/lib/dailyReport/jstDate.ts`：JST 境界ヘルパ
+- `src/lib/dailyReport/metrics.ts`：CA 数値の集計
+- `src/lib/dailyReport/prompt.ts`：職種別 system prompt
+- `src/lib/dailyReport/featureFlag.ts`：`DAILY_REPORT_ENABLED`（デフォルト OFF）
+- `src/app/api/daily-report/route.ts`：GET（状態取得）、POST（下書き/確定）
+- `src/app/api/daily-report/chat/route.ts`：AI チャット
+- `src/components/dailyReport/DailyReportChatDrawer.tsx`：右スライドイン会話 UI
+- `src/components/dashboard/DashboardTabs.tsx`：3 タブ切替（Client）
