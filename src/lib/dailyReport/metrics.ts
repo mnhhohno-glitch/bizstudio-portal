@@ -53,7 +53,7 @@ export interface CaDailyMetrics {
  * 4-3 の紐づきキーに従い使い分ける。
  * - 面談：InterviewRecord.interviewerUserId = employeeId
  * - 求人検索/紹介：CandidateFile.uploadedByUserId = userId
- * - エントリー以降：JobEntry.careerAdvisorId = userId
+ * - エントリー以降：JobEntry.careerAdvisorId = employeeId（実データは Employee.id が入っている）
  */
 export async function computeCaMetrics(params: {
   userId: string;
@@ -173,7 +173,7 @@ export async function computeCaMetrics(params: {
   // === エントリー以降（JobEntry） ===
   // entryDate は user 入力なので null の可能性あり → 仕様 R4 で createdAt 近似は集計外。
   // ここは entryDate 厳密一致でカウントし、近似は将来 separate 関数で扱う。
-  const advisorFilter = { careerAdvisorId: userId };
+  const advisorFilter = { careerAdvisorId: employeeId ?? "__nonexistent__" };
 
   const [
     entryDay,
