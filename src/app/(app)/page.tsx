@@ -12,7 +12,6 @@ import SchedulePanel from "@/components/schedule/SchedulePanel";
 import { todayForDB } from "@/lib/attendance/timezone";
 import { isDailyReportEnabled } from "@/lib/dailyReport/featureFlag";
 import DashboardTabs from "@/components/dashboard/DashboardTabs";
-import DailyReportEntryButton from "@/components/dailyReport/DailyReportEntryButton";
 
 const STATUS_LABEL: Record<string, string> = {
   NOT_STARTED: "未着手",
@@ -214,13 +213,11 @@ export default async function DashboardPage() {
   }
 
   // === feature flag ON：3 タブ ===
+  // 日報導線は SchedulePanel の中に置く（選択中の日付と連動するため）。
   const scheduleTab = (
     <div className="flex gap-6">
       <div className="w-[440px] flex-shrink-0">
-        <SchedulePanel />
-        <div className="mt-3">
-          <DailyReportEntryButton />
-        </div>
+        <SchedulePanel enableDailyReport />
       </div>
       <div className="flex-1 space-y-3">{attendanceArea}</div>
     </div>
