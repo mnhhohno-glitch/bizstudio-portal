@@ -63,6 +63,15 @@ enum SalaryRange {
   MANAGEMENT
 }
 
+// 社員の職種フラグ（日報フォーマット分岐に使用、T-066）。
+// 既存 model JobCategoryMajor/Middle/Minor は求人マスタなので名前が被らないよう
+// EmployeeJobCategory として定義する。
+enum EmployeeJobCategory {
+  CA
+  MARKETING
+  OFFICE_AND_MGMT
+}
+
 enum GuideType {
   INTERVIEW
 }
@@ -139,6 +148,8 @@ model User {
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
   dailySchedules           DailySchedule[]
   googleCalendarConnection GoogleCalendarConnection?
+  // T-066
+  dailyReports             DailyReport[]             @relation("DailyReportAuthor")
 
   @@map("users")
 }
@@ -196,16 +207,18 @@ model AuditLog {
 }
 
 model Employee {
-  id                     String         @id @default(cuid())
-  employeeNumber         String         @unique @map("employee_number")
+  id                     String               @id @default(cuid())
+  employeeNumber         String               @unique @map("employee_number")
   name                   String
-  status                 EmployeeStatus @default(active)
-  userId                 String?        @unique @map("user_id")
-  user                   User?          @relation("EmployeeUser", fields: [userId], references: [id])
-  paidLeave              Float          @default(0) @map("paid_leave") // 有給付与残日数
-  isExemptFromAttendance Boolean        @default(false) @map("is_exempt_from_attendance") // 打刻不要（役員等）
-  salaryRange            SalaryRange    @default(SALES) @map("salary_range")
-  lineUserId             String?        @map("line_user_id") // LINE ユーザーID
+  status                 EmployeeStatus       @default(active)
+  userId                 String?              @unique @map("user_id")
+  user                   User?                @relation("EmployeeUser", fields: [userId], references: [id])
+  paidLeave              Float                @default(0) @map("paid_leave") // 有給付与残日数
+  isExemptFromAttendance Boolean              @default(false) @map("is_exempt_from_attendance") // 打刻不要（役員等）
+  salaryRange            SalaryRange          @default(SALES) @map("salary_range")
+  // T-066: 日報フォーマット分岐用。nullable で全既存社員に NULL を入れ非破壊追加。
+  jobCategory            EmployeeJobCategory? @map("job_category")
+  lineUserId             String?              @map("line_user_id") // LINE ユーザーID
 
   // 担当求職者
   candidates    Candidate[]
@@ -1074,28 +1087,28 @@ model RpaExecutionBatch {
 
 // マイナビRPA処理ログ（1応募分の処理結果）
 model MynaviRpaProcessingLog {
-  id              String            @id @default(cuid())
-  batchId         String            @map("batch_id")
-  batch           RpaExecutionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  candidateId     String?           @map("candidate_id")
-  candidate       Candidate?        @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  phoneNormalized String?           @map("phone_normalized")
-  candidateName   String?           @map("candidate_name")
-  candidateAge    Int?              @map("candidate_age")
-  status          String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIP" | "ERROR"
-  reason          String?           @db.Text
-  canSendReply    Boolean           @default(false) @map("can_send_reply")
-  replySentAt     DateTime?         @map("reply_sent_at")
-  replyResult     String?           @map("reply_result") // "SUCCESS" | "FAILURE"
-  pdfFileName     String?           @map("pdf_file_name")
-  pdfFileId       String?           @map("pdf_file_id")
-  errorMessage    String?           @map("error_message") @db.Text
+  id                String            @id @default(cuid())
+  batchId           String            @map("batch_id")
+  batch             RpaExecutionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  candidateId       String?           @map("candidate_id")
+  candidate         Candidate?        @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  phoneNormalized   String?           @map("phone_normalized")
+  candidateName     String?           @map("candidate_name")
+  candidateAge      Int?              @map("candidate_age")
+  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIP" | "ERROR"
+  reason            String?           @db.Text
+  canSendReply      Boolean           @default(false) @map("can_send_reply")
+  replySentAt       DateTime?         @map("reply_sent_at")
+  replyResult       String?           @map("reply_result") // "SUCCESS" | "FAILURE"
+  pdfFileName       String?           @map("pdf_file_name")
+  pdfFileId         String?           @map("pdf_file_id")
+  errorMessage      String?           @map("error_message") @db.Text
   // T-064: 自動紐付け結果（matched / no_recruiter_name / no_machine_master / no_candidate_today / no_candidate_yesterday / error）
-  scoutLinkResult    String? @map("scout_link_result")
-  scoutLinkedSlotId  String? @map("scout_linked_slot_id")
-  processedAt     DateTime          @default(now()) @map("processed_at")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  scoutLinkResult   String?           @map("scout_link_result")
+  scoutLinkedSlotId String?           @map("scout_linked_slot_id")
+  processedAt       DateTime          @default(now()) @map("processed_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
 
   @@index([phoneNormalized, processedAt])
   @@index([batchId])
@@ -1396,6 +1409,12 @@ enum ScheduleChatType {
   REVIEW
 }
 
+// 日報の確定状態。T-066。
+enum DailyReportStatus {
+  DRAFT
+  SUBMITTED
+}
+
 model DailySchedule {
   id           String         @id @default(cuid())
   userId       String
@@ -1450,6 +1469,50 @@ model ScheduleChat {
   createdAt DateTime         @default(now())
 
   @@index([dailyScheduleId])
+}
+
+// T-066: 日報。日付ごとに 1 ユーザー 1 レコード。
+// 数字は DB 集計済みのものを numbers(Json) にスナップショット保存し、
+// AI へは集計済み値のみを渡す（生の面談/求職者レコードは渡さない）。
+model DailyReport {
+  id          String               @id @default(cuid())
+  userId      String               @map("user_id")
+  user        User                 @relation("DailyReportAuthor", fields: [userId], references: [id])
+  // 既存 DailySchedule.date と同じ「UTC midnight 保存」パターンに揃える（@db.Date）。
+  date        DateTime             @db.Date
+  // 保存時点の職種スナップショット。Employee.jobCategory を後で変更しても
+  // 過去の日報フォーマットは凍結したいため別途持つ。NULL ならコメントのみフォーマットへフォールバック。
+  jobCategory EmployeeJobCategory? @map("job_category")
+  // CA の予/実数値（4-2 の指標）。スキーマ無しの自由形式で持つ。
+  numbers     Json?
+  // 社員入力のコメント本文。
+  comment     String?              @db.Text
+  // AI が生成した日報文。
+  aiBody      String?              @map("ai_body") @db.Text
+  status      DailyReportStatus    @default(DRAFT)
+  submittedAt DateTime?            @map("submitted_at")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  chats DailyReportChat[]
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@map("daily_reports")
+}
+
+// T-066: 日報 AI チャットの履歴。既存 ScheduleChat に倣う。
+model DailyReportChat {
+  id            String      @id @default(cuid())
+  dailyReportId String      @map("daily_report_id")
+  dailyReport   DailyReport @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  role          ChatRole
+  content       String      @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([dailyReportId])
+  @@map("daily_report_chats")
 }
 
 model GoogleCalendarConnection {
@@ -1902,7 +1965,7 @@ model ScoutImportLog {
   successCount Int @default(0) @map("success_count")
   failureCount Int @default(0) @map("failure_count")
 
-  status       String  // "RUNNING" / "COMPLETED" / "FAILED"
+  status       String // "RUNNING" / "COMPLETED" / "FAILED"
   errorMessage String? @map("error_message") @db.Text
 
   startedAt  DateTime  @default(now()) @map("started_at")
