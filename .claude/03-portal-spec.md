@@ -164,7 +164,7 @@ model InterviewMemo {
 | 面接対策 | InterviewRecord (interviewType="面接対策") | interviewDate | 同上 | 当日 |
 | 求人検索 | CandidateFile (category=BOOKMARK, archivedAt=null) | createdAt | uploadedByUserId=User.id | 当日（＋紹介率は当月） |
 | 求人紹介 | CandidateFile (category=BOOKMARK, lastExportedAt≠null) | lastExportedAt | 同上 | 当日（＋紹介率は当月） |
-| エントリー | JobEntry | entryDate | careerAdvisorId=User.id | 当日（＋率は当月） |
+| エントリー | JobEntry | entryDate | careerAdvisorId=Employee.id | 当日（＋率は当月） |
 | 書類通過 | JobEntry | documentPassDate | 同上 | 当日（＋率は当月） |
 | 内定 | JobEntry | offerDate | 同上 | 当日（＋率は当月） |
 | 承諾 | JobEntry | acceptanceDate | 同上 | 当日（＋率は当月） |
