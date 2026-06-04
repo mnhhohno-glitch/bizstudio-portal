@@ -899,3 +899,31 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 4. 主要 handler シグネチャ（特に引数形式）
 5. 主要 state
 6. 関連ファイル（API、モデル、共通スタイル等）
+
+---
+
+## ダッシュボード（src/app/(app)/page.tsx）— T-066 で 3 タブ化
+
+### feature flag によるレイアウト分岐
+
+- `DAILY_REPORT_ENABLED=false`（デフォルト）：従来の「左 SchedulePanel / 右 2 カラム（タスク・お知らせ）」をそのまま表示。
+- `DAILY_REPORT_ENABLED=true`：3 タブ（「スケジュール（日報）」｜「タスク」｜「お知らせ」）。タブ切替のみ `DashboardTabs.tsx`（Client Component）。データ取得は Server Component のままで props 注入（R8）。
+
+### タブの中身
+
+- スケジュールタブ：`SchedulePanel`（既存 SSoT）＋ `DailyReportEntryButton`（「📝 日報を作る」）。右側に勤怠ミニカード／アラート。
+- タスクタブ：旧「マイタスク」JSX をそのまま移植。
+- お知らせタブ：旧「お知らせ」JSX をそのまま移植。
+
+### DailyReportChatDrawer.tsx
+
+- 右からスライドイン（ScheduleChatDrawer と同じパターン、幅 520px）。
+- 上段：社員コメント入力欄（AI が日報を組み立てる素材）。
+- 中段：AI 会話。
+- 下段：「下書き保存」「確定」アクション。
+- API：`/api/daily-report`（GET/POST）と `/api/daily-report/chat`（AI）。
+
+### 注意
+
+- ScheduleChatDrawer（プランニング）と DailyReportChatDrawer（日報生成）は別物。両者を流用しないこと。
+- 「🌙 1日を振り返る」（ScheduleReviewDrawer）は既存どおり SchedulePanel 内に残り、その隣に日報導線が追加される。

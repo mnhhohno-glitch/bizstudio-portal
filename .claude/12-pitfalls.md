@@ -320,3 +320,25 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 **関連ケース**:
 - T-028: kyuujinPDF Job 7 件を修正したが、対応する portal JobEntry は 0 件だった
 - 修正コミット: portal 9b22b94
+
+## 36. 日報集計の JST 境界は `toLocaleDateString("sv-SE")` で固定し、`toISOString()` 系を使わない
+
+**罠**: 日報の「当日」「当月」は JST 基準。Node の `Date.toISOString()` は UTC を返すので、JST 0:00〜8:59 帯に処理が走ると前日の集計に化ける。Prisma の where 範囲を `new Date(dateStr + "T00:00:00.000Z")` で組むのも同罪（UTC midnight = JST 9:00 のため、JST 当日の前半 9 時間ぶんが範囲から脱落）。
+
+**対処**:
+- 日付文字列の生成は `new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })`。
+- 範囲は `new Date(\`${dateStr}T00:00:00+09:00\`)` 〜 `new Date(\`${dateStr}T23:59:59.999+09:00\`)`。
+- 集計ヘルパは `src/lib/dailyReport/jstDate.ts` に集約済み。新規集計で同じことをするときはこのファイルから import すること（コピペ実装は禁止）。
+
+**関連**: T-066 で確立。集計実装は `src/lib/dailyReport/metrics.ts:computeCaMetrics`。罠 #17 の Memo 日付保存形式と同じ思想だが、集計 where 範囲は別パターンなので両方覚えること。
+
+## 37. InterviewRecord.resultFlag を「実施／未実施」のフラグとして読まない
+
+**罠**: `resultFlag` は合否でも実施有無でもない。「紹介ステータス」（書類選考通過／内定／辞退など）と「辞退」が混在し、約 30% が null。これを「実施数判定」に流用すると、null の人（実は実施済み）を一律「未実施」にカウントして実施率が崩れる。
+
+**対処**:
+- 実施数の判定は「`resultFlag` が `連絡なし辞退` / `連絡あり辞退` / `辞退` の **いずれでもない**」（null を含む全部実施扱い）。
+- 定数は `src/lib/dailyReport/constants.ts:INTERVIEW_DECLINED_FLAGS`。UI 定数（InterviewListClient 等）と独立して持つ。UI 文言の変更で集計が壊れる連鎖を防ぐため流用禁止。
+- 初回/既存判定は `interviewCount`（=1 初回、>=2 既存）。`interviewType` 文字列（"初回面談" 等）で判定しない（UI 定数外の値が大量混在）。
+
+**関連**: T-066 で集計定義を確定。仕様詳細は `03-portal-spec.md` 「T-066: 日報・予実管理機能」セクション。
