@@ -206,6 +206,12 @@ model InterviewMemo {
   - count 系=当日窓、率系=当月窓。当月窓は `jstMonthStart` 〜 `jstNextMonthStart - 1ms`（従来の `lt nextMonthStart` と等価）。
 - キー対応は T-066 のまま厳守：検索/紹介=User.id（uploadedByUserId）、面談=Employee.id（interviewerUserId）、エントリー=Employee.id（careerAdvisorId）。
 - 面談実施判定は `{ OR: [{ resultFlag: null }, { resultFlag: { notIn: 辞退系 } }] }`（罠 #37 のまま）。
+- **JobEntry 集計は管理画面 `/api/entries` と一致**させる（T-071 後修正）：
+  - 全エントリー系指標に `isActive: true` & `archivedAt: null` を共通付与（T-067 自動失効レコードを除外）。
+  - 「エントリー数」は `entryDate` 在に加え、**応募済み以降のステージのみ**に限定：`entryFlag IN {応募, エントリー, 書類選考, 面接, 内定, 入社済}`（求人紹介段階を除外）。EntryBoard.tsx の TABS と `/api/entries` countResults の値と整合。
+  - 「書類通過/内定/承諾」は各日付フィールドが非 null である時点で求人紹介段階を超えているため、`entryFlag` ホワイトリストは不要。失効除外のみ適用。
+  - エントリー率・書類通過率・内定率・承諾率の分子は上記修正後の値を使う（分母は同レンジ内の前段階数）。
+  - 日報（`computeCaMetrics`）にも同じ条件が波及（ラッパー経由）。求人紹介段階のレコードは日報のエントリー欄からも除外される。
 
 ### 期間レンジ（jstDate.ts / periods.ts）
 
