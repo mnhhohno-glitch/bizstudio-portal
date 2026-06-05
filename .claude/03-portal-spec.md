@@ -242,12 +242,22 @@ model InterviewMemo {
 
 - `GET /api/performance?employeeId=Y`：指定 CA の 6 期間分の指標をまとめて返す（`Promise.all`）。employeeId 省略時はログインユーザー本人を解決。閲覧権限は**全 CA 可**（admin 限定にしない＝確定仕様）。
 - `GET /api/performance/advisors`：`jobCategory='CA'` の active Employee 一覧（担当セレクト用）＋本人 employeeId。
-- `GET /api/performance/weekly?employeeId=Y&anchorDate=YYYY-MM-DD`（T-071 週マトリクス）：起算日から 5 週に分割し、各週の実績＋目標＋TOTAL＋達成率を返す。
+- `GET /api/performance/weekly?employeeId=Y&anchorDate=YYYY-MM-DD`（T-071 週マトリクス・FileMaker 形）：起算日から 5 週に分割し、各週の実績＋目標＋TOTAL＋達成率を返す。
   - 週分割（`src/lib/performance/fiveWeeks.ts:splitIntoFiveWeeks`）：W1＝起算日〜その週の日曜（端数になり得る。例 水曜起算なら水〜日5日）、W2〜W5＝月〜日のフル暦週。
-  - 各週の実績＝`computeCaMetricsForRange` を週レンジで呼ぶ（並列）。数え方は維持（エントリー以降は候補者ユニーク人数、求人/面談は件数）。
-  - **TOTAL（5週合計）はユニーク再集計**：週別の単純合計ではなく、起算日〜W5末の全期間で `computeCaMetricsForRange` を再呼び出し（複数週にまたがる同一候補者の重複を排除）。週別合計とTOTALが一致しないことがあるのは仕様。
-  - 週別目標＝対象月（起算日が属する JST 年月）の `PerformanceTarget` を `allocateToWeeks`（T-073、5週営業日按分、切り上げ＋最終週帳尻）で割り振り → 合計＝月目標。目標未登録なら null。
+  - 各週の実績＝`src/lib/performance/weeklyMatrix.ts:computeWeeklyMatrix`（raw SQL）。返す内容：
+    - 面談：初回(count=1)/2回目(=2)/3回目以降(>=3)/合計、notDeclined。
+    - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者の**初回**提案/エントリー（`MIN(date) OVER (PARTITION BY candidate)` がレンジ内）。既存＝初回がレンジより前。新規uniq+既存uniq=合計uniq を検証済み。
+    - 選考状況：書類通過/内定/承諾（候補者ユニーク人数）＋決定売上(`SUM(revenue) WHERE acceptanceDate in range`)/決定単価(売上÷承諾人数)。
+    - 数え方は `computeCaMetricsForRange` と整合（entry uniq・紹介件数・初回面談が一致することを検証済み）。
+  - **TOTAL（5週合計）はユニーク再集計**：週別の単純合計ではなく、起算日〜W5末の全期間で `computeWeeklyMatrix` を再呼び出し（複数週にまたがる同一候補者の重複を排除）。週別合計とTOTALが一致しないことがあるのは仕様。
+  - 週別目標＝対象月の `PerformanceTarget` を `allocateToWeeks`（T-073、5週営業日按分）で割り振り。対象メトリクス＝初回面談/合計提案人数/合計エントリー人数/書類通過/内定/承諾。
   - 達成率＝TOTAL 実績 ÷ TOTAL 目標（人数の達成率。段階間転換率とは別物）。
+  - **率（段階間転換率）は週マトリクスでは出さない**（月をまたいで破綻するため）。率は cohort API で。
+- `GET /api/performance/cohort?employeeId=Y&months=6`（T-071 直近6ヶ月コホート率）：当月を含まない 6ヶ月前〜前月の各月コホートの段階別人数＋率。
+  - コホート＝その月に `entryDate` を持つ候補者（post-app・担当軸・archived除く・候補者ユニーク）。
+  - そのコホート集合を後段階へ追跡（`BOOL_OR(documentPassDate IS NOT NULL)` 等、**月窓に縛らずいつか到達したか**で判定）。月をまたいで内定しても起点月コホートの内定として数える。
+  - **率はコホート隣接段階基準**（前段が分母）：書類通過率＝書類通過÷コホート、内定率＝内定÷書類通過、承諾率＝承諾÷内定。月内の段階間率破綻（分母0で次段>0）が起きない。
+  - JST 基準。`src/app/api/performance/cohort/route.ts`。
 
 ### インデックス（T-071 migration `20260605120000_t071_performance_indexes`）
 

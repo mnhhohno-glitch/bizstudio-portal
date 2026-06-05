@@ -1,70 +1,105 @@
 "use client";
 
-// T-071: 実績表パネル。ダッシュボード「スケジュール（日報）」タブの右エリアに置く。
-// - 担当セレクト（CA 一覧）で対象を切替（初期=ログインユーザー本人）
-// - 期間タブ（日/週/月/3か月/半期/年）で集計レンジを切替
-// - T-072: さらに「期間指定」を追加。開始月〜終了月（月単位）を指定して集計。
-// - 日報と同じ CA 指標を「数 + 率」で表示
-// 担当・期間が変わるたび GET /api/performance を再フェッチ（SchedulePanel と同じ Client fetch）。
+// T-071 実績表（FileMaker 形）：起算日から 5 週の週マトリクス（4タブ）＋直近6ヶ月コホート（1タブ）。
+// - 上部：担当セレクト／起算日ピッカー／目標登録ボタン（T-073）。
+// - 週マトリクス：GET /api/performance/weekly（実績＋目標＋TOTAL＋達成率）。
+// - 直近6ヶ月：GET /api/performance/cohort（コホート追跡の率）。
+// 既存の期間ボタン式は廃止。集計の数え方は API 側（変更なし）。
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import TargetModal from "./TargetModal";
 
-type CountWithRate = { count: number; denominator?: number; rate?: number | null };
+type Advisor = { id: string; name: string };
+type CUP = { recs: number; uniq: number; perPerson: number | null };
+type WeeklyMatrix = {
+  interview: { first: number; second: number; thirdPlus: number; total: number };
+  proposal: { fresh: CUP; existing: CUP; total: CUP };
+  entry: { fresh: CUP; existing: CUP; total: CUP };
+  selection: { documentPass: number; offer: number; acceptance: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
+};
+type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
+type WeekOut = { weekIndex: number; label: string; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
+type WeeklyResp = {
+  weeks: WeekOut[];
+  total: { from: string; to: string; matrix: WeeklyMatrix; targets: Record<TKey, number | null>; achievement: Record<TKey, number | null> };
+  targetExists: boolean;
+};
+type Cohort = { yearMonth: string; entry: number; documentPass: number; offer: number; acceptance: number; documentPassRate: number | null; offerRate: number | null; acceptanceRate: number | null };
 
-type RangeMetrics = {
-  firstInterviewPlanned: number;
-  firstInterviewExecuted: number;
-  firstInterviewRate: number | null;
-  existingInterviewExecuted: number;
-  interviewPrepExecuted: number;
-  jobSearched: number;
-  jobIntroduced: number;
-  jobIntroductionRate: number | null;
-  entry: CountWithRate;
-  documentPass: CountWithRate;
-  offer: CountWithRate;
-  acceptance: CountWithRate;
+const TABS = [
+  { key: "interview", label: "面談実績" },
+  { key: "proposal", label: "求人紹介実績" },
+  { key: "entry", label: "エントリー実績" },
+  { key: "selection", label: "選考状況" },
+  { key: "cohort", label: "直近6ヶ月" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
+function todayJst(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+const numFmt = (v: number | null | undefined, d = 0) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
+const pctFmt = (r: number | null | undefined) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
+const yenFmt = (v: number | null | undefined) => (v == null ? "—" : `¥${Math.round(v).toLocaleString()}`);
+const mdLabel = (d: string) => { const [, m, day] = d.split("-"); return `${parseInt(m)}/${parseInt(day)}`; };
+
+// 行定義：actual 抽出関数＋任意 targetKey＋フォーマッタ
+type Row = {
+  label: string;
+  indent?: boolean;
+  actual: (m: WeeklyMatrix) => number | null;
+  targetKey?: TKey;
+  fmt?: (v: number | null) => string;
 };
 
-type CustomRange = { fromMonth: string; toMonth: string; metrics: RangeMetrics };
-
-type Advisor = { id: string; name: string };
-
-// "custom" は API パラメータではなく UI の選択肢キー。月範囲は別途 fromMonth/toMonth で送る。
-const PERIODS: { key: string; label: string }[] = [
-  { key: "day", label: "日" },
-  { key: "week", label: "週" },
-  { key: "month", label: "月" },
-  { key: "quarter", label: "3か月" },
-  { key: "half", label: "半期" },
-  { key: "year", label: "年" },
-  { key: "custom", label: "期間指定" },
-];
-
-const pct = (r: number | null | undefined) =>
-  r === null || r === undefined ? "—" : `${(r * 100).toFixed(1)}%`;
-
-// 今月の "YYYY-MM"（JST）を返す。
-function currentYearMonthJst(): string {
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-  return today.slice(0, 7);
-}
+const ROWS: Record<Exclude<TabKey, "cohort">, Row[]> = {
+  interview: [
+    { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
+    { label: "求人面談（2回目）", actual: (m) => m.interview.second },
+    { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
+    { label: "合計面談", actual: (m) => m.interview.total },
+  ],
+  proposal: [
+    { label: "初回提案 人数", actual: (m) => m.proposal.fresh.uniq },
+    { label: "初回提案 件数", indent: true, actual: (m) => m.proposal.fresh.recs },
+    { label: "初回提案 1人当たり", indent: true, actual: (m) => m.proposal.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
+    { label: "既存提案 人数", actual: (m) => m.proposal.existing.uniq },
+    { label: "既存提案 件数", indent: true, actual: (m) => m.proposal.existing.recs },
+    { label: "既存提案 1人当たり", indent: true, actual: (m) => m.proposal.existing.perPerson, fmt: (v) => numFmt(v, 1) },
+    { label: "合計提案 人数", actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
+    { label: "合計提案 件数", indent: true, actual: (m) => m.proposal.total.recs },
+    { label: "合計提案 1人当たり", indent: true, actual: (m) => m.proposal.total.perPerson, fmt: (v) => numFmt(v, 1) },
+  ],
+  entry: [
+    { label: "新規エントリー 人数", actual: (m) => m.entry.fresh.uniq },
+    { label: "新規エントリー 件数", indent: true, actual: (m) => m.entry.fresh.recs },
+    { label: "新規エントリー 1人当たり", indent: true, actual: (m) => m.entry.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
+    { label: "既存エントリー 人数", actual: (m) => m.entry.existing.uniq },
+    { label: "既存エントリー 件数", indent: true, actual: (m) => m.entry.existing.recs },
+    { label: "既存エントリー 1人当たり", indent: true, actual: (m) => m.entry.existing.perPerson, fmt: (v) => numFmt(v, 1) },
+    { label: "合計エントリー 人数", actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
+    { label: "合計エントリー 件数", indent: true, actual: (m) => m.entry.total.recs },
+    { label: "合計エントリー 1人当たり", indent: true, actual: (m) => m.entry.total.perPerson, fmt: (v) => numFmt(v, 1) },
+  ],
+  selection: [
+    { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
+    { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
+    { label: "承諾", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
+    { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+    { label: "決定単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+  ],
+};
 
 export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<string>("month");
-  const [periods, setPeriods] = useState<Record<string, RangeMetrics> | null>(null);
-  const [customRange, setCustomRange] = useState<CustomRange | null>(null);
-  // 期間指定の入力。初期値は今月（単月）。
-  const initialMonth = useMemo(() => currentYearMonthJst(), []);
-  const [fromMonth, setFromMonth] = useState<string>(initialMonth);
-  const [toMonth, setToMonth] = useState<string>(initialMonth);
+  const [anchorDate, setAnchorDate] = useState<string>(() => todayJst());
+  const [tab, setTab] = useState<TabKey>("entry");
+  const [weekly, setWeekly] = useState<WeeklyResp | null>(null);
+  const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [showTargetModal, setShowTargetModal] = useState(false);
 
-  // 担当一覧 + 本人を初期ロード
   useEffect(() => {
     fetch("/api/performance/advisors")
       .then((r) => (r.ok ? r.json() : null))
@@ -76,68 +111,57 @@ export default function PerformancePanel() {
       .catch(() => {});
   }, []);
 
-  // 月範囲バリデーション：開始月 <= 終了月。invalid のときは API に送らない。
-  const customRangeValid =
-    !!fromMonth && !!toMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(fromMonth) &&
-    /^\d{4}-(0[1-9]|1[0-2])$/.test(toMonth) && fromMonth <= toMonth;
-
-  const fetchPerformance = useCallback(async () => {
+  const fetchWeekly = useCallback(async () => {
     if (!employeeId) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ employeeId });
-      // 期間指定タブを選んでいて、かつ範囲が valid なときだけ月範囲をクエリに付与する。
-      if (period === "custom" && customRangeValid) {
-        params.set("fromMonth", fromMonth);
-        params.set("toMonth", toMonth);
-      }
-      const res = await fetch(`/api/performance?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPeriods(data.periods || null);
-        setCustomRange(data.customRange ?? null);
-      }
-    } catch {
-      /* noop */
-    } finally {
-      setLoading(false);
-    }
-  }, [employeeId, period, customRangeValid, fromMonth, toMonth]);
+      const res = await fetch(`/api/performance/weekly?employeeId=${employeeId}&anchorDate=${anchorDate}`);
+      if (res.ok) setWeekly(await res.json());
+    } catch { /* */ } finally { setLoading(false); }
+  }, [employeeId, anchorDate]);
+
+  const fetchCohort = useCallback(async () => {
+    if (!employeeId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/performance/cohort?employeeId=${employeeId}&months=6`);
+      if (res.ok) setCohorts((await res.json()).cohorts ?? null);
+    } catch { /* */ } finally { setLoading(false); }
+  }, [employeeId]);
 
   useEffect(() => {
-    void fetchPerformance();
-  }, [fetchPerformance]);
+    if (tab === "cohort") void fetchCohort();
+    else void fetchWeekly();
+  }, [tab, fetchWeekly, fetchCohort]);
 
-  // 表示する metrics：custom 選択時は customRange.metrics、それ以外は periods[period]。
-  const m: RangeMetrics | null =
-    period === "custom" ? customRange?.metrics ?? null : periods?.[period] ?? null;
+  const advisorName = useMemo(() => advisors.find((a) => a.id === employeeId)?.name ?? "", [advisors, employeeId]);
 
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#E5E7EB] gap-2">
-        <h2 className="text-[14px] font-medium text-[#374151] flex items-center gap-1.5 shrink-0">
-          📊 実績表
-        </h2>
-        <div className="flex items-center gap-2">
-          <select
-            value={employeeId ?? ""}
-            onChange={(e) => setEmployeeId(e.target.value || null)}
-            className="text-[12px] border border-gray-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-[#2563EB] max-w-[140px]"
-          >
-            {advisors.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowTargetModal(true)}
-            disabled={!employeeId}
-            className="text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-2 py-1 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap"
-          >
-            🎯 目標登録
-          </button>
-        </div>
+      {/* ヘッダ */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[#E5E7EB] flex-wrap">
+        <h2 className="text-[14px] font-medium text-[#374151] shrink-0">📊 実績表</h2>
+        <select
+          value={employeeId ?? ""}
+          onChange={(e) => setEmployeeId(e.target.value || null)}
+          className="text-[12px] border border-gray-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-[#2563EB] max-w-[140px]"
+        >
+          {advisors.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <label className="text-[11px] text-[#6B7280] ml-1">起算日</label>
+        <input
+          type="date"
+          value={anchorDate}
+          onChange={(e) => setAnchorDate(e.target.value)}
+          className="text-[12px] border border-gray-200 rounded px-2 py-1"
+        />
+        <button
+          onClick={() => setShowTargetModal(true)}
+          disabled={!employeeId}
+          className="text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-2 py-1 hover:bg-blue-50 disabled:opacity-50 ml-auto"
+        >
+          🎯 目標登録
+        </button>
       </div>
 
       {showTargetModal && employeeId && (
@@ -145,105 +169,124 @@ export default function PerformancePanel() {
           isOpen={showTargetModal}
           onClose={() => setShowTargetModal(false)}
           employeeId={employeeId}
-          employeeName={advisors.find((a) => a.id === employeeId)?.name ?? ""}
-          yearMonth={currentYearMonthJst()}
+          employeeName={advisorName}
+          yearMonth={anchorDate.slice(0, 7)}
         />
       )}
 
-      {/* 期間タブ */}
+      {/* タブ */}
       <div className="flex gap-1 px-3 py-2 border-b border-[#F3F4F6] flex-wrap">
-        {PERIODS.map((p) => (
+        {TABS.map((t) => (
           <button
-            key={p.key}
-            onClick={() => setPeriod(p.key)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             className={`px-2.5 py-1 text-[12px] rounded-md border transition-colors ${
-              period === p.key
-                ? "bg-[#2563EB] text-white border-[#2563EB]"
-                : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
+              tab === t.key ? "bg-[#2563EB] text-white border-[#2563EB]" : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
             }`}
           >
-            {p.label}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* 期間指定の月セレクト（custom 選択時のみ） */}
-      {period === "custom" && (
-        <div className="px-3 py-2 border-b border-[#F3F4F6] bg-[#F9FAFB] flex items-center gap-2 flex-wrap text-[12px] text-[#374151]">
-          <span className="text-[#6B7280]">開始</span>
-          <input
-            type="month"
-            value={fromMonth}
-            onChange={(e) => setFromMonth(e.target.value)}
-            className="border border-gray-200 rounded px-2 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
-          />
-          <span className="text-[#6B7280]">〜 終了</span>
-          <input
-            type="month"
-            value={toMonth}
-            onChange={(e) => setToMonth(e.target.value)}
-            className="border border-gray-200 rounded px-2 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
-          />
-          {!customRangeValid && (
-            <span className="text-[11px] text-red-600">開始月は終了月以前にしてください</span>
-          )}
-        </div>
-      )}
-
-      {/* 指標テーブル */}
-      <div className="px-4 py-3">
+      {/* 本体 */}
+      <div className="px-4 py-3 overflow-x-auto">
         {loading ? (
-          <div className="py-8 text-center text-[13px] text-[#9CA3AF]">読み込み中...</div>
-        ) : !m ? (
-          <div className="py-8 text-center text-[13px] text-[#9CA3AF]">
-            {period === "custom" && !customRangeValid ? "月を指定してください" : "データがありません"}
-          </div>
+          <div className="py-8 text-center text-[12px] text-[#9CA3AF]">読み込み中...</div>
+        ) : tab === "cohort" ? (
+          <CohortTable cohorts={cohorts} />
         ) : (
-          <div className="space-y-3">
-            <MetricSection title="面談">
-              <MetricRow label="初回面談 予定" value={m.firstInterviewPlanned} />
-              <MetricRow label="初回面談 実施" value={m.firstInterviewExecuted} sub={`実施率 ${pct(m.firstInterviewRate)}`} />
-              <MetricRow label="既存面談" value={m.existingInterviewExecuted} />
-              <MetricRow label="面接対策" value={m.interviewPrepExecuted} />
-            </MetricSection>
-
-            <MetricSection title="求人">
-              <MetricRow label="求人検索" value={m.jobSearched} />
-              <MetricRow label="求人紹介" value={m.jobIntroduced} sub={`紹介率 ${pct(m.jobIntroductionRate)}`} />
-            </MetricSection>
-
-            <MetricSection title="エントリー〜承諾">
-              <MetricRow label="エントリー" value={m.entry.count} sub={`エントリー率 ${pct(m.entry.rate)}`} />
-              <MetricRow label="書類通過" value={m.documentPass.count} sub={`通過率 ${pct(m.documentPass.rate)}`} />
-              <MetricRow label="内定" value={m.offer.count} sub={`内定率 ${pct(m.offer.rate)}`} />
-              <MetricRow label="承諾" value={m.acceptance.count} sub={`承諾率 ${pct(m.acceptance.rate)}`} />
-            </MetricSection>
-          </div>
+          <WeekMatrixTable weekly={weekly} rows={ROWS[tab]} />
         )}
       </div>
     </div>
   );
 }
 
-function MetricSection({ title, children }: { title: string; children: React.ReactNode }) {
+function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Row[] }) {
+  if (!weekly) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
+  const { weeks, total } = weekly;
+  const fmt = (r: Row, v: number | null) => (r.fmt ? r.fmt(v) : numFmt(v));
+
   return (
-    <div>
-      <div className="text-[11px] font-medium text-[#9CA3AF] mb-1">{title}</div>
-      <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-[#F3F4F6]">
-        {children}
-      </div>
-    </div>
+    <table className="text-[11px] border-collapse min-w-[760px]">
+      <thead>
+        <tr className="text-[#6B7280]">
+          <th className="sticky left-0 bg-white px-2 py-1.5 text-left font-medium border-b border-gray-200 min-w-[150px]">段階</th>
+          {weeks.map((w) => (
+            <th key={w.weekIndex} className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">
+              {w.label}<div className="text-[9px] text-[#9CA3AF]">{mdLabel(w.from)}〜{mdLabel(w.to)}</div>
+              <div className="text-[8px] text-[#C0C4CC]">目標｜実績</div>
+            </th>
+          ))}
+          <th className="px-2 py-1.5 text-center font-medium border-b border-gray-200 bg-[#F9FAFB] whitespace-nowrap">合計<div className="text-[8px] text-[#C0C4CC]">目標｜実績</div></th>
+          <th className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">達成率</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-[#F3F4F6]">
+        {rows.map((r) => {
+          const hasTarget = !!r.targetKey;
+          return (
+            <tr key={r.label}>
+              <td className={`sticky left-0 bg-white px-2 py-1.5 text-[#374151] ${r.indent ? "pl-5 text-[#9CA3AF]" : "font-medium"}`}>{r.label}</td>
+              {weeks.map((w) => {
+                const a = r.actual(w.matrix);
+                const tgt = hasTarget ? w.targets[r.targetKey!] : null;
+                return (
+                  <td key={w.weekIndex} className="px-2 py-1.5 text-center tabular-nums">
+                    {hasTarget && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
+                    <span className="text-[#374151] font-medium">{fmt(r, a)}</span>
+                  </td>
+                );
+              })}
+              <td className="px-2 py-1.5 text-center tabular-nums bg-[#F9FAFB]">
+                {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
+                <span className="text-[#374151] font-semibold">{fmt(r, r.actual(total.matrix))}</span>
+              </td>
+              <td className="px-2 py-1.5 text-center tabular-nums">
+                {hasTarget ? <span className="text-[#2563EB] font-medium">{pctFmt(total.achievement[r.targetKey!])}</span> : <span className="text-[#C0C4CC]">—</span>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
-function MetricRow({ label, value, sub }: { label: string; value: number; sub?: string }) {
+function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
+  if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
-      <span className="text-[#6B7280]">{label}</span>
-      <span className="flex items-baseline gap-2">
-        <span className="text-[13px] font-semibold text-[#374151] tabular-nums">{value}</span>
-        {sub && <span className="text-[10px] text-[#9CA3AF] tabular-nums">{sub}</span>}
-      </span>
-    </div>
+    <table className="text-[11px] border-collapse min-w-[620px]">
+      <thead>
+        <tr className="text-[#6B7280]">
+          <th className="sticky left-0 bg-white px-2 py-1.5 text-left font-medium border-b border-gray-200 min-w-[120px]">段階</th>
+          {cohorts.map((c) => (
+            <th key={c.yearMonth} className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">{c.yearMonth}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-[#F3F4F6]">
+        <tr>
+          <td className="sticky left-0 bg-white px-2 py-1.5 font-medium text-[#374151]">エントリー（人数）</td>
+          {cohorts.map((c) => <td key={c.yearMonth} className="px-2 py-1.5 text-center tabular-nums font-medium">{c.entry}</td>)}
+        </tr>
+        {([
+          ["書類通過", "documentPass", "documentPassRate"],
+          ["内定", "offer", "offerRate"],
+          ["承諾", "acceptance", "acceptanceRate"],
+        ] as const).map(([label, cntKey, rateKey]) => (
+          <tr key={label}>
+            <td className="sticky left-0 bg-white px-2 py-1.5 font-medium text-[#374151]">{label}</td>
+            {cohorts.map((c) => (
+              <td key={c.yearMonth} className="px-2 py-1.5 text-center tabular-nums">
+                <div className="text-[#374151] font-medium">{c[cntKey] as number}</div>
+                <div className="text-[9px] text-[#2563EB]">{pctFmt(c[rateKey] as number | null)}</div>
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

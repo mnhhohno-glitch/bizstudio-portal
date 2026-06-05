@@ -963,20 +963,22 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 用途: ダッシュボード「スケジュール（日報）」タブの右エリアに置く CA 実績表。日報の CA 指標を複数期間で俯瞰。
 - 配置: `page.tsx` の `scheduleTab` 右カラム（`attendanceArea` の下）。feature flag `DAILY_REPORT_ENABLED` 配下（3タブ表示時のみ）。
 
-### 構成
-- **担当セレクト**: `GET /api/performance/advisors` の CA 一覧（`jobCategory='CA'` の active Employee）。初期値はログインユーザー本人（`selfEmployeeId`）。
-- **期間タブ**: 日 / 週 / 月 / 3か月 / 半期 / 年（`PERIODS` 定数）。
-- **期間指定**（T-072）：7番目のタブ。選ぶと開始月・終了月の `<input type="month">` が出る。開始月は終了月以前のときだけ集計（フロントガード）。送信時に `?fromMonth=YYYY-MM&toMonth=YYYY-MM` を付与し、API は `customRange.metrics` を返す。終了月は**月末 23:59:59.999 JST まで**含む（`jstMonthRangeEnd` は翌月1日0:00-1ms 方式でうるう年・31日月にも安全）。
-- **指標テーブル**: 面談 / 求人 / エントリー〜承諾 の3セクション。各行「数 + 率」。日報 welcome の4ブロックを転用。
-- 担当・期間が変わるたび `GET /api/performance?employeeId=Y` を再フェッチ（SchedulePanel と同じ Client fetch）。1レスポンスに6期間分が入るので、期間切替時はクライアント側で `periods[period]` を切り替えるだけ（再フェッチは担当変更時のみ）。**期間指定タブ**は月セレクト変更時にも再フェッチ（fromMonth/toMonth が依存配列に入る）。
+### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）
+- **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／🎯 目標登録ボタン（TargetModal）。
+- **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
+- **週マトリクス（4タブ）**: `GET /api/performance/weekly?employeeId=&anchorDate=`。列＝W1〜W5（各「目標｜実績」、ヘッダに日付範囲）＋ TOTAL（目標｜実績）＋ 達成率。
+  - 行（段階）は `ROWS` 定数で定義（tab → Row[]）。`Row.actual(matrix)` で実績抽出、`Row.targetKey` があれば目標＋達成率表示、`Row.fmt` で書式（1人当たりは小数1桁、決定売上/単価は ¥）。
+  - 面談実績＝初回/求人面談(2回目)/既存(3回目以降)/合計。求人紹介・エントリー＝新規/既存/合計 × 人数・件数・1人当たり（件数÷人数）。選考状況＝書類通過/内定/承諾（人数）＋決定売上/決定単価（`revenue` 集計）。
+  - **率（段階間転換率）は週マトリクスでは出さない**（人数・件数・達成率のみ）。TOTAL はユニーク再集計値（週別合計ではない）。目標未登録・未到来は「—」。
+- **直近6ヶ月（1タブ）**: `GET /api/performance/cohort?employeeId=&months=6`。月別（6ヶ月前〜前月、当月含まない）に各段階の人数＋**コホート率**（前段が分母、月をまたいで追跡）。人数の下に率を縦に重ねて表示。
+- タブ切替で weekly / cohort を出し分け。担当・起算日・タブ変更で再フェッチ。横スクロール許容（`overflow-x-auto`, `min-w`）。
 
 ### Server/Client 構成
 - page.tsx の Server Component は触らず（R8 維持）、PerformancePanel 内で `useEffect`+fetch。
 
 ### 関連
-- API: `src/app/api/performance/route.ts`（6期間まとめ＋T-072 月範囲 `fromMonth`/`toMonth` 拡張）, `src/app/api/performance/advisors/route.ts`（CA一覧）
-- 集計: `src/lib/dailyReport/metrics.ts:computeCaMetricsForRange`、`src/lib/dailyReport/periods.ts:periodRange`
-- 月範囲ヘルパ（T-072）: `src/lib/dailyReport/jstDate.ts:jstMonthRangeStart`/`jstMonthRangeEnd`
+- API: `src/app/api/performance/weekly/route.ts`（週マトリクス）, `cohort/route.ts`（コホート）, `advisors/route.ts`（CA一覧）, `target/`（T-073）。`/api/performance`（旧6期間）は残置だが UI からは未使用。
+- 集計: `src/lib/performance/weeklyMatrix.ts:computeWeeklyMatrix`（raw SQL・新規/既存・件数/人数）、`src/lib/performance/fiveWeeks.ts:splitIntoFiveWeeks`、`src/lib/dailyReport/metrics.ts:computeCaMetricsForRange`（数え方の正本、変更なし）
 - 詳細仕様は `03-portal-spec.md`「T-071: 実績表機能」参照
 
 ### TargetModal.tsx（目標設定ポップアップ・T-073）
