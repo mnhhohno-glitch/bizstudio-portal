@@ -42,7 +42,7 @@ export const SELECTION_ENDED_DETAILS = [
 export const INACTIVE_TRIGGERS = {
   personFlags: ["見送り通知送信済", "見送り通知済み", "入社済"],
   companyFlags: ["辞退報告済"],
-  entryFlagDetails: ["本人辞退", "本人辞退_他社決", "本人辞退_自社他"], // T-048: 本人辞退時に自動無効化
+  entryFlagDetails: [] as string[], // 本人辞退は企業対応「辞退報告済」で無効化（companyFlags で判定）。entryFlagDetail だけでは無効化しない。
 };
 
 export function applyEntryFlagAutoTransitions<T extends {
