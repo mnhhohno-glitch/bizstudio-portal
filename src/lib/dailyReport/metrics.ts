@@ -100,27 +100,27 @@ export async function computeCaMetricsForRange(params: {
     ],
   };
 
-  // 面談（employeeId が無いユーザーは 0 件で確定）
-  const interviewerFilter = employeeId
-    ? { interviewerUserId: employeeId }
-    : { interviewerUserId: "__nonexistent__" };
+  // 面談：担当軸（候補者の担当 CA = candidate.employeeId = Employee.id）。
+  // 実施者軸（interviewerUserId）はやめる。岡田=面談官（実施者58/担当0）のように
+  // 実施者軸は CA 実績を表さず、面談管理画面の「担当CA」絞り（candidate.employee）と一致しない。
+  // 担当軸なら面談管理「担当CA=大野」の件数と一致する（初回59=59 で検証済み）。
+  const interviewerFilter = { candidate: { employeeId: employeeId ?? "__nonexistent__" } };
 
   // 求人（CandidateFile, uploadedByUserId = User.id）
   //
-  // エントリー以降（JobEntry）：担当キーは候補者の担当 CA = candidate.employeeId（Employee.id）。
-  // JobEntry.careerAdvisorId は実データの 99.9%（28007 行中 27981 行）が NULL のため使えない。
-  // 管理画面 /api/entries の「担当」フィルタも careerAdvisorName → candidate.employee.name で
-  // 引いており（EntryBoard.tsx は careerAdvisorName を送る）、候補者の担当 CA が真の担当キー。
-  // 既定で isActive=true & archivedAt=null を付与（T-067 の自動失効レコードを除外）。
+  // エントリー以降（JobEntry）：実績表は「過去に何件到達したか」の累積実績を見る。
+  // - 担当キーは候補者の担当 CA = candidate.employeeId（Employee.id）。
+  //   JobEntry.careerAdvisorId は実データの 99.9% が NULL のため使えない（再調査で判明）。
+  //   管理画面 /api/entries の「担当」フィルタも careerAdvisorName → candidate.employee.name。
+  // - 無効（isActive=false）も含む：過去の実績の一部なので除外しない（T-067 失効済みでもカウント）。
+  // - アーカイブ（archivedAt あり）は削除扱いで除く。
   const advisorFilter = {
     candidate: { employeeId: employeeId ?? "__nonexistent__" },
-    isActive: true,
     archivedAt: null,
   };
 
-  // 「エントリー」は entryDate 在のみだと求人紹介段階（まだ応募していない枠）も含んでしまう。
-  // 管理画面 EntryBoard の TABS は entryFlag をタブ key として使い、'求人紹介' を別タブで分けている。
-  // ここでは応募済み以降のステージのホワイトリストで限定する（/api/entries の countResults と整合）。
+  // エントリー（応募到達）：entryFlag が応募以降に到達した全件（求人紹介段階を除く）。
+  // hasEntry/hasJoined は実データで全件 false の未使用フィールドのため使えない。entryFlag の進行度で判定。
   const entryFlagPostApplication = {
     entryFlag: { in: ["応募", "エントリー", "書類選考", "面接", "内定", "入社済"] },
   };

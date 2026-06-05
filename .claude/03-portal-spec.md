@@ -204,16 +204,28 @@ model InterviewMemo {
 - `computeCaMetricsForRange({ userId, employeeId, from, to })`：from〜to の**単一レンジ**で全 CA 指標を集計する汎用関数（T-071 新設）。率の分母は同一レンジ内の母数。
 - `computeCaMetrics({ userId, employeeId, dateStr })`（日報用・当日+当月）は `computeCaMetricsForRange` を**当日窓と当月窓の2回呼ぶラッパー**に置き換え済み。出力 `CaDailyMetrics` は T-066 から不変（リグレッションなし）。
   - count 系=当日窓、率系=当月窓。当月窓は `jstMonthStart` 〜 `jstNextMonthStart - 1ms`（従来の `lt nextMonthStart` と等価）。
-- キー対応（厳守）：検索/紹介=User.id（uploadedByUserId）、面談=Employee.id（interviewerUserId＝実施者軸）、**エントリー=候補者の担当 CA = `candidate.employeeId`（Employee.id）**。
-- ⚠️ **`JobEntry.careerAdvisorId` は使わない**（T-071 再調査で判明）：実データの 99.9%（28007 行中 27981 行）が NULL。エントリーの真の担当キーは候補者の担当 CA（`candidate.employee`）。管理画面 `/api/entries` の「担当」フィルタも `careerAdvisorName → candidate.employee.name` で引いている（`EntryBoard.tsx` は `careerAdvisorName` を送る）。
-- 面談実施判定は `{ OR: [{ resultFlag: null }, { resultFlag: { notIn: 辞退系 } }] }`（罠 #37 のまま）。
-- **JobEntry 集計は管理画面 `/api/entries` と一致**させる：
-  - 担当キーは `candidate: { employeeId }`（上記）。`isActive: true` & `archivedAt: null` を共通付与（T-067 自動失効レコードを除外）。
-  - 「エントリー数」は `entryDate` 在に加え、**応募済み以降のステージのみ**に限定：`entryFlag IN {応募, エントリー, 書類選考, 面接, 内定, 入社済}`（求人紹介段階を除外）。EntryBoard.tsx の TABS と `/api/entries` countResults の値と整合。
-  - 「書類通過/内定/承諾」は各日付フィールドが非 null である時点で求人紹介段階を超えているため、`entryFlag` ホワイトリストは不要。失効除外のみ適用。
-  - 検証（大野・candidate.employee 軸・active）：3か月(4/1-6/5) entry=72、当月6月=31、年=73/docPass1/offer7/accept7。管理画面と一致。
-  - 日報（`computeCaMetrics`）にも同じ条件が波及（ラッパー経由）。
-- ⚠️ **面談の軸は未決（業務判断待ち）**：現状は実施者軸（interviewerUserId）。ただし 岡田=面談官（実施者軸 初回58/担当軸0）、安藤=CA（実施者軸 初回5/担当軸78）のように役割で乖離が大きく、CA 実績としては**担当軸（candidate.employee）**が妥当な可能性。将幸さんの判断後に確定。
+### 集計の軸と定義（T-071 確定・実績ベース）
+
+実績表は「過去に何件紹介し、何件通過し、何件内定したか」の**累積実績**を見るもの（現在進行中の有効案件ではない）。
+
+- キー対応（厳守）：
+  - 検索/紹介＝**User.id**（`uploadedByUserId`）。変更しない。
+  - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
+  - **エントリー以降＝担当軸＝`candidate.employeeId`**。
+- ⚠️ **`JobEntry.careerAdvisorId` は使わない**：実データの 99.9%（28007 行中 27981 行）が NULL の実質未使用カラム。管理画面 `/api/entries` の担当フィルタも `careerAdvisorName → candidate.employee.name`（`EntryBoard.tsx` が送る）。
+- ⚠️ **`interviewerUserId`（実施者軸）も使わない**：岡田=面談官（実施者 初回58/担当0）、安藤=CA（実施者 初回5/担当78）のように役割で乖離が大きく、CA 実績を表さない。担当軸なら面談管理「担当CA=大野」と一致（初回 59=59 検証済み）。
+- **無効/アーカイブの扱い**：
+  - 無効（`isActive=false`）は**含む**（過去実績の一部。除外しない）。← T-071 で一旦入れた `isActive:true` 絞りは撤回。
+  - アーカイブ（`archivedAt` あり）は**除く**（削除扱い。`archivedAt: null` のみ）。
+- **エントリー各段階は到達ベース累積**（「現在その段階」ではなく「その段階に到達したことがある」）：
+  - エントリー（応募到達）＝ `entryFlag IN {応募,エントリー,書類選考,面接,内定,入社済}`（求人紹介除外）、`entryDate` がレンジ内。`hasEntry`/`hasJoined` は全件 false の未使用フィールドで使えない。
+  - 書類通過＝ `documentPassDate` がレンジ内（非 null＝到達）。
+  - 内定＝ `offerDate` がレンジ内。承諾＝ `acceptanceDate` がレンジ内。
+  - 各段階は「その段階の日付」でレンジ絞り。中間段階を後で通過した案件も到達としてカウントされる（管理画面の current-state タブ件数とは概念が異なり一致しない。タブ＝現在地、実績表＝到達累積）。
+- 面談実施判定は `{ OR: [{ resultFlag: null }, { resultFlag: { notIn: 辞退系 } }] }`（罠 #37 のまま）。初回/既存は interviewCount、面接対策は interviewType（不変）。
+- 各率の分子は上記修正後の値、分母は同レンジ内の前段階数（現状維持）。
+- **検証（管理画面 真値突合・大野）**：年(1/1-今日) entry=428 / 書類通過45 / 内定15 / 承諾9 / 面談初回52(予定56) / 既存40 / 対策15。3か月 entry=218。当月6月 entry=34 面談初回7/8。面談初回(全期間)=59 が面談管理「担当CA=大野」と完全一致。他CA（安藤 entry369・面談70、南條 entry224・面談26、岡田 entry2・面談0）も整合。
+- 日報（`computeCaMetrics`）にも同じ軸・定義が波及（ラッパー経由）。日報の当日/当月も「担当候補者ベース」になる。
 
 ### 期間レンジ（jstDate.ts / periods.ts）
 
