@@ -107,7 +107,20 @@ export async function computeCaMetricsForRange(params: {
 
   // 求人（CandidateFile, uploadedByUserId = User.id）
   // エントリー以降（JobEntry, careerAdvisorId = Employee.id）
-  const advisorFilter = { careerAdvisorId: employeeId ?? "__nonexistent__" };
+  // 管理画面 /api/entries と一致させるため、既定で isActive=true & archivedAt=null を付与する
+  // （T-067 の自動失効で isActive=false になった古い紹介枠を除外）。
+  const advisorFilter = {
+    careerAdvisorId: employeeId ?? "__nonexistent__",
+    isActive: true,
+    archivedAt: null,
+  };
+
+  // 「エントリー」は entryDate 在のみだと求人紹介段階（まだ応募していない枠）も含んでしまう。
+  // 管理画面 EntryBoard の TABS は entryFlag をタブ key として使い、'求人紹介' を別タブで分けている。
+  // ここでは応募済み以降のステージのホワイトリストで限定する（/api/entries の countResults と整合）。
+  const entryFlagPostApplication = {
+    entryFlag: { in: ["応募", "エントリー", "書類選考", "面接", "内定", "入社済"] },
+  };
 
   const [
     firstPlanned,
@@ -139,7 +152,10 @@ export async function computeCaMetricsForRange(params: {
     prisma.candidateFile.count({
       where: { category: "BOOKMARK", uploadedByUserId: userId, lastExportedAt: range },
     }),
-    prisma.jobEntry.count({ where: { ...advisorFilter, entryDate: range } }),
+    // エントリー数：応募済み以降のステージに限定（求人紹介段階を除外）。
+    prisma.jobEntry.count({ where: { ...advisorFilter, ...entryFlagPostApplication, entryDate: range } }),
+    // 書類通過/内定/承諾：それぞれの日付フィールドが非 null である時点で求人紹介段階を超えているため、
+    // entryFlag ホワイトリストは不要。失効除外（isActive=true & archivedAt=null）のみ適用。
     prisma.jobEntry.count({ where: { ...advisorFilter, documentPassDate: range } }),
     prisma.jobEntry.count({ where: { ...advisorFilter, offerDate: range } }),
     prisma.jobEntry.count({ where: { ...advisorFilter, acceptanceDate: range } }),
