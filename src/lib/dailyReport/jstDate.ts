@@ -62,3 +62,66 @@ export function jstNextMonthStart(dateStr: string): Date {
 export function jstDateStringToDbDate(dateStr: string): Date {
   return new Date(`${dateStr}T00:00:00.000Z`);
 }
+
+// ============================================================
+// T-071 実績表：期間レンジの起点ヘルパ（今日起点・to は常に今日）
+// すべて JST。toISOString().slice(0,10) は使わない（罠 #17/#36）。
+// ============================================================
+
+/**
+ * "YYYY-MM-DD"（JST）から「当週の月曜 0:00 JST」を返す。週起点は月曜（確定仕様）。
+ * 曜日は JST の getDay() ではなく、日付文字列から決定的に算出する。
+ */
+export function jstWeekStart(dateStr: string): Date {
+  // dateStr の JST 0:00 を基準に、月曜まで戻す。
+  // new Date(`${dateStr}T00:00:00+09:00`).getUTCDay() で曜日を取得（0=日,1=月,...,6=土）。
+  const base = new Date(`${dateStr}T00:00:00+09:00`);
+  const dow = jstDayOfWeek(dateStr); // 0=日,1=月,...
+  // 月曜起点：月曜=0 戻り、日曜=6 戻り
+  const daysBack = (dow + 6) % 7;
+  const monday = new Date(base.getTime() - daysBack * 24 * 60 * 60 * 1000);
+  // monday は JST 0:00 を指す Date。
+  return monday;
+}
+
+/**
+ * "YYYY-MM-DD"（JST）の曜日（0=日,1=月,...,6=土）を返す。
+ * dateStr は壁時計日付なので、UTC Date に詰めて getUTCDay で確実に取る。
+ */
+export function jstDayOfWeek(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map((s) => parseInt(s, 10));
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * "YYYY-MM-DD"（JST）から「直近3か月の起点 = 2か月前の月初 0:00 JST」を返す。
+ * 例：6月 → 4/1。
+ */
+export function jstQuarterStart(dateStr: string): Date {
+  const [year, month] = dateStr.split("-").map((s) => parseInt(s, 10));
+  let y = year;
+  let m = month - 2; // 2か月前
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  const mm = String(m).padStart(2, "0");
+  return new Date(`${y}-${mm}-01T00:00:00+09:00`);
+}
+
+/**
+ * "YYYY-MM-DD"（JST）から「半期初日 0:00 JST」を返す。暦半期（1〜6月→1/1、7〜12月→7/1）。
+ */
+export function jstHalfStart(dateStr: string): Date {
+  const [year, month] = dateStr.split("-").map((s) => parseInt(s, 10));
+  const startMonth = month <= 6 ? "01" : "07";
+  return new Date(`${year}-${startMonth}-01T00:00:00+09:00`);
+}
+
+/**
+ * "YYYY-MM-DD"（JST）から「年初 1/1 0:00 JST」を返す。
+ */
+export function jstYearStart(dateStr: string): Date {
+  const year = dateStr.slice(0, 4);
+  return new Date(`${year}-01-01T00:00:00+09:00`);
+}
