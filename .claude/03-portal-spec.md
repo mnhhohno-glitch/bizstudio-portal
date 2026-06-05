@@ -194,3 +194,34 @@ model InterviewMemo {
 - `src/app/api/daily-report/chat/route.ts`：AI チャット
 - `src/components/dailyReport/DailyReportChatDrawer.tsx`：右スライドイン会話 UI
 - `src/components/dashboard/DashboardTabs.tsx`：3 タブ切替（Client）
+
+## T-071: 実績表機能（ダッシュボード）
+
+日報の CA 数値（T-066）を土台に、複数期間（日/週/月/3か月/半期/年）で同じ指標を俯瞰する実績表。
+
+### 集計の汎用化（metrics.ts）
+
+- `computeCaMetricsForRange({ userId, employeeId, from, to })`：from〜to の**単一レンジ**で全 CA 指標を集計する汎用関数（T-071 新設）。率の分母は同一レンジ内の母数。
+- `computeCaMetrics({ userId, employeeId, dateStr })`（日報用・当日+当月）は `computeCaMetricsForRange` を**当日窓と当月窓の2回呼ぶラッパー**に置き換え済み。出力 `CaDailyMetrics` は T-066 から不変（リグレッションなし）。
+  - count 系=当日窓、率系=当月窓。当月窓は `jstMonthStart` 〜 `jstNextMonthStart - 1ms`（従来の `lt nextMonthStart` と等価）。
+- キー対応は T-066 のまま厳守：検索/紹介=User.id（uploadedByUserId）、面談=Employee.id（interviewerUserId）、エントリー=Employee.id（careerAdvisorId）。
+- 面談実施判定は `{ OR: [{ resultFlag: null }, { resultFlag: { notIn: 辞退系 } }] }`（罠 #37 のまま）。
+
+### 期間レンジ（jstDate.ts / periods.ts）
+
+- `jstWeekStart`（**月曜始まり**）、`jstQuarterStart`（2か月前の月初）、`jstHalfStart`（暦半期 1/1 or 7/1）、`jstYearStart`（1/1）、`jstDayOfWeek` を追加。
+- `src/lib/dailyReport/periods.ts`：6 期間の定義（`PERFORMANCE_PERIODS`）と `periodRange(key, todayStr)`。`to` は常に今日 23:59:59.999 JST。
+- 任意期間指定は本実装スコープ外（from/to 引数化済みなので後付け可能）。
+
+### API
+
+- `GET /api/performance?employeeId=Y`：指定 CA の 6 期間分の指標をまとめて返す（`Promise.all`）。employeeId 省略時はログインユーザー本人を解決。閲覧権限は**全 CA 可**（admin 限定にしない＝確定仕様）。
+- `GET /api/performance/advisors`：`jobCategory='CA'` の active Employee 一覧（担当セレクト用）＋本人 employeeId。
+
+### インデックス（T-071 migration `20260605120000_t071_performance_indexes`）
+
+- 集計クエリ `WHERE key = X AND dateField BETWEEN from AND to` 用の複合インデックスを追加：
+  - `interview_records (interviewer_user_id, interview_date)`
+  - `candidate_files (uploaded_by_user_id, created_at)` / `(uploaded_by_user_id, last_exported_at)`
+  - `job_entries (career_advisor_id, {entry_date|document_pass_date|offer_date|acceptance_date})`
+- `CREATE INDEX IF NOT EXISTS`（冪等）。`prisma migrate deploy` はトランザクション内実行なので CONCURRENTLY は不可。対象は数千行規模でロックは数ミリ秒のため通常 CREATE INDEX で実害なし。schema.prisma にも `@@index` を追加済み（drift 防止）。
