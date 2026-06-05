@@ -36,7 +36,7 @@ export const COMPANY_FLAG_RULES: Record<string, string[]> = {
 };
 
 export const SELECTION_ENDED_DETAILS = [
-  "選考落ち", "本人辞退", "本人辞退_他社決", "本人辞退_自社他", "クローズ",
+  "選考落ち", "本人辞退", "本人辞退_他社決", "本人辞退_自社他", "クローズ", "求人クローズ",
 ];
 
 export const INACTIVE_TRIGGERS = {

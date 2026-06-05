@@ -72,7 +72,7 @@ export type Entry = {
 };
 
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
-const END_FLAG_DETAILS = new Set(["書類見送り", "面接見送り", "本人辞退"]);
+const END_FLAG_DETAILS = new Set(["書類見送り", "面接見送り", "本人辞退", "求人クローズ"]);
 function isEndFlagDetail(value: unknown): boolean {
   return typeof value === "string" && END_FLAG_DETAILS.has(value);
 }
