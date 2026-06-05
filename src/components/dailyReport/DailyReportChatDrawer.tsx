@@ -59,8 +59,11 @@ export default function DailyReportChatDrawer({ isOpen, onClose, date }: Props) 
       if (!res.ok) return;
       const data = await res.json();
       const summary = data.scheduleSummary;
-      const metricsSummary = data.metrics
-        ? `初回面談 ${data.metrics.firstInterviewExecuted}/${data.metrics.firstInterviewPlanned}、求人検索 ${data.metrics.jobSearched}、紹介 ${data.metrics.jobIntroduced}`
+      const m = data.metrics;
+      const pct = (r: number | null | undefined) =>
+        r === null || r === undefined ? "—" : `${(r * 100).toFixed(1)}%`;
+      const metricsSummary = m
+        ? `初回面談 ${m.firstInterviewExecuted}/${m.firstInterviewPlanned}（実施率 当日 ${pct(m.firstInterviewRateDaily)} / 当月 ${pct(m.firstInterviewRateMonthly)}）、求人検索 ${m.jobSearched}、紹介 ${m.jobIntroduced}（紹介率 当月 ${pct(m.jobIntroductionRateMonthly)}）`
         : null;
       setContext({
         format: data.format,
@@ -73,8 +76,22 @@ export default function DailyReportChatDrawer({ isOpen, onClose, date }: Props) 
       const welcome: string[] = [];
       welcome.push(`${dateLabel} の日報を作りましょう。`);
       welcome.push(`予定 ${summary.plannedCount} 件 / 完了 ${summary.completedCount} 件。`);
-      if (data.format === "CA" && metricsSummary) {
-        welcome.push(metricsSummary);
+      if (data.format === "CA" && m) {
+        // 当日値（仕様 4-2 の当日窓）
+        welcome.push("");
+        welcome.push("【面談（当日）】");
+        welcome.push(`・初回面談 予定 ${m.firstInterviewPlanned} / 実施 ${m.firstInterviewExecuted}（実施率 ${pct(m.firstInterviewRateDaily)}）`);
+        welcome.push(`・既存面談 ${m.existingInterviewExecuted} / 面接対策 ${m.interviewPrepExecuted}`);
+        welcome.push("");
+        welcome.push("【求人（当日）】");
+        welcome.push(`・検索 ${m.jobSearched} / 紹介 ${m.jobIntroduced}`);
+        welcome.push("");
+        welcome.push("【エントリー以降（当日）】");
+        welcome.push(`・エントリー ${m.entry.count} / 書類通過 ${m.documentPass.count} / 内定 ${m.offer.count} / 承諾 ${m.acceptance.count}`);
+        welcome.push("");
+        welcome.push(`【当月（${m.yearMonth}）の率指標】`);
+        welcome.push(`・初回面談実施率 ${pct(m.firstInterviewRateMonthly)} / 紹介率 ${pct(m.jobIntroductionRateMonthly)}`);
+        welcome.push(`・エントリー率 ${pct(m.entry.rate)} / 書類通過率 ${pct(m.documentPass.rate)} / 内定率 ${pct(m.offer.rate)} / 承諾率 ${pct(m.acceptance.rate)}`);
       } else if (data.format !== "CA") {
         welcome.push("コメントベースで日報を組み立てます。");
       }
