@@ -213,9 +213,8 @@ export default async function DashboardPage() {
     );
   }
 
-  // === feature flag ON：3 タブ ===
-  // 日報導線は SchedulePanel の中に置く（選択中の日付と連動するため）。
-  // 右エリアに勤怠 + 実績表（T-071）を縦に並べる。
+  // === feature flag ON：4 タブ（スケジュール（日報）｜実績表｜タスク｜お知らせ） ===
+  // 実績表は独立タブで全幅表示（T-071 後修正）。スケジュールタブには日報・スケジュール・勤怠のみ。
   const scheduleTab = (
     <div className="flex gap-6">
       <div className="w-[440px] flex-shrink-0">
@@ -223,8 +222,14 @@ export default async function DashboardPage() {
       </div>
       <div className="flex-1 space-y-3">
         {attendanceArea}
-        <PerformancePanel />
       </div>
+    </div>
+  );
+
+  // 実績表タブ：全幅で配置（左右分割なし、コンテナ幅をフルに使う）
+  const performanceTab = (
+    <div className="w-full">
+      <PerformancePanel />
     </div>
   );
 
@@ -233,6 +238,7 @@ export default async function DashboardPage() {
       <PageTitle>ダッシュボード</PageTitle>
       <DashboardTabs
         scheduleTab={scheduleTab}
+        performanceTab={performanceTab}
         tasksTab={tasksPanel}
         announcementsTab={announcementsPanel}
       />

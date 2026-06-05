@@ -209,41 +209,41 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
   const fmt = (r: Row, v: number | null) => (r.fmt ? r.fmt(v) : numFmt(v));
 
   return (
-    <table className="text-[11px] border-collapse min-w-[760px]">
+    <table className="w-full text-[13px] border-collapse">
       <thead>
         <tr className="text-[#6B7280]">
-          <th className="sticky left-0 bg-white px-2 py-1.5 text-left font-medium border-b border-gray-200 min-w-[150px]">段階</th>
+          <th className="sticky left-0 bg-white px-3 py-2.5 text-left font-medium border-b border-gray-200 min-w-[200px]">段階</th>
           {weeks.map((w) => (
-            <th key={w.weekIndex} className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">
-              {w.label}<div className="text-[9px] text-[#9CA3AF]">{mdLabel(w.from)}〜{mdLabel(w.to)}</div>
-              <div className="text-[8px] text-[#C0C4CC]">目標｜実績</div>
+            <th key={w.weekIndex} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">
+              {w.label}<div className="text-[11px] text-[#9CA3AF]">{mdLabel(w.from)}〜{mdLabel(w.to)}</div>
+              <div className="text-[10px] text-[#C0C4CC]">目標｜実績</div>
             </th>
           ))}
-          <th className="px-2 py-1.5 text-center font-medium border-b border-gray-200 bg-[#F9FAFB] whitespace-nowrap">合計<div className="text-[8px] text-[#C0C4CC]">目標｜実績</div></th>
-          <th className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">達成率</th>
+          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 bg-[#F9FAFB] whitespace-nowrap">合計<div className="text-[10px] text-[#C0C4CC]">目標｜実績</div></th>
+          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap min-w-[80px]">達成率</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
         {rows.map((r) => {
           const hasTarget = !!r.targetKey;
           return (
-            <tr key={r.label}>
-              <td className={`sticky left-0 bg-white px-2 py-1.5 text-[#374151] ${r.indent ? "pl-5 text-[#9CA3AF]" : "font-medium"}`}>{r.label}</td>
+            <tr key={r.label} className="hover:bg-[#F9FAFB]">
+              <td className={`sticky left-0 bg-white px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
               {weeks.map((w) => {
                 const a = r.actual(w.matrix);
                 const tgt = hasTarget ? w.targets[r.targetKey!] : null;
                 return (
-                  <td key={w.weekIndex} className="px-2 py-1.5 text-center tabular-nums">
+                  <td key={w.weekIndex} className="px-3 py-2 text-center tabular-nums">
                     {hasTarget && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
                     <span className="text-[#374151] font-medium">{fmt(r, a)}</span>
                   </td>
                 );
               })}
-              <td className="px-2 py-1.5 text-center tabular-nums bg-[#F9FAFB]">
+              <td className="px-3 py-2 text-center tabular-nums bg-[#F9FAFB]">
                 {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
                 <span className="text-[#374151] font-semibold">{fmt(r, r.actual(total.matrix))}</span>
               </td>
-              <td className="px-2 py-1.5 text-center tabular-nums">
+              <td className="px-3 py-2 text-center tabular-nums">
                 {hasTarget ? <span className="text-[#2563EB] font-medium">{pctFmt(total.achievement[r.targetKey!])}</span> : <span className="text-[#C0C4CC]">—</span>}
               </td>
             </tr>
@@ -257,31 +257,31 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
 function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   return (
-    <table className="text-[11px] border-collapse min-w-[620px]">
+    <table className="w-full text-[13px] border-collapse">
       <thead>
         <tr className="text-[#6B7280]">
-          <th className="sticky left-0 bg-white px-2 py-1.5 text-left font-medium border-b border-gray-200 min-w-[120px]">段階</th>
+          <th className="sticky left-0 bg-white px-3 py-2.5 text-left font-medium border-b border-gray-200 min-w-[180px]">段階</th>
           {cohorts.map((c) => (
-            <th key={c.yearMonth} className="px-2 py-1.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">{c.yearMonth}</th>
+            <th key={c.yearMonth} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">{c.yearMonth}</th>
           ))}
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
-        <tr>
-          <td className="sticky left-0 bg-white px-2 py-1.5 font-medium text-[#374151]">エントリー（人数）</td>
-          {cohorts.map((c) => <td key={c.yearMonth} className="px-2 py-1.5 text-center tabular-nums font-medium">{c.entry}</td>)}
+        <tr className="hover:bg-[#F9FAFB]">
+          <td className="sticky left-0 bg-white px-3 py-2 font-medium text-[#374151]">エントリー（人数）</td>
+          {cohorts.map((c) => <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums font-medium">{c.entry}</td>)}
         </tr>
         {([
           ["書類通過", "documentPass", "documentPassRate"],
           ["内定", "offer", "offerRate"],
           ["承諾", "acceptance", "acceptanceRate"],
         ] as const).map(([label, cntKey, rateKey]) => (
-          <tr key={label}>
-            <td className="sticky left-0 bg-white px-2 py-1.5 font-medium text-[#374151]">{label}</td>
+          <tr key={label} className="hover:bg-[#F9FAFB]">
+            <td className="sticky left-0 bg-white px-3 py-2 font-medium text-[#374151]">{label}</td>
             {cohorts.map((c) => (
-              <td key={c.yearMonth} className="px-2 py-1.5 text-center tabular-nums">
+              <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums">
                 <div className="text-[#374151] font-medium">{c[cntKey] as number}</div>
-                <div className="text-[9px] text-[#2563EB]">{pctFmt(c[rateKey] as number | null)}</div>
+                <div className="text-[11px] text-[#2563EB]">{pctFmt(c[rateKey] as number | null)}</div>
               </td>
             ))}
           </tr>

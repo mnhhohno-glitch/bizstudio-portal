@@ -8,21 +8,23 @@
 
 import { useState, type ReactNode } from "react";
 
-type TabKey = "schedule" | "tasks" | "announcements";
+type TabKey = "schedule" | "performance" | "tasks" | "announcements";
 
 interface Props {
   scheduleTab: ReactNode;
+  performanceTab: ReactNode;
   tasksTab: ReactNode;
   announcementsTab: ReactNode;
 }
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "schedule", label: "スケジュール（日報）" },
+  { key: "performance", label: "実績表" },
   { key: "tasks", label: "タスク" },
   { key: "announcements", label: "お知らせ" },
 ];
 
-export default function DashboardTabs({ scheduleTab, tasksTab, announcementsTab }: Props) {
+export default function DashboardTabs({ scheduleTab, performanceTab, tasksTab, announcementsTab }: Props) {
   const [active, setActive] = useState<TabKey>("schedule");
   return (
     <div className="mt-4">
@@ -43,6 +45,7 @@ export default function DashboardTabs({ scheduleTab, tasksTab, announcementsTab 
       </div>
       <div className="mt-4">
         {active === "schedule" && scheduleTab}
+        {active === "performance" && performanceTab}
         {active === "tasks" && tasksTab}
         {active === "announcements" && announcementsTab}
       </div>

@@ -960,8 +960,11 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 
 ### 基本情報
 - パス: `src/components/performance/PerformancePanel.tsx`（Client Component）
-- 用途: ダッシュボード「スケジュール（日報）」タブの右エリアに置く CA 実績表。日報の CA 指標を複数期間で俯瞰。
-- 配置: `page.tsx` の `scheduleTab` 右カラム（`attendanceArea` の下）。feature flag `DAILY_REPORT_ENABLED` 配下（3タブ表示時のみ）。
+- 用途: ダッシュボードの**独立タブ「実績表」**で全幅表示する CA 実績表。FileMaker 形の週マトリクス＋5タブ。
+- 配置: `page.tsx` の `performanceTab`（`<div className="w-full">`）として 2 番目のタブに配置。feature flag `DAILY_REPORT_ENABLED` 配下（4タブ表示時のみ）。
+- **ダッシュボードのタブ構成（4タブ）**：スケジュール（日報）｜**実績表**｜タスク｜お知らせ（`DashboardTabs.tsx`）。実績表はスケジュールとタスクの間。
+- スケジュールタブには日報・スケジュール・勤怠のみ（実績表は完全分離）。
+- 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
 
 ### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）
 - **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／🎯 目標登録ボタン（TargetModal）。
