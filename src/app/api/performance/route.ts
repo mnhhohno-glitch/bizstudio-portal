@@ -10,7 +10,13 @@ import {
   periodRange,
   type PerformancePeriodKey,
 } from "@/lib/dailyReport/periods";
-import { todayJstDateString } from "@/lib/dailyReport/jstDate";
+import {
+  jstMonthRangeEnd,
+  jstMonthRangeStart,
+  todayJstDateString,
+} from "@/lib/dailyReport/jstDate";
+
+const YYYY_MM = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
@@ -61,9 +67,46 @@ export async function GET(req: Request) {
   const periods: Record<string, CaRangeMetrics> = {};
   for (const [key, m] of results) periods[key] = m;
 
+  // T-072: 月範囲指定（fromMonth/toMonth が両方与えられた場合のみ）。
+  // 形式は "YYYY-MM"。範囲は fromMonth の月初〜toMonth の月末（JST）。
+  // fromMonth > toMonth は 400 を返す（フロント側でもガード）。
+  const fromMonth = searchParams.get("fromMonth");
+  const toMonth = searchParams.get("toMonth");
+  let customRange: { fromMonth: string; toMonth: string; metrics: CaRangeMetrics } | null = null;
+  if (fromMonth || toMonth) {
+    if (!fromMonth || !toMonth) {
+      return NextResponse.json(
+        { error: "fromMonth と toMonth は両方指定してください" },
+        { status: 400 },
+      );
+    }
+    if (!YYYY_MM.test(fromMonth) || !YYYY_MM.test(toMonth)) {
+      return NextResponse.json(
+        { error: "fromMonth/toMonth は YYYY-MM 形式で指定してください" },
+        { status: 400 },
+      );
+    }
+    if (fromMonth > toMonth) {
+      return NextResponse.json(
+        { error: "fromMonth は toMonth 以前である必要があります" },
+        { status: 400 },
+      );
+    }
+    const from = jstMonthRangeStart(fromMonth);
+    const to = jstMonthRangeEnd(toMonth);
+    const metrics = await computeCaMetricsForRange({
+      userId,
+      employeeId: employee.id,
+      from,
+      to,
+    });
+    customRange = { fromMonth, toMonth, metrics };
+  }
+
   return NextResponse.json({
     today: todayStr,
     employee: { id: employee.id, name: employee.name, jobCategory: employee.jobCategory },
     periods,
+    customRange,
   });
 }
