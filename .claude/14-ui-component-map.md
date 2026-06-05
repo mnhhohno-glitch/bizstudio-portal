@@ -953,13 +953,15 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 ### 構成
 - **担当セレクト**: `GET /api/performance/advisors` の CA 一覧（`jobCategory='CA'` の active Employee）。初期値はログインユーザー本人（`selfEmployeeId`）。
 - **期間タブ**: 日 / 週 / 月 / 3か月 / 半期 / 年（`PERIODS` 定数）。
+- **期間指定**（T-072）：7番目のタブ。選ぶと開始月・終了月の `<input type="month">` が出る。開始月は終了月以前のときだけ集計（フロントガード）。送信時に `?fromMonth=YYYY-MM&toMonth=YYYY-MM` を付与し、API は `customRange.metrics` を返す。終了月は**月末 23:59:59.999 JST まで**含む（`jstMonthRangeEnd` は翌月1日0:00-1ms 方式でうるう年・31日月にも安全）。
 - **指標テーブル**: 面談 / 求人 / エントリー〜承諾 の3セクション。各行「数 + 率」。日報 welcome の4ブロックを転用。
-- 担当・期間が変わるたび `GET /api/performance?employeeId=Y` を再フェッチ（SchedulePanel と同じ Client fetch）。1レスポンスに6期間分が入るので、期間切替時はクライアント側で `periods[period]` を切り替えるだけ（再フェッチは担当変更時のみ）。
+- 担当・期間が変わるたび `GET /api/performance?employeeId=Y` を再フェッチ（SchedulePanel と同じ Client fetch）。1レスポンスに6期間分が入るので、期間切替時はクライアント側で `periods[period]` を切り替えるだけ（再フェッチは担当変更時のみ）。**期間指定タブ**は月セレクト変更時にも再フェッチ（fromMonth/toMonth が依存配列に入る）。
 
 ### Server/Client 構成
 - page.tsx の Server Component は触らず（R8 維持）、PerformancePanel 内で `useEffect`+fetch。
 
 ### 関連
-- API: `src/app/api/performance/route.ts`（6期間まとめ）, `src/app/api/performance/advisors/route.ts`（CA一覧）
+- API: `src/app/api/performance/route.ts`（6期間まとめ＋T-072 月範囲 `fromMonth`/`toMonth` 拡張）, `src/app/api/performance/advisors/route.ts`（CA一覧）
 - 集計: `src/lib/dailyReport/metrics.ts:computeCaMetricsForRange`、`src/lib/dailyReport/periods.ts:periodRange`
+- 月範囲ヘルパ（T-072）: `src/lib/dailyReport/jstDate.ts:jstMonthRangeStart`/`jstMonthRangeEnd`
 - 詳細仕様は `03-portal-spec.md`「T-071: 実績表機能」参照

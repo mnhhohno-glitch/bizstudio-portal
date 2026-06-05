@@ -3,10 +3,11 @@
 // T-071: 実績表パネル。ダッシュボード「スケジュール（日報）」タブの右エリアに置く。
 // - 担当セレクト（CA 一覧）で対象を切替（初期=ログインユーザー本人）
 // - 期間タブ（日/週/月/3か月/半期/年）で集計レンジを切替
+// - T-072: さらに「期間指定」を追加。開始月〜終了月（月単位）を指定して集計。
 // - 日報と同じ CA 指標を「数 + 率」で表示
 // 担当・期間が変わるたび GET /api/performance を再フェッチ（SchedulePanel と同じ Client fetch）。
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 type CountWithRate = { count: number; denominator?: number; rate?: number | null };
 
@@ -25,8 +26,11 @@ type RangeMetrics = {
   acceptance: CountWithRate;
 };
 
+type CustomRange = { fromMonth: string; toMonth: string; metrics: RangeMetrics };
+
 type Advisor = { id: string; name: string };
 
+// "custom" は API パラメータではなく UI の選択肢キー。月範囲は別途 fromMonth/toMonth で送る。
 const PERIODS: { key: string; label: string }[] = [
   { key: "day", label: "日" },
   { key: "week", label: "週" },
@@ -34,16 +38,28 @@ const PERIODS: { key: string; label: string }[] = [
   { key: "quarter", label: "3か月" },
   { key: "half", label: "半期" },
   { key: "year", label: "年" },
+  { key: "custom", label: "期間指定" },
 ];
 
 const pct = (r: number | null | undefined) =>
   r === null || r === undefined ? "—" : `${(r * 100).toFixed(1)}%`;
+
+// 今月の "YYYY-MM"（JST）を返す。
+function currentYearMonthJst(): string {
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  return today.slice(0, 7);
+}
 
 export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>("month");
   const [periods, setPeriods] = useState<Record<string, RangeMetrics> | null>(null);
+  const [customRange, setCustomRange] = useState<CustomRange | null>(null);
+  // 期間指定の入力。初期値は今月（単月）。
+  const initialMonth = useMemo(() => currentYearMonthJst(), []);
+  const [fromMonth, setFromMonth] = useState<string>(initialMonth);
+  const [toMonth, setToMonth] = useState<string>(initialMonth);
   const [loading, setLoading] = useState(false);
 
   // 担当一覧 + 本人を初期ロード
@@ -58,27 +74,41 @@ export default function PerformancePanel() {
       .catch(() => {});
   }, []);
 
+  // 月範囲バリデーション：開始月 <= 終了月。invalid のときは API に送らない。
+  const customRangeValid =
+    !!fromMonth && !!toMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(fromMonth) &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(toMonth) && fromMonth <= toMonth;
+
   const fetchPerformance = useCallback(async () => {
     if (!employeeId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/performance?employeeId=${employeeId}`);
+      const params = new URLSearchParams({ employeeId });
+      // 期間指定タブを選んでいて、かつ範囲が valid なときだけ月範囲をクエリに付与する。
+      if (period === "custom" && customRangeValid) {
+        params.set("fromMonth", fromMonth);
+        params.set("toMonth", toMonth);
+      }
+      const res = await fetch(`/api/performance?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setPeriods(data.periods || null);
+        setCustomRange(data.customRange ?? null);
       }
     } catch {
       /* noop */
     } finally {
       setLoading(false);
     }
-  }, [employeeId]);
+  }, [employeeId, period, customRangeValid, fromMonth, toMonth]);
 
   useEffect(() => {
     void fetchPerformance();
   }, [fetchPerformance]);
 
-  const m = periods?.[period] ?? null;
+  // 表示する metrics：custom 選択時は customRange.metrics、それ以外は periods[period]。
+  const m: RangeMetrics | null =
+    period === "custom" ? customRange?.metrics ?? null : periods?.[period] ?? null;
 
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
@@ -116,12 +146,37 @@ export default function PerformancePanel() {
         ))}
       </div>
 
+      {/* 期間指定の月セレクト（custom 選択時のみ） */}
+      {period === "custom" && (
+        <div className="px-3 py-2 border-b border-[#F3F4F6] bg-[#F9FAFB] flex items-center gap-2 flex-wrap text-[12px] text-[#374151]">
+          <span className="text-[#6B7280]">開始</span>
+          <input
+            type="month"
+            value={fromMonth}
+            onChange={(e) => setFromMonth(e.target.value)}
+            className="border border-gray-200 rounded px-2 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
+          />
+          <span className="text-[#6B7280]">〜 終了</span>
+          <input
+            type="month"
+            value={toMonth}
+            onChange={(e) => setToMonth(e.target.value)}
+            className="border border-gray-200 rounded px-2 py-0.5 bg-white focus:ring-1 focus:ring-[#2563EB]"
+          />
+          {!customRangeValid && (
+            <span className="text-[11px] text-red-600">開始月は終了月以前にしてください</span>
+          )}
+        </div>
+      )}
+
       {/* 指標テーブル */}
       <div className="px-4 py-3">
         {loading ? (
           <div className="py-8 text-center text-[13px] text-[#9CA3AF]">読み込み中...</div>
         ) : !m ? (
-          <div className="py-8 text-center text-[13px] text-[#9CA3AF]">データがありません</div>
+          <div className="py-8 text-center text-[13px] text-[#9CA3AF]">
+            {period === "custom" && !customRangeValid ? "月を指定してください" : "データがありません"}
+          </div>
         ) : (
           <div className="space-y-3">
             <MetricSection title="面談">
