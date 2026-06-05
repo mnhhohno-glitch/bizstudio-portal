@@ -978,3 +978,15 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 集計: `src/lib/dailyReport/metrics.ts:computeCaMetricsForRange`、`src/lib/dailyReport/periods.ts:periodRange`
 - 月範囲ヘルパ（T-072）: `src/lib/dailyReport/jstDate.ts:jstMonthRangeStart`/`jstMonthRangeEnd`
 - 詳細仕様は `03-portal-spec.md`「T-071: 実績表機能」参照
+
+### TargetModal.tsx（目標設定ポップアップ・T-073）
+
+- パス: `src/components/performance/TargetModal.tsx`（Client Component）
+- 入口: PerformancePanel ヘッダの「🎯 目標登録」ボタン（担当セレクト横）。`employeeId` 未選択時は disabled。初期対象月は今月（JST）。
+- レイアウト（大型モーダル `max-w-[1100px]`、2カラム）:
+  - **左＝参考値**: `GET /api/performance/target/reference` の 昨年同月/前月/3か月/半年 × 段階（初回面談/紹介/エントリー/書類通過/内定/承諾）の **数＋率**テーブル。
+  - **右＝逆算入力＋週按分**: 目標売上・売上単価・各段階率（%）を手入力 → `reverseCalc`（クライアント純関数）で人数をリアルタイム算出（小数1桁表示）。下に週按分テーブル（各週切り上げ・最終週帳尻・月計＝合計）。
+- 保存: `POST /api/performance/target`（upsert）。`isComplete` で全段階数が確定したときのみ保存可。既存目標は開いたとき読み込んで編集（率は % に戻して表示）。
+- ヘッダの `<input type="month">` で対象月を切替（参考値・既存目標を再取得）。
+- 計算ロジック: `src/lib/performance/reverseCalc.ts`（逆算）、`src/lib/performance/businessDays.ts`（営業日・週按分、`@holiday-jp/holiday_jp` で祝日除外）。
+- 詳細仕様は `03-portal-spec.md`「T-073: 目標設定機能」参照

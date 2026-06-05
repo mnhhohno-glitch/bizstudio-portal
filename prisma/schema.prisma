@@ -234,10 +234,53 @@ model Employee {
   modificationReqs ModificationRequest[]
   leaveRequests    LeaveRequest[]        @relation("EmployeeLeaveRequests")
 
+  // T-073: 実績表の月次目標
+  performanceTargets PerformanceTarget[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("employees")
+}
+
+// T-073: 実績表の CA 月次目標。1 CA × 1 月で 1 レコード。
+// 月目標だけを保存し、週按分は表示時に計算する（営業日按分）。
+// 逆算チェーン：承諾数 = targetRevenue / unitPrice、内定 = 承諾 / 承諾率 … 面談 = 紹介 / 紹介率。
+// 数・率はすべて Float（小数保持、整数に丸めない）。
+model PerformanceTarget {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  yearMonth  String   @map("year_month") // "YYYY-MM"
+
+  // 逆算の起点
+  targetRevenue Float @map("target_revenue") // 目標売上
+  unitPrice     Float @map("unit_price") // 売上単価（承諾1件あたり）
+
+  // 各段階の目標数（小数保持）
+  interviewCount         Float  @map("interview_count") // 面談（初回）数
+  existingInterviewCount Float? @map("existing_interview_count") // 既存面談数（任意）
+  interviewPrepCount     Float? @map("interview_prep_count") // 面接対策数（任意）
+  introductionCount      Float  @map("introduction_count") // 紹介数
+  entryCount             Float  @map("entry_count") // エントリー数
+  documentPassCount      Float  @map("document_pass_count") // 書類通過数
+  offerCount             Float  @map("offer_count") // 内定数
+  acceptanceCount        Float  @map("acceptance_count") // 承諾数
+
+  // 各段階の率（隣接段の比、手入力。小数 0〜1）
+  introductionRate Float @map("introduction_rate") // 面談→紹介
+  entryRate        Float @map("entry_rate") // 紹介→エントリー
+  documentPassRate Float @map("document_pass_rate") // エントリー→書類通過
+  offerRate        Float @map("offer_rate") // 書類通過→内定
+  acceptanceRate   Float @map("acceptance_rate") // 内定→承諾
+
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([employeeId, yearMonth])
+  @@index([employeeId])
+  @@map("performance_targets")
 }
 
 model Candidate {

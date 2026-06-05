@@ -8,6 +8,7 @@
 // 担当・期間が変わるたび GET /api/performance を再フェッチ（SchedulePanel と同じ Client fetch）。
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import TargetModal from "./TargetModal";
 
 type CountWithRate = { count: number; denominator?: number; rate?: number | null };
 
@@ -61,6 +62,7 @@ export default function PerformancePanel() {
   const [fromMonth, setFromMonth] = useState<string>(initialMonth);
   const [toMonth, setToMonth] = useState<string>(initialMonth);
   const [loading, setLoading] = useState(false);
+  const [showTargetModal, setShowTargetModal] = useState(false);
 
   // 担当一覧 + 本人を初期ロード
   useEffect(() => {
@@ -116,18 +118,37 @@ export default function PerformancePanel() {
         <h2 className="text-[14px] font-medium text-[#374151] flex items-center gap-1.5 shrink-0">
           📊 実績表
         </h2>
-        <select
-          value={employeeId ?? ""}
-          onChange={(e) => setEmployeeId(e.target.value || null)}
-          className="text-[12px] border border-gray-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-[#2563EB] max-w-[160px]"
-        >
-          {advisors.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={employeeId ?? ""}
+            onChange={(e) => setEmployeeId(e.target.value || null)}
+            className="text-[12px] border border-gray-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-[#2563EB] max-w-[140px]"
+          >
+            {advisors.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => setShowTargetModal(true)}
+            disabled={!employeeId}
+            className="text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-2 py-1 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap"
+          >
+            🎯 目標登録
+          </button>
+        </div>
       </div>
+
+      {showTargetModal && employeeId && (
+        <TargetModal
+          isOpen={showTargetModal}
+          onClose={() => setShowTargetModal(false)}
+          employeeId={employeeId}
+          employeeName={advisors.find((a) => a.id === employeeId)?.name ?? ""}
+          yearMonth={currentYearMonthJst()}
+        />
+      )}
 
       {/* 期間タブ */}
       <div className="flex gap-1 px-3 py-2 border-b border-[#F3F4F6] flex-wrap">

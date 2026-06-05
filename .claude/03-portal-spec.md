@@ -245,3 +245,33 @@ model InterviewMemo {
   - `candidate_files (uploaded_by_user_id, created_at)` / `(uploaded_by_user_id, last_exported_at)`
   - `job_entries (career_advisor_id, {entry_date|document_pass_date|offer_date|acceptance_date})`
 - `CREATE INDEX IF NOT EXISTS`（冪等）。`prisma migrate deploy` はトランザクション内実行なので CONCURRENTLY は不可。対象は数千行規模でロックは数ミリ秒のため通常 CREATE INDEX で実害なし。schema.prisma にも `@@index` を追加済み（drift 防止）。
+
+## T-073: 目標設定機能（実績表）
+
+実績表（PerformancePanel）の「🎯 目標登録」ボタンから、CA 個人の**月次目標**を設定する。逆算で各段階の必要数を算出し、週へ営業日按分する。
+
+### モデル `PerformanceTarget`（migration `20260606000000_t073_performance_target`）
+
+- `@@unique([employeeId, yearMonth])`（1 CA × 1 月）。保存は**月目標のみ**（週按分は表示時計算）。
+- 起点：`targetRevenue`（目標売上）、`unitPrice`（売上単価）。
+- 各段階の目標数：`interviewCount`（面談初回）/`introductionCount`/`entryCount`/`documentPassCount`/`offerCount`/`acceptanceCount`、任意で `existingInterviewCount`/`interviewPrepCount`。すべて **Float（小数保持）**。
+- 各段階の率（隣接段の比、0〜1）：`introductionRate`（面談→紹介）/`entryRate`（紹介→エントリー）/`documentPassRate`（エントリー→書類通過）/`offerRate`（書類通過→内定）/`acceptanceRate`（内定→承諾）。
+
+### 逆算（`src/lib/performance/reverseCalc.ts`・クライアント計算）
+
+下から上へ：承諾 = `targetRevenue / unitPrice` → 内定 = 承諾/承諾率 → 書類通過 = 内定/内定率 → エントリー = 書類通過/書類通過率 → 紹介 = エントリー/エントリー率 → 面談 = 紹介/紹介率。小数保持・整数に丸めない。除数0/未満は null（未確定）。
+
+### 営業日・週按分（`src/lib/performance/businessDays.ts`）
+
+- **祝日マスタは DB テーブルではなく `@holiday-jp/holiday_jp` npm ライブラリ**（attendance/business-days.ts と同じソース。2025/2026 含む複数年）。Holiday テーブルは作らない。
+- `monthBusinessDays(ym)`：土日＋祝日を除く営業日数。`weeklyBusinessDays(ym)`：月曜始まりで月内を週分割し各週の営業日数（月をまたがない・部分週も1週）。
+- `allocateToWeeks(monthTarget, weeks)`：各週＝`月目標 ÷ 月営業日 × その週営業日` を**切り上げ**、ただし**最終週で帳尻**（最終週 = 月目標 − 他週の合計）→ **合計＝月目標を保証**。内部は小数保持。
+
+### API
+
+- `GET /api/performance/target/reference?employeeId=Y&yearMonth=YYYY-MM`：左側の参考値。**昨年同月/前月/直近3か月(前月まで)/直近半年(前月まで)** の各段階 数・率。T-071 `computeCaMetricsForRange`（担当軸・到達ベース・無効含む・アーカイブ除く）を月レンジで呼ぶだけ。yearMonth 基準で期間算出（実績表の「今日起点」ではない）。
+- `GET /api/performance/target?employeeId=Y&yearMonth=YYYY-MM`：既存目標取得。
+- `POST /api/performance/target`：upsert（`employeeId_yearMonth`）。全数値フィールドの有限性を検証。
+
+### リグレッション
+- T-071 集計（`computeCaMetricsForRange`）は一切変更せず参考値で呼ぶだけ。年(1/1-今日) entry=428・面談52/56 が不変（内定/承諾は live データ増加で変動するが定義不変）。
