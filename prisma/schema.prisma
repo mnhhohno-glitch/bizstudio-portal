@@ -1179,6 +1179,9 @@ model CandidateFile {
 
   @@index([candidateId, category, archivedAt])
   @@index([folderId])
+  // T-071: 実績表の CA 別期間集計（uploadedByUserId = User.id × created_at/last_exported_at レンジ）用
+  @@index([uploadedByUserId, createdAt])
+  @@index([uploadedByUserId, lastExportedAt])
   @@map("candidate_files")
 }
 
@@ -1334,6 +1337,11 @@ model JobEntry {
   @@index([entryFlag])
   @@index([isActive])
   @@index([archivedAt])
+  // T-071: 実績表の CA 別期間集計（careerAdvisorId = Employee.id × 各日付フィールド レンジ）用
+  @@index([careerAdvisorId, entryDate])
+  @@index([careerAdvisorId, documentPassDate])
+  @@index([careerAdvisorId, offerDate])
+  @@index([careerAdvisorId, acceptanceDate])
   @@map("job_entries")
 }
 
@@ -1585,6 +1593,8 @@ model InterviewRecord {
   @@index([candidateId])
   @@index([interviewDate])
   @@index([isLatest])
+  // T-071: 実績表の CA 別期間集計（interviewerUserId = Employee.id × interviewDate レンジ）用
+  @@index([interviewerUserId, interviewDate])
   @@map("interview_records")
 }
 

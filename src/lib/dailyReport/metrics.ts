@@ -1,11 +1,16 @@
-// T-066: CA 数値の集計（仕様 4-2）。
+// T-066/T-071: CA 数値の集計（仕様 4-2）。
 //
 // 厳守事項：
 //   - 初回/既存判定は interviewCount（=1 初回, >=2 既存）。interviewType 文字列で判定しない（仕様 4-1）。
 //   - 辞退系は INTERVIEW_DECLINED_FLAGS。これら以外（null 含む）を実施扱い。
-//   - 当日窓は JST の 0:00〜23:59:59.999、当月窓は JST の月初〜翌月初（排他）。
-//     toISOString().slice(0,10) や `dateStr + "T00:00:00.000Z"` で範囲を作るのは禁止（罠 #17）。
+//     Prisma の { notIn } は SQL 標準で NULL を除外するため、OR で resultFlag IS NULL を明示する。
+//   - JST 境界は jstDate.ts のヘルパ経由のみ。toISOString().slice(0,10) や
+//     `dateStr + "T00:00:00.000Z"` で範囲を作るのは禁止（罠 #17/#36）。
 //   - AI には生の面談・求職者レコードを渡さない。本ファイルが返す集計済み数値だけを渡す（仕様 #10）。
+//
+// T-071：実績表のため「from〜to の単一レンジ集計」を computeCaMetricsForRange に一般化し、
+//        日報用の computeCaMetrics（当日 + 当月の2窓）はそのラッパーに置き換えた。
+//        日報側の出力（CaDailyMetrics）は一切変えていない。
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -25,6 +30,27 @@ export interface CaCountWithRate {
   denominator?: number;
   // count / denominator。分母 0 は null（0除算回避）。
   rate?: number | null;
+}
+
+// === 単一レンジの集計結果（T-071 実績表で使用） ===
+export interface CaRangeMetrics {
+  fromIso: string;
+  toIso: string;
+  // 面談
+  firstInterviewPlanned: number; // 初回面談予定数（辞退系含む全件）
+  firstInterviewExecuted: number; // 初回面談実施数（辞退系除く・null 含む）
+  firstInterviewRate: number | null; // 実施 ÷ 予定
+  existingInterviewExecuted: number; // 既存面談数（実施のみ）
+  interviewPrepExecuted: number; // 面接対策数
+  // 求人
+  jobSearched: number; // 求人検索数
+  jobIntroduced: number; // 求人紹介数
+  jobIntroductionRate: number | null; // 紹介 ÷ 検索
+  // エントリー〜承諾（各 count/denominator/rate は同一レンジ）
+  entry: CaCountWithRate; // 分母=紹介数
+  documentPass: CaCountWithRate; // 分母=エントリー数
+  offer: CaCountWithRate; // 分母=書類通過数
+  acceptance: CaCountWithRate; // 分母=内定数
 }
 
 export interface CaDailyMetrics {
@@ -49,11 +75,99 @@ export interface CaDailyMetrics {
 }
 
 /**
- * userId（User.id）と employeeId（Employee.id）の両方から CA 数値を集計する。
+ * from〜to（JST の Date 範囲、両端含む）で CA 数値を集計する汎用関数。
  * 4-3 の紐づきキーに従い使い分ける。
  * - 面談：InterviewRecord.interviewerUserId = employeeId
  * - 求人検索/紹介：CandidateFile.uploadedByUserId = userId
  * - エントリー以降：JobEntry.careerAdvisorId = employeeId（実データは Employee.id が入っている）
+ */
+export async function computeCaMetricsForRange(params: {
+  userId: string;
+  employeeId: string | null;
+  from: Date;
+  to: Date;
+}): Promise<CaRangeMetrics> {
+  const { userId, employeeId, from, to } = params;
+  const range = { gte: from, lte: to };
+
+  // 「実施」フィルタ：辞退系以外（NULL は実施扱い）。
+  // Prisma の `{ notIn: [...] }` は SQL 標準どおり NULL を除外するため、
+  // OR で `resultFlag IS NULL` を明示的に含める必要がある（仕様 4-1 / 罠 #37）。
+  const notDeclined = {
+    OR: [
+      { resultFlag: null },
+      { resultFlag: { notIn: INTERVIEW_DECLINED_FLAGS.map((s) => s) } },
+    ],
+  };
+
+  // 面談（employeeId が無いユーザーは 0 件で確定）
+  const interviewerFilter = employeeId
+    ? { interviewerUserId: employeeId }
+    : { interviewerUserId: "__nonexistent__" };
+
+  // 求人（CandidateFile, uploadedByUserId = User.id）
+  // エントリー以降（JobEntry, careerAdvisorId = Employee.id）
+  const advisorFilter = { careerAdvisorId: employeeId ?? "__nonexistent__" };
+
+  const [
+    firstPlanned,
+    firstExecuted,
+    existingExecuted,
+    prepExecuted,
+    jobSearched,
+    jobIntroduced,
+    entryCount,
+    documentPassCount,
+    offerCount,
+    acceptanceCount,
+  ] = await Promise.all([
+    prisma.interviewRecord.count({
+      where: { ...interviewerFilter, interviewCount: 1, interviewDate: range },
+    }),
+    prisma.interviewRecord.count({
+      where: { ...interviewerFilter, interviewCount: 1, ...notDeclined, interviewDate: range },
+    }),
+    prisma.interviewRecord.count({
+      where: { ...interviewerFilter, interviewCount: { gte: 2 }, ...notDeclined, interviewDate: range },
+    }),
+    prisma.interviewRecord.count({
+      where: { ...interviewerFilter, interviewType: INTERVIEW_TYPE_INTERVIEW_PREP, interviewDate: range },
+    }),
+    prisma.candidateFile.count({
+      where: { category: "BOOKMARK", archivedAt: null, uploadedByUserId: userId, createdAt: range },
+    }),
+    prisma.candidateFile.count({
+      where: { category: "BOOKMARK", uploadedByUserId: userId, lastExportedAt: range },
+    }),
+    prisma.jobEntry.count({ where: { ...advisorFilter, entryDate: range } }),
+    prisma.jobEntry.count({ where: { ...advisorFilter, documentPassDate: range } }),
+    prisma.jobEntry.count({ where: { ...advisorFilter, offerDate: range } }),
+    prisma.jobEntry.count({ where: { ...advisorFilter, acceptanceDate: range } }),
+  ]);
+
+  return {
+    fromIso: from.toISOString(),
+    toIso: to.toISOString(),
+    firstInterviewPlanned: firstPlanned,
+    firstInterviewExecuted: firstExecuted,
+    firstInterviewRate: rate(firstExecuted, firstPlanned),
+    existingInterviewExecuted: existingExecuted,
+    interviewPrepExecuted: prepExecuted,
+    jobSearched,
+    jobIntroduced,
+    jobIntroductionRate: rate(jobIntroduced, jobSearched),
+    entry: { count: entryCount, denominator: jobIntroduced, rate: rate(entryCount, jobIntroduced) },
+    documentPass: { count: documentPassCount, denominator: entryCount, rate: rate(documentPassCount, entryCount) },
+    offer: { count: offerCount, denominator: documentPassCount, rate: rate(offerCount, documentPassCount) },
+    acceptance: { count: acceptanceCount, denominator: offerCount, rate: rate(acceptanceCount, offerCount) },
+  };
+}
+
+/**
+ * 日報用：当日窓 + 当月窓の2レンジを集計して CaDailyMetrics を組み立てる。
+ * computeCaMetricsForRange のラッパー。出力は T-066 から不変。
+ * - count 系：当日窓
+ * - 率系：当月窓（紹介率・エントリー率・通過率・内定率・承諾率・初回面談実施率の当月版）
  */
 export async function computeCaMetrics(params: {
   userId: string;
@@ -62,183 +176,36 @@ export async function computeCaMetrics(params: {
 }): Promise<CaDailyMetrics> {
   const { userId, employeeId, dateStr } = params;
 
-  const dayStart = jstDateStart(dateStr);
-  const dayEnd = jstDateEnd(dateStr);
-  const monthStart = jstMonthStart(dateStr);
-  const monthEnd = jstNextMonthStart(dateStr); // 排他
+  const dayFrom = jstDateStart(dateStr);
+  const dayTo = jstDateEnd(dateStr);
+  const monthFrom = jstMonthStart(dateStr);
+  // 当月窓は jstNextMonthStart（排他）の 1ms 手前を lte に使い、従来の lt と等価にする。
+  const monthTo = new Date(jstNextMonthStart(dateStr).getTime() - 1);
 
-  const yearMonth = dateStr.slice(0, 7);
-
-  // 「実施」フィルタ：辞退系以外（NULL は実施扱い）。
-  // Prisma の `{ notIn: [...] }` は SQL 標準どおり NULL を除外するため、
-  // OR で `resultFlag IS NULL` を明示的に含める必要がある（仕様 4-1）。
-  const notDeclined = {
-    OR: [
-      { resultFlag: null },
-      { resultFlag: { notIn: INTERVIEW_DECLINED_FLAGS.map((s) => s) } },
-    ],
-  };
-
-  // === 面談（employeeId が無いユーザーは 0 件で確定） ===
-  const interviewerFilter = employeeId
-    ? { interviewerUserId: employeeId }
-    : { interviewerUserId: "__nonexistent__" };
-
-  const [
-    firstInterviewPlannedDay,
-    firstInterviewExecutedDay,
-    firstInterviewPlannedMonth,
-    firstInterviewExecutedMonth,
-    existingInterviewExecutedDay,
-    interviewPrepExecutedDay,
-  ] = await Promise.all([
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewCount: 1,
-        interviewDate: { gte: dayStart, lte: dayEnd },
-      },
-    }),
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewCount: 1,
-        ...notDeclined,
-        interviewDate: { gte: dayStart, lte: dayEnd },
-      },
-    }),
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewCount: 1,
-        interviewDate: { gte: monthStart, lt: monthEnd },
-      },
-    }),
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewCount: 1,
-        ...notDeclined,
-        interviewDate: { gte: monthStart, lt: monthEnd },
-      },
-    }),
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewCount: { gte: 2 },
-        ...notDeclined,
-        interviewDate: { gte: dayStart, lte: dayEnd },
-      },
-    }),
-    prisma.interviewRecord.count({
-      where: {
-        ...interviewerFilter,
-        interviewType: INTERVIEW_TYPE_INTERVIEW_PREP,
-        interviewDate: { gte: dayStart, lte: dayEnd },
-      },
-    }),
+  const [day, month] = await Promise.all([
+    computeCaMetricsForRange({ userId, employeeId, from: dayFrom, to: dayTo }),
+    computeCaMetricsForRange({ userId, employeeId, from: monthFrom, to: monthTo }),
   ]);
 
-  // === 求人（CandidateFile, BOOKMARK） ===
-  const [
-    jobSearchedDay,
-    jobIntroducedDay,
-    jobSearchedMonth,
-    jobIntroducedMonth,
-  ] = await Promise.all([
-    prisma.candidateFile.count({
-      where: {
-        category: "BOOKMARK",
-        archivedAt: null,
-        uploadedByUserId: userId,
-        createdAt: { gte: dayStart, lte: dayEnd },
-      },
-    }),
-    prisma.candidateFile.count({
-      where: {
-        category: "BOOKMARK",
-        uploadedByUserId: userId,
-        lastExportedAt: { gte: dayStart, lte: dayEnd },
-      },
-    }),
-    prisma.candidateFile.count({
-      where: {
-        category: "BOOKMARK",
-        archivedAt: null,
-        uploadedByUserId: userId,
-        createdAt: { gte: monthStart, lt: monthEnd },
-      },
-    }),
-    prisma.candidateFile.count({
-      where: {
-        category: "BOOKMARK",
-        uploadedByUserId: userId,
-        lastExportedAt: { gte: monthStart, lt: monthEnd },
-      },
-    }),
-  ]);
-
-  // === エントリー以降（JobEntry） ===
-  // entryDate は user 入力なので null の可能性あり → 仕様 R4 で createdAt 近似は集計外。
-  // ここは entryDate 厳密一致でカウントし、近似は将来 separate 関数で扱う。
-  const advisorFilter = { careerAdvisorId: employeeId ?? "__nonexistent__" };
-
-  const [
-    entryDay,
-    documentPassDay,
-    offerDay,
-    acceptanceDay,
-    entryMonth,
-    documentPassMonth,
-    offerMonth,
-    acceptanceMonth,
-  ] = await Promise.all([
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, entryDate: { gte: dayStart, lte: dayEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, documentPassDate: { gte: dayStart, lte: dayEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, offerDate: { gte: dayStart, lte: dayEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, acceptanceDate: { gte: dayStart, lte: dayEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, entryDate: { gte: monthStart, lt: monthEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, documentPassDate: { gte: monthStart, lt: monthEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, offerDate: { gte: monthStart, lt: monthEnd } },
-    }),
-    prisma.jobEntry.count({
-      where: { ...advisorFilter, acceptanceDate: { gte: monthStart, lt: monthEnd } },
-    }),
-  ]);
-
-  // === 比率（4-2 の窓に厳密に従う。0 除算は null） ===
   return {
     date: dateStr,
-    yearMonth,
+    yearMonth: dateStr.slice(0, 7),
     // 面談
-    firstInterviewPlanned: firstInterviewPlannedDay,
-    firstInterviewExecuted: firstInterviewExecutedDay,
-    firstInterviewRateDaily: rate(firstInterviewExecutedDay, firstInterviewPlannedDay),
-    firstInterviewRateMonthly: rate(firstInterviewExecutedMonth, firstInterviewPlannedMonth),
-    existingInterviewExecuted: existingInterviewExecutedDay,
-    interviewPrepExecuted: interviewPrepExecutedDay,
+    firstInterviewPlanned: day.firstInterviewPlanned,
+    firstInterviewExecuted: day.firstInterviewExecuted,
+    firstInterviewRateDaily: day.firstInterviewRate,
+    firstInterviewRateMonthly: month.firstInterviewRate,
+    existingInterviewExecuted: day.existingInterviewExecuted,
+    interviewPrepExecuted: day.interviewPrepExecuted,
     // 求人
-    jobSearched: jobSearchedDay,
-    jobIntroduced: jobIntroducedDay,
-    jobIntroductionRateMonthly: rate(jobIntroducedMonth, jobSearchedMonth),
-    // エントリー〜承諾
-    entry: { count: entryDay, denominator: jobIntroducedMonth, rate: rate(entryMonth, jobIntroducedMonth) },
-    documentPass: { count: documentPassDay, denominator: entryMonth, rate: rate(documentPassMonth, entryMonth) },
-    offer: { count: offerDay, denominator: documentPassMonth, rate: rate(offerMonth, documentPassMonth) },
-    acceptance: { count: acceptanceDay, denominator: offerMonth, rate: rate(acceptanceMonth, offerMonth) },
+    jobSearched: day.jobSearched,
+    jobIntroduced: day.jobIntroduced,
+    jobIntroductionRateMonthly: month.jobIntroductionRate,
+    // エントリー〜承諾：count は当日、denominator/rate は当月
+    entry: { count: day.entry.count, denominator: month.entry.denominator, rate: month.entry.rate },
+    documentPass: { count: day.documentPass.count, denominator: month.documentPass.denominator, rate: month.documentPass.rate },
+    offer: { count: day.offer.count, denominator: month.offer.denominator, rate: month.offer.rate },
+    acceptance: { count: day.acceptance.count, denominator: month.acceptance.denominator, rate: month.acceptance.rate },
   };
 }
 

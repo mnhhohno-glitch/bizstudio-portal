@@ -940,3 +940,26 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 
 - ScheduleChatDrawer（プランニング）と DailyReportChatDrawer（日報生成）は別物。両者を流用しないこと。
 - 「🌙 1日を振り返る」（ScheduleReviewDrawer）は既存どおり SchedulePanel 内に残り、その隣に日報導線が追加される。
+
+---
+
+## PerformancePanel.tsx（実績表・T-071）
+
+### 基本情報
+- パス: `src/components/performance/PerformancePanel.tsx`（Client Component）
+- 用途: ダッシュボード「スケジュール（日報）」タブの右エリアに置く CA 実績表。日報の CA 指標を複数期間で俯瞰。
+- 配置: `page.tsx` の `scheduleTab` 右カラム（`attendanceArea` の下）。feature flag `DAILY_REPORT_ENABLED` 配下（3タブ表示時のみ）。
+
+### 構成
+- **担当セレクト**: `GET /api/performance/advisors` の CA 一覧（`jobCategory='CA'` の active Employee）。初期値はログインユーザー本人（`selfEmployeeId`）。
+- **期間タブ**: 日 / 週 / 月 / 3か月 / 半期 / 年（`PERIODS` 定数）。
+- **指標テーブル**: 面談 / 求人 / エントリー〜承諾 の3セクション。各行「数 + 率」。日報 welcome の4ブロックを転用。
+- 担当・期間が変わるたび `GET /api/performance?employeeId=Y` を再フェッチ（SchedulePanel と同じ Client fetch）。1レスポンスに6期間分が入るので、期間切替時はクライアント側で `periods[period]` を切り替えるだけ（再フェッチは担当変更時のみ）。
+
+### Server/Client 構成
+- page.tsx の Server Component は触らず（R8 維持）、PerformancePanel 内で `useEffect`+fetch。
+
+### 関連
+- API: `src/app/api/performance/route.ts`（6期間まとめ）, `src/app/api/performance/advisors/route.ts`（CA一覧）
+- 集計: `src/lib/dailyReport/metrics.ts:computeCaMetricsForRange`、`src/lib/dailyReport/periods.ts:periodRange`
+- 詳細仕様は `03-portal-spec.md`「T-071: 実績表機能」参照
