@@ -69,7 +69,15 @@ export async function computeCaMetrics(params: {
 
   const yearMonth = dateStr.slice(0, 7);
 
-  const declinedNotIn = { notIn: INTERVIEW_DECLINED_FLAGS.map((s) => s) };
+  // 「実施」フィルタ：辞退系以外（NULL は実施扱い）。
+  // Prisma の `{ notIn: [...] }` は SQL 標準どおり NULL を除外するため、
+  // OR で `resultFlag IS NULL` を明示的に含める必要がある（仕様 4-1）。
+  const notDeclined = {
+    OR: [
+      { resultFlag: null },
+      { resultFlag: { notIn: INTERVIEW_DECLINED_FLAGS.map((s) => s) } },
+    ],
+  };
 
   // === 面談（employeeId が無いユーザーは 0 件で確定） ===
   const interviewerFilter = employeeId
@@ -95,7 +103,7 @@ export async function computeCaMetrics(params: {
       where: {
         ...interviewerFilter,
         interviewCount: 1,
-        resultFlag: declinedNotIn,
+        ...notDeclined,
         interviewDate: { gte: dayStart, lte: dayEnd },
       },
     }),
@@ -110,7 +118,7 @@ export async function computeCaMetrics(params: {
       where: {
         ...interviewerFilter,
         interviewCount: 1,
-        resultFlag: declinedNotIn,
+        ...notDeclined,
         interviewDate: { gte: monthStart, lt: monthEnd },
       },
     }),
@@ -118,7 +126,7 @@ export async function computeCaMetrics(params: {
       where: {
         ...interviewerFilter,
         interviewCount: { gte: 2 },
-        resultFlag: declinedNotIn,
+        ...notDeclined,
         interviewDate: { gte: dayStart, lte: dayEnd },
       },
     }),
