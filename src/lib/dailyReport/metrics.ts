@@ -13,6 +13,7 @@
 //        日報側の出力（CaDailyMetrics）は一切変えていない。
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import {
   INTERVIEW_DECLINED_FLAGS,
   INTERVIEW_TYPE_INTERVIEW_PREP,
@@ -125,6 +126,18 @@ export async function computeCaMetricsForRange(params: {
     entryFlag: { in: ["応募", "エントリー", "書類選考", "面接", "内定", "入社済"] },
   };
 
+  // エントリー以降は「何人がその段階に到達したか」＝候補者ユニーク人数で数える（T-071 修正）。
+  // 同一候補者が同月に複数社で同段階に到達しても 1。月をまたげば各月で別カウント（レンジが別）。
+  // distinct: ["candidateId"] で候補者ユニークの行を取り、その件数を数える。
+  const countUniqueCandidates = async (where: Prisma.JobEntryWhereInput): Promise<number> => {
+    const rows = await prisma.jobEntry.findMany({
+      where,
+      select: { candidateId: true },
+      distinct: ["candidateId"],
+    });
+    return rows.length;
+  };
+
   const [
     firstPlanned,
     firstExecuted,
@@ -155,13 +168,13 @@ export async function computeCaMetricsForRange(params: {
     prisma.candidateFile.count({
       where: { category: "BOOKMARK", uploadedByUserId: userId, lastExportedAt: range },
     }),
-    // エントリー数：応募済み以降のステージに限定（求人紹介段階を除外）。
-    prisma.jobEntry.count({ where: { ...advisorFilter, ...entryFlagPostApplication, entryDate: range } }),
+    // エントリー数：応募済み以降のステージに限定（求人紹介段階を除外）。候補者ユニーク人数。
+    countUniqueCandidates({ ...advisorFilter, ...entryFlagPostApplication, entryDate: range }),
     // 書類通過/内定/承諾：それぞれの日付フィールドが非 null である時点で求人紹介段階を超えているため、
-    // entryFlag ホワイトリストは不要。失効除外（isActive=true & archivedAt=null）のみ適用。
-    prisma.jobEntry.count({ where: { ...advisorFilter, documentPassDate: range } }),
-    prisma.jobEntry.count({ where: { ...advisorFilter, offerDate: range } }),
-    prisma.jobEntry.count({ where: { ...advisorFilter, acceptanceDate: range } }),
+    // entryFlag ホワイトリストは不要。失効除外（archivedAt=null）のみ適用。候補者ユニーク人数。
+    countUniqueCandidates({ ...advisorFilter, documentPassDate: range }),
+    countUniqueCandidates({ ...advisorFilter, offerDate: range }),
+    countUniqueCandidates({ ...advisorFilter, acceptanceDate: range }),
   ]);
 
   return {
