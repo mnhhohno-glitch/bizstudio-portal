@@ -153,27 +153,30 @@ function filterFlagOptions(
   });
 }
 
-// 面接「選考中」状態のときに企業対応／本人対応で選べる値を絞る（T-066 関連の運用要件）。
-// 値は src/lib/constants/entry-flag-rules.ts と EntryBoard.tsx の auto-update（"所感報告前"）
-// で使われている verbatim 文字列に合わせる。
-const SCREENING_DETAILS = ["一次面接選考中", "二次面接選考中", "最終面接選考中"];
-const COMPANY_FLAGS_IN_SCREENING = ["所感報告前", "所感報告済"];
-const PERSON_FLAGS_IN_SCREENING = ["本人所感回収中", "本人所感回収済"];
+// entryFlagDetail の値に応じて企業対応／本人対応の選択肢を絞る。
+// 値は src/lib/constants/entry-flag-rules.ts の verbatim 文字列と一致させる。
+// - 面接「選考中」3値（T-066 運用要件）
+// - 適性検査受講中（同要件）
+const DETAIL_FLAG_RESTRICTIONS: Record<string, { company: string[]; person: string[] }> = {
+  "一次面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
+  "二次面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
+  "最終面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
+  "適性検査受講中": { company: ["受講完了報告前", "受講完了報告済"], person: ["受講完了未確認", "受講完了確認済"] },
+};
 
-function isScreeningDetail(entryFlagDetail: string | null | undefined): boolean {
-  return !!entryFlagDetail && SCREENING_DETAILS.includes(entryFlagDetail);
-}
-
-// 「選考中」状態のときに表示する選択肢を制限する。
-// 現在値が制限外の場合は、データを書き換えずに「現在値だけは残す」（仕様確定）。
-function restrictForScreening(
+// 制限対象の entryFlagDetail のとき、表示する選択肢を許可セットに絞る。
+// 現在値が制限外の場合は「現在値だけは残す」（データを書き換えない）。
+function restrictByDetail(
   options: string[],
   entryFlagDetail: string | null | undefined,
-  allowedSet: string[],
+  flagType: "company" | "person",
   currentValue: string | null | undefined
 ): string[] {
-  if (!isScreeningDetail(entryFlagDetail)) return options;
-  const result = options.filter((opt) => allowedSet.includes(opt));
+  if (!entryFlagDetail) return options;
+  const rule = DETAIL_FLAG_RESTRICTIONS[entryFlagDetail];
+  if (!rule) return options;
+  const allowed = rule[flagType];
+  const result = options.filter((opt) => allowed.includes(opt));
   if (currentValue && options.includes(currentValue) && !result.includes(currentValue)) {
     result.push(currentValue);
   }
@@ -431,17 +434,13 @@ export default function EntryTable({
   function renderCell(entry: Entry, col: ColConfig) {
     const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
     const rawPersonOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
-    const companyOptions = restrictForScreening(
+    const companyOptions = restrictByDetail(
       filterFlagOptions(rawCompanyOptions, entry.entryFlagDetail, entry.companyFlag),
-      entry.entryFlagDetail,
-      COMPANY_FLAGS_IN_SCREENING,
-      entry.companyFlag
+      entry.entryFlagDetail, "company", entry.companyFlag
     );
-    const personOptions = restrictForScreening(
+    const personOptions = restrictByDetail(
       filterFlagOptions(rawPersonOptions, entry.entryFlagDetail, entry.personFlag),
-      entry.entryFlagDetail,
-      PERSON_FLAGS_IN_SCREENING,
-      entry.personFlag
+      entry.entryFlagDetail, "person", entry.personFlag
     );
 
     switch (col.key) {

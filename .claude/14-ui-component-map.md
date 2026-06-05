@@ -631,18 +631,20 @@ EntryBoard (1083 行)
 - 適用箇所: `renderCell()` 冒頭で `rawCompanyOptions`／`rawPersonOptions` を `filterFlagOptions(..., entry.entryFlagDetail, entry.companyFlag|personFlag)` に通してから `statusFlags` セルで描画
 - 副作用: `書類選考` ステージは `COMPANY_FLAG_RULES` がもともと `["辞退報告前","辞退報告済"]` の辞退系のみのため、`entryFlagDetail` が本人辞退以外のとき企業対応 dropdown は空になり `-` 表示に縮退する（仕様通り）
 
-### EntryTable: 面接「選考中」時の企業対応／本人対応 絞り込み（運用要件）
+### EntryTable: entryFlagDetail 別の企業対応／本人対応 選択肢制限（運用要件）
 
-- `entryFlagDetail` が `一次面接選考中` / `二次面接選考中` / `最終面接選考中` のいずれかのとき、企業対応／本人対応 dropdown の表示選択肢を以下に**制限**する（描画のみ。保存値・API・スキーマは変更しない）
-  - 企業対応: `所感報告前` / `所感報告済` の 2 択
-  - 本人対応: `本人所感回収中` / `本人所感回収済` の 2 択
-- 既存値の保護: 現在値が 2 択に含まれない場合は**現在値だけ残す**（書き換え・空欄化しない）
-- 適用箇所（EntryTable.tsx）: `restrictForScreening()`（既存 `filterFlagOptions()` の後段で適用）
-- 関連定数（EntryTable.tsx 内、すべて verbatim）:
-  - `SCREENING_DETAILS = ["一次面接選考中", "二次面接選考中", "最終面接選考中"]`
-  - `COMPANY_FLAGS_IN_SCREENING = ["所感報告前", "所感報告済"]`
-  - `PERSON_FLAGS_IN_SCREENING = ["本人所感回収中", "本人所感回収済"]`
-- 値の由来: `src/lib/constants/entry-flag-rules.ts` の `COMPANY_FLAG_RULES["面接"]` / `PERSON_FLAG_RULES["面接"]` および `EntryBoard.tsx` L227-229 の自動遷移（`実施前 → 選考中` で `companyFlag="所感報告前"` を自動セット）と一致
+特定の `entryFlagDetail` 値のとき、企業対応／本人対応 dropdown の表示選択肢を絞る（描画のみ。保存値・API・スキーマは変更しない）。
+
+| entryFlagDetail | 企業対応（2択） | 本人対応（2択） |
+|--|--|--|
+| `一次面接選考中` / `二次面接選考中` / `最終面接選考中` | `所感報告前` / `所感報告済` | `本人所感回収中` / `本人所感回収済` |
+| `適性検査受講中` | `受講完了報告前` / `受講完了報告済` | `受講完了未確認` / `受講完了確認済` |
+
+- 上記以外の `entryFlagDetail` では従来どおり全選択肢を表示
+- 既存値の保護: 現在値が制限に含まれない場合は**現在値だけ残す**（書き換え・空欄化しない）
+- 適用箇所（EntryTable.tsx）: `restrictByDetail()`（既存 `filterFlagOptions()` の後段で適用）
+- 関連定数（EntryTable.tsx 内）: `DETAIL_FLAG_RESTRICTIONS`（entryFlagDetail → { company, person } のマップ。verbatim 文字列）
+- 値の由来: `src/lib/constants/entry-flag-rules.ts` の `COMPANY_FLAG_RULES["面接"]` / `PERSON_FLAG_RULES["面接"]` および `EntryBoard.tsx` L227-229 の自動遷移と一致
 
 ---
 
