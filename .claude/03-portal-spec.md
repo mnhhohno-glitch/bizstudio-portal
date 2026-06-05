@@ -242,6 +242,12 @@ model InterviewMemo {
 
 - `GET /api/performance?employeeId=Y`：指定 CA の 6 期間分の指標をまとめて返す（`Promise.all`）。employeeId 省略時はログインユーザー本人を解決。閲覧権限は**全 CA 可**（admin 限定にしない＝確定仕様）。
 - `GET /api/performance/advisors`：`jobCategory='CA'` の active Employee 一覧（担当セレクト用）＋本人 employeeId。
+- `GET /api/performance/weekly?employeeId=Y&anchorDate=YYYY-MM-DD`（T-071 週マトリクス）：起算日から 5 週に分割し、各週の実績＋目標＋TOTAL＋達成率を返す。
+  - 週分割（`src/lib/performance/fiveWeeks.ts:splitIntoFiveWeeks`）：W1＝起算日〜その週の日曜（端数になり得る。例 水曜起算なら水〜日5日）、W2〜W5＝月〜日のフル暦週。
+  - 各週の実績＝`computeCaMetricsForRange` を週レンジで呼ぶ（並列）。数え方は維持（エントリー以降は候補者ユニーク人数、求人/面談は件数）。
+  - **TOTAL（5週合計）はユニーク再集計**：週別の単純合計ではなく、起算日〜W5末の全期間で `computeCaMetricsForRange` を再呼び出し（複数週にまたがる同一候補者の重複を排除）。週別合計とTOTALが一致しないことがあるのは仕様。
+  - 週別目標＝対象月（起算日が属する JST 年月）の `PerformanceTarget` を `allocateToWeeks`（T-073、5週営業日按分、切り上げ＋最終週帳尻）で割り振り → 合計＝月目標。目標未登録なら null。
+  - 達成率＝TOTAL 実績 ÷ TOTAL 目標（人数の達成率。段階間転換率とは別物）。
 
 ### インデックス（T-071 migration `20260605120000_t071_performance_indexes`）
 
