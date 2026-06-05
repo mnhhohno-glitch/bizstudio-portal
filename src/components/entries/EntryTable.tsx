@@ -157,15 +157,25 @@ function filterFlagOptions(
 // 値は src/lib/constants/entry-flag-rules.ts の verbatim 文字列と一致させる。
 // - 面接「選考中」3値（T-066 運用要件）
 // - 適性検査受講中（同要件）
-const DETAIL_FLAG_RESTRICTIONS: Record<string, { company: string[]; person: string[] }> = {
+// - 日程調整中3値（本人対応のみ制限。企業対応は制限なし）
+// 各エントリの company/person は **片側のみ optional**。未定義の側は従来どおり全選択肢。
+const PERSON_FLAGS_IN_SCHEDULING = [
+  "見送り通知未送信", "見送り通知送信済", "選考通過連絡前",
+  "日程回収中", "日程回収済", "日程通知前", "日程通知済",
+];
+const DETAIL_FLAG_RESTRICTIONS: Record<string, { company?: string[]; person?: string[] }> = {
   "一次面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
   "二次面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
   "最終面接選考中": { company: ["所感報告前", "所感報告済"], person: ["本人所感回収中", "本人所感回収済"] },
   "適性検査受講中": { company: ["受講完了報告前", "受講完了報告済"], person: ["受講完了未確認", "受講完了確認済"] },
+  "一次日程調整中": { person: PERSON_FLAGS_IN_SCHEDULING },
+  "二次日程調整中": { person: PERSON_FLAGS_IN_SCHEDULING },
+  "最終日程調整中": { person: PERSON_FLAGS_IN_SCHEDULING },
 };
 
 // 制限対象の entryFlagDetail のとき、表示する選択肢を許可セットに絞る。
 // 現在値が制限外の場合は「現在値だけは残す」（データを書き換えない）。
+// flagType の許可セットが未定義なら制限なし（=従来どおり全選択肢）。
 function restrictByDetail(
   options: string[],
   entryFlagDetail: string | null | undefined,
@@ -176,6 +186,7 @@ function restrictByDetail(
   const rule = DETAIL_FLAG_RESTRICTIONS[entryFlagDetail];
   if (!rule) return options;
   const allowed = rule[flagType];
+  if (!allowed) return options;
   const result = options.filter((opt) => allowed.includes(opt));
   if (currentValue && options.includes(currentValue) && !result.includes(currentValue)) {
     result.push(currentValue);

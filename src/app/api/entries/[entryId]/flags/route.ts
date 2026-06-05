@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, INACTIVE_TRIGGERS, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { jstDateStringToDbDate, todayJstDateString } from "@/lib/dailyReport/jstDate";
 
 export async function PATCH(
   req: NextRequest,
@@ -59,6 +60,25 @@ export async function PATCH(
   if (entryFlagDetail !== undefined) data.entryFlagDetail = entryFlagDetail;
   if (companyFlag !== undefined) data.companyFlag = companyFlag;
   if (personFlag !== undefined) data.personFlag = personFlag;
+
+  // 内定／承諾の日付自動入力：entryFlag が「内定」に変わったとき内定日、
+  // entryFlagDetail が「承諾」に変わったとき承諾日を JST 当日でセットする。
+  // ただし既存値が入っているレコードは上書きしない（手入力値を保護）。
+  // JST 当日は jstDateStringToDbDate(todayJstDateString()) で UTC midnight Date に変換
+  // （他の日付フィールドの保存規約と同じ。toISOString().slice(0,10) は使わない）。
+  if (entryFlag === "内定" || entryFlagDetail === "承諾") {
+    const existing = await prisma.jobEntry.findUnique({
+      where: { id: entryId },
+      select: { offerDate: true, acceptanceDate: true },
+    });
+    const today = jstDateStringToDbDate(todayJstDateString());
+    if (entryFlag === "内定" && existing && existing.offerDate == null) {
+      data.offerDate = today;
+    }
+    if (entryFlagDetail === "承諾" && existing && existing.acceptanceDate == null) {
+      data.acceptanceDate = today;
+    }
+  }
 
   const transformedData = applyEntryFlagAutoTransitions(data);
 

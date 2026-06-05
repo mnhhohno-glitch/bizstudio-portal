@@ -635,16 +635,27 @@ EntryBoard (1083 行)
 
 特定の `entryFlagDetail` 値のとき、企業対応／本人対応 dropdown の表示選択肢を絞る（描画のみ。保存値・API・スキーマは変更しない）。
 
-| entryFlagDetail | 企業対応（2択） | 本人対応（2択） |
+| entryFlagDetail | 企業対応 | 本人対応 |
 |--|--|--|
-| `一次面接選考中` / `二次面接選考中` / `最終面接選考中` | `所感報告前` / `所感報告済` | `本人所感回収中` / `本人所感回収済` |
-| `適性検査受講中` | `受講完了報告前` / `受講完了報告済` | `受講完了未確認` / `受講完了確認済` |
+| `一次面接選考中` / `二次面接選考中` / `最終面接選考中` | `所感報告前` / `所感報告済`（2択） | `本人所感回収中` / `本人所感回収済`（2択） |
+| `適性検査受講中` | `受講完了報告前` / `受講完了報告済`（2択） | `受講完了未確認` / `受講完了確認済`（2択） |
+| `一次日程調整中` / `二次日程調整中` / `最終日程調整中` | **制限なし**（全選択肢） | `見送り通知未送信` / `見送り通知送信済` / `選考通過連絡前` / `日程回収中` / `日程回収済` / `日程通知前` / `日程通知済`（7択） |
 
 - 上記以外の `entryFlagDetail` では従来どおり全選択肢を表示
+- マップ各エントリの `company`/`person` は **片側のみ optional**。未定義の側は制限せず全選択肢
 - 既存値の保護: 現在値が制限に含まれない場合は**現在値だけ残す**（書き換え・空欄化しない）
 - 適用箇所（EntryTable.tsx）: `restrictByDetail()`（既存 `filterFlagOptions()` の後段で適用）
-- 関連定数（EntryTable.tsx 内）: `DETAIL_FLAG_RESTRICTIONS`（entryFlagDetail → { company, person } のマップ。verbatim 文字列）
+- 関連定数（EntryTable.tsx 内）: `DETAIL_FLAG_RESTRICTIONS`（entryFlagDetail → `{ company?, person? }` のマップ。verbatim 文字列）/ `PERSON_FLAGS_IN_SCHEDULING`（日程調整中の本人対応7値）
 - 値の由来: `src/lib/constants/entry-flag-rules.ts` の `COMPANY_FLAG_RULES["面接"]` / `PERSON_FLAG_RULES["面接"]` および `EntryBoard.tsx` L227-229 の自動遷移と一致
+
+### EntryTable: 内定/承諾フラグ選択時の日付自動入力（サーバ側）
+
+- 操作: エントリーフラグを `内定` に選択 → `offerDate`（内定日）に JST 当日を自動入力
+- 操作: フラグ詳細を `承諾` に選択 → `acceptanceDate`（承諾日）に JST 当日を自動入力
+- **空欄時のみ入力。既存値は上書きしない**（手入力値を保護）
+- 内定/承諾以外に戻しても既存日付は**消さない**
+- 実装箇所: `src/app/api/entries/[entryId]/flags/route.ts` の PATCH。`prisma.jobEntry.findUnique` で現在の `offerDate`/`acceptanceDate` を確認し、null のときだけ `data` に追加
+- 日付生成: `jstDateStringToDbDate(todayJstDateString())`（`src/lib/dailyReport/jstDate.ts`）。`todayJstDateString` は `toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })` で JST YYYY-MM-DD を取得し、`new Date("YYYY-MM-DDT00:00:00.000Z")` で UTC midnight Date に変換。他の日付フィールド（entryDate 等）の保存規約と同一。**`toISOString().slice(0,10)` は使わない**（罠 #17）
 
 ---
 
