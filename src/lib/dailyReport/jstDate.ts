@@ -125,3 +125,23 @@ export function jstYearStart(dateStr: string): Date {
   const year = dateStr.slice(0, 4);
   return new Date(`${year}-01-01T00:00:00+09:00`);
 }
+
+/**
+ * T-072: 「YYYY-MM」（月単位）の月初 0:00 JST を返す。
+ * 例：jstMonthRangeStart("2026-04") → 2026-04-01T00:00:00+09:00。
+ */
+export function jstMonthRangeStart(yyyyMm: string): Date {
+  return new Date(`${yyyyMm}-01T00:00:00+09:00`);
+}
+
+/**
+ * T-072: 「YYYY-MM」の月末 23:59:59.999 JST を返す。
+ * 翌月 1 日 0:00 JST の 1ms 前を返す方式で、月の日数差・うるう年に依存せず安全。
+ */
+export function jstMonthRangeEnd(yyyyMm: string): Date {
+  const [y, m] = yyyyMm.split("-").map((s) => parseInt(s, 10));
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+  const mm = String(nextM).padStart(2, "0");
+  return new Date(new Date(`${nextY}-${mm}-01T00:00:00+09:00`).getTime() - 1);
+}
