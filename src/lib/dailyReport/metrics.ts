@@ -106,11 +106,14 @@ export async function computeCaMetricsForRange(params: {
     : { interviewerUserId: "__nonexistent__" };
 
   // 求人（CandidateFile, uploadedByUserId = User.id）
-  // エントリー以降（JobEntry, careerAdvisorId = Employee.id）
-  // 管理画面 /api/entries と一致させるため、既定で isActive=true & archivedAt=null を付与する
-  // （T-067 の自動失効で isActive=false になった古い紹介枠を除外）。
+  //
+  // エントリー以降（JobEntry）：担当キーは候補者の担当 CA = candidate.employeeId（Employee.id）。
+  // JobEntry.careerAdvisorId は実データの 99.9%（28007 行中 27981 行）が NULL のため使えない。
+  // 管理画面 /api/entries の「担当」フィルタも careerAdvisorName → candidate.employee.name で
+  // 引いており（EntryBoard.tsx は careerAdvisorName を送る）、候補者の担当 CA が真の担当キー。
+  // 既定で isActive=true & archivedAt=null を付与（T-067 の自動失効レコードを除外）。
   const advisorFilter = {
-    careerAdvisorId: employeeId ?? "__nonexistent__",
+    candidate: { employeeId: employeeId ?? "__nonexistent__" },
     isActive: true,
     archivedAt: null,
   };
