@@ -1,26 +1,38 @@
-// T-071 週マトリクス API：起算日から 5 週に分割し、各週の実績（FileMaker 形）＋目標＋TOTAL＋達成率を返す。
+// T-071 実績表マトリクス API（粒度 day/week/month 対応）。
+// 起算日(anchorDate)を起点に、粒度に応じた列（日5/週5/月6）の実績＋目標＋TOTAL＋達成率を返す。
 //
-// 実績は computeWeeklyMatrix（weeklyMatrix.ts、raw SQL）で算出。
-//   - 面談：初回/2回目/3回目以降/合計
-//   - 求人紹介・エントリー：新規/既存/合計 × 件数・人数・1人当たり
-//   - 選考状況：書類通過・内定・承諾（人数）＋決定売上・決定単価
-// TOTAL は週別合計ではなく「起算日〜W5末の全期間」で再集計（ユニーク重複排除）。
-// 目標は対象月（起算日が属する JST 年月）の PerformanceTarget を週営業日按分（T-073 allocateToWeeks）。
-// 達成率＝TOTAL 実績 ÷ TOTAL 目標（人数の達成率）。
+// 実績は computeWeeklyMatrix（weeklyMatrix.ts、raw SQL）を各列レンジで呼ぶ（数え方は変更しない）。
+// TOTAL は列別合計ではなく「全列をカバーする全期間」で再集計（候補者ユニーク重複を排除）。
+// 目標（粒度別）：
+//   - week  ：起算月の月目標を 5 週営業日按分（allocateToWeeks）。TOTAL 目標＝月目標。
+//   - day   ：起算月の月目標 ÷ 月営業日数 を「営業日の列」に配分（土日祝列は 0）。TOTAL＝列合計。
+//   - month ：各列の月の登録目標をそのまま。未登録は null。TOTAL＝登録分の合計。
+// 後方互換：granularity 未指定は week。
+// エンドポイント名は weekly のまま（呼び出しは PerformancePanel のみ）。
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
-import { splitIntoFiveWeeks } from "@/lib/performance/fiveWeeks";
-import { allocateToWeeks, type WeekBucket } from "@/lib/performance/businessDays";
+import { buildColumns, type Granularity } from "@/lib/performance/columns";
+import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/performance/businessDays";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// 目標を持つ主要メトリクス（按分・達成率の対象）
-type TargetMetricKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
+type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
+const TKEYS: TKey[] = ["interviewFirst", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance"];
 
-function actualOf(m: WeeklyMatrix, key: TargetMetricKey): number {
+// PerformanceTarget のフィールド名
+const TARGET_FIELD: Record<TKey, "interviewCount" | "introductionCount" | "entryCount" | "documentPassCount" | "offerCount" | "acceptanceCount"> = {
+  interviewFirst: "interviewCount",
+  proposalUniq: "introductionCount",
+  entryUniq: "entryCount",
+  documentPass: "documentPassCount",
+  offer: "offerCount",
+  acceptance: "acceptanceCount",
+};
+
+function actualOf(m: WeeklyMatrix, key: TKey): number {
   switch (key) {
     case "interviewFirst": return m.interview.first;
     case "proposalUniq": return m.proposal.total.uniq;
@@ -30,7 +42,6 @@ function actualOf(m: WeeklyMatrix, key: TargetMetricKey): number {
     case "acceptance": return m.selection.acceptance;
   }
 }
-
 function rate(num: number, den: number | null): number | null {
   if (den == null || den <= 0) return null;
   return num / den;
@@ -43,6 +54,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const employeeId = searchParams.get("employeeId");
   const anchorDate = searchParams.get("anchorDate");
+  const gParam = searchParams.get("granularity");
+  const granularity: Granularity = gParam === "day" || gParam === "month" ? gParam : "week";
+
   if (!employeeId || !anchorDate || !DATE_RE.test(anchorDate)) {
     return NextResponse.json({ error: "employeeId と anchorDate(YYYY-MM-DD) が必要です" }, { status: 400 });
   }
@@ -54,79 +68,85 @@ export async function GET(req: Request) {
   if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
   const userId = employee.userId ?? "__nonexistent__";
 
-  const weeks = splitIntoFiveWeeks(anchorDate);
+  const columns = buildColumns(granularity, anchorDate);
+  const anchorMonth = anchorDate.slice(0, 7);
 
-  // 各週の実績＋TOTAL（全期間再集計）を並列
-  const [weeklyMatrices, totalMatrix] = await Promise.all([
-    Promise.all(weeks.map((w) => computeWeeklyMatrix({ employeeId: employee.id, userId, from: w.from, to: w.to }))),
-    computeWeeklyMatrix({ employeeId: employee.id, userId, from: weeks[0].from, to: weeks[weeks.length - 1].to }),
+  // 各列の実績＋TOTAL（全列カバー範囲で再集計）を並列
+  const [columnMatrices, totalMatrix] = await Promise.all([
+    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: employee.id, userId, from: c.from, to: c.to }))),
+    computeWeeklyMatrix({ employeeId: employee.id, userId, from: columns[0].from, to: columns[columns.length - 1].to }),
   ]);
 
-  // 目標（対象月）
-  const yearMonth = anchorDate.slice(0, 7);
-  const target = await prisma.performanceTarget.findUnique({
-    where: { employeeId_yearMonth: { employeeId: employee.id, yearMonth } },
+  // 目標：必要な月の PerformanceTarget をまとめて取得
+  const neededMonths = Array.from(new Set([anchorMonth, ...columns.map((c) => c.yearMonth)]));
+  const targetRows = await prisma.performanceTarget.findMany({
+    where: { employeeId: employee.id, yearMonth: { in: neededMonths } },
   });
+  const targetByMonth = new Map(targetRows.map((t) => [t.yearMonth, t]));
+  const targetExists = (granularity === "month")
+    ? columns.some((c) => targetByMonth.has(c.yearMonth))
+    : targetByMonth.has(anchorMonth);
 
-  const monthTargets: Record<TargetMetricKey, number | null> = {
-    interviewFirst: target?.interviewCount ?? null,
-    proposalUniq: target?.introductionCount ?? null,
-    entryUniq: target?.entryCount ?? null,
-    documentPass: target?.documentPassCount ?? null,
-    offer: target?.offerCount ?? null,
-    acceptance: target?.acceptanceCount ?? null,
-  };
+  // 粒度別の目標算出
+  function targetVal(ym: string, key: TKey): number | null {
+    const t = targetByMonth.get(ym);
+    return t ? (t[TARGET_FIELD[key]] as number) : null;
+  }
 
-  // 5 週営業日按分
-  const buckets: WeekBucket[] = weeks.map((w) => ({
-    weekIndex: w.weekIndex, startDate: w.fromDateStr, endDate: w.toDateStr, businessDays: w.businessDays,
-  }));
-  const allocByKey: Record<TargetMetricKey, (number | null)[]> = {} as Record<TargetMetricKey, (number | null)[]>;
-  (Object.keys(monthTargets) as TargetMetricKey[]).forEach((k) => {
-    const v = monthTargets[k];
-    allocByKey[k] = v == null ? weeks.map(() => null) : allocateToWeeks(v, buckets);
-  });
+  // perColumnTargets[key] = 各列の目標、totalTargets[key] = TOTAL目標
+  const perColumnTargets: Record<TKey, (number | null)[]> = {} as Record<TKey, (number | null)[]>;
+  const totalTargets: Record<TKey, number | null> = {} as Record<TKey, number | null>;
 
-  const weeksOut = weeks.map((w, i) => {
-    const targets: Record<TargetMetricKey, number | null> = {
-      interviewFirst: allocByKey.interviewFirst[i],
-      proposalUniq: allocByKey.proposalUniq[i],
-      entryUniq: allocByKey.entryUniq[i],
-      documentPass: allocByKey.documentPass[i],
-      offer: allocByKey.offer[i],
-      acceptance: allocByKey.acceptance[i],
-    };
+  for (const key of TKEYS) {
+    if (granularity === "week") {
+      const monthT = targetVal(anchorMonth, key);
+      const buckets: WeekBucket[] = columns.map((c) => ({ weekIndex: c.index, startDate: c.fromDateStr, endDate: c.toDateStr, businessDays: c.businessDays }));
+      perColumnTargets[key] = monthT == null ? columns.map(() => null) : allocateToWeeks(monthT, buckets);
+      totalTargets[key] = monthT;
+    } else if (granularity === "day") {
+      const monthT = targetVal(anchorMonth, key);
+      const mBiz = monthBusinessDays(anchorMonth);
+      const perDay = monthT != null && mBiz > 0 ? monthT / mBiz : null;
+      perColumnTargets[key] = columns.map((c) => (perDay == null ? null : c.businessDays > 0 ? perDay : 0));
+      totalTargets[key] = perDay == null ? null : perColumnTargets[key].reduce((s: number, v) => s + (v ?? 0), 0);
+    } else {
+      // month：各列の月の登録目標をそのまま。TOTAL は登録分の合計（全 null なら null）。
+      const vals = columns.map((c) => targetVal(c.yearMonth, key));
+      perColumnTargets[key] = vals;
+      const present = vals.filter((v): v is number => v != null);
+      totalTargets[key] = present.length > 0 ? present.reduce((s, v) => s + v, 0) : null;
+    }
+  }
+
+  const columnsOut = columns.map((c, i) => {
+    const targets: Record<TKey, number | null> = {} as Record<TKey, number | null>;
+    for (const key of TKEYS) targets[key] = perColumnTargets[key][i];
     return {
-      weekIndex: w.weekIndex,
-      label: w.label,
-      from: w.fromDateStr,
-      to: w.toDateStr,
-      businessDays: w.businessDays,
-      matrix: weeklyMatrices[i],
+      index: c.index,
+      label: c.label,
+      subLabel: c.subLabel,
+      from: c.fromDateStr,
+      to: c.toDateStr,
+      businessDays: c.businessDays,
+      matrix: columnMatrices[i],
       targets,
     };
   });
 
-  const achievement: Record<TargetMetricKey, number | null> = {
-    interviewFirst: rate(actualOf(totalMatrix, "interviewFirst"), monthTargets.interviewFirst),
-    proposalUniq: rate(actualOf(totalMatrix, "proposalUniq"), monthTargets.proposalUniq),
-    entryUniq: rate(actualOf(totalMatrix, "entryUniq"), monthTargets.entryUniq),
-    documentPass: rate(actualOf(totalMatrix, "documentPass"), monthTargets.documentPass),
-    offer: rate(actualOf(totalMatrix, "offer"), monthTargets.offer),
-    acceptance: rate(actualOf(totalMatrix, "acceptance"), monthTargets.acceptance),
-  };
+  const achievement: Record<TKey, number | null> = {} as Record<TKey, number | null>;
+  for (const key of TKEYS) achievement[key] = rate(actualOf(totalMatrix, key), totalTargets[key]);
 
   return NextResponse.json({
     employee: { id: employee.id, name: employee.name },
     anchorDate,
-    yearMonth,
-    targetExists: !!target,
-    weeks: weeksOut,
+    granularity,
+    targetExists,
+    columns: columnsOut,
     total: {
-      from: weeks[0].fromDateStr,
-      to: weeks[weeks.length - 1].toDateStr,
+      from: columns[0].fromDateStr,
+      to: columns[columns.length - 1].toDateStr,
       matrix: totalMatrix,
-      targets: monthTargets,
+      targets: totalTargets,
       achievement,
     },
   });

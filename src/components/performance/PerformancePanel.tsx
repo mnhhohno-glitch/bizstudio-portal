@@ -18,13 +18,21 @@ type WeeklyMatrix = {
   selection: { documentPass: number; offer: number; acceptance: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
 };
 type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
-type WeekOut = { weekIndex: number; label: string; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
+type ColOut = { index: number; label: string; subLabel: string | null; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
+type Granularity = "day" | "week" | "month";
 type WeeklyResp = {
-  weeks: WeekOut[];
+  granularity: Granularity;
+  columns: ColOut[];
   total: { from: string; to: string; matrix: WeeklyMatrix; targets: Record<TKey, number | null>; achievement: Record<TKey, number | null> };
   targetExists: boolean;
 };
 type Cohort = { yearMonth: string; entry: number; documentPass: number; offer: number; acceptance: number; documentPassRate: number | null; offerRate: number | null; acceptanceRate: number | null };
+
+const GRANULARITIES: { key: Granularity; label: string }[] = [
+  { key: "day", label: "日" },
+  { key: "week", label: "週" },
+  { key: "month", label: "半年" },
+];
 
 const TABS = [
   { key: "interview", label: "面談実績" },
@@ -94,6 +102,7 @@ export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [anchorDate, setAnchorDate] = useState<string>(() => todayJst());
+  const [granularity, setGranularity] = useState<Granularity>("week");
   const [tab, setTab] = useState<TabKey>("entry");
   const [weekly, setWeekly] = useState<WeeklyResp | null>(null);
   const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
@@ -115,10 +124,10 @@ export default function PerformancePanel() {
     if (!employeeId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/performance/weekly?employeeId=${employeeId}&anchorDate=${anchorDate}`);
+      const res = await fetch(`/api/performance/weekly?employeeId=${employeeId}&anchorDate=${anchorDate}&granularity=${granularity}`);
       if (res.ok) setWeekly(await res.json());
     } catch { /* */ } finally { setLoading(false); }
-  }, [employeeId, anchorDate]);
+  }, [employeeId, anchorDate, granularity]);
 
   const fetchCohort = useCallback(async () => {
     if (!employeeId) return;
@@ -155,6 +164,21 @@ export default function PerformancePanel() {
           onChange={(e) => setAnchorDate(e.target.value)}
           className="text-[12px] border border-gray-200 rounded px-2 py-1"
         />
+        {/* 粒度切替（cohort タブ以外で有効） */}
+        <div className="flex gap-0.5 ml-1">
+          {GRANULARITIES.map((g) => (
+            <button
+              key={g.key}
+              onClick={() => setGranularity(g.key)}
+              disabled={tab === "cohort"}
+              className={`px-2 py-1 text-[12px] rounded border transition-colors disabled:opacity-40 ${
+                granularity === g.key ? "bg-[#374151] text-white border-[#374151]" : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setShowTargetModal(true)}
           disabled={!employeeId}
@@ -205,7 +229,7 @@ export default function PerformancePanel() {
 
 function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Row[] }) {
   if (!weekly) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
-  const { weeks, total } = weekly;
+  const { columns, total } = weekly;
   const fmt = (r: Row, v: number | null) => (r.fmt ? r.fmt(v) : numFmt(v));
 
   return (
@@ -213,9 +237,10 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
       <thead>
         <tr className="text-[#6B7280]">
           <th className="sticky left-0 bg-white px-3 py-2.5 text-left font-medium border-b border-gray-200 min-w-[200px]">段階</th>
-          {weeks.map((w) => (
-            <th key={w.weekIndex} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">
-              {w.label}<div className="text-[11px] text-[#9CA3AF]">{mdLabel(w.from)}〜{mdLabel(w.to)}</div>
+          {columns.map((c) => (
+            <th key={c.index} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">
+              {c.label}
+              <div className="text-[11px] text-[#9CA3AF]">{c.subLabel ?? `${mdLabel(c.from)}〜${mdLabel(c.to)}`}</div>
               <div className="text-[10px] text-[#C0C4CC]">目標｜実績</div>
             </th>
           ))}
@@ -229,11 +254,11 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           return (
             <tr key={r.label} className="hover:bg-[#F9FAFB]">
               <td className={`sticky left-0 bg-white px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
-              {weeks.map((w) => {
-                const a = r.actual(w.matrix);
-                const tgt = hasTarget ? w.targets[r.targetKey!] : null;
+              {columns.map((c) => {
+                const a = r.actual(c.matrix);
+                const tgt = hasTarget ? c.targets[r.targetKey!] : null;
                 return (
-                  <td key={w.weekIndex} className="px-3 py-2 text-center tabular-nums">
+                  <td key={c.index} className="px-3 py-2 text-center tabular-nums">
                     {hasTarget && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
                     <span className="text-[#374151] font-medium">{fmt(r, a)}</span>
                   </td>

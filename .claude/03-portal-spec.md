@@ -242,8 +242,14 @@ model InterviewMemo {
 
 - `GET /api/performance?employeeId=Y`：指定 CA の 6 期間分の指標をまとめて返す（`Promise.all`）。employeeId 省略時はログインユーザー本人を解決。閲覧権限は**全 CA 可**（admin 限定にしない＝確定仕様）。
 - `GET /api/performance/advisors`：`jobCategory='CA'` の active Employee 一覧（担当セレクト用）＋本人 employeeId。
-- `GET /api/performance/weekly?employeeId=Y&anchorDate=YYYY-MM-DD`（T-071 週マトリクス・FileMaker 形）：起算日から 5 週に分割し、各週の実績＋目標＋TOTAL＋達成率を返す。
-  - 週分割（`src/lib/performance/fiveWeeks.ts:splitIntoFiveWeeks`）：W1＝起算日〜その週の日曜（端数になり得る。例 水曜起算なら水〜日5日）、W2〜W5＝月〜日のフル暦週。
+- `GET /api/performance/weekly?employeeId=Y&anchorDate=YYYY-MM-DD&granularity=day|week|month`（T-071 マトリクス・FileMaker 形・粒度切替）：起算日を起点に、粒度に応じた列の実績＋目標＋TOTAL＋達成率を返す。レスポンスは `columns[]`（旧 `weeks[]` を一般化）＋ `total` ＋ `granularity`。後方互換：未指定＝week。
+  - **粒度と列**（`src/lib/performance/columns.ts:buildColumns`）：
+    - `day`：起算日から **5 日**（各列 1 日）。営業日列の businessDays=1、土日祝=0。
+    - `week`：起算日から **5 週**（W1＝起算日〜最初の日曜の端数、W2-5＝月〜日。`splitIntoFiveWeeks`）。
+    - `month`：起算月から **6 ヶ月**（各列 1 暦月）。
+  - 数え方は全粒度共通（各列レンジ内の候補者ユニーク等、`computeWeeklyMatrix`）。検証済み（day/week/month とも各列 entry uniq が SQL と一致、2026-05=16人 等）。
+  - **TOTAL は列別合計でなく全列カバー範囲で再ユニーク集計**（day で TOTAL=4 vs 単純合計6 のように一致しないのは仕様）。
+  - **目標（粒度別）**：week＝起算月の月目標を 5 週営業日按分（`allocateToWeeks`、TOTAL=月目標）。day＝月目標÷月営業日数を営業日列に配分（土日祝列0、TOTAL=列合計）。month＝各列の月の登録目標そのまま（未登録は null、TOTAL=登録分の合計）。達成率＝TOTAL実績÷TOTAL目標。
   - 各週の実績＝`src/lib/performance/weeklyMatrix.ts:computeWeeklyMatrix`（raw SQL）。返す内容：
     - 面談：初回(count=1)/2回目(=2)/3回目以降(>=3)/合計、notDeclined。
     - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者の**初回**提案/エントリー（`MIN(date) OVER (PARTITION BY candidate)` がレンジ内）。既存＝初回がレンジより前。新規uniq+既存uniq=合計uniq を検証済み。
