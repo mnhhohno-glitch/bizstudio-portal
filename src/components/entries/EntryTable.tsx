@@ -153,6 +153,33 @@ function filterFlagOptions(
   });
 }
 
+// 面接「選考中」状態のときに企業対応／本人対応で選べる値を絞る（T-066 関連の運用要件）。
+// 値は src/lib/constants/entry-flag-rules.ts と EntryBoard.tsx の auto-update（"所感報告前"）
+// で使われている verbatim 文字列に合わせる。
+const SCREENING_DETAILS = ["一次面接選考中", "二次面接選考中", "最終面接選考中"];
+const COMPANY_FLAGS_IN_SCREENING = ["所感報告前", "所感報告済"];
+const PERSON_FLAGS_IN_SCREENING = ["本人所感回収中", "本人所感回収済"];
+
+function isScreeningDetail(entryFlagDetail: string | null | undefined): boolean {
+  return !!entryFlagDetail && SCREENING_DETAILS.includes(entryFlagDetail);
+}
+
+// 「選考中」状態のときに表示する選択肢を制限する。
+// 現在値が制限外の場合は、データを書き換えずに「現在値だけは残す」（仕様確定）。
+function restrictForScreening(
+  options: string[],
+  entryFlagDetail: string | null | undefined,
+  allowedSet: string[],
+  currentValue: string | null | undefined
+): string[] {
+  if (!isScreeningDetail(entryFlagDetail)) return options;
+  const result = options.filter((opt) => allowedSet.includes(opt));
+  if (currentValue && options.includes(currentValue) && !result.includes(currentValue)) {
+    result.push(currentValue);
+  }
+  return result;
+}
+
 // T-048: 面接日超過判定。entryFlagDetail が "{stage}面接実施前" の状態で
 // 面接日が今日より過去なら true。JST 日付ベース比較（罠 #17 準拠）。
 function isInterviewOverdue(entry: Entry, stage: "first" | "second" | "final"): boolean {
@@ -404,8 +431,18 @@ export default function EntryTable({
   function renderCell(entry: Entry, col: ColConfig) {
     const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
     const rawPersonOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
-    const companyOptions = filterFlagOptions(rawCompanyOptions, entry.entryFlagDetail, entry.companyFlag);
-    const personOptions = filterFlagOptions(rawPersonOptions, entry.entryFlagDetail, entry.personFlag);
+    const companyOptions = restrictForScreening(
+      filterFlagOptions(rawCompanyOptions, entry.entryFlagDetail, entry.companyFlag),
+      entry.entryFlagDetail,
+      COMPANY_FLAGS_IN_SCREENING,
+      entry.companyFlag
+    );
+    const personOptions = restrictForScreening(
+      filterFlagOptions(rawPersonOptions, entry.entryFlagDetail, entry.personFlag),
+      entry.entryFlagDetail,
+      PERSON_FLAGS_IN_SCREENING,
+      entry.personFlag
+    );
 
     switch (col.key) {
       case "candidate":
