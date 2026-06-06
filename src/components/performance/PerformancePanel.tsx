@@ -26,7 +26,15 @@ type WeeklyResp = {
   total: { from: string; to: string; matrix: WeeklyMatrix; targets: Record<TKey, number | null>; achievement: Record<TKey, number | null> };
   targetExists: boolean;
 };
-type Cohort = { yearMonth: string; entry: number; documentPass: number; offer: number; acceptance: number; documentPassRate: number | null; offerRate: number | null; acceptanceRate: number | null };
+type Cohort = {
+  yearMonth: string;
+  interview: { first: number; second: number; thirdPlus: number; total: number };
+  proposal: { fresh: number; existing: number; total: number };
+  entry: { fresh: number; existing: number; total: number };
+  documentPass: number; offer: number; decided: number;
+  documentPassRate: number | null; offerRate: number | null; decidedRate: number | null;
+  decidedRevenue: number | null; decidedUnitPrice: number | null;
+};
 type DetailRow = Record<string, string | number | null>;
 type DetailResp = { tab: string; stage?: string | null; summary: { persons: number; records: number }; rows: DetailRow[] };
 
@@ -55,44 +63,51 @@ const pctFmt = (r: number | null | undefined) => (r == null ? "—" : `${(r * 10
 const yenFmt = (v: number | null | undefined) => (v == null ? "—" : `¥${Math.round(v).toLocaleString()}`);
 const mdLabel = (d: string) => { const [, m, day] = d.split("-"); return `${parseInt(m)}/${parseInt(day)}`; };
 
-// 行定義：actual 抽出関数＋任意 targetKey＋フォーマッタ
+// 行定義：actual 抽出関数＋任意 targetKey＋フォーマッタ。
+// band＝薄青の帯色（提案/エントリーの人数行のみ）。isTotal＝合計行（上罫線＋太字）。
 type Row = {
   label: string;
   indent?: boolean;
+  band?: boolean;
+  isTotal?: boolean;
   actual: (m: WeeklyMatrix) => number | null;
   targetKey?: TKey;
   fmt?: (v: number | null) => string;
 };
 
 const ROWS: Record<Exclude<TabKey, "cohort">, Row[]> = {
+  // 面談：色なし。合計面談は上罫線＋太字で区別。
   interview: [
     { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
     { label: "求人面談（2回目）", actual: (m) => m.interview.second },
     { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
-    { label: "合計面談", actual: (m) => m.interview.total },
+    { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
   ],
+  // 求人紹介：人数行に帯色。
   proposal: [
-    { label: "初回提案 人数", actual: (m) => m.proposal.fresh.uniq },
+    { label: "初回提案 人数", band: true, actual: (m) => m.proposal.fresh.uniq },
     { label: "初回提案 件数", indent: true, actual: (m) => m.proposal.fresh.recs },
     { label: "初回提案 1人当たり", indent: true, actual: (m) => m.proposal.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "既存提案 人数", actual: (m) => m.proposal.existing.uniq },
+    { label: "既存提案 人数", band: true, actual: (m) => m.proposal.existing.uniq },
     { label: "既存提案 件数", indent: true, actual: (m) => m.proposal.existing.recs },
     { label: "既存提案 1人当たり", indent: true, actual: (m) => m.proposal.existing.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "合計提案 人数", actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
+    { label: "合計提案 人数", band: true, isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
     { label: "合計提案 件数", indent: true, actual: (m) => m.proposal.total.recs },
     { label: "合計提案 1人当たり", indent: true, actual: (m) => m.proposal.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
+  // エントリー：人数行に帯色。
   entry: [
-    { label: "新規エントリー 人数", actual: (m) => m.entry.fresh.uniq },
+    { label: "新規エントリー 人数", band: true, actual: (m) => m.entry.fresh.uniq },
     { label: "新規エントリー 件数", indent: true, actual: (m) => m.entry.fresh.recs },
     { label: "新規エントリー 1人当たり", indent: true, actual: (m) => m.entry.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "既存エントリー 人数", actual: (m) => m.entry.existing.uniq },
+    { label: "既存エントリー 人数", band: true, actual: (m) => m.entry.existing.uniq },
     { label: "既存エントリー 件数", indent: true, actual: (m) => m.entry.existing.recs },
     { label: "既存エントリー 1人当たり", indent: true, actual: (m) => m.entry.existing.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "合計エントリー 人数", actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
+    { label: "合計エントリー 人数", band: true, isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
     { label: "合計エントリー 件数", indent: true, actual: (m) => m.entry.total.recs },
     { label: "合計エントリー 1人当たり", indent: true, actual: (m) => m.entry.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
+  // 選考状況：色なし。
   selection: [
     { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
     { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
@@ -101,6 +116,10 @@ const ROWS: Record<Exclude<TabKey, "cohort">, Row[]> = {
     { label: "決定単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
   ],
 };
+
+// ダークグレーのヘッダ用クラス。
+const HEAD_CLS = "bg-[#3C3C3C] text-white";
+const SUBHEAD_CLS = "text-[#D1D5DB]"; // 目標｜実績 等のサブ文字
 
 export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
@@ -112,6 +131,7 @@ export default function PerformancePanel() {
   const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
   const [selectionStage, setSelectionStage] = useState<"documentPass" | "offer" | "acceptance">("documentPass");
   const [detail, setDetail] = useState<DetailResp | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showTargetModal, setShowTargetModal] = useState(false);
 
@@ -246,36 +266,55 @@ export default function PerformancePanel() {
         )}
       </div>
 
-      {/* 明細一覧（マトリクスタブ連動。cohort は対象外） */}
+      {/* 明細を見るボタン（マトリクスタブ連動。cohort は対象外）→ ポップアップ */}
       {tab !== "cohort" && (
         <div className="border-t border-[#E5E7EB] px-4 py-3">
-          <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <h3 className="text-[13px] font-medium text-[#374151]">明細一覧</h3>
-            {tab === "selection" && (
-              <div className="flex gap-1">
-                {([["documentPass", "書類選考"], ["offer", "内定"], ["acceptance", "承諾"]] as const).map(([k, l]) => (
-                  <button
-                    key={k}
-                    onClick={() => setSelectionStage(k)}
-                    className={`px-2 py-0.5 text-[12px] rounded border transition-colors ${
-                      selectionStage === k ? "bg-[#2563EB] text-white border-[#2563EB]" : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
-                    }`}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            )}
-            {detail && (
-              <span className="text-[12px] text-[#6B7280] ml-auto">
-                対象 <span className="font-semibold text-[#374151]">{detail.summary.persons}</span> 人 / {detail.summary.records} 件
-              </span>
-            )}
-          </div>
-          <div className="overflow-x-auto">
-            <DetailTable tab={tab} detail={detail} />
-          </div>
+          <button
+            onClick={() => setShowDetail(true)}
+            disabled={!detail}
+            className="text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-3 py-1.5 hover:bg-blue-50 disabled:opacity-50"
+          >
+            📋 明細を見る{detail ? `（${detail.summary.persons} 人 / ${detail.summary.records} 件）` : ""}
+          </button>
         </div>
+      )}
+
+      {/* 明細ポップアップ（sticky ヘッダ＋スクロール） */}
+      {showDetail && tab !== "cohort" && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setShowDetail(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[1200px] max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
+                <h2 className="text-[14px] font-semibold">明細一覧</h2>
+                {tab === "selection" && (
+                  <div className="flex gap-1">
+                    {([["documentPass", "書類選考"], ["offer", "内定"], ["acceptance", "承諾"]] as const).map(([k, l]) => (
+                      <button
+                        key={k}
+                        onClick={() => setSelectionStage(k)}
+                        className={`px-2 py-0.5 text-[12px] rounded border transition-colors ${
+                          selectionStage === k ? "bg-[#2563EB] text-white border-[#2563EB]" : "border-[#6B7280] text-[#D1D5DB] hover:bg-[#4A4A4A]"
+                        }`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {detail && (
+                  <span className="text-[12px] text-[#D1D5DB] ml-auto">
+                    対象 <span className="font-semibold text-white">{detail.summary.persons}</span> 人 / {detail.summary.records} 件
+                  </span>
+                )}
+                <button onClick={() => setShowDetail(false)} className="text-white hover:text-gray-300 text-lg px-1">✕</button>
+              </div>
+              <div className="overflow-auto flex-1">
+                <DetailTable tab={tab} detail={detail} />
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -289,18 +328,18 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
   return (
     <table className="w-full text-[13px] border-collapse">
       <thead>
-        <tr className="text-[#6B7280]">
-          <th className="sticky left-0 bg-white px-3 py-2.5 text-left font-medium border-b border-gray-200 min-w-[200px]">段階</th>
+        <tr>
+          <th className={`sticky left-0 ${HEAD_CLS} px-3 py-2.5 text-left font-medium min-w-[200px]`}>段階</th>
           {columns.map((c) => (
-            <th key={c.index} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap bg-[#EEF2F7]">
+            <th key={c.index} className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>
               {c.label}
-              <div className="text-[11px] text-[#9CA3AF]">{c.subLabel ?? `${mdLabel(c.from)}〜${mdLabel(c.to)}`}</div>
-              <div className="text-[10px] text-[#C0C4CC]">目標｜実績</div>
+              <div className={`text-[11px] ${SUBHEAD_CLS}`}>{c.subLabel ?? `${mdLabel(c.from)}〜${mdLabel(c.to)}`}</div>
+              <div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div>
             </th>
           ))}
-          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 bg-[#F9FAFB] whitespace-nowrap">合計<div className="text-[10px] text-[#C0C4CC]">目標｜実績</div></th>
-          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap min-w-[70px]">平均<div className="text-[10px] text-[#C0C4CC]">/列</div></th>
-          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap min-w-[80px]">達成率</th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div></th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[70px]`}>平均<div className={`text-[10px] ${SUBHEAD_CLS}`}>/列</div></th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[80px]`}>達成率</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
@@ -309,13 +348,12 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           const totalActual = r.actual(total.matrix);
           // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
           const avg = totalActual == null || columns.length === 0 ? null : totalActual / columns.length;
-          // FileMaker 風：人数（primary、非 indent）行に薄い青、件数/1人当たり（indent）行は白。
-          const primary = !r.indent;
-          const rowBg = primary ? "bg-[#EFF6FF]" : "bg-white";
-          const stickyBg = primary ? "bg-[#EFF6FF]" : "bg-white";
+          // 帯色（提案/エントリーの人数行のみ）。合計行は上罫線＋太字。
+          const rowBg = r.band ? "bg-[#EFF6FF]" : "bg-white";
+          const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
           return (
-            <tr key={r.label} className={`${rowBg} hover:bg-[#E0EAFF]`}>
-              <td className={`sticky left-0 ${stickyBg} px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
+            <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#E0EAFF]`}>
+              <td className={`sticky left-0 ${rowBg} px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
               {columns.map((c) => {
                 const a = r.actual(c.matrix);
                 const tgt = hasTarget ? c.targets[r.targetKey!] : null;
@@ -326,7 +364,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
                   </td>
                 );
               })}
-              <td className="px-3 py-2 text-center tabular-nums bg-[#F9FAFB]">
+              <td className="px-3 py-2 text-center tabular-nums">
                 {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
                 <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>
               </td>
@@ -344,38 +382,67 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
   );
 }
 
+// 直近6ヶ月の行定義。num＝人数（or 金額）、pct＝その月の%（構成比 or コホート率、null は非表示）。
+type CohortRow = {
+  label: string;
+  num: (c: Cohort) => number | null;
+  pct: (c: Cohort) => number | null;
+  fmt?: (v: number | null) => string;
+  band?: "blue" | "orange"; // 合計＝オレンジ、売上系＝オレンジ
+  isTotal?: boolean;
+};
+const ratio = (n: number, d: number): number | null => (d > 0 ? n / d : null);
+
+const COHORT_ROWS: CohortRow[] = [
+  { label: "初回面談", num: (c) => c.interview.first, pct: (c) => ratio(c.interview.first, c.interview.total) },
+  { label: "求人面談（2回目）", num: (c) => c.interview.second, pct: (c) => ratio(c.interview.second, c.interview.total) },
+  { label: "既存面談（3回目以降）", num: (c) => c.interview.thirdPlus, pct: (c) => ratio(c.interview.thirdPlus, c.interview.total) },
+  { label: "合計面談", num: (c) => c.interview.total, pct: (c) => (c.interview.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "初回求人紹介", num: (c) => c.proposal.fresh, pct: (c) => ratio(c.proposal.fresh, c.proposal.total) },
+  { label: "既存求人紹介", num: (c) => c.proposal.existing, pct: (c) => ratio(c.proposal.existing, c.proposal.total) },
+  { label: "合計求人紹介", num: (c) => c.proposal.total, pct: (c) => (c.proposal.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "新規エントリー", num: (c) => c.entry.fresh, pct: (c) => ratio(c.entry.fresh, c.entry.total) },
+  { label: "既存エントリー", num: (c) => c.entry.existing, pct: (c) => ratio(c.entry.existing, c.entry.total) },
+  { label: "合計エントリー", num: (c) => c.entry.total, pct: (c) => (c.entry.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "書類選考通過", num: (c) => c.documentPass, pct: (c) => c.documentPassRate },
+  { label: "内定数", num: (c) => c.offer, pct: (c) => c.offerRate },
+  { label: "決定数（内定承諾）", num: (c) => c.decided, pct: (c) => c.decidedRate },
+  { label: "決定売上（粗利金額）", num: (c) => c.decidedRevenue, pct: () => null, fmt: yenFmt, band: "orange" },
+  { label: "売上単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
+];
+
 function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   return (
     <table className="w-full text-[13px] border-collapse">
       <thead>
-        <tr className="text-[#6B7280]">
-          <th className="sticky left-0 bg-white px-3 py-2.5 text-left font-medium border-b border-gray-200 min-w-[180px]">段階</th>
+        <tr>
+          <th className={`sticky left-0 ${HEAD_CLS} px-3 py-2.5 text-left font-medium min-w-[180px]`}>段階<div className={`text-[10px] ${SUBHEAD_CLS}`}>実績｜%</div></th>
           {cohorts.map((c) => (
-            <th key={c.yearMonth} className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap">{c.yearMonth}</th>
+            <th key={c.yearMonth} className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>{c.yearMonth}</th>
           ))}
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
-        <tr className="hover:bg-[#F9FAFB]">
-          <td className="sticky left-0 bg-white px-3 py-2 font-medium text-[#374151]">エントリー（人数）</td>
-          {cohorts.map((c) => <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums font-medium">{c.entry}</td>)}
-        </tr>
-        {([
-          ["書類通過", "documentPass", "documentPassRate"],
-          ["内定", "offer", "offerRate"],
-          ["承諾", "acceptance", "acceptanceRate"],
-        ] as const).map(([label, cntKey, rateKey]) => (
-          <tr key={label} className="hover:bg-[#F9FAFB]">
-            <td className="sticky left-0 bg-white px-3 py-2 font-medium text-[#374151]">{label}</td>
-            {cohorts.map((c) => (
-              <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums">
-                <div className="text-[#374151] font-medium">{c[cntKey] as number}</div>
-                <div className="text-[11px] text-[#2563EB]">{pctFmt(c[rateKey] as number | null)}</div>
-              </td>
-            ))}
-          </tr>
-        ))}
+        {COHORT_ROWS.map((r) => {
+          const rowBg = r.band === "orange" ? "bg-[#FFF4E6]" : r.band === "blue" ? "bg-[#EFF6FF]" : "bg-white";
+          const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
+          return (
+            <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#F3F4F6]`}>
+              <td className={`sticky left-0 ${rowBg} px-3 py-2 font-medium text-[#374151]`}>{r.label}</td>
+              {cohorts.map((c) => {
+                const n = r.num(c);
+                const pv = r.pct(c);
+                return (
+                  <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums">
+                    <div className="text-[#374151] font-medium">{r.fmt ? r.fmt(n) : numFmt(n)}</div>
+                    {pv != null && <div className="text-[11px] text-[#2563EB]">{pctFmt(pv)}</div>}
+                  </td>
+                );
+              })}
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -451,10 +518,10 @@ function DetailTable({ tab, detail }: { tab: string; detail: DetailResp | null }
   if (detail.rows.length === 0) return <div className="py-6 text-center text-[12px] text-[#9CA3AF]">対象がありません</div>;
   return (
     <table className="w-full text-[12px] border-collapse">
-      <thead>
-        <tr className="text-[#6B7280] bg-[#EEF2F7]">
+      <thead className="sticky top-0 z-10">
+        <tr className="bg-[#3C3C3C] text-white">
           {cols.map((c) => (
-            <th key={c.key} className="px-2 py-1.5 text-left font-medium border-b border-gray-200 whitespace-nowrap">{c.label}</th>
+            <th key={c.key} className="px-2 py-2 text-left font-medium whitespace-nowrap">{c.label}</th>
           ))}
         </tr>
       </thead>
