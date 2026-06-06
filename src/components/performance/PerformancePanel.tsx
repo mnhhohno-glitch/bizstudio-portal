@@ -28,9 +28,11 @@ type WeeklyResp = {
 };
 type Cohort = { yearMonth: string; entry: number; documentPass: number; offer: number; acceptance: number; documentPassRate: number | null; offerRate: number | null; acceptanceRate: number | null };
 
+// UI ラベルのみ付け替え（内部値 day/week/month はロジック対応を崩さないため変更しない）。
+//   day（起算日から5日）→「週」、week（5週）→「月」、month（6ヶ月）→「半年」。
 const GRANULARITIES: { key: Granularity; label: string }[] = [
-  { key: "day", label: "日" },
-  { key: "week", label: "週" },
+  { key: "day", label: "週" },
+  { key: "week", label: "月" },
   { key: "month", label: "半年" },
 ];
 
@@ -245,12 +247,16 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
             </th>
           ))}
           <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 bg-[#F9FAFB] whitespace-nowrap">合計<div className="text-[10px] text-[#C0C4CC]">目標｜実績</div></th>
+          <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap min-w-[70px]">平均<div className="text-[10px] text-[#C0C4CC]">/列</div></th>
           <th className="px-3 py-2.5 text-center font-medium border-b border-gray-200 whitespace-nowrap min-w-[80px]">達成率</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
         {rows.map((r) => {
           const hasTarget = !!r.targetKey;
+          const totalActual = r.actual(total.matrix);
+          // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
+          const avg = totalActual == null || columns.length === 0 ? null : totalActual / columns.length;
           return (
             <tr key={r.label} className="hover:bg-[#F9FAFB]">
               <td className={`sticky left-0 bg-white px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
@@ -266,7 +272,10 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               })}
               <td className="px-3 py-2 text-center tabular-nums bg-[#F9FAFB]">
                 {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
-                <span className="text-[#374151] font-semibold">{fmt(r, r.actual(total.matrix))}</span>
+                <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>
+              </td>
+              <td className="px-3 py-2 text-center tabular-nums text-[#6B7280]">
+                {r.fmt ? r.fmt(avg) : numFmt(avg, 1)}
               </td>
               <td className="px-3 py-2 text-center tabular-nums">
                 {hasTarget ? <span className="text-[#2563EB] font-medium">{pctFmt(total.achievement[r.targetKey!])}</span> : <span className="text-[#C0C4CC]">—</span>}

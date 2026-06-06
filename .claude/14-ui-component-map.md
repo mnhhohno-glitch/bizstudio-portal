@@ -967,8 +967,9 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
 
 ### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）
-- **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／**粒度切替（日／週／半年）**（`GRANULARITIES`、cohort タブ時は disabled、初期=週）／🎯 目標登録ボタン（TargetModal）。
-- **粒度切替**：日＝起算日から5日（各列1日）、週＝5週、半年＝起算月から6ヶ月（各列1暦月）。`/api/performance/weekly` に `granularity` を付与し、列ヘッダ（label/subLabel）と列数（5 or 6）を動的描画。「直近6ヶ月」タブは粒度切替対象外（cohort 固定）。
+- **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／**粒度切替（週／月／半年）**（`GRANULARITIES`、cohort タブ時は disabled、初期=week）／🎯 目標登録ボタン（TargetModal）。
+- **粒度切替（UIラベルと内部値の対応に注意）**：UI ラベル「週」=内部 `day`（起算日から5日・各列1日）、「月」=内部 `week`（5週）、「半年」=内部 `month`（起算月から6ヶ月）。**ボタン表示ラベルだけ付け替え、`granularity` 値と列生成ロジックの対応は不変**（`day=5日` がラベル「週」になるだけ）。`/api/performance/weekly` に `granularity` を付与し、列ヘッダ・列数（5 or 6）を動的描画。「直近6ヶ月」タブは粒度切替対象外（cohort 固定）。
+- **右端3列**：合計｜平均｜達成率。合計＝TOTAL（目標｜実績、全期間再ユニーク）。**平均＝TOTAL実績÷列数**（実績ベース、列数=5 or 6、行の fmt で書式）。達成率＝TOTAL実績÷TOTAL目標。
 - **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
 - **週マトリクス（4タブ）**: `GET /api/performance/weekly?employeeId=&anchorDate=`。列＝W1〜W5（各「目標｜実績」、ヘッダに日付範囲）＋ TOTAL（目標｜実績）＋ 達成率。
   - 行（段階）は `ROWS` 定数で定義（tab → Row[]）。`Row.actual(matrix)` で実績抽出、`Row.targetKey` があれば目標＋達成率表示、`Row.fmt` で書式（1人当たりは小数1桁、決定売上/単価は ¥）。
