@@ -988,7 +988,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
 - **面談タブのグラフ（常設・面談実績タブのみ）**: マトリクス下に Chart.js（cdnjs UMD `4.4.1`）で**左＝折れ線・右＝円**を横並び常設（明細はボタン→ポップアップのまま）。
   - 折れ線＝面談数推移（初回=青/求人(2回目)=緑/既存(3回目〜)=オレンジ）、横軸＝**粒度連動の列ラベル**（`weekly.columns[].matrix.interview`）。
-  - 円（ドーナツ）＝**合計面談のランク割合**（`overallRank`：A+/A/B+/B/C/D＋未評価）。`weekly.total.interviewRanks`（`computeInterviewRankBreakdown`、合計＝合計面談数）。S は存在しない。
+  - 円（ドーナツ）＝**初回面談のランク割合**（`overallRank`：A+/A/B+/B/C/D＋未評価）。`weekly.total.interviewRanks`（`computeInterviewRankBreakdown` で `interview_count = 1` に絞る、合計＝初回面談数 = `interview.first`）。S は存在しない。目的：その期間に新規で会った人の質（ランク）の分布。求人/既存（2回目以降）は再面談で評価が重複するため除外。
   - 軸/凡例色は canvas の `getComputedStyle().color`（テーマ追従）、グリッドは半透明グレー（ダーク/ライト両対応）。`InterviewCharts` コンポーネント、`loadChartJs()` で script を一度だけ注入。他タブには出さない。
 - **面談明細にランク列**追加（`InterviewRating.overallRank`、detail API で `rating.overallRank` を select）。
 - **週マトリクス（4タブ）**: `GET /api/performance/weekly?employeeId=&anchorDate=`。列＝W1〜W5（各「目標｜実績」、ヘッダに日付範囲）＋ TOTAL（目標｜実績）＋ 達成率。
