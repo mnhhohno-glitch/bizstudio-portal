@@ -61,29 +61,38 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "employeeId と anchorDate(YYYY-MM-DD) が必要です" }, { status: 400 });
   }
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: employeeId },
-    select: { id: true, name: true, userId: true },
-  });
-  if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
-  const userId = employee.userId ?? "__nonexistent__";
+  // 全員（全CA合算）モード
+  const allCas = employeeId === "all";
+  let resolvedEmployeeId = "__nonexistent__";
+  let employeeName = "全員";
+  let userId = "__nonexistent__";
+  if (!allCas) {
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { id: true, name: true, userId: true },
+    });
+    if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
+    resolvedEmployeeId = employee.id;
+    employeeName = employee.name;
+    userId = employee.userId ?? "__nonexistent__";
+  }
 
   const columns = buildColumns(granularity, anchorDate);
   const anchorMonth = anchorDate.slice(0, 7);
 
   // 各列の実績＋TOTAL（全列カバー範囲で再集計）を並列
   const [columnMatrices, totalMatrix] = await Promise.all([
-    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: employee.id, userId, from: c.from, to: c.to }))),
-    computeWeeklyMatrix({ employeeId: employee.id, userId, from: columns[0].from, to: columns[columns.length - 1].to }),
+    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas }))),
+    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
   ]);
 
-  // 目標：必要な月の PerformanceTarget をまとめて取得
+  // 目標：全員モードは目標なし。個別のみ対象月の PerformanceTarget をまとめて取得。
   const neededMonths = Array.from(new Set([anchorMonth, ...columns.map((c) => c.yearMonth)]));
-  const targetRows = await prisma.performanceTarget.findMany({
-    where: { employeeId: employee.id, yearMonth: { in: neededMonths } },
+  const targetRows = allCas ? [] : await prisma.performanceTarget.findMany({
+    where: { employeeId: resolvedEmployeeId, yearMonth: { in: neededMonths } },
   });
   const targetByMonth = new Map(targetRows.map((t) => [t.yearMonth, t]));
-  const targetExists = (granularity === "month")
+  const targetExists = allCas ? false : (granularity === "month")
     ? columns.some((c) => targetByMonth.has(c.yearMonth))
     : targetByMonth.has(anchorMonth);
 
@@ -137,7 +146,7 @@ export async function GET(req: Request) {
   for (const key of TKEYS) achievement[key] = rate(actualOf(totalMatrix, key), totalTargets[key]);
 
   return NextResponse.json({
-    employee: { id: employee.id, name: employee.name },
+    employee: { id: allCas ? "all" : resolvedEmployeeId, name: employeeName },
     anchorDate,
     granularity,
     targetExists,

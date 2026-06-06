@@ -970,6 +970,9 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／**粒度切替（週／月／半年）**（`GRANULARITIES`、cohort タブ時は disabled、初期=week）／🎯 目標登録ボタン（TargetModal）。
 - **粒度切替（UIラベルと内部値の対応に注意）**：UI ラベル「週」=内部 `day`（起算日から5日・各列1日）、「月」=内部 `week`（5週）、「半年」=内部 `month`（起算月から6ヶ月）。**ボタン表示ラベルだけ付け替え、`granularity` 値と列生成ロジックの対応は不変**（`day=5日` がラベル「週」になるだけ）。`/api/performance/weekly` に `granularity` を付与し、列ヘッダ・列数（5 or 6）を動的描画。「直近6ヶ月」タブは粒度切替対象外（cohort 固定）。
 - **右端3列**：合計｜平均｜達成率。合計＝TOTAL（目標｜実績、全期間再ユニーク）。**平均＝TOTAL実績÷列数**（実績ベース、列数=5 or 6、行の fmt で書式）。達成率＝TOTAL実績÷TOTAL目標。
+- **全員**：担当セレクトに「全員」（`employeeId=all`）。全CA合算（候補者ユニーク重複排除、目標なし）。
+- **明細一覧**：マトリクスの下に対象候補者を全件表示（`DetailTable`、`GET /api/performance/detail`）。タブ連動で列を出し分け（`DETAIL_COLS`）。選考状況は **書類選考｜内定｜承諾 のサブタブ**（`selectionStage`）。見出しに「対象◯人／◯件」（summary.persons＝マトリクス人数と一致）。長い列（企業名・求人タイトル）は truncate。
+- **FileMaker 風色付け**：日付ヘッダ＝薄グレー(`#EEF2F7`)、人数行（primary・非 indent）＝薄青(`#EFF6FF`)、件数/1人当たり行（indent）＝白。明細ヘッダも薄グレー。
 - **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
 - **週マトリクス（4タブ）**: `GET /api/performance/weekly?employeeId=&anchorDate=`。列＝W1〜W5（各「目標｜実績」、ヘッダに日付範囲）＋ TOTAL（目標｜実績）＋ 達成率。
   - 行（段階）は `ROWS` 定数で定義（tab → Row[]）。`Row.actual(matrix)` で実績抽出、`Row.targetKey` があれば目標＋達成率表示、`Row.fmt` で書式（1人当たりは小数1桁、決定売上/単価は ¥）。

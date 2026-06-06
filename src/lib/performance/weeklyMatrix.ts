@@ -45,10 +45,14 @@ export async function computeWeeklyMatrix(params: {
   userId: string;
   from: Date;
   to: Date;
+  allCas?: boolean; // true なら全CA合算（担当・User フィルタを外す。数え方は同じ）
 }): Promise<WeeklyMatrix> {
-  const { employeeId, userId, from, to } = params;
+  const { employeeId, userId, from, to, allCas } = params;
   const F = tsLit(from);
   const T = tsLit(to);
+  // 全員モードでは担当軸/Userフィルタを外す（対象を全候補者・全アップロードに広げるだけ）。
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+  const userPred = allCas ? "TRUE" : `cf.uploaded_by_user_id = '${userId}'`;
 
   const [iv, prop, ent, sel] = await Promise.all([
     // 面談（candidate.employeeId 軸・notDeclined）。second は予約語のため別名にする。
@@ -59,7 +63,7 @@ export async function computeWeeklyMatrix(params: {
         COUNT(*) FILTER (WHERE ir.interview_count >= 3)::int iv_third,
         COUNT(*) FILTER (WHERE ir.interview_count >= 1)::int iv_total
       FROM interview_records ir JOIN candidates c ON c.id = ir.candidate_id
-      WHERE c.employee_id = '${employeeId}'
+      WHERE ${empPred}
         AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
         AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}';`),
 
@@ -69,7 +73,7 @@ export async function computeWeeklyMatrix(params: {
         SELECT cf.candidate_id, cf.last_exported_at,
           MIN(cf.last_exported_at) OVER (PARTITION BY cf.candidate_id) AS first_export
         FROM candidate_files cf
-        WHERE cf.category = 'BOOKMARK' AND cf.uploaded_by_user_id = '${userId}' AND cf.last_exported_at IS NOT NULL
+        WHERE cf.category = 'BOOKMARK' AND ${userPred} AND cf.last_exported_at IS NOT NULL
       )
       SELECT
         COUNT(*) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_export >= TIMESTAMP '${F}')::int new_recs,
@@ -86,7 +90,7 @@ export async function computeWeeklyMatrix(params: {
         SELECT je.candidate_id, je.entry_date,
           MIN(je.entry_date) OVER (PARTITION BY je.candidate_id) AS first_entry
         FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
-        WHERE c.employee_id = '${employeeId}' AND je.archived_at IS NULL
+        WHERE ${empPred} AND je.archived_at IS NULL
           AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')
       )
       SELECT
@@ -106,7 +110,7 @@ export async function computeWeeklyMatrix(params: {
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ac,
         COALESCE(SUM(je.revenue) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint revenue
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
-      WHERE c.employee_id = '${employeeId}' AND je.archived_at IS NULL;`),
+      WHERE ${empPred} AND je.archived_at IS NULL;`),
   ]);
 
   const i = iv[0];

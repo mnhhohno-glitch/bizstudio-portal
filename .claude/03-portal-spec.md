@@ -259,7 +259,12 @@ model InterviewMemo {
   - 週別目標＝対象月の `PerformanceTarget` を `allocateToWeeks`（T-073、5週営業日按分）で割り振り。対象メトリクス＝初回面談/合計提案人数/合計エントリー人数/書類通過/内定/承諾。
   - 達成率＝TOTAL 実績 ÷ TOTAL 目標（人数の達成率。段階間転換率とは別物）。
   - **率（段階間転換率）は週マトリクスでは出さない**（月をまたいで破綻するため）。率は cohort API で。
-- `GET /api/performance/cohort?employeeId=Y&months=6`（T-071 直近6ヶ月コホート率）：当月を含まない 6ヶ月前〜前月の各月コホートの段階別人数＋率。
+- **全員（全CA合算）**：weekly / cohort / detail は `employeeId=all` で全CA合算。担当軸/User フィルタを外すだけ（`computeWeeklyMatrix` の `allCas` フラグで SQL 述語を TRUE に）。数え方は同じ＝候補者ユニーク（COUNT DISTINCT）で重複排除。各候補者は単一 CA 担当のため 全員＝Σ個別＋無担当（検証：全員 entry=26＝個別CA合計26）。全員モードは目標なし（達成率「—」）。
+- `GET /api/performance/detail?employeeId=&anchorDate=&granularity=&tab=&stage=`（T-071 明細一覧）：マトリクスと**同条件**で対象候補者の明細行を返す。
+  - 期間＝起算日と粒度から算出した全列カバー範囲（= マトリクスの TOTAL 範囲）。担当軸（全員=all で全CA）・到達ベース（段階日付がレンジ内）・無効含む・アーカイブ除く。
+  - tab：entry（entryDate・post-app）/ proposal（CandidateFile lastExportedAt）/ interview（interviewDate・notDeclined）/ selection（stage=documentPass|offer|acceptance の各日付）。
+  - `summary.persons`（候補者ユニーク）＝マトリクスの「人数」と一致、`summary.records`＝明細行数（件数）。検証済み（大野 entry 人数8=8・件数80=80、書類通過12=12）。行は最大1000件。
+- `GET /api/performance/cohort?employeeId=Y&months=6`（T-071 直近6ヶ月コホート率）：当月を含まない 6ヶ月前〜前月の各月コホートの段階別人数＋率。`employeeId=all` で全CA。
   - コホート＝その月に `entryDate` を持つ候補者（post-app・担当軸・archived除く・候補者ユニーク）。
   - そのコホート集合を後段階へ追跡（`BOOL_OR(documentPassDate IS NOT NULL)` 等、**月窓に縛らずいつか到達したか**で判定）。月をまたいで内定しても起点月コホートの内定として数える。
   - **率はコホート隣接段階基準**（前段が分母）：書類通過率＝書類通過÷コホート、内定率＝内定÷書類通過、承諾率＝承諾÷内定。月内の段階間率破綻（分母0で次段>0）が起きない。

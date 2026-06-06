@@ -37,11 +37,16 @@ export async function GET(req: Request) {
   const months = Math.min(12, Math.max(1, parseInt(searchParams.get("months") || "6", 10)));
   if (!employeeId) return NextResponse.json({ error: "employeeId が必要です" }, { status: 400 });
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: employeeId },
-    select: { id: true, name: true },
-  });
-  if (!employee) return NextResponse.json({ error: "employee not found" }, { status: 404 });
+  const allCas = employeeId === "all";
+  let employee: { id: string; name: string };
+  if (allCas) {
+    employee = { id: "all", name: "全員" };
+  } else {
+    const found = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true, name: true } });
+    if (!found) return NextResponse.json({ error: "employee not found" }, { status: 404 });
+    employee = found;
+  }
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
 
   // 当月を含まない：前月（-1）から months ヶ月分さかのぼる。
   const thisMonth = todayJstDateString().slice(0, 7);
@@ -61,7 +66,7 @@ export async function GET(req: Request) {
         WITH cohort AS (
           SELECT DISTINCT je.candidate_id
           FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
-          WHERE c.employee_id = '${employeeId}' AND je.archived_at IS NULL
+          WHERE ${empPred} AND je.archived_at IS NULL
             AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')
             AND je.entry_date >= TIMESTAMP '${mStart}' AND je.entry_date < TIMESTAMP '${mEnd}'
         ),
