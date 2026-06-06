@@ -415,11 +415,21 @@ const COHORT_ROWS: CohortRow[] = [
 function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   return (
-    <table className="text-[12px] border-collapse" style={{ tableLayout: "auto" }}>
+    // 段階列＝最長項目名が収まる固定幅（折り返さない）、月12列＝残り幅を均等配分、全幅。
+    <table className="w-full text-[12px] border-collapse" style={{ tableLayout: "fixed" }}>
+      <colgroup>
+        <col style={{ width: "190px" }} />
+        {cohorts.map((c) => (
+          <Fragment key={c.yearMonth}>
+            <col />
+            <col />
+          </Fragment>
+        ))}
+      </colgroup>
       <thead>
         {/* 1段目：段階列＋各月（colSpan=2） */}
         <tr>
-          <th rowSpan={2} className={`sticky left-0 ${HEAD_CLS} px-2 py-1.5 text-left font-medium w-[150px] whitespace-nowrap`}>段階</th>
+          <th rowSpan={2} className={`sticky left-0 ${HEAD_CLS} px-2 py-1.5 text-left font-medium whitespace-nowrap`}>段階</th>
           {cohorts.map((c) => (
             <th key={c.yearMonth} colSpan={2} className={`${HEAD_CLS} px-2 py-1.5 text-center font-medium whitespace-nowrap border-l border-[#5A5A5A]`}>{c.yearMonth}</th>
           ))}
