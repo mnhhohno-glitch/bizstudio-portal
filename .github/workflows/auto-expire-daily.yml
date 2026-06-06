@@ -1,0 +1,79 @@
+# T-067: auto-expire 日次自動実行（暦1ヶ月放置の求人紹介を「未応募」化）。
+# - 毎日 JST 03:00（= UTC 18:00）に schedule で本番に対し dry_run=false&confirm=true で 1 回叩く。
+# - workflow_dispatch で手動疎通も可能（dry_run 入力で書き換えなし確認）。
+# - 通知は付けない。実行件数は本 workflow の Actions 実行ログに残る（後から遡れる）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（コミットに値は載せない）。
+# - default branch (master) に置かないと schedule が動かない。
+
+name: T-067 auto-expire daily
+
+on:
+  schedule:
+    # 毎日 JST 03:00 = UTC 18:00
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら DB を書き換えない（疎通確認用）。本番自動実行（schedule）は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  auto-expire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine dry_run flag
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 定時実行は必ず本番書き換え
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+          else
+            # 手動実行：入力 dry_run を尊重。confirm は dry_run の逆（書き換える時だけ true）
+            DRY="${{ github.event.inputs.dry_run }}"
+            echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+            if [ "$DRY" = "false" ]; then
+              echo "confirm=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "confirm=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Call auto-expire API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-staging-production.up.railway.app/api/internal/entries/auto-expire?dry_run=${{ steps.flag.outputs.dry }}&confirm=${{ steps.flag.outputs.confirm }}"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }} / dry_run=${{ steps.flag.outputs.dry }} confirm=${{ steps.flag.outputs.confirm }}"
+
+          # -w で HTTP コードを末尾追記、-o でレスポンス本文をファイルへ。
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::auto-expire returned HTTP $HTTP"
+            exit 1
+          fi
+
+          # サマリを Actions ログにも別途出す（後から遡りやすく）
+          if command -v jq >/dev/null 2>&1; then
+            echo "=== Summary ==="
+            jq -r '"expired=\(.expired) total_checked=\(.total_checked) executed=\(.executed) cutoff=\(.cutoff) duration_ms=\(.total_duration_ms)"' response.json || true
+          fi
