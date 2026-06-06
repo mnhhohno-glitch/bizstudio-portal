@@ -678,7 +678,7 @@ function InterviewCharts({ weekly }: { weekly: WeeklyResp | null }) {
     return () => { lineChart.current?.destroy(); pieChart.current?.destroy(); lineChart.current = null; pieChart.current = null; };
   }, [ready, weekly]);
 
-  const totalInterview = weekly?.total.matrix.interview.total ?? 0;
+  const firstInterview = weekly?.total.matrix.interview.first ?? 0;
   return (
     <div className="border-t border-[#E5E7EB] px-4 py-4">
       <div className="flex flex-col lg:flex-row gap-4">
@@ -687,9 +687,9 @@ function InterviewCharts({ weekly }: { weekly: WeeklyResp | null }) {
           <div className="h-[260px]"><canvas ref={lineRef} /></div>
         </div>
         <div className="w-full lg:w-[360px] shrink-0">
-          <div className="text-[12px] font-medium text-[#374151] mb-2">合計面談のランク割合（{totalInterview}件）</div>
+          <div className="text-[12px] font-medium text-[#374151] mb-2">初回面談のランク割合（{firstInterview}件）</div>
           <div className="h-[260px]">
-            {totalInterview > 0 ? <canvas ref={pieRef} /> : <div className="h-full flex items-center justify-center text-[12px] text-[#9CA3AF]">データなし</div>}
+            {firstInterview > 0 ? <canvas ref={pieRef} /> : <div className="h-full flex items-center justify-center text-[12px] text-[#9CA3AF]">データなし</div>}
           </div>
         </div>
       </div>

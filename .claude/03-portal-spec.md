@@ -212,7 +212,7 @@ model InterviewMemo {
   - **求人検索**＝CandidateFile BOOKMARK `createdAt`・User.id（`uploadedByUserId`）。マトリクス上部の「検索」件数は変更しない。
   - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算**順位（両ソース横断の最古がレンジ内＝初回）。`src/lib/performance/weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS＋ROW_NUMBER）。
   - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
-  - **面談ランク**＝`InterviewRating.overallRank`（`overall_rank`、InterviewRecord と 1:1・LEFT JOIN・nullable）。実データの値体系は **A+/A/B+/B/C/D ＋ 未評価(null)**（**S は存在しない**）。約55%のみ rank 付与。円グラフは合計面談（担当軸・到達ベース・実施判定・`interview_count>=1`）を rank 別集計、null は「未評価」に寄せ合計＝合計面談数。`computeInterviewRankBreakdown()`（weeklyMatrix.ts）。
+  - **面談ランク**＝`InterviewRating.overallRank`（`overall_rank`、InterviewRecord と 1:1・LEFT JOIN・nullable）。実データの値体系は **A+/A/B+/B/C/D ＋ 未評価(null)**（**S は存在しない**）。約55%のみ rank 付与。円グラフは**初回面談**（担当軸・到達ベース・実施判定・`interview_count = 1`）を rank 別集計、null は「未評価」に寄せ合計＝初回面談数（マトリクスの `interview.first`）。`computeInterviewRankBreakdown()`（weeklyMatrix.ts）。理由：その期間に新規で会った人の質の分布を見るため、2回目以降の再面談（評価重複）を除外。
   - **エントリー以降＝担当軸＝`candidate.employeeId`**。
 - ⚠️ **`JobEntry.careerAdvisorId` は使わない**：実データの 99.9%（28007 行中 27981 行）が NULL の実質未使用カラム。管理画面 `/api/entries` の担当フィルタも `careerAdvisorName → candidate.employee.name`（`EntryBoard.tsx` が送る）。
 - ⚠️ **`interviewerUserId`（実施者軸）も使わない**：岡田=面談官（実施者 初回58/担当0）、安藤=CA（実施者 初回5/担当78）のように役割で乖離が大きく、CA 実績を表さない。担当軸なら面談管理「担当CA=大野」と一致（初回 59=59 検証済み）。

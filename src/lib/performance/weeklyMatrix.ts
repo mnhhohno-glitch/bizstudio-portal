@@ -163,9 +163,10 @@ export async function computeWeeklyMatrix(params: {
   };
 }
 
-// 面談ランク割合（円グラフ用）。マトリクスの「合計面談」と同条件（担当軸・到達ベース・実施判定・interviewCount>=1）で
+// 面談ランク割合（円グラフ用）。マトリクスの「**初回面談**」と同条件（担当軸・到達ベース・実施判定・interview_count=1）で
 // InterviewRating.overallRank 別に集計。未評価（rating なし or rank null）は '未評価' に寄せる。
-// 返り値の合計＝マトリクスの合計面談数（total）と一致する。
+// 返り値の合計＝マトリクスの初回面談数（interview.first）と一致する。
+// 目的：その期間に新規で会った人の質（ランク）の分布。求人/既存（2回目以降）は再面談で評価が重複するため除外。
 export async function computeInterviewRankBreakdown(params: {
   employeeId: string;
   from: Date;
@@ -183,7 +184,7 @@ export async function computeInterviewRankBreakdown(params: {
     LEFT JOIN interview_ratings rt ON rt.interview_record_id = ir.id
     WHERE ${empPred}
       AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
-      AND ir.interview_count >= 1
+      AND ir.interview_count = 1
       AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}'
     GROUP BY COALESCE(NULLIF(rt.overall_rank, ''), '未評価');`);
   const out: Record<string, number> = {};
