@@ -24,12 +24,42 @@ type Props = {
 
 type Stage = "extract" | "generate" | "create";
 type StageState = "pending" | "running" | "done" | "failed";
-type ModalStep = "idle" | "processing" | "selectCompany" | "completed" | "error";
+// T-035 step2: その他系のみ generate と create の間に "confirmQuestions"（質問確認画面）を挟む。
+type ModalStep = "idle" | "processing" | "selectCompany" | "confirmQuestions" | "completed" | "error";
 
 type WorkHistoryEntry = {
   company?: string;
   period?: string;
   [key: string]: unknown;
+};
+
+// T-035 step2: 確認画面プレビュー用の questionsJson 最小型（candidate-intake の QuestionsJson に準拠、表示のみ）。
+type PreviewQuestionItem = {
+  type?: string;
+  title?: string;
+  help_text?: string | null;
+  choices?: string[] | null;
+  required?: boolean | null;
+};
+type PreviewQuestionSection = {
+  id?: string;
+  header?: string;
+  items?: PreviewQuestionItem[];
+};
+type PreviewQuestions = {
+  candidate_name?: string;
+  greeting?: string;
+  sections?: PreviewQuestionSection[];
+};
+
+// 質問タイプの日本語ラベル（確認画面の表示用）。
+const ITEM_TYPE_LABEL: Record<string, string> = {
+  short_text: "記述（短）",
+  long_text: "記述（長）",
+  single_select: "単一選択",
+  multi_select: "複数選択",
+  dropdown: "プルダウン",
+  section_header: "見出し",
 };
 
 // T-038: モーダル open 時に既存 URL チェックで使う最小型
@@ -305,6 +335,12 @@ export default function GoogleFormCreatorModal({
     return null;
   };
 
+  // T-035 step2: 選択中のカテゴリ（1画面目 categoryValue か 会社別 companyCategoryMap）に
+  // その他系コードが含まれるか。含むときだけ generate→create の間に確認画面を挟む。
+  const includesOtherType = (): boolean =>
+    isOtherTypeCategory(categoryValue) ||
+    Object.values(companyCategoryMap).some((c) => isOtherTypeCategory(c));
+
   const runExtract = async (): Promise<{ resumeData: unknown; interviewLogText: string } | null> => {
     setStageStatus((s) => ({ ...s, extract: "running" }));
     try {
@@ -349,9 +385,7 @@ export default function GoogleFormCreatorModal({
         const label = (companyCategoryLabelMap[key] ?? "").trim();
         if (label) labelMapToSend[key] = label;
       }
-      const hasOtherTypeSomewhere =
-        isOtherTypeCategory(categoryValue) ||
-        Object.values(companyCategoryMap).some((c) => isOtherTypeCategory(c));
+      const hasOtherTypeSomewhere = includesOtherType();
 
       const res = await fetch(
         `/api/candidates/${candidateId}/google-form/generate-form`,
@@ -445,7 +479,9 @@ export default function GoogleFormCreatorModal({
     setStep("selectCompany");
   };
 
-  // T-035: 質問生成 開始（バリデーション後、generate + create を一気に実行）
+  // T-035: 質問生成 開始。
+  // 通常職種：generate → 即 create（従来通り）。
+  // T-035 step2 その他系：generate のあと確認画面で停止（create はユーザー操作で実行）。
   const handleStartGenerate = async () => {
     const validationError = validateBeforeGenerate(resumeData);
     if (validationError) {
@@ -463,6 +499,14 @@ export default function GoogleFormCreatorModal({
       setStep("error");
       return;
     }
+
+    // T-035 step2: その他系を含む場合は確認画面で停止（create_form_v2 はまだ呼ばない）。
+    if (includesOtherType()) {
+      setStep("confirmQuestions");
+      return;
+    }
+
+    // 通常職種：従来通りそのままフォーム化。
     const e3 = await runCreate(e2);
     if (!e3) {
       setStep("error");
@@ -470,6 +514,35 @@ export default function GoogleFormCreatorModal({
     }
     setStep("completed");
     toast.success("Google フォーム作成完了");
+  };
+
+  // T-035 step2: 確認画面「フォーム作成」。保持中の questionsJson でフォーム化（create_form_v2）。
+  const handleConfirmCreate = async () => {
+    if (!questionsJson) return;
+    setStep("processing");
+    setErrorMessage(null);
+    setStageStatus((s) => ({ ...s, create: "pending" }));
+    setFormResult(null);
+
+    const e3 = await runCreate(questionsJson);
+    if (!e3) {
+      setStep("error");
+      return;
+    }
+    setStep("completed");
+    toast.success("Google フォーム作成完了");
+  };
+
+  // T-035 step2: 確認画面「やり直し」。同パラメータで generate_form を再呼び出し → 確認画面を更新。
+  const handleRegenerate = async () => {
+    setErrorMessage(null);
+    setStageStatus((s) => ({ ...s, generate: "pending" }));
+    const e2 = await runGenerate(resumeData, interviewLogText);
+    if (!e2) {
+      setStep("error");
+      return;
+    }
+    // 成功時：runGenerate が questionsJson を更新済み。confirmQuestions のまま再描画される。
   };
 
   const handleRetry = async () => {
@@ -503,6 +576,11 @@ export default function GoogleFormCreatorModal({
         return;
       }
       questions = r;
+      // T-035 step2: その他系は確認画面へ戻す（create はユーザー操作で実行）。
+      if (includesOtherType()) {
+        setStep("confirmQuestions");
+        return;
+      }
     }
 
     if (stageStatus.create === "failed" || (questions !== questionsJson && !formResult)) {
@@ -861,6 +939,108 @@ export default function GoogleFormCreatorModal({
             </div>
           </div>
         )}
+
+        {/* Step 1.7: confirmQuestions - 質問確認画面（T-035 step2、その他系のみ） */}
+        {step === "confirmQuestions" && (() => {
+          const q = (questionsJson ?? {}) as PreviewQuestions;
+          const sections = q.sections ?? [];
+          const isRegenerating = stageStatus.generate === "running";
+          const totalItems = sections.reduce((n, s) => n + (s.items?.length ?? 0), 0);
+          return (
+            <div>
+              <div className="mb-3 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[12px] text-green-800">
+                ✓ 質問を生成しました（{sections.length} セクション / {totalItems} 項目）。内容をご確認ください。
+                <span className="block text-[11px] text-green-700 mt-0.5">
+                  この時点ではまだ Google フォームは作成されていません。
+                </span>
+              </div>
+              <div className="mb-3 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">
+                ⚠️ 修正したい場合はGoogleフォーム編集画面で後ほど修正してください。
+              </div>
+
+              {q.greeting && (
+                <div className="mb-3 text-[12px] text-gray-600 whitespace-pre-wrap border border-gray-100 rounded-md p-2 bg-gray-50">
+                  {q.greeting}
+                </div>
+              )}
+
+              <div className="space-y-3 mb-4 max-h-[50vh] overflow-y-auto pr-1">
+                {sections.length === 0 ? (
+                  <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-4 text-center text-[12px] text-gray-500">
+                    質問が生成されませんでした。「やり直し」で再生成してください。
+                  </div>
+                ) : (
+                  sections.map((sec, si) => (
+                    <div key={sec.id ?? si} className="border border-gray-200 rounded-md">
+                      <div className="bg-[#F9FAFB] px-3 py-2 text-[13px] font-semibold text-[#374151] border-b border-gray-200">
+                        {sec.header || `セクション ${si + 1}`}
+                      </div>
+                      <ol className="divide-y divide-gray-100">
+                        {(sec.items ?? []).map((it, ii) => (
+                          <li key={ii} className="px-3 py-2">
+                            <div className="flex items-start gap-2">
+                              <span className="text-[11px] text-gray-400 mt-0.5">{ii + 1}.</span>
+                              <div className="flex-1">
+                                <div className="text-[12px] text-[#374151]">
+                                  {it.title || "（無題）"}
+                                  {it.required ? <span className="text-red-500 ml-1">*</span> : null}
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[10px] text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
+                                    {ITEM_TYPE_LABEL[it.type ?? ""] ?? it.type ?? "—"}
+                                  </span>
+                                  {it.choices && it.choices.length > 0 && (
+                                    <span className="text-[10px] text-gray-400">
+                                      選択肢: {it.choices.join(" / ")}
+                                    </span>
+                                  )}
+                                </div>
+                                {it.help_text && (
+                                  <div className="mt-0.5 text-[10px] text-gray-400">{it.help_text}</div>
+                                )}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {isRegenerating && (
+                <div className="mb-3 flex items-center justify-center gap-2 text-[12px] text-blue-700">
+                  <span className="inline-block w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                  質問を再生成中...
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t border-gray-200">
+                <button
+                  onClick={handleClose}
+                  disabled={isRegenerating}
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50"
+                >
+                  閉じる
+                </button>
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
+                  className="flex-1 border border-[#2563EB] text-[#2563EB] bg-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {isRegenerating ? "再生成中..." : "やり直し（再生成）"}
+                </button>
+                <button
+                  onClick={handleConfirmCreate}
+                  disabled={isRegenerating || sections.length === 0}
+                  className="flex-1 bg-[#16A34A] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50"
+                >
+                  フォーム作成
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Step 2: processing / Step 4: error */}
         {(step === "processing" || step === "error") && (
