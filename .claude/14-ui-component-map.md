@@ -1010,9 +1010,13 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 
 - パス: `src/components/performance/TargetModal.tsx`（Client Component）
 - 入口: PerformancePanel ヘッダの「🎯 目標登録」ボタン（担当セレクト横）。`employeeId` 未選択時は disabled。初期対象月は今月（JST）。
-- レイアウト（大型モーダル `max-w-[1100px]`、2カラム）:
-  - **左＝参考値**: `GET /api/performance/target/reference` の 昨年同月/前月/3か月/半年 × 段階（初回面談/紹介/エントリー/書類通過/内定/承諾）の **数＋率**テーブル。
-  - **右＝逆算入力＋週按分**: 目標売上・売上単価・各段階率（%）を手入力 → `reverseCalc`（クライアント純関数）で人数をリアルタイム算出（小数1桁表示）。下に週按分テーブル（各週切り上げ・最終週帳尻・月計＝合計）。
+- レイアウト（大型モーダル `max-w-[1180px]`、**1つの横並び統合表**）:
+  - 列：`段階 | 参考値[昨年同月｜前月｜3か月｜半年] | 目標 | 週按分[W1..Wn｜月計]`（`table-layout:fixed` ＋ `<colgroup>` で段階列のみ132px固定・数値列は均等幅）。ヘッダはダークグレー `#3C3C3C`＋白（実績表と統一）、2段（参考値/週按分は colSpan、目標は rowSpan2）。
+  - **各段階は2行**：1行目＝実数値（人数）、2行目＝率（段階名の真下にインデント薄字「○○率」）。参考値・目標・週按分すべての列でこの2行構造が縦に揃う。
+  - **参考値**（`GET /api/performance/target/reference` 4期間）：数値の行＝実績数、率の行＝前段転換率（%）。
+  - **目標**：数値の行＝`reverseCalc` の逆算人数（自動・青字）、率の行＝率%手入力欄（初回面談は逆算の起点で入力なし＝「—」）。
+  - **週按分**：実数値の行のみ（各週切り上げ・最終週帳尻・月計＝合計）。率の行は空（按分対象外）。
+  - 売上・単価入力は表の上部にまとめて配置（逆算の起点）。すべてカンマ区切り表示（`toLocaleString("ja-JP")`、入力欄も `commaInt`/`onlyDigits` で3桁区切り）。
 - 保存: `POST /api/performance/target`（upsert）。`isComplete` で全段階数が確定したときのみ保存可。既存目標は開いたとき読み込んで編集（率は % に戻して表示）。
 - ヘッダの `<input type="month">` で対象月を切替（参考値・既存目標を再取得）。
 - 計算ロジック: `src/lib/performance/reverseCalc.ts`（逆算）、`src/lib/performance/businessDays.ts`（営業日・週按分、`@holiday-jp/holiday_jp` で祝日除外）。
