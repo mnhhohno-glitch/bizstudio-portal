@@ -285,10 +285,10 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - [ ] Claude.ai プロジェクト設定で「置き換え」実行
 - [ ] portal リポジトリの `src/skills/job-matching-advisor/SKILL.md` にも反映（コピー or 直接編集）
 - [ ] portal リポジトリの `src/skills/job-matching-advisor/references/middle-career.md` にも反映
-- [ ] portal で commit → master push → staging merge → push
+- [ ] portal で commit → master push（本番＝master ブランチ。検証が必要な場合のみ staging へ merge）
 
 **反映確認**:
-- portal は staging push でしか本番デプロイされない（master push 単独では反映されない）
+- portal は master push で本番デプロイされる（本番＝master ブランチ、2026-06-07 Railway 実設定で確定）
 - ヘルパー関数 `src/lib/load-job-matching-skill.ts` がモジュールロード時にキャッシュするため、Railway 再デプロイ後に新内容が反映される
 
 **関連**: T-056（2026/5/14）で portal への SKILL.md 反映の仕組みを構築、`06-other-repos.md` の job-matching-skill セクション参照

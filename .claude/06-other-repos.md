@@ -22,7 +22,7 @@ candidate-intake `src/constants/flags.ts` と portal `src/constants/candidate-fl
 **更新時の必須手順**:
 1. FLAG_DEFINITIONS の enum 配列を両ファイルで同一に揃える
 2. FLAG_LIST_TSV の該当行も両ファイルで同時更新する（Gemini プロンプトに TSV が直接渡されるため）
-3. candidate-intake は master push でデプロイ、portal は staging merge でデプロイ — 両方デプロイして初めて同期完了
+3. candidate-intake は master push でデプロイ、portal も master push でデプロイ（本番＝master ブランチ）— 両方デプロイして初めて同期完了
 
 **関連ケース**: T-051 Step 2（2026/5/10）で 4 フラグ + 6 TSV行を両ファイル同時更新
 
@@ -142,7 +142,7 @@ CA求人マッチングスキル。Claude.ai プロジェクトと bizstudio-por
 1. `C:\claude\skill\` で SKILL.md を編集
 2. Claude.ai プロジェクトの「置き換え」操作で更新
 3. portal リポジトリの `src/skills/job-matching-advisor/SKILL.md`（および references/middle-career.md）に同内容をコピー
-4. portal で commit → master push → staging へ merge → push で本番反映
+4. portal で commit → master push で本番反映（検証が必要な場合のみ staging へ merge）
 5. AIアドバイザーのチャット履歴をクリアして検証（過去履歴の few-shot 汚染を回避、詳細は `12-pitfalls.md` 参照）
 6. 更新頻度: 1〜2ヶ月に1回程度（エントリー実績の蓄積に応じて）
 
