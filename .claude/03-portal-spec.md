@@ -291,6 +291,7 @@ model InterviewMemo {
 - 起点：`targetRevenue`（目標売上）、`unitPrice`（売上単価）。
 - 各段階の目標数：`interviewCount`（面談初回）/`introductionCount`/`entryCount`/`documentPassCount`/`offerCount`/`acceptanceCount`、任意で `existingInterviewCount`/`interviewPrepCount`。すべて **Float（小数保持）**。
 - 各段階の率（隣接段の比、0〜1）：`introductionRate`（面談→紹介）/`entryRate`（紹介→エントリー）/`documentPassRate`（エントリー→書類通過）/`offerRate`（書類通過→内定）/`acceptanceRate`（内定→承諾）。
+- `proposalPerPerson`（Float?・nullable、migration `20260607000000_t073_proposal_per_person`、`ADD COLUMN IF NOT EXISTS`）：**紹介の1人あたり件数**（手入力の係数）。**紹介件数＝`introductionCount`（紹介人数）× `proposalPerPerson`**。件数は再算出可のため係数のみ保存。達成率は人数ベースのため紹介件数は実績表の達成率に影響しない。
 
 ### 逆算（`src/lib/performance/reverseCalc.ts`・クライアント計算）
 
@@ -304,7 +305,7 @@ model InterviewMemo {
 
 ### API
 
-- `GET /api/performance/target/reference?employeeId=Y&yearMonth=YYYY-MM`：左側の参考値。**昨年同月/前月/直近3か月(前月まで)/直近半年(前月まで)** の各段階 数・率。T-071 `computeCaMetricsForRange`（担当軸・到達ベース・無効含む・アーカイブ除く）を月レンジで呼ぶだけ。yearMonth 基準で期間算出（実績表の「今日起点」ではない）。
+- `GET /api/performance/target/reference?employeeId=Y&yearMonth=YYYY-MM`：参考値。**昨年同月/前月/直近3か月(前月まで)/直近半年(前月まで)** の各段階 数・率。T-071 `computeCaMetricsForRange`（担当軸・到達ベース・無効含む・アーカイブ除く）を月レンジで呼ぶ。加えて各期間の **`proposalPerPerson`（提案1人当たり件数＝`computeWeeklyMatrix.proposal.total.perPerson`）** を返す（1人あたり件数の参考値・追加のみ、既存 metrics 不変）。yearMonth 基準で期間算出（実績表の「今日起点」ではない）。
 - `GET /api/performance/target?employeeId=Y&yearMonth=YYYY-MM`：既存目標取得。
 - `POST /api/performance/target`：upsert（`employeeId_yearMonth`）。全数値フィールドの有限性を検証。
 

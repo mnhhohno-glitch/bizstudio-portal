@@ -42,6 +42,7 @@ interface TargetBody {
   documentPassRate: number;
   offerRate: number;
   acceptanceRate: number;
+  proposalPerPerson?: number | null; // 紹介の1人あたり件数（任意）
 }
 
 const NUM_FIELDS: (keyof TargetBody)[] = [
@@ -84,6 +85,7 @@ export async function POST(req: Request) {
     documentPassRate: body.documentPassRate,
     offerRate: body.offerRate,
     acceptanceRate: body.acceptanceRate,
+    proposalPerPerson: optional(body.proposalPerPerson),
   };
 
   const target = await prisma.performanceTarget.upsert({

@@ -267,6 +267,9 @@ model PerformanceTarget {
   offerCount             Float  @map("offer_count") // 内定数
   acceptanceCount        Float  @map("acceptance_count") // 承諾数
 
+  // 紹介の1人あたり件数（手入力の係数。紹介件数＝introductionCount × これ）。T-073 追加・nullable。
+  proposalPerPerson Float? @map("proposal_per_person")
+
   // 各段階の率（隣接段の比、手入力。小数 0〜1）
   introductionRate Float @map("introduction_rate") // 面談→紹介
   entryRate        Float @map("entry_rate") // 紹介→エントリー

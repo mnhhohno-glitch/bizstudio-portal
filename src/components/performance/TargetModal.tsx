@@ -6,7 +6,7 @@
 // 逆算はクライアント計算（reverseCalc）。週按分は businessDays（クライアントでも動く純関数）。
 // ※ロジック（reverseCalc / API / allocateToWeeks / handleSave）は不変。レイアウトのみ統合表に再構成。
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { reverseCalc, isComplete, type ReverseCalcInput } from "@/lib/performance/reverseCalc";
 import { weeklyBusinessDays, monthBusinessDays, allocateToWeeks } from "@/lib/performance/businessDays";
 
@@ -21,7 +21,7 @@ type RangeMetrics = {
   offer: CountWithRate;
   acceptance: CountWithRate;
 };
-type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics };
+type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null };
 
 interface Props {
   isOpen: boolean;
@@ -49,21 +49,6 @@ const REF_COLS: { key: string; label: string }[] = [
 
 type RateKey = "introductionRate" | "entryRate" | "documentPassRate" | "offerRate" | "acceptanceRate";
 
-// 段階行の定義（参考値・目標・週按分で共通の並び）。
-// rateKey＝目標の率入力欄に対応する rates のキー。interview は逆算の起点（前段なし）のため入力なし。
-const STAGE_ROWS: {
-  key: string; label: string;
-  count: (m: RangeMetrics) => number; rate: (m: RangeMetrics) => number | null;
-  rateKey: RateKey | null;
-}[] = [
-  { key: "interview", label: "初回面談", count: (m) => m.firstInterviewExecuted, rate: (m) => m.firstInterviewRate, rateKey: null },
-  { key: "introduction", label: "紹介", count: (m) => m.jobIntroduced, rate: (m) => m.jobIntroductionRate, rateKey: "introductionRate" },
-  { key: "entry", label: "エントリー", count: (m) => m.entry.count, rate: (m) => m.entry.rate ?? null, rateKey: "entryRate" },
-  { key: "documentPass", label: "書類通過", count: (m) => m.documentPass.count, rate: (m) => m.documentPass.rate ?? null, rateKey: "documentPassRate" },
-  { key: "offer", label: "内定", count: (m) => m.offer.count, rate: (m) => m.offer.rate ?? null, rateKey: "offerRate" },
-  { key: "acceptance", label: "承諾", count: (m) => m.acceptance.count, rate: (m) => m.acceptance.rate ?? null, rateKey: "acceptanceRate" },
-];
-
 const HEAD_CLS = "bg-[#3C3C3C] text-white";
 
 export default function TargetModal({ isOpen, onClose, employeeId, employeeName, yearMonth: initialYm }: Props) {
@@ -76,6 +61,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   // 逆算の入力（手入力）。率は % で持つ（表示一致）。
   const [targetRevenue, setTargetRevenue] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
+  const [proposalPerPerson, setProposalPerPerson] = useState<string>(""); // 紹介の1人あたり件数（手入力）
   const [rates, setRates] = useState({
     acceptanceRate: "", offerRate: "", documentPassRate: "", entryRate: "", introductionRate: "",
   });
@@ -99,6 +85,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
         if (t) {
           setTargetRevenue(String(t.targetRevenue ?? ""));
           setUnitPrice(String(t.unitPrice ?? ""));
+          setProposalPerPerson(t.proposalPerPerson != null ? String(t.proposalPerPerson) : "");
           setRates({
             acceptanceRate: t.acceptanceRate != null ? String(t.acceptanceRate * 100) : "",
             offerRate: t.offerRate != null ? String(t.offerRate * 100) : "",
@@ -164,6 +151,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           documentPassRate: calcInput.documentPassRate,
           offerRate: calcInput.offerRate,
           acceptanceRate: calcInput.acceptanceRate,
+          proposalPerPerson: parseFloat(proposalPerPerson) || null,
         }),
       });
       if (res.ok) { setSavedMsg("保存しました"); setTimeout(() => onClose(), 600); }
@@ -183,13 +171,45 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
     acceptance: result.acceptanceCount,
   };
 
+  // 紹介（件数）＝紹介人数 × 1人あたり件数（手入力）。未入力なら null。
+  const ppNum = parseFloat(proposalPerPerson);
+  const introducedRecs = result.introductionCount != null && Number.isFinite(result.introductionCount) && ppNum > 0
+    ? result.introductionCount * ppNum : null;
+
+  // 統合表の行モデル。
+  //   kind: count=逆算自動(青字) / rate=率%手入力 / pp=1人あたり件数手入力 / recs=件数自動(青字)。
+  //   week: alloc=週按分する(初回面談・紹介人数・紹介件数・エントリー) / dash=週按分しない「—」(書類通過以降) / empty=率・係数行で空。
+  type Wmode = "alloc" | "dash" | "empty";
+  const funnelRows: {
+    key: string; label: string; indent?: boolean;
+    kind: "count" | "rate" | "pp" | "recs";
+    ref: (b: RefBucket | undefined) => string;
+    targetValue?: number | null; rateKey?: RateKey | null;
+    week: Wmode; weekTarget?: number | null;
+  }[] = [
+    { key: "interview", label: "初回面談", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.firstInterviewExecuted) : "—"), targetValue: targetCounts.interview, week: "alloc", weekTarget: targetCounts.interview },
+    { key: "interviewRate", label: "初回面談率", indent: true, kind: "rate", rateKey: null, ref: (b) => (b ? pct(b.metrics.firstInterviewRate) : "—"), week: "empty" },
+    { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
+    { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty" },
+    { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty" },
+    { key: "introductionRecs", label: "紹介（件数）", indent: true, kind: "recs", ref: () => "—", targetValue: introducedRecs, week: "alloc", weekTarget: introducedRecs },
+    { key: "entry", label: "エントリー", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.entry.count) : "—"), targetValue: targetCounts.entry, week: "alloc", weekTarget: targetCounts.entry },
+    { key: "entryRate", label: "エントリー率", indent: true, kind: "rate", rateKey: "entryRate", ref: (b) => (b ? pct(b.metrics.entry.rate) : "—"), week: "empty" },
+    { key: "documentPass", label: "書類通過", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.documentPass.count) : "—"), targetValue: targetCounts.documentPass, week: "dash" },
+    { key: "documentPassRate", label: "書類通過率", indent: true, kind: "rate", rateKey: "documentPassRate", ref: (b) => (b ? pct(b.metrics.documentPass.rate) : "—"), week: "empty" },
+    { key: "offer", label: "内定", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.offer.count) : "—"), targetValue: targetCounts.offer, week: "dash" },
+    { key: "offerRate", label: "内定率", indent: true, kind: "rate", rateKey: "offerRate", ref: (b) => (b ? pct(b.metrics.offer.rate) : "—"), week: "empty" },
+    { key: "acceptance", label: "承諾", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.acceptance.count) : "—"), targetValue: targetCounts.acceptance, week: "dash" },
+    { key: "acceptanceRate", label: "承諾率", indent: true, kind: "rate", rateKey: "acceptanceRate", ref: (b) => (b ? pct(b.metrics.acceptance.rate) : "—"), week: "empty" },
+  ];
+
   const numNumericCols = REF_COLS.length + 1 + weeks.length + 1; // 参考値4 + 目標1 + 週N + 月計1
 
   return (
     <>
       <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[1180px] max-h-[90vh] overflow-y-auto">
+        <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[1320px] max-h-[90vh] overflow-y-auto">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 sticky top-0 bg-white z-10">
             <h2 className="text-[15px] font-semibold text-[#374151]">🎯 目標登録 — {employeeName}</h2>
@@ -247,71 +267,60 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3F4F6]">
-                  {STAGE_ROWS.map((row) => {
-                    const monthTarget = targetCounts[row.key];
-                    const alloc = weeklyFor(monthTarget ?? null);
+                  {funnelRows.map((row) => {
+                    const isSub = row.kind === "rate" || row.kind === "pp"; // 薄字・按分なしの行
+                    const alloc = row.week === "alloc" ? weeklyFor(row.weekTarget ?? null) : null;
+                    const padY = isSub ? "py-1" : "py-1.5";
+                    const weekCell = (i: number) =>
+                      row.week === "alloc" ? (alloc ? fmtCount(alloc[i]) : "—") : row.week === "dash" ? "—" : "";
                     return (
-                      <Fragment key={row.key}>
-                        {/* 実数値の行 */}
-                        <tr className="border-t border-[#E5E7EB]">
-                          <td className="px-2 py-1.5 text-[#374151] font-medium">{row.label}</td>
-                          {REF_COLS.map((c, i) => {
-                            const m = reference?.[c.key]?.metrics;
-                            return (
-                              <td key={c.key} className={`px-2 py-1.5 text-right tabular-nums text-[#374151] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
-                                {loadingRef ? "…" : m ? fmtCount(row.count(m)) : "—"}
-                              </td>
-                            );
-                          })}
-                          <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-[#2563EB] border-l border-[#F3F4F6]">
-                            {fmtCount(monthTarget ?? null)}
+                      <tr key={row.key} className={`${isSub ? "bg-[#FAFAFA]" : ""} ${!row.indent ? "border-t border-[#E5E7EB]" : ""}`}>
+                        <td className={row.indent ? `pl-5 pr-2 ${padY} text-[#9CA3AF] text-[11px]` : `px-2 ${padY} text-[#374151] font-medium`}>{row.label}</td>
+                        {/* 参考値 */}
+                        {REF_COLS.map((c, i) => (
+                          <td key={c.key} className={`px-2 ${padY} text-right tabular-nums ${isSub ? "text-[#9CA3AF] text-[11px]" : "text-[#374151]"} ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
+                            {loadingRef ? (isSub ? "" : "…") : row.ref(reference?.[c.key])}
                           </td>
-                          {weeks.map((w, i) => (
-                            <td key={w.weekIndex} className={`px-2 py-1.5 text-right tabular-nums text-[#374151] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
-                              {alloc ? fmtCount(alloc[i]) : "—"}
-                            </td>
-                          ))}
-                          <td className="px-2 py-1.5 text-right tabular-nums font-medium text-[#374151]">
-                            {fmtCount(monthTarget ?? null)}
+                        ))}
+                        {/* 目標 */}
+                        <td className={`px-1.5 ${padY} text-right border-l border-[#F3F4F6]`}>
+                          {row.kind === "count" || row.kind === "recs" ? (
+                            <span className="tabular-nums font-semibold text-[#2563EB]">{fmtCount(row.targetValue ?? null)}</span>
+                          ) : row.kind === "pp" ? (
+                            <span className="inline-flex items-center gap-0.5 justify-end">
+                              <input type="number" value={proposalPerPerson} onChange={(e) => setProposalPerPerson(e.target.value)}
+                                className="w-12 border border-gray-300 rounded px-1 py-0.5 text-[11px] text-right" placeholder="件" />
+                              <span className="text-[10px] text-[#9CA3AF]">件</span>
+                            </span>
+                          ) : row.rateKey ? (
+                            <span className="inline-flex items-center gap-0.5 justify-end">
+                              <input type="number" value={rates[row.rateKey]}
+                                onChange={(e) => setRates((s) => ({ ...s, [row.rateKey as RateKey]: e.target.value }))}
+                                className="w-12 border border-gray-300 rounded px-1 py-0.5 text-[11px] text-right" placeholder="%" />
+                              <span className="text-[10px] text-[#9CA3AF]">%</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-[#C0C4CC]">—</span>
+                          )}
+                        </td>
+                        {/* 週按分 */}
+                        {weeks.map((w, i) => (
+                          <td key={w.weekIndex} className={`px-2 ${padY} text-right tabular-nums text-[#374151] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
+                            {weekCell(i)}
                           </td>
-                        </tr>
-                        {/* 率の行（段階名の真下・薄字・インデント） */}
-                        <tr className="bg-[#FAFAFA]">
-                          <td className="pl-5 pr-2 py-1 text-[#9CA3AF] text-[11px]">{row.label}率</td>
-                          {REF_COLS.map((c, i) => {
-                            const m = reference?.[c.key]?.metrics;
-                            return (
-                              <td key={c.key} className={`px-2 py-1 text-right tabular-nums text-[#9CA3AF] text-[11px] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
-                                {loadingRef ? "" : m ? pct(row.rate(m)) : "—"}
-                              </td>
-                            );
-                          })}
-                          <td className="px-1.5 py-1 text-right border-l border-[#F3F4F6]">
-                            {row.rateKey ? (
-                              <span className="inline-flex items-center gap-0.5 justify-end">
-                                <input type="number" value={rates[row.rateKey]}
-                                  onChange={(e) => setRates((s) => ({ ...s, [row.rateKey as RateKey]: e.target.value }))}
-                                  className="w-12 border border-gray-300 rounded px-1 py-0.5 text-[11px] text-right" placeholder="%" />
-                                <span className="text-[10px] text-[#9CA3AF]">%</span>
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-[#C0C4CC]">—</span>
-                            )}
-                          </td>
-                          {/* 週按分は実数値の行のみ（率は按分対象外） */}
-                          {weeks.map((w, i) => (
-                            <td key={w.weekIndex} className={`px-2 py-1 ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`} />
-                          ))}
-                          <td className="px-2 py-1" />
-                        </tr>
-                      </Fragment>
+                        ))}
+                        <td className={`px-2 ${padY} text-right tabular-nums font-medium text-[#374151]`}>
+                          {row.week === "alloc" ? fmtCount(row.weekTarget ?? null) : row.week === "dash" ? "—" : ""}
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
             <p className="mt-1.5 text-[10px] text-[#9CA3AF]">
-              数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。週按分は各週切り上げ・最終週で帳尻（合計＝月計）。
+              数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。紹介件数＝紹介人数×1人あたり件数（手入力、参考値は実績の提案1人当たり）。
+              週按分は初回面談・紹介（人数・件数）・エントリーのみ（各週切り上げ・最終週で帳尻、合計＝月計）。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。
             </p>
 
             {/* 保存 */}

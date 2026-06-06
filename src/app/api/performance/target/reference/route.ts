@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { computeCaMetricsForRange, type CaRangeMetrics } from "@/lib/dailyReport/metrics";
+import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { jstMonthRangeStart, jstMonthRangeEnd } from "@/lib/dailyReport/jstDate";
 
 const YYYY_MM = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -53,19 +54,25 @@ export async function GET(req: Request) {
     { key: "half", fromMonth: halfFrom, toMonth: prevMonth },
   ];
 
+  // 紹介の「1人あたり件数」参考値は T-071 確定の提案集計（両ソース統合・件数÷人数）から取る。
+  // computeWeeklyMatrix.proposal.total.perPerson を各期間で算出（既存 metrics は不変、追加のみ）。
   const results = await Promise.all(
     periodDefs.map(async (d) => {
       const from = jstMonthRangeStart(d.fromMonth);
       const to = jstMonthRangeEnd(d.toMonth);
-      const metrics = await computeCaMetricsForRange({ userId, employeeId: employee.id, from, to });
-      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics }] as [
+      const [metrics, matrix] = await Promise.all([
+        computeCaMetricsForRange({ userId, employeeId: employee.id, from, to }),
+        computeWeeklyMatrix({ employeeId: employee.id, userId, from, to }),
+      ]);
+      const proposalPerPerson = matrix.proposal.total.perPerson;
+      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson }] as [
         string,
-        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics },
+        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null },
       ];
     }),
   );
 
-  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics }> = {};
+  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null }> = {};
   for (const [k, v] of results) reference[k] = v;
 
   return NextResponse.json({
