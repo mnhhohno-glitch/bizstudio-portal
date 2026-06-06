@@ -6,7 +6,7 @@
 // - 直近6ヶ月：GET /api/performance/cohort（コホート追跡の率）。
 // 既存の期間ボタン式は廃止。集計の数え方は API 側（変更なし）。
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import TargetModal from "./TargetModal";
 
 type Advisor = { id: string; name: string };
@@ -284,16 +284,16 @@ export default function PerformancePanel() {
         <>
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setShowDetail(false)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-            <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[1200px] max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[1400px] max-h-[85vh] flex flex-col overflow-hidden">
               <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
-                <h2 className="text-[14px] font-semibold">明細一覧</h2>
+                <h2 className="text-[14px] font-semibold shrink-0">明細一覧</h2>
                 {tab === "selection" && (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 w-[360px]">
                     {([["documentPass", "書類選考"], ["offer", "内定"], ["acceptance", "承諾"]] as const).map(([k, l]) => (
                       <button
                         key={k}
                         onClick={() => setSelectionStage(k)}
-                        className={`px-2 py-0.5 text-[12px] rounded border transition-colors ${
+                        className={`flex-1 px-2 py-1 text-[12px] rounded border transition-colors ${
                           selectionStage === k ? "bg-[#2563EB] text-white border-[#2563EB]" : "border-[#6B7280] text-[#D1D5DB] hover:bg-[#4A4A4A]"
                         }`}
                       >
@@ -309,7 +309,8 @@ export default function PerformancePanel() {
                 )}
                 <button onClick={() => setShowDetail(false)} className="text-white hover:text-gray-300 text-lg px-1">✕</button>
               </div>
-              <div className="overflow-auto flex-1">
+              {/* 15 行相当（≈480px）で頭打ち、超過はスクロール。thead は sticky。 */}
+              <div className="overflow-auto max-h-[480px]">
                 <DetailTable tab={tab} detail={detail} />
               </div>
             </div>
@@ -414,12 +415,22 @@ const COHORT_ROWS: CohortRow[] = [
 function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   return (
-    <table className="w-full text-[13px] border-collapse">
+    <table className="text-[12px] border-collapse" style={{ tableLayout: "auto" }}>
       <thead>
+        {/* 1段目：段階列＋各月（colSpan=2） */}
         <tr>
-          <th className={`sticky left-0 ${HEAD_CLS} px-3 py-2.5 text-left font-medium min-w-[180px]`}>段階<div className={`text-[10px] ${SUBHEAD_CLS}`}>実績｜%</div></th>
+          <th rowSpan={2} className={`sticky left-0 ${HEAD_CLS} px-2 py-1.5 text-left font-medium w-[150px] whitespace-nowrap`}>段階</th>
           {cohorts.map((c) => (
-            <th key={c.yearMonth} className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>{c.yearMonth}</th>
+            <th key={c.yearMonth} colSpan={2} className={`${HEAD_CLS} px-2 py-1.5 text-center font-medium whitespace-nowrap border-l border-[#5A5A5A]`}>{c.yearMonth}</th>
+          ))}
+        </tr>
+        {/* 2段目：実績｜% */}
+        <tr>
+          {cohorts.map((c) => (
+            <Fragment key={c.yearMonth}>
+              <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS} border-l border-[#5A5A5A]`}>実績</th>
+              <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS}`}>%</th>
+            </Fragment>
           ))}
         </tr>
       </thead>
@@ -429,15 +440,15 @@ function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
           const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
           return (
             <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#F3F4F6]`}>
-              <td className={`sticky left-0 ${rowBg} px-3 py-2 font-medium text-[#374151]`}>{r.label}</td>
+              <td className={`sticky left-0 ${rowBg} px-2 py-1 font-medium text-[#374151] whitespace-nowrap`}>{r.label}</td>
               {cohorts.map((c) => {
                 const n = r.num(c);
                 const pv = r.pct(c);
                 return (
-                  <td key={c.yearMonth} className="px-3 py-2 text-center tabular-nums">
-                    <div className="text-[#374151] font-medium">{r.fmt ? r.fmt(n) : numFmt(n)}</div>
-                    {pv != null && <div className="text-[11px] text-[#2563EB]">{pctFmt(pv)}</div>}
-                  </td>
+                  <Fragment key={c.yearMonth}>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6]">{r.fmt ? r.fmt(n) : numFmt(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
+                  </Fragment>
                 );
               })}
             </tr>
@@ -449,7 +460,8 @@ function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
 }
 
 // 明細テーブル：タブごとに列を出し分ける。FileMaker ④⑤ 踏襲。
-type DetailCol = { key: string; label: string; truncate?: boolean };
+// truncate＝省略表示、wide＝広め（求人タイトルは約2倍幅）。
+type DetailCol = { key: string; label: string; truncate?: boolean; wide?: boolean };
 const DETAIL_COLS: Record<string, DetailCol[]> = {
   entry: [
     { key: "entryDate", label: "エントリー日" },
@@ -464,7 +476,7 @@ const DETAIL_COLS: Record<string, DetailCol[]> = {
     { key: "entryFlag", label: "フラグ" },
     { key: "entryFlagDetail", label: "詳細" },
     { key: "companyName", label: "企業名", truncate: true },
-    { key: "jobTitle", label: "求人タイトル", truncate: true },
+    { key: "jobTitle", label: "求人タイトル", truncate: true, wide: true },
   ],
   selection: [
     { key: "documentPassDate", label: "書類通過日" },
@@ -477,7 +489,7 @@ const DETAIL_COLS: Record<string, DetailCol[]> = {
     { key: "entryFlag", label: "フラグ" },
     { key: "entryFlagDetail", label: "詳細" },
     { key: "companyName", label: "企業名", truncate: true },
-    { key: "jobTitle", label: "求人タイトル", truncate: true },
+    { key: "jobTitle", label: "求人タイトル", truncate: true, wide: true },
   ],
   interview: [
     { key: "interviewDate", label: "面談日" },
@@ -492,7 +504,7 @@ const DETAIL_COLS: Record<string, DetailCol[]> = {
   ],
   proposal: [
     { key: "proposalDate", label: "紹介日" },
-    { key: "jobTitle", label: "求人", truncate: true },
+    { key: "jobTitle", label: "求人", truncate: true, wide: true },
     { key: "caName", label: "担当CA" },
     { key: "rcName", label: "担当RC" },
     { key: "candidateNumber", label: "求職者NO" },
@@ -512,26 +524,45 @@ function cellValue(row: DetailRow, key: string): string {
   return v == null || v === "" ? "—" : String(v);
 }
 
+const DETAIL_FIXED_ROWS = 15; // 面談・選考は常に15行（FileMaker 式・空行で埋める）
+
 function DetailTable({ tab, detail }: { tab: string; detail: DetailResp | null }) {
   const cols = DETAIL_COLS[tab] ?? DETAIL_COLS.entry;
   if (!detail) return <div className="py-6 text-center text-[12px] text-[#9CA3AF]">読み込み中...</div>;
-  if (detail.rows.length === 0) return <div className="py-6 text-center text-[12px] text-[#9CA3AF]">対象がありません</div>;
+
+  // 面談・選考タブは常に15行表示（不足分は空行で埋める）。エントリーは行数固定しない。
+  const padTo15 = tab === "interview" || tab === "selection";
+  const rows = detail.rows;
+  const emptyCount = padTo15 ? Math.max(0, DETAIL_FIXED_ROWS - rows.length) : 0;
+  const cellCls = (c: DetailCol) =>
+    c.wide ? "max-w-[360px] truncate" : c.truncate ? "max-w-[180px] truncate" : "whitespace-nowrap";
+
   return (
     <table className="w-full text-[12px] border-collapse">
       <thead className="sticky top-0 z-10">
         <tr className="bg-[#3C3C3C] text-white">
           {cols.map((c) => (
-            <th key={c.key} className="px-2 py-2 text-left font-medium whitespace-nowrap">{c.label}</th>
+            <th key={c.key} className={`px-2 py-2 text-left font-medium whitespace-nowrap ${c.wide ? "min-w-[300px]" : ""}`}>{c.label}</th>
           ))}
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
-        {detail.rows.map((row) => (
+        {rows.length === 0 && !padTo15 && (
+          <tr><td colSpan={cols.length} className="py-6 text-center text-[12px] text-[#9CA3AF]">対象がありません</td></tr>
+        )}
+        {rows.map((row) => (
           <tr key={String(row.id)} className="hover:bg-[#F9FAFB]">
             {cols.map((c) => (
-              <td key={c.key} className={`px-2 py-1.5 text-[#374151] ${c.truncate ? "max-w-[180px] truncate" : "whitespace-nowrap"}`} title={c.truncate ? cellValue(row, c.key) : undefined}>
+              <td key={c.key} className={`px-2 py-1.5 text-[#374151] ${cellCls(c)}`} title={c.truncate ? cellValue(row, c.key) : undefined}>
                 {cellValue(row, c.key)}
               </td>
+            ))}
+          </tr>
+        ))}
+        {Array.from({ length: emptyCount }).map((_, i) => (
+          <tr key={`empty-${i}`}>
+            {cols.map((c) => (
+              <td key={c.key} className="px-2 py-1.5 text-transparent select-none">&nbsp;</td>
             ))}
           </tr>
         ))}
