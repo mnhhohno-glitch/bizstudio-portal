@@ -514,12 +514,13 @@ const DETAIL_COLS: Record<string, DetailCol[]> = {
   ],
   proposal: [
     { key: "proposalDate", label: "紹介日" },
-    { key: "jobTitle", label: "求人", truncate: true, wide: true },
+    { key: "source", label: "区分" },
     { key: "caName", label: "担当CA" },
-    { key: "rcName", label: "担当RC" },
     { key: "candidateNumber", label: "求職者NO" },
     { key: "candidateName", label: "氏名" },
     { key: "genderAge", label: "性別/年齢" },
+    { key: "companyName", label: "企業名", truncate: true },
+    { key: "jobTitle", label: "求人タイトル", truncate: true, wide: true },
   ],
 };
 const GENDER_LABEL: Record<string, string> = { male: "男", female: "女", other: "他" };

@@ -2,10 +2,12 @@
 // 新規/既存の区別・件数/人数/1人当たり・選考状況（決定売上等）を raw SQL で算出する。
 //
 // 数え方（T-071 確定を踏襲）：
-//   - 担当軸＝candidate.employeeId（面談・エントリー・選考状況）、求人紹介は uploadedByUserId（User.id）。
+//   - 担当軸＝candidate.employeeId（面談・エントリー・選考状況・**求人紹介も統一**）。
+//   - 求人紹介（提案）は **JobEntry.jobIntroDate ∪ CandidateFile BOOKMARK.lastExportedAt** の両ソース統合
+//     （記録方式が 2026/4 に移行。片方だけでは過去 or 現在が欠ける）。candidate×同日のクロスソース重複は除外。
 //   - 無効（isActive=false）含む・アーカイブ（archivedAt）除く。
 //   - 件数＝レコード件数、人数＝候補者ユニーク、1人当たり＝件数÷人数。
-//   - 新規/既存：その候補者にとっての「初回」提案/エントリーかどうか（最初の日付がレンジ内なら新規）。
+//   - 新規/既存：その候補者にとっての「初回」提案/エントリーか（統合イベントの通算最古がレンジ内なら初回）。
 //   - 面談は notDeclined（辞退系以外、null 含む）でカウント。
 //   - JST 境界は呼び出し側が from/to(Date) で渡す（罠 #17）。列は UTC 保存なので UTC wall-clock で比較。
 
@@ -50,9 +52,9 @@ export async function computeWeeklyMatrix(params: {
   const { employeeId, userId, from, to, allCas } = params;
   const F = tsLit(from);
   const T = tsLit(to);
-  // 全員モードでは担当軸/Userフィルタを外す（対象を全候補者・全アップロードに広げるだけ）。
+  // 全員モードでは担当軸フィルタを外す（対象を全候補者に広げるだけ）。
   const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
-  const userPred = allCas ? "TRUE" : `cf.uploaded_by_user_id = '${userId}'`;
+  void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
 
   const [iv, prop, ent, sel] = await Promise.all([
     // 面談（candidate.employeeId 軸・notDeclined）。second は予約語のため別名にする。
@@ -67,22 +69,39 @@ export async function computeWeeklyMatrix(params: {
         AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
         AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}';`),
 
-    // 求人紹介（CandidateFile BOOKMARK・uploadedByUserId 軸）。新規＝その候補者の初回提案がレンジ内。
+    // 求人紹介（提案）＝両ソース統合：JobEntry.jobIntroDate（旧・〜2026/4）∪ CandidateFile BOOKMARK.lastExportedAt（新・2026/4〜）。
+    // 担当はどちらも candidate.employeeId 軸に統一。無効含む・archivedAt 除く（JobEntry）。
+    // 移行期の二重記録ガード：同一候補者×同一日に JE 提案があれば CF 側は同一提案とみなし除外（NOT EXISTS）。
+    //   ※実データ検証で同日クロスソース衝突は 0 件のため現状は no-op だが、移行重複の保険。
+    // 初回/既存は統合イベントの候補者**通算**順位（ROW_NUMBER、両ソース横断の最古がレンジ内なら初回）。
     prisma.$queryRawUnsafe<{ new_recs: number; new_uniq: number; ex_recs: number; ex_uniq: number; tot_recs: number; tot_uniq: number }[]>(`
-      WITH props AS (
-        SELECT cf.candidate_id, cf.last_exported_at,
-          MIN(cf.last_exported_at) OVER (PARTITION BY cf.candidate_id) AS first_export
-        FROM candidate_files cf
-        WHERE cf.category = 'BOOKMARK' AND ${userPred} AND cf.last_exported_at IS NOT NULL
+      WITH events AS (
+        SELECT je.candidate_id, je.job_intro_date AS pdate
+        FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+        WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
+        UNION ALL
+        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
+        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM job_entries je2
+            WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
+              AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+                = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+          )
+      ),
+      ranked AS (
+        SELECT candidate_id, pdate, ROW_NUMBER() OVER (PARTITION BY candidate_id ORDER BY pdate ASC) AS rn
+        FROM events
       )
       SELECT
-        COUNT(*) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_export >= TIMESTAMP '${F}')::int new_recs,
-        COUNT(DISTINCT candidate_id) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_export >= TIMESTAMP '${F}')::int new_uniq,
-        COUNT(*) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_export < TIMESTAMP '${F}')::int ex_recs,
-        COUNT(DISTINCT candidate_id) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_export < TIMESTAMP '${F}')::int ex_uniq,
-        COUNT(*) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_recs,
-        COUNT(DISTINCT candidate_id) FILTER (WHERE last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_uniq
-      FROM props;`),
+        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int new_recs,
+        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int new_uniq,
+        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn > 1)::int ex_recs,
+        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn > 1)::int ex_uniq,
+        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_recs,
+        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_uniq
+      FROM ranked;`),
 
     // エントリー（JobEntry・candidate.employeeId 軸・post-app・archived除く）。新規＝その候補者の初回エントリーがレンジ内。
     prisma.$queryRawUnsafe<{ new_recs: number; new_uniq: number; ex_recs: number; ex_uniq: number; tot_recs: number; tot_uniq: number }[]>(`

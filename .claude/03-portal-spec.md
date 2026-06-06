@@ -209,7 +209,8 @@ model InterviewMemo {
 実績表は「過去に何件紹介し、何件通過し、何件内定したか」の**累積実績**を見るもの（現在進行中の有効案件ではない）。
 
 - キー対応（厳守）：
-  - 検索/紹介＝**User.id**（`uploadedByUserId`）。変更しない。
+  - **求人検索**＝CandidateFile BOOKMARK `createdAt`・User.id（`uploadedByUserId`）。マトリクス上部の「検索」件数は変更しない。
+  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算**順位（両ソース横断の最古がレンジ内＝初回）。`src/lib/performance/weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS＋ROW_NUMBER）。
   - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
   - **エントリー以降＝担当軸＝`candidate.employeeId`**。
 - ⚠️ **`JobEntry.careerAdvisorId` は使わない**：実データの 99.9%（28007 行中 27981 行）が NULL の実質未使用カラム。管理画面 `/api/entries` の担当フィルタも `careerAdvisorName → candidate.employee.name`（`EntryBoard.tsx` が送る）。

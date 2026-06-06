@@ -109,36 +109,71 @@ export async function GET(req: Request) {
     });
   }
 
-  // === 求人紹介（CandidateFile BOOKMARK） ===
+  // === 求人紹介（提案）＝両ソース統合：JobEntry.jobIntroDate ∪ CandidateFile BOOKMARK.lastExportedAt ===
+  // 担当は candidate.employeeId 軸に統一。CF は同一候補者×同日に JE 提案があれば除外（移行重複ガード）。
   if (tab === "proposal") {
-    const where: Prisma.CandidateFileWhereInput = {
-      category: "BOOKMARK",
-      lastExportedAt: range,
-      ...(allCas ? {} : { uploadedByUserId: userId }),
-      candidate: candFilter,
-    };
-    const [records, persons, rows] = await Promise.all([
-      prisma.candidateFile.count({ where }),
-      prisma.candidateFile.findMany({ where, select: { candidateId: true }, distinct: ["candidateId"] }).then((r) => r.length),
+    const jeWhere: Prisma.JobEntryWhereInput = { candidate: candFilter, archivedAt: null, jobIntroDate: range };
+    const cfWhere: Prisma.CandidateFileWhereInput = { category: "BOOKMARK", lastExportedAt: range, candidate: candFilter };
+    const [jeRows, cfRows] = await Promise.all([
+      prisma.jobEntry.findMany({
+        where: jeWhere,
+        select: { id: true, jobIntroDate: true, companyName: true, jobTitle: true, candidate: { select: CANDIDATE_SELECT } },
+        orderBy: { jobIntroDate: "desc" },
+        take: ROW_LIMIT,
+      }),
       prisma.candidateFile.findMany({
-        where,
-        select: { id: true, fileName: true, lastExportedAt: true, candidate: { select: CANDIDATE_SELECT } },
+        where: cfWhere,
+        select: { id: true, fileName: true, lastExportedAt: true, candidateId: true, candidate: { select: CANDIDATE_SELECT } },
         orderBy: { lastExportedAt: "desc" },
         take: ROW_LIMIT,
       }),
     ]);
+    // summary（件数・人数）はマトリクスと一致させるため raw SQL の統合集計で算出（行は上限1000で別途取得）。
+    const empPredSql = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+    const F = from.toISOString().replace("T", " ").replace("Z", "");
+    const T = to.toISOString().replace("T", " ").replace("Z", "");
+    const sumRows = await prisma.$queryRawUnsafe<{ recs: number; persons: number }[]>(`
+      WITH events AS (
+        SELECT je.candidate_id, je.job_intro_date AS pdate
+        FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+        WHERE ${empPredSql} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
+        UNION ALL
+        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
+        WHERE ${empPredSql} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM job_entries je2 WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
+              AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+          )
+      )
+      SELECT COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int recs,
+             COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int persons
+      FROM events;`);
+    const sum = sumRows[0] ?? { recs: 0, persons: 0 };
+
+    // 移行重複ガード：JE が持つ (candidate, JST日) は CF 側から除外。
+    const jeKeys = new Set(jeRows.map((r) => `${r.candidate.candidateNumber}|${ymd(r.jobIntroDate)}`));
+    type PRow = { id: string; date: string | null; jobTitle: string | null; companyName: string | null; cand: typeof jeRows[number]["candidate"]; src: string };
+    const merged: PRow[] = [
+      ...jeRows.map((r) => ({ id: `je-${r.id}`, date: ymd(r.jobIntroDate), jobTitle: r.jobTitle, companyName: r.companyName, cand: r.candidate, src: "JE" })),
+      ...cfRows
+        .filter((r) => !jeKeys.has(`${r.candidate.candidateNumber}|${ymd(r.lastExportedAt)}`))
+        .map((r) => ({ id: `cf-${r.id}`, date: ymd(r.lastExportedAt), jobTitle: r.fileName, companyName: null, cand: r.candidate, src: "CF" })),
+    ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, ROW_LIMIT);
     return NextResponse.json({
-      tab, summary: { persons, records },
-      rows: rows.map((r) => ({
+      tab, summary: { persons: sum.persons, records: sum.recs },
+      rows: merged.map((r) => ({
         id: r.id,
-        proposalDate: ymd(r.lastExportedAt),
-        jobTitle: r.fileName,
-        caName: r.candidate.employee?.name ?? null,
-        rcName: r.candidate.recruiterName ?? null,
-        candidateNumber: r.candidate.candidateNumber,
-        candidateName: r.candidate.name,
-        gender: r.candidate.gender,
-        age: ageOf(r.candidate.birthday),
+        proposalDate: r.date,
+        companyName: r.companyName,
+        jobTitle: r.jobTitle,
+        source: r.src,
+        caName: r.cand.employee?.name ?? null,
+        rcName: r.cand.recruiterName ?? null,
+        candidateNumber: r.cand.candidateNumber,
+        candidateName: r.cand.name,
+        gender: r.cand.gender,
+        age: ageOf(r.cand.birthday),
       })),
     });
   }
