@@ -16,6 +16,20 @@
 - マスタへのレコード追加（既存データに影響なし）
 - オプトインのプロパティ追加
 
+### 本番デプロイ衝突回避（portal-1/portal-2 並行運用）
+
+portal は複数 worktree から同じ master・同じ Railway 本番サービスにつながる。master への push が二重に走ると本番デプロイが衝突するため、master push 系の手順では `git push origin master` の直前に必ず待機スクリプトを挟む:
+
+```
+# Windows
+py scripts\wait_railway_idle.py ; if ($?) { git push origin master }
+
+# Unix
+python3 scripts/wait_railway_idle.py && git push origin master
+```
+
+このスクリプトは本番サービス `bizstudio-portal`（master）のデプロイが idle になるまでブロッキング待機する。staging（検証）への push は衝突無害のため対象外。詳細仕様は `scripts/wait_railway_idle.py` の docstring 参照。
+
 ## kyuujin-pdf-tool
 
 - production: master 自動デプロイ
