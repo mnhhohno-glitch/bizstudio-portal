@@ -43,6 +43,34 @@ type InterviewRecordForGoogleForm = {
   googleFormStatus: string | null;
 };
 
+// T-035 step2: 「その他系」職種コード判定。会社別の自由記入ラベル入力欄を出す対象。
+// office_other / planning_other / care_other / other（業種カテゴリ「その他」）。
+const OTHER_TYPE_CATEGORY_VALUES = new Set([
+  "other",
+  "office_other",
+  "planning_other",
+  "care_other",
+]);
+
+function isOtherTypeCategory(value: string | undefined | null): boolean {
+  return !!value && OTHER_TYPE_CATEGORY_VALUES.has(value);
+}
+
+function getOtherTypeLabelPlaceholder(value: string): string {
+  switch (value) {
+    case "office_other":
+      return "例: 特許事務、医療事務 など";
+    case "planning_other":
+      return "例: 経営企画、新規事業 など";
+    case "care_other":
+      return "例: 歯科助手、薬剤師補助 など";
+    case "other":
+      return "例: トラック運転手、職人 など";
+    default:
+      return "";
+  }
+}
+
 const STAGE_LABELS: Record<Stage, string> = {
   extract: "履歴書解析",
   generate: "質問生成",
@@ -123,6 +151,9 @@ export default function GoogleFormCreatorModal({
   const [companyCategoryMap, setCompanyCategoryMap] = useState<Record<string, string>>({});
   // 大項目 label を保持する内部 state（UI の 2 階層ドロップダウン用、API には送らない）
   const [companyGroupMap, setCompanyGroupMap] = useState<Record<string, string>>({});
+  // T-035 step2: 会社別の自由記入ラベル（その他系のみ表示・保持）。
+  // キー: work_history index 文字列。値: ユーザー入力ラベル（例「特許事務」）。
+  const [companyCategoryLabelMap, setCompanyCategoryLabelMap] = useState<Record<string, string>>({});
 
   const pdfCandidates = useMemo(
     () =>
@@ -193,8 +224,8 @@ export default function GoogleFormCreatorModal({
   const selectedGroup = groups.find((g) => g.label === groupKey) ?? null;
 
   const filesValid = !!selectedPdfFileId && !!selectedTxtFileId;
-  const categoryValid =
-    !!categoryValue && (categoryValue !== "other" || otherLabel.trim().length > 0);
+  // T-035 step2: その他系の自由記入ラベルは任意（空でも先に進める）。サブカテゴリのみ必須。
+  const categoryValid = !!categoryValue;
   const canStart = filesValid && categoryValid && step === "idle";
 
   const handleClose = () => {
@@ -213,6 +244,7 @@ export default function GoogleFormCreatorModal({
     setFormCreatedAt(null);
     setCompanyCategoryMap({});
     setCompanyGroupMap({});
+    setCompanyCategoryLabelMap({});
   };
 
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
@@ -233,23 +265,33 @@ export default function GoogleFormCreatorModal({
   };
 
   // T-035: extract 直後に各社にデフォルトカテゴリを初期適用
+  // T-035 step2: その他系のときは、1画面目で入力された自由記入ラベルを各社の初期値として配る。
   const initializeCompanyCategoryMap = (
     workHistory: WorkHistoryEntry[],
     defaultGroupLabel: string,
     defaultCategoryValue: string,
+    defaultLabel: string,
   ) => {
     const initialMap: Record<string, string> = {};
     const initialGroupMap: Record<string, string> = {};
+    const initialLabelMap: Record<string, string> = {};
+    const shouldPropagateLabel =
+      isOtherTypeCategory(defaultCategoryValue) && defaultLabel.trim().length > 0;
     workHistory.forEach((_, index) => {
       const key = String(index);
       initialMap[key] = defaultCategoryValue;
       initialGroupMap[key] = defaultGroupLabel;
+      if (shouldPropagateLabel) {
+        initialLabelMap[key] = defaultLabel.trim();
+      }
     });
     setCompanyCategoryMap(initialMap);
     setCompanyGroupMap(initialGroupMap);
+    setCompanyCategoryLabelMap(initialLabelMap);
   };
 
-  // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須 + グローバル "other" ラベル必須）
+  // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
+  // T-035 step2: その他系の自由記入ラベルは任意（空でも進める）ため、ラベル必須チェックは削除。
   const validateBeforeGenerate = (resume: unknown): string | null => {
     const workHistory = getWorkHistory(resume);
     for (let i = 0; i < workHistory.length; i++) {
@@ -259,12 +301,6 @@ export default function GoogleFormCreatorModal({
         const name = workHistory[i].company || `会社 ${i + 1}`;
         return `${name} のカテゴリが未選択です`;
       }
-    }
-    // T-035 hotfix: "other" のラベルチェックは会社単位ではなくグローバルに 1 度だけ
-    // (otherLabel は全社で共有する単一フィールドのため)
-    const hasOther = Object.values(companyCategoryMap).includes("other");
-    if (hasOther && otherLabel.trim().length === 0) {
-      return "「その他」を選択した会社があります。画面下部の自由記述を入力してください";
     }
     return null;
   };
@@ -305,6 +341,18 @@ export default function GoogleFormCreatorModal({
   ): Promise<unknown | null> => {
     setStageStatus((s) => ({ ...s, generate: "running" }));
     try {
+      // T-035 step2: その他系の会社のみ、非空のラベルを抽出して送る。
+      // 空 / その他系でない会社はマップに含めない（candidate-intake は空を無視する仕様）。
+      const labelMapToSend: Record<string, string> = {};
+      for (const [key, cat] of Object.entries(companyCategoryMap)) {
+        if (!isOtherTypeCategory(cat)) continue;
+        const label = (companyCategoryLabelMap[key] ?? "").trim();
+        if (label) labelMapToSend[key] = label;
+      }
+      const hasOtherTypeSomewhere =
+        isOtherTypeCategory(categoryValue) ||
+        Object.values(companyCategoryMap).some((c) => isOtherTypeCategory(c));
+
       const res = await fetch(
         `/api/candidates/${candidateId}/google-form/generate-form`,
         {
@@ -314,15 +362,14 @@ export default function GoogleFormCreatorModal({
             resumeData: resume,
             interviewLog: log,
             achievementCategory: categoryValue,
-            // T-035 hotfix: いずれかの会社で "other" 選択 OR Step 1 デフォルトが "other" のときに送る
-            // (candidate-intake 側で全 "other" 会社にこの単一ラベルが共通展開される)
-            achievementCategoryOtherLabel:
-              categoryValue === "other" ||
-              Object.values(companyCategoryMap).includes("other")
-                ? otherLabel.trim()
-                : null,
+            // 後方互換: 1画面目で入力されたラベル（その他系のとき）。
+            // 会社別マップが優先される想定だが、ない会社の fallback として candidate-intake が利用する。
+            achievementCategoryOtherLabel: hasOtherTypeSomewhere ? otherLabel.trim() : null,
             // T-035: 会社別カテゴリマップ（空 / undefined は candidate-intake が後方互換動作）
             companyCategoryMap,
+            // T-035 step2: 会社別の自由記入ラベルマップ（その他系のみ、非空のみ）。
+            // 空オブジェクトでも素直に送る（candidate-intake 側は空無視で正規化済み）。
+            companyCategoryLabelMap: labelMapToSend,
           }),
         },
       );
@@ -394,7 +441,7 @@ export default function GoogleFormCreatorModal({
       setStep("error");
       return;
     }
-    initializeCompanyCategoryMap(getWorkHistory(e1.resumeData), groupKey, categoryValue);
+    initializeCompanyCategoryMap(getWorkHistory(e1.resumeData), groupKey, categoryValue, otherLabel);
     setStep("selectCompany");
   };
 
@@ -438,7 +485,7 @@ export default function GoogleFormCreatorModal({
         setStep("error");
         return;
       }
-      initializeCompanyCategoryMap(getWorkHistory(r.resumeData), groupKey, categoryValue);
+      initializeCompanyCategoryMap(getWorkHistory(r.resumeData), groupKey, categoryValue, otherLabel);
       setStep("selectCompany");
       return;
     }
@@ -623,14 +670,21 @@ export default function GoogleFormCreatorModal({
                   ))}
                 </select>
               </div>
-              {categoryValue === "other" && (
-                <input
-                  type="text"
-                  value={otherLabel}
-                  onChange={(e) => setOtherLabel(e.target.value)}
-                  placeholder="職種を自由記述（例: トラック運転手）"
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                />
+              {/* T-035 step2: その他系（_other / other）のとき、1画面目に自由記入欄を出す。
+                  任意入力（空でも進める）。ここに書いた値は解析後に各社の初期値として配られる。 */}
+              {isOtherTypeCategory(categoryValue) && (
+                <>
+                  <input
+                    type="text"
+                    value={otherLabel}
+                    onChange={(e) => setOtherLabel(e.target.value)}
+                    placeholder={getOtherTypeLabelPlaceholder(categoryValue)}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                  />
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    任意。解析後、各会社の自由記入欄に初期値として反映され、会社ごとに変更できます。
+                  </p>
+                </>
               )}
             </div>
 
@@ -716,6 +770,15 @@ export default function GoogleFormCreatorModal({
                                 ...prev,
                                 [key]: firstSubInGroup,
                               }));
+                              // T-035 step2: 切替後がその他系でなければラベルをクリア
+                              if (!isOtherTypeCategory(firstSubInGroup)) {
+                                setCompanyCategoryLabelMap((prev) => {
+                                  if (!(key in prev)) return prev;
+                                  const next = { ...prev };
+                                  delete next[key];
+                                  return next;
+                                });
+                              }
                             }}
                             className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
                           >
@@ -728,12 +791,22 @@ export default function GoogleFormCreatorModal({
                           </select>
                           <select
                             value={currentCategory}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const newCat = e.target.value;
                               setCompanyCategoryMap((prev) => ({
                                 ...prev,
-                                [key]: e.target.value,
-                              }))
-                            }
+                                [key]: newCat,
+                              }));
+                              // T-035 step2: 非その他系に切り替わったらラベルをクリア
+                              if (!isOtherTypeCategory(newCat)) {
+                                setCompanyCategoryLabelMap((prev) => {
+                                  if (!(key in prev)) return prev;
+                                  const next = { ...prev };
+                                  delete next[key];
+                                  return next;
+                                });
+                              }
+                            }}
                             disabled={!currentGroup}
                             className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
                           >
@@ -745,31 +818,32 @@ export default function GoogleFormCreatorModal({
                             ))}
                           </select>
                         </div>
+                        {/* T-035 step2: その他系のときだけ、会社別の自由記入欄（任意） */}
+                        {isOtherTypeCategory(currentCategory) && (
+                          <div className="mt-2">
+                            <input
+                              type="text"
+                              value={companyCategoryLabelMap[key] ?? ""}
+                              onChange={(e) =>
+                                setCompanyCategoryLabelMap((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              placeholder={getOtherTypeLabelPlaceholder(currentCategory)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                            />
+                            <p className="mt-0.5 text-[11px] text-gray-500">
+                              この会社の自由記入欄（任意）。空のままでも進めます。
+                            </p>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               );
             })()}
-
-            {/* T-035 hotfix: いずれかの会社で "other" 選択時、グローバル自由記述欄を表示 */}
-            {Object.values(companyCategoryMap).includes("other") && (
-              <div className="mb-4 rounded-md border border-yellow-300 bg-yellow-50 p-3">
-                <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                  「その他」選択会社の自由記述
-                  <span className="ml-2 text-[11px] text-gray-600 font-normal">
-                    ※「その他」を選んだ会社全てで共有されます
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  value={otherLabel}
-                  onChange={(e) => setOtherLabel(e.target.value)}
-                  placeholder="例: 空港グランドスタッフ、医療事務 等"
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-                />
-              </div>
-            )}
 
             <div className="flex gap-2 pt-2 border-t border-gray-200">
               <button

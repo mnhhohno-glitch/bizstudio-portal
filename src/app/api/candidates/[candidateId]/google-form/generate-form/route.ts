@@ -27,6 +27,11 @@ export async function POST(
       body?.companyCategoryMap && typeof body.companyCategoryMap === "object"
         ? (body.companyCategoryMap as Record<string, string>)
         : undefined;
+    // T-035 step2: 会社別の自由記入ラベルマップ（その他系のみ）。素通しで candidate-intake に転送。
+    const companyCategoryLabelMap: Record<string, string> | undefined =
+      body?.companyCategoryLabelMap && typeof body.companyCategoryLabelMap === "object"
+        ? (body.companyCategoryLabelMap as Record<string, string>)
+        : undefined;
 
     if (!resumeData || !interviewLog || !achievementCategory) {
       return NextResponse.json(
@@ -57,8 +62,11 @@ export async function POST(
     }
 
     const companyCategoryMapKeyCount = companyCategoryMap ? Object.keys(companyCategoryMap).length : 0;
+    const companyCategoryLabelMapKeyCount = companyCategoryLabelMap
+      ? Object.keys(companyCategoryLabelMap).length
+      : 0;
     console.log(
-      `[google-form/generate-form] start candidateId=${candidateId} category=${achievementCategory} companyCategoryMap_keys=${companyCategoryMapKeyCount}`,
+      `[google-form/generate-form] start candidateId=${candidateId} category=${achievementCategory} companyCategoryMap_keys=${companyCategoryMapKeyCount} companyCategoryLabelMap_keys=${companyCategoryLabelMapKeyCount}`,
     );
 
     const upstreamUrl = `${intakeUrl}/api/intake/generate_form`;
@@ -80,6 +88,8 @@ export async function POST(
           achievementCategoryOtherLabel,
           // T-035: companyCategoryMap が指定されているときだけ送る（candidate-intake は undefined を後方互換処理）
           ...(companyCategoryMap !== undefined && { companyCategoryMap }),
+          // T-035 step2: 会社別ラベルマップを素通しで転送。
+          ...(companyCategoryLabelMap !== undefined && { companyCategoryLabelMap }),
         }),
       });
     } catch (e) {
