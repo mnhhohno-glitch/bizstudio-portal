@@ -85,6 +85,7 @@ export async function GET(req: Request) {
         select: {
           id: true, interviewDate: true, interviewType: true, interviewCount: true, resultFlag: true,
           interviewer: { select: { name: true } },
+          rating: { select: { overallRank: true } },
           candidate: { select: CANDIDATE_SELECT },
         },
         orderBy: { interviewDate: "desc" },
@@ -99,6 +100,7 @@ export async function GET(req: Request) {
         interviewType: r.interviewType,
         interviewCount: r.interviewCount,
         resultFlag: r.resultFlag,
+        rank: r.rating?.overallRank ?? null,
         caName: r.candidate.employee?.name ?? null,
         rcName: r.interviewer?.name ?? r.candidate.recruiterName ?? null,
         candidateNumber: r.candidate.candidateNumber,

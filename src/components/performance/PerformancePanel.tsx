@@ -6,7 +6,7 @@
 // - 直近6ヶ月：GET /api/performance/cohort（コホート追跡の率）。
 // 既存の期間ボタン式は廃止。集計の数え方は API 側（変更なし）。
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import TargetModal from "./TargetModal";
 
 type Advisor = { id: string; name: string };
@@ -23,7 +23,7 @@ type Granularity = "day" | "week" | "month";
 type WeeklyResp = {
   granularity: Granularity;
   columns: ColOut[];
-  total: { from: string; to: string; matrix: WeeklyMatrix; targets: Record<TKey, number | null>; achievement: Record<TKey, number | null> };
+  total: { from: string; to: string; matrix: WeeklyMatrix; targets: Record<TKey, number | null>; achievement: Record<TKey, number | null>; interviewRanks?: Record<string, number> };
   targetExists: boolean;
 };
 type Cohort = {
@@ -266,6 +266,9 @@ export default function PerformancePanel() {
         )}
       </div>
 
+      {/* グラフ（面談実績タブのみ常設：左＝折れ線・右＝円） */}
+      {tab === "interview" && !loading && <InterviewCharts weekly={weekly} />}
+
       {/* 明細を見るボタン（マトリクスタブ連動。cohort は対象外）→ ポップアップ */}
       {tab !== "cohort" && (
         <div className="border-t border-[#E5E7EB] px-4 py-3">
@@ -505,6 +508,7 @@ const DETAIL_COLS: Record<string, DetailCol[]> = {
     { key: "interviewDate", label: "面談日" },
     { key: "interviewType", label: "種別" },
     { key: "interviewCount", label: "回数" },
+    { key: "rank", label: "ランク" },
     { key: "resultFlag", label: "結果" },
     { key: "caName", label: "担当CA" },
     { key: "rcName", label: "担当RC" },
@@ -579,5 +583,116 @@ function DetailTable({ tab, detail }: { tab: string; detail: DetailResp | null }
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ===== 面談タブのグラフ（Chart.js / cdnjs UMD） =====
+// 折れ線＝面談数推移（初回/求人/既存・粒度連動の列）。円＝合計面談のランク割合（overallRank）。
+// データ源はマトリクスと同じ weekly API（columns[].matrix.interview / total.interviewRanks）。
+let chartJsPromise: Promise<void> | null = null;
+function loadChartJs(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((window as any).Chart) return Promise.resolve();
+  if (chartJsPromise) return chartJsPromise;
+  chartJsPromise = new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Chart.js load failed"));
+    document.head.appendChild(s);
+  });
+  return chartJsPromise;
+}
+
+// ランク表示順と色（実データ体系：A+/A/B+/B/C/D＋未評価。S は存在しない）。
+const RANK_ORDER = ["A+", "A", "B+", "B", "C", "D", "未評価"];
+const RANK_COLORS: Record<string, string> = {
+  "A+": "#15803D", A: "#22C55E", "B+": "#0891B2", B: "#2563EB", C: "#F59E0B", D: "#EF4444", 未評価: "#9CA3AF",
+};
+
+function InterviewCharts({ weekly }: { weekly: WeeklyResp | null }) {
+  const lineRef = useRef<HTMLCanvasElement>(null);
+  const pieRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lineChart = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pieChart = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => { loadChartJs().then(() => setReady(true)).catch(() => {}); }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Chart = typeof window !== "undefined" ? (window as any).Chart : null;
+    if (!ready || !weekly || !Chart) return;
+    const fg = lineRef.current ? getComputedStyle(lineRef.current).color : "#374151";
+    const grid = "rgba(148,163,184,0.25)";
+
+    // 折れ線：3系列（初回=青・求人=緑・既存=オレンジ）、横軸＝粒度連動の列ラベル。
+    const labels = weekly.columns.map((c) => c.label);
+    const mk = (key: "first" | "second" | "thirdPlus") => weekly.columns.map((c) => c.matrix.interview[key]);
+    lineChart.current?.destroy();
+    if (lineRef.current) {
+      lineChart.current = new Chart(lineRef.current, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "初回面談", data: mk("first"), borderColor: "#2563EB", backgroundColor: "#2563EB", tension: 0.3 },
+            { label: "求人面談(2回目)", data: mk("second"), borderColor: "#22C55E", backgroundColor: "#22C55E", tension: 0.3 },
+            { label: "既存面談(3回目〜)", data: mk("thirdPlus"), borderColor: "#F59E0B", backgroundColor: "#F59E0B", tension: 0.3 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { color: fg, boxWidth: 12, font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid } },
+            y: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } },
+          },
+        },
+      });
+    }
+
+    // 円（ドーナツ）：合計面談のランク割合。合計＝total.matrix.interview.total。
+    const ranks = weekly.total.interviewRanks ?? {};
+    const present = RANK_ORDER.filter((r) => (ranks[r] ?? 0) > 0);
+    const totalN = present.reduce((s, r) => s + ranks[r], 0);
+    pieChart.current?.destroy();
+    if (pieRef.current && present.length > 0) {
+      pieChart.current = new Chart(pieRef.current, {
+        type: "doughnut",
+        data: { labels: present, datasets: [{ data: present.map((r) => ranks[r]), backgroundColor: present.map((r) => RANK_COLORS[r]), borderWidth: 1, borderColor: "#ffffff" }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "right", labels: { color: fg, boxWidth: 12, font: { size: 11 } } },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            tooltip: { callbacks: { label: (ctx: any) => `${ctx.label}: ${ctx.parsed}件 (${totalN ? ((ctx.parsed / totalN) * 100).toFixed(1) : 0}%)` } },
+          },
+        },
+      });
+    }
+    return () => { lineChart.current?.destroy(); pieChart.current?.destroy(); lineChart.current = null; pieChart.current = null; };
+  }, [ready, weekly]);
+
+  const totalInterview = weekly?.total.matrix.interview.total ?? 0;
+  return (
+    <div className="border-t border-[#E5E7EB] px-4 py-4">
+      <div className="flex flex-col lg:flex-row gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-medium text-[#374151] mb-2">面談数の推移</div>
+          <div className="h-[260px]"><canvas ref={lineRef} /></div>
+        </div>
+        <div className="w-full lg:w-[360px] shrink-0">
+          <div className="text-[12px] font-medium text-[#374151] mb-2">合計面談のランク割合（{totalInterview}件）</div>
+          <div className="h-[260px]">
+            {totalInterview > 0 ? <canvas ref={pieRef} /> : <div className="h-full flex items-center justify-center text-[12px] text-[#9CA3AF]">データなし</div>}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

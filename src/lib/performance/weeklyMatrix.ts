@@ -162,3 +162,31 @@ export async function computeWeeklyMatrix(params: {
     },
   };
 }
+
+// 面談ランク割合（円グラフ用）。マトリクスの「合計面談」と同条件（担当軸・到達ベース・実施判定・interviewCount>=1）で
+// InterviewRating.overallRank 別に集計。未評価（rating なし or rank null）は '未評価' に寄せる。
+// 返り値の合計＝マトリクスの合計面談数（total）と一致する。
+export async function computeInterviewRankBreakdown(params: {
+  employeeId: string;
+  from: Date;
+  to: Date;
+  allCas?: boolean;
+}): Promise<Record<string, number>> {
+  const { employeeId, from, to, allCas } = params;
+  const F = tsLit(from);
+  const T = tsLit(to);
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+  const rows = await prisma.$queryRawUnsafe<{ rk: string; n: number }[]>(`
+    SELECT COALESCE(NULLIF(rt.overall_rank, ''), '未評価') AS rk, COUNT(*)::int n
+    FROM interview_records ir
+    JOIN candidates c ON c.id = ir.candidate_id
+    LEFT JOIN interview_ratings rt ON rt.interview_record_id = ir.id
+    WHERE ${empPred}
+      AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
+      AND ir.interview_count >= 1
+      AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}'
+    GROUP BY COALESCE(NULLIF(rt.overall_rank, ''), '未評価');`);
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.rk] = r.n;
+  return out;
+}

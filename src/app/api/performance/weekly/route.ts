@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeWeeklyMatrix, computeInterviewRankBreakdown, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { buildColumns, type Granularity } from "@/lib/performance/columns";
 import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/performance/businessDays";
 
@@ -80,10 +80,11 @@ export async function GET(req: Request) {
   const columns = buildColumns(granularity, anchorDate);
   const anchorMonth = anchorDate.slice(0, 7);
 
-  // 各列の実績＋TOTAL（全列カバー範囲で再集計）を並列
-  const [columnMatrices, totalMatrix] = await Promise.all([
+  // 各列の実績＋TOTAL（全列カバー範囲で再集計）＋面談ランク割合（円グラフ用・TOTAL範囲）を並列
+  const [columnMatrices, totalMatrix, interviewRanks] = await Promise.all([
     Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas }))),
     computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
+    computeInterviewRankBreakdown({ employeeId: resolvedEmployeeId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
   ]);
 
   // 目標：全員モードは目標なし。個別のみ対象月の PerformanceTarget をまとめて取得。
@@ -157,6 +158,7 @@ export async function GET(req: Request) {
       matrix: totalMatrix,
       targets: totalTargets,
       achievement,
+      interviewRanks, // 面談ランク割合（円グラフ用）。合計＝合計面談数。
     },
   });
 }

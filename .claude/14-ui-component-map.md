@@ -986,6 +986,11 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
   - **レイアウト**：各月セルは**実績｜% の2列横並び**（縦積みをやめ行高縮小）。thead 2段（1段目＝月 colSpan=2、2段目＝実績/%）、`Fragment` で月ごとに2 td。
   - **幅バランス**：`table w-full` ＋ `table-layout:fixed` ＋ `<colgroup>`。段階列＝`<col width:190px>`（最長項目名「売上単価（1人当単価）」が折り返さず収まる）、月12列（各月 実績/% の2 col）は**残り幅を均等配分**（width 未指定で fixed が等分）。間延びなく全幅を使う。
 - **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
+- **面談タブのグラフ（常設・面談実績タブのみ）**: マトリクス下に Chart.js（cdnjs UMD `4.4.1`）で**左＝折れ線・右＝円**を横並び常設（明細はボタン→ポップアップのまま）。
+  - 折れ線＝面談数推移（初回=青/求人(2回目)=緑/既存(3回目〜)=オレンジ）、横軸＝**粒度連動の列ラベル**（`weekly.columns[].matrix.interview`）。
+  - 円（ドーナツ）＝**合計面談のランク割合**（`overallRank`：A+/A/B+/B/C/D＋未評価）。`weekly.total.interviewRanks`（`computeInterviewRankBreakdown`、合計＝合計面談数）。S は存在しない。
+  - 軸/凡例色は canvas の `getComputedStyle().color`（テーマ追従）、グリッドは半透明グレー（ダーク/ライト両対応）。`InterviewCharts` コンポーネント、`loadChartJs()` で script を一度だけ注入。他タブには出さない。
+- **面談明細にランク列**追加（`InterviewRating.overallRank`、detail API で `rating.overallRank` を select）。
 - **週マトリクス（4タブ）**: `GET /api/performance/weekly?employeeId=&anchorDate=`。列＝W1〜W5（各「目標｜実績」、ヘッダに日付範囲）＋ TOTAL（目標｜実績）＋ 達成率。
   - 行（段階）は `ROWS` 定数で定義（tab → Row[]）。`Row.actual(matrix)` で実績抽出、`Row.targetKey` があれば目標＋達成率表示、`Row.fmt` で書式（1人当たりは小数1桁、決定売上/単価は ¥）。
   - 面談実績＝初回/求人面談(2回目)/既存(3回目以降)/合計。求人紹介・エントリー＝新規/既存/合計 × 人数・件数・1人当たり（件数÷人数）。選考状況＝書類通過/内定/承諾（人数）＋決定売上/決定単価（`revenue` 集計）。
