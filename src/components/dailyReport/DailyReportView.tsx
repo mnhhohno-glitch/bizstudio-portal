@@ -366,7 +366,12 @@ export default function DailyReportView() {
         </div>
       </div>
 
-      {/* 上段：スケジュール 予定（作成導線つき）｜実績(完了チェック)｜明日 */}
+      {/* カレンダー連携バー（3列の外側上部・予定列から外出して3列の予定行を横並びに揃える） */}
+      <div className="px-4 pt-3">
+        <CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} />
+      </div>
+
+      {/* 上段：スケジュール 予定（作成導線つき）｜実績(完了チェック)｜明日（3列のヘッダ高さ＝同じ1行ダーク帯で揃う） */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 p-4 border-b border-[#E5E7EB]">
         {/* 予定枠：作成導線（+予定追加・AI作成・カレンダー同期）＋編集/削除 */}
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
@@ -378,7 +383,6 @@ export default function DailyReportView() {
               <button onClick={handleSyncCalendar} disabled={syncing} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncing ? "同期中" : "📅同期"}</button>
             </div>
           </div>
-          <div className="px-2 py-1 border-b border-[#F3F4F6]"><CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} /></div>
           <div className="max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]">
             {schedEntries.length === 0 ? (
               <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません。「＋追加」または「✏️AI」で作成</div>
