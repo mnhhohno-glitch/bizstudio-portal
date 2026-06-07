@@ -21,7 +21,7 @@ type RangeMetrics = {
   offer: CountWithRate;
   acceptance: CountWithRate;
 };
-type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null };
+type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null; interviewTotal: number };
 
 interface Props {
   isOpen: boolean;
@@ -189,6 +189,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   }[] = [
     { key: "interview", label: "初回面談", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.firstInterviewExecuted) : "—"), targetValue: targetCounts.interview, week: "alloc", weekTarget: targetCounts.interview },
     { key: "interviewRate", label: "初回面談率", indent: true, kind: "rate", rateKey: null, ref: (b) => (b ? pct(b.metrics.firstInterviewRate) : "—"), week: "empty" },
+    // 合計面談（紹介率の分母。初回+求人(2回目)+既存(3回目以降)）。表示のみ・逆算/目標とは無関係。
+    { key: "interviewTotal", label: "合計面談", indent: true, kind: "count", ref: (b) => (b ? fmtCount(b.interviewTotal) : "—"), week: "empty" },
     { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
     { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty" },
     { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty" },

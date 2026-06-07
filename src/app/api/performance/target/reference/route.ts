@@ -70,33 +70,37 @@ export async function GET(req: Request) {
         computeCaMetricsForRange({ userId, employeeId: employee.id, from, to }),
         computeWeeklyMatrix({ employeeId: employee.id, userId, from, to }),
       ]);
-      const iv = matrix.interview.first; // 初回面談（人数）
+      const ivFirst = matrix.interview.first; // 初回面談（人数）
+      const ivTotal = matrix.interview.total; // 合計面談（初回+求人(2回目)+既存(3回目以降)）
       const intro = matrix.proposal.total.uniq; // 紹介（人数・両ソース統合ユニーク）
       const ent = matrix.entry.total.uniq; // エントリー（人数ユニーク）
       const dp = matrix.selection.documentPass;
       const of = matrix.selection.offer;
       const ac = matrix.selection.acceptance;
       // 既存 metrics 形を維持しつつ、紹介〜承諾の人数と率を matrix（人数ベース隣接段比）で差し替える。
+      // ⚠️ 紹介率の分母は**合計面談**（実績表・隣接段比と一致）。a1c0321 で初回面談を渡していたバグの修正。
+      //    半年など長期間で >100% になるのは過去の面談履歴が未インポートのため。データ投入後に正常化。
       const metrics: CaRangeMetrics = {
         ...ca,
-        firstInterviewExecuted: iv, // 実績表と一致（=ca.firstInterviewExecuted）
+        firstInterviewExecuted: ivFirst, // 実績表と一致（=ca.firstInterviewExecuted）
         // firstInterviewRate（実施率）は ca のまま維持
         jobIntroduced: intro,
-        jobIntroductionRate: ratio(intro, iv), // 紹介人数 ÷ 面談人数（面談→紹介）
+        jobIntroductionRate: ratio(intro, ivTotal), // 紹介人数 ÷ 合計面談（面談→紹介・人数ベース隣接段比）
         entry: { count: ent, denominator: intro, rate: ratio(ent, intro) },
         documentPass: { count: dp, denominator: ent, rate: ratio(dp, ent) },
         offer: { count: of, denominator: dp, rate: ratio(of, dp) },
         acceptance: { count: ac, denominator: of, rate: ratio(ac, of) },
       };
       const proposalPerPerson = matrix.proposal.total.perPerson;
-      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson }] as [
+      // 合計面談の値（TargetModal の表示・率の分母確認用）。
+      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson, interviewTotal: ivTotal }] as [
         string,
-        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null },
+        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewTotal: number },
       ];
     }),
   );
 
-  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null }> = {};
+  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewTotal: number }> = {};
   for (const [k, v] of results) reference[k] = v;
 
   return NextResponse.json({

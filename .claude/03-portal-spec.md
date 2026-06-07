@@ -328,7 +328,8 @@ model InterviewMemo {
 - `GET /api/performance/target/reference?employeeId=Y&yearMonth=YYYY-MM`：参考値。**昨年同月/前月/直近3か月(前月まで)/直近半年(前月まで)**。yearMonth 基準で期間算出（実績表の「今日起点」ではない）。
   - **紹介〜承諾の人数・率は実績表（`computeWeeklyMatrix`）と同一集計に統一**（2026-06-07 修正）：紹介人数＝`proposal.total.uniq`（両ソース統合・候補者ユニーク）、エントリー＝`entry.total.uniq`、書類通過/内定/承諾＝`selection.*`。**各率は人数ベースの隣接段比**（紹介率＝紹介÷面談、エントリー率＝エントリー÷紹介、…）。`proposalPerPerson`＝`proposal.total.perPerson`。
   - ⚠️ **旧実装は `computeCaMetricsForRange`（CandidateFile 単一・件数）を紹介人数に使い、紹介人数に件数が混入（575等）・エントリー率が件数分母で過小（2.8%）→ それを目標率に写すと逆算が爆発**していた。これが目標数字膨張の根本原因（%変換は元から正常）。人数ベース集計に統一して解消（エントリー率 57% 等の現実値に）。
-  - 初回面談率（実施率＝実施÷予定）は `computeCaMetricsForRange` の値を維持（隣接段比ではない別指標）。紹介率は紹介人数÷面談人数のため期間によっては >100%（提案と初回面談の期間ズレによる正当な funnel アーティファクト）。
+  - 初回面談率（実施率＝実施÷予定）は `computeCaMetricsForRange` の値を維持（隣接段比ではない別指標）。
+  - ⚠️ **紹介率の分母＝`matrix.interview.total`（合計面談＝first+second+thirdPlus）**。a1c0321 で `interview.first`（初回面談）を渡してしまい紹介率が 100% 超になっていたバグを修正（前月93.3%→47.5%、3か月106.4%→64.9% 等）。半年で依然 >100% になるのは**過去面談履歴の未インポート**が原因（紹介＝候補者ユニーク・面談＝レコード数の単位差ではなく、面談レコードが不足しているため）。データ投入後に正常化する。reference API は表示用に `interviewTotal` も返し、TargetModal は参考値テーブルに「合計面談」行を表示する（紹介率の分母と表示を整合）。
   - `computeCaMetricsForRange`（日報の正本）自体は不変。reference が参照して参考値を組み替えるだけ（日報非波及）。
 - `GET /api/performance/target?employeeId=Y&yearMonth=YYYY-MM`：既存目標取得。
 - `POST /api/performance/target`：upsert（`employeeId_yearMonth`）。全数値フィールドの有限性を検証。
