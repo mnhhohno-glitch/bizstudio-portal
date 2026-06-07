@@ -77,28 +77,30 @@ const mdLabel = (d: string) => { const [, m, day] = d.split("-"); return `${pars
 type Row = {
   label: string;
   indent?: boolean;
-  band?: boolean;
+  // 帯色：true=薄青(#EFF6FF、提案/エントリー人数の補助強調)、"orange"=薄オレンジ(#FFF4E6、合計・決定の強調・直近6ヶ月と統一)。
+  band?: boolean | "orange";
   isTotal?: boolean;
   actual: (m: WeeklyMatrix) => number | null;
   targetKey?: TKey;
   fmt?: (v: number | null) => string;
 };
 
-// 当月実績タブの行（直近6ヶ月と同項目＝人数のみ。各週＋合計＋平均＋達成率は WeekMatrixTable が描画）。
+// 当月実績タブの行（直近6ヶ月と同項目＝人数のみ）。
+// 帯色ルール（直近6ヶ月と統一）：**合計面談・合計提案・合計エントリー・決定の4行のみ薄オレンジ**。他は白。
 const MONTHLY_ROWS: Row[] = [
   { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
   { label: "求人面談（2回目）", actual: (m) => m.interview.second },
   { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
-  { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
-  { label: "初回提案", band: true, actual: (m) => m.proposal.fresh.uniq },
-  { label: "既存提案", band: true, actual: (m) => m.proposal.existing.uniq },
-  { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
-  { label: "新規エントリー", band: true, actual: (m) => m.entry.fresh.uniq },
-  { label: "既存エントリー", band: true, actual: (m) => m.entry.existing.uniq },
-  { label: "合計エントリー", band: true, isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
+  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total },
+  { label: "初回提案", actual: (m) => m.proposal.fresh.uniq },
+  { label: "既存提案", actual: (m) => m.proposal.existing.uniq },
+  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
+  { label: "新規エントリー", actual: (m) => m.entry.fresh.uniq },
+  { label: "既存エントリー", actual: (m) => m.entry.existing.uniq },
+  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
   { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
   { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
-  { label: "決定", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
+  { label: "決定", band: "orange", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
   { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
   { label: "売上単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
 ];
@@ -271,7 +273,7 @@ export default function PerformancePanel() {
         <button
           onClick={() => setShowTargetModal(true)}
           disabled={!employeeId}
-          className="text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-2 py-1 hover:bg-blue-50 disabled:opacity-50 ml-auto"
+          className="w-[112px] text-center text-[12px] border border-[#2563EB] text-[#2563EB] rounded px-2.5 py-1 hover:bg-blue-50 disabled:opacity-50 ml-auto"
         >
           🎯 目標登録
         </button>
@@ -293,7 +295,7 @@ export default function PerformancePanel() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-2.5 py-1 text-[12px] rounded-md border transition-colors ${
+            className={`w-[112px] text-center px-2.5 py-1 text-[12px] rounded-md border transition-colors ${
               tab === t.key ? "bg-[#2563EB] text-white border-[#2563EB]" : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
             }`}
           >
@@ -318,7 +320,7 @@ export default function PerformancePanel() {
       {/* グラフ（面談実績タブのみ常設：左＝折れ線・右＝円） */}
       {tab === "interview" && !loading && <InterviewCharts weekly={weekly} />}
 
-      {/* 当月実績タブ：週別横棒＋属性円4種 */}
+      {/* 当月実績タブ：週別折れ線＋属性円4種 */}
       {tab === "monthly" && !loading && monthly && <MonthlyCharts data={monthly} />}
 
       {/* 明細を見るボタン（マトリクスタブ連動。cohort・当月実績は対象外）→ ポップアップ */}
@@ -405,7 +407,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
           const avg = totalActual == null || columns.length === 0 ? null : totalActual / columns.length;
           // 帯色（提案/エントリーの人数行のみ）。合計行は上罫線＋太字。
-          const rowBg = r.band ? "bg-[#EFF6FF]" : "bg-white";
+          const rowBg = r.band === "orange" ? "bg-[#FFF4E6]" : r.band ? "bg-[#EFF6FF]" : "bg-white";
           const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
           return (
             <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#E0EAFF]`}>
@@ -791,7 +793,7 @@ function InterviewCharts({ weekly }: { weekly: WeeklyResp | null }) {
   );
 }
 
-// 当月実績タブ：週別横棒（面談/紹介/エントリー）＋ 当月初回面談者の属性円4種。
+// 当月実績タブ：週別折れ線（面談/紹介/エントリー）＋ 当月初回面談者の属性円4種。
 const GENDER_ORDER = ["female", "male", "other", "未設定"];
 const GENDER_LABELS: Record<string, string> = { female: "女", male: "男", other: "その他", 未設定: "未設定" };
 const GENDER_COLORS: Record<string, string> = { female: "#EC4899", male: "#3B82F6", other: "#A78BFA", 未設定: "#9CA3AF" };
@@ -823,25 +825,25 @@ function MonthlyCharts({ data }: { data: MonthlyResp }) {
     charts.current.forEach((c) => c?.destroy());
     charts.current = [];
 
-    // 横棒：週別 面談/紹介/エントリー数。
+    // 折れ線：週別 面談/紹介/エントリー数（面談タブの折れ線と同スタイル）。横軸＝週ラベル、3系列。
     if (barRef.current) {
       const labels = data.columns.map((c) => c.label);
       charts.current.push(new Chart(barRef.current, {
-        type: "bar",
+        type: "line",
         data: {
           labels,
           datasets: [
-            { label: "面談", data: data.columns.map((c) => c.matrix.interview.total), backgroundColor: "#2563EB" },
-            { label: "紹介", data: data.columns.map((c) => c.matrix.proposal.total.uniq), backgroundColor: "#22C55E" },
-            { label: "エントリー", data: data.columns.map((c) => c.matrix.entry.total.uniq), backgroundColor: "#F59E0B" },
+            { label: "面談", data: data.columns.map((c) => c.matrix.interview.total), borderColor: "#2563EB", backgroundColor: "#2563EB", tension: 0.3 },
+            { label: "紹介", data: data.columns.map((c) => c.matrix.proposal.total.uniq), borderColor: "#22C55E", backgroundColor: "#22C55E", tension: 0.3 },
+            { label: "エントリー", data: data.columns.map((c) => c.matrix.entry.total.uniq), borderColor: "#F59E0B", backgroundColor: "#F59E0B", tension: 0.3 },
           ],
         },
         options: {
-          indexAxis: "y", responsive: true, maintainAspectRatio: false,
+          responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: "bottom", labels: { color: fg, boxWidth: 12, font: { size: 11 } } } },
           scales: {
-            x: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } },
-            y: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid } },
+            x: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid } },
+            y: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } },
           },
         },
       }));
@@ -889,7 +891,7 @@ function MonthlyCharts({ data }: { data: MonthlyResp }) {
   return (
     <div className="border-t border-[#E5E7EB] px-4 py-4 space-y-5">
       <div>
-        <div className="text-[12px] font-medium text-[#374151] mb-2">週別 面談・紹介・エントリー数</div>
+        <div className="text-[12px] font-medium text-[#374151] mb-2">週別 面談・紹介・エントリー数の推移</div>
         <div className="h-[240px]"><canvas ref={barRef} /></div>
       </div>
       <div>
