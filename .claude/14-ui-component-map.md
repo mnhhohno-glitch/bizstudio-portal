@@ -969,7 +969,8 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - パス: `src/components/dailyReport/DailyReportView.tsx`（Client）。前日/翌日ナビ＋`?date=YYYY-MM-DD` 連動（`history.replaceState`、②直リンクの土台）。
 - データ源: `GET /api/daily-report?date=`（既存を拡張）→ `scheduleEntries`(当日予定)・`tomorrowEntries`(明日)・`scheduleSummary`(完了数)・`dayMatrix`(当日 `computeWeeklyMatrix`)・`attributes`(当日初回面談者の属性)・`report`(scheduleNote/metricsReflection)。
 - **上段3列**: スケジュール予定｜実績（完了 N/M・消化率%）｜明日の予定（`SchedCol`、ダークヘッダ、完了は✓）。
-- **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒**＝当日各段階数[面談/紹介/エントリー/書類通過/内定/決定]＋**円4種**＝当日初回面談者の ランク/男女比/職種希望/年齢層）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字）＋💾保存。
+- **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒4本（箱型・隙間ゼロ）**＝初回面談・既存面談(＝求人面談2回目+既存面談3回目以降)・紹介・エントリー（書類通過以降は日々頻繁でないため除外）。`barPercentage:1.0/categoryPercentage:1.0/borderWidth:1` で連続したバーに＋**円3種**＝当日初回面談者の ランク/男女比/年代（職種希望は実用不可のため非表示。属性集計APIには残置）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字、`flex-1 min-h-[180px]` で縦に拡大）。
+- **保存ボタンは右上**（ヘッダ内・日付ナビの右）。②で「下書き保存｜提出」を並べる予定の配置。
 - 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
 - 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。

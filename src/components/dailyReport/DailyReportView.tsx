@@ -78,8 +78,6 @@ const GENDER_LABELS: Record<string, string> = { female: "女", male: "男", othe
 const GENDER_COLORS: Record<string, string> = { female: "#EC4899", male: "#3B82F6", other: "#A78BFA", 未設定: "#9CA3AF" };
 const AGE_ORDER = ["20代前半", "20代後半", "30代前半", "30代後半", "40代前半", "45歳以上", "不明"];
 const AGE_COLORS: Record<string, string> = { "20代前半": "#60A5FA", "20代後半": "#3B82F6", "30代前半": "#22C55E", "30代後半": "#16A34A", "40代前半": "#F59E0B", "45歳以上": "#EF4444", 不明: "#9CA3AF" };
-const JOBTYPE_PALETTE = ["#2563EB", "#16A34A", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4", "#EC4899", "#84CC16", "#F97316", "#14B8A6", "#A855F7"];
-
 function todayJst(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
@@ -148,7 +146,7 @@ export default function DailyReportView() {
 
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
-      {/* ヘッダ：前日/翌日ナビ */}
+      {/* ヘッダ：前日/翌日ナビ＋右上に保存（②で「下書き｜提出」を並べる予定の配置） */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-[#E5E7EB]">
         <h2 className="text-[14px] font-medium text-[#374151]">📝 日報</h2>
         <div className="flex items-center gap-1 ml-2">
@@ -158,6 +156,12 @@ export default function DailyReportView() {
           <button onClick={() => setDate(todayJst())} className="px-2 py-1 text-[12px] text-[#2563EB] hover:underline">今日</button>
         </div>
         {loading && <span className="text-[12px] text-[#9CA3AF]">読み込み中...</span>}
+        <div className="ml-auto flex items-center gap-2">
+          {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
+          <button onClick={handleSave} disabled={saving} className="bg-[#16A34A] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
+            {saving ? "保存中..." : "💾 保存"}
+          </button>
+        </div>
       </div>
 
       {/* 上段：スケジュール 予定｜実績(完了)｜明日 */}
@@ -203,31 +207,25 @@ export default function DailyReportView() {
           )}
         </div>
 
-        {/* 所感 */}
-        <div className="space-y-3">
-          <div>
+        {/* 所感（円グラフが3種になった分、縦幅を拡大） */}
+        <div className="flex flex-col gap-3 h-full">
+          <div className="flex-1 flex flex-col min-h-[200px]">
             <div className="text-[12px] font-medium text-[#374151] mb-1">当日のスケジュールに関する気づき</div>
             <textarea
               value={scheduleNote}
               onChange={(e) => setScheduleNote(e.target.value)}
               placeholder="予定通りに行かなかった内容についてわかりやすく記載してください"
-              className="w-full h-32 border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y"
+              className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
             />
           </div>
-          <div>
+          <div className="flex-1 flex flex-col min-h-[200px]">
             <div className="text-[12px] font-medium text-[#374151] mb-1">当日の数字に対する振り返り</div>
             <textarea
               value={metricsReflection}
               onChange={(e) => setMetricsReflection(e.target.value)}
               placeholder="当日の実績数字を見ての気づき・次への改善などを記載してください"
-              className="w-full h-32 border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y"
+              className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
             />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleSave} disabled={saving} className="bg-[#16A34A] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
-              {saving ? "保存中..." : "💾 保存"}
-            </button>
-            {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
           </div>
         </div>
       </div>
@@ -261,7 +259,6 @@ function DailyCharts({ matrix, attributes }: { matrix: DayMatrix; attributes: { 
   const barRef = useRef<HTMLCanvasElement>(null);
   const rankRef = useRef<HTMLCanvasElement>(null);
   const genderRef = useRef<HTMLCanvasElement>(null);
-  const jobRef = useRef<HTMLCanvasElement>(null);
   const ageRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const charts = useRef<any[]>([]);
@@ -278,22 +275,29 @@ function DailyCharts({ matrix, attributes }: { matrix: DayMatrix; attributes: { 
     charts.current.forEach((c) => c?.destroy());
     charts.current = [];
 
-    // 縦棒：当日の各段階数。
+    // 縦棒：当日の主要4項目（初回面談・既存面談・紹介・エントリー）。
+    // 既存面談 = 求人面談(2回目) + 既存面談(3回目以降)。書類通過以降は日々頻繁でないため除外。
+    // 棒同士は隙間ゼロの箱型（barPercentage=1.0・categoryPercentage=1.0・borderWidth で区切り）。
     if (barRef.current) {
+      const existingInterview = matrix.interview.second + matrix.interview.thirdPlus;
       charts.current.push(new Chart(barRef.current, {
         type: "bar",
         data: {
-          labels: ["面談", "紹介", "エントリー", "書類通過", "内定", "決定"],
+          labels: ["初回面談", "既存面談", "紹介", "エントリー"],
           datasets: [{
             label: "当日件数",
-            data: [matrix.interview.total, matrix.proposal.total.uniq, matrix.entry.total.uniq, matrix.selection.documentPass, matrix.selection.offer, matrix.selection.acceptance],
-            backgroundColor: ["#2563EB", "#22C55E", "#F59E0B", "#06B6D4", "#8B5CF6", "#EF4444"],
+            data: [matrix.interview.first, existingInterview, matrix.proposal.total.uniq, matrix.entry.total.uniq],
+            backgroundColor: ["#2563EB", "#0891B2", "#22C55E", "#F59E0B"],
+            borderColor: "#ffffff",
+            borderWidth: 1,
+            barPercentage: 1.0,
+            categoryPercentage: 1.0,
           }],
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false } },
-          scales: { x: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid } }, y: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } } },
+          scales: { x: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid, display: false } }, y: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } } },
         },
       }));
     }
@@ -318,7 +322,6 @@ function DailyCharts({ matrix, attributes }: { matrix: DayMatrix; attributes: { 
     };
     buildPie(rankRef.current, attributes.rank, RANK_ORDER, (k) => RANK_COLORS[k] ?? "#9CA3AF", (k) => k);
     buildPie(genderRef.current, attributes.gender, GENDER_ORDER, (k) => GENDER_COLORS[k] ?? "#9CA3AF", (k) => GENDER_LABELS[k] ?? k);
-    buildPie(jobRef.current, attributes.jobType, null, (k, i) => (k === "未設定" ? "#9CA3AF" : JOBTYPE_PALETTE[i % JOBTYPE_PALETTE.length]), (k) => k);
     buildPie(ageRef.current, attributes.ageBand, AGE_ORDER, (k) => AGE_COLORS[k] ?? "#9CA3AF", (k) => k);
 
     return () => { charts.current.forEach((c) => c?.destroy()); charts.current = []; };
@@ -343,8 +346,7 @@ function DailyCharts({ matrix, attributes }: { matrix: DayMatrix; attributes: { 
         <div className="flex flex-wrap gap-3">
           {pie("ランク", rankRef)}
           {pie("男女比", genderRef)}
-          {pie("職種希望", jobRef)}
-          {pie("年齢層", ageRef)}
+          {pie("年代", ageRef)}
         </div>
       </div>
     </div>
