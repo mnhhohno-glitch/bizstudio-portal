@@ -92,6 +92,7 @@ function shiftDate(dateStr: string, delta: number): string {
   return `${nd.getUTCFullYear()}-${String(nd.getUTCMonth() + 1).padStart(2, "0")}-${String(nd.getUTCDate()).padStart(2, "0")}`;
 }
 function mdLabel(dateStr: string): string { const [, m, d] = dateStr.split("-"); return `${parseInt(m)}/${parseInt(d)}`; }
+function mdJpLabel(dateStr: string): string { const [, m, d] = dateStr.split("-"); return `${parseInt(m)}月${parseInt(d)}日`; }
 
 // 新規（未記入）の日にコメント入力を開いたときの定型文。
 const COMMENT_TEMPLATE = [
@@ -312,30 +313,38 @@ export default function DailyReportView() {
       {accordionOpen && (
         <>
           <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setAccordionOpen(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] bg-white shadow-2xl flex flex-col">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
-              <span className="text-[14px] font-semibold">コメント入力（{mdLabel(date)}）</span>
+          {/* 幅を画面半分（min 440px・画面狭時は w-full） */}
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-1/2 sm:min-w-[440px] bg-white shadow-2xl flex flex-col">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
+              <span className="text-[14px] font-semibold">コメント入力</span>
+              <span className="text-[13px] text-[#D1D5DB]">日報コメント｜{mdJpLabel(date)}</span>
               <button onClick={() => setAccordionOpen(false)} className="ml-auto text-white hover:text-gray-300 text-lg px-1">✕</button>
             </div>
+            {/* 上：本文（1.8倍の縦幅）／中：AIチャット表示／下：AIチャット入力（パネル最下部に固定） */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <textarea
                 value={body}
                 onChange={(e) => onBodyChange(e.target.value)}
-                className="w-full h-[300px] border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y leading-relaxed"
+                className="w-full h-[540px] border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y leading-relaxed"
               />
-              {/* AIチャットの器（中身は次段で実装） */}
+              {/* AIチャットの表示エリア（中身は次段で実装） */}
               <div className="border border-gray-200 rounded-lg p-3 bg-[#F9FAFB]">
                 <div className="text-[12px] font-medium text-[#374151] mb-2">🤖 AIと会話して日報を作成（準備中）</div>
-                <div className="h-24 border border-gray-200 rounded bg-white mb-2 flex items-center justify-center text-[11px] text-[#9CA3AF]">AIアシスタントは次回アップデートで利用可能になります</div>
-                <div className="flex gap-2">
-                  <input disabled placeholder="メッセージを入力…" className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-[12px] bg-gray-50" />
-                  <button disabled className="bg-gray-300 text-white rounded px-3 py-1.5 text-[12px]">送信</button>
-                </div>
+                <div className="h-24 border border-gray-200 rounded bg-white flex items-center justify-center text-[11px] text-[#9CA3AF]">AIアシスタントは次回アップデートで利用可能になります</div>
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-2">
+            {/* 確定バー */}
+            <div className="px-4 py-2 border-t border-gray-200 flex items-center gap-2 bg-white">
               {confirmed ? <span className="text-[12px] text-[#16A34A]">✓ 確定済み</span> : <span className="text-[12px] text-[#9CA3AF]">未確定（確定すると提出可）</span>}
               <button onClick={handleConfirm} className="ml-auto bg-[#2563EB] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]">確定</button>
+            </div>
+            {/* AIチャット入力欄をパネル最下部に固定 */}
+            <div className="px-4 py-3 border-t border-gray-200 bg-[#F9FAFB]">
+              <div className="text-[10px] text-[#9CA3AF] mb-1">AIチャット入力（準備中）</div>
+              <div className="flex gap-2">
+                <input disabled placeholder="メッセージを入力…" className="flex-1 border border-gray-200 rounded px-2 py-2 text-[12px] bg-gray-50" />
+                <button disabled className="bg-gray-300 text-white rounded px-4 py-2 text-[12px]">送信</button>
+              </div>
             </div>
           </div>
         </>
