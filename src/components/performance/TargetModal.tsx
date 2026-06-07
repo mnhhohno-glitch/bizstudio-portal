@@ -21,7 +21,7 @@ type RangeMetrics = {
   offer: CountWithRate;
   acceptance: CountWithRate;
 };
-type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null; interviewTotal: number };
+type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null; interviewExisting: number; interviewTotal: number };
 
 interface Props {
   isOpen: boolean;
@@ -187,10 +187,17 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
     targetValue?: number | null; rateKey?: RateKey | null;
     week: Wmode; weekTarget?: number | null;
   }[] = [
-    { key: "interview", label: "初回面談", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.firstInterviewExecuted) : "—"), targetValue: targetCounts.interview, week: "alloc", weekTarget: targetCounts.interview },
-    { key: "interviewRate", label: "初回面談率", indent: true, kind: "rate", rateKey: null, ref: (b) => (b ? pct(b.metrics.firstInterviewRate) : "—"), week: "empty" },
-    // 合計面談（紹介率の分母。初回+求人(2回目)+既存(3回目以降)）。表示のみ・逆算/目標とは無関係。
-    { key: "interviewTotal", label: "合計面談", indent: true, kind: "count", ref: (b) => (b ? fmtCount(b.interviewTotal) : "—"), week: "empty" },
+    // 面談：初回/既存/合計の3行。参考値の括弧内は**合計面談に占める構成比**（初回÷合計・既存÷合計・合計100%）。
+    // 目標逆算は初回面談（interviewCount＝逆算の最上流）に紐付け、既存・合計は表示専用（参考値）。
+    { key: "interview", label: "初回面談", kind: "count",
+      ref: (b) => (b ? `${fmtCount(b.metrics.firstInterviewExecuted)}（${pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null)}）` : "—"),
+      targetValue: targetCounts.interview, week: "alloc", weekTarget: targetCounts.interview },
+    { key: "interviewExisting", label: "既存面談", indent: true, kind: "count",
+      ref: (b) => (b ? `${fmtCount(b.interviewExisting)}（${pct(b.interviewTotal > 0 ? b.interviewExisting / b.interviewTotal : null)}）` : "—"),
+      week: "empty" },
+    { key: "interviewTotal", label: "合計面談", indent: true, kind: "count",
+      ref: (b) => (b ? `${fmtCount(b.interviewTotal)}（${pct(b.interviewTotal > 0 ? 1 : null)}）` : "—"),
+      week: "empty" },
     { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
     { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty" },
     { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty" },

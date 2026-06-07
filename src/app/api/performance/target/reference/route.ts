@@ -71,7 +71,8 @@ export async function GET(req: Request) {
         computeWeeklyMatrix({ employeeId: employee.id, userId, from, to }),
       ]);
       const ivFirst = matrix.interview.first; // 初回面談（人数）
-      const ivTotal = matrix.interview.total; // 合計面談（初回+求人(2回目)+既存(3回目以降)）
+      const ivExisting = matrix.interview.second + matrix.interview.thirdPlus; // 既存面談＝求人(2回目)+既存(3回目以降)
+      const ivTotal = matrix.interview.total; // 合計面談（first+second+thirdPlus）
       const intro = matrix.proposal.total.uniq; // 紹介（人数・両ソース統合ユニーク）
       const ent = matrix.entry.total.uniq; // エントリー（人数ユニーク）
       const dp = matrix.selection.documentPass;
@@ -92,15 +93,15 @@ export async function GET(req: Request) {
         acceptance: { count: ac, denominator: of, rate: ratio(ac, of) },
       };
       const proposalPerPerson = matrix.proposal.total.perPerson;
-      // 合計面談の値（TargetModal の表示・率の分母確認用）。
-      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson, interviewTotal: ivTotal }] as [
+      // 面談の人数（TargetModal は初回/既存/合計の3行＋構成比で表示）。
+      return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson, interviewExisting: ivExisting, interviewTotal: ivTotal }] as [
         string,
-        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewTotal: number },
+        { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewExisting: number; interviewTotal: number },
       ];
     }),
   );
 
-  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewTotal: number }> = {};
+  const reference: Record<string, { fromMonth: string; toMonth: string; metrics: CaRangeMetrics; proposalPerPerson: number | null; interviewExisting: number; interviewTotal: number }> = {};
   for (const [k, v] of results) reference[k] = v;
 
   return NextResponse.json({

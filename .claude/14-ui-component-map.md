@@ -1053,6 +1053,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
   - 列：`段階 | 参考値[昨年同月｜前月｜3か月｜半年] | 目標 | 週按分[W1..Wn｜月計]`（`table-layout:fixed` ＋ `<colgroup>` で段階列のみ132px固定・数値列は均等幅）。ヘッダはダークグレー `#3C3C3C`＋白（実績表と統一）、2段（参考値/週按分は colSpan、目標は rowSpan2）。
   - **各段階は実数値の行＋率の行**：実数値（人数）の真下にインデント薄字「○○率」。参考値・目標・週按分すべての列で縦に揃う。
   - **参考値**（`GET /api/performance/target/reference` 4期間）：数値の行＝実績数、率の行＝前段転換率（%）。
+  - **面談は初回/既存/合計の3行＋構成比**（T-073 修正）：初回（first）／既存（second+thirdPlus）／合計（total）。各行に「人数（÷合計面談 の構成比）」を表示。初回面談率（実施率）は廃止（紛らわしいため）。reference API は `interviewExisting`/`interviewTotal` を返す。集計（computeWeeklyMatrix）は不変、値を取り出して構成比を出すだけ。
   - **目標**：数値の行＝`reverseCalc` の逆算人数（自動・青字）、率の行＝率%手入力欄（初回面談は逆算の起点で入力なし＝「—」）。
   - **紹介は3段**：紹介（人数）＝逆算自動／紹介率＝%手入力／**1人あたり件数＝件数手入力（新規、`proposalPerPerson`）**／**紹介（件数）＝紹介人数×1人あたり件数の自動算出（青字）**。1人あたり件数の参考値は実績の提案1人当たり（reference API が `computeWeeklyMatrix.proposal.total.perPerson` を返す）。
   - **週按分**：**初回面談・紹介（人数・件数）・エントリーのみ**（各週切り上げ・最終週帳尻・月計＝合計）。**書類通過・内定・承諾はタイミングが読めないため週按分しない（W列・月計とも「—」）**。率・係数の行は空（按分対象外）。
