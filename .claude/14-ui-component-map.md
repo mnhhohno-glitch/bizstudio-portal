@@ -985,7 +985,12 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
   - 帯色：合計行・売上系＝オレンジ `#FFF4E6`。cohort API（`/api/performance/cohort`）が拡充項目を返す（面談/提案/エントリーは `computeWeeklyMatrix` 月レンジ、選考は cohort funnel）。母集団定義（その月エントリー候補者追跡）は不変。
   - **レイアウト**：各月セルは**実績｜% の2列横並び**（縦積みをやめ行高縮小）。thead 2段（1段目＝月 colSpan=2、2段目＝実績/%）、`Fragment` で月ごとに2 td。
   - **幅バランス**：`table w-full` ＋ `table-layout:fixed` ＋ `<colgroup>`。段階列＝`<col width:190px>`（最長項目名「売上単価（1人当単価）」が折り返さず収まる）、月12列（各月 実績/% の2 col）は**残り幅を均等配分**（width 未指定で fixed が等分）。間延びなく全幅を使う。
-- **5タブ**: 面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月。
+- **6タブ**: **当月実績**｜面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月（当月実績が先頭・既定タブ）。
+- **当月実績タブ（T-071②）**: `GET /api/performance/monthly?employeeId=&anchorDate=`。当月（anchorDate の月）を **1日起算で週分割（月内クランプ、`weeklyBusinessDays`：W1=1日〜最初の日曜、以降 月〜日、4〜6週）**。
+  - 上段＝週別表：列＝1W〜（4-6）W｜合計｜平均｜達成率、行＝直近6ヶ月と同項目（人数のみ＝`MONTHLY_ROWS`）。`WeekMatrixTable` を流用（レスポンスは weekly 互換 columns/total）。集計は `computeWeeklyMatrix`（両ソース統合・MIN方式の初回/既存）。目標は当月 PerformanceTarget を週按分（initial面談・提案・エントリーのみ、書類通過以降は週按分せず「—」＝T-073方針）。達成率＝当月通算実績÷月目標。
+  - 下段グラフ（`MonthlyCharts`・Chart.js）：横棒＝週別 面談/紹介/エントリー数（`indexAxis:'y'`）＋ **円4種**＝当月初回面談者の ランク／男女比／**職種希望（第1希望大分類）**／年齢層。
+  - **属性の母集団＝当月の初回面談（`interview_count=1`・辞退系除外・担当軸 candidate.employeeId）**。ランク＝`overall_rank`、性別＝`candidate.gender`、**職種希望＝`interview_details.desired_job_types[0]->>'large'`（candidate.desiredJobType1 は充足率21%で使わない・面談詳細JSONの大分類73%を使う）**、年齢層＝`candidate.birthday`→AGE を6バンド＋不明。各円に「未設定/未評価/不明」スライスを含む。4種とも母数＝初回面談数。
+- **面談タブのグラフ（常設・面談実績タブのみ）**: マトリクス下に Chart.js（cdnjs UMD `4.4.1`）で**左＝折れ線・右＝円**を横並び常設（明細はボタン→ポップアップのまま）。
 - **面談タブのグラフ（常設・面談実績タブのみ）**: マトリクス下に Chart.js（cdnjs UMD `4.4.1`）で**左＝折れ線・右＝円**を横並び常設（明細はボタン→ポップアップのまま）。
   - 折れ線＝面談数推移（初回=青/求人(2回目)=緑/既存(3回目〜)=オレンジ）、横軸＝**粒度連動の列ラベル**（`weekly.columns[].matrix.interview`）。
   - 円（ドーナツ）＝**初回面談のランク割合**（`overallRank`：A+/A/B+/B/C/D＋未評価）。`weekly.total.interviewRanks`（`computeInterviewRankBreakdown` で `interview_count = 1` に絞る、合計＝初回面談数 = `interview.first`）。S は存在しない。目的：その期間に新規で会った人の質（ランク）の分布。求人/既存（2回目以降）は再面談で評価が重複するため除外。

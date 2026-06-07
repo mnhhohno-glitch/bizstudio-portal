@@ -156,6 +156,14 @@ model InterviewMemo {
 - 初回/既存判定は `interviewCount`（=1 初回、>=2 既存）。`interviewType` 文字列で判定しない（UI 定数外の "初回面談" が大量混在）。
 - 面接対策のみ `interviewType === "面接対策"` で抽出（種別でしか取れないため例外的）。
 
+### 当月実績タブの属性集計（T-071②・円グラフ4種）
+- 母集団＝**当月の初回面談（`interview_count=1`・辞退系除外・担当軸 `candidate.employeeId`）**。4種とも母数＝初回面談数。
+- **ランク**：`InterviewRating.overallRank`（A+/A/B+/B/C/D＋未評価）。
+- **男女比**：`candidate.gender`（male/female/other/未設定）。
+- **職種希望**：**`interview_details.desired_job_types`（JSON配列）の第1希望大分類 `[0]->>'large'`**（約10カテゴリ＋未設定）。⚠️ `candidate.desiredJobType1` は充足率21%・45粒度ラベルで使わない。面談詳細JSONの大分類（充足率73%）を使う。複数選択のうち第1希望のみ。
+- **年齢層**：`candidate.birthday`→`AGE()` を `20代前半(20-24)/20代後半(25-29)/30代前半(30-34)/30代後半(35-39)/40代前半(40-44)/45歳以上(45+)/不明` に分類。
+- API：`GET /api/performance/monthly`（`computeMonthlyAttributes`）。週別表は当月1日起算の週分割（`weeklyBusinessDays`・月内クランプ4-6週）で `computeWeeklyMatrix` を集計（数え方は実績表と共通）。
+
 ### CA 数値の集計テーブル早見
 
 | 指標 | 算出元 | 集計フィールド | 紐づきキー | 窓 |

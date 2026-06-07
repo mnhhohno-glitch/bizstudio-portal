@@ -37,6 +37,9 @@ type Cohort = {
 };
 type DetailRow = Record<string, string | number | null>;
 type DetailResp = { tab: string; stage?: string | null; summary: { persons: number; records: number }; rows: DetailRow[] };
+// 当月実績：週マトリクス（weekly 互換）＋ 当月初回面談者の属性分布（円グラフ用）。
+type Attr = Record<string, number>;
+type MonthlyResp = WeeklyResp & { attributes: { total: number; rank: Attr; gender: Attr; jobType: Attr; ageBand: Attr } };
 
 // UI ラベルのみ付け替え（内部値 day/week/month はロジック対応を崩さないため変更しない）。
 //   day（起算日から5日）→「週」、week（5週）→「月」、month（6ヶ月）→「半年」。
@@ -47,6 +50,7 @@ const GRANULARITIES: { key: Granularity; label: string }[] = [
 ];
 
 const TABS = [
+  { key: "monthly", label: "当月実績" },
   { key: "interview", label: "面談実績" },
   { key: "proposal", label: "求人紹介実績" },
   { key: "entry", label: "エントリー実績" },
@@ -54,6 +58,8 @@ const TABS = [
   { key: "cohort", label: "直近6ヶ月" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
+// 表・グラフ非連動タブ（明細・粒度・週マトリクスを使わない）
+type NonMatrixTab = "cohort" | "monthly";
 
 function todayJst(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
@@ -75,7 +81,26 @@ type Row = {
   fmt?: (v: number | null) => string;
 };
 
-const ROWS: Record<Exclude<TabKey, "cohort">, Row[]> = {
+// 当月実績タブの行（直近6ヶ月と同項目＝人数のみ。各週＋合計＋平均＋達成率は WeekMatrixTable が描画）。
+const MONTHLY_ROWS: Row[] = [
+  { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
+  { label: "求人面談（2回目）", actual: (m) => m.interview.second },
+  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
+  { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
+  { label: "初回提案", band: true, actual: (m) => m.proposal.fresh.uniq },
+  { label: "既存提案", band: true, actual: (m) => m.proposal.existing.uniq },
+  { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
+  { label: "新規エントリー", band: true, actual: (m) => m.entry.fresh.uniq },
+  { label: "既存エントリー", band: true, actual: (m) => m.entry.existing.uniq },
+  { label: "合計エントリー", band: true, isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
+  { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
+  { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
+  { label: "決定", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
+  { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+  { label: "売上単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+];
+
+const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
   // 面談：色なし。合計面談は上罫線＋太字で区別。
   interview: [
     { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
@@ -126,8 +151,9 @@ export default function PerformancePanel() {
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [anchorDate, setAnchorDate] = useState<string>(() => todayJst());
   const [granularity, setGranularity] = useState<Granularity>("week");
-  const [tab, setTab] = useState<TabKey>("entry");
+  const [tab, setTab] = useState<TabKey>("monthly");
   const [weekly, setWeekly] = useState<WeeklyResp | null>(null);
+  const [monthly, setMonthly] = useState<MonthlyResp | null>(null);
   const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
   const [selectionStage, setSelectionStage] = useState<"documentPass" | "offer" | "acceptance">("documentPass");
   const [detail, setDetail] = useState<DetailResp | null>(null);
@@ -164,9 +190,18 @@ export default function PerformancePanel() {
     } catch { /* */ } finally { setLoading(false); }
   }, [employeeId]);
 
-  // 明細（マトリクスタブ連動）。選考状況は selectionStage サブタブで段階を指定。
+  const fetchMonthly = useCallback(async () => {
+    if (!employeeId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/performance/monthly?employeeId=${employeeId}&anchorDate=${anchorDate}`);
+      if (res.ok) setMonthly(await res.json());
+    } catch { /* */ } finally { setLoading(false); }
+  }, [employeeId, anchorDate]);
+
+  // 明細（マトリクスタブ連動）。選考状況は selectionStage サブタブで段階を指定。当月実績・直近6ヶ月は明細なし。
   const fetchDetail = useCallback(async () => {
-    if (!employeeId || tab === "cohort") { setDetail(null); return; }
+    if (!employeeId || tab === "cohort" || tab === "monthly") { setDetail(null); return; }
     try {
       const params = new URLSearchParams({ employeeId, anchorDate, granularity, tab });
       if (tab === "selection") params.set("stage", selectionStage);
@@ -177,8 +212,9 @@ export default function PerformancePanel() {
 
   useEffect(() => {
     if (tab === "cohort") void fetchCohort();
+    else if (tab === "monthly") void fetchMonthly();
     else void fetchWeekly();
-  }, [tab, fetchWeekly, fetchCohort]);
+  }, [tab, fetchWeekly, fetchCohort, fetchMonthly]);
 
   useEffect(() => {
     void fetchDetail();
@@ -206,13 +242,13 @@ export default function PerformancePanel() {
           onChange={(e) => setAnchorDate(e.target.value)}
           className="text-[12px] border border-gray-200 rounded px-2 py-1"
         />
-        {/* 粒度切替（cohort タブ以外で有効） */}
+        {/* 粒度切替（cohort・当月実績タブ以外で有効） */}
         <div className="flex gap-0.5 ml-1">
           {GRANULARITIES.map((g) => (
             <button
               key={g.key}
               onClick={() => setGranularity(g.key)}
-              disabled={tab === "cohort"}
+              disabled={tab === "cohort" || tab === "monthly"}
               className={`px-2 py-1 text-[12px] rounded border transition-colors disabled:opacity-40 ${
                 granularity === g.key ? "bg-[#374151] text-white border-[#374151]" : "border-gray-200 text-[#6B7280] hover:bg-gray-50"
               }`}
@@ -261,16 +297,21 @@ export default function PerformancePanel() {
           <div className="py-8 text-center text-[12px] text-[#9CA3AF]">読み込み中...</div>
         ) : tab === "cohort" ? (
           <CohortTable cohorts={cohorts} />
+        ) : tab === "monthly" ? (
+          <WeekMatrixTable weekly={monthly} rows={MONTHLY_ROWS} />
         ) : (
-          <WeekMatrixTable weekly={weekly} rows={ROWS[tab]} />
+          <WeekMatrixTable weekly={weekly} rows={ROWS[tab as Exclude<TabKey, NonMatrixTab>]} />
         )}
       </div>
 
       {/* グラフ（面談実績タブのみ常設：左＝折れ線・右＝円） */}
       {tab === "interview" && !loading && <InterviewCharts weekly={weekly} />}
 
-      {/* 明細を見るボタン（マトリクスタブ連動。cohort は対象外）→ ポップアップ */}
-      {tab !== "cohort" && (
+      {/* 当月実績タブ：週別横棒＋属性円4種 */}
+      {tab === "monthly" && !loading && monthly && <MonthlyCharts data={monthly} />}
+
+      {/* 明細を見るボタン（マトリクスタブ連動。cohort・当月実績は対象外）→ ポップアップ */}
+      {tab !== "cohort" && tab !== "monthly" && (
         <div className="border-t border-[#E5E7EB] px-4 py-3">
           <button
             onClick={() => setShowDetail(true)}
@@ -283,7 +324,7 @@ export default function PerformancePanel() {
       )}
 
       {/* 明細ポップアップ（sticky ヘッダ＋スクロール） */}
-      {showDetail && tab !== "cohort" && (
+      {showDetail && tab !== "cohort" && tab !== "monthly" && (
         <>
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setShowDetail(false)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
@@ -691,6 +732,120 @@ function InterviewCharts({ weekly }: { weekly: WeeklyResp | null }) {
           <div className="h-[260px]">
             {firstInterview > 0 ? <canvas ref={pieRef} /> : <div className="h-full flex items-center justify-center text-[12px] text-[#9CA3AF]">データなし</div>}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 当月実績タブ：週別横棒（面談/紹介/エントリー）＋ 当月初回面談者の属性円4種。
+const GENDER_ORDER = ["female", "male", "other", "未設定"];
+const GENDER_LABELS: Record<string, string> = { female: "女", male: "男", other: "その他", 未設定: "未設定" };
+const GENDER_COLORS: Record<string, string> = { female: "#EC4899", male: "#3B82F6", other: "#A78BFA", 未設定: "#9CA3AF" };
+const AGE_ORDER = ["20代前半", "20代後半", "30代前半", "30代後半", "40代前半", "45歳以上", "不明"];
+const AGE_COLORS: Record<string, string> = {
+  "20代前半": "#60A5FA", "20代後半": "#3B82F6", "30代前半": "#22C55E", "30代後半": "#16A34A", "40代前半": "#F59E0B", "45歳以上": "#EF4444", 不明: "#9CA3AF",
+};
+// 職種希望（大分類）用パレット（カテゴリ可変・循環）。未設定はグレー。
+const JOBTYPE_PALETTE = ["#2563EB", "#16A34A", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4", "#EC4899", "#84CC16", "#F97316", "#14B8A6", "#A855F7"];
+
+function MonthlyCharts({ data }: { data: MonthlyResp }) {
+  const barRef = useRef<HTMLCanvasElement>(null);
+  const rankRef = useRef<HTMLCanvasElement>(null);
+  const genderRef = useRef<HTMLCanvasElement>(null);
+  const jobRef = useRef<HTMLCanvasElement>(null);
+  const ageRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const charts = useRef<any[]>([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => { loadChartJs().then(() => setReady(true)).catch(() => {}); }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Chart = typeof window !== "undefined" ? (window as any).Chart : null;
+    if (!ready || !Chart) return;
+    const fg = barRef.current ? getComputedStyle(barRef.current).color : "#374151";
+    const grid = "rgba(148,163,184,0.25)";
+    charts.current.forEach((c) => c?.destroy());
+    charts.current = [];
+
+    // 横棒：週別 面談/紹介/エントリー数。
+    if (barRef.current) {
+      const labels = data.columns.map((c) => c.label);
+      charts.current.push(new Chart(barRef.current, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "面談", data: data.columns.map((c) => c.matrix.interview.total), backgroundColor: "#2563EB" },
+            { label: "紹介", data: data.columns.map((c) => c.matrix.proposal.total.uniq), backgroundColor: "#22C55E" },
+            { label: "エントリー", data: data.columns.map((c) => c.matrix.entry.total.uniq), backgroundColor: "#F59E0B" },
+          ],
+        },
+        options: {
+          indexAxis: "y", responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { color: fg, boxWidth: 12, font: { size: 11 } } } },
+          scales: {
+            x: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } },
+            y: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid } },
+          },
+        },
+      }));
+    }
+
+    // 円（ドーナツ）共通ビルダー。
+    const buildPie = (
+      el: HTMLCanvasElement | null, map: Record<string, number>,
+      order: string[] | null, colorOf: (k: string, i: number) => string, labelOf: (k: string) => string,
+    ) => {
+      if (!el) return;
+      const keys = (order ? order.filter((k) => (map[k] ?? 0) > 0) : Object.keys(map).filter((k) => map[k] > 0).sort((a, b) => map[b] - map[a]));
+      if (keys.length === 0) return;
+      const total = keys.reduce((s, k) => s + map[k], 0);
+      charts.current.push(new Chart(el, {
+        type: "doughnut",
+        data: { labels: keys.map(labelOf), datasets: [{ data: keys.map((k) => map[k]), backgroundColor: keys.map((k, i) => colorOf(k, i)), borderWidth: 1, borderColor: "#ffffff" }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "right", labels: { color: fg, boxWidth: 10, font: { size: 10 } } },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            tooltip: { callbacks: { label: (ctx: any) => `${ctx.label}: ${ctx.parsed}件 (${total ? ((ctx.parsed / total) * 100).toFixed(1) : 0}%)` } },
+          },
+        },
+      }));
+    };
+
+    buildPie(rankRef.current, data.attributes.rank, RANK_ORDER, (k) => RANK_COLORS[k] ?? "#9CA3AF", (k) => k);
+    buildPie(genderRef.current, data.attributes.gender, GENDER_ORDER, (k) => GENDER_COLORS[k] ?? "#9CA3AF", (k) => GENDER_LABELS[k] ?? k);
+    buildPie(jobRef.current, data.attributes.jobType, null, (k, i) => (k === "未設定" ? "#9CA3AF" : JOBTYPE_PALETTE[i % JOBTYPE_PALETTE.length]), (k) => k);
+    buildPie(ageRef.current, data.attributes.ageBand, AGE_ORDER, (k) => AGE_COLORS[k] ?? "#9CA3AF", (k) => k);
+
+    return () => { charts.current.forEach((c) => c?.destroy()); charts.current = []; };
+  }, [ready, data]);
+
+  const n = data.attributes.total;
+  const pie = (title: string, ref: { current: HTMLCanvasElement | null }) => (
+    <div className="flex-1 min-w-[200px]">
+      <div className="text-[12px] font-medium text-[#374151] mb-1">{title}</div>
+      <div className="h-[200px]">{n > 0 ? <canvas ref={ref} /> : <div className="h-full flex items-center justify-center text-[12px] text-[#9CA3AF]">データなし</div>}</div>
+    </div>
+  );
+
+  return (
+    <div className="border-t border-[#E5E7EB] px-4 py-4 space-y-5">
+      <div>
+        <div className="text-[12px] font-medium text-[#374151] mb-2">週別 面談・紹介・エントリー数</div>
+        <div className="h-[240px]"><canvas ref={barRef} /></div>
+      </div>
+      <div>
+        <div className="text-[12px] font-medium text-[#374151] mb-2">当月の初回面談者 属性（{n}人）</div>
+        <div className="flex flex-wrap gap-4">
+          {pie("ランク", rankRef)}
+          {pie("男女比", genderRef)}
+          {pie("職種希望（第1希望・大分類）", jobRef)}
+          {pie("年齢層", ageRef)}
         </div>
       </div>
     </div>
