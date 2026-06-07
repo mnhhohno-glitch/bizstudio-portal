@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/auth";
 import { computeCaMetrics, type CaDailyMetrics } from "@/lib/dailyReport/metrics";
 import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { computeInterviewAttributes, type InterviewAttributes } from "@/lib/performance/attributes";
+import { notifyDailyReport } from "@/lib/dailyReport/lineworks-notify";
 import {
   formatHasNumbers,
   resolveDailyReportFormat,
@@ -187,6 +188,20 @@ export async function POST(req: Request) {
   }
 
   const submit = Boolean(body.submit);
+  // update では body に来たフィールドのみ反映（undefined は据え置き）。
+  // ＝新・日報ビューの自動保存（scheduleNote/metricsReflection のみ送信）が
+  //   旧ドロワーの comment/aiBody を NULL で潰さないようにする。
+  const update: Record<string, unknown> = {
+    jobCategory: actor.jobCategory,
+    status: submit ? "SUBMITTED" : "DRAFT",
+    submittedAt: submit ? new Date() : null,
+  };
+  if (metrics) update.numbers = metrics as unknown as object;
+  if (body.comment !== undefined) update.comment = body.comment;
+  if (body.aiBody !== undefined) update.aiBody = body.aiBody;
+  if (body.scheduleNote !== undefined) update.scheduleNote = body.scheduleNote;
+  if (body.metricsReflection !== undefined) update.metricsReflection = body.metricsReflection;
+
   const report = await prisma.dailyReport.upsert({
     where: { userId_date: { userId: user.id, date: dbDate } },
     create: {
@@ -201,17 +216,34 @@ export async function POST(req: Request) {
       status: submit ? "SUBMITTED" : "DRAFT",
       submittedAt: submit ? new Date() : null,
     },
-    update: {
-      jobCategory: actor.jobCategory,
-      numbers: metrics ? (metrics as unknown as object) : undefined,
-      comment: body.comment ?? null,
-      aiBody: body.aiBody ?? null,
-      scheduleNote: body.scheduleNote ?? null,
-      metricsReflection: body.metricsReflection ?? null,
-      status: submit ? "SUBMITTED" : "DRAFT",
-      submittedAt: submit ? new Date() : null,
-    },
+    update,
   });
+
+  // 提出時のみ LINE WORKS 通知（fire&forget・本体をブロックしない）。下書き自動保存では送らない。
+  if (submit && formatHasNumbers(actor.format)) {
+    const from = jstDateStart(dateStr);
+    const to = jstDateEnd(dateStr);
+    const [dayMatrix, jobSearch, sched] = await Promise.all([
+      computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: user.id, from, to }),
+      computeJobSearchDay(user.id, dateStr),
+      buildScheduleSummary(user.id, dateStr),
+    ]);
+    void notifyDailyReport({
+      caName: user.name,
+      dateStr,
+      interviewTotal: dayMatrix.interview.total,
+      interviewFirst: dayMatrix.interview.first,
+      interviewExisting: dayMatrix.interview.second + dayMatrix.interview.thirdPlus,
+      bmCount: jobSearch.bmCount,
+      entryTotal: dayMatrix.entry.total.uniq,
+      selectionRate: jobSearch.selectionRate,
+      dCount: jobSearch.ratings["D"] ?? 0,
+      plannedCount: sched.summary.plannedCount,
+      completedCount: sched.summary.completedCount,
+      scheduleNote: (body.scheduleNote ?? report.scheduleNote) ?? null,
+      metricsReflection: (body.metricsReflection ?? report.metricsReflection) ?? null,
+    }).catch((e) => console.warn("日報LINE通知 失敗:", e?.message ?? e));
+  }
 
   return NextResponse.json({ report });
 }

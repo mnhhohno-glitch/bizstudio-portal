@@ -105,8 +105,17 @@ export default function DailyReportView() {
   const [loading, setLoading] = useState(false);
   const [scheduleNote, setScheduleNote] = useState("");
   const [metricsReflection, setMetricsReflection] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+
+  // 最新値・dirty・debounce を ref で保持（離脱前/日付移動の即時保存・クロージャ対策）。
+  const noteRef = useRef(scheduleNote); noteRef.current = scheduleNote;
+  const reflRef = useRef(metricsReflection); reflRef.current = metricsReflection;
+  const dateRef = useRef(date); dateRef.current = date;
+  const dirtyRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const submitted = data?.report?.status === "SUBMITTED";
 
   // ?date= をURLに反映（②直リンクの土台）。
   useEffect(() => {
@@ -125,24 +134,68 @@ export default function DailyReportView() {
         setData(d);
         setScheduleNote(d.report?.scheduleNote ?? "");
         setMetricsReflection(d.report?.metricsReflection ?? "");
+        dirtyRef.current = false; // ロード直後は未編集
       }
     } catch { /* */ } finally { setLoading(false); }
   }, [date]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
 
-  const handleSave = async () => {
-    setSaving(true);
+  // 下書き保存（自動保存・提出なし）。dirty のときだけ送る。
+  const saveDraft = useCallback((opts?: { keepalive?: boolean }) => {
+    if (!dirtyRef.current) return Promise.resolve();
+    dirtyRef.current = false;
+    return fetch("/api/daily-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: opts?.keepalive,
+      body: JSON.stringify({ date: dateRef.current, scheduleNote: noteRef.current, metricsReflection: reflRef.current }),
+    }).then(() => { setSavedMsg("自動保存しました"); setTimeout(() => setSavedMsg(""), 1500); }).catch(() => {});
+  }, []);
+
+  // 入力で dirty マーク＋debounce 自動保存（2.5秒）。
+  const markDirtyAndSchedule = useCallback(() => {
+    dirtyRef.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { void saveDraft(); }, 2500);
+  }, [saveDraft]);
+
+  const onNoteChange = (v: string) => { setScheduleNote(v); noteRef.current = v; markDirtyAndSchedule(); };
+  const onReflChange = (v: string) => { setMetricsReflection(v); reflRef.current = v; markDirtyAndSchedule(); };
+
+  // 日付移動：移動前に現在日の下書きを即時保存（書きかけが消えないように）。
+  const changeDate = useCallback((nd: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    void saveDraft({ keepalive: true });
+    setDate(nd);
+  }, [saveDraft]);
+
+  // 画面離脱前に即時保存（keepalive）。
+  useEffect(() => {
+    const handler = () => { if (dirtyRef.current) void saveDraft({ keepalive: true }); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [saveDraft]);
+
+  // 提出：保存＋完了状態＋LINE WORKS 通知（サーバ側で送信）。
+  const handleSubmit = async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    dirtyRef.current = false;
+    setSubmitting(true);
     setSavedMsg("");
     try {
       const res = await fetch("/api/daily-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, scheduleNote, metricsReflection }),
+        body: JSON.stringify({ date, scheduleNote, metricsReflection, submit: true }),
       });
-      if (res.ok) { setSavedMsg("保存しました"); setTimeout(() => setSavedMsg(""), 2000); }
-      else setSavedMsg("保存に失敗しました");
-    } catch { setSavedMsg("保存に失敗しました"); } finally { setSaving(false); }
+      if (res.ok) {
+        const j = await res.json();
+        setData((d) => (d ? { ...d, report: j.report } : d));
+        setSavedMsg("提出しました（LINE WORKS に通知）");
+        setTimeout(() => setSavedMsg(""), 3000);
+      } else setSavedMsg("提出に失敗しました");
+    } catch { setSavedMsg("提出に失敗しました"); } finally { setSubmitting(false); }
   };
 
   const planned = data?.scheduleSummary.plannedCount ?? 0;
@@ -151,20 +204,21 @@ export default function DailyReportView() {
 
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
-      {/* ヘッダ：前日/翌日ナビ＋右上に保存（②で「下書き｜提出」を並べる予定の配置） */}
+      {/* ヘッダ：前日/翌日ナビ＋右上に提出（下書きは自動保存） */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-[#E5E7EB]">
         <h2 className="text-[14px] font-medium text-[#374151]">📝 日報</h2>
         <div className="flex items-center gap-1 ml-2">
-          <button onClick={() => setDate(shiftDate(date, -1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">←前日</button>
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="text-[13px] border border-gray-200 rounded px-2 py-1" />
-          <button onClick={() => setDate(shiftDate(date, 1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">翌日→</button>
-          <button onClick={() => setDate(todayJst())} className="px-2 py-1 text-[12px] text-[#2563EB] hover:underline">今日</button>
+          <button onClick={() => changeDate(shiftDate(date, -1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">←前日</button>
+          <input type="date" value={date} onChange={(e) => e.target.value && changeDate(e.target.value)} className="text-[13px] border border-gray-200 rounded px-2 py-1" />
+          <button onClick={() => changeDate(shiftDate(date, 1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">翌日→</button>
+          <button onClick={() => changeDate(todayJst())} className="px-2 py-1 text-[12px] text-[#2563EB] hover:underline">今日</button>
         </div>
         {loading && <span className="text-[12px] text-[#9CA3AF]">読み込み中...</span>}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
           {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
-          <button onClick={handleSave} disabled={saving} className="bg-[#16A34A] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
-            {saving ? "保存中..." : "💾 保存"}
+          {submitted && <span className="text-[12px] text-[#16A34A] font-medium">✓ 提出済み</span>}
+          <button onClick={handleSubmit} disabled={submitting} className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
+            {submitting ? "提出中..." : submitted ? "再提出" : "提出"}
           </button>
         </div>
       </div>
@@ -218,7 +272,7 @@ export default function DailyReportView() {
             <div className="text-[12px] font-medium text-[#374151] mb-1">当日のスケジュールに関する気づき</div>
             <textarea
               value={scheduleNote}
-              onChange={(e) => setScheduleNote(e.target.value)}
+              onChange={(e) => onNoteChange(e.target.value)}
               placeholder="予定通りに行かなかった内容についてわかりやすく記載してください"
               className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
             />
@@ -227,7 +281,7 @@ export default function DailyReportView() {
             <div className="text-[12px] font-medium text-[#374151] mb-1">当日の数字に対する振り返り</div>
             <textarea
               value={metricsReflection}
-              onChange={(e) => setMetricsReflection(e.target.value)}
+              onChange={(e) => onReflChange(e.target.value)}
               placeholder="当日の実績数字を見ての気づき・次への改善などを記載してください"
               className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
             />
