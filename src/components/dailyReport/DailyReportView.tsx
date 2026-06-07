@@ -7,6 +7,9 @@
 // ②LINE通知・③AI壁打ちは別タスク。所感は CA×日付で素直に保存（AIに渡せる構造）。
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import ScheduleEntryFormModal, { type EditEntryData } from "@/components/schedule/ScheduleEntryFormModal";
+import ScheduleChatDrawer from "@/components/schedule/ScheduleChatDrawer";
+import CalendarConnectButton from "@/components/schedule/CalendarConnectButton";
 
 type CUP = { recs: number; uniq: number; perPerson: number | null };
 type DayMatrix = {
@@ -17,7 +20,8 @@ type DayMatrix = {
 };
 type Attr = Record<string, number>;
 type JobSearch = { bmCount: number; exportCount: number; ratings: Attr; selectionRate: number | null };
-type SchedEntry = { id: string; startTime: string; endTime: string; title: string; tag: string | null; tagColor: string | null; isCompleted: boolean };
+type SchedEntry = { id: string; startTime: string; endTime: string; title: string; note?: string | null; tag: string | null; tagColor: string | null; isCompleted: boolean; sortOrder?: number };
+type Schedule = { id: string; date: string; summary: string | null; status: string; entries: SchedEntry[] };
 type Report = { reportBody: string | null; commentConfirmedAt: string | null; status: string } | null;
 type Resp = {
   date: string;
@@ -132,6 +136,14 @@ export default function DailyReportView() {
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string; advice?: string; rewrittenBody?: string }[]>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  // スケジュール（上段予定枠で作成・編集・完了。既存 /api/schedule・モーダル/ドロワーを再利用）
+  const [sched, setSched] = useState<Schedule | null>(null);
+  const [calConnected, setCalConnected] = useState(false);
+  const [calEvents, setCalEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<EditEntryData | null>(null);
+  const [showAiDrawer, setShowAiDrawer] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // 最新値・dirty・debounce を ref で保持（離脱前/日付移動の即時保存・クロージャ対策）。
   const bodyRef = useRef(body); bodyRef.current = body;
@@ -165,6 +177,61 @@ export default function DailyReportView() {
   }, [date]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
+
+  // スケジュール（予定・実績）取得。既存 /api/schedule?date= を流用（schedule.id・entries）。
+  const fetchSchedule = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/schedule?date=${date}`);
+      if (res.ok) setSched((await res.json()).schedule ?? null);
+    } catch { /* */ }
+  }, [date]);
+  const fetchCalendar = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/calendar/events?date=${date}`);
+      if (res.ok) { const d = await res.json(); setCalConnected(!!d.connected); setCalEvents(d.events ?? []); }
+    } catch { /* */ }
+  }, [date]);
+  useEffect(() => { void fetchSchedule(); void fetchCalendar(); }, [fetchSchedule, fetchCalendar]);
+
+  // schedule が無ければ空で作成して id を返す（手動追加・既存 handleOpenAddModal と同じ）。
+  const ensureSchedule = async (): Promise<string | null> => {
+    if (sched) return sched.id;
+    try {
+      const res = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, entries: [] }) });
+      if (res.ok) { const s = (await res.json()).schedule; await fetchSchedule(); return s?.id ?? null; }
+    } catch { /* */ }
+    return null;
+  };
+  const handleAddEntry = async () => { const id = await ensureSchedule(); if (id) { setEditingEntry(null); setShowEntryModal(true); } };
+  const handleEditEntry = (e: SchedEntry) => { setEditingEntry({ id: e.id, startTime: e.startTime, endTime: e.endTime, title: e.title, note: e.note, tag: e.tag ?? "", tagColor: e.tagColor ?? "#6B7280" }); setShowEntryModal(true); };
+  const handleDeleteEntry = async (id: string) => { if (!confirm("この予定を削除しますか？")) return; try { await fetch(`/api/schedule/entry/${id}`, { method: "DELETE" }); fetchSchedule(); } catch { /* */ } };
+  const handleToggleComplete = async (e: SchedEntry) => {
+    // 楽観更新
+    setSched((s) => (s ? { ...s, entries: s.entries.map((x) => (x.id === e.id ? { ...x, isCompleted: !x.isCompleted } : x)) } : s));
+    try {
+      await fetch(`/api/schedule/entry/${e.id}/complete`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isCompleted: !e.isCompleted }) });
+    } catch { fetchSchedule(); }
+  };
+  // AI作成の保存（既存 SchedulePanel.handleAiSave と同じ：有→PUT、無→POST）。
+  const handleAiSave = async (entries: { startTime: string; endTime: string; title: string; note?: string | null; tag: string; tagColor: string; sortOrder: number }[], summary: string) => {
+    const formatted = entries.map((e, i) => ({ startTime: e.startTime, endTime: e.endTime, title: e.title, note: e.note || null, tag: e.tag, tagColor: e.tagColor, entryType: "AI_GENERATED", sortOrder: e.sortOrder ?? i }));
+    try {
+      if (sched) await fetch(`/api/schedule/${sched.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summary, entries: formatted }) });
+      else await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, summary, entries: formatted }) });
+      setShowAiDrawer(false); fetchSchedule();
+    } catch { /* */ }
+  };
+  // カレンダー同期（既存 handleSyncCalendar 同等。重複バグは対象外＝既存ロジックそのまま）。
+  const handleSyncCalendar = async () => {
+    if (!sched) { alert("先に予定を追加してください"); return; }
+    if (!confirm("現在のスケジュールをGoogleカレンダーに同期しますか？")) return;
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/schedule/${sched.id}/sync-calendar`, { method: "POST" });
+      if (res.ok) { const d = await res.json(); alert(`${d.synced}件を同期しました（新規: ${d.created}件、更新: ${d.updated}件${d.errors ? `、エラー: ${d.errors}件` : ""}）`); }
+      else alert("同期に失敗しました");
+    } catch { alert("同期に失敗しました"); } finally { setSyncing(false); }
+  };
 
   // 下書き保存（自動保存・提出なし）。dirty のときだけ送る。本文編集はサーバ側で未確定に戻る。
   const saveDraft = useCallback((opts?: { keepalive?: boolean }) => {
@@ -270,8 +337,9 @@ export default function DailyReportView() {
     } catch { setSavedMsg("提出に失敗しました"); } finally { setSubmitting(false); }
   };
 
-  const planned = data?.scheduleSummary.plannedCount ?? 0;
-  const completed = data?.scheduleSummary.completedCount ?? 0;
+  const schedEntries = sched?.entries ?? [];
+  const planned = schedEntries.length;
+  const completed = schedEntries.filter((e) => e.isCompleted).length;
   const rate = planned > 0 ? Math.round((completed / planned) * 100) : null;
 
   return (
@@ -298,14 +366,49 @@ export default function DailyReportView() {
         </div>
       </div>
 
-      {/* 上段：スケジュール 予定｜実績(完了)｜明日 */}
+      {/* 上段：スケジュール 予定（作成導線つき）｜実績(完了チェック)｜明日 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 p-4 border-b border-[#E5E7EB]">
-        <SchedCol title="スケジュール予定" entries={data?.scheduleEntries ?? []} />
-        <SchedCol
-          title={`スケジュール実績（完了 ${completed}/${planned}${rate != null ? ` ・${rate}%` : ""}）`}
-          entries={(data?.scheduleEntries ?? []).filter((e) => e.isCompleted)}
-          emptyText="完了した予定がありません"
-        />
+        {/* 予定枠：作成導線（+予定追加・AI作成・カレンダー同期）＋編集/削除 */}
+        <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
+          <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5 flex-wrap">
+            <span>スケジュール予定</span>
+            <div className="ml-auto flex items-center gap-1">
+              <button onClick={handleAddEntry} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
+              <button onClick={() => setShowAiDrawer(true)} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
+              <button onClick={handleSyncCalendar} disabled={syncing} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncing ? "同期中" : "📅同期"}</button>
+            </div>
+          </div>
+          <div className="px-2 py-1 border-b border-[#F3F4F6]"><CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} /></div>
+          <div className="max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]">
+            {schedEntries.length === 0 ? (
+              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません。「＋追加」または「✏️AI」で作成</div>
+            ) : schedEntries.map((e) => (
+              <div key={e.id} className="px-3 py-1.5 flex items-center gap-2 text-[12px] group">
+                <span className="tabular-nums text-[#6B7280] shrink-0">{e.startTime}</span>
+                <span className="text-[#374151] truncate flex-1">{e.title}</span>
+                {e.tag && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: e.tagColor ?? "#E5E7EB", color: "#374151" }}>{e.tag}</span>}
+                <button onClick={() => handleEditEntry(e)} className="shrink-0 text-[11px] text-[#6B7280] opacity-0 group-hover:opacity-100 hover:text-[#2563EB]">編集</button>
+                <button onClick={() => handleDeleteEntry(e.id)} className="shrink-0 text-[11px] text-[#9CA3AF] opacity-0 group-hover:opacity-100 hover:text-red-500">削除</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* 実績枠：完了チェック（read-only 解除） */}
+        <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
+          <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium">スケジュール実績（完了 {completed}/{planned}{rate != null ? ` ・${rate}%` : ""}）</div>
+          <div className="max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]">
+            {schedEntries.length === 0 ? (
+              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません</div>
+            ) : schedEntries.map((e) => (
+              <label key={e.id} className="px-3 py-1.5 flex items-center gap-2 text-[12px] cursor-pointer hover:bg-[#F9FAFB]">
+                <input type="checkbox" checked={e.isCompleted} onChange={() => handleToggleComplete(e)} className="shrink-0" />
+                <span className="tabular-nums text-[#6B7280] shrink-0">{e.startTime}</span>
+                <span className={`truncate ${e.isCompleted ? "text-[#9CA3AF] line-through" : "text-[#374151]"}`}>{e.title}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        {/* 明日（read-only） */}
         <SchedCol title={`明日の予定（${data ? mdLabel(data.tomorrowDate) : ""}）`} entries={data?.tomorrowEntries ?? []} emptyText="明日の予定は未登録です" />
       </div>
 
@@ -436,6 +539,27 @@ export default function DailyReportView() {
           </div>
         </>
       )}
+
+      {/* スケジュール：手動追加/編集モーダル（既存コンポーネント再利用） */}
+      {showEntryModal && sched && (
+        <ScheduleEntryFormModal
+          onClose={() => { setShowEntryModal(false); setEditingEntry(null); }}
+          onSaved={() => { setShowEntryModal(false); setEditingEntry(null); fetchSchedule(); }}
+          scheduleId={sched.id}
+          editEntry={editingEntry}
+        />
+      )}
+
+      {/* スケジュール：AI作成ドロワー（既存コンポーネント再利用・日報の date 連動） */}
+      <ScheduleChatDrawer
+        isOpen={showAiDrawer}
+        onClose={() => setShowAiDrawer(false)}
+        date={date}
+        scheduleId={sched?.id ?? null}
+        existingEntries={schedEntries.map((e) => ({ startTime: e.startTime, endTime: e.endTime, title: e.title, note: e.note ?? null, tag: e.tag ?? "", tagColor: e.tagColor ?? "#6B7280", sortOrder: e.sortOrder ?? 0 }))}
+        calendarEvents={calEvents}
+        onSave={handleAiSave}
+      />
     </div>
   );
 }

@@ -968,7 +968,11 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 ### DailyReportView.tsx（日報タブ・T-069①）
 - パス: `src/components/dailyReport/DailyReportView.tsx`（Client）。前日/翌日ナビ＋`?date=YYYY-MM-DD` 連動（`history.replaceState`、②直リンクの土台）。
 - データ源: `GET /api/daily-report?date=`（既存を拡張）→ `scheduleEntries`(当日予定)・`tomorrowEntries`(明日)・`scheduleSummary`(完了数)・`dayMatrix`(当日 `computeWeeklyMatrix`)・`attributes`(当日初回面談者の属性)・`report`(scheduleNote/metricsReflection)。
-- **上段3列**: スケジュール予定｜実績（完了 N/M・消化率%）｜明日の予定（`SchedCol`、ダークヘッダ、完了は✓）。
+- **上段3列**: スケジュール予定｜実績（完了 N/M・消化率%）｜明日の予定。
+  - **予定枠＝作成導線つき（T-069 移植）**：ヘッダに **＋追加（手動 `ScheduleEntryFormModal`）／✏️AI（`ScheduleChatDrawer`）／📅同期（`/api/schedule/[id]/sync-calendar`）** ＋ `CalendarConnectButton`。各エントリに編集/削除。schedule は `GET /api/schedule?date=` で取得（id＋entries）、未作成日は `POST /api/schedule`（空）で自動作成してから追加。既存モーダル/ドロワー/APIを**無改変で再利用**、日付は日報 `date` 連動。
+  - **実績枠＝完了チェック（read-only解除）**：各エントリに完了トグル（`PATCH /api/schedule/entry/[id]/complete`・楽観更新）。消化率は `sched.entries` から算出。
+  - 明日枠は read-only（`/api/daily-report` の `tomorrowEntries`）。
+  - **旧・折りたたみ「スケジュールを編集」（`SchedulePanel`）は撤去**（手動/AI/同期/完了を上段に移植済み）。`SchedulePanel` 自体は flag-OFF レガシーレイアウト（page.tsx）で残存・不変。カレンダー同期の重複バグは別課題で未対応。
 - **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒4本（箱型・隙間ゼロ）**＝初回面談・既存面談(＝求人面談2回目+既存面談3回目以降)・紹介・エントリー（書類通過以降は日々頻繁でないため除外）。`barPercentage:1.0/categoryPercentage:1.0/borderWidth:1` で連続したバーに＋**円3種**＝当日初回面談者の ランク/男女比/年代（職種希望は実用不可のため非表示。属性集計APIには残置）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字、`flex-1 min-h-[180px]` で縦に拡大）。
 - **コメント＝右アコーディオン＋ポップアップ（T-069②後）**：所感を画面下段から外し、**統合1本文 `reportBody`**（定型■1〜■6）に。入力は **右スライドのアコーディオン**（「📝 コメント入力」）＋ **中央モーダル**（「👁 コメント表示」、表示・編集可）。両方＋自動保存が **同じ `reportBody`（CA×日付1レコード・重複なし）** を更新。新規（本文空）でアコーディオンを開くと**定型文初期表示**（記入済みは保存内容、上書きしない）。
 - **日報AIアシスト（T-069③）**：アコーディオン最下部のチャット入力 → `POST /api/daily-report/assist`（Claude `claude-sonnet-4-20250514`）。**日報skill（`src/skills/daily-report-advisor/SKILL.md`・`getDailyReportSkill`）＋ job-matching-advisor skill** を system 注入（cache_control: ephemeral）。当日集計（面談/紹介/エントリー/BM/選定率/支援中ACTIVE数）を**数字として渡す（AIに計算させない＝捏造防止）**。返り値 JSON `{ message, rewrittenBody(■1〜■6保持), advice(上司視点) }`。「本文に反映」で `rewrittenBody`→`reportBody`（`onBodyChange` 経由で自動保存＋未確定化）→ 確定→提出。会話は `DailyReportChat` に保存。旧 `/api/daily-report/chat`（aiBody用）は別物・不変。Gemini 不使用。
