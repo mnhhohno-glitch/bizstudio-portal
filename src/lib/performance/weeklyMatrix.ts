@@ -7,7 +7,7 @@
 //     （記録方式が 2026/4 に移行。片方だけでは過去 or 現在が欠ける）。candidate×同日のクロスソース重複は除外。
 //   - 無効（isActive=false）含む・アーカイブ（archivedAt）除く。
 //   - 件数＝レコード件数、人数＝候補者ユニーク、1人当たり＝件数÷人数。
-//   - 新規/既存：その候補者にとっての「初回」提案/エントリーか（統合イベントの通算最古がレンジ内なら初回）。
+//   - 新規/既存：その候補者の**通算最古日（MIN）がレンジ内なら新規・レンジ前なら既存**（提案・エントリーとも候補者単位で排他。初回+既存=合計）。
 //   - 面談は notDeclined（辞退系以外、null 含む）でカウント。
 //   - JST 境界は呼び出し側が from/to(Date) で渡す（罠 #17）。列は UTC 保存なので UTC wall-clock で比較。
 
@@ -73,7 +73,10 @@ export async function computeWeeklyMatrix(params: {
     // 担当はどちらも candidate.employeeId 軸に統一。無効含む・archivedAt 除く（JobEntry）。
     // 移行期の二重記録ガード：同一候補者×同一日に JE 提案があれば CF 側は同一提案とみなし除外（NOT EXISTS）。
     //   ※実データ検証で同日クロスソース衝突は 0 件のため現状は no-op だが、移行重複の保険。
-    // 初回/既存は統合イベントの候補者**通算**順位（ROW_NUMBER、両ソース横断の最古がレンジ内なら初回）。
+    // 初回/既存は統合イベントの候補者**通算最古日（MIN(pdate)）が基準**＝entry と同型（候補者単位で排他）。
+    //   first_p >= F：その候補者の初回提案がレンジ内＝新規候補者／first_p < F：レンジ前に初回、レンジ内で再提案＝既存候補者。
+    //   ⚠️ ROW_NUMBER（rn=1/rn>1・イベント単位）方式は、1人月20件の提案があると新規候補者も同月に2件目以降を持ち
+    //      「初回にも既存にも二重計上」され、既存≒合計になる誤り（T-071 修正①で MIN 方式へ）。
     prisma.$queryRawUnsafe<{ new_recs: number; new_uniq: number; ex_recs: number; ex_uniq: number; tot_recs: number; tot_uniq: number }[]>(`
       WITH events AS (
         SELECT je.candidate_id, je.job_intro_date AS pdate
@@ -90,18 +93,18 @@ export async function computeWeeklyMatrix(params: {
                 = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
           )
       ),
-      ranked AS (
-        SELECT candidate_id, pdate, ROW_NUMBER() OVER (PARTITION BY candidate_id ORDER BY pdate ASC) AS rn
+      props AS (
+        SELECT candidate_id, pdate, MIN(pdate) OVER (PARTITION BY candidate_id) AS first_p
         FROM events
       )
       SELECT
-        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int new_recs,
-        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int new_uniq,
-        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn > 1)::int ex_recs,
-        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn > 1)::int ex_uniq,
+        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_p >= TIMESTAMP '${F}')::int new_recs,
+        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_p >= TIMESTAMP '${F}')::int new_uniq,
+        COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_p < TIMESTAMP '${F}')::int ex_recs,
+        COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_p < TIMESTAMP '${F}')::int ex_uniq,
         COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_recs,
         COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int tot_uniq
-      FROM ranked;`),
+      FROM props;`),
 
     // エントリー（JobEntry・candidate.employeeId 軸・post-app・archived除く）。新規＝その候補者の初回エントリーがレンジ内。
     prisma.$queryRawUnsafe<{ new_recs: number; new_uniq: number; ex_recs: number; ex_uniq: number; tot_recs: number; tot_uniq: number }[]>(`

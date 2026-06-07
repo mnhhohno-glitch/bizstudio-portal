@@ -211,7 +211,7 @@ model InterviewMemo {
 
 - キー対応（厳守）：
   - **求人検索**＝CandidateFile BOOKMARK `createdAt`・User.id（`uploadedByUserId`）。マトリクス上部の「検索」件数は変更しない。
-  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算**順位（両ソース横断の最古がレンジ内＝初回）。`src/lib/performance/weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS＋ROW_NUMBER）。
+  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算最古日 `MIN(pdate)` 基準＝entry と同型**：`first_p >= レンジ開始`＝新規候補者、`first_p < レンジ開始`＝既存候補者（**候補者単位で排他、初回+既存=合計**）。`weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS）＋`props` CTE（`MIN(pdate) OVER`）。⚠️ **`ROW_NUMBER`（rn=1/rn>1・イベント単位）方式は誤り**：1人月20件もの提案があると新規候補者も同月に2件目以降を持ち初回・既存に二重計上され「既存≒合計（構成比≒100%）」になる（T-071 修正①で MIN 方式へ是正、2026-06-07）。
   - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
   - **面談ランク**＝`InterviewRating.overallRank`（`overall_rank`、InterviewRecord と 1:1・LEFT JOIN・nullable）。実データの値体系は **A+/A/B+/B/C/D ＋ 未評価(null)**（**S は存在しない**）。約55%のみ rank 付与。円グラフは**初回面談**（担当軸・到達ベース・実施判定・`interview_count = 1`）を rank 別集計、null は「未評価」に寄せ合計＝初回面談数（マトリクスの `interview.first`）。`computeInterviewRankBreakdown()`（weeklyMatrix.ts）。理由：その期間に新規で会った人の質の分布を見るため、2回目以降の再面談（評価重複）を除外。
   - **エントリー以降＝担当軸＝`candidate.employeeId`**。
