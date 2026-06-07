@@ -35,6 +35,9 @@ type Cohort = {
   documentPassRate: number | null; offerRate: number | null; decidedRate: number | null;
   decidedRevenue: number | null; decidedUnitPrice: number | null;
 };
+// T-071 ③ 合計列・平均列。Cohort と shape は同じ（yearMonth なし、数値は小数を含む）。
+type CohortSummary = Omit<Cohort, "yearMonth">;
+type CohortResp = { cohorts: Cohort[]; total: CohortSummary; average: CohortSummary };
 type DetailRow = Record<string, string | number | null>;
 type DetailResp = { tab: string; stage?: string | null; summary: { persons: number; records: number }; rows: DetailRow[] };
 // 当月実績：週マトリクス（weekly 互換）＋ 当月初回面談者の属性分布（円グラフ用）。
@@ -155,6 +158,9 @@ export default function PerformancePanel() {
   const [weekly, setWeekly] = useState<WeeklyResp | null>(null);
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null);
   const [cohorts, setCohorts] = useState<Cohort[] | null>(null);
+  // T-071 ③ 合計・平均（6ヶ月通算ユニーク／各月平均）。
+  const [cohortTotal, setCohortTotal] = useState<CohortSummary | null>(null);
+  const [cohortAverage, setCohortAverage] = useState<CohortSummary | null>(null);
   const [selectionStage, setSelectionStage] = useState<"documentPass" | "offer" | "acceptance">("documentPass");
   const [detail, setDetail] = useState<DetailResp | null>(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -186,7 +192,12 @@ export default function PerformancePanel() {
     setLoading(true);
     try {
       const res = await fetch(`/api/performance/cohort?employeeId=${employeeId}&months=6`);
-      if (res.ok) setCohorts((await res.json()).cohorts ?? null);
+      if (res.ok) {
+        const data = (await res.json()) as CohortResp;
+        setCohorts(data.cohorts ?? null);
+        setCohortTotal(data.total ?? null);
+        setCohortAverage(data.average ?? null);
+      }
     } catch { /* */ } finally { setLoading(false); }
   }, [employeeId]);
 
@@ -296,7 +307,7 @@ export default function PerformancePanel() {
         {loading ? (
           <div className="py-8 text-center text-[12px] text-[#9CA3AF]">読み込み中...</div>
         ) : tab === "cohort" ? (
-          <CohortTable cohorts={cohorts} />
+          <CohortTable cohorts={cohorts} total={cohortTotal} average={cohortAverage} />
         ) : tab === "monthly" ? (
           <WeekMatrixTable weekly={monthly} rows={MONTHLY_ROWS} />
         ) : (
@@ -428,10 +439,12 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
 }
 
 // 直近6ヶ月の行定義。num＝人数（or 金額）、pct＝その月の%（構成比 or コホート率、null は非表示）。
+// CohortLike = Cohort（月別）も CohortSummary（合計/平均）も受け取れる。
+type CohortLike = Omit<Cohort, "yearMonth">;
 type CohortRow = {
   label: string;
-  num: (c: Cohort) => number | null;
-  pct: (c: Cohort) => number | null;
+  num: (c: CohortLike) => number | null;
+  pct: (c: CohortLike) => number | null;
   fmt?: (v: number | null) => string;
   band?: "blue" | "orange"; // 合計＝オレンジ、売上系＝オレンジ
   isTotal?: boolean;
@@ -456,10 +469,16 @@ const COHORT_ROWS: CohortRow[] = [
   { label: "売上単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
 ];
 
-function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
+// 合計・平均の数値書式：人数は小数1桁、件数・売上は整数 or 円表記（行ごとの fmt に従う）。
+// 既存の cohort セルは numFmt(n) で整数表示だが、合計・平均は小数になり得るため別フォーマッタで桁数を分ける。
+const numFmtCell = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(0));
+const numFmtAvg = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(1));
+
+function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; total: CohortSummary | null; average: CohortSummary | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
+  // T-071 ③ 合計列・平均列を月の後ろに追加。達成率列は作らない。
   return (
-    // 段階列＝最長項目名が収まる固定幅（折り返さない）、月12列＝残り幅を均等配分、全幅。
+    // 段階列＝最長項目名が収まる固定幅（折り返さない）、月6列＋合計＋平均＝残り幅を均等配分、全幅。
     <table className="w-full text-[12px] border-collapse" style={{ tableLayout: "fixed" }}>
       <colgroup>
         <col style={{ width: "190px" }} />
@@ -469,14 +488,22 @@ function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
             <col />
           </Fragment>
         ))}
+        {/* 合計列（実績｜%） */}
+        <col />
+        <col />
+        {/* 平均列（実績｜%） */}
+        <col />
+        <col />
       </colgroup>
       <thead>
-        {/* 1段目：段階列＋各月（colSpan=2） */}
+        {/* 1段目：段階列＋各月（colSpan=2）＋合計（colSpan=2）＋平均（colSpan=2） */}
         <tr>
           <th rowSpan={2} className={`sticky left-0 ${HEAD_CLS} px-2 py-1.5 text-left font-medium whitespace-nowrap`}>段階</th>
           {cohorts.map((c) => (
             <th key={c.yearMonth} colSpan={2} className={`${HEAD_CLS} px-2 py-1.5 text-center font-medium whitespace-nowrap border-l border-[#5A5A5A]`}>{c.yearMonth}</th>
           ))}
+          <th colSpan={2} className={`${HEAD_CLS} px-2 py-1.5 text-center font-medium whitespace-nowrap border-l-2 border-[#9CA3AF]`}>合計</th>
+          <th colSpan={2} className={`${HEAD_CLS} px-2 py-1.5 text-center font-medium whitespace-nowrap border-l border-[#5A5A5A]`}>平均</th>
         </tr>
         {/* 2段目：実績｜% */}
         <tr>
@@ -486,6 +513,10 @@ function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
               <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS}`}>%</th>
             </Fragment>
           ))}
+          <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS} border-l-2 border-[#9CA3AF]`}>実績</th>
+          <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS}`}>%</th>
+          <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS} border-l border-[#5A5A5A]`}>実績</th>
+          <th className={`${HEAD_CLS} px-2 py-1 text-right font-normal text-[10px] ${SUBHEAD_CLS}`}>%</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-[#F3F4F6]">
@@ -500,11 +531,33 @@ function CohortTable({ cohorts }: { cohorts: Cohort[] | null }) {
                 const pv = r.pct(c);
                 return (
                   <Fragment key={c.yearMonth}>
-                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6]">{r.fmt ? r.fmt(n) : numFmt(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6]">{r.fmt ? r.fmt(n) : numFmtCell(n)}</td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </Fragment>
                 );
               })}
+              {/* 合計列：人数は通算ユニーク（API側で COUNT DISTINCT 再集計）、件数・売上は加算、率は通算コホート率。 */}
+              {(() => {
+                const n = total ? r.num(total) : null;
+                const pv = total ? r.pct(total) : null;
+                return (
+                  <>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-semibold border-l-2 border-[#9CA3AF]">{r.fmt ? r.fmt(n) : numFmtCell(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
+                  </>
+                );
+              })()}
+              {/* 平均列：各月実績の÷6固定平均。率は平均人数の隣接段比。 */}
+              {(() => {
+                const n = average ? r.num(average) : null;
+                const pv = average ? r.pct(average) : null;
+                return (
+                  <>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#6B7280] border-l border-[#5A5A5A]">{r.fmt ? r.fmt(n) : numFmtAvg(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
+                  </>
+                );
+              })()}
             </tr>
           );
         })}
