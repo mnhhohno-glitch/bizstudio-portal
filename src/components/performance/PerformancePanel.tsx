@@ -71,9 +71,13 @@ const numFmt = (v: number | null | undefined, d = 0) => (v == null || !Number.is
 const pctFmt = (r: number | null | undefined) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
 const yenFmt = (v: number | null | undefined) => (v == null ? "—" : `¥${Math.round(v).toLocaleString()}`);
 const mdLabel = (d: string) => { const [, m, day] = d.split("-"); return `${parseInt(m)}/${parseInt(day)}`; };
+// 隣接段比・構成比のヘルパ（0 / null 安全）。直近6ヶ月と当月実績の合計列で共用。
+const ratio = (n: number, d: number): number | null => (d > 0 ? n / d : null);
 
 // 行定義：actual 抽出関数＋任意 targetKey＋フォーマッタ。
 // band＝薄青の帯色（提案/エントリーの人数行のみ）。isTotal＝合計行（上罫線＋太字）。
+// pct＝T-071 ③ 当月実績の合計列のみに表示する転換率%（隣接段比または構成比、人数ベース）。
+//      週列・平均列・達成率列には表示しない（週別の率は「率の窓問題」で意味を持たないため）。
 type Row = {
   label: string;
   indent?: boolean;
@@ -83,24 +87,29 @@ type Row = {
   actual: (m: WeeklyMatrix) => number | null;
   targetKey?: TKey;
   fmt?: (v: number | null) => string;
+  pct?: (m: WeeklyMatrix) => number | null;
 };
 
 // 当月実績タブの行（直近6ヶ月と同項目＝人数のみ）。
 // 帯色ルール（直近6ヶ月と統一）：**合計面談・合計提案・合計エントリー・決定の4行のみ薄オレンジ**。他は白。
+// pct（T-071 ③）：合計列にのみ表示する転換率%（人数ベース・当月通算）。
+//   sub 行は**構成比**（÷各合計）、合計行は**隣接段比**（紹介率＝÷面談、エントリー率＝÷提案）または 100%（合計面談）。
+//   選考（書類通過/内定/決定）は**隣接段比**（÷前段）。決定売上・売上単価は%なし。
+//   週列・平均列・達成率列には表示しない（週別の率は「率の窓問題」で意味を持たないため）。
 const MONTHLY_ROWS: Row[] = [
-  { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
-  { label: "求人面談（2回目）", actual: (m) => m.interview.second },
-  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
-  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total },
-  { label: "初回提案", actual: (m) => m.proposal.fresh.uniq },
-  { label: "既存提案", actual: (m) => m.proposal.existing.uniq },
-  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
-  { label: "新規エントリー", actual: (m) => m.entry.fresh.uniq },
-  { label: "既存エントリー", actual: (m) => m.entry.existing.uniq },
-  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
-  { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
-  { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
-  { label: "決定", band: "orange", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
+  { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst", pct: (m) => ratio(m.interview.first, m.interview.total) },
+  { label: "求人面談（2回目）", actual: (m) => m.interview.second, pct: (m) => ratio(m.interview.second, m.interview.total) },
+  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
+  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, pct: (m) => (m.interview.total > 0 ? 1 : null) },
+  { label: "初回提案", actual: (m) => m.proposal.fresh.uniq, pct: (m) => ratio(m.proposal.fresh.uniq, m.proposal.total.uniq) },
+  { label: "既存提案", actual: (m) => m.proposal.existing.uniq, pct: (m) => ratio(m.proposal.existing.uniq, m.proposal.total.uniq) },
+  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.total.uniq, m.interview.total) },
+  { label: "新規エントリー", actual: (m) => m.entry.fresh.uniq, pct: (m) => ratio(m.entry.fresh.uniq, m.entry.total.uniq) },
+  { label: "既存エントリー", actual: (m) => m.entry.existing.uniq, pct: (m) => ratio(m.entry.existing.uniq, m.entry.total.uniq) },
+  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.total.uniq, m.proposal.total.uniq) },
+  { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
+  { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
+  { label: "決定", band: "orange", actual: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
   { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
   { label: "売上単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
 ];
@@ -382,6 +391,8 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
   if (!weekly) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
   const { columns, total } = weekly;
   const fmt = (r: Row, v: number | null) => (r.fmt ? r.fmt(v) : numFmt(v));
+  // T-071 ③ 合計列の % 表示有無（当月実績タブのみ pct を持つ）。週列・平均列・達成率列には出さない。
+  const hasPctInRows = rows.some((r) => !!r.pct);
 
   return (
     <table className="w-full text-[13px] border-collapse">
@@ -395,7 +406,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               <div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div>
             </th>
           ))}
-          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div></th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>{hasPctInRows ? "目標｜実績｜%" : "目標｜実績"}</div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[70px]`}>平均<div className={`text-[10px] ${SUBHEAD_CLS}`}>/列</div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[80px]`}>達成率</th>
         </tr>
@@ -425,6 +436,11 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               <td className="px-3 py-2 text-center tabular-nums">
                 {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
                 <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>
+                {/* T-071 ③ 当月実績の合計列にのみ転換率%（隣接段比 or 構成比、当月通算人数ベース）。
+                    週列・平均列・達成率列には出さない（週別の率は「率の窓問題」で意味を持たないため）。 */}
+                {r.pct && (
+                  <span className="text-[11px] text-[#2563EB] ml-1">｜{pctFmt(r.pct(total.matrix))}</span>
+                )}
               </td>
               <td className="px-3 py-2 text-center tabular-nums text-[#6B7280]">
                 {r.fmt ? r.fmt(avg) : numFmt(avg, 1)}
@@ -451,8 +467,6 @@ type CohortRow = {
   band?: "blue" | "orange"; // 合計＝オレンジ、売上系＝オレンジ
   isTotal?: boolean;
 };
-const ratio = (n: number, d: number): number | null => (d > 0 ? n / d : null);
-
 const COHORT_ROWS: CohortRow[] = [
   { label: "初回面談", num: (c) => c.interview.first, pct: (c) => ratio(c.interview.first, c.interview.total) },
   { label: "求人面談（2回目）", num: (c) => c.interview.second, pct: (c) => ratio(c.interview.second, c.interview.total) },
