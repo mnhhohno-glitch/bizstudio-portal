@@ -306,7 +306,7 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
 
     // 縦棒：当日の主要4項目（初回面談・既存面談・紹介・エントリー）。
     // 既存面談 = 求人面談(2回目) + 既存面談(3回目以降)。書類通過以降は日々頻繁でないため除外。
-    // 棒同士は隙間ゼロの箱型（barPercentage=1.0・categoryPercentage=1.0・borderWidth で区切り）。
+    // 棒は細くスタイリッシュに（barPercentage:0.3、categoryPercentage:0.7）。棒上に数値。
     if (barRef.current) {
       const existingInterview = matrix.interview.second + matrix.interview.thirdPlus;
       charts.current.push(new Chart(barRef.current, {
@@ -317,10 +317,9 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
             label: "当日件数",
             data: [matrix.interview.first, existingInterview, matrix.proposal.total.uniq, matrix.entry.total.uniq],
             backgroundColor: ["#2563EB", "#0891B2", "#22C55E", "#F59E0B"],
-            borderColor: "#ffffff",
-            borderWidth: 1,
-            barPercentage: 1.0,
-            categoryPercentage: 1.0,
+            borderRadius: 4,
+            barPercentage: 0.3,
+            categoryPercentage: 0.7,
           }],
         },
         options: {
@@ -334,6 +333,7 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
     }
 
     // 求人検索の行動量：BM数（求人紹介数）・出力数（提案数）。面談系とは桁が違うため別グラフ。棒上に数値。
+    // 細くスタイリッシュ（barPercentage:0.3）＋親コンテナを max-w-[280px] で詰め、2本が間延びしないように。
     if (jobBarRef.current && jobSearch) {
       charts.current.push(new Chart(jobBarRef.current, {
         type: "bar",
@@ -343,10 +343,9 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
             label: "件数",
             data: [jobSearch.bmCount, jobSearch.exportCount],
             backgroundColor: ["#2563EB", "#F59E0B"],
-            borderColor: "#ffffff",
-            borderWidth: 1,
-            barPercentage: 1.0,
-            categoryPercentage: 1.0,
+            borderRadius: 4,
+            barPercentage: 0.3,
+            categoryPercentage: 0.6,
           }],
         },
         options: {
@@ -402,7 +401,8 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
           <div className="text-[12px] font-medium text-[#374151] mb-2">当日の各段階数</div>
           <div className="h-[200px]"><canvas ref={barRef} /></div>
         </div>
-        <div className="flex-1 min-w-0">
+        {/* 求人検索は 2 本のため幅を詰める（max-w で間延び解消・左寄せ） */}
+        <div className="w-full md:w-[280px] shrink-0">
           <div className="text-[12px] font-medium text-[#374151] mb-2 flex items-center gap-2">
             求人検索（BM/出力）
             <span className="ml-auto text-[11px] font-normal text-[#6B7280]">選定率 <span className="text-[15px] font-bold text-[#2563EB]">{selPct}</span></span>
