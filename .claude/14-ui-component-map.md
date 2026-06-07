@@ -971,6 +971,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - **上段3列**: スケジュール予定｜実績（完了 N/M・消化率%）｜明日の予定（`SchedCol`、ダークヘッダ、完了は✓）。
 - **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒4本（箱型・隙間ゼロ）**＝初回面談・既存面談(＝求人面談2回目+既存面談3回目以降)・紹介・エントリー（書類通過以降は日々頻繁でないため除外）。`barPercentage:1.0/categoryPercentage:1.0/borderWidth:1` で連続したバーに＋**円3種**＝当日初回面談者の ランク/男女比/年代（職種希望は実用不可のため非表示。属性集計APIには残置）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字、`flex-1 min-h-[180px]` で縦に拡大）。
 - **保存ボタンは右上**（ヘッダ内・日付ナビの右）。②で「下書き保存｜提出」を並べる予定の配置。
+- **求人検索グラフ（行動量＋精度）**：面談系縦棒の隣に **BM数(求人紹介数=createdAt当日)・出力数(提案数=lastExportedAt当日)** の縦棒（棒上に数値＝inline plugin `barValue` afterDatasetsDraw）。**選定率**を見出しに大きく表示（`(A+B+C)÷合計BM`、D・未評価除外）。**求人ABCD ドーナツ**＝当日BM の `aiMatchRating` 構成比（A/B/C/D/未評価）。母数は**紹介保留含む（archivedAt 条件なし）**。`/api/daily-report?date=` の `jobSearch{bmCount,exportCount,ratings,selectionRate}`（`computeJobSearchDay`・`uploadedByUserId`軸）。⚠️ 既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別集計（archivedAt=null だとDの77%が保留に逃げ選定率100%固定になるため、グラフ用は archivedAt 条件なし）。
 - 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
 - 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。

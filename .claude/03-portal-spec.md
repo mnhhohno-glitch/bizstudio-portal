@@ -161,6 +161,7 @@ model InterviewMemo {
 - **所感は CA×日付で `daily_reports` に保存**（`scheduleNote`＝当日スケジュールの気づき / `metricsReflection`＝当日数字の振り返り。共に `TEXT?`・nullable・migration `20260608000000_t069_daily_report_notes`・冪等）。③AI壁打ちで読めるよう素直に保持。
 - 当日実績＝`computeWeeklyMatrix` を当日レンジで（当月実績と同項目）。属性円4種＝`computeInterviewAttributes`（当日初回面談者）。`/api/daily-report?date=` が当日 dayMatrix・attributes・当日/翌日スケジュールを返す。
 - 有効化＝`DAILY_REPORT_ENABLED`（環境変数 true、本番=master の `bizstudio-portal` と検証=staging の両サービス）。
+- **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、ABCD＝`aiMatchRating` 構成比、**選定率＝(A+B+C)÷合計BM**（D・未評価除外。D は「見る目」の指標として母数に含める）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
 
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
 - 母集団＝**当月の初回面談（`interview_count=1`・辞退系除外・担当軸 `candidate.employeeId`）**。4種とも母数＝初回面談数。
