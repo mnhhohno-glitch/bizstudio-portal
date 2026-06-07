@@ -329,7 +329,8 @@ model InterviewMemo {
   - **紹介〜承諾の人数・率は実績表（`computeWeeklyMatrix`）と同一集計に統一**（2026-06-07 修正）：紹介人数＝`proposal.total.uniq`（両ソース統合・候補者ユニーク）、エントリー＝`entry.total.uniq`、書類通過/内定/承諾＝`selection.*`。**各率は人数ベースの隣接段比**（紹介率＝紹介÷面談、エントリー率＝エントリー÷紹介、…）。`proposalPerPerson`＝`proposal.total.perPerson`。
   - ⚠️ **旧実装は `computeCaMetricsForRange`（CandidateFile 単一・件数）を紹介人数に使い、紹介人数に件数が混入（575等）・エントリー率が件数分母で過小（2.8%）→ それを目標率に写すと逆算が爆発**していた。これが目標数字膨張の根本原因（%変換は元から正常）。人数ベース集計に統一して解消（エントリー率 57% 等の現実値に）。
   - 初回面談率（実施率＝実施÷予定）は `computeCaMetricsForRange` の値を維持（隣接段比ではない別指標）。
-  - ⚠️ **紹介率の分母＝`matrix.interview.total`（合計面談＝first+second+thirdPlus）**。a1c0321 で `interview.first`（初回面談）を渡してしまい紹介率が 100% 超になっていたバグを修正（前月93.3%→47.5%、3か月106.4%→64.9% 等）。半年で依然 >100% になるのは**過去面談履歴の未インポート**が原因（紹介＝候補者ユニーク・面談＝レコード数の単位差ではなく、面談レコードが不足しているため）。データ投入後に正常化する。reference API は表示用に `interviewTotal` も返し、TargetModal は参考値テーブルに「合計面談」行を表示する（紹介率の分母と表示を整合）。
+  - ⚠️ **紹介率の分母＝`matrix.interview.total`（合計面談＝first+second+thirdPlus）**。a1c0321 で `interview.first`（初回面談）を渡してしまい紹介率が 100% 超になっていたバグを修正（前月93.3%→47.5%、3か月106.4%→64.9% 等）。半年で依然 >100% になるのは**過去面談履歴の未インポート**が原因（紹介＝候補者ユニーク・面談＝レコード数の単位差ではなく、面談レコードが不足しているため）。データ投入後に正常化する。reference API は表示用に `interviewTotal`・`interviewExisting` も返す。
+  - **逆算の面談＝合計面談が母数（T-073）**：`reverseCalc` の面談段＝`紹介÷紹介率＝合計面談（totalInterviewCount）`。合計面談を **初回%（`firstInterviewRatio` 手入力）** で内訳化＝初回面談（合計×初回%）／既存面談（合計×(1-初回%)）。内訳は逆算チェーンに影響しない。**保存：interviewCount＝初回面談**（実績表の達成率は初回実績と比較するため初回を保存）／**existingInterviewCount＝既存**／**firstInterviewRatio（0〜1・nullable・migration `20260608140000_t073_first_interview_ratio`）**。週按分は合計面談。表示順＝合計面談→初回%→初回面談→既存面談。
   - `computeCaMetricsForRange`（日報の正本）自体は不変。reference が参照して参考値を組み替えるだけ（日報非波及）。
 - `GET /api/performance/target?employeeId=Y&yearMonth=YYYY-MM`：既存目標取得。
 - `POST /api/performance/target`：upsert（`employeeId_yearMonth`）。全数値フィールドの有限性を検証。

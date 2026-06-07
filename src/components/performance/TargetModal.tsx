@@ -62,6 +62,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   const [targetRevenue, setTargetRevenue] = useState<string>("");
   const [unitPrice, setUnitPrice] = useState<string>("");
   const [proposalPerPerson, setProposalPerPerson] = useState<string>(""); // 紹介の1人あたり件数（手入力）
+  const [firstInterviewRatio, setFirstInterviewRatio] = useState<string>(""); // 合計面談に占める初回面談の割合（%手入力）
   const [rates, setRates] = useState({
     acceptanceRate: "", offerRate: "", documentPassRate: "", entryRate: "", introductionRate: "",
   });
@@ -86,6 +87,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           setTargetRevenue(String(t.targetRevenue ?? ""));
           setUnitPrice(String(t.unitPrice ?? ""));
           setProposalPerPerson(t.proposalPerPerson != null ? String(t.proposalPerPerson) : "");
+          setFirstInterviewRatio(t.firstInterviewRatio != null ? String(t.firstInterviewRatio * 100) : "");
           setRates({
             acceptanceRate: t.acceptanceRate != null ? String(t.acceptanceRate * 100) : "",
             offerRate: t.offerRate != null ? String(t.offerRate * 100) : "",
@@ -114,7 +116,13 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   }), [targetRevenue, unitPrice, rates]);
 
   const result = useMemo(() => reverseCalc(calcInput), [calcInput]);
-  const complete = isComplete(result);
+  // 合計面談（逆算）→ 初回%手入力で初回/既存に内訳化（逆算には影響しない・表示と保存用）。
+  const ratioFrac = (parseFloat(firstInterviewRatio) || 0) / 100;
+  const ratioValid = firstInterviewRatio.trim() !== "" && ratioFrac > 0 && ratioFrac <= 1;
+  const totalInterview = result.totalInterviewCount;
+  const firstInterview = totalInterview != null && Number.isFinite(totalInterview) ? totalInterview * ratioFrac : null;
+  const existingInterview = totalInterview != null && Number.isFinite(totalInterview) ? totalInterview * (1 - ratioFrac) : null;
+  const complete = isComplete(result) && ratioValid; // 初回%も入れて初めて確定（初回/既存が算出できる）
 
   // 週按分（面談数で代表表示。各段階も同様に計算可能だが UI は面談で示す）。
   const weeks = useMemo(() => weeklyBusinessDays(yearMonth), [yearMonth]);
@@ -140,7 +148,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           employeeId, yearMonth,
           targetRevenue: calcInput.targetRevenue,
           unitPrice: calcInput.unitPrice,
-          interviewCount: result.interviewCount,
+          interviewCount: firstInterview,        // 初回面談（達成率は初回実績と比較するため初回を保存）
+          existingInterviewCount: existingInterview, // 既存面談（合計面談×(1-初回%)）
           introductionCount: result.introductionCount,
           entryCount: result.entryCount,
           documentPassCount: result.documentPassCount,
@@ -152,6 +161,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           offerRate: calcInput.offerRate,
           acceptanceRate: calcInput.acceptanceRate,
           proposalPerPerson: parseFloat(proposalPerPerson) || null,
+          firstInterviewRatio: ratioFrac,        // 合計面談に占める初回の割合（0〜1）
         }),
       });
       if (res.ok) { setSavedMsg("保存しました"); setTimeout(() => onClose(), 600); }
@@ -161,9 +171,11 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
 
   if (!isOpen) return null;
 
-  // 目標の各段階数（表示用）
+  // 目標の各段階数（表示用）。面談は 合計面談（逆算）＋初回/既存（内訳）。
   const targetCounts: Record<string, number | null> = {
-    interview: result.interviewCount,
+    interviewTotal: totalInterview,
+    interviewFirst: firstInterview,
+    interviewExisting: existingInterview,
     introduction: result.introductionCount,
     entry: result.entryCount,
     documentPass: result.documentPassCount,
@@ -182,22 +194,24 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   type Wmode = "alloc" | "dash" | "empty";
   const funnelRows: {
     key: string; label: string; indent?: boolean;
-    kind: "count" | "rate" | "pp" | "recs";
+    kind: "count" | "rate" | "pp" | "recs" | "fipct";
     ref: (b: RefBucket | undefined) => string;
     targetValue?: number | null; rateKey?: RateKey | null;
     week: Wmode; weekTarget?: number | null;
   }[] = [
-    // 面談：初回/既存/合計の3行。参考値の括弧内は**合計面談に占める構成比**（初回÷合計・既存÷合計・合計100%）。
-    // 目標逆算は初回面談（interviewCount＝逆算の最上流）に紐付け、既存・合計は表示専用（参考値）。
-    { key: "interview", label: "初回面談", kind: "count",
+    // 面談：合計面談（逆算の母数・週按分対象）→ 初回%（手入力・内訳）→ 初回面談 → 既存面談。
+    // 初回/既存は合計面談×初回%の内訳で、逆算チェーンには影響しない。参考値括弧内は合計面談に占める構成比。
+    { key: "interviewTotal", label: "合計面談", kind: "count",
+      ref: (b) => (b ? `${fmtCount(b.interviewTotal)}（${pct(b.interviewTotal > 0 ? 1 : null)}）` : "—"),
+      targetValue: targetCounts.interviewTotal, week: "alloc", weekTarget: targetCounts.interviewTotal },
+    { key: "firstRatio", label: "初回面談率（内訳）", indent: true, kind: "fipct",
+      ref: (b) => (b ? pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null) : "—"), week: "empty" },
+    { key: "interviewFirst", label: "初回面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.metrics.firstInterviewExecuted)}（${pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null)}）` : "—"),
-      targetValue: targetCounts.interview, week: "alloc", weekTarget: targetCounts.interview },
+      targetValue: targetCounts.interviewFirst, week: "empty" },
     { key: "interviewExisting", label: "既存面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.interviewExisting)}（${pct(b.interviewTotal > 0 ? b.interviewExisting / b.interviewTotal : null)}）` : "—"),
-      week: "empty" },
-    { key: "interviewTotal", label: "合計面談", indent: true, kind: "count",
-      ref: (b) => (b ? `${fmtCount(b.interviewTotal)}（${pct(b.interviewTotal > 0 ? 1 : null)}）` : "—"),
-      week: "empty" },
+      targetValue: targetCounts.interviewExisting, week: "empty" },
     { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
     { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty" },
     { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty" },
@@ -277,7 +291,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                 </thead>
                 <tbody className="divide-y divide-[#F3F4F6]">
                   {funnelRows.map((row) => {
-                    const isSub = row.kind === "rate" || row.kind === "pp"; // 薄字・按分なしの行
+                    const isSub = row.kind === "rate" || row.kind === "pp" || row.kind === "fipct"; // 薄字・按分なしの行
                     const alloc = row.week === "alloc" ? weeklyFor(row.weekTarget ?? null) : null;
                     const padY = isSub ? "py-1" : "py-1.5";
                     const weekCell = (i: number) =>
@@ -300,6 +314,12 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                               <input type="number" value={proposalPerPerson} onChange={(e) => setProposalPerPerson(e.target.value)}
                                 className="w-12 border border-gray-300 rounded px-1 py-0.5 text-[11px] text-right" placeholder="件" />
                               <span className="text-[10px] text-[#9CA3AF]">件</span>
+                            </span>
+                          ) : row.kind === "fipct" ? (
+                            <span className="inline-flex items-center gap-0.5 justify-end">
+                              <input type="number" value={firstInterviewRatio} onChange={(e) => setFirstInterviewRatio(e.target.value)}
+                                className="w-12 border border-gray-300 rounded px-1 py-0.5 text-[11px] text-right" placeholder="%" />
+                              <span className="text-[10px] text-[#9CA3AF]">%</span>
                             </span>
                           ) : row.rateKey ? (
                             <span className="inline-flex items-center gap-0.5 justify-end">
@@ -328,8 +348,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
               </table>
             </div>
             <p className="mt-1.5 text-[10px] text-[#9CA3AF]">
-              数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。紹介件数＝紹介人数×1人あたり件数（手入力、参考値は実績の提案1人当たり）。
-              週按分は初回面談・紹介（人数・件数）・エントリーのみ（各週切り上げ・最終週で帳尻、合計＝月計）。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。
+              数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。**面談は紹介÷紹介率＝合計面談が逆算の母数**。初回面談＝合計面談×初回%（手入力）、既存面談＝残り（内訳・逆算非影響）。紹介件数＝紹介人数×1人あたり件数（手入力）。
+              週按分は合計面談・紹介（人数・件数）・エントリーのみ（各週切り上げ・最終週で帳尻、合計＝月計）。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。
             </p>
 
             {/* 保存 */}

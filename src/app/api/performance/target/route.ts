@@ -43,6 +43,7 @@ interface TargetBody {
   offerRate: number;
   acceptanceRate: number;
   proposalPerPerson?: number | null; // 紹介の1人あたり件数（任意）
+  firstInterviewRatio?: number | null; // 合計面談に占める初回面談の割合 0〜1（任意）
 }
 
 const NUM_FIELDS: (keyof TargetBody)[] = [
@@ -86,6 +87,7 @@ export async function POST(req: Request) {
     offerRate: body.offerRate,
     acceptanceRate: body.acceptanceRate,
     proposalPerPerson: optional(body.proposalPerPerson),
+    firstInterviewRatio: optional(body.firstInterviewRatio),
   };
 
   const target = await prisma.performanceTarget.upsert({

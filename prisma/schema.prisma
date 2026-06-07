@@ -269,6 +269,8 @@ model PerformanceTarget {
 
   // 紹介の1人あたり件数（手入力の係数。紹介件数＝introductionCount × これ）。T-073 追加・nullable。
   proposalPerPerson Float? @map("proposal_per_person")
+  // 合計面談に占める初回面談の割合（手入力 0〜1）。初回面談＝合計面談×これ、既存面談＝合計面談×(1-これ)。T-073 追加・nullable。
+  firstInterviewRatio Float? @map("first_interview_ratio")
 
   // 各段階の率（隣接段の比、手入力。小数 0〜1）
   introductionRate Float @map("introduction_rate") // 面談→紹介
