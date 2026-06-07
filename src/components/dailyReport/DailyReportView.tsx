@@ -95,19 +95,21 @@ function mdLabel(dateStr: string): string { const [, m, d] = dateStr.split("-");
 function mdJpLabel(dateStr: string): string { const [, m, d] = dateStr.split("-"); return `${parseInt(m)}月${parseInt(d)}日`; }
 
 // 新規（未記入）の日にコメント入力を開いたときの定型文。
+// 各見出しの下に空行3つを入れて、記入スペースを広く確保する。
 const COMMENT_TEMPLATE = [
   "■1. スケジュール予定実施率（　％）",
   "（予定と実際の行動結果に関する乖離理由やコメントを記載）",
-  "",
+  "", "", "",
   "■2. 今日やったこと（事実・実績）",
-  "",
+  "", "", "",
   "■3. うまくいった点・工夫（気づき）",
-  "",
+  "", "", "",
   "■4. 難しかった点・課題（改善点）",
-  "",
+  "", "", "",
   "■5. 感じたこと（成長・感情）",
-  "",
+  "", "", "",
   "■6. 次にやること（アクション）",
+  "", "", "",
 ].join("\n");
 
 export default function DailyReportView() {
