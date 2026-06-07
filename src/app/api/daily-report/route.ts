@@ -171,6 +171,8 @@ export async function POST(req: Request) {
     aiBody?: string;
     scheduleNote?: string;
     metricsReflection?: string;
+    reportBody?: string;
+    confirmComment?: boolean; // 「確定」操作。commentConfirmedAt をセット
     submit?: boolean;
   };
 
@@ -178,19 +180,25 @@ export async function POST(req: Request) {
   const dbDate = jstDateStringToDbDate(dateStr);
   const actor = await resolveActor(user.id, user.name);
 
-  let metrics: CaDailyMetrics | null = null;
-  if (formatHasNumbers(actor.format)) {
-    metrics = await computeCaMetrics({
-      userId: user.id,
-      employeeId: actor.employeeId,
-      dateStr,
+  const submit = Boolean(body.submit);
+
+  // 提出は「コメント確定済み」が前提（未確定では弾く。フロントも提出ボタンを disabled）。
+  if (submit) {
+    const cur = await prisma.dailyReport.findUnique({
+      where: { userId_date: { userId: user.id, date: dbDate } },
+      select: { commentConfirmedAt: true },
     });
+    if (!cur?.commentConfirmedAt && !body.confirmComment) {
+      return NextResponse.json({ error: "コメントを確定してから提出してください" }, { status: 400 });
+    }
   }
 
-  const submit = Boolean(body.submit);
-  // update では body に来たフィールドのみ反映（undefined は据え置き）。
-  // ＝新・日報ビューの自動保存（scheduleNote/metricsReflection のみ送信）が
-  //   旧ドロワーの comment/aiBody を NULL で潰さないようにする。
+  let metrics: CaDailyMetrics | null = null;
+  if (formatHasNumbers(actor.format)) {
+    metrics = await computeCaMetrics({ userId: user.id, employeeId: actor.employeeId, dateStr });
+  }
+
+  // update は body に来たフィールドのみ反映（undefined 据え置き＝旧 comment/aiBody を潰さない）。
   const update: Record<string, unknown> = {
     jobCategory: actor.jobCategory,
     status: submit ? "SUBMITTED" : "DRAFT",
@@ -201,6 +209,10 @@ export async function POST(req: Request) {
   if (body.aiBody !== undefined) update.aiBody = body.aiBody;
   if (body.scheduleNote !== undefined) update.scheduleNote = body.scheduleNote;
   if (body.metricsReflection !== undefined) update.metricsReflection = body.metricsReflection;
+  if (body.reportBody !== undefined) update.reportBody = body.reportBody;
+  // 確定/未確定の制御：confirm=true で確定。本文編集（submit でも confirm でもない reportBody 送信）は未確定に戻す。
+  if (body.confirmComment === true) update.commentConfirmedAt = new Date();
+  else if (body.reportBody !== undefined && !submit) update.commentConfirmedAt = null;
 
   const report = await prisma.dailyReport.upsert({
     where: { userId_date: { userId: user.id, date: dbDate } },
@@ -213,6 +225,8 @@ export async function POST(req: Request) {
       aiBody: body.aiBody ?? null,
       scheduleNote: body.scheduleNote ?? null,
       metricsReflection: body.metricsReflection ?? null,
+      reportBody: body.reportBody ?? null,
+      commentConfirmedAt: body.confirmComment === true ? new Date() : null,
       status: submit ? "SUBMITTED" : "DRAFT",
       submittedAt: submit ? new Date() : null,
     },
@@ -240,8 +254,7 @@ export async function POST(req: Request) {
       dCount: jobSearch.ratings["D"] ?? 0,
       plannedCount: sched.summary.plannedCount,
       completedCount: sched.summary.completedCount,
-      scheduleNote: (body.scheduleNote ?? report.scheduleNote) ?? null,
-      metricsReflection: (body.metricsReflection ?? report.metricsReflection) ?? null,
+      reportBody: (body.reportBody ?? report.reportBody) ?? null,
     }).catch((e) => console.warn("日報LINE通知 失敗:", e?.message ?? e));
   }
 

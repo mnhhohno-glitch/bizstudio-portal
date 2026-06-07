@@ -18,7 +18,7 @@ type DayMatrix = {
 type Attr = Record<string, number>;
 type JobSearch = { bmCount: number; exportCount: number; ratings: Attr; selectionRate: number | null };
 type SchedEntry = { id: string; startTime: string; endTime: string; title: string; tag: string | null; tagColor: string | null; isCompleted: boolean };
-type Report = { scheduleNote: string | null; metricsReflection: string | null; status: string } | null;
+type Report = { reportBody: string | null; commentConfirmedAt: string | null; status: string } | null;
 type Resp = {
   date: string;
   tomorrowDate: string;
@@ -93,6 +93,22 @@ function shiftDate(dateStr: string, delta: number): string {
 }
 function mdLabel(dateStr: string): string { const [, m, d] = dateStr.split("-"); return `${parseInt(m)}/${parseInt(d)}`; }
 
+// 新規（未記入）の日にコメント入力を開いたときの定型文。
+const COMMENT_TEMPLATE = [
+  "■1. スケジュール予定実施率（　％）",
+  "（予定と実際の行動結果に関する乖離理由やコメントを記載）",
+  "",
+  "■2. 今日やったこと（事実・実績）",
+  "",
+  "■3. うまくいった点・工夫（気づき）",
+  "",
+  "■4. 難しかった点・課題（改善点）",
+  "",
+  "■5. 感じたこと（成長・感情）",
+  "",
+  "■6. 次にやること（アクション）",
+].join("\n");
+
 export default function DailyReportView() {
   const [date, setDate] = useState<string>(() => {
     if (typeof window !== "undefined") {
@@ -103,19 +119,21 @@ export default function DailyReportView() {
   });
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(false);
-  const [scheduleNote, setScheduleNote] = useState("");
-  const [metricsReflection, setMetricsReflection] = useState("");
+  const [body, setBody] = useState(""); // 統合コメント本文（reportBody）
+  const [confirmedAt, setConfirmedAt] = useState<string | null>(null); // コメント確定日時
   const [submitting, setSubmitting] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [accordionOpen, setAccordionOpen] = useState(false); // 右コメント入力パネル
+  const [modalOpen, setModalOpen] = useState(false); // 中央コメント表示・編集
 
   // 最新値・dirty・debounce を ref で保持（離脱前/日付移動の即時保存・クロージャ対策）。
-  const noteRef = useRef(scheduleNote); noteRef.current = scheduleNote;
-  const reflRef = useRef(metricsReflection); reflRef.current = metricsReflection;
+  const bodyRef = useRef(body); bodyRef.current = body;
   const dateRef = useRef(date); dateRef.current = date;
   const dirtyRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const submitted = data?.report?.status === "SUBMITTED";
+  const confirmed = confirmedAt != null;
 
   // ?date= をURLに反映（②直リンクの土台）。
   useEffect(() => {
@@ -132,8 +150,8 @@ export default function DailyReportView() {
       if (res.ok) {
         const d: Resp = await res.json();
         setData(d);
-        setScheduleNote(d.report?.scheduleNote ?? "");
-        setMetricsReflection(d.report?.metricsReflection ?? "");
+        setBody(d.report?.reportBody ?? "");
+        setConfirmedAt(d.report?.commentConfirmedAt ?? null);
         dirtyRef.current = false; // ロード直後は未編集
       }
     } catch { /* */ } finally { setLoading(false); }
@@ -141,7 +159,7 @@ export default function DailyReportView() {
 
   useEffect(() => { void fetchData(); }, [fetchData]);
 
-  // 下書き保存（自動保存・提出なし）。dirty のときだけ送る。
+  // 下書き保存（自動保存・提出なし）。dirty のときだけ送る。本文編集はサーバ側で未確定に戻る。
   const saveDraft = useCallback((opts?: { keepalive?: boolean }) => {
     if (!dirtyRef.current) return Promise.resolve();
     dirtyRef.current = false;
@@ -149,24 +167,43 @@ export default function DailyReportView() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       keepalive: opts?.keepalive,
-      body: JSON.stringify({ date: dateRef.current, scheduleNote: noteRef.current, metricsReflection: reflRef.current }),
+      body: JSON.stringify({ date: dateRef.current, reportBody: bodyRef.current }),
     }).then(() => { setSavedMsg("自動保存しました"); setTimeout(() => setSavedMsg(""), 1500); }).catch(() => {});
   }, []);
 
-  // 入力で dirty マーク＋debounce 自動保存（2.5秒）。
-  const markDirtyAndSchedule = useCallback(() => {
+  // 本文入力：dirty マーク＋未確定に戻す＋debounce 自動保存（2.5秒）。
+  const onBodyChange = (v: string) => {
+    setBody(v); bodyRef.current = v;
+    setConfirmedAt(null); // 編集したら未確定（提出不可）に戻す
     dirtyRef.current = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { void saveDraft(); }, 2500);
-  }, [saveDraft]);
+  };
 
-  const onNoteChange = (v: string) => { setScheduleNote(v); noteRef.current = v; markDirtyAndSchedule(); };
-  const onReflChange = (v: string) => { setMetricsReflection(v); reflRef.current = v; markDirtyAndSchedule(); };
+  // コメント入力を開く：新規（本文空）なら定型文を初期表示。記入済みは保存内容のまま。
+  const openAccordion = () => {
+    if (!body.trim()) { setBody(COMMENT_TEMPLATE); bodyRef.current = COMMENT_TEMPLATE; }
+    setAccordionOpen(true);
+  };
+
+  // 確定：本文保存＋確定状態に。
+  const handleConfirm = async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    dirtyRef.current = false;
+    try {
+      const res = await fetch("/api/daily-report", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, reportBody: body, confirmComment: true }),
+      });
+      if (res.ok) { const j = await res.json(); setConfirmedAt(j.report?.commentConfirmedAt ?? new Date().toISOString()); setData((d) => (d ? { ...d, report: j.report } : d)); setSavedMsg("コメントを確定しました"); setTimeout(() => setSavedMsg(""), 2000); }
+    } catch { setSavedMsg("確定に失敗しました"); }
+  };
 
   // 日付移動：移動前に現在日の下書きを即時保存（書きかけが消えないように）。
   const changeDate = useCallback((nd: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     void saveDraft({ keepalive: true });
+    setAccordionOpen(false); setModalOpen(false);
     setDate(nd);
   }, [saveDraft]);
 
@@ -177,8 +214,9 @@ export default function DailyReportView() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [saveDraft]);
 
-  // 提出：保存＋完了状態＋LINE WORKS 通知（サーバ側で送信）。
+  // 提出：保存＋完了状態＋LINE WORKS 通知（確定済みのみ）。
   const handleSubmit = async () => {
+    if (!confirmed) { setSavedMsg("コメントを確定してください"); setTimeout(() => setSavedMsg(""), 2000); return; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     dirtyRef.current = false;
     setSubmitting(true);
@@ -187,14 +225,14 @@ export default function DailyReportView() {
       const res = await fetch("/api/daily-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, scheduleNote, metricsReflection, submit: true }),
+        body: JSON.stringify({ date, reportBody: body, submit: true }),
       });
       if (res.ok) {
         const j = await res.json();
         setData((d) => (d ? { ...d, report: j.report } : d));
         setSavedMsg("提出しました（LINE WORKS に通知）");
         setTimeout(() => setSavedMsg(""), 3000);
-      } else setSavedMsg("提出に失敗しました");
+      } else { const e = await res.json().catch(() => ({})); setSavedMsg(e.error || "提出に失敗しました"); }
     } catch { setSavedMsg("提出に失敗しました"); } finally { setSubmitting(false); }
   };
 
@@ -214,10 +252,13 @@ export default function DailyReportView() {
           <button onClick={() => changeDate(todayJst())} className="px-2 py-1 text-[12px] text-[#2563EB] hover:underline">今日</button>
         </div>
         {loading && <span className="text-[12px] text-[#9CA3AF]">読み込み中...</span>}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2">
           {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
-          {submitted && <span className="text-[12px] text-[#16A34A] font-medium">✓ 提出済み</span>}
-          <button onClick={handleSubmit} disabled={submitting} className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
+          {confirmed ? <span className="text-[11px] text-[#16A34A] font-medium">✓ 確定済み</span> : <span className="text-[11px] text-[#9CA3AF]">未確定</span>}
+          {submitted && <span className="text-[11px] text-[#16A34A] font-medium">／提出済み</span>}
+          <button onClick={openAccordion} className="border border-[#2563EB] text-[#2563EB] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-blue-50">📝 コメント入力</button>
+          <button onClick={() => setModalOpen(true)} className="border border-gray-300 text-[#374151] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50">👁 コメント表示</button>
+          <button onClick={handleSubmit} disabled={submitting || !confirmed} title={!confirmed ? "コメントを確定すると提出できます" : ""} className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
             {submitting ? "提出中..." : submitted ? "再提出" : "提出"}
           </button>
         </div>
@@ -234,8 +275,8 @@ export default function DailyReportView() {
         <SchedCol title={`明日の予定（${data ? mdLabel(data.tomorrowDate) : ""}）`} entries={data?.tomorrowEntries ?? []} emptyText="明日の予定は未登録です" />
       </div>
 
-      {/* 下段：当日実績｜グラフ｜所感 */}
-      <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr_320px] gap-4 p-4">
+      {/* 下段：当日実績（やや広く）｜グラフ（広く）。コメントはアコーディオン/ポップアップへ移動。 */}
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5 p-4">
         {/* 当日実績 */}
         <div>
           <div className="text-[12px] font-medium text-[#374151] mb-2">当日実績（{mdLabel(date)}）</div>
@@ -257,7 +298,7 @@ export default function DailyReportView() {
           )}
         </div>
 
-        {/* グラフ */}
+        {/* グラフ（コメント欄を外した分、全幅で広く） */}
         <div>
           {data?.dayMatrix && data.attributes ? (
             <DailyCharts matrix={data.dayMatrix} attributes={data.attributes} jobSearch={data.jobSearch} />
@@ -265,29 +306,68 @@ export default function DailyReportView() {
             <div className="text-[12px] text-[#9CA3AF] py-4">グラフは CA のみ表示されます。</div>
           )}
         </div>
-
-        {/* 所感（円グラフが3種になった分、縦幅を拡大） */}
-        <div className="flex flex-col gap-3 h-full">
-          <div className="flex-1 flex flex-col min-h-[200px]">
-            <div className="text-[12px] font-medium text-[#374151] mb-1">当日のスケジュールに関する気づき</div>
-            <textarea
-              value={scheduleNote}
-              onChange={(e) => onNoteChange(e.target.value)}
-              placeholder="予定通りに行かなかった内容についてわかりやすく記載してください"
-              className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
-            />
-          </div>
-          <div className="flex-1 flex flex-col min-h-[200px]">
-            <div className="text-[12px] font-medium text-[#374151] mb-1">当日の数字に対する振り返り</div>
-            <textarea
-              value={metricsReflection}
-              onChange={(e) => onReflChange(e.target.value)}
-              placeholder="当日の実績数字を見ての気づき・次への改善などを記載してください"
-              className="flex-1 w-full border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y min-h-[180px]"
-            />
-          </div>
-        </div>
       </div>
+
+      {/* 右スライド：コメント入力アコーディオン */}
+      {accordionOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setAccordionOpen(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] bg-white shadow-2xl flex flex-col">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
+              <span className="text-[14px] font-semibold">コメント入力（{mdLabel(date)}）</span>
+              <button onClick={() => setAccordionOpen(false)} className="ml-auto text-white hover:text-gray-300 text-lg px-1">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <textarea
+                value={body}
+                onChange={(e) => onBodyChange(e.target.value)}
+                className="w-full h-[300px] border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y leading-relaxed"
+              />
+              {/* AIチャットの器（中身は次段で実装） */}
+              <div className="border border-gray-200 rounded-lg p-3 bg-[#F9FAFB]">
+                <div className="text-[12px] font-medium text-[#374151] mb-2">🤖 AIと会話して日報を作成（準備中）</div>
+                <div className="h-24 border border-gray-200 rounded bg-white mb-2 flex items-center justify-center text-[11px] text-[#9CA3AF]">AIアシスタントは次回アップデートで利用可能になります</div>
+                <div className="flex gap-2">
+                  <input disabled placeholder="メッセージを入力…" className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-[12px] bg-gray-50" />
+                  <button disabled className="bg-gray-300 text-white rounded px-3 py-1.5 text-[12px]">送信</button>
+                </div>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center gap-2">
+              {confirmed ? <span className="text-[12px] text-[#16A34A]">✓ 確定済み</span> : <span className="text-[12px] text-[#9CA3AF]">未確定（確定すると提出可）</span>}
+              <button onClick={handleConfirm} className="ml-auto bg-[#2563EB] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]">確定</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 中央ポップアップ：コメント表示・編集 */}
+      {modalOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setModalOpen(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[680px] max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
+                <span className="text-[14px] font-semibold">日報コメント（{mdLabel(date)}）</span>
+                {confirmed ? <span className="text-[11px] text-green-300">✓ 確定済み</span> : <span className="text-[11px] text-gray-300">未確定</span>}
+                <button onClick={() => setModalOpen(false)} className="ml-auto text-white hover:text-gray-300 text-lg px-1">✕</button>
+              </div>
+              <div className="p-5 overflow-y-auto">
+                <textarea
+                  value={body}
+                  onChange={(e) => onBodyChange(e.target.value)}
+                  className="w-full h-[360px] border border-gray-300 rounded px-3 py-2 text-[13px] resize-y leading-relaxed"
+                />
+              </div>
+              <div className="px-5 py-3 border-t border-gray-200 flex items-center gap-2">
+                <span className="text-[11px] text-[#9CA3AF]">編集は自動保存されます（編集すると未確定に戻ります）</span>
+                <button onClick={handleConfirm} className="ml-auto bg-[#2563EB] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]">確定</button>
+                <button onClick={() => setModalOpen(false)} className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-gray-50">閉じる</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

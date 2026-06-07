@@ -1543,10 +1543,14 @@ model DailyReport {
   comment     String?              @db.Text
   // AI が生成した日報文。
   aiBody      String?              @map("ai_body") @db.Text
-  // 日報①：当日スケジュールに関する気づき（予定通りいかなかった内容など）。T-069 追加・nullable。
+  // 日報①：当日スケジュールに関する気づき。T-069 追加・nullable。（②で reportBody に統合・新規入力は reportBody へ）
   scheduleNote     String? @map("schedule_note") @db.Text
-  // 日報①：当日の数字に対する振り返り。T-069 追加・nullable。
+  // 日報①：当日の数字に対する振り返り。T-069 追加・nullable。（②で reportBody に統合）
   metricsReflection String? @map("metrics_reflection") @db.Text
+  // 日報②：統合コメント本文（定型■1〜■6 を1フィールドに）。T-069② 追加・nullable。
+  reportBody       String? @map("report_body") @db.Text
+  // 日報②：コメント確定日時。確定済み（非NULL）でないと提出不可。本文編集で NULL に戻す。T-069② 追加・nullable。
+  commentConfirmedAt DateTime? @map("comment_confirmed_at")
   status      DailyReportStatus    @default(DRAFT)
   submittedAt DateTime?            @map("submitted_at")
   createdAt   DateTime             @default(now()) @map("created_at")

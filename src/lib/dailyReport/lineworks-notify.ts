@@ -21,8 +21,7 @@ export interface DailyReportNotifyParams {
   dCount: number; // 当日BM の aiMatchRating=D 件数
   plannedCount: number;
   completedCount: number;
-  scheduleNote: string | null;
-  metricsReflection: string | null;
+  reportBody: string | null; // 統合コメント本文（定型■1〜■6）
 }
 
 // メッセージ本文を組み立てる純関数（テスト・送信で共用）。
@@ -31,8 +30,7 @@ export function buildDailyReportMessage(p: DailyReportNotifyParams): string {
   const md = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
   const sel = p.selectionRate != null ? `${(p.selectionRate * 100).toFixed(1)}` : "—";
   const digest = p.plannedCount > 0 ? Math.round((p.completedCount / p.plannedCount) * 100) : 0;
-  const note = p.scheduleNote && p.scheduleNote.trim() ? p.scheduleNote.trim() : "（記載なし）";
-  const refl = p.metricsReflection && p.metricsReflection.trim() ? p.metricsReflection.trim() : "（記載なし）";
+  const comment = p.reportBody && p.reportBody.trim() ? p.reportBody.trim() : "（記載なし）";
   return [
     `📋 日報提出：${p.caName}（${md}）`,
     "",
@@ -45,11 +43,8 @@ export function buildDailyReportMessage(p: DailyReportNotifyParams): string {
     "【スケジュール】",
     `・予定 ${p.plannedCount}件／完了 ${p.completedCount}件（消化${digest}%）`,
     "",
-    "【気づき】",
-    note,
-    "",
-    "【振り返り】",
-    refl,
+    "【コメント】",
+    comment,
     "",
     "▼詳細・グラフはこちら",
     `${PORTAL_PROD_URL}/?date=${p.dateStr}`,

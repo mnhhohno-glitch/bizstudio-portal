@@ -163,7 +163,8 @@ model InterviewMemo {
 - 有効化＝`DAILY_REPORT_ENABLED`（環境変数 true、本番=master の `bizstudio-portal` と検証=staging の両サービス）。
 - **提出＋LINE WORKS通知（T-069②）**：提出ボタン（右上）で `status=SUBMITTED`＋`submittedAt` セット＋`notifyDailyReport`（`src/lib/dailyReport/lineworks-notify.ts`、既存 `sendBotMessage` 流用、fire&forget）。下書きは**自動保存**（debounce 2.5s＋日付移動/離脱前 keepalive）で通知なし。提出時のみ通知。
   - 通知先＝`LINEWORKS_DAILYREPORT_BOT_ID`(=12416787)/`LINEWORKS_DAILYREPORT_CHANNEL_ID`（日報報告グループ）。⚠️ **本番サービスのみ設定**（staging には未設定＝staging では通知スキップ）。
-  - メッセージ＝当日サマリ（面談[初回/既存]・求人紹介BM数・エントリー・選定率[BM/D]・スケジュール消化・気づき・振り返り）＋**本番直リンク `?date=`**。直リンクは `PORTAL_PUBLIC_URL` or 本番ドメイン定数で固定（`PORTAL_BASE_URL` はサービス毎に staging/本番が異なるため使わない＝staging から送っても本番に飛ばす）。
+  - メッセージ＝当日サマリ（面談[初回/既存]・求人紹介BM数・エントリー・選定率[BM/D]・スケジュール消化・**コメント**[統合本文 `reportBody`]）＋**本番直リンク `?date=`**。直リンクは `PORTAL_PUBLIC_URL` or 本番ドメイン定数で固定（`PORTAL_BASE_URL` はサービス毎に staging/本番が異なるため使わない＝staging から送っても本番に飛ばす）。
+- **コメントは統合1本文＋確定制（T-069②後）**：`scheduleNote`/`metricsReflection`（①の2分割）→ **`reportBody`（統合・定型■1〜■6）** に集約（migration `20260608120000_t069_report_body_confirm`、`report_body TEXT` + `comment_confirmed_at TIMESTAMP` を nullable 追加・冪等）。**確定（`commentConfirmedAt`）でないと提出不可**。本文編集で未確定に戻す。入力UIは右アコーディオン＋中央ポップアップ＋自動保存が同一 `reportBody`（CA×日付1レコード）を更新。AIチャット壁打ち（③）は器のみ実装、中身は次段。
 - **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、ABCD＝`aiMatchRating` 構成比、**選定率＝(A+B+C)÷合計BM**（D・未評価除外。D は「見る目」の指標として母数に含める）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
 
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
