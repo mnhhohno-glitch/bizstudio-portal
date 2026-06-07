@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/auth";
 import { computeCaMetrics, type CaDailyMetrics } from "@/lib/dailyReport/metrics";
 import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { computeInterviewAttributes, type InterviewAttributes } from "@/lib/performance/attributes";
+import { computeJobSearchDay } from "@/lib/dailyReport/jobSearch";
 import { notifyDailyReport } from "@/lib/dailyReport/lineworks-notify";
 import {
   formatHasNumbers,
@@ -24,32 +25,6 @@ function nextJstDateString(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map((s) => parseInt(s, 10));
   const next = new Date(Date.UTC(y, m - 1, d) + 24 * 60 * 60 * 1000);
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
-}
-
-// 求人検索の行動量・精度（当日・担当 uploadedByUserId）。
-// ⚠️ グラフ専用集計：archivedAt 条件を**付けない**（紹介保留＝BOOKMARK+archivedAt のため、
-//    archivedAt=null だと D の 77% が保留に逃げて選定率が常時100%になる）。既存 metrics.ts の
-//    jobSearched/jobIntroduced（archivedAt=null）とは別物。D は aiMatchRating の実値で判定。
-async function computeJobSearchDay(userId: string, dateStr: string) {
-  const counts = await prisma.$queryRawUnsafe<{ bm: number; exp: number }[]>(`
-    SELECT
-      COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}')::int bm,
-      COUNT(*) FILTER (WHERE (last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}')::int exp
-    FROM candidate_files
-    WHERE category = 'BOOKMARK' AND uploaded_by_user_id = '${userId}'`);
-  const ratingRows = await prisma.$queryRawUnsafe<{ r: string; n: number }[]>(`
-    SELECT COALESCE(NULLIF(ai_match_rating,''),'未評価') r, COUNT(*)::int n
-    FROM candidate_files
-    WHERE category = 'BOOKMARK' AND uploaded_by_user_id = '${userId}'
-      AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}'
-    GROUP BY r`);
-  const ratings: Record<string, number> = {};
-  for (const row of ratingRows) ratings[row.r] = row.n;
-  const bmCount = counts[0]?.bm ?? 0;
-  const abc = (ratings["A"] ?? 0) + (ratings["B"] ?? 0) + (ratings["C"] ?? 0);
-  // 選定率＝(A+B+C)÷合計BM。D・未評価は分子から除外（見る目の指標として D を母数に含める）。
-  const selectionRate = bmCount > 0 ? abc / bmCount : null;
-  return { bmCount, exportCount: counts[0]?.exp ?? 0, ratings, selectionRate };
 }
 
 // 当日のスケジュール entries（予定）と完了（実績）を返す。

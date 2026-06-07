@@ -128,6 +128,10 @@ export default function DailyReportView() {
   const [savedMsg, setSavedMsg] = useState("");
   const [accordionOpen, setAccordionOpen] = useState(false); // 右コメント入力パネル
   const [modalOpen, setModalOpen] = useState(false); // 中央コメント表示・編集
+  // AIアシスト会話
+  const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string; advice?: string; rewrittenBody?: string }[]>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   // 最新値・dirty・debounce を ref で保持（離脱前/日付移動の即時保存・クロージャ対策）。
   const bodyRef = useRef(body); bodyRef.current = body;
@@ -188,6 +192,33 @@ export default function DailyReportView() {
     if (!body.trim()) { setBody(COMMENT_TEMPLATE); bodyRef.current = COMMENT_TEMPLATE; }
     setAccordionOpen(true);
   };
+
+  // AIアシスト送信：所感本文＋当日数字を渡し、整理本文＋上司視点アドバイスを得る。
+  const handleAiSend = async () => {
+    const msg = aiInput.trim();
+    if (!msg || aiLoading) return;
+    const history = aiMessages.map((m) => ({ role: m.role, content: m.content }));
+    setAiMessages((prev) => [...prev, { role: "user", content: msg }]);
+    setAiInput("");
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/daily-report/assist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, reportBody: bodyRef.current, message: msg, chatHistory: history }),
+      });
+      if (res.ok) {
+        const j = await res.json() as { message: string; rewrittenBody: string; advice: string };
+        setAiMessages((prev) => [...prev, { role: "assistant", content: j.message || "(応答なし)", advice: j.advice, rewrittenBody: j.rewrittenBody }]);
+      } else {
+        setAiMessages((prev) => [...prev, { role: "assistant", content: "エラー：AI応答の取得に失敗しました" }]);
+      }
+    } catch {
+      setAiMessages((prev) => [...prev, { role: "assistant", content: "エラー：通信に失敗しました" }]);
+    } finally { setAiLoading(false); }
+  };
+
+  // AIの整理本文を本文に反映（onBodyChange 経由で自動保存＆未確定化）。
+  const applyRewrite = (rewritten: string) => { onBodyChange(rewritten); };
 
   // 確定：本文保存＋確定状態に。
   const handleConfirm = async () => {
@@ -329,10 +360,29 @@ export default function DailyReportView() {
                 onChange={(e) => onBodyChange(e.target.value)}
                 className="w-full h-[540px] border border-gray-300 rounded px-2 py-1.5 text-[12px] resize-y leading-relaxed"
               />
-              {/* AIチャットの表示エリア（中身は次段で実装） */}
+              {/* AIチャットの表示エリア */}
               <div className="border border-gray-200 rounded-lg p-3 bg-[#F9FAFB]">
-                <div className="text-[12px] font-medium text-[#374151] mb-2">🤖 AIと会話して日報を作成（準備中）</div>
-                <div className="h-24 border border-gray-200 rounded bg-white flex items-center justify-center text-[11px] text-[#9CA3AF]">AIアシスタントは次回アップデートで利用可能になります</div>
+                <div className="text-[12px] font-medium text-[#374151] mb-2">🤖 AIと会話して日報を整理・アドバイス</div>
+                {aiMessages.length === 0 ? (
+                  <div className="text-[11px] text-[#9CA3AF] py-3">「今日の所感を整理して」「アドバイスして」など送ると、6項目を保ったまま整理＋上司視点の助言を返します。</div>
+                ) : (
+                  <div className="space-y-2">
+                    {aiMessages.map((m, i) => (
+                      <div key={i} className={m.role === "user" ? "text-right" : ""}>
+                        <div className={`inline-block text-left rounded-lg px-2.5 py-1.5 text-[12px] max-w-[90%] ${m.role === "user" ? "bg-[#DBEAFE] text-[#1E3A8A]" : "bg-white border border-gray-200 text-[#374151]"}`}>
+                          <div className="whitespace-pre-wrap">{m.content}</div>
+                          {m.advice && (
+                            <div className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-[#6B7280] whitespace-pre-wrap">💡 {m.advice}</div>
+                          )}
+                          {m.rewrittenBody && (
+                            <button onClick={() => applyRewrite(m.rewrittenBody!)} className="mt-2 text-[11px] text-[#2563EB] border border-[#2563EB] rounded px-2 py-0.5 hover:bg-blue-50">本文に反映</button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {aiLoading && <div className="text-[11px] text-[#9CA3AF]">AI が考えています…</div>}
+                  </div>
+                )}
               </div>
             </div>
             {/* 確定バー */}
@@ -342,10 +392,17 @@ export default function DailyReportView() {
             </div>
             {/* AIチャット入力欄をパネル最下部に固定 */}
             <div className="px-4 py-3 border-t border-gray-200 bg-[#F9FAFB]">
-              <div className="text-[10px] text-[#9CA3AF] mb-1">AIチャット入力（準備中）</div>
               <div className="flex gap-2">
-                <input disabled placeholder="メッセージを入力…" className="flex-1 border border-gray-200 rounded px-2 py-2 text-[12px] bg-gray-50" />
-                <button disabled className="bg-gray-300 text-white rounded px-4 py-2 text-[12px]">送信</button>
+                <input
+                  value={aiInput}
+                  onChange={(e) => setAiInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleAiSend(); } }}
+                  placeholder="AIに相談（例：今日の所感を整理して／アドバイスして）"
+                  className="flex-1 border border-gray-300 rounded px-2 py-2 text-[12px]"
+                />
+                <button onClick={handleAiSend} disabled={aiLoading || !aiInput.trim()} className="bg-[#2563EB] text-white rounded px-4 py-2 text-[12px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50">
+                  {aiLoading ? "..." : "送信"}
+                </button>
               </div>
             </div>
           </div>
