@@ -18,7 +18,7 @@ interface Props {
 }
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "schedule", label: "スケジュール（日報）" },
+  { key: "schedule", label: "日報" },
   { key: "performance", label: "実績表" },
   { key: "tasks", label: "タスク" },
   { key: "announcements", label: "お知らせ" },

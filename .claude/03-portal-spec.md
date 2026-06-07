@@ -156,6 +156,12 @@ model InterviewMemo {
 - 初回/既存判定は `interviewCount`（=1 初回、>=2 既存）。`interviewType` 文字列で判定しない（UI 定数外の "初回面談" が大量混在）。
 - 面接対策のみ `interviewType === "面接対策"` で抽出（種別でしか取れないため例外的）。
 
+### 日報①（T-069）
+- 日報タブ＝`DailyReportView`。**実績＝予定の完了チェック（`ScheduleEntry.isCompleted`）**で確定（新たな実績テーブルは作らない。予定通りいかなかった内容は所感欄に記載）。
+- **所感は CA×日付で `daily_reports` に保存**（`scheduleNote`＝当日スケジュールの気づき / `metricsReflection`＝当日数字の振り返り。共に `TEXT?`・nullable・migration `20260608000000_t069_daily_report_notes`・冪等）。③AI壁打ちで読めるよう素直に保持。
+- 当日実績＝`computeWeeklyMatrix` を当日レンジで（当月実績と同項目）。属性円4種＝`computeInterviewAttributes`（当日初回面談者）。`/api/daily-report?date=` が当日 dayMatrix・attributes・当日/翌日スケジュールを返す。
+- 有効化＝`DAILY_REPORT_ENABLED`（環境変数 true、本番=master の `bizstudio-portal` と検証=staging の両サービス）。
+
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
 - 母集団＝**当月の初回面談（`interview_count=1`・辞退系除外・担当軸 `candidate.employeeId`）**。4種とも母数＝初回面談数。
 - **ランク**：`InterviewRating.overallRank`（A+/A/B+/B/C/D＋未評価）。

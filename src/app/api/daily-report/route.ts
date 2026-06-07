@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { computeCaMetrics, type CaDailyMetrics } from "@/lib/dailyReport/metrics";
+import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeInterviewAttributes, type InterviewAttributes } from "@/lib/performance/attributes";
 import {
   formatHasNumbers,
   resolveDailyReportFormat,
@@ -15,6 +17,30 @@ import {
   jstDateStringToDbDate,
   todayJstDateString,
 } from "@/lib/dailyReport/jstDate";
+
+// "YYYY-MM-DD"（JST）の翌日を返す。
+function nextJstDateString(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map((s) => parseInt(s, 10));
+  const next = new Date(Date.UTC(y, m - 1, d) + 24 * 60 * 60 * 1000);
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
+}
+
+// 当日のスケジュール entries（予定）と完了（実績）を返す。
+async function buildScheduleEntries(userId: string, dateStr: string) {
+  const schedule = await prisma.dailySchedule.findUnique({
+    where: { userId_date: { userId, date: jstDateStringToDbDate(dateStr) } },
+    include: { entries: { orderBy: { startTime: "asc" } } },
+  });
+  return (schedule?.entries ?? []).map((e) => ({
+    id: e.id,
+    startTime: e.startTime,
+    endTime: e.endTime,
+    title: e.title,
+    tag: e.tag,
+    tagColor: e.tagColor,
+    isCompleted: e.isCompleted,
+  }));
+}
 
 async function resolveActor(userId: string, userName: string) {
   const employee = await prisma.employee.findFirst({
@@ -71,21 +97,37 @@ export async function GET(req: Request) {
   ]);
 
   let metrics: CaDailyMetrics | null = null;
+  let dayMatrix: WeeklyMatrix | null = null;
+  let attributes: InterviewAttributes | null = null;
   if (formatHasNumbers(actor.format)) {
-    metrics = await computeCaMetrics({
-      userId: user.id,
-      employeeId: actor.employeeId,
-      dateStr,
-    });
+    const from = jstDateStart(dateStr);
+    const to = jstDateEnd(dateStr);
+    [metrics, dayMatrix, attributes] = await Promise.all([
+      computeCaMetrics({ userId: user.id, employeeId: actor.employeeId, dateStr }),
+      computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: user.id, from, to }),
+      computeInterviewAttributes({ employeeId: actor.employeeId ?? "__nonexistent__", from, to }),
+    ]);
   }
+
+  // 当日の予定/実績エントリ＋明日の予定。
+  const tomorrowStr = nextJstDateString(dateStr);
+  const [todayEntries, tomorrowEntries] = await Promise.all([
+    buildScheduleEntries(user.id, dateStr),
+    buildScheduleEntries(user.id, tomorrowStr),
+  ]);
 
   return NextResponse.json({
     date: dateStr,
+    tomorrowDate: tomorrowStr,
     format: actor.format,
     jobCategory: actor.jobCategory,
     report: existing,
     scheduleSummary: scheduleData.summary,
+    scheduleEntries: todayEntries,
+    tomorrowEntries,
     metrics,
+    dayMatrix,
+    attributes,
   });
 }
 
@@ -97,6 +139,8 @@ export async function POST(req: Request) {
     date?: string;
     comment?: string;
     aiBody?: string;
+    scheduleNote?: string;
+    metricsReflection?: string;
     submit?: boolean;
   };
 
@@ -123,6 +167,8 @@ export async function POST(req: Request) {
       numbers: metrics ? (metrics as unknown as object) : undefined,
       comment: body.comment ?? null,
       aiBody: body.aiBody ?? null,
+      scheduleNote: body.scheduleNote ?? null,
+      metricsReflection: body.metricsReflection ?? null,
       status: submit ? "SUBMITTED" : "DRAFT",
       submittedAt: submit ? new Date() : null,
     },
@@ -131,6 +177,8 @@ export async function POST(req: Request) {
       numbers: metrics ? (metrics as unknown as object) : undefined,
       comment: body.comment ?? null,
       aiBody: body.aiBody ?? null,
+      scheduleNote: body.scheduleNote ?? null,
+      metricsReflection: body.metricsReflection ?? null,
       status: submit ? "SUBMITTED" : "DRAFT",
       submittedAt: submit ? new Date() : null,
     },

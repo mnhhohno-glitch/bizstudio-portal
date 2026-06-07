@@ -962,8 +962,16 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - パス: `src/components/performance/PerformancePanel.tsx`（Client Component）
 - 用途: ダッシュボードの**独立タブ「実績表」**で全幅表示する CA 実績表。FileMaker 形の週マトリクス＋5タブ。
 - 配置: `page.tsx` の `performanceTab`（`<div className="w-full">`）として 2 番目のタブに配置。feature flag `DAILY_REPORT_ENABLED` 配下（4タブ表示時のみ）。
-- **ダッシュボードのタブ構成（4タブ）**：スケジュール（日報）｜**実績表**｜タスク｜お知らせ（`DashboardTabs.tsx`）。実績表はスケジュールとタスクの間。
-- スケジュールタブには日報・スケジュール・勤怠のみ（実績表は完全分離）。
+- **ダッシュボードのタブ構成（4タブ）**：**日報**｜**実績表**｜タスク｜お知らせ（`DashboardTabs.tsx`）。実績表は日報とタスクの間。
+- 日報タブ（T-069①）＝`DailyReportView`（`src/components/dailyReport/DailyReportView.tsx`）。スケジュール編集（`SchedulePanel`：予定作成/AI/カレンダー同期）は折りたたみ `<details>` で温存（既存機能リグレッション防止）。勤怠も同タブ。
+
+### DailyReportView.tsx（日報タブ・T-069①）
+- パス: `src/components/dailyReport/DailyReportView.tsx`（Client）。前日/翌日ナビ＋`?date=YYYY-MM-DD` 連動（`history.replaceState`、②直リンクの土台）。
+- データ源: `GET /api/daily-report?date=`（既存を拡張）→ `scheduleEntries`(当日予定)・`tomorrowEntries`(明日)・`scheduleSummary`(完了数)・`dayMatrix`(当日 `computeWeeklyMatrix`)・`attributes`(当日初回面談者の属性)・`report`(scheduleNote/metricsReflection)。
+- **上段3列**: スケジュール予定｜実績（完了 N/M・消化率%）｜明日の予定（`SchedCol`、ダークヘッダ、完了は✓）。
+- **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒**＝当日各段階数[面談/紹介/エントリー/書類通過/内定/決定]＋**円4種**＝当日初回面談者の ランク/男女比/職種希望/年齢層）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字）＋💾保存。
+- 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
+- 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
 
 ### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）

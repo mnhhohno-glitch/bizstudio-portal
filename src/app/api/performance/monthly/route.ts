@@ -13,10 +13,9 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { weeklyBusinessDays, monthBusinessDays, allocateToWeeks, type WeekBucket } from "@/lib/performance/businessDays";
-import { INTERVIEW_DECLINED_FLAGS } from "@/lib/dailyReport/constants";
+import { computeInterviewAttributes } from "@/lib/performance/attributes";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DECLINED_SQL = INTERVIEW_DECLINED_FLAGS.map((f) => `'${f}'`).join(",");
 
 type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
 const TKEYS: TKey[] = ["interviewFirst", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance"];
@@ -81,7 +80,7 @@ export async function GET(req: Request) {
   const [columnMatrices, totalMatrix, attributes] = await Promise.all([
     Promise.all(buckets.map((b) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: jstStart(b.startDate), to: jstEnd(b.endDate), allCas }))),
     computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas }),
-    computeMonthlyAttributes({ employeeId: resolvedEmployeeId, from: monthFrom, to: monthTo, allCas }),
+    computeInterviewAttributes({ employeeId: resolvedEmployeeId, from: monthFrom, to: monthTo, allCas }),
   ]);
 
   // 目標（当月の PerformanceTarget。週按分は initial面談・提案・エントリーのみ）。
@@ -131,44 +130,4 @@ export async function GET(req: Request) {
     total: { from: monthFirst, to: monthLastBucket.endDate, matrix: totalMatrix, targets: totalTargets, achievement },
     attributes,
   });
-}
-
-// 当月の初回面談（interview_count=1・辞退系除外・担当軸）を母集団に、4属性の分布を返す。
-// 全 4 種とも母数＝初回面談数（rank と一致）。null は「未設定/未評価/不明」に寄せる。
-async function computeMonthlyAttributes(params: { employeeId: string; from: Date; to: Date; allCas?: boolean }) {
-  const { employeeId, from, to, allCas } = params;
-  const F = from.toISOString().replace("T", " ").replace("Z", "");
-  const T = to.toISOString().replace("T", " ").replace("Z", "");
-  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
-  const base = `
-    FROM interview_records ir
-    JOIN candidates c ON c.id = ir.candidate_id
-    LEFT JOIN interview_details d ON d.interview_record_id = ir.id
-    LEFT JOIN interview_ratings rt ON rt.interview_record_id = ir.id
-    WHERE ${empPred}
-      AND ir.interview_count = 1
-      AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
-      AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}'`;
-
-  const [rankRows, genderRows, jobRows, ageRows, totalRows] = await Promise.all([
-    prisma.$queryRawUnsafe<{ k: string; n: number }[]>(`SELECT COALESCE(NULLIF(rt.overall_rank,''),'未評価') k, COUNT(*)::int n ${base} GROUP BY 1`),
-    prisma.$queryRawUnsafe<{ k: string; n: number }[]>(`SELECT COALESCE(c.gender,'未設定') k, COUNT(*)::int n ${base} GROUP BY 1`),
-    prisma.$queryRawUnsafe<{ k: string; n: number }[]>(`SELECT COALESCE(d.desired_job_types->0->>'large','未設定') k, COUNT(*)::int n ${base} GROUP BY 1`),
-    prisma.$queryRawUnsafe<{ k: string; n: number }[]>(`
-      SELECT CASE
-        WHEN age BETWEEN 20 AND 24 THEN '20代前半' WHEN age BETWEEN 25 AND 29 THEN '20代後半'
-        WHEN age BETWEEN 30 AND 34 THEN '30代前半' WHEN age BETWEEN 35 AND 39 THEN '30代後半'
-        WHEN age BETWEEN 40 AND 44 THEN '40代前半' WHEN age >= 45 THEN '45歳以上' ELSE '不明' END k,
-        COUNT(*)::int n
-      FROM (SELECT EXTRACT(YEAR FROM AGE(c.birthday))::int age ${base}) x GROUP BY 1`),
-    prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT COUNT(*)::int n ${base}`),
-  ]);
-  const toMap = (rows: { k: string; n: number }[]) => { const o: Record<string, number> = {}; for (const r of rows) o[r.k] = r.n; return o; };
-  return {
-    total: totalRows[0]?.n ?? 0,
-    rank: toMap(rankRows),
-    gender: toMap(genderRows),
-    jobType: toMap(jobRows),
-    ageBand: toMap(ageRows),
-  };
 }

@@ -13,6 +13,7 @@ import { todayForDB } from "@/lib/attendance/timezone";
 import { isDailyReportEnabled } from "@/lib/dailyReport/featureFlag";
 import DashboardTabs from "@/components/dashboard/DashboardTabs";
 import PerformancePanel from "@/components/performance/PerformancePanel";
+import DailyReportView from "@/components/dailyReport/DailyReportView";
 
 const STATUS_LABEL: Record<string, string> = {
   NOT_STARTED: "未着手",
@@ -215,14 +216,20 @@ export default async function DashboardPage() {
 
   // === feature flag ON：4 タブ（スケジュール（日報）｜実績表｜タスク｜お知らせ） ===
   // 実績表は独立タブで全幅表示（T-071 後修正）。スケジュールタブには日報・スケジュール・勤怠のみ。
+  // 日報タブ：日報ビュー（上段スケジュール3要素＋下段当日実績/グラフ/所感）を主体に、
+  // スケジュール編集（SchedulePanel：予定作成/AI/カレンダー同期）は折りたたみで温存（既存機能のリグレッション防止）。
   const scheduleTab = (
-    <div className="flex gap-6">
-      <div className="w-[440px] flex-shrink-0">
-        <SchedulePanel enableDailyReport />
-      </div>
-      <div className="flex-1 space-y-3">
-        {attendanceArea}
-      </div>
+    <div className="space-y-4">
+      <DailyReportView />
+      {attendanceArea}
+      <details className="rounded-xl border border-[#E5E7EB] bg-white">
+        <summary className="cursor-pointer px-4 py-3 text-[13px] font-medium text-[#374151]">🗓 スケジュールを編集（予定作成・AI・カレンダー同期）</summary>
+        <div className="px-4 pb-4">
+          <div className="w-[440px] max-w-full">
+            <SchedulePanel enableDailyReport />
+          </div>
+        </div>
+      </details>
     </div>
   );
 
