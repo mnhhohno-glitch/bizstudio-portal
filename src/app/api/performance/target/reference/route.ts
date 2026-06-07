@@ -54,16 +54,40 @@ export async function GET(req: Request) {
     { key: "half", fromMonth: halfFrom, toMonth: prevMonth },
   ];
 
-  // 紹介の「1人あたり件数」参考値は T-071 確定の提案集計（両ソース統合・件数÷人数）から取る。
-  // computeWeeklyMatrix.proposal.total.perPerson を各期間で算出（既存 metrics は不変、追加のみ）。
+  // 参考値の紹介〜承諾は実績表（T-071 computeWeeklyMatrix）と同じ集計に統一する。
+  //   - 紹介人数＝両ソース統合の候補者ユニーク人数（proposal.total.uniq）。旧 CandidateFile 単一・件数(jobIntroduced)はやめる。
+  //   - 各段階人数も matrix のユニーク人数（面談=initial、エントリー=uniq、書類通過/内定/承諾=候補者ユニーク）。
+  //   - 各率は人数ベースの隣接段比（逆算チェーンと一致）：紹介率=紹介÷面談、エントリー率=エントリー÷紹介 …。
+  //     これで参考値の率が件数分母による過小値（例 2.8%）にならず、目標へ写しても逆算が膨張しない。
+  //   - 初回面談率（実施率＝実施÷予定）は computeCaMetricsForRange の値を維持（隣接段比ではない別指標）。
+  //   日報（computeCaMetricsForRange の出力）は不変。ここで参照して参考値を組み替えるだけ。
+  const ratio = (n: number, d: number): number | null => (d > 0 ? n / d : null);
   const results = await Promise.all(
     periodDefs.map(async (d) => {
       const from = jstMonthRangeStart(d.fromMonth);
       const to = jstMonthRangeEnd(d.toMonth);
-      const [metrics, matrix] = await Promise.all([
+      const [ca, matrix] = await Promise.all([
         computeCaMetricsForRange({ userId, employeeId: employee.id, from, to }),
         computeWeeklyMatrix({ employeeId: employee.id, userId, from, to }),
       ]);
+      const iv = matrix.interview.first; // 初回面談（人数）
+      const intro = matrix.proposal.total.uniq; // 紹介（人数・両ソース統合ユニーク）
+      const ent = matrix.entry.total.uniq; // エントリー（人数ユニーク）
+      const dp = matrix.selection.documentPass;
+      const of = matrix.selection.offer;
+      const ac = matrix.selection.acceptance;
+      // 既存 metrics 形を維持しつつ、紹介〜承諾の人数と率を matrix（人数ベース隣接段比）で差し替える。
+      const metrics: CaRangeMetrics = {
+        ...ca,
+        firstInterviewExecuted: iv, // 実績表と一致（=ca.firstInterviewExecuted）
+        // firstInterviewRate（実施率）は ca のまま維持
+        jobIntroduced: intro,
+        jobIntroductionRate: ratio(intro, iv), // 紹介人数 ÷ 面談人数（面談→紹介）
+        entry: { count: ent, denominator: intro, rate: ratio(ent, intro) },
+        documentPass: { count: dp, denominator: ent, rate: ratio(dp, ent) },
+        offer: { count: of, denominator: dp, rate: ratio(of, dp) },
+        acceptance: { count: ac, denominator: of, rate: ratio(ac, of) },
+      };
       const proposalPerPerson = matrix.proposal.total.perPerson;
       return [d.key, { fromMonth: d.fromMonth, toMonth: d.toMonth, metrics, proposalPerPerson }] as [
         string,
