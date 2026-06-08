@@ -47,7 +47,7 @@ export async function PATCH(
     "offerMeetingDate", "offerMeetingTime", "acceptanceDate", "joinDate",
     "memo", "isActive", "careerAdvisorId", "entryDate", "jobDbUrl",
     "archivedAt",
-    // T-088: 課金方式（年収％/固定）と粗利関連。revenue はサーバー側で確定計算する（後段）。
+    // T-087/T-088: 粗利金額（revenue）と課金方式（年収％/固定）。revenue はサーバー側で確定計算する（後段の feeType 分岐）。
     "feeType", "theoreticalAnnualIncome", "feeRatePercent", "revenue",
   ];
 
@@ -59,6 +59,14 @@ export async function PATCH(
       // Convert date strings to Date objects
       if (key.endsWith("Date") || key.endsWith("Deadline") || key.endsWith("At") || key === "entryDate") {
         data[key] = val ? new Date(val) : null;
+      } else if (key === "revenue") {
+        // 粗利金額（円）: null=未入力 / 数値=保存。空文字列は null、0 はそのまま保存（実績表は revenue>0 のみ売上扱い）。
+        if (val === null || val === "" || typeof val === "undefined") {
+          data[key] = null;
+        } else {
+          const n = typeof val === "number" ? val : Number(val);
+          data[key] = Number.isFinite(n) ? Math.round(n) : null;
+        }
       } else {
         data[key] = val;
       }

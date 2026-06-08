@@ -65,14 +65,14 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerDeadline", label: "承諾期限", width: 85, sortKey: "offerDeadline" },
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
-    // T-088: 粗利（課金方式選択＋確定金額）。承諾レコードに表示・入力可。
-    { key: "revenue", label: "粗利金額", width: 210, sortKey: null },
+    // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
+    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
   ],
   "入社済": [
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
-    // T-088: 入社済タブでも粗利入力可（同一 JobEntry・revenueはSSoTなので重複なし）。
-    { key: "revenue", label: "粗利金額", width: 210, sortKey: null },
+    // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
+    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
   ],
   "全件": [],
 };
@@ -241,6 +241,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
     case "offerMeetingDate": return entry.offerMeetingDate;
     case "acceptanceDate": return entry.acceptanceDate;
     case "joinDate": return entry.joinDate;
+    case "revenue": return entry.revenue == null ? null : String(entry.revenue).padStart(15, "0");
     default: return null;
   }
 }
@@ -367,9 +368,10 @@ function AptitudeCell({ value, entryId, onUpdate }: {
   );
 }
 
-// T-088: 粗利セル。承諾 or 入社済レコードで課金方式（年収％/固定）と金額を入力。
+// T-088: 粗利セル（T-087 の InlineRevenueCell を統合・拡張）。
+// 承諾 or 入社済レコードで「課金方式（年収％/固定）」と金額を入力。
 // 確定 revenue はサーバー側で計算（送信は feeType + 必要な入力のみ。表示は entry.revenue を信用）。
-// 既存 revenue 入り（feeType=null）は固定金額として有効・編集可。
+// 既存 revenue 入り（feeType=null・FMインポート分等）は固定金額として有効・編集可（後方互換）。
 function RevenueCell({ entry, onUpdate }: {
   entry: Entry;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
