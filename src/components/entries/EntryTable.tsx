@@ -65,10 +65,13 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerDeadline", label: "承諾期限", width: 85, sortKey: "offerDeadline" },
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
+    // T-087: 承諾レコードの粗利金額（実績表の決定売上 = この値の承諾日月集計）。
+    { key: "revenue", label: "粗利金額", width: 105, sortKey: "revenue" },
   ],
   "入社済": [
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
+    { key: "revenue", label: "粗利金額", width: 105, sortKey: "revenue" },
   ],
   "全件": [],
 };
@@ -237,6 +240,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
     case "offerMeetingDate": return entry.offerMeetingDate;
     case "acceptanceDate": return entry.acceptanceDate;
     case "joinDate": return entry.joinDate;
+    case "revenue": return entry.revenue == null ? null : String(entry.revenue).padStart(15, "0");
     default: return null;
   }
 }
@@ -360,6 +364,69 @@ function AptitudeCell({ value, entryId, onUpdate }: {
       <option value="なし">なし</option>
       <option value="あり">あり</option>
     </select>
+  );
+}
+
+// T-087: 承諾レコード専用の粗利金額（円）インライン入力。
+// - entryFlagDetail === "承諾" のレコードのみ編集可。それ以外は「—」を表示し編集不可。
+// - 空欄=未入力(null)、0 もそのまま保存（実績表は revenue>0 のみ売上扱い）。
+function InlineRevenueCell({ value, entryFlagDetail, entryId, onUpdate }: {
+  value: number | null;
+  entryFlagDetail: string | null;
+  entryId: string;
+  onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+}) {
+  const isAccepted = entryFlagDetail === "承諾";
+  const [editing, setEditing] = useState(false);
+  const cur = value == null ? "" : String(value);
+
+  if (!isAccepted) {
+    return <span className="text-[10px] text-gray-300">—</span>;
+  }
+
+  const fmtYen = (v: number) => `¥${v.toLocaleString()}`;
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/[,¥\s]/g, "");
+    let next: number | null;
+    if (raw === "") {
+      next = null;
+    } else {
+      const n = Number(raw);
+      next = Number.isFinite(n) ? Math.round(n) : null;
+    }
+    if (next !== value) onUpdate(entryId, { revenue: next });
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        type="number"
+        inputMode="numeric"
+        autoFocus
+        defaultValue={cur}
+        placeholder="0"
+        onBlur={handleBlur}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full text-[11px] border border-[#2563EB] rounded px-1 py-0.5 outline-none text-right"
+      />
+    );
+  }
+
+  return (
+    <span
+      onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      title={value == null ? "クリックして粗利金額を入力" : fmtYen(value)}
+      className={`cursor-pointer rounded px-1 block min-h-[20px] w-full text-right leading-[20px] ${
+        value == null
+          ? "border border-dashed border-gray-300 text-gray-300 text-[10px] hover:border-gray-400"
+          : "hover:bg-blue-50"
+      }`}
+    >
+      {value == null ? "未入力" : fmtYen(value)}
+    </span>
   );
 }
 
@@ -667,6 +734,12 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.acceptanceDate} entryId={entry.id} field="acceptanceDate" onUpdate={onFieldUpdate} /></td>;
       case "joinDate":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.joinDate} entryId={entry.id} field="joinDate" onUpdate={onFieldUpdate} /></td>;
+      case "revenue":
+        return (
+          <td key={col.key} className="px-1 py-0.5 text-[11px]" onClick={(e) => e.stopPropagation()}>
+            <InlineRevenueCell value={entry.revenue} entryFlagDetail={entry.entryFlagDetail} entryId={entry.id} onUpdate={onFieldUpdate} />
+          </td>
+        );
       case "memo":
         return (
           <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>

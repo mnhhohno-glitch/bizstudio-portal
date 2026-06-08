@@ -58,6 +58,7 @@ export type Entry = {
   offerMeetingTime: string | null;
   acceptanceDate: string | null;
   joinDate: string | null;
+  revenue: number | null;
   memo: string | null;
   isActive: boolean;
   archivedAt: string | null;
