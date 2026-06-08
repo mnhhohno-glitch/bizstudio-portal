@@ -11,6 +11,7 @@ import { nextBusinessDayJst } from "@/lib/dailyReport/jstDate";
 import ScheduleEntryFormModal, { type EditEntryData } from "@/components/schedule/ScheduleEntryFormModal";
 import ScheduleChatDrawer from "@/components/schedule/ScheduleChatDrawer";
 import CalendarConnectButton from "@/components/schedule/CalendarConnectButton";
+import DailyReportComments from "./DailyReportComments";
 
 type CUP = { recs: number; uniq: number; perPerson: number | null };
 type DayMatrix = {
@@ -29,6 +30,10 @@ type Resp = {
   tomorrowDate: string;
   format: string;
   report: Report;
+  // T-085: 閲覧対象ユーザー情報。
+  viewUserId?: string;
+  viewUserName?: string;
+  isSelf?: boolean;
   scheduleSummary: { plannedCount: number; completedCount: number };
   scheduleEntries: SchedEntry[];
   tomorrowEntries: SchedEntry[];
@@ -117,7 +122,15 @@ const COMMENT_TEMPLATE = [
   "", "", "",
 ].join("\n");
 
-export default function DailyReportView() {
+export default function DailyReportView({
+  currentUserId = "",
+  users = [],
+  isAdmin = false,
+}: {
+  currentUserId?: string;
+  users?: { id: string; name: string }[];
+  isAdmin?: boolean;
+} = {}) {
   const [date, setDate] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const q = new URLSearchParams(window.location.search).get("date");
@@ -125,6 +138,17 @@ export default function DailyReportView() {
     }
     return todayJst();
   });
+  // T-085: 閲覧対象ユーザー。URL ?userId= から初期化。空 or 自分なら編集モード、他人なら閲覧モード。
+  const [viewUserId, setViewUserId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const q = new URLSearchParams(window.location.search).get("userId");
+      if (q) return q;
+    }
+    return "";
+  });
+  const viewMode = viewUserId !== "" && viewUserId !== currentUserId;
+  // コメント欄の対象ユーザー（閲覧モードは対象者・自分モードは自分）。
+  const commentTargetUserId = viewMode ? viewUserId : currentUserId;
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(false);
   const [body, setBody] = useState(""); // 統合コメント本文（reportBody）
@@ -168,18 +192,21 @@ export default function DailyReportView() {
   const submitted = data?.report?.status === "SUBMITTED";
   const confirmed = confirmedAt != null;
 
-  // ?date= をURLに反映（②直リンクの土台）。
+  // ?date=（＋閲覧モードは userId）をURLに反映。
   useEffect(() => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.searchParams.set("date", date);
+    if (viewUserId) url.searchParams.set("userId", viewUserId);
+    else url.searchParams.delete("userId");
     window.history.replaceState(null, "", url.toString());
-  }, [date]);
+  }, [date, viewUserId]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/daily-report?date=${date}`);
+      const url = viewMode ? `/api/daily-report?date=${date}&userId=${viewUserId}` : `/api/daily-report?date=${date}`;
+      const res = await fetch(url);
       if (res.ok) {
         const d: Resp = await res.json();
         setData(d);
@@ -188,7 +215,7 @@ export default function DailyReportView() {
         dirtyRef.current = false; // ロード直後は未編集
       }
     } catch { /* */ } finally { setLoading(false); }
-  }, [date]);
+  }, [date, viewMode, viewUserId]);
 
   useEffect(() => { void fetchData(); }, [fetchData]);
 
@@ -218,8 +245,9 @@ export default function DailyReportView() {
       if (res.ok) { const d = await res.json(); setTomorrowCalEvents(d.events ?? []); }
     } catch { /* */ }
   }, [tomorrowDate]);
-  useEffect(() => { void fetchSchedule(); void fetchCalendar(); }, [fetchSchedule, fetchCalendar]);
-  useEffect(() => { void fetchTomorrowCalendar(); }, [fetchTomorrowCalendar]);
+  // T-085: 閲覧モードでは自分のスケジュール/カレンダーは取得しない（表示は data.scheduleEntries 等を使う）。
+  useEffect(() => { if (!viewMode) { void fetchSchedule(); void fetchCalendar(); } }, [fetchSchedule, fetchCalendar, viewMode]);
+  useEffect(() => { if (!viewMode) void fetchTomorrowCalendar(); }, [fetchTomorrowCalendar, viewMode]);
 
   // schedule が無ければ空で作成して id を返す（手動追加・既存 handleOpenAddModal と同じ）。
   // T-082: 今日/明日 target で対象 DailySchedule を確保。明日操作は tomorrowSched に紐付けて
@@ -279,7 +307,10 @@ export default function DailyReportView() {
   };
 
   // 下書き保存（自動保存・提出なし）。dirty のときだけ送る。本文編集はサーバ側で未確定に戻る。
+  // T-085: 閲覧モードでは絶対に保存しない（他人の所感を自分の日報に書き込む事故を防ぐ）。
+  const viewModeRef = useRef(viewMode); viewModeRef.current = viewMode;
   const saveDraft = useCallback((opts?: { keepalive?: boolean }) => {
+    if (viewModeRef.current) return Promise.resolve();
     if (!dirtyRef.current) return Promise.resolve();
     dirtyRef.current = false;
     return fetch("/api/daily-report", {
@@ -382,7 +413,9 @@ export default function DailyReportView() {
     } catch { setSavedMsg("提出に失敗しました"); } finally { setSubmitting(false); }
   };
 
-  const schedEntries = sched?.entries ?? [];
+  // T-085: 閲覧モードは GET /api/daily-report が返す対象者のスケジュールを表示（自分の sched は使わない）。
+  const schedEntries = viewMode ? (data?.scheduleEntries ?? []) : (sched?.entries ?? []);
+  const tomorrowEntries = viewMode ? (data?.tomorrowEntries ?? []) : (tomorrowSched?.entries ?? []);
   const planned = schedEntries.length;
   const completed = schedEntries.filter((e) => e.isCompleted).length;
   // T-081: CA 以外（数字を出さないフォーマット）はスケジュール表示の高さ制限を外して全件展開。
@@ -393,8 +426,8 @@ export default function DailyReportView() {
 
   return (
     <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] overflow-hidden">
-      {/* ヘッダ：前日/翌日ナビ＋右上に提出（下書きは自動保存） */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-[#E5E7EB]">
+      {/* ヘッダ：前日/翌日ナビ＋表示する人セレクタ＋右上に提出（下書きは自動保存） */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-[#E5E7EB] flex-wrap">
         <h2 className="text-[14px] font-medium text-[#374151]">📝 日報</h2>
         <div className="flex items-center gap-1 ml-2">
           <button onClick={() => changeDate(shiftDate(date, -1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">←前日</button>
@@ -402,23 +435,52 @@ export default function DailyReportView() {
           <button onClick={() => changeDate(shiftDate(date, 1))} className="px-2 py-1 text-[13px] border border-gray-200 rounded hover:bg-gray-50">翌日→</button>
           <button onClick={() => changeDate(todayJst())} className="px-2 py-1 text-[12px] text-[#2563EB] hover:underline">今日</button>
         </div>
+        {/* T-085: 表示する人セレクタ（自分＝編集モード、他人＝閲覧モード） */}
+        {users.length > 0 && (
+          <div className="flex items-center gap-1 ml-1">
+            <span className="text-[11px] text-[#9CA3AF]">表示</span>
+            <select
+              value={viewMode ? viewUserId : currentUserId}
+              onChange={(e) => setViewUserId(e.target.value === currentUserId ? "" : e.target.value)}
+              className="text-[13px] border border-gray-200 rounded px-2 py-1 max-w-[140px]"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.id === currentUserId ? `${u.name}（自分）` : u.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {viewMode && (
+          <span className="text-[11px] text-[#2563EB] bg-blue-50 border border-blue-200 rounded px-2 py-0.5 font-medium">
+            👁 {data?.viewUserName ?? ""} さんの日報（閲覧）
+          </span>
+        )}
         {loading && <span className="text-[12px] text-[#9CA3AF]">読み込み中...</span>}
         <div className="ml-auto flex items-center gap-2">
           {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
-          {confirmed ? <span className="text-[11px] text-[#16A34A] font-medium">✓ 確定済み</span> : <span className="text-[11px] text-[#9CA3AF]">未確定</span>}
-          {submitted && <span className="text-[11px] text-[#16A34A] font-medium">／提出済み</span>}
-          <button onClick={openAccordion} className="border border-[#2563EB] text-[#2563EB] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-blue-50">📝 コメント入力</button>
-          <button onClick={() => setModalOpen(true)} className="border border-gray-300 text-[#374151] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50">👁 コメント表示</button>
-          <button onClick={handleSubmit} disabled={submitting || !confirmed} title={!confirmed ? "コメントを確定すると提出できます" : ""} className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
-            {submitting ? "提出中..." : submitted ? "再提出" : "提出"}
-          </button>
+          {/* 編集モードのみ：確定/提出/コメント入力。閲覧モードは所感表示のみ。 */}
+          {viewMode ? (
+            <button onClick={() => setModalOpen(true)} className="border border-gray-300 text-[#374151] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50">👁 所感を表示</button>
+          ) : (
+            <>
+              {confirmed ? <span className="text-[11px] text-[#16A34A] font-medium">✓ 確定済み</span> : <span className="text-[11px] text-[#9CA3AF]">未確定</span>}
+              {submitted && <span className="text-[11px] text-[#16A34A] font-medium">／提出済み</span>}
+              <button onClick={openAccordion} className="border border-[#2563EB] text-[#2563EB] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-blue-50">📝 コメント入力</button>
+              <button onClick={() => setModalOpen(true)} className="border border-gray-300 text-[#374151] rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50">👁 コメント表示</button>
+              <button onClick={handleSubmit} disabled={submitting || !confirmed} title={!confirmed ? "コメントを確定すると提出できます" : ""} className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
+                {submitting ? "提出中..." : submitted ? "再提出" : "提出"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* カレンダー連携バー（3列の外側上部・予定列から外出して3列の予定行を横並びに揃える） */}
-      <div className="px-4 pt-3">
-        <CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} />
-      </div>
+      {/* カレンダー連携バー（自分モードのみ。閲覧モードでは出さない） */}
+      {!viewMode && (
+        <div className="px-4 pt-3">
+          <CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} />
+        </div>
+      )}
 
       {/* 上段：スケジュール 予定（作成導線つき）｜実績(完了チェック)｜明日（3列のヘッダ高さ＝同じ1行ダーク帯で揃う） */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 p-4 border-b border-[#E5E7EB]">
@@ -426,61 +488,65 @@ export default function DailyReportView() {
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
           <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5 flex-wrap">
             <span>スケジュール予定</span>
-            <div className="ml-auto flex items-center gap-1">
-              <button onClick={() => handleAddEntry("today")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
-              <button onClick={() => setAiDrawerTarget("today")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
-              <button onClick={() => handleSyncCalendar("today")} disabled={syncing} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncing ? "同期中" : "📅同期"}</button>
-            </div>
+            {!viewMode && (
+              <div className="ml-auto flex items-center gap-1">
+                <button onClick={() => handleAddEntry("today")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
+                <button onClick={() => setAiDrawerTarget("today")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
+                <button onClick={() => handleSyncCalendar("today")} disabled={syncing} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncing ? "同期中" : "📅同期"}</button>
+              </div>
+            )}
           </div>
           <div className={schedScrollCls}>
             {schedEntries.length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません。「＋追加」または「✏️AI」で作成</div>
+              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">{viewMode ? "予定がありません" : "予定がありません。「＋追加」または「✏️AI」で作成"}</div>
             ) : schedEntries.map((e) => (
               <div key={e.id} className="px-3 py-1.5 flex items-center gap-2 text-[12px] group">
                 <span className="tabular-nums text-[#6B7280] shrink-0">{e.startTime}</span>
                 <span className="text-[#374151] truncate flex-1">{e.title}</span>
                 {e.tag && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: e.tagColor ?? "#E5E7EB", color: "#374151" }}>{e.tag}</span>}
-                <button onClick={() => handleEditEntry(e, "today")} className="shrink-0 text-[11px] text-[#6B7280] opacity-0 group-hover:opacity-100 hover:text-[#2563EB]">編集</button>
-                <button onClick={() => handleDeleteEntry(e.id)} className="shrink-0 text-[11px] text-[#9CA3AF] opacity-0 group-hover:opacity-100 hover:text-red-500">削除</button>
+                {!viewMode && <button onClick={() => handleEditEntry(e, "today")} className="shrink-0 text-[11px] text-[#6B7280] opacity-0 group-hover:opacity-100 hover:text-[#2563EB]">編集</button>}
+                {!viewMode && <button onClick={() => handleDeleteEntry(e.id)} className="shrink-0 text-[11px] text-[#9CA3AF] opacity-0 group-hover:opacity-100 hover:text-red-500">削除</button>}
               </div>
             ))}
           </div>
         </div>
-        {/* 実績枠：完了チェック（read-only 解除） */}
+        {/* 実績枠：完了チェック（閲覧モードは disabled） */}
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
           <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium">スケジュール実績（完了 {completed}/{planned}{rate != null ? ` ・${rate}%` : ""}）</div>
           <div className={schedScrollCls}>
             {schedEntries.length === 0 ? (
               <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません</div>
             ) : schedEntries.map((e) => (
-              <label key={e.id} className="px-3 py-1.5 flex items-center gap-2 text-[12px] cursor-pointer hover:bg-[#F9FAFB]">
-                <input type="checkbox" checked={e.isCompleted} onChange={() => handleToggleComplete(e)} className="shrink-0" />
+              <label key={e.id} className={`px-3 py-1.5 flex items-center gap-2 text-[12px] ${viewMode ? "" : "cursor-pointer hover:bg-[#F9FAFB]"}`}>
+                <input type="checkbox" checked={e.isCompleted} disabled={viewMode} onChange={() => handleToggleComplete(e)} className="shrink-0" />
                 <span className="tabular-nums text-[#6B7280] shrink-0">{e.startTime}</span>
                 <span className={`truncate ${e.isCompleted ? "text-[#9CA3AF] line-through" : "text-[#374151]"}`}>{e.title}</span>
               </label>
             ))}
           </div>
         </div>
-        {/* 明日：当日枠と同じ＋追加/AI/同期＋編集/削除。tomorrowSched.id にルーティングし当日実績の母数に混入させない（T-082） */}
+        {/* 明日：当日枠と同じ＋追加/AI/同期＋編集/削除（閲覧モードは表示のみ）。 */}
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
           <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5 flex-wrap">
-            <span>明日の予定（{mdLabel(tomorrowDate)}・翌営業日）</span>
-            <div className="ml-auto flex items-center gap-1">
-              <button onClick={() => handleAddEntry("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
-              <button onClick={() => setAiDrawerTarget("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
-              <button onClick={() => handleSyncCalendar("tomorrow")} disabled={syncingTomorrow} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncingTomorrow ? "同期中" : "📅同期"}</button>
-            </div>
+            <span>明日の予定（{viewMode ? mdLabel(data?.tomorrowDate ?? tomorrowDate) : `${mdLabel(tomorrowDate)}・翌営業日`}）</span>
+            {!viewMode && (
+              <div className="ml-auto flex items-center gap-1">
+                <button onClick={() => handleAddEntry("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
+                <button onClick={() => setAiDrawerTarget("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
+                <button onClick={() => handleSyncCalendar("tomorrow")} disabled={syncingTomorrow} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncingTomorrow ? "同期中" : "📅同期"}</button>
+              </div>
+            )}
           </div>
           <div className={schedScrollCls}>
-            {(tomorrowSched?.entries ?? []).length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">明日の予定は未登録です。「＋追加」または「✏️AI」で作成</div>
-            ) : (tomorrowSched?.entries ?? []).map((e) => (
+            {tomorrowEntries.length === 0 ? (
+              <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">{viewMode ? "明日の予定は未登録です" : "明日の予定は未登録です。「＋追加」または「✏️AI」で作成"}</div>
+            ) : tomorrowEntries.map((e) => (
               <div key={e.id} className="px-3 py-1.5 flex items-center gap-2 text-[12px] group">
                 <span className="tabular-nums text-[#6B7280] shrink-0">{e.startTime}</span>
                 <span className="text-[#374151] truncate flex-1">{e.title}</span>
                 {e.tag && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: e.tagColor ?? "#E5E7EB", color: "#374151" }}>{e.tag}</span>}
-                <button onClick={() => handleEditEntry(e, "tomorrow")} className="shrink-0 text-[11px] text-[#6B7280] opacity-0 group-hover:opacity-100 hover:text-[#2563EB]">編集</button>
-                <button onClick={() => handleDeleteEntry(e.id)} className="shrink-0 text-[11px] text-[#9CA3AF] opacity-0 group-hover:opacity-100 hover:text-red-500">削除</button>
+                {!viewMode && <button onClick={() => handleEditEntry(e, "tomorrow")} className="shrink-0 text-[11px] text-[#6B7280] opacity-0 group-hover:opacity-100 hover:text-[#2563EB]">編集</button>}
+                {!viewMode && <button onClick={() => handleDeleteEntry(e.id)} className="shrink-0 text-[11px] text-[#9CA3AF] opacity-0 group-hover:opacity-100 hover:text-red-500">削除</button>}
               </div>
             ))}
           </div>
@@ -519,6 +585,9 @@ export default function DailyReportView() {
           )}
         </div>
       </div>
+
+      {/* T-085: コメント欄（自分・他人どちらの日報でも誰でも投稿可。日付・対象者連動）。 */}
+      {commentTargetUserId && <DailyReportComments targetUserId={commentTargetUserId} date={date} currentUserId={currentUserId} isAdmin={isAdmin} />}
 
       {/* 右スライド：コメント入力アコーディオン */}
       {accordionOpen && (
@@ -594,21 +663,22 @@ export default function DailyReportView() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
             <div className="pointer-events-auto bg-white rounded-xl shadow-2xl w-full max-w-[680px] max-h-[85vh] flex flex-col overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-200 bg-[#3C3C3C] text-white">
-                <span className="text-[14px] font-semibold">日報コメント（{mdLabel(date)}）</span>
-                {confirmed ? <span className="text-[11px] text-green-300">✓ 確定済み</span> : <span className="text-[11px] text-gray-300">未確定</span>}
+                <span className="text-[14px] font-semibold">{viewMode ? `所感（${data?.viewUserName ?? ""}・${mdLabel(date)}）` : `日報コメント（${mdLabel(date)}）`}</span>
+                {!viewMode && (confirmed ? <span className="text-[11px] text-green-300">✓ 確定済み</span> : <span className="text-[11px] text-gray-300">未確定</span>)}
                 <button onClick={() => setModalOpen(false)} className="ml-auto text-white hover:text-gray-300 text-lg px-1">✕</button>
               </div>
               <div className="p-5 overflow-y-auto">
                 <textarea
                   value={body}
-                  onChange={(e) => onBodyChange(e.target.value)}
-                  className="w-full h-[360px] border border-gray-300 rounded px-3 py-2 text-[13px] resize-y leading-relaxed"
+                  readOnly={viewMode}
+                  onChange={(e) => { if (!viewMode) onBodyChange(e.target.value); }}
+                  className={`w-full h-[360px] border border-gray-300 rounded px-3 py-2 text-[13px] resize-y leading-relaxed ${viewMode ? "bg-[#F9FAFB]" : ""}`}
                 />
               </div>
               <div className="px-5 py-3 border-t border-gray-200 flex items-center gap-2">
-                <span className="text-[11px] text-[#9CA3AF]">編集は自動保存されます（編集すると未確定に戻ります）</span>
-                <button onClick={handleConfirm} className="ml-auto bg-[#2563EB] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]">確定</button>
-                <button onClick={() => setModalOpen(false)} className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-gray-50">閉じる</button>
+                {!viewMode && <span className="text-[11px] text-[#9CA3AF]">編集は自動保存されます（編集すると未確定に戻ります）</span>}
+                {!viewMode && <button onClick={handleConfirm} className="ml-auto bg-[#2563EB] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]">確定</button>}
+                <button onClick={() => setModalOpen(false)} className={`border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-gray-50 ${viewMode ? "ml-auto" : ""}`}>閉じる</button>
               </div>
             </div>
           </div>

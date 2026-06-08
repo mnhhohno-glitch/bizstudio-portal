@@ -37,6 +37,13 @@ const PRIORITY_COLOR: Record<string, string> = {
 export default async function DashboardPage() {
   const user = await getSessionUser();
 
+  // T-085: 日報の「表示する人」プルダウン用に active ユーザー一覧を取得（人数が少ないので全員）。
+  const reportUsers = await prisma.user.findMany({
+    where: { status: "active" },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
   const [recentAnnouncements, employee] = await Promise.all([
     prisma.announcement.findMany({
       where: { status: "PUBLISHED" },
@@ -220,7 +227,7 @@ export default async function DashboardPage() {
   // スケジュール作成（手動・AI・カレンダー同期）と完了チェックは DailyReportView 上段に移植済み（T-069 折りたたみ撤去）。
   const scheduleTab = (
     <div className="space-y-4">
-      <DailyReportView />
+      <DailyReportView currentUserId={user?.id ?? ""} users={reportUsers} isAdmin={user?.role === "admin"} />
       {attendanceArea}
     </div>
   );

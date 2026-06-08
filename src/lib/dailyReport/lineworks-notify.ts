@@ -12,6 +12,7 @@ const PORTAL_PROD_URL = process.env.PORTAL_PUBLIC_URL || "https://bizstudio-port
 export interface DailyReportNotifyParams {
   caName: string;
   dateStr: string; // "YYYY-MM-DD"（JST）
+  userId?: string; // T-085: 提出者の userId。通知リンクに付けて本人の日報を閲覧モードで開かせる。
   interviewTotal?: number;
   interviewFirst?: number;
   interviewExisting?: number;
@@ -58,7 +59,8 @@ export function buildDailyReportMessage(p: DailyReportNotifyParams): string {
     comment,
     "",
     "▼詳細はこちら",
-    `${PORTAL_PROD_URL}/?date=${p.dateStr}`,
+    // T-085: userId 付きで提出者本人の日報を閲覧モードで開く（無ければ従来通り）。
+    p.userId ? `${PORTAL_PROD_URL}/?date=${p.dateStr}&userId=${p.userId}` : `${PORTAL_PROD_URL}/?date=${p.dateStr}`,
   );
 
   return lines.join("\n");

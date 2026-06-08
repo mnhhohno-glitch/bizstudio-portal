@@ -85,17 +85,33 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const dateStr = searchParams.get("date") ?? todayJstDateString();
 
-  const actor = await resolveActor(user.id, user.name);
+  // T-085: userId 指定時はそのユーザーの日報を閲覧（ログイン済みなら誰でも可）。
+  //        省略時はログインユーザー自身（後方互換 100%）。
+  const queryUserId = searchParams.get("userId");
+  const targetUserId = queryUserId && queryUserId.trim() ? queryUserId : user.id;
+  const isSelf = targetUserId === user.id;
+
+  // 閲覧対象ユーザーの表示情報（name・職種→format）を解決。
+  const targetUser = isSelf
+    ? { id: user.id, name: user.name }
+    : await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, name: true } });
+  if (!targetUser) return NextResponse.json({ error: "ユーザーが見つかりません" }, { status: 404 });
+
+  const actor = await resolveActor(targetUser.id, targetUser.name);
   const dbDate = jstDateStringToDbDate(dateStr);
 
   const [existing, scheduleData] = await Promise.all([
     prisma.dailyReport.findUnique({
-      where: { userId_date: { userId: user.id, date: dbDate } },
+      where: { userId_date: { userId: targetUser.id, date: dbDate } },
       include: {
         chats: { orderBy: { createdAt: "asc" } },
+        comments: {
+          orderBy: { createdAt: "asc" },
+          include: { user: { select: { id: true, name: true } } },
+        },
       },
     }),
-    buildScheduleSummary(user.id, dateStr),
+    buildScheduleSummary(targetUser.id, dateStr),
   ]);
 
   let metrics: CaDailyMetrics | null = null;
@@ -106,26 +122,40 @@ export async function GET(req: Request) {
     const from = jstDateStart(dateStr);
     const to = jstDateEnd(dateStr);
     [metrics, dayMatrix, attributes, jobSearch] = await Promise.all([
-      computeCaMetrics({ userId: user.id, employeeId: actor.employeeId, dateStr }),
-      computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: user.id, from, to }),
+      computeCaMetrics({ userId: targetUser.id, employeeId: actor.employeeId, dateStr }),
+      computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: targetUser.id, from, to }),
       computeInterviewAttributes({ employeeId: actor.employeeId ?? "__nonexistent__", from, to }),
-      computeJobSearchDay(user.id, dateStr),
+      computeJobSearchDay(targetUser.id, dateStr),
     ]);
   }
 
   // 当日の予定/実績エントリ＋明日の予定。
   const tomorrowStr = nextJstDateString(dateStr);
   const [todayEntries, tomorrowEntries] = await Promise.all([
-    buildScheduleEntries(user.id, dateStr),
-    buildScheduleEntries(user.id, tomorrowStr),
+    buildScheduleEntries(targetUser.id, dateStr),
+    buildScheduleEntries(targetUser.id, tomorrowStr),
   ]);
+
+  // コメント一覧（投稿者名つき）。report が無ければ空配列。
+  const comments = (existing?.comments ?? []).map((c) => ({
+    id: c.id,
+    body: c.body,
+    userId: c.userId,
+    userName: c.user?.name ?? "",
+    createdAt: c.createdAt,
+  }));
 
   return NextResponse.json({
     date: dateStr,
     tomorrowDate: tomorrowStr,
     format: actor.format,
     jobCategory: actor.jobCategory,
+    // T-085: 閲覧対象ユーザー・閲覧モード判定用情報。
+    viewUserId: targetUser.id,
+    viewUserName: targetUser.name,
+    isSelf,
     report: existing,
+    comments,
     scheduleSummary: scheduleData.summary,
     scheduleEntries: todayEntries,
     tomorrowEntries,
@@ -142,6 +172,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json()) as {
     date?: string;
+    userId?: string; // T-085: 本人ガード用（指定があっても本人のみ許可）
     comment?: string;
     aiBody?: string;
     scheduleNote?: string;
@@ -150,6 +181,11 @@ export async function POST(req: Request) {
     confirmComment?: boolean; // 「確定」操作。commentConfirmedAt をセット
     submit?: boolean;
   };
+
+  // T-085: 編集・提出は本人のみ。他人の日報への書き込み経路を物理的に塞ぐ（閲覧モードからの誤書き込み防止）。
+  if (body.userId && body.userId !== user.id) {
+    return NextResponse.json({ error: "他人の日報は編集できません（閲覧のみ可）" }, { status: 403 });
+  }
 
   const dateStr = body.date ?? todayJstDateString();
   const dbDate = jstDateStringToDbDate(dateStr);
@@ -214,6 +250,7 @@ export async function POST(req: Request) {
     const base = {
       caName: user.name,
       dateStr,
+      userId: user.id, // T-085: 通知リンクに付けて提出者本人の日報を閲覧モードで開く
       plannedCount: sched.summary.plannedCount,
       completedCount: sched.summary.completedCount,
       reportBody: (body.reportBody ?? report.reportBody) ?? null,

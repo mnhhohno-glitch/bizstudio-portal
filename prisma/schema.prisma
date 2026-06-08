@@ -150,6 +150,8 @@ model User {
   googleCalendarConnection GoogleCalendarConnection?
   // T-066
   dailyReports             DailyReport[]             @relation("DailyReportAuthor")
+  // T-085: 他人の日報に残したコメントの投稿者リレーション。
+  dailyReportComments      DailyReportComment[]      @relation("DailyReportCommentAuthor")
 
   @@map("users")
 }
@@ -1573,12 +1575,30 @@ model DailyReport {
   createdAt   DateTime             @default(now()) @map("created_at")
   updatedAt   DateTime             @updatedAt @map("updated_at")
 
-  chats DailyReportChat[]
+  chats    DailyReportChat[]
+  // T-085: 上司・同僚が残すコメント（編集・提出とは別。閲覧者誰でも投稿可）。
+  comments DailyReportComment[]
 
   @@unique([userId, date])
   @@index([userId])
   @@index([date])
   @@map("daily_reports")
+}
+
+// T-085: 日報コメント（他人の日報を閲覧した人が残す。TaskComment と同パターン）。
+model DailyReportComment {
+  id            String      @id @default(cuid())
+  dailyReportId String      @map("daily_report_id")
+  dailyReport   DailyReport @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  userId        String      @map("user_id") // コメント投稿者
+  user          User        @relation("DailyReportCommentAuthor", fields: [userId], references: [id])
+  body          String      @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  @@index([dailyReportId])
+  @@index([userId])
+  @@map("daily_report_comments")
 }
 
 // T-066: 日報 AI チャットの履歴。既存 ScheduleChat に倣う。
