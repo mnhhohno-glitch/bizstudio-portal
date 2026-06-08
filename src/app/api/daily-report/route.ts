@@ -209,28 +209,36 @@ export async function POST(req: Request) {
   });
 
   // 提出時のみ LINE WORKS 通知（fire&forget・本体をブロックしない）。下書き自動保存では送らない。
-  if (submit && formatHasNumbers(actor.format)) {
-    const from = jstDateStart(dateStr);
-    const to = jstDateEnd(dateStr);
-    const [dayMatrix, jobSearch, sched] = await Promise.all([
-      computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: user.id, from, to }),
-      computeJobSearchDay(user.id, dateStr),
-      buildScheduleSummary(user.id, dateStr),
-    ]);
-    void notifyDailyReport({
+  if (submit) {
+    const sched = await buildScheduleSummary(user.id, dateStr);
+    const base = {
       caName: user.name,
       dateStr,
-      interviewTotal: dayMatrix.interview.total,
-      interviewFirst: dayMatrix.interview.first,
-      interviewExisting: dayMatrix.interview.second + dayMatrix.interview.thirdPlus,
-      bmCount: jobSearch.bmCount,
-      entryTotal: dayMatrix.entry.total.uniq,
-      selectionRate: jobSearch.selectionRate,
-      dCount: jobSearch.ratings["D"] ?? 0,
       plannedCount: sched.summary.plannedCount,
       completedCount: sched.summary.completedCount,
       reportBody: (body.reportBody ?? report.reportBody) ?? null,
-    }).catch((e) => console.warn("日報LINE通知 失敗:", e?.message ?? e));
+    };
+
+    if (formatHasNumbers(actor.format)) {
+      const from = jstDateStart(dateStr);
+      const to = jstDateEnd(dateStr);
+      const [dayMatrix, jobSearch] = await Promise.all([
+        computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: user.id, from, to }),
+        computeJobSearchDay(user.id, dateStr),
+      ]);
+      void notifyDailyReport({
+        ...base,
+        interviewTotal: dayMatrix.interview.total,
+        interviewFirst: dayMatrix.interview.first,
+        interviewExisting: dayMatrix.interview.second + dayMatrix.interview.thirdPlus,
+        bmCount: jobSearch.bmCount,
+        entryTotal: dayMatrix.entry.total.uniq,
+        selectionRate: jobSearch.selectionRate,
+        dCount: jobSearch.ratings["D"] ?? 0,
+      }).catch((e) => console.warn("日報LINE通知 失敗:", e?.message ?? e));
+    } else {
+      void notifyDailyReport(base).catch((e) => console.warn("日報LINE通知 失敗:", e?.message ?? e));
+    }
   }
 
   return NextResponse.json({ report });
