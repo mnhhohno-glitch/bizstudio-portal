@@ -340,6 +340,10 @@ export default function DailyReportView() {
   const schedEntries = sched?.entries ?? [];
   const planned = schedEntries.length;
   const completed = schedEntries.filter((e) => e.isCompleted).length;
+  // T-081: CA 以外（数字を出さないフォーマット）はスケジュール表示の高さ制限を外して全件展開。
+  // CA は従来通り max-h-[200px] スクロールでコンパクト表示。
+  const expandSchedule = !!data && data.format !== "CA";
+  const schedScrollCls = expandSchedule ? "divide-y divide-[#F3F4F6]" : "max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]";
   const rate = planned > 0 ? Math.round((completed / planned) * 100) : null;
 
   return (
@@ -383,7 +387,7 @@ export default function DailyReportView() {
               <button onClick={handleSyncCalendar} disabled={syncing} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 disabled:opacity-50">{syncing ? "同期中" : "📅同期"}</button>
             </div>
           </div>
-          <div className="max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]">
+          <div className={schedScrollCls}>
             {schedEntries.length === 0 ? (
               <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません。「＋追加」または「✏️AI」で作成</div>
             ) : schedEntries.map((e) => (
@@ -400,7 +404,7 @@ export default function DailyReportView() {
         {/* 実績枠：完了チェック（read-only 解除） */}
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
           <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium">スケジュール実績（完了 {completed}/{planned}{rate != null ? ` ・${rate}%` : ""}）</div>
-          <div className="max-h-[200px] overflow-y-auto divide-y divide-[#F3F4F6]">
+          <div className={schedScrollCls}>
             {schedEntries.length === 0 ? (
               <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">予定がありません</div>
             ) : schedEntries.map((e) => (
@@ -413,7 +417,7 @@ export default function DailyReportView() {
           </div>
         </div>
         {/* 明日（read-only） */}
-        <SchedCol title={`明日の予定（${data ? mdLabel(data.tomorrowDate) : ""}）`} entries={data?.tomorrowEntries ?? []} emptyText="明日の予定は未登録です" />
+        <SchedCol title={`明日の予定（${data ? mdLabel(data.tomorrowDate) : ""}）`} entries={data?.tomorrowEntries ?? []} emptyText="明日の予定は未登録です" noLimit={expandSchedule} />
       </div>
 
       {/* 下段：当日実績（やや広く）｜グラフ（広く）。コメントはアコーディオン/ポップアップへ移動。 */}
@@ -568,11 +572,12 @@ export default function DailyReportView() {
   );
 }
 
-function SchedCol({ title, entries, emptyText }: { title: string; entries: SchedEntry[]; emptyText?: string }) {
+function SchedCol({ title, entries, emptyText, noLimit }: { title: string; entries: SchedEntry[]; emptyText?: string; noLimit?: boolean }) {
+  // T-081: noLimit=true（CA以外）のとき高さ制限を外して全件縦展開。
   return (
     <div className="border border-[#E5E7EB] rounded-lg overflow-hidden">
       <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium">{title}</div>
-      <div className="max-h-[220px] overflow-y-auto divide-y divide-[#F3F4F6]">
+      <div className={noLimit ? "divide-y divide-[#F3F4F6]" : "max-h-[220px] overflow-y-auto divide-y divide-[#F3F4F6]"}>
         {entries.length === 0 ? (
           <div className="px-3 py-4 text-[12px] text-[#9CA3AF] text-center">{emptyText ?? "予定がありません"}</div>
         ) : (
