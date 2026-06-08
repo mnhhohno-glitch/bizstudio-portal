@@ -86,6 +86,12 @@ function isOtherTypeCategory(value: string | undefined | null): boolean {
   return !!value && OTHER_TYPE_CATEGORY_VALUES.has(value);
 }
 
+// T-035 step2: 部分再生成の対象にできるセクション（AI生成系のみ）。
+// work_content_*（職務内容・実績などAI生成）と mindset のみ。consent/個人情報/固定dutiesは対象外。
+function isEditableSection(sectionId: string | undefined | null): boolean {
+  return !!sectionId && (sectionId.startsWith("work_content") || sectionId === "mindset");
+}
+
 function getOtherTypeLabelPlaceholder(value: string): string {
   switch (value) {
     case "office_other":
@@ -185,6 +191,11 @@ export default function GoogleFormCreatorModal({
   // キー: work_history index 文字列。値: ユーザー入力ラベル（例「特許事務」）。
   const [companyCategoryLabelMap, setCompanyCategoryLabelMap] = useState<Record<string, string>>({});
 
+  // T-035 step2: 確認画面の部分再生成。チェック済み item（key=`${sectionId}__${itemIndex}`）と指示文。
+  const [checkedTargets, setCheckedTargets] = useState<Record<string, boolean>>({});
+  const [regenerateInstruction, setRegenerateInstruction] = useState<string>("");
+  const [regenerateNotice, setRegenerateNotice] = useState<string | null>(null);
+
   const pdfCandidates = useMemo(
     () =>
       meetingFiles
@@ -275,6 +286,9 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryMap({});
     setCompanyGroupMap({});
     setCompanyCategoryLabelMap({});
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
   };
 
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
@@ -493,6 +507,9 @@ export default function GoogleFormCreatorModal({
     setStageStatus((s) => ({ ...s, generate: "pending", create: "pending" }));
     setQuestionsJson(null);
     setFormResult(null);
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
 
     const e2 = await runGenerate(resumeData, interviewLogText);
     if (!e2) {
@@ -543,6 +560,68 @@ export default function GoogleFormCreatorModal({
       return;
     }
     // 成功時：runGenerate が questionsJson を更新済み。confirmQuestions のまま再描画される。
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
+  };
+
+  // T-035 step2: 確認画面の部分再生成。チェックした item ＋指示で regenerate_questions を呼ぶ。
+  // - チェックあり → その item のみ targets。
+  // - チェックなし＋指示あり → 許可セクション内の全 item を targets に展開（全体指示）。
+  // - 返ってきた questionsJson をそのまま次の previousQuestionsJson として保持（index ずれ防止）。
+  const handleRegenerateTargeted = async () => {
+    const instruction = regenerateInstruction.trim();
+    if (!instruction || stageStatus.generate === "running") return;
+
+    const q = (questionsJson ?? {}) as PreviewQuestions;
+    const sections = q.sections ?? [];
+    let targets: { sectionId: string; itemIndex: number }[] = Object.entries(checkedTargets)
+      .filter(([, v]) => v)
+      .map(([k]) => {
+        const idx = k.lastIndexOf("__");
+        return { sectionId: k.slice(0, idx), itemIndex: Number(k.slice(idx + 2)) };
+      });
+
+    // チェックなし → 許可セクションの全 item を対象に展開（全体指示）。
+    if (targets.length === 0) {
+      sections.forEach((sec) => {
+        if (!isEditableSection(sec.id)) return;
+        (sec.items ?? []).forEach((_, ii) => targets.push({ sectionId: sec.id as string, itemIndex: ii }));
+      });
+    }
+    if (targets.length === 0) {
+      toast.error("再生成できる質問（AI生成セクション）がありません");
+      return;
+    }
+
+    setStageStatus((s) => ({ ...s, generate: "running" }));
+    setRegenerateNotice(null);
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/google-form/regenerate-questions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ previousQuestionsJson: questionsJson, instruction, targets }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `再生成失敗 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      // サーバから返った JSON をそのまま保持（次の previousQuestionsJson＝index ずれ防止）。
+      setQuestionsJson(data.questionsJson);
+      setCheckedTargets({});
+      setRegenerateInstruction("");
+      const regenCount = Array.isArray(data.regenerated) ? data.regenerated.length : data.regenerated ? 1 : 0;
+      if (regenCount === 0) setRegenerateNotice("変更されませんでした。");
+      setStageStatus((s) => ({ ...s, generate: "done" }));
+    } catch (e) {
+      // 確認画面に留めてエラーをトーストで知らせる（error ステップには飛ばさない）。
+      setStageStatus((s) => ({ ...s, generate: "done" }));
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const handleRetry = async () => {
@@ -618,7 +697,9 @@ export default function GoogleFormCreatorModal({
       onClick={handleClose}
     >
       <div
-        className="bg-white rounded-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto shadow-xl"
+        className={`bg-white rounded-xl w-full mx-4 p-6 max-h-[92vh] overflow-y-auto shadow-xl ${
+          step === "confirmQuestions" ? "max-w-5xl" : "max-w-2xl"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* ヘッダー */}
@@ -940,100 +1021,165 @@ export default function GoogleFormCreatorModal({
           </div>
         )}
 
-        {/* Step 1.7: confirmQuestions - 質問確認画面（T-035 step2、その他系のみ） */}
+        {/* Step 1.7: confirmQuestions - 質問確認画面（T-035 step2、その他系のみ）。
+            チェック＋指示で部分再生成。確認画面のみ広く・文字を大きく。 */}
         {step === "confirmQuestions" && (() => {
           const q = (questionsJson ?? {}) as PreviewQuestions;
           const sections = q.sections ?? [];
           const isRegenerating = stageStatus.generate === "running";
           const totalItems = sections.reduce((n, s) => n + (s.items?.length ?? 0), 0);
+          const checkedCount = Object.values(checkedTargets).filter(Boolean).length;
+          const canRegenerate = regenerateInstruction.trim().length > 0 && !isRegenerating;
           return (
             <div>
-              <div className="mb-3 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-[12px] text-green-800">
+              <div className="mb-3 rounded-md bg-green-50 border border-green-200 px-4 py-3 text-[14px] text-green-800">
                 ✓ 質問を生成しました（{sections.length} セクション / {totalItems} 項目）。内容をご確認ください。
-                <span className="block text-[11px] text-green-700 mt-0.5">
+                <span className="block text-[12px] text-green-700 mt-1">
                   この時点ではまだ Google フォームは作成されていません。
                 </span>
               </div>
-              <div className="mb-3 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">
+              <div className="mb-3 rounded-md bg-yellow-50 border border-yellow-200 px-4 py-3 text-[13px] text-yellow-800">
                 ⚠️ 修正したい場合はGoogleフォーム編集画面で後ほど修正してください。
+              </div>
+              <div className="mb-3 rounded-md bg-blue-50 border border-blue-200 px-4 py-2.5 text-[12px] text-blue-800">
+                💡 直したい質問（AI生成セクションのみ選択可）にチェックを入れ、下の欄に指示を書いて「この内容で再生成」を押すと、その質問だけを作り直せます。チェックなしで指示すると、AI生成質問全体を直します。
               </div>
 
               {q.greeting && (
-                <div className="mb-3 text-[12px] text-gray-600 whitespace-pre-wrap border border-gray-100 rounded-md p-2 bg-gray-50">
+                <div className="mb-3 text-[13px] text-gray-600 whitespace-pre-wrap border border-gray-100 rounded-md p-3 bg-gray-50">
                   {q.greeting}
                 </div>
               )}
 
-              <div className="space-y-3 mb-4 max-h-[50vh] overflow-y-auto pr-1">
+              <div className="space-y-4 mb-4 max-h-[56vh] overflow-y-auto pr-1">
                 {sections.length === 0 ? (
-                  <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-4 text-center text-[12px] text-gray-500">
+                  <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-4 text-center text-[13px] text-gray-500">
                     質問が生成されませんでした。「やり直し」で再生成してください。
                   </div>
                 ) : (
-                  sections.map((sec, si) => (
-                    <div key={sec.id ?? si} className="border border-gray-200 rounded-md">
-                      <div className="bg-[#F9FAFB] px-3 py-2 text-[13px] font-semibold text-[#374151] border-b border-gray-200">
-                        {sec.header || `セクション ${si + 1}`}
-                      </div>
-                      <ol className="divide-y divide-gray-100">
-                        {(sec.items ?? []).map((it, ii) => (
-                          <li key={ii} className="px-3 py-2">
-                            <div className="flex items-start gap-2">
-                              <span className="text-[11px] text-gray-400 mt-0.5">{ii + 1}.</span>
-                              <div className="flex-1">
-                                <div className="text-[12px] text-[#374151]">
-                                  {it.title || "（無題）"}
-                                  {it.required ? <span className="text-red-500 ml-1">*</span> : null}
-                                </div>
-                                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                                  <span className="text-[10px] text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
-                                    {ITEM_TYPE_LABEL[it.type ?? ""] ?? it.type ?? "—"}
-                                  </span>
-                                  {it.choices && it.choices.length > 0 && (
-                                    <span className="text-[10px] text-gray-400">
-                                      選択肢: {it.choices.join(" / ")}
-                                    </span>
+                  sections.map((sec, si) => {
+                    const editable = isEditableSection(sec.id);
+                    return (
+                      <div key={sec.id ?? si} className="border border-gray-200 rounded-md">
+                        <div className="bg-[#F9FAFB] px-4 py-2.5 text-[15px] font-semibold text-[#374151] border-b border-gray-200 flex items-center gap-2">
+                          <span>{sec.header || `セクション ${si + 1}`}</span>
+                          {editable ? (
+                            <span className="text-[11px] font-normal text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">再生成OK</span>
+                          ) : (
+                            <span className="text-[11px] font-normal text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">🔒 固定</span>
+                          )}
+                        </div>
+                        <ol className="divide-y divide-gray-100">
+                          {(sec.items ?? []).map((it, ii) => {
+                            const key = `${sec.id ?? ""}__${ii}`;
+                            return (
+                              <li key={ii} className="px-4 py-3">
+                                <div className="flex items-start gap-3">
+                                  {editable ? (
+                                    <input
+                                      type="checkbox"
+                                      checked={!!checkedTargets[key]}
+                                      disabled={isRegenerating}
+                                      onChange={(e) => {
+                                        setRegenerateNotice(null);
+                                        setCheckedTargets((prev) => ({ ...prev, [key]: e.target.checked }));
+                                      }}
+                                      className="mt-1 w-4 h-4 accent-[#2563EB] shrink-0 disabled:opacity-40"
+                                    />
+                                  ) : (
+                                    <span className="mt-1 w-4 h-4 shrink-0" aria-hidden />
                                   )}
+                                  <span className="text-[12px] text-gray-400 mt-0.5">{ii + 1}.</span>
+                                  <div className="flex-1">
+                                    <div className="text-[14px] text-[#374151] leading-relaxed">
+                                      {it.title || "（無題）"}
+                                      {it.required ? <span className="text-red-500 ml-1">*</span> : null}
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                                      <span className="text-[11px] text-gray-500 bg-gray-100 rounded px-2 py-0.5">
+                                        {ITEM_TYPE_LABEL[it.type ?? ""] ?? it.type ?? "—"}
+                                      </span>
+                                      {it.choices && it.choices.length > 0 && (
+                                        <span className="text-[11px] text-gray-400">
+                                          選択肢: {it.choices.join(" / ")}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {it.help_text && (
+                                      <div className="mt-1 text-[11px] text-gray-400">{it.help_text}</div>
+                                    )}
+                                  </div>
                                 </div>
-                                {it.help_text && (
-                                  <div className="mt-0.5 text-[10px] text-gray-400">{it.help_text}</div>
-                                )}
-                              </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  ))
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
-              {isRegenerating && (
-                <div className="mb-3 flex items-center justify-center gap-2 text-[12px] text-blue-700">
-                  <span className="inline-block w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-                  質問を再生成中...
+              {/* 指示チャット欄＋部分再生成 */}
+              <div className="mb-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+                <label className="block text-[13px] font-medium text-[#374151] mb-1.5">
+                  指示で再生成
+                  {checkedCount > 0 ? (
+                    <span className="ml-2 text-[12px] text-blue-600 font-normal">チェック中: {checkedCount} 問</span>
+                  ) : (
+                    <span className="ml-2 text-[12px] text-gray-400 font-normal">（チェックなし＝AI生成質問全体が対象）</span>
+                  )}
+                </label>
+                <textarea
+                  value={regenerateInstruction}
+                  onChange={(e) => {
+                    setRegenerateInstruction(e.target.value);
+                    setRegenerateNotice(null);
+                  }}
+                  disabled={isRegenerating}
+                  rows={2}
+                  placeholder="チェックした質問をどう直したいか入力（例: もっと専門的に／この2問を1つに）"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-100 resize-y"
+                />
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    onClick={handleRegenerateTargeted}
+                    disabled={!canRegenerate}
+                    className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isRegenerating ? "再生成中..." : "この内容で再生成"}
+                  </button>
+                  {isRegenerating && (
+                    <span className="flex items-center gap-2 text-[12px] text-blue-700">
+                      <span className="inline-block w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                      質問を再生成中...
+                    </span>
+                  )}
+                  {regenerateNotice && !isRegenerating && (
+                    <span className="text-[12px] text-gray-500">{regenerateNotice}</span>
+                  )}
                 </div>
-              )}
+              </div>
 
-              <div className="flex gap-2 pt-2 border-t border-gray-200">
+              <div className="flex gap-2 pt-3 border-t border-gray-200">
                 <button
                   onClick={handleClose}
                   disabled={isRegenerating}
-                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50"
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50"
                 >
                   閉じる
                 </button>
                 <button
                   onClick={handleRegenerate}
                   disabled={isRegenerating}
-                  className="flex-1 border border-[#2563EB] text-[#2563EB] bg-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-blue-50 disabled:opacity-50"
+                  className="flex-1 border border-[#2563EB] text-[#2563EB] bg-white rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-blue-50 disabled:opacity-50"
                 >
-                  {isRegenerating ? "再生成中..." : "やり直し（再生成）"}
+                  {isRegenerating ? "再生成中..." : "最初から作り直し"}
                 </button>
                 <button
                   onClick={handleConfirmCreate}
                   disabled={isRegenerating || sections.length === 0}
-                  className="flex-1 bg-[#16A34A] text-white rounded-md px-3 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50"
+                  className="flex-1 bg-[#16A34A] text-white rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50"
                 >
                   フォーム作成
                 </button>
