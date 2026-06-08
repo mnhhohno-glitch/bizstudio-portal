@@ -2,6 +2,7 @@
 // 保存は月目標のみ（週按分は表示時に businessDays.ts で計算）。数・率は Float（小数保持）。
 
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 
@@ -44,6 +45,7 @@ interface TargetBody {
   acceptanceRate: number;
   proposalPerPerson?: number | null; // 紹介の1人あたり件数（任意）
   firstInterviewRatio?: number | null; // 合計面談に占める初回面談の割合 0〜1（任意）
+  weeklyOverrides?: { firstInterview: (number | null)[]; existingInterview: (number | null)[] } | null; // 週按分の手動調整（任意）
 }
 
 const NUM_FIELDS: (keyof TargetBody)[] = [
@@ -88,6 +90,10 @@ export async function POST(req: Request) {
     acceptanceRate: body.acceptanceRate,
     proposalPerPerson: optional(body.proposalPerPerson),
     firstInterviewRatio: optional(body.firstInterviewRatio),
+    // 週按分の手動調整（初回/既存面談）。未調整（null）なら自動配分（JSON null として保存）。
+    weeklyOverrides: body.weeklyOverrides
+      ? (body.weeklyOverrides as unknown as Prisma.InputJsonValue)
+      : Prisma.JsonNull,
   };
 
   const target = await prisma.performanceTarget.upsert({

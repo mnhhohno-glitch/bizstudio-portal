@@ -279,6 +279,9 @@ model PerformanceTarget {
   offerRate        Float @map("offer_rate") // 書類通過→内定
   acceptanceRate   Float @map("acceptance_rate") // 内定→承諾
 
+  // 週按分の手動調整値（初回/既存面談のみ）。{ firstInterview:[w1,..], existingInterview:[w1,..] }（未調整週は null）。T-073 PhaseC 追加・nullable。
+  weeklyOverrides Json? @map("weekly_overrides")
+
   createdBy String?  @map("created_by")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

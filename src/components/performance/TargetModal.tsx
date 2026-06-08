@@ -65,6 +65,9 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   const [unitPrice, setUnitPrice] = useState<string>("");
   const [proposalPerPerson, setProposalPerPerson] = useState<string>(""); // 紹介の1人あたり件数（手入力）
   const [firstInterviewRatio, setFirstInterviewRatio] = useState<string>(""); // 合計面談に占める初回面談の割合（%手入力）
+  // 週按分の手動調整（初回/既存面談のみ。null=未調整＝自動配分）。各週の文字列で持つ。
+  const [ovFirst, setOvFirst] = useState<(string | null)[]>([]);
+  const [ovExisting, setOvExisting] = useState<(string | null)[]>([]);
   const [rates, setRates] = useState({
     acceptanceRate: "", offerRate: "", documentPassRate: "", entryRate: "", introductionRate: "",
   });
@@ -83,6 +86,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
         fetch(`/api/performance/target?employeeId=${employeeId}&yearMonth=${yearMonth}`),
       ]);
       if (refRes.ok) setReference((await refRes.json()).reference ?? null);
+      const wlen = weeklyBusinessDays(yearMonth).length;
+      const nulls = (): (string | null)[] => Array.from({ length: wlen }, () => null);
       if (tgtRes.ok) {
         const t = (await tgtRes.json()).target;
         if (t) {
@@ -97,8 +102,15 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
             entryRate: t.entryRate != null ? String(t.entryRate * 100) : "",
             introductionRate: t.introductionRate != null ? String(t.introductionRate * 100) : "",
           });
+          // 週按分の手動調整を復元（週数が一致するときのみ。違えば自動配分）。
+          const wo = t.weeklyOverrides as { firstInterview?: (number | null)[]; existingInterview?: (number | null)[] } | null;
+          const toStr = (arr?: (number | null)[]) => (Array.isArray(arr) && arr.length === wlen ? arr.map((v) => (v == null ? null : String(v))) : nulls());
+          setOvFirst(toStr(wo?.firstInterview));
+          setOvExisting(toStr(wo?.existingInterview));
+        } else {
+          setOvFirst(nulls()); setOvExisting(nulls());
         }
-      }
+      } else { setOvFirst(nulls()); setOvExisting(nulls()); }
     } catch { /* noop */ } finally { setLoadingRef(false); }
   }, [employeeId, yearMonth]);
 
@@ -164,6 +176,13 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           acceptanceRate: calcInput.acceptanceRate,
           proposalPerPerson: parseFloat(proposalPerPerson) || null,
           firstInterviewRatio: ratioFrac,        // 合計面談に占める初回の割合（0〜1）
+          // 週按分の手動調整（初回/既存面談）。未調整なら null（＝自動配分）。
+          weeklyOverrides: (ovFirst.some((v) => v != null && v !== "") || ovExisting.some((v) => v != null && v !== ""))
+            ? {
+                firstInterview: ovFirst.map((v) => (v == null || v === "" ? null : (parseFloat(v) || 0))),
+                existingInterview: ovExisting.map((v) => (v == null || v === "" ? null : (parseFloat(v) || 0))),
+              }
+            : null,
         }),
       });
       if (res.ok) { setSavedMsg("保存しました"); setTimeout(() => onClose(), 600); }
@@ -189,10 +208,25 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   const ppNum = parseFloat(proposalPerPerson);
   const introducedRecs = result.introductionCount != null && Number.isFinite(result.introductionCount) && ppNum > 0
     ? result.introductionCount * ppNum : null;
-  // 合計面談の週按分（初回/既存の各週内訳の母数）。
+  // 合計面談の週按分（初回/既存の各週内訳の母数＝自動配分）。
   const allocTotalIv = weeklyFor(targetCounts.interviewTotal ?? null);
   // 各週の率/係数は月固定（週で変えない）→ 各週同じ値を表示。
   const introRatePct = pct(calcInput.introductionRate);
+
+  // 週按分の手動調整：各週の実効値＝手動値があればそれ、無ければ自動配分。
+  const autoFirst = (i: number) => (allocTotalIv ? allocTotalIv[i] * ratioFrac : null);
+  const autoExisting = (i: number) => (allocTotalIv ? allocTotalIv[i] * (1 - ratioFrac) : null);
+  const effFirst = (i: number): number | null => { const o = ovFirst[i]; return o != null && o !== "" ? (parseFloat(o) || 0) : autoFirst(i); };
+  const effExisting = (i: number): number | null => { const o = ovExisting[i]; return o != null && o !== "" ? (parseFloat(o) || 0) : autoExisting(i); };
+  const effTotal = (i: number): number | null => { const f = effFirst(i), e = effExisting(i); return f == null || e == null ? null : f + e; };
+  const sumFirst = weeks.reduce((s, _w, i) => s + (effFirst(i) ?? 0), 0);
+  const sumExisting = weeks.reduce((s, _w, i) => s + (effExisting(i) ?? 0), 0);
+  const sumTotalIv = sumFirst + sumExisting;
+  const hasOverride = ovFirst.some((v) => v != null && v !== "") || ovExisting.some((v) => v != null && v !== "");
+  // 超過：手動調整時のみ判定。初回+既存の週合計が月の合計面談目標を超えたらエラー（保存ブロック）。
+  const monthIvTarget = targetCounts.interviewTotal;
+  const ivOver = hasOverride && monthIvTarget != null && Number.isFinite(monthIvTarget) && sumTotalIv > monthIvTarget + 0.5;
+  const resetWeekly = () => { setOvFirst(weeks.map(() => null)); setOvExisting(weeks.map(() => null)); };
 
   // 統合表の行モデル。
   //   kind: count=逆算自動(青字) / rate=率%手入力 / pp=1人あたり件数手入力 / recs=件数自動(青字) / fipct=初回%手入力。
@@ -206,22 +240,27 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
     targetValue?: number | null; rateKey?: RateKey | null; targetText?: string;
     week: Wmode; weekTarget?: number | null;
     weekText?: (i: number) => string; monthText?: string;
+    weekInput?: { value: (i: number) => string; onChange: (i: number, v: string) => void }; // 週セルを手入力可に（初回/既存面談）
+    monthOver?: boolean; // 月計が月目標超過（赤表示）
   }[] = [
-    // 面談：合計面談（逆算の母数・週按分対象）→ 初回%（手入力・内訳）→ 初回面談 → 既存面談。
-    // 初回/既存は合計面談×初回%の内訳で、逆算チェーンには影響しない。参考値括弧内は合計面談に占める構成比。
+    // 面談：合計面談（＝初回+既存の週合計・直接編集不可）→ 初回%（内訳率）→ 初回面談（手入力可）→ 既存面談（手入力可）。
+    // 初回/既存は手入力で週調整可。未調整の週は自動配分（合計面談按分×初回%／×(1-初回%)）。合計面談（各週）＝初回+既存。
     { key: "interviewTotal", label: "合計面談", kind: "count",
       ref: (b) => (b ? `${fmtCount(b.interviewTotal)}（${pct(b.interviewTotal > 0 ? 1 : null)}）` : "—"),
-      targetValue: targetCounts.interviewTotal, week: "alloc", weekTarget: targetCounts.interviewTotal },
+      targetValue: targetCounts.interviewTotal, week: "empty",
+      weekText: (i) => fmtCount(effTotal(i)), monthText: fmtCount(sumTotalIv), monthOver: ivOver },
     { key: "firstRatio", label: "初回面談率（内訳）", indent: true, kind: "fipct",
       ref: (b) => (b ? pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null) : "—"), week: "empty" },
     { key: "interviewFirst", label: "初回面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.metrics.firstInterviewExecuted)}（${pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null)}）` : "—"),
       targetValue: targetCounts.interviewFirst, week: "empty",
-      weekText: (i) => (allocTotalIv ? fmtCount(allocTotalIv[i] * ratioFrac) : "—"), monthText: fmtCount(targetCounts.interviewFirst ?? null) },
+      weekInput: { value: (i) => { const o = ovFirst[i]; const v = o != null && o !== "" ? o : (autoFirst(i) != null ? String(Math.round((autoFirst(i) as number) * 10) / 10) : ""); return v; }, onChange: (i, v) => setOvFirst((s) => { const n = [...s]; n[i] = v === "" ? null : v; return n; }) },
+      monthText: fmtCount(sumFirst) },
     { key: "interviewExisting", label: "既存面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.interviewExisting)}（${pct(b.interviewTotal > 0 ? b.interviewExisting / b.interviewTotal : null)}）` : "—"),
       targetValue: targetCounts.interviewExisting, week: "empty",
-      weekText: (i) => (allocTotalIv ? fmtCount(allocTotalIv[i] * (1 - ratioFrac)) : "—"), monthText: fmtCount(targetCounts.interviewExisting ?? null) },
+      weekInput: { value: (i) => { const o = ovExisting[i]; const v = o != null && o !== "" ? o : (autoExisting(i) != null ? String(Math.round((autoExisting(i) as number) * 10) / 10) : ""); return v; }, onChange: (i, v) => setOvExisting((s) => { const n = [...s]; n[i] = v === "" ? null : v; return n; }) },
+      monthText: fmtCount(sumExisting) },
     { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
     { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty",
       weekText: () => (calcInput.introductionRate > 0 ? introRatePct : "—"), monthText: calcInput.introductionRate > 0 ? introRatePct : "—" },
@@ -348,13 +387,16 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                             <span className="text-[11px] text-[#C0C4CC]">—</span>
                           )}
                         </td>
-                        {/* 週按分 */}
+                        {/* 週按分（初回/既存面談は手入力可） */}
                         {weeks.map((w, i) => (
-                          <td key={w.weekIndex} className={`px-2 ${padY} text-right tabular-nums text-[#374151] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
-                            {weekCell(i)}
+                          <td key={w.weekIndex} className={`px-1 ${padY} text-right tabular-nums text-[#374151] ${i === 0 ? "border-l border-[#F3F4F6]" : ""}`}>
+                            {row.weekInput ? (
+                              <input type="number" value={row.weekInput.value(i)} onChange={(e) => row.weekInput!.onChange(i, e.target.value)}
+                                className={`w-full max-w-[44px] border rounded px-0.5 py-0.5 text-[11px] text-right ${ivOver ? "border-red-400 bg-red-50" : "border-gray-200"}`} />
+                            ) : weekCell(i)}
                           </td>
                         ))}
-                        <td className={`px-2 ${padY} text-right tabular-nums font-medium text-[#374151]`}>
+                        <td className={`px-2 ${padY} text-right tabular-nums font-medium ${row.monthOver ? "text-red-600" : "text-[#374151]"}`}>
                           {row.monthText ?? (row.week === "alloc" ? fmtCount(row.weekTarget ?? null) : row.week === "dash" ? "—" : "")}
                         </td>
                       </tr>
@@ -365,18 +407,24 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
             </div>
             <p className="mt-1.5 text-[10px] text-[#9CA3AF]">
               数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。**面談は紹介÷紹介率＝合計面談が逆算の母数**。初回面談＝合計面談×初回%（手入力）、既存面談＝残り（内訳・逆算非影響）。紹介件数＝紹介人数×1人あたり件数（手入力）。
-              週按分は合計面談・紹介（人数・件数）・エントリー（各週切り上げ・最終週で帳尻、合計＝月計）。各週の初回/既存面談＝合計面談の週按分×初回%、1人あたり件数・紹介率は月固定値を各週表示。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。売上単価（決定単価）は参考値＝実績の決定売上÷決定数（売上未記録期間は「—」）。
+              週按分は合計面談・紹介（人数・件数）・エントリー（各週切り上げ・最終週で帳尻、合計＝月計）。**初回面談・既存面談は各週セルを手入力で調整可**（合計面談＝初回+既存で自動更新）。未調整の週は自動配分（合計面談の週按分×初回%）。1人あたり件数・紹介率は月固定値を各週表示。書類通過・内定・承諾は週按分しない（「—」）。売上単価（決定単価）は参考値＝実績の決定売上÷決定数（売上未記録期間は「—」）。
             </p>
+
+            {/* 週按分の手動調整：超過エラー＋自動配分に戻す */}
+            <div className="mt-1.5 flex items-center gap-3">
+              {ivOver && <span className="text-[11px] text-red-600 font-medium">⚠️ 面談のW合計（{fmtCount(sumTotalIv)}）が月目標（{fmtCount(monthIvTarget ?? null)}）を超えています。調整してください（保存不可）。</span>}
+              {hasOverride && <button onClick={resetWeekly} className="text-[11px] text-[#2563EB] border border-[#2563EB] rounded px-2 py-0.5 hover:bg-blue-50">面談の週按分を自動配分に戻す</button>}
+            </div>
 
             {/* 保存 */}
             <div className="mt-4 flex items-center gap-2">
-              <button onClick={handleSave} disabled={saving || !complete}
+              <button onClick={handleSave} disabled={saving || !complete || ivOver}
                 className="bg-[#16A34A] text-white rounded-lg px-5 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50">
                 {saving ? "保存中..." : "💾 目標を保存"}
               </button>
               <button onClick={onClose} className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-gray-50">閉じる</button>
               {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
-              {!complete && <span className="text-[10px] text-red-500 ml-auto">売上・単価・各率を入力すると人数が確定します。</span>}
+              {!complete && !ivOver && <span className="text-[10px] text-red-500 ml-auto">売上・単価・各率を入力すると人数が確定します。</span>}
             </div>
           </div>
         </div>
