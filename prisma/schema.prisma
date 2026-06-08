@@ -1638,6 +1638,10 @@ model InterviewRecord {
   lastEditedBy  String?   @map("last_edited_by")
   autosaveToken String?   @map("autosave_token")
 
+  // T-080: FileMaker 過去面談履歴の取り込み追跡・冪等判定用。FM の面談NO（例 "interview10116"）。
+  // 新規作成（portal 上の面談）では常に null。取り込みレコードのみ値を持つ。
+  legacyFmInterviewNo String? @map("legacy_fm_interview_no")
+
   detail        InterviewDetail?
   rating        InterviewRating?
   memos         InterviewMemo[]
@@ -1651,6 +1655,8 @@ model InterviewRecord {
   @@index([isLatest])
   // T-071: 実績表の CA 別期間集計（interviewerUserId = Employee.id × interviewDate レンジ）用
   @@index([interviewerUserId, interviewDate])
+  // T-080: 取り込み済み判定・追跡用
+  @@index([legacyFmInterviewNo])
   @@map("interview_records")
 }
 
