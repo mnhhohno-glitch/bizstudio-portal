@@ -331,6 +331,7 @@ model InterviewMemo {
   - 初回面談率（実施率＝実施÷予定）は `computeCaMetricsForRange` の値を維持（隣接段比ではない別指標）。
   - ⚠️ **紹介率の分母＝`matrix.interview.total`（合計面談＝first+second+thirdPlus）**。a1c0321 で `interview.first`（初回面談）を渡してしまい紹介率が 100% 超になっていたバグを修正（前月93.3%→47.5%、3か月106.4%→64.9% 等）。半年で依然 >100% になるのは**過去面談履歴の未インポート**が原因（紹介＝候補者ユニーク・面談＝レコード数の単位差ではなく、面談レコードが不足しているため）。データ投入後に正常化する。reference API は表示用に `interviewTotal`・`interviewExisting` も返す。
   - **逆算の面談＝合計面談が母数（T-073）**：`reverseCalc` の面談段＝`紹介÷紹介率＝合計面談（totalInterviewCount）`。合計面談を **初回%（`firstInterviewRatio` 手入力）** で内訳化＝初回面談（合計×初回%）／既存面談（合計×(1-初回%)）。内訳は逆算チェーンに影響しない。**保存：interviewCount＝初回面談**（実績表の達成率は初回実績と比較するため初回を保存）／**existingInterviewCount＝既存**／**firstInterviewRatio（0〜1・nullable・migration `20260608140000_t073_first_interview_ratio`）**。週按分は合計面談。表示順＝合計面談→初回%→初回面談→既存面談。
+  - **各週の内訳・率＋決定単価参考値（T-073 Phase A+B・表示のみ）**：週按分の各週に 初回面談＝合計面談の週按分×初回%・既存面談＝同×(1-初回%)（各週 初回+既存=合計面談按分）、1人あたり件数・紹介率は月固定値を各週表示。reference API は **`decidedUnitPrice`（決定売上÷決定数）** を返し、参考値テーブルに「売上単価（決定単価）」行を表示（売上未記録期間は「—」）。集計本体（computeWeeklyMatrix/allocateToWeeks）・按分対象・逆算・保存は不変。手動調整・超過エラー・週按分保存（weeklyOverrides）は未実装（Phase C・別タスク）。
   - `computeCaMetricsForRange`（日報の正本）自体は不変。reference が参照して参考値を組み替えるだけ（日報非波及）。
 - `GET /api/performance/target?employeeId=Y&yearMonth=YYYY-MM`：既存目標取得。
 - `POST /api/performance/target`：upsert（`employeeId_yearMonth`）。全数値フィールドの有限性を検証。

@@ -1084,6 +1084,8 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
   - **参考値**（`GET /api/performance/target/reference` 4期間）：数値の行＝実績数、率の行＝前段転換率（%）。
   - **面談は初回/既存/合計の3行＋構成比**（参考値側）：初回（first）／既存（second+thirdPlus）／合計（total）。各行に「人数（÷合計面談 の構成比）」を表示。初回面談率（実施率）は廃止。reference API は `interviewExisting`/`interviewTotal` を返す。
   - **逆算の面談＝合計面談が母数**（T-073）：`reverseCalc` の面談段＝`紹介÷紹介率＝totalInterviewCount`（紹介率は紹介÷合計面談に統一済み）。面談行の並びは **合計面談（逆算・週按分対象）→ 初回面談率（内訳・%手入力 `firstInterviewRatio`／kind="fipct"）→ 初回面談（=合計×初回%）→ 既存面談（=合計×(1-初回%)）**。初回/既存は内訳で逆算非影響。保存は **interviewCount＝初回面談**（達成率は初回実績と比較するため）・**existingInterviewCount＝既存**・**firstInterviewRatio＝初回%(0〜1)**。週按分は合計面談（旧・初回面談→合計に変更）。`firstInterviewRatio` は nullable カラム（migration `20260608140000_t073_first_interview_ratio`・冪等）。複数%入力（紹介率・1人あたり件数・初回%）が確定して初めて保存可（complete に ratioValid 追加）。
+  - **各週の内訳・率表示（Phase B）**：週按分（W1〜Wn）の各週に、初回面談＝合計面談の週按分(`allocateToWeeks`)×初回%・既存面談＝同×(1-初回%) を表示（各週 初回+既存=合計面談の按分値）。1人あたり件数・紹介率は月固定値を各週に表示。`funnelRows` の行に `weekText(i)`/`monthText`（empty 行でも週/月計に値を出す）を追加。按分対象・自動配分・逆算・保存は不変（表示のみ）。手動調整・超過エラーは未実装（Phase C・別タスク）。
+  - **売上単価（決定単価）の参考値（Phase A）**：参考値テーブルに「売上単価（決定単価）」行を追加。参考値＝実績の決定売上÷決定数（reference API が `matrix.selection.decidedUnitPrice` を返す。売上未記録期間は「—」）。目標セル＝上部で手入力した売上単価（`targetText` で ¥ 表示）。
   - **目標**：数値の行＝`reverseCalc` の逆算人数（自動・青字）、率の行＝率%手入力欄。
   - **紹介は3段**：紹介（人数）＝逆算自動／紹介率＝%手入力／**1人あたり件数＝件数手入力（新規、`proposalPerPerson`）**／**紹介（件数）＝紹介人数×1人あたり件数の自動算出（青字）**。1人あたり件数の参考値は実績の提案1人当たり（reference API が `computeWeeklyMatrix.proposal.total.perPerson` を返す）。
   - **週按分**：**初回面談・紹介（人数・件数）・エントリーのみ**（各週切り上げ・最終週帳尻・月計＝合計）。**書類通過・内定・承諾はタイミングが読めないため週按分しない（W列・月計とも「—」）**。率・係数の行は空（按分対象外）。

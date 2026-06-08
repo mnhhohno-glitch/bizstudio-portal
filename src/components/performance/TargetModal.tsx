@@ -21,7 +21,7 @@ type RangeMetrics = {
   offer: CountWithRate;
   acceptance: CountWithRate;
 };
-type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null; interviewExisting: number; interviewTotal: number };
+type RefBucket = { fromMonth: string; toMonth: string; metrics: RangeMetrics; proposalPerPerson: number | null; interviewExisting: number; interviewTotal: number; decidedUnitPrice: number | null };
 
 interface Props {
   isOpen: boolean;
@@ -36,6 +36,8 @@ const fmtCount = (v: number | null | undefined) =>
   v === null || v === undefined || !Number.isFinite(v) ? "—" : v.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
 const pct = (r: number | null | undefined) =>
   r === null || r === undefined ? "—" : `${(r * 100).toFixed(1)}%`;
+const yen = (v: number | null | undefined) =>
+  v === null || v === undefined || !Number.isFinite(v) ? "—" : `¥${Math.round(v).toLocaleString("ja-JP")}`;
 // 入力欄のカンマ表示（整数のみ）。保存・逆算は生の数字文字列で保持。
 const onlyDigits = (s: string) => s.replace(/[^\d]/g, "");
 const commaInt = (s: string) => { const d = onlyDigits(s); return d ? Number(d).toLocaleString("ja-JP") : ""; };
@@ -187,17 +189,23 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
   const ppNum = parseFloat(proposalPerPerson);
   const introducedRecs = result.introductionCount != null && Number.isFinite(result.introductionCount) && ppNum > 0
     ? result.introductionCount * ppNum : null;
+  // 合計面談の週按分（初回/既存の各週内訳の母数）。
+  const allocTotalIv = weeklyFor(targetCounts.interviewTotal ?? null);
+  // 各週の率/係数は月固定（週で変えない）→ 各週同じ値を表示。
+  const introRatePct = pct(calcInput.introductionRate);
 
   // 統合表の行モデル。
-  //   kind: count=逆算自動(青字) / rate=率%手入力 / pp=1人あたり件数手入力 / recs=件数自動(青字)。
-  //   week: alloc=週按分する(初回面談・紹介人数・紹介件数・エントリー) / dash=週按分しない「—」(書類通過以降) / empty=率・係数行で空。
+  //   kind: count=逆算自動(青字) / rate=率%手入力 / pp=1人あたり件数手入力 / recs=件数自動(青字) / fipct=初回%手入力。
+  //   week: alloc=週按分する(合計面談・紹介人数・紹介件数・エントリー) / dash=週按分しない「—」(書類通過以降) / empty=空。
+  //   weekText/monthText：empty 行でも各週/月計に表示する値（初回/既存の内訳・率の月固定値）。targetText：目標セルの表示上書き（¥など）。
   type Wmode = "alloc" | "dash" | "empty";
   const funnelRows: {
     key: string; label: string; indent?: boolean;
     kind: "count" | "rate" | "pp" | "recs" | "fipct";
     ref: (b: RefBucket | undefined) => string;
-    targetValue?: number | null; rateKey?: RateKey | null;
+    targetValue?: number | null; rateKey?: RateKey | null; targetText?: string;
     week: Wmode; weekTarget?: number | null;
+    weekText?: (i: number) => string; monthText?: string;
   }[] = [
     // 面談：合計面談（逆算の母数・週按分対象）→ 初回%（手入力・内訳）→ 初回面談 → 既存面談。
     // 初回/既存は合計面談×初回%の内訳で、逆算チェーンには影響しない。参考値括弧内は合計面談に占める構成比。
@@ -208,13 +216,17 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
       ref: (b) => (b ? pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null) : "—"), week: "empty" },
     { key: "interviewFirst", label: "初回面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.metrics.firstInterviewExecuted)}（${pct(b.interviewTotal > 0 ? b.metrics.firstInterviewExecuted / b.interviewTotal : null)}）` : "—"),
-      targetValue: targetCounts.interviewFirst, week: "empty" },
+      targetValue: targetCounts.interviewFirst, week: "empty",
+      weekText: (i) => (allocTotalIv ? fmtCount(allocTotalIv[i] * ratioFrac) : "—"), monthText: fmtCount(targetCounts.interviewFirst ?? null) },
     { key: "interviewExisting", label: "既存面談", indent: true, kind: "count",
       ref: (b) => (b ? `${fmtCount(b.interviewExisting)}（${pct(b.interviewTotal > 0 ? b.interviewExisting / b.interviewTotal : null)}）` : "—"),
-      targetValue: targetCounts.interviewExisting, week: "empty" },
+      targetValue: targetCounts.interviewExisting, week: "empty",
+      weekText: (i) => (allocTotalIv ? fmtCount(allocTotalIv[i] * (1 - ratioFrac)) : "—"), monthText: fmtCount(targetCounts.interviewExisting ?? null) },
     { key: "introduction", label: "紹介（人数）", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.jobIntroduced) : "—"), targetValue: targetCounts.introduction, week: "alloc", weekTarget: targetCounts.introduction },
-    { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty" },
-    { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty" },
+    { key: "introductionRate", label: "紹介率", indent: true, kind: "rate", rateKey: "introductionRate", ref: (b) => (b ? pct(b.metrics.jobIntroductionRate) : "—"), week: "empty",
+      weekText: () => (calcInput.introductionRate > 0 ? introRatePct : "—"), monthText: calcInput.introductionRate > 0 ? introRatePct : "—" },
+    { key: "perPerson", label: "1人あたり件数", indent: true, kind: "pp", ref: (b) => (b ? fmtCount(b.proposalPerPerson) : "—"), week: "empty",
+      weekText: () => (ppNum > 0 ? fmtCount(ppNum) : "—"), monthText: ppNum > 0 ? fmtCount(ppNum) : "—" },
     { key: "introductionRecs", label: "紹介（件数）", indent: true, kind: "recs", ref: (b) => (b && b.proposalPerPerson != null ? fmtCount(b.metrics.jobIntroduced * b.proposalPerPerson) : "—"), targetValue: introducedRecs, week: "alloc", weekTarget: introducedRecs },
     { key: "entry", label: "エントリー", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.entry.count) : "—"), targetValue: targetCounts.entry, week: "alloc", weekTarget: targetCounts.entry },
     { key: "entryRate", label: "エントリー率", indent: true, kind: "rate", rateKey: "entryRate", ref: (b) => (b ? pct(b.metrics.entry.rate) : "—"), week: "empty" },
@@ -224,6 +236,9 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
     { key: "offerRate", label: "内定率", indent: true, kind: "rate", rateKey: "offerRate", ref: (b) => (b ? pct(b.metrics.offer.rate) : "—"), week: "empty" },
     { key: "acceptance", label: "承諾", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.acceptance.count) : "—"), targetValue: targetCounts.acceptance, week: "dash" },
     { key: "acceptanceRate", label: "承諾率", indent: true, kind: "rate", rateKey: "acceptanceRate", ref: (b) => (b ? pct(b.metrics.acceptance.rate) : "—"), week: "empty" },
+    // 売上単価（決定単価）：参考値＝実績の決定売上÷決定数（matrix.selection.decidedUnitPrice）。目標＝上部で手入力した売上単価。
+    { key: "unitPrice", label: "売上単価（決定単価）", kind: "count", ref: (b) => (b ? yen(b.decidedUnitPrice) : "—"),
+      targetText: yen(parseFloat(unitPrice) || null), week: "empty" },
   ];
 
   const numNumericCols = REF_COLS.length + 1 + weeks.length + 1; // 参考値4 + 目標1 + 週N + 月計1
@@ -295,7 +310,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                     const alloc = row.week === "alloc" ? weeklyFor(row.weekTarget ?? null) : null;
                     const padY = isSub ? "py-1" : "py-1.5";
                     const weekCell = (i: number) =>
-                      row.week === "alloc" ? (alloc ? fmtCount(alloc[i]) : "—") : row.week === "dash" ? "—" : "";
+                      row.weekText ? row.weekText(i) // 内訳・率の各週表示（empty 行でも表示）
+                        : row.week === "alloc" ? (alloc ? fmtCount(alloc[i]) : "—") : row.week === "dash" ? "—" : "";
                     return (
                       <tr key={row.key} className={`${isSub ? "bg-[#FAFAFA]" : ""} ${!row.indent ? "border-t border-[#E5E7EB]" : ""}`}>
                         <td className={row.indent ? `pl-5 pr-2 ${padY} text-[#9CA3AF] text-[11px]` : `px-2 ${padY} text-[#374151] font-medium`}>{row.label}</td>
@@ -308,7 +324,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                         {/* 目標 */}
                         <td className={`px-1.5 ${padY} text-right border-l border-[#F3F4F6]`}>
                           {row.kind === "count" || row.kind === "recs" ? (
-                            <span className="tabular-nums font-semibold text-[#2563EB]">{fmtCount(row.targetValue ?? null)}</span>
+                            <span className="tabular-nums font-semibold text-[#2563EB]">{row.targetText ?? fmtCount(row.targetValue ?? null)}</span>
                           ) : row.kind === "pp" ? (
                             <span className="inline-flex items-center gap-0.5 justify-end">
                               <input type="number" value={proposalPerPerson} onChange={(e) => setProposalPerPerson(e.target.value)}
@@ -339,7 +355,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
                           </td>
                         ))}
                         <td className={`px-2 ${padY} text-right tabular-nums font-medium text-[#374151]`}>
-                          {row.week === "alloc" ? fmtCount(row.weekTarget ?? null) : row.week === "dash" ? "—" : ""}
+                          {row.monthText ?? (row.week === "alloc" ? fmtCount(row.weekTarget ?? null) : row.week === "dash" ? "—" : "")}
                         </td>
                       </tr>
                     );
@@ -349,7 +365,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
             </div>
             <p className="mt-1.5 text-[10px] text-[#9CA3AF]">
               数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。**面談は紹介÷紹介率＝合計面談が逆算の母数**。初回面談＝合計面談×初回%（手入力）、既存面談＝残り（内訳・逆算非影響）。紹介件数＝紹介人数×1人あたり件数（手入力）。
-              週按分は合計面談・紹介（人数・件数）・エントリーのみ（各週切り上げ・最終週で帳尻、合計＝月計）。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。
+              週按分は合計面談・紹介（人数・件数）・エントリー（各週切り上げ・最終週で帳尻、合計＝月計）。各週の初回/既存面談＝合計面談の週按分×初回%、1人あたり件数・紹介率は月固定値を各週表示。書類通過・内定・承諾はタイミングが読めないため週按分しない（「—」）。売上単価（決定単価）は参考値＝実績の決定売上÷決定数（売上未記録期間は「—」）。
             </p>
 
             {/* 保存 */}
