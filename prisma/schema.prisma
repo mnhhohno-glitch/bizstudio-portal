@@ -1290,6 +1290,12 @@ model AdvisorChatMessage {
 // エントリー履歴
 // ========================================
 
+// T-088: 承諾レコードの課金方式。年収％（理論年収×手数料%）か固定金額。
+enum FeeType {
+  ANNUAL_RATE
+  FIXED
+}
+
 model JobEntry {
   id          String    @id @default(cuid())
   candidateId String    @map("candidate_id")
@@ -1362,6 +1368,12 @@ model JobEntry {
   referralFee       Int? @map("referral_fee")
   revenue           Int? @map("revenue")
   grossProfit       Int? @map("gross_profit")
+  // T-088: 課金方式（年収％ or 固定金額）。承諾レコードで選択。null=未設定（既存 revenue ありは固定扱いで後方互換）。
+  feeType                 FeeType? @map("fee_type")
+  // T-088: 年収％方式のときの理論年収（円・整数）。固定方式 or 未設定なら null。
+  theoreticalAnnualIncome Int?     @map("theoretical_annual_income")
+  // T-088: 年収％方式のときの手数料%（0〜100、小数2桁。例 35.00）。固定方式 or 未設定なら null。
+  feeRatePercent          Decimal? @map("fee_rate_percent") @db.Decimal(5, 2)
 
   // === 応募経路 ===
   route String?

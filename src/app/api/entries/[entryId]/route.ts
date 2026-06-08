@@ -47,6 +47,8 @@ export async function PATCH(
     "offerMeetingDate", "offerMeetingTime", "acceptanceDate", "joinDate",
     "memo", "isActive", "careerAdvisorId", "entryDate", "jobDbUrl",
     "archivedAt",
+    // T-088: 課金方式（年収％/固定）と粗利関連。revenue はサーバー側で確定計算する（後段）。
+    "feeType", "theoreticalAnnualIncome", "feeRatePercent", "revenue",
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,6 +62,38 @@ export async function PATCH(
       } else {
         data[key] = val;
       }
+    }
+  }
+
+  // T-088: 課金方式に応じてサーバー側で revenue を確定計算する（SSoT保証・改ざん防止）。
+  // ・feeType が body に来た場合のみ確定処理（部分更新で feeType を触らない PATCH は revenue を上書きしない）。
+  // ・feeType = "ANNUAL_RATE"：revenue = round(theoreticalAnnualIncome * feeRatePercent / 100)。
+  //   theoreticalAnnualIncome / feeRatePercent はそのまま保存。どちらか欠ければ revenue は null。
+  // ・feeType = "FIXED"：revenue = body.revenue（数値 or null）。theoreticalAnnualIncome / feeRatePercent は null。
+  // ・feeType = null：revenue は body の値をそのまま採用（後方互換：feeType 未設定でも固定金額として有効）。
+  if ("feeType" in body) {
+    const ft = data.feeType;
+    if (ft === "ANNUAL_RATE") {
+      const inc = data.theoreticalAnnualIncome;
+      // feeRatePercent は Decimal を文字列で受け取る可能性があるため Number 化
+      const rateRaw = data.feeRatePercent;
+      const rate = rateRaw == null ? null : Number(rateRaw);
+      if (typeof inc === "number" && inc > 0 && rate != null && Number.isFinite(rate) && rate > 0) {
+        data.revenue = Math.round((inc * rate) / 100);
+      } else {
+        data.revenue = null;
+      }
+    } else if (ft === "FIXED") {
+      // 固定方式：理論年収・%はクリア。revenue は body の値（数値 or null）。
+      data.theoreticalAnnualIncome = null;
+      data.feeRatePercent = null;
+      const rev = "revenue" in body ? body.revenue : null;
+      data.revenue = typeof rev === "number" && Number.isFinite(rev) ? Math.round(rev) : null;
+    } else if (ft === null) {
+      // 方式未設定にリセット：理論年収・%もクリア、revenue は body の値をそのまま（または null）。
+      data.theoreticalAnnualIncome = null;
+      data.feeRatePercent = null;
+      data.revenue = "revenue" in body && typeof body.revenue === "number" && Number.isFinite(body.revenue) ? Math.round(body.revenue) : null;
     }
   }
 

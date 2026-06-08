@@ -69,6 +69,12 @@ export type Entry = {
   firstInterviewGtaskId?: string | null;
   secondInterviewGtaskId?: string | null;
   finalInterviewGtaskId?: string | null;
+  // T-088: 課金方式（年収％/固定）と粗利関連。承諾 or 入社済レコードで入力可。
+  feeType?: "ANNUAL_RATE" | "FIXED" | null;
+  theoreticalAnnualIncome?: number | null;
+  // Decimal は JSON で string 化されることがあるので両方受ける
+  feeRatePercent?: number | string | null;
+  revenue?: number | null;
 };
 
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
