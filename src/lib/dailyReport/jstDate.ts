@@ -4,6 +4,32 @@
 // 日報の集計は「JST 当日の 0:00〜23:59:59.999」を Date 範囲で取る必要があり、
 // dailyAttendance のような @db.Date 用とは要件が違うので別関数を切る。
 
+import holiday_jp from "@holiday-jp/holiday_jp";
+
+/**
+ * T-084: JST 翌営業日（土日・祝日を除く翌日以降の最初の営業日）の "YYYY-MM-DD" を返す。
+ * holiday_jp で祝日判定。壁時計日付の (y, m-1, d, 12) で曜日・祝日を判定（DST 無しの JST で安全）。
+ * 罠 #17：toISOString().slice(0,10) は使わない。
+ */
+export function nextBusinessDayJst(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map((s) => parseInt(s, 10));
+  // 起点：表示日の翌日から探索開始
+  let cur = new Date(y, m - 1, d, 12, 0, 0);
+  cur.setDate(cur.getDate() + 1);
+  // 最大 14 日見て営業日を見つける（連休でも安全側）
+  for (let i = 0; i < 14; i++) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6 && !holiday_jp.isHoliday(cur)) {
+      const yy = cur.getFullYear(), mm = String(cur.getMonth() + 1).padStart(2, "0"), dd = String(cur.getDate()).padStart(2, "0");
+      return `${yy}-${mm}-${dd}`;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  // 連休 14 日でも見つからない異常系：翌日固定で返す
+  const fb = new Date(y, m - 1, d, 12, 0, 0); fb.setDate(fb.getDate() + 1);
+  return `${fb.getFullYear()}-${String(fb.getMonth() + 1).padStart(2, "0")}-${String(fb.getDate()).padStart(2, "0")}`;
+}
+
 /**
  * JST 現在時刻の日付文字列を "YYYY-MM-DD" で返す。
  * toISOString().slice(0,10) は UTC 基準で 9 時間ずれるので絶対に使わない（罠 #17）。

@@ -35,6 +35,9 @@ interface ScheduleChatDrawerProps {
   existingEntries: Entry[];
   calendarEvents: CalendarEvent[];
   onSave: (entries: Entry[], summary: string) => void;
+  // T-084: 明日枠用に対象日を変更できるようにする（デフォルト=翌営業日、変更で再同期）。
+  allowDateChange?: boolean;
+  onDateChange?: (newDate: string) => void;
 }
 
 export default function ScheduleChatDrawer({
@@ -45,6 +48,8 @@ export default function ScheduleChatDrawer({
   existingEntries,
   calendarEvents,
   onSave,
+  allowDateChange,
+  onDateChange,
 }: ScheduleChatDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentEntries, setCurrentEntries] = useState<Entry[]>(existingEntries);
@@ -94,8 +99,9 @@ export default function ScheduleChatDrawer({
         timestamp: new Date(),
       }]);
     }
+  // T-084: 日付・カレンダーが変わったら welcome を作り直し（明日枠で日付変更→カレンダー再取得が反映される）
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, date, calendarEvents]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -213,11 +219,28 @@ export default function ScheduleChatDrawer({
         }`}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 shrink-0 flex-wrap">
           <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
           <h2 className="text-[14px] font-semibold text-[#374151]">
             📅 {dateLabel}のスケジュールを作成
           </h2>
+          {/* T-084: 明日枠のときだけ対象日変更＋カレンダー再同期 */}
+          {allowDateChange && onDateChange && (
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-[#6B7280]">対象日</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => { if (e.target.value) onDateChange(e.target.value); }}
+                className="text-[12px] border border-gray-300 rounded px-1.5 py-0.5"
+              />
+              <button
+                onClick={() => onDateChange(date)}
+                title="この日のGoogleカレンダー予定を再取得"
+                className="text-[11px] border border-[#2563EB] text-[#2563EB] rounded px-1.5 py-0.5 hover:bg-blue-50"
+              >🔄 再同期</button>
+            </div>
+          )}
         </div>
 
         {/* Chat area */}

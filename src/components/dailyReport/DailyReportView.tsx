@@ -7,6 +7,7 @@
 // ②LINE通知・③AI壁打ちは別タスク。所感は CA×日付で素直に保存（AIに渡せる構造）。
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { nextBusinessDayJst } from "@/lib/dailyReport/jstDate";
 import ScheduleEntryFormModal, { type EditEntryData } from "@/components/schedule/ScheduleEntryFormModal";
 import ScheduleChatDrawer from "@/components/schedule/ScheduleChatDrawer";
 import CalendarConnectButton from "@/components/schedule/CalendarConnectButton";
@@ -142,8 +143,15 @@ export default function DailyReportView() {
   // ＋追加/AI/同期 が今日の scheduleId に紐付くと当日実績の母数に明日予定が混入するため、
   // 明日操作は必ず tomorrowSched.id へルーティングする。
   const [tomorrowSched, setTomorrowSched] = useState<Schedule | null>(null);
+  // T-084: 明日枠の対象日。デフォルト=翌営業日(土日祝スキップ・holiday_jp)。
+  // ユーザーがAIドロワー内で変更したら更新され、tomorrowSched/tomorrowCalEvents を再フェッチ。
+  const [tomorrowDate, setTomorrowDate] = useState<string>(() => nextBusinessDayJst(date));
+  // 表示日(date)が変わったら翌営業日を再計算（ユーザーがドロワーで上書きした値はそのとき破棄）。
+  useEffect(() => { setTomorrowDate(nextBusinessDayJst(date)); }, [date]);
   const [calConnected, setCalConnected] = useState(false);
   const [calEvents, setCalEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
+  // T-084: 明日枠用の別 calendar events（当日の calEvents と分離。AIドロワーが当日カレンダーを出すバグの修正）。
+  const [tomorrowCalEvents, setTomorrowCalEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
   // T-082: モーダル/ドロワーは今日/明日のどちらに対する操作かを target で持つ。
   const [entryModalTarget, setEntryModalTarget] = useState<"today" | "tomorrow" | null>(null);
   const [editingEntry, setEditingEntry] = useState<EditEntryData | null>(null);
@@ -186,24 +194,32 @@ export default function DailyReportView() {
 
   // スケジュール（予定・実績）取得。既存 /api/schedule?date= を流用（schedule.id・entries）。
   // T-082: 明日の DailySchedule も同時に取得（明日操作を tomorrowSched.id にルーティングするため）。
+  // T-084: 明日対象日は tomorrowDate（翌営業日デフォルト・ドロワーで可変）を使う。
   const fetchSchedule = useCallback(async () => {
     try {
-      const tomorrowStr = shiftDate(date, 1);
       const [t, m] = await Promise.all([
         fetch(`/api/schedule?date=${date}`),
-        fetch(`/api/schedule?date=${tomorrowStr}`),
+        fetch(`/api/schedule?date=${tomorrowDate}`),
       ]);
       if (t.ok) setSched((await t.json()).schedule ?? null);
       if (m.ok) setTomorrowSched((await m.json()).schedule ?? null);
     } catch { /* */ }
-  }, [date]);
+  }, [date, tomorrowDate]);
   const fetchCalendar = useCallback(async () => {
     try {
       const res = await fetch(`/api/calendar/events?date=${date}`);
       if (res.ok) { const d = await res.json(); setCalConnected(!!d.connected); setCalEvents(d.events ?? []); }
     } catch { /* */ }
   }, [date]);
+  // T-084: 明日対象日（tomorrowDate）のカレンダー予定を取得。ドロワーで日付が変わるたび再取得。
+  const fetchTomorrowCalendar = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/calendar/events?date=${tomorrowDate}`);
+      if (res.ok) { const d = await res.json(); setTomorrowCalEvents(d.events ?? []); }
+    } catch { /* */ }
+  }, [tomorrowDate]);
   useEffect(() => { void fetchSchedule(); void fetchCalendar(); }, [fetchSchedule, fetchCalendar]);
+  useEffect(() => { void fetchTomorrowCalendar(); }, [fetchTomorrowCalendar]);
 
   // schedule が無ければ空で作成して id を返す（手動追加・既存 handleOpenAddModal と同じ）。
   // T-082: 今日/明日 target で対象 DailySchedule を確保。明日操作は tomorrowSched に紐付けて
@@ -211,7 +227,7 @@ export default function DailyReportView() {
   const ensureSchedule = async (target: "today" | "tomorrow"): Promise<string | null> => {
     const cur = target === "today" ? sched : tomorrowSched;
     if (cur) return cur.id;
-    const targetDate = target === "today" ? date : shiftDate(date, 1);
+    const targetDate = target === "today" ? date : tomorrowDate;
     try {
       const res = await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: targetDate, entries: [] }) });
       if (res.ok) { const s = (await res.json()).schedule; await fetchSchedule(); return s?.id ?? null; }
@@ -239,7 +255,7 @@ export default function DailyReportView() {
   const handleAiSave = async (target: "today" | "tomorrow", entries: { startTime: string; endTime: string; title: string; note?: string | null; tag: string; tagColor: string; sortOrder: number }[], summary: string) => {
     const formatted = entries.map((e, i) => ({ startTime: e.startTime, endTime: e.endTime, title: e.title, note: e.note || null, tag: e.tag, tagColor: e.tagColor, entryType: "AI_GENERATED", sortOrder: e.sortOrder ?? i }));
     const cur = target === "today" ? sched : tomorrowSched;
-    const targetDate = target === "today" ? date : shiftDate(date, 1);
+    const targetDate = target === "today" ? date : tomorrowDate;
     try {
       if (cur) await fetch(`/api/schedule/${cur.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summary, entries: formatted }) });
       else await fetch("/api/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: targetDate, summary, entries: formatted }) });
@@ -448,7 +464,7 @@ export default function DailyReportView() {
         {/* 明日：当日枠と同じ＋追加/AI/同期＋編集/削除。tomorrowSched.id にルーティングし当日実績の母数に混入させない（T-082） */}
         <div className="border border-[#E5E7EB] rounded-lg overflow-hidden flex flex-col">
           <div className="bg-[#3C3C3C] text-white px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5 flex-wrap">
-            <span>明日の予定（{data ? mdLabel(data.tomorrowDate) : ""}）</span>
+            <span>明日の予定（{mdLabel(tomorrowDate)}・翌営業日）</span>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={() => handleAddEntry("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">＋追加</button>
               <button onClick={() => setAiDrawerTarget("tomorrow")} className="text-[11px] bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5">✏️AI</button>
@@ -613,11 +629,13 @@ export default function DailyReportView() {
       <ScheduleChatDrawer
         isOpen={aiDrawerTarget !== null}
         onClose={() => setAiDrawerTarget(null)}
-        date={aiDrawerTarget === "tomorrow" ? shiftDate(date, 1) : date}
+        date={aiDrawerTarget === "tomorrow" ? tomorrowDate : date}
         scheduleId={(aiDrawerTarget === "tomorrow" ? tomorrowSched?.id : sched?.id) ?? null}
         existingEntries={(aiDrawerTarget === "tomorrow" ? (tomorrowSched?.entries ?? []) : schedEntries).map((e) => ({ startTime: e.startTime, endTime: e.endTime, title: e.title, note: e.note ?? null, tag: e.tag ?? "", tagColor: e.tagColor ?? "#6B7280", sortOrder: e.sortOrder ?? 0 }))}
-        calendarEvents={calEvents}
+        calendarEvents={aiDrawerTarget === "tomorrow" ? tomorrowCalEvents : calEvents}
         onSave={(entries, summary) => handleAiSave(aiDrawerTarget ?? "today", entries, summary)}
+        allowDateChange={aiDrawerTarget === "tomorrow"}
+        onDateChange={aiDrawerTarget === "tomorrow" ? (newDate) => { setTomorrowDate(newDate); } : undefined}
       />
     </div>
   );
