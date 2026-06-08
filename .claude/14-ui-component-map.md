@@ -2,6 +2,35 @@
 
 頻出修正対象の UI コンポーネントの内部構造マップ。実装着手前にここで構造を把握し、毎回の Cursor 経由構造調査を削減する。
 
+## 支援フラグの source of truth（T-080）
+
+- 「フラグ」＝`Candidate.supportStatus`（テーブル `candidates.support_status`、デフォルト `"BEFORE"`）。**求職者単位**で1つ。面談単位ではない。
+- 正規値定義：`src/lib/support-status-constants.ts` の `SUPPORT_STATUS_VALUES = ["BEFORE","ACTIVE","WAITING","ENDED","ARCHIVED"]`。表示ラベルは `SUPPORT_STATUS_LABEL`（BEFORE=支援前 / ACTIVE=支援中 / WAITING=待機 / ENDED=支援終了 / ARCHIVED=アーカイブ）。
+- 中項目：`Candidate.supportSubStatus`（許可値は `SUPPORT_SUB_STATUS_MAP`）。`supportSubStatusManual=true` のとき手動上書き済みで、自動再計算ロジックは触らない。
+- 自動再計算ヘルパ：`src/lib/support-sub-status.ts`
+  - `calculateSubStatus(candidateId)`：JobEntry/CandidateFile から ACTIVE 時の中項目を自動判定（入社済/内定/面接/書類選考/エントリー/求人紹介/BM/求人紹介前）
+  - `resetSubStatusForStatus(candidateId, supportStatus)`：大項目変更時に中項目を整合（ACTIVE は計算、それ以外は `SUPPORT_SUB_STATUS_DEFAULT[supportStatus]`）
+  - `recalculateSubStatusIfAuto(candidateId)`：`supportStatus === "ACTIVE"` のときだけ supportSubStatus を再計算（エントリー操作等のトリガー）
+
+## resultFlag → supportStatus 自動マッピング（T-080）
+
+- **実装**: `src/lib/interview-result-to-status.ts`
+- **マッピング表** `RESULT_FLAG_TO_SUPPORT_STATUS`：
+  - 面談前 → BEFORE
+  - 連絡なし辞退 / 連絡あり辞退 / 支援終了_当社判断 / 支援終了_本人希望 → ENDED
+  - 求人紹介 送付前 / 求人紹介 送付済 / 継続 / 保留 → ACTIVE
+  - マッピング表に無い値 / null → **何もしない**（誤上書き防止）
+- **適用関数** `applyLatestInterviewResultToSupportStatus(candidateId)`：
+  - 「最新面談」＝`interviewCount` 最大（NULLS LAST）、同数なら `interviewDate` 最新。既存 `isLatest`（面談日のみ）とは別判定軸。
+  - 既に supportStatus が一致なら何もしない。
+  - `supportSubStatusManual=true` なら supportSubStatus は触らない。それ以外は ACTIVE は `calculateSubStatus` で自動判定、BEFORE/ENDED は `SUPPORT_SUB_STATUS_DEFAULT` にリセット。
+  - 例外は throw しない（保存処理本体を壊さないようログのみ）。
+- **適用タイミング**（resultFlag が書き込まれる3保存パスすべての**直後**）:
+  - `POST /api/interviews` (`src/app/api/interviews/route.ts`)：新規作成・コピー処理後
+  - `PATCH /api/interviews/[id]` (`src/app/api/interviews/[id]/route.ts`)：body に `resultFlag` キーがあるときのみ
+  - `PATCH /api/interviews/[id]/autosave` (`src/app/api/interviews/[id]/autosave/route.ts`)：body に `resultFlag` キーがあるときのみ。トランザクション外で実行
+- `recalculateSubStatusIfAuto` との関係：競合しない。本ロジックは status 変更時に supportSubStatus も整合させるので、結果的に同じ ACTIVE 用 `calculateSubStatus` を内部呼出しする形になる。エントリー操作等の他トリガーから `recalculateSubStatusIfAuto` が後で呼ばれても、ACTIVE 時のみ subStatus を再計算するだけで衝突しない。
+
 ## InterviewForm.tsx
 
 ### 基本情報

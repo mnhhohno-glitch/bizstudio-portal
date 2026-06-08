@@ -6,6 +6,7 @@ import { downloadFileFromDrive } from "@/lib/google-drive";
 import { supabase } from "@/lib/supabase";
 import { randomUUID } from "crypto";
 import { checkInputMissing } from "@/lib/interview-input-missing";
+import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
@@ -283,6 +284,9 @@ export async function POST(req: Request) {
   } else {
     await copyFromPreviousInterview(candidateId, record.id);
   }
+
+  // T-080: 最新面談の resultFlag に応じて Candidate.supportStatus を自動更新
+  await applyLatestInterviewResultToSupportStatus(candidateId);
 
   const freshRecord = await prisma.interviewRecord.findUnique({
     where: { id: record.id },

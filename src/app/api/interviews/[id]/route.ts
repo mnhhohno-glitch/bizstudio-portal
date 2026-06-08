@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { sanitizeDateTimeFields } from "@/lib/date-utils";
+import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
 
 export async function GET(
   _req: NextRequest,
@@ -86,6 +87,12 @@ export async function PATCH(
       interviewer: { select: { id: true, name: true } },
     },
   });
+
+  // T-080: resultFlag が変更された場合、最新面談基準で Candidate.supportStatus を自動更新。
+  // 変更が無くても候補者単位で最新面談を見直すだけなので副作用は小さい。
+  if (Object.prototype.hasOwnProperty.call(recordFields, "resultFlag")) {
+    await applyLatestInterviewResultToSupportStatus(record.candidateId);
+  }
 
   return NextResponse.json({ record });
 }
