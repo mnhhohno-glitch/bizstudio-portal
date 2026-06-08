@@ -503,6 +503,7 @@ export default function InterviewForm({
       setDetailState(loadedDetail);
       setRatingState(rec.rating || {});
       setAutosaveToken(rec.autosaveToken || null);
+      lastResultFlagRef.current = rec.resultFlag || "";
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
       // T-067: 添付は CandidateFile(MEETING) から別 fetch（fetchMeetingFiles）で取得
       setMemos(rec.memos || []);
@@ -594,6 +595,7 @@ export default function InterviewForm({
   const workHistoriesRef = useRef<WorkHistoryRecord[]>([]);
   const isDirtyRef = useRef(false);
   const autosaveTokenRef = useRef<string | null>(null);
+  const lastResultFlagRef = useRef<string>(""); // 直前に保存成功した resultFlag（変更検知用）
   const interviewIdRef = useRef<string>("");
   const currentUserIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -625,6 +627,11 @@ export default function InterviewForm({
         const data = await res.json();
         setLastSavedAt(new Date(data.lastSavedAt));
         setAutosaveToken(data.autosaveToken);
+        // resultFlag が変わった保存のとき候補者データを再取得（フラグ表示を自動更新・手動リロード不要に）。
+        if (f.resultFlag !== undefined && f.resultFlag !== lastResultFlagRef.current) {
+          lastResultFlagRef.current = f.resultFlag as string;
+          fetch(`/api/candidates/${candidateId}`).then((r) => r.ok ? r.json() : null).then((d) => { if (d?.candidate) setCandidate(d.candidate); }).catch(() => {});
+        }
       } else if (res.status === 409) {
         toast.error("他のセッションで変更されました。リロードしてください。");
         setSaveStatus("error");
