@@ -22,12 +22,15 @@
  *   - resultFlag は取り込み時に現行9選択肢へ正規化（未マップ値は null・生値はログ）。
  *   - 社員NO は "BS" を除去して Employee.employeeNumber に一致。未解決は fallback ユーザー。
  *   - 冪等: 同一 legacyFmInterviewNo が既存ならスキップ。
+ *   - 監査ログ: resultFlag の生値→正規化（null にした生値含む）を tmp/import-fm-interviews_*.json に保存。
+ *     生値の集計は冪等スキップより前で記録するため、再実行でも全行の生値が監査に残る。
  */
 
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import * as XLSX from "xlsx";
+import { writeFileSync, mkdirSync } from "fs";
 import "dotenv/config";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -122,7 +125,8 @@ type LogStats = {
   empFallbackUsed: number;
   resultRaw: Map<string, number>; // 生値 → 件数
   resultNormalized: Map<string, number>; // 正規化後(null含む) → 件数
-  resultUnknown: Map<string, number>; // マップに無い生値 → 件数
+  resultUnknown: Map<string, number>; // マップに無い生値（→null） → 件数
+  resultNulledRaw: Map<string, number>; // マップ上 null へ正規化した生値 → 件数
   noCandidateNumbers: string[];
 };
 
@@ -191,6 +195,7 @@ async function main() {
     detailCreated: 0, ratingCreated: 0,
     empUnresolved: new Map(), empFallbackUsed: 0,
     resultRaw: new Map(), resultNormalized: new Map(), resultUnknown: new Map(),
+    resultNulledRaw: new Map(),
     noCandidateNumbers: [],
   };
 
@@ -221,6 +226,25 @@ async function main() {
 
     const legacyFmInterviewNo = toStr(row[HDR.fmInterviewNo]);
 
+    // resultFlag 正規化（生値の監査ログは冪等スキップより前に必ず記録する＝再実行でも全行の生値が残る）
+    const rawResult = toStr(row[HDR.resultFlag]);
+    let resultFlag: string | null = null;
+    if (rawResult) {
+      stats.resultRaw.set(rawResult, (stats.resultRaw.get(rawResult) ?? 0) + 1);
+      if (rawResult in RESULT_NORMALIZE) {
+        resultFlag = RESULT_NORMALIZE[rawResult];
+        // null へ正規化した生値も明示的に追跡（後から見返せるように）
+        if (resultFlag === null) {
+          stats.resultNulledRaw.set(rawResult, (stats.resultNulledRaw.get(rawResult) ?? 0) + 1);
+        }
+      } else {
+        resultFlag = null;
+        stats.resultUnknown.set(rawResult, (stats.resultUnknown.get(rawResult) ?? 0) + 1);
+      }
+    }
+    const normKey = resultFlag ?? "(null)";
+    stats.resultNormalized.set(normKey, (stats.resultNormalized.get(normKey) ?? 0) + 1);
+
     // 冪等
     if (legacyFmInterviewNo) {
       const exists = await prisma.interviewRecord.findFirst({
@@ -229,21 +253,6 @@ async function main() {
       });
       if (exists) { stats.skippedExisting++; affectedCandidateIds.add(candidateId); continue; }
     }
-
-    // resultFlag 正規化
-    const rawResult = toStr(row[HDR.resultFlag]);
-    let resultFlag: string | null = null;
-    if (rawResult) {
-      stats.resultRaw.set(rawResult, (stats.resultRaw.get(rawResult) ?? 0) + 1);
-      if (rawResult in RESULT_NORMALIZE) {
-        resultFlag = RESULT_NORMALIZE[rawResult];
-      } else {
-        resultFlag = null;
-        stats.resultUnknown.set(rawResult, (stats.resultUnknown.get(rawResult) ?? 0) + 1);
-      }
-    }
-    const normKey = resultFlag ?? "(null)";
-    stats.resultNormalized.set(normKey, (stats.resultNormalized.get(normKey) ?? 0) + 1);
 
     const interviewDate = dateOnly(row[HDR.interviewDate]);
     if (!interviewDate) {
@@ -340,11 +349,51 @@ async function main() {
     const mapped = raw in RESULT_NORMALIZE ? RESULT_NORMALIZE[raw] : "(未知→null)";
     console.log(`    "${raw}" (${n}) → ${mapped === null ? "null" : `"${mapped}"`}`);
   }
-  if (stats.resultUnknown.size) {
-    console.log("  ※マップ外で null にした生値:");
-    for (const [raw, n] of stats.resultUnknown) console.log(`    "${raw}": ${n}`);
+  // null へ正規化した生値（マップ上の明示 null ＋ マップ外）をまとめて表示
+  const nulledAll = new Map<string, number>();
+  for (const [raw, n] of stats.resultNulledRaw) nulledAll.set(raw, (nulledAll.get(raw) ?? 0) + n);
+  for (const [raw, n] of stats.resultUnknown) nulledAll.set(raw, (nulledAll.get(raw) ?? 0) + n);
+  if (nulledAll.size) {
+    console.log("  ※ null にした生値（後から見返せるようログ保存）:");
+    for (const [raw, n] of nulledAll) console.log(`    "${raw}": ${n} 件 → null`);
   }
-  console.log("==================================\n");
+  console.log("==================================");
+
+  // ---- 監査ログをファイルへ永続化（後から見返せるように）----
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const logDir = "tmp";
+  try { mkdirSync(logDir, { recursive: true }); } catch { /* noop */ }
+  const logPath = `${logDir}/import-fm-interviews_${ONLY ?? "ALL"}${DRY_RUN ? "_dryrun" : ""}_${stamp}.json`;
+  const m2o = (m: Map<string, number>) => Object.fromEntries(m);
+  const audit = {
+    ranAt: new Date().toISOString(),
+    mode: ONLY ? `only:${ONLY}` : "ALL",
+    dryRun: DRY_RUN,
+    file: FILE,
+    summary: {
+      totalRows: stats.totalRows,
+      created: stats.created,
+      detailCreated: stats.detailCreated,
+      ratingCreated: stats.ratingCreated,
+      skippedExisting: stats.skippedExisting,
+      skippedNoCandidate: stats.skippedNoCandidate,
+      empFallbackUsed: stats.empFallbackUsed,
+    },
+    resultFlag: {
+      // 生値 → 件数（全件）
+      raw: m2o(stats.resultRaw),
+      // 正規化後 → 件数（"(null)" を含む）
+      normalized: m2o(stats.resultNormalized),
+      // null にした生値（マップ上の明示 null）→ 件数
+      nulledByMap: m2o(stats.resultNulledRaw),
+      // マップ外で null にした生値 → 件数
+      nulledUnknown: m2o(stats.resultUnknown),
+    },
+    empUnresolved: m2o(stats.empUnresolved),
+    noCandidateNumbers: stats.noCandidateNumbers,
+  };
+  writeFileSync(logPath, JSON.stringify(audit, null, 2), "utf-8");
+  console.log(`監査ログ: ${logPath}\n`);
 
   await prisma.$disconnect();
   await pool.end();
