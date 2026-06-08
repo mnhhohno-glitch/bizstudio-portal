@@ -737,10 +737,17 @@ export default function EntryTable({
       case "docSubmit":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} /></td>;
       case "docDates":
+        // T-090: 上段=提出日 / 下段=通過日 のインライン行ラベルを付与（ヘッダ2行と整合・視認性改善）。
         return (
           <td key={col.key} className="px-1 py-0.5 text-center text-[11px]">
-            <InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} />
-            <div className="mt-0.5"><InlineDateCell value={entry.documentPassDate} entryId={entry.id} field="documentPassDate" onUpdate={onFieldUpdate} /></div>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-[#9CA3AF] shrink-0 w-6 text-right">提出</span>
+              <div className="flex-1 min-w-0"><InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} /></div>
+            </div>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-[9px] text-[#9CA3AF] shrink-0 w-6 text-right">通過</span>
+              <div className="flex-1 min-w-0"><InlineDateCell value={entry.documentPassDate} entryId={entry.id} field="documentPassDate" onUpdate={onFieldUpdate} /></div>
+            </div>
           </td>
         );
       case "aptitudeDates":

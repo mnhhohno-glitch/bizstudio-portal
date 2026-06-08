@@ -62,6 +62,7 @@ export async function PATCH(
   if (personFlag !== undefined) data.personFlag = personFlag;
 
   // 段階日付の自動入力：フラグが進んだとき、対応する日付欄が空なら JST 当日をセットする。
+  //  - entryFlag が「書類選考」に変わったとき → 書類提出日（提出して書類選考フェーズに入った日）
   //  - entryFlag が「面接 / 内定 / 入社済」に変わったとき → 書類通過日（面接以降＝書類は通過済み）
   //  - entryFlag が「内定」に変わったとき → 内定日
   //  - entryFlagDetail が「承諾」に変わったとき → 承諾日
@@ -69,12 +70,16 @@ export async function PATCH(
   // JST 当日は jstDateStringToDbDate(todayJstDateString()) で UTC midnight Date に変換
   // （他の日付フィールドの保存規約と同じ。toISOString().slice(0,10) は使わない）。
   const reachedInterviewOrBeyond = entryFlag === "面接" || entryFlag === "内定" || entryFlag === "入社済";
-  if (reachedInterviewOrBeyond || entryFlag === "内定" || entryFlagDetail === "承諾") {
+  const reachedDocReview = entryFlag === "書類選考";
+  if (reachedDocReview || reachedInterviewOrBeyond || entryFlag === "内定" || entryFlagDetail === "承諾") {
     const existing = await prisma.jobEntry.findUnique({
       where: { id: entryId },
-      select: { documentPassDate: true, offerDate: true, acceptanceDate: true },
+      select: { documentSubmitDate: true, documentPassDate: true, offerDate: true, acceptanceDate: true },
     });
     const today = jstDateStringToDbDate(todayJstDateString());
+    if (reachedDocReview && existing && existing.documentSubmitDate == null) {
+      data.documentSubmitDate = today;
+    }
     if (reachedInterviewOrBeyond && existing && existing.documentPassDate == null) {
       data.documentPassDate = today;
     }
