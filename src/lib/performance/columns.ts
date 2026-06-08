@@ -79,9 +79,13 @@ export function buildColumns(granularity: Granularity, anchorDate: string): Matr
   }
 
   if (granularity === "month") {
+    // T-086: 半年タブは「起算月を含む過去6ヶ月」を昇順表示（旧→新）。
+    // 起算 2026-06 のとき [2026-01, 2026-02, 2026-03, 2026-04, 2026-05, 2026-06]（右端=起算月）。
+    // 旧実装は i=0..5 で未来方向 +0〜+5（起算月から未来6ヶ月）になっており当月以外0だった。
+    // ※「直近6ヶ月」タブ(/api/performance/cohort)は当月除外の -6〜-1 で別ロジック・別ルート。
     const cols: MatrixColumn[] = [];
     for (let i = 0; i < 6; i++) {
-      const ym = shiftMonth(anchorMonth, i);
+      const ym = shiftMonth(anchorMonth, i - 5);
       const first = `${ym}-01`;
       const last = `${ym}-${pad(daysInMonth(ym))}`;
       cols.push({
