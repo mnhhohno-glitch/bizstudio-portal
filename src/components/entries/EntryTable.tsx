@@ -370,9 +370,10 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
         </span>
       )}
       {bottomLeftSlot ? (
-        <div className="flex items-center gap-1 mt-0.5">
-          <div className="shrink-0">{bottomLeftSlot}</div>
-          <div className="flex-1 min-w-0">{timeEl}</div>
+        // T-091 fix3: アイコンを絶対配置で左に逃がし、時刻は親の text-center で日付と縦に一直線にそろえる。
+        <div className="relative mt-0.5">
+          <div className="absolute inset-y-0 left-0 flex items-center pointer-events-auto">{bottomLeftSlot}</div>
+          <div>{timeEl}</div>
         </div>
       ) : (
         <div className="mt-0.5">{timeEl}</div>
@@ -397,12 +398,15 @@ const INTERVIEW_TOOL_LABEL: Record<string, string> = {
   "対面": "対面",
   "電話": "電話",
 };
-function InterviewToolIcon({ value, entryId, field, onUpdate }: {
+function InterviewToolIcon({ value, entryId, field, onUpdate, alert = false }: {
   value: string | null; entryId: string; field: string;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+  // T-091 fix3: 「○次面接実施前」かつ方法未設定のとき true。未設定状態を赤系で強調して CA に設定忘れを気づかせる。
+  alert?: boolean;
 }) {
   const cur = value || "";
   const empty = !cur;
+  const alertOn = alert && empty;
   const [open, setOpen] = useState(false);
   // openRight=true: 内容を左寄せ（ボタン左端起点に右へ広がる）／false: 右寄せ（ボタン右端起点に左へ広がる）。
   const [openRight, setOpenRight] = useState(true);
@@ -441,8 +445,14 @@ function InterviewToolIcon({ value, entryId, field, onUpdate }: {
         ref={btnRef}
         type="button"
         onClick={handleToggle}
-        title={INTERVIEW_TOOL_LABEL[cur] || "未設定"}
-        className={`inline-flex items-center justify-center w-[18px] h-[18px] text-[12px] leading-none rounded shrink-0 ${empty ? "border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600" : "hover:bg-blue-50"}`}
+        title={alertOn ? "面接方法が未設定です" : (INTERVIEW_TOOL_LABEL[cur] || "未設定")}
+        className={`inline-flex items-center justify-center w-[18px] h-[18px] text-[12px] leading-none rounded shrink-0 ${
+          alertOn
+            ? "border border-red-400 text-red-500 hover:border-red-500 hover:text-red-600"
+            : empty
+              ? "border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600"
+              : "hover:bg-blue-50"
+        }`}
       >
         {INTERVIEW_TOOL_ICON[cur] ?? "–"}
       </button>
@@ -887,33 +897,37 @@ export default function EntryTable({
       case "firstInterview": {
         const warn = entry.entryFlagDetail === "一次面接実施前" && (!entry.firstInterviewDate || !entry.firstInterviewTime);
         const overdue = isInterviewOverdue(entry, "first");
+        // T-091 fix3: 「実施前」かつ方法未設定なら設定忘れを赤系で警告（保存・状態変更なし、表示のみ）。
+        const toolAlert = entry.entryFlagDetail === "一次面接実施前" && !entry.firstInterviewTool;
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
           <InlineDateTimeCell
             dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id}
             dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate}
-            bottomLeftSlot={<InterviewToolIcon value={entry.firstInterviewTool} entryId={entry.id} field="firstInterviewTool" onUpdate={onFieldUpdate} />}
+            bottomLeftSlot={<InterviewToolIcon value={entry.firstInterviewTool} entryId={entry.id} field="firstInterviewTool" onUpdate={onFieldUpdate} alert={toolAlert} />}
           />
         </td>;
       }
       case "secondInterview": {
         const warn = entry.entryFlagDetail === "二次面接実施前" && (!entry.secondInterviewDate || !entry.secondInterviewTime);
         const overdue = isInterviewOverdue(entry, "second");
+        const toolAlert = entry.entryFlagDetail === "二次面接実施前" && !entry.secondInterviewTool;
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
           <InlineDateTimeCell
             dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id}
             dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate}
-            bottomLeftSlot={<InterviewToolIcon value={entry.secondInterviewTool} entryId={entry.id} field="secondInterviewTool" onUpdate={onFieldUpdate} />}
+            bottomLeftSlot={<InterviewToolIcon value={entry.secondInterviewTool} entryId={entry.id} field="secondInterviewTool" onUpdate={onFieldUpdate} alert={toolAlert} />}
           />
         </td>;
       }
       case "finalInterview": {
         const warn = entry.entryFlagDetail === "最終面接実施前" && (!entry.finalInterviewDate || !entry.finalInterviewTime);
         const overdue = isInterviewOverdue(entry, "final");
+        const toolAlert = entry.entryFlagDetail === "最終面接実施前" && !entry.finalInterviewTool;
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
           <InlineDateTimeCell
             dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id}
             dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate}
-            bottomLeftSlot={<InterviewToolIcon value={entry.finalInterviewTool} entryId={entry.id} field="finalInterviewTool" onUpdate={onFieldUpdate} />}
+            bottomLeftSlot={<InterviewToolIcon value={entry.finalInterviewTool} entryId={entry.id} field="finalInterviewTool" onUpdate={onFieldUpdate} alert={toolAlert} />}
           />
         </td>;
       }
