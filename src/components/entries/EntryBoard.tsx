@@ -11,6 +11,7 @@ import BulkEndFlagModal from "./BulkEndFlagModal";
 import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
+import InterviewGuideCopyModal from "./InterviewGuideCopyModal";
 import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
 
 export type Entry = {
@@ -48,10 +49,13 @@ export type Entry = {
   interviewPrepTime: string | null;
   firstInterviewDate: string | null;
   firstInterviewTime: string | null;
+  firstInterviewTool: string | null;
   secondInterviewDate: string | null;
   secondInterviewTime: string | null;
+  secondInterviewTool: string | null;
   finalInterviewDate: string | null;
   finalInterviewTime: string | null;
+  finalInterviewTool: string | null;
   offerDate: string | null;
   offerDeadline: string | null;
   offerMeetingDate: string | null;
@@ -161,6 +165,7 @@ export default function EntryBoard() {
   const [showBulkFlags, setShowBulkFlags] = useState(false);
   const [showEndNotice, setShowEndNotice] = useState(false);
   const [showBulkEndFlag, setShowBulkEndFlag] = useState(false);
+  const [showInterviewGuideCopy, setShowInterviewGuideCopy] = useState(false);
 
   // URL edit modal
   const [urlModalEntryId, setUrlModalEntryId] = useState<string | null>(null);
@@ -898,6 +903,13 @@ export default function EntryBoard() {
               📋 タスク作成
             </button>
             <button
+              onClick={() => setShowInterviewGuideCopy(true)}
+              className="border border-sky-400 text-sky-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-sky-50"
+              title="✓した企業の直近の面接日程を一覧コピー"
+            >
+              📋 面接案内コピー
+            </button>
+            <button
               onClick={() => handleBulkArchive(selectedEntries)}
               className="border border-red-400 text-red-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-red-50"
             >
@@ -1048,6 +1060,14 @@ export default function EntryBoard() {
           selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
           onClose={() => setShowEndNotice(false)}
           onDone={() => { setShowEndNotice(false); setSelectedIds(new Set()); fetchEntries(); }}
+        />
+      )}
+
+      {/* T-091: 面接案内コピー */}
+      {showInterviewGuideCopy && (
+        <InterviewGuideCopyModal
+          selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
+          onClose={() => setShowInterviewGuideCopy(false)}
         />
       )}
 

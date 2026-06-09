@@ -353,6 +353,45 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
   );
 }
 
+// T-091: 面接方法アイコン（オンライン/対面/電話）。クリックで サイクル切替＋PATCH 即保存。
+// 値は Interview モデル interviewTool と同一の3値に揃える。列幅は増やさずアイコン＋tooltip のみ。
+const INTERVIEW_TOOL_CYCLE = ["", "オンライン", "対面", "電話"] as const;
+const INTERVIEW_TOOL_ICON: Record<string, string> = {
+  "": "–",
+  "オンライン": "💻",
+  "対面": "🤝",
+  "電話": "📞",
+};
+const INTERVIEW_TOOL_LABEL: Record<string, string> = {
+  "": "未設定",
+  "オンライン": "オンライン",
+  "対面": "対面",
+  "電話": "電話",
+};
+function InterviewToolIcon({ value, entryId, field, onUpdate }: {
+  value: string | null; entryId: string; field: string;
+  onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+}) {
+  const cur = value || "";
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const idx = INTERVIEW_TOOL_CYCLE.indexOf(cur as typeof INTERVIEW_TOOL_CYCLE[number]);
+    const next = INTERVIEW_TOOL_CYCLE[(idx + 1) % INTERVIEW_TOOL_CYCLE.length];
+    onUpdate(entryId, { [field]: next || null });
+  };
+  const empty = !cur;
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title={INTERVIEW_TOOL_LABEL[cur] || "未設定"}
+      className={`inline-flex items-center justify-center w-[16px] h-[16px] text-[11px] leading-none rounded ${empty ? "text-gray-300 hover:text-gray-500" : "hover:bg-blue-50"}`}
+    >
+      {INTERVIEW_TOOL_ICON[cur] ?? "–"}
+    </button>
+  );
+}
+
 function AptitudeCell({ value, entryId, onUpdate }: {
   value: boolean; entryId: string;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
@@ -762,17 +801,32 @@ export default function EntryTable({
       case "firstInterview": {
         const warn = entry.entryFlagDetail === "一次面接実施前" && (!entry.firstInterviewDate || !entry.firstInterviewTime);
         const overdue = isInterviewOverdue(entry, "first");
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
+          <div className="flex items-center gap-0.5">
+            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></div>
+            <InterviewToolIcon value={entry.firstInterviewTool} entryId={entry.id} field="firstInterviewTool" onUpdate={onFieldUpdate} />
+          </div>
+        </td>;
       }
       case "secondInterview": {
         const warn = entry.entryFlagDetail === "二次面接実施前" && (!entry.secondInterviewDate || !entry.secondInterviewTime);
         const overdue = isInterviewOverdue(entry, "second");
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
+          <div className="flex items-center gap-0.5">
+            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></div>
+            <InterviewToolIcon value={entry.secondInterviewTool} entryId={entry.id} field="secondInterviewTool" onUpdate={onFieldUpdate} />
+          </div>
+        </td>;
       }
       case "finalInterview": {
         const warn = entry.entryFlagDetail === "最終面接実施前" && (!entry.finalInterviewDate || !entry.finalInterviewTime);
         const overdue = isInterviewOverdue(entry, "final");
-        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></td>;
+        return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
+          <div className="flex items-center gap-0.5">
+            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></div>
+            <InterviewToolIcon value={entry.finalInterviewTool} entryId={entry.id} field="finalInterviewTool" onUpdate={onFieldUpdate} />
+          </div>
+        </td>;
       }
       case "offerDate":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.offerDate} entryId={entry.id} field="offerDate" onUpdate={onFieldUpdate} /></td>;
