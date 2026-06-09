@@ -35,14 +35,16 @@ type Props = {
 
 /* ========== Column Definitions ========== */
 
+// T-091 fix5: 標準デスクトップ幅で横スクロールなしに全列が収まるよう、
+// 情報の薄い列の余剰幅を詰める。企業名（company）は CA が頻繁に見るため幅維持。
 const COMMON_COLS: ColConfig[] = [
-  { key: "candidate", label: "求職者", width: 120, sortKey: "candidate" },
-  { key: "ca", label: "担当CA", width: 80, sortKey: "ca" },
+  { key: "candidate", label: "求職者", width: 110, sortKey: "candidate" },
+  { key: "ca", label: "担当CA", width: 70, sortKey: "ca" },
   { key: "company", label: "紹介先企業", width: 280, sortKey: "company" },
-  { key: "jobDb", label: "求人DB", width: 260, sortKey: "jobDb" },
-  { key: "entryFlags", label: "エントリーフラグ", width: 130, sortKey: "entryFlag" },
-  { key: "statusFlags", label: "対応状況", width: 130, sortKey: "companyFlag" },
-  { key: "entryDate", label: "エントリー日", width: 80, sortKey: "entryDate" },
+  { key: "jobDb", label: "求人DB", width: 200, sortKey: "jobDb" },
+  { key: "entryFlags", label: "エントリーフラグ", width: 110, sortKey: "entryFlag" },
+  { key: "statusFlags", label: "対応状況", width: 110, sortKey: "companyFlag" },
+  { key: "entryDate", label: "エントリー日", width: 60, sortKey: "entryDate" },
 ];
 
 const TAB_EXTRA: Record<string, ColConfig[]> = {
@@ -55,8 +57,9 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "aptitudeDates", label: "適性検査", width: 100, sortKey: "aptitudeTestExists" },
   ],
   "面接": [
-    { key: "interviewPrep", label: "面接対策", width: 95, sortKey: "interviewPrepDate" },
-    // T-091 fix2: 下段=アイコン+時刻の2段レイアウトで列幅内に収まるため 95px に戻す（テーブル総幅を圧縮しメモ列まで横スクロール到達可能に）
+    // T-091 fix5: 面接対策はアイコン無しのため日付/時刻が収まる最小幅 75 へ圧縮。
+    { key: "interviewPrep", label: "面接対策", width: 75, sortKey: "interviewPrepDate" },
+    // T-091 fix2: 下段=アイコン+時刻の2段レイアウトで列幅内に収まるため 95px 維持（アイコン padding 含む最小幅）。
     { key: "firstInterview", label: "一次面接", width: 95, sortKey: "firstInterviewDate" },
     { key: "secondInterview", label: "二次面接", width: 95, sortKey: "secondInterviewDate" },
     { key: "finalInterview", label: "最終面接", width: 95, sortKey: "finalInterviewDate" },
@@ -78,11 +81,10 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   "全件": [],
 };
 
-// T-091 fix: 表示/編集アイコン2つが見切れずクリックできる幅に拡張
-// T-091 fix4: メモ列の編集アイコンが右端で切れる症状の対策として幅を拡張。
-// テーブル右端に余白を確保するため minWidth にも MEMO_GUTTER を加算（テーブル全体を
-// その分だけ右に伸ばしてスクロール領域の最右にアイコンが密着しないようにする）。
-const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 120, sortKey: null };
+// T-091 fix5: 中身は ✏️(13px)+gap-1.5(6px)+📝(14px)+td px-2(16px)=約49px。
+//             横スクロール解消のため必要最小幅 60px に圧縮。右端の border 密着回避用
+//             MEMO_GUTTER=16 は維持（fix4 の border 密着回避を崩さない）。
+const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 60, sortKey: null };
 const MEMO_GUTTER = 16; // メモ列右の余白（テーブル右端のクリッピング防止）
 
 function getColumns(tab: string): ColConfig[] {
