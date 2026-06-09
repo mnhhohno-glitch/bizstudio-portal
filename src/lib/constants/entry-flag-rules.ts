@@ -35,6 +35,10 @@ export const COMPANY_FLAG_RULES: Record<string, string[]> = {
   ],
 };
 
+export const HIDDEN_ENTRY_DETAILS = [
+  "本人所感回収中", "所感回収済(提出)", "選考中(所感提出)",
+];
+
 export const SELECTION_ENDED_DETAILS = [
   "選考落ち", "本人辞退", "本人辞退_他社決", "本人辞退_自社他", "クローズ", "求人クローズ",
 ];

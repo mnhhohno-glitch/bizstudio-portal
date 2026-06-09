@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import type { FlagData } from "./EntryBoard";
+import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 
 type CandidateOption = {
   id: string;
@@ -188,7 +189,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
               <label className={labelCls}>フラグ詳細</label>
               <select className={inputCls} value={entryFlagDetail} onChange={(e) => setEntryFlagDetail(e.target.value)}>
                 <option value="">-</option>
-                {flagData.entryDetails[entryFlag]?.map((d) => <option key={d} value={d}>{d}</option>)}
+                {flagData.entryDetails[entryFlag]?.filter((d) => !HIDDEN_ENTRY_DETAILS.includes(d)).map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
           </div>

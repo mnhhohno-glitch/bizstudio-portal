@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import type { Entry, FlagData } from "./EntryBoard";
+import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { normalizeTimeInput } from "@/lib/timeFormat";
 
 const TIME_FIELDS = [
@@ -192,7 +193,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
               <div><label className={labelCls}>フラグ詳細</label>
                 <select className={selectCls} value={form.entryFlagDetail as string} onChange={(e) => set("entryFlagDetail", e.target.value)}>
                   <option value="">-</option>
-                  {flagData.entryDetails[currentEntryFlag]?.map((d) => <option key={d} value={d}>{d}</option>)}
+                  {flagData.entryDetails[currentEntryFlag]?.filter((d) => !HIDDEN_ENTRY_DETAILS.includes(d) || d === (form.entryFlagDetail as string)).map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div><label className={labelCls}>企業対応</label>

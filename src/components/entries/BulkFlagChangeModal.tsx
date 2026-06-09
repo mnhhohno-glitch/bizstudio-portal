@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import type { FlagData } from "./EntryBoard";
+import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 
 type Props = {
   selectedCount: number;
@@ -22,7 +23,7 @@ export default function BulkFlagChangeModal({ selectedCount, selectedIds, flagDa
   const [saving, setSaving] = useState(false);
 
   const entryFlagOptions = flagData.entryFlags.filter((f) => f !== "応募");
-  const detailOptions = entryFlag !== NO_CHANGE ? (flagData.entryDetails[entryFlag] || []) : [];
+  const detailOptions = entryFlag !== NO_CHANGE ? (flagData.entryDetails[entryFlag] || []).filter((d) => !HIDDEN_ENTRY_DETAILS.includes(d)) : [];
   const companyOptions = entryFlag !== NO_CHANGE ? (flagData.companyFlags[entryFlag] || []) : [];
   const personOptions = entryFlag !== NO_CHANGE ? (flagData.personFlags[entryFlag] || []) : [];
 

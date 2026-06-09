@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
+import { SELECTION_ENDED_DETAILS, HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import { normalizeTimeInput } from "@/lib/timeFormat";
 import type { Entry, FlagData } from "./EntryBoard";
@@ -707,7 +707,7 @@ export default function EntryTable({
                   : "text-gray-500"
               }`}>
               <option value="">-</option>
-              {flagData?.entryDetails[entry.entryFlag || ""]?.map((d) => <option key={d} value={d}>{d}</option>)}
+              {flagData?.entryDetails[entry.entryFlag || ""]?.filter((d) => !HIDDEN_ENTRY_DETAILS.includes(d) || d === entry.entryFlagDetail).map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </td>
         );
