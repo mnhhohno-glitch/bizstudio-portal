@@ -15,14 +15,14 @@ export async function PATCH(
 
   const entry = await prisma.scheduleEntry.findUnique({
     where: { id: entryId },
-    include: { dailySchedule: { select: { userId: true, status: true } } },
+    include: { dailySchedule: { select: { userId: true } } },
   });
 
   if (!entry) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (entry.dailySchedule.userId !== user.id) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  if (entry.dailySchedule.status !== "CONFIRMED") {
-    return NextResponse.json({ error: "スケジュールが確定済みの場合のみ操作可能です" }, { status: 400 });
-  }
+  // T-091: 日報タブから作成された DailySchedule は status="DRAFT" のまま完了チェックする運用に変更。
+  // 以前の "CONFIRMED のみ許可" ガードは日報の完了 PATCH を 400 で弾き、楽観更新が DB と不整合になっていた。
+  // 権限（userId 一致）は維持。SchedulePanel 由来の CONFIRMED ワークフローも従来どおり動作する。
 
   const updated = await prisma.scheduleEntry.update({
     where: { id: entryId },

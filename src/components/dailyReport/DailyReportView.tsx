@@ -275,8 +275,11 @@ export default function DailyReportView({
     // 楽観更新（target ＝ 今日のみ：明日は未来予定なので完了チェックは出さない）
     setSched((s) => (s ? { ...s, entries: s.entries.map((x) => (x.id === e.id ? { ...x, isCompleted: !x.isCompleted } : x)) } : s));
     try {
-      await fetch(`/api/schedule/entry/${e.id}/complete`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isCompleted: !e.isCompleted }) });
-    } catch { fetchSchedule(); }
+      const res = await fetch(`/api/schedule/entry/${e.id}/complete`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isCompleted: !e.isCompleted }) });
+      // T-091: HTTP エラー（fetch は 4xx/5xx で reject しない）は catch を素通りするので res.ok で明示チェック。
+      // 失敗時に再フェッチして楽観更新を DB の真値に戻す（過去バグ：エラー握り潰しで実施率が 0% にズレた）。
+      if (!res.ok) void fetchSchedule();
+    } catch { void fetchSchedule(); }
   };
   // AI作成の保存（既存 SchedulePanel.handleAiSave と同じ：有→PUT、無→POST）。
   // T-082: target に応じて対象 DailySchedule（今日 sched / 明日 tomorrowSched）に保存。
