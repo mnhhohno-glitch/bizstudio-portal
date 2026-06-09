@@ -79,7 +79,11 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
 };
 
 // T-091 fix: 表示/編集アイコン2つが見切れずクリックできる幅に拡張
-const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 95, sortKey: null };
+// T-091 fix4: メモ列の編集アイコンが右端で切れる症状の対策として幅を拡張。
+// テーブル右端に余白を確保するため minWidth にも MEMO_GUTTER を加算（テーブル全体を
+// その分だけ右に伸ばしてスクロール領域の最右にアイコンが密着しないようにする）。
+const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 120, sortKey: null };
+const MEMO_GUTTER = 16; // メモ列右の余白（テーブル右端のクリッピング防止）
 
 function getColumns(tab: string): ColConfig[] {
   return [...COMMON_COLS, ...(TAB_EXTRA[tab] || []), MEMO_COL];
@@ -342,15 +346,20 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
     setEditTime(false);
   };
 
+  // T-091 fix4: 時刻の文字サイズを上段の日付と同じ text-[11px] に合わせる。
+  // input と表示の双方を text-center にして中央そろえ、左端の方法アイコン（absolute left-0・幅 18px）
+  // と被らないよう padding-x で余白を確保。アイコン有無は呼び出し側で決まるため
+  // bottomLeftSlot の有無に応じて pl を変える。
+  const sidePadCls = bottomLeftSlot ? "px-5" : "px-0.5";
   const timeEl = editTime ? (
     <input type="text" autoFocus defaultValue={timeValue || ""} placeholder="HH:mm"
       onBlur={handleTimeBlur}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-      className="w-full text-[10px] border border-[#2563EB] rounded px-0.5 py-0 outline-none"
+      className={`w-full text-[11px] text-center border border-[#2563EB] rounded py-0 outline-none ${sidePadCls}`}
       onClick={(e) => e.stopPropagation()} />
   ) : (
     <span onClick={(e) => { e.stopPropagation(); setEditTime(true); }}
-      className={`text-[10px] block cursor-pointer rounded min-h-[14px] leading-[14px] ${timeValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
+      className={`text-[11px] block text-center cursor-pointer rounded min-h-[16px] leading-[16px] ${sidePadCls} ${timeValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
       {timeValue || "HH:mm"}
     </span>
   );
@@ -685,7 +694,7 @@ export default function EntryTable({
   const entryFlagOptions = flagData?.entryFlags.filter((f) => f !== "応募") || [];
   const allIds = entries.map((e) => e.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
-  const minWidth = 36 + cols.reduce((sum, c) => sum + c.width, 0);
+  const minWidth = 36 + cols.reduce((sum, c) => sum + c.width, 0) + MEMO_GUTTER;
 
   function renderCell(entry: Entry, col: ColConfig) {
     const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
@@ -945,13 +954,13 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><RevenueCell entry={entry} onUpdate={onFieldUpdate} /></td>;
       case "memo":
         return (
-          <td key={col.key} className="px-1 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-center gap-1">
+          <td key={col.key} className="px-2 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-center gap-1.5">
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onEditEntry(entry); }}
                 title="エントリーを編集"
-                className="text-[13px] leading-none text-gray-300 hover:text-[#2563EB]"
+                className="text-[13px] leading-none text-gray-300 hover:text-[#2563EB] shrink-0"
               >
                 ✏️
               </button>
