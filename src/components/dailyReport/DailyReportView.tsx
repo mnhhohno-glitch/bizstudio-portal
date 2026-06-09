@@ -20,6 +20,14 @@ type DayMatrix = {
   entry: { fresh: CUP; existing: CUP; total: CUP };
   selection: { documentPass: number; offer: number; acceptance: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
 };
+// T-094: 当日「各段階数」棒グラフのツールチップ用。求職者名×件数の内訳（件数降順・氏名昇順）。
+type StageDetail = { name: string; count: number };
+type DayStageDetails = {
+  ivFirst: StageDetail[];
+  ivExisting: StageDetail[];
+  proposal: StageDetail[];
+  entry: StageDetail[];
+};
 type Attr = Record<string, number>;
 type JobSearch = { bmCount: number; exportCount: number; ratings: Attr; selectionRate: number | null };
 type SchedEntry = { id: string; startTime: string; endTime: string; title: string; note?: string | null; tag: string | null; tagColor: string | null; isCompleted: boolean; sortOrder?: number };
@@ -40,6 +48,8 @@ type Resp = {
   dayMatrix: DayMatrix | null;
   attributes: { total: number; rank: Attr; gender: Attr; jobType: Attr; ageBand: Attr } | null;
   jobSearch: JobSearch | null;
+  // T-094: 棒グラフのツールチップ用求職者名内訳（CA のみ・format に応じて null）。
+  dayStageDetails: DayStageDetails | null;
 };
 
 const numFmt = (v: number | null | undefined, d = 0) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
@@ -582,7 +592,7 @@ export default function DailyReportView({
         {/* グラフ（コメント欄を外した分、全幅で広く） */}
         <div>
           {data?.dayMatrix && data.attributes ? (
-            <DailyCharts matrix={data.dayMatrix} attributes={data.attributes} jobSearch={data.jobSearch} />
+            <DailyCharts matrix={data.dayMatrix} attributes={data.attributes} jobSearch={data.jobSearch} stageDetails={data.dayStageDetails} />
           ) : (
             <div className="text-[12px] text-[#9CA3AF] py-4">グラフは CA のみ表示されます。</div>
           )}
@@ -737,7 +747,7 @@ function SchedCol({ title, entries, emptyText, noLimit }: { title: string; entri
   );
 }
 
-function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; attributes: { total: number; rank: Attr; gender: Attr; jobType: Attr; ageBand: Attr }; jobSearch: JobSearch | null }) {
+function DailyCharts({ matrix, attributes, jobSearch, stageDetails }: { matrix: DayMatrix; attributes: { total: number; rank: Attr; gender: Attr; jobType: Attr; ageBand: Attr }; jobSearch: JobSearch | null; stageDetails: DayStageDetails | null }) {
   const barRef = useRef<HTMLCanvasElement>(null);
   const jobBarRef = useRef<HTMLCanvasElement>(null);
   const rankRef = useRef<HTMLCanvasElement>(null);
@@ -784,8 +794,16 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
     // 縦棒：当日の主要4項目（初回面談・既存面談・紹介・エントリー）。
     // 既存面談 = 求人面談(2回目) + 既存面談(3回目以降)。書類通過以降は日々頻繁でないため除外。
     // 棒は細くスタイリッシュに（barPercentage:0.3、categoryPercentage:0.7）。棒上に数値。
+    // T-094: ツールチップを「求職者名｜件数」の行リストに差し替え（合計バッジ・企業名は表示しない）。
     if (barRef.current) {
       const existingInterview = matrix.interview.second + matrix.interview.thirdPlus;
+      // dataIndex（0=初回面談 / 1=既存面談 / 2=紹介 / 3=エントリー）→ 求職者名×件数のリスト。
+      const stageArr: (StageDetail[] | null)[] = [
+        stageDetails?.ivFirst ?? null,
+        stageDetails?.ivExisting ?? null,
+        stageDetails?.proposal ?? null,
+        stageDetails?.entry ?? null,
+      ];
       charts.current.push(new Chart(barRef.current, {
         type: "bar",
         data: {
@@ -802,7 +820,22 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
         options: {
           responsive: true, maintainAspectRatio: false,
           layout: { padding: { top: 16 } },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              displayColors: false,
+              callbacks: {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                title: (items: any[]) => items[0]?.label ?? "",
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                label: (ctx: any): string | string[] => {
+                  const list = stageArr[ctx.dataIndex];
+                  if (!list || list.length === 0) return "該当なし";
+                  return list.map((it) => `${it.name}｜${it.count}件`);
+                },
+              },
+            },
+          },
           scales: { x: { ticks: { color: fg, font: { size: 11 } }, grid: { color: grid, display: false } }, y: { beginAtZero: true, ticks: { color: fg, precision: 0 }, grid: { color: grid } } },
         },
         plugins: [barValuePlugin],
@@ -859,7 +892,7 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
     if (jobSearch) buildPie(ratingRef.current, jobSearch.ratings, RATING_ORDER, (k) => RATING_COLORS[k] ?? "#9CA3AF", (k) => k);
 
     return () => { charts.current.forEach((c) => c?.destroy()); charts.current = []; };
-  }, [ready, matrix, attributes, jobSearch]);
+  }, [ready, matrix, attributes, jobSearch, stageDetails]);
 
   const n = attributes.total;
   const pie = (title: string, ref: { current: HTMLCanvasElement | null }, has: boolean) => (

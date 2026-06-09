@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { computeCaMetrics, type CaDailyMetrics } from "@/lib/dailyReport/metrics";
-import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeWeeklyMatrix, computeDayStageDetails, type WeeklyMatrix, type DayStageDetails } from "@/lib/performance/weeklyMatrix";
 import { computeInterviewAttributes, type InterviewAttributes } from "@/lib/performance/attributes";
 import { computeJobSearchDay } from "@/lib/dailyReport/jobSearch";
 import { notifyDailyReport } from "@/lib/dailyReport/lineworks-notify";
@@ -118,14 +118,17 @@ export async function GET(req: Request) {
   let dayMatrix: WeeklyMatrix | null = null;
   let attributes: InterviewAttributes | null = null;
   let jobSearch: Awaited<ReturnType<typeof computeJobSearchDay>> | null = null;
+  // T-094: 当日「各段階数」棒グラフのツールチップ用の求職者名×件数内訳。集計条件は computeWeeklyMatrix と完全一致。
+  let dayStageDetails: DayStageDetails | null = null;
   if (formatHasNumbers(actor.format)) {
     const from = jstDateStart(dateStr);
     const to = jstDateEnd(dateStr);
-    [metrics, dayMatrix, attributes, jobSearch] = await Promise.all([
+    [metrics, dayMatrix, attributes, jobSearch, dayStageDetails] = await Promise.all([
       computeCaMetrics({ userId: targetUser.id, employeeId: actor.employeeId, dateStr }),
       computeWeeklyMatrix({ employeeId: actor.employeeId ?? "__nonexistent__", userId: targetUser.id, from, to }),
       computeInterviewAttributes({ employeeId: actor.employeeId ?? "__nonexistent__", from, to }),
       computeJobSearchDay(targetUser.id, dateStr),
+      computeDayStageDetails({ employeeId: actor.employeeId ?? "__nonexistent__", from, to }),
     ]);
   }
 
@@ -163,6 +166,7 @@ export async function GET(req: Request) {
     dayMatrix,
     attributes,
     jobSearch,
+    dayStageDetails,
   });
 }
 

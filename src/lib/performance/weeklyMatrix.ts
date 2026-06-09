@@ -166,6 +166,99 @@ export async function computeWeeklyMatrix(params: {
   };
 }
 
+// T-094: 当日「各段階数」棒グラフのツールチップ用。求職者名×件数の内訳を4段階分まとめて返す。
+// computeWeeklyMatrix の集計条件（担当軸・interview の辞退除外・JE archived 除外・entry_flag 有効値・両ソース統合）と
+// 完全一致させ、バー高さとツールチップの母集団がズレないようにする。集計値自体は computeWeeklyMatrix が引き続き source of truth。
+export interface StageDetail { name: string; count: number }
+export interface DayStageDetails {
+  ivFirst: StageDetail[];   // 初回面談（interview_count=1）
+  ivExisting: StageDetail[]; // 既存面談（interview_count>=2、second+thirdPlus 合算）
+  proposal: StageDetail[];  // 紹介（JobEntry.jobIntroDate ∪ CandidateFile BOOKMARK.lastExportedAt）
+  entry: StageDetail[];     // エントリー（job_entries.entry_flag 有効値）
+}
+
+export async function computeDayStageDetails(params: {
+  employeeId: string;
+  from: Date;
+  to: Date;
+  allCas?: boolean;
+}): Promise<DayStageDetails> {
+  const { employeeId, from, to, allCas } = params;
+  const F = tsLit(from);
+  const T = tsLit(to);
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+
+  const [ivFirst, ivExisting, proposal, entry] = await Promise.all([
+    // 初回面談：interview_count=1（候補者通算初回）。辞退系除外。range は date 列 BETWEEN F..T。
+    prisma.$queryRawUnsafe<{ name: string; cnt: number }[]>(`
+      SELECT c.name AS name, COUNT(*)::int AS cnt
+      FROM interview_records ir JOIN candidates c ON c.id = ir.candidate_id
+      WHERE ${empPred}
+        AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
+        AND ir.interview_count = 1
+        AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}'
+      GROUP BY c.id, c.name
+      ORDER BY cnt DESC, c.name ASC;`),
+
+    // 既存面談：interview_count>=2（2回目以降を合算）。辞退系除外。同条件で GROUP BY。
+    prisma.$queryRawUnsafe<{ name: string; cnt: number }[]>(`
+      SELECT c.name AS name, COUNT(*)::int AS cnt
+      FROM interview_records ir JOIN candidates c ON c.id = ir.candidate_id
+      WHERE ${empPred}
+        AND (ir.result_flag IS NULL OR ir.result_flag NOT IN (${DECLINED_SQL}))
+        AND ir.interview_count >= 2
+        AND ir.interview_date >= TIMESTAMP '${F}' AND ir.interview_date <= TIMESTAMP '${T}'
+      GROUP BY c.id, c.name
+      ORDER BY cnt DESC, c.name ASC;`),
+
+    // 紹介：両ソース統合（JE.jobIntroDate ∪ CF BOOKMARK.lastExportedAt）。
+    // NOT EXISTS dedup は同候補者×同日 JST のクロスソース重複を弾く（computeWeeklyMatrix と同条件）。
+    // 当日範囲は events CTE 内で pdate 列直接フィルタ（外側で WHERE する代わり）。
+    prisma.$queryRawUnsafe<{ name: string; cnt: number }[]>(`
+      WITH events AS (
+        SELECT je.candidate_id, je.job_intro_date AS pdate
+        FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+        WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
+          AND je.job_intro_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
+        UNION ALL
+        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
+        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+          AND cf.last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
+          AND NOT EXISTS (
+            SELECT 1 FROM job_entries je2
+            WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
+              AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+                = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+          )
+      )
+      SELECT c2.name AS name, COUNT(*)::int AS cnt
+      FROM events e JOIN candidates c2 ON c2.id = e.candidate_id
+      GROUP BY c2.id, c2.name
+      ORDER BY cnt DESC, c2.name ASC;`),
+
+    // エントリー：job_entries.entry_flag が有効値・archived 除外・entry_date 範囲内。
+    prisma.$queryRawUnsafe<{ name: string; cnt: number }[]>(`
+      SELECT c.name AS name, COUNT(*)::int AS cnt
+      FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+      WHERE ${empPred} AND je.archived_at IS NULL
+        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')
+        AND je.entry_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
+      GROUP BY c.id, c.name
+      ORDER BY cnt DESC, c.name ASC;`),
+  ]);
+
+  const toList = (rows: { name: string; cnt: number }[]): StageDetail[] =>
+    rows.map((r) => ({ name: r.name, count: r.cnt }));
+
+  return {
+    ivFirst: toList(ivFirst),
+    ivExisting: toList(ivExisting),
+    proposal: toList(proposal),
+    entry: toList(entry),
+  };
+}
+
 // 面談ランク割合（円グラフ用）。マトリクスの「**初回面談**」と同条件（担当軸・到達ベース・実施判定・interview_count=1）で
 // InterviewRating.overallRank 別に集計。未評価（rating なし or rank null）は '未評価' に寄せる。
 // 返り値の合計＝マトリクスの初回面談数（interview.first）と一致する。
