@@ -1,8 +1,15 @@
-// T-069：求人検索の行動量・精度（当日・担当 uploadedByUserId）。
-// ⚠️ グラフ/AI専用集計：archivedAt 条件を**付けない**（紹介保留＝BOOKMARK+archivedAt のため、
-//    archivedAt=null だと D の約77% が保留に逃げて選定率が常時100%になる）。
-//    既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別物。D は aiMatchRating の実値で判定。
-// 選定率＝(A+B+C)÷合計BM（D・未評価は分子から除外。D は「見る目」の指標として母数に含める）。
+// T-069/T-092：求人検索の行動量・精度（当日・担当 uploadedByUserId）。
+// ⚠️ グラフ/AI専用集計：archivedAt 条件を**付けない**。当日BM（bmCount）＝紹介保留含む全BOOKMARK。
+//    既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別物。
+//
+// T-092 選定率の定義変更：
+//   選定率 ＝ 出力数 ÷ (BM数 + 紹介保留数)
+//          ＝ 出力数 ÷ 当日の全BOOKMARK（archived問わず）＝ exportCount ÷ bmCount
+//   - 分子 exportCount：lastExportedAt 当日の出力数。D評価でも出力するため aiMatchRating で絞らない。
+//   - 分母 bmCount：createdAt 当日の全BOOKMARK。archivedAt=null（BM数）＋ archivedAt≠null（紹介保留数）の合計。
+//     （bmCount は archivedAt 無条件なので、その値が BM数+紹介保留数 と一致する＝SQL検証済み・一致=true）
+//   旧定義は (A+B+C)÷合計BM（aiMatchRating ベース・D/未評価を分子から除外）だった。
+//   aiMatchRating の構成比（ratings）は ABCD 円グラフ用に従来どおり返す（円の表示は不変）。
 
 import { prisma } from "@/lib/prisma";
 
@@ -28,8 +35,9 @@ export async function computeJobSearchDay(userId: string, dateStr: string): Prom
     GROUP BY r`);
   const ratings: Record<string, number> = {};
   for (const row of ratingRows) ratings[row.r] = row.n;
-  const bmCount = counts[0]?.bm ?? 0;
-  const abc = (ratings["A"] ?? 0) + (ratings["B"] ?? 0) + (ratings["C"] ?? 0);
-  const selectionRate = bmCount > 0 ? abc / bmCount : null;
-  return { bmCount, exportCount: counts[0]?.exp ?? 0, ratings, selectionRate };
+  const bmCount = counts[0]?.bm ?? 0;       // 当日の全BOOKMARK（BM数＋紹介保留数）＝分母
+  const exportCount = counts[0]?.exp ?? 0;  // 当日の出力数（D含む全出力）＝分子
+  // T-092: 選定率＝出力数÷(BM数+紹介保留数)。分母0（当日BMなし）は null で安全に。
+  const selectionRate = bmCount > 0 ? exportCount / bmCount : null;
+  return { bmCount, exportCount, ratings, selectionRate };
 }

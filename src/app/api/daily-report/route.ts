@@ -269,6 +269,7 @@ export async function POST(req: Request) {
         interviewFirst: dayMatrix.interview.first,
         interviewExisting: dayMatrix.interview.second + dayMatrix.interview.thirdPlus,
         bmCount: jobSearch.bmCount,
+        exportCount: jobSearch.exportCount,
         entryTotal: dayMatrix.entry.total.uniq,
         selectionRate: jobSearch.selectionRate,
         dCount: jobSearch.ratings["D"] ?? 0,

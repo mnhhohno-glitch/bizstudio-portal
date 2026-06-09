@@ -17,6 +17,7 @@ export interface DailyReportNotifyParams {
   interviewFirst?: number;
   interviewExisting?: number;
   bmCount?: number;
+  exportCount?: number; // T-092: 当日の出力数（選定率の分子）
   entryTotal?: number;
   selectionRate?: number | null;
   dCount?: number;
@@ -46,7 +47,7 @@ export function buildDailyReportMessage(p: DailyReportNotifyParams): string {
       `・面談 ${p.interviewTotal}件（初回${p.interviewFirst}／既存${p.interviewExisting}）`,
       `・求人紹介 ${p.bmCount}件`,
       `・エントリー ${p.entryTotal}件`,
-      `・選定率 ${sel}%（BM${p.bmCount}／D${p.dCount}）`,
+      `・選定率 ${sel}%（出力${p.exportCount ?? 0}／BM${p.bmCount}）`,
       "",
     );
   }
