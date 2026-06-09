@@ -15,7 +15,7 @@ import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
-const INTERVIEW_DECLINE_ASSIGNEES = "1000007,1000004,1000025";
+const INTERVIEW_DECLINE_ASSIGNEES = "1000004,1000025";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 

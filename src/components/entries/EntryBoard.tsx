@@ -623,7 +623,7 @@ export default function EntryBoard() {
         prefill: "entry",
         candidateId,
         categoryName: CATEGORY_NAME,
-        assignees: "1000025,1000007",
+        assignees: "1000025",
         title: `エントリー対応依頼 - ${info.name}`,
         entryDate: latestEntryDate(info.entries),
         entryCount: String(info.entries.length),
@@ -654,7 +654,7 @@ export default function EntryBoard() {
         toast.error("カテゴリ「エントリー対応（求職者対応）」が見つかりません");
         return;
       }
-      const assigneeIds = ["1000025", "1000007"]
+      const assigneeIds = ["1000025"]
         .map((num) => employees.find((e) => e.employeeNo === num)?.id)
         .filter((id): id is string => !!id);
       if (assigneeIds.length === 0) {
