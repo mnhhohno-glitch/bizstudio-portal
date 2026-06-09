@@ -76,3 +76,39 @@ export async function notifyDailyReport(p: DailyReportNotifyParams): Promise<voi
   }
   await sendBotMessage(botId, channelId, buildDailyReportMessage(p));
 }
+
+// T-093: 日報コメント投稿時の通知。
+// リモート中心の運用で「上司のコメントをLINEでそのまま読める」ことを目的に、
+// コメント本文を見出し＋ポータルURL（本人の日報を閲覧モードで開く）と共に流す。
+// 既存 notifyDailyReport と同じ日報専用ボット・チャンネルを流用する。
+export interface DailyReportCommentNotifyParams {
+  ownerUserId: string; // 日報の所有者（提出者）の userId（URLに付ける）
+  ownerName: string;   // 提出者の氏名
+  authorName: string;  // コメント投稿者の氏名
+  dateStr: string;     // "YYYY-MM-DD"（JST）
+  body: string;        // コメント本文
+}
+
+export function buildDailyReportCommentMessage(p: DailyReportCommentNotifyParams): string {
+  const [, m, d] = p.dateStr.split("-");
+  const md = `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+  const url = `${PORTAL_PROD_URL}/?date=${p.dateStr}&userId=${p.ownerUserId}`;
+  return [
+    `💬 日報コメント：${p.ownerName}さん（${md}）に ${p.authorName}さんがコメントしました`,
+    "",
+    p.body,
+    "",
+    "▼詳細はこちら",
+    url,
+  ].join("\n");
+}
+
+export async function notifyDailyReportComment(p: DailyReportCommentNotifyParams): Promise<void> {
+  const botId = process.env.LINEWORKS_DAILYREPORT_BOT_ID;
+  const channelId = process.env.LINEWORKS_DAILYREPORT_CHANNEL_ID;
+  if (!botId || !channelId) {
+    console.warn("日報コメントLINE通知: LINEWORKS_DAILYREPORT_BOT_ID / CHANNEL_ID 未設定のためスキップ");
+    return;
+  }
+  await sendBotMessage(botId, channelId, buildDailyReportCommentMessage(p));
+}

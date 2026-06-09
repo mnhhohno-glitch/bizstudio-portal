@@ -7,7 +7,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { jstDateStringToDbDate, todayJstDateString } from "@/lib/dailyReport/jstDate";
+import { jstDateStringToDbDate, toJstDateString, todayJstDateString } from "@/lib/dailyReport/jstDate";
+import { notifyDailyReportComment } from "@/lib/dailyReport/lineworks-notify";
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -90,6 +91,27 @@ export async function POST(req: Request) {
     data: { dailyReportId: reportId, userId: user.id, body: text },
     include: { user: { select: { id: true, name: true } } },
   });
+
+  // T-093: 他人がコメントしたときに日報チャンネルへ通知（投稿者＝提出者本人ならスキップ）。
+  // 通知失敗はコメント保存の成功扱いに影響させない（fire&forget・本体レスポンスをブロックしない）。
+  try {
+    const report = await prisma.dailyReport.findUnique({
+      where: { id: reportId },
+      select: { userId: true, date: true, user: { select: { name: true } } },
+    });
+    if (report && report.userId !== user.id) {
+      const dateStr = toJstDateString(report.date);
+      void notifyDailyReportComment({
+        ownerUserId: report.userId,
+        ownerName: report.user?.name ?? "",
+        authorName: user.name,
+        dateStr,
+        body: created.body,
+      }).catch((e) => console.warn("日報コメントLINE通知 失敗:", e?.message ?? e));
+    }
+  } catch (e) {
+    console.warn("日報コメントLINE通知 前処理失敗:", e instanceof Error ? e.message : e);
+  }
 
   return NextResponse.json({
     comment: {
