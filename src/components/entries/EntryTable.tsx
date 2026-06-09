@@ -144,6 +144,22 @@ function isPersonFlagRed(entry: Entry): boolean {
 const isWithdrawalDetail = (entryFlagDetail?: string | null): boolean =>
   !!entryFlagDetail && entryFlagDetail.startsWith("本人辞退");
 
+// 矛盾ハイライト: 企業=日程確定返信済 / 本人=日程通知済 / 対応段階の面接日入力済 で
+// 進行ステータスが「日程調整中」のまま残っている行を CA に気づかせる。
+function isScheduleStatusMismatch(entry: Entry): boolean {
+  if (entry.companyFlag !== "日程確定返信済") return false;
+  if (entry.personFlag !== "日程通知済") return false;
+  const detail = entry.entryFlagDetail || "";
+  if (!detail.includes("日程調整中")) return false;
+  // 段階に対応する面接日の presence のみ判定（罠 #17 回避のため日付パース・比較は行わない）。
+  const stageDate =
+    detail === "一次日程調整中" ? entry.firstInterviewDate :
+    detail === "二次日程調整中" ? entry.secondInterviewDate :
+    detail === "最終日程調整中" ? entry.finalInterviewDate :
+    null;
+  return !!stageDate && String(stageDate).trim() !== "";
+}
+
 const isWithdrawalOption = (label: string): boolean => label.includes("辞退");
 
 function filterFlagOptions(
@@ -744,7 +760,7 @@ export default function EntryTable({
                 onFlagUpdate(entry.id, updates);
               }}
               className={`w-full text-[10px] border border-gray-200 rounded px-1 py-0.5 mt-0.5 bg-white focus:ring-1 focus:ring-[#2563EB] ${
-                isInterviewOverdue(entry, "first") || isInterviewOverdue(entry, "second") || isInterviewOverdue(entry, "final")
+                isInterviewOverdue(entry, "first") || isInterviewOverdue(entry, "second") || isInterviewOverdue(entry, "final") || isScheduleStatusMismatch(entry)
                   ? "text-red-600 font-bold"
                   : "text-gray-500"
               }`}>
