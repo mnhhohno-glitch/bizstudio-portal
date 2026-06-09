@@ -56,9 +56,10 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   ],
   "面接": [
     { key: "interviewPrep", label: "面接対策", width: 95, sortKey: "interviewPrepDate" },
-    { key: "firstInterview", label: "一次面接", width: 95, sortKey: "firstInterviewDate" },
-    { key: "secondInterview", label: "二次面接", width: 95, sortKey: "secondInterviewDate" },
-    { key: "finalInterview", label: "最終面接", width: 95, sortKey: "finalInterviewDate" },
+    // T-091 fix: 日付セル+方法アイコンが折り返さず横並びで収まる幅に拡張（対策列はアイコンなしで据え置き）
+    { key: "firstInterview", label: "一次面接", width: 125, sortKey: "firstInterviewDate" },
+    { key: "secondInterview", label: "二次面接", width: 125, sortKey: "secondInterviewDate" },
+    { key: "finalInterview", label: "最終面接", width: 125, sortKey: "finalInterviewDate" },
   ],
   "内定": [
     { key: "offerDate", label: "内定日", width: 85, sortKey: "offerDate" },
@@ -77,7 +78,8 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   "全件": [],
 };
 
-const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 68, sortKey: null };
+// T-091 fix: 表示/編集アイコン2つが見切れずクリックできる幅に拡張
+const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 95, sortKey: null };
 
 function getColumns(tab: string): ColConfig[] {
   return [...COMMON_COLS, ...(TAB_EXTRA[tab] || []), MEMO_COL];
@@ -354,7 +356,8 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
 }
 
 // T-091: 面接方法アイコン（オンライン/対面/電話）。クリックで サイクル切替＋PATCH 即保存。
-// 値は Interview モデル interviewTool と同一の3値に揃える。列幅は増やさずアイコン＋tooltip のみ。
+// 値は Interview モデル interviewTool と同一の3値に揃える。アイコン＋tooltip。
+// T-091 fix: 未設定時も「ここで選べる」ことが分かるよう、薄い枠線付きの淡色ボタンで視認性を確保。
 const INTERVIEW_TOOL_CYCLE = ["", "オンライン", "対面", "電話"] as const;
 const INTERVIEW_TOOL_ICON: Record<string, string> = {
   "": "–",
@@ -385,7 +388,7 @@ function InterviewToolIcon({ value, entryId, field, onUpdate }: {
       type="button"
       onClick={handleClick}
       title={INTERVIEW_TOOL_LABEL[cur] || "未設定"}
-      className={`inline-flex items-center justify-center w-[16px] h-[16px] text-[11px] leading-none rounded ${empty ? "text-gray-300 hover:text-gray-500" : "hover:bg-blue-50"}`}
+      className={`inline-flex items-center justify-center w-[18px] h-[18px] text-[12px] leading-none rounded shrink-0 ${empty ? "border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600" : "hover:bg-blue-50"}`}
     >
       {INTERVIEW_TOOL_ICON[cur] ?? "–"}
     </button>
