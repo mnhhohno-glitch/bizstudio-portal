@@ -56,10 +56,10 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
   ],
   "面接": [
     { key: "interviewPrep", label: "面接対策", width: 95, sortKey: "interviewPrepDate" },
-    // T-091 fix: 日付セル+方法アイコンが折り返さず横並びで収まる幅に拡張（対策列はアイコンなしで据え置き）
-    { key: "firstInterview", label: "一次面接", width: 125, sortKey: "firstInterviewDate" },
-    { key: "secondInterview", label: "二次面接", width: 125, sortKey: "secondInterviewDate" },
-    { key: "finalInterview", label: "最終面接", width: 125, sortKey: "finalInterviewDate" },
+    // T-091 fix2: 下段=アイコン+時刻の2段レイアウトで列幅内に収まるため 95px に戻す（テーブル総幅を圧縮しメモ列まで横スクロール到達可能に）
+    { key: "firstInterview", label: "一次面接", width: 95, sortKey: "firstInterviewDate" },
+    { key: "secondInterview", label: "二次面接", width: 95, sortKey: "secondInterviewDate" },
+    { key: "finalInterview", label: "最終面接", width: 95, sortKey: "finalInterviewDate" },
   ],
   "内定": [
     { key: "offerDate", label: "内定日", width: 85, sortKey: "offerDate" },
@@ -319,10 +319,11 @@ function InlineDateCell({ value, entryId, field, onUpdate }: {
   );
 }
 
-function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeField, onUpdate }: {
+function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeField, onUpdate, bottomLeftSlot }: {
   dateValue: string | null; timeValue: string | null; entryId: string;
   dateField: string; timeField: string;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+  bottomLeftSlot?: React.ReactNode;
 }) {
   const [editDate, setEditDate] = useState(false);
   const [editTime, setEditTime] = useState(false);
@@ -341,6 +342,19 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
     setEditTime(false);
   };
 
+  const timeEl = editTime ? (
+    <input type="text" autoFocus defaultValue={timeValue || ""} placeholder="HH:mm"
+      onBlur={handleTimeBlur}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      className="w-full text-[10px] border border-[#2563EB] rounded px-0.5 py-0 outline-none"
+      onClick={(e) => e.stopPropagation()} />
+  ) : (
+    <span onClick={(e) => { e.stopPropagation(); setEditTime(true); }}
+      className={`text-[10px] block cursor-pointer rounded min-h-[14px] leading-[14px] ${timeValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
+      {timeValue || "HH:mm"}
+    </span>
+  );
+
   return (
     <div className="text-center">
       {editDate ? (
@@ -355,26 +369,22 @@ function InlineDateTimeCell({ dateValue, timeValue, entryId, dateField, timeFiel
           {fmtDate(dateValue) || "MM/DD"}
         </span>
       )}
-      {editTime ? (
-        <input type="text" autoFocus defaultValue={timeValue || ""} placeholder="HH:mm"
-          onBlur={handleTimeBlur}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          className="w-full text-[10px] border border-[#2563EB] rounded px-0.5 py-0 mt-0.5 outline-none"
-          onClick={(e) => e.stopPropagation()} />
+      {bottomLeftSlot ? (
+        <div className="flex items-center gap-1 mt-0.5">
+          <div className="shrink-0">{bottomLeftSlot}</div>
+          <div className="flex-1 min-w-0">{timeEl}</div>
+        </div>
       ) : (
-        <span onClick={(e) => { e.stopPropagation(); setEditTime(true); }}
-          className={`text-[10px] block cursor-pointer rounded mt-0.5 min-h-[14px] leading-[14px] ${timeValue ? "hover:bg-blue-50" : "border border-dashed border-gray-300 text-gray-300 hover:border-gray-400"}`}>
-          {timeValue || "HH:mm"}
-        </span>
+        <div className="mt-0.5">{timeEl}</div>
       )}
     </div>
   );
 }
 
-// T-091: 面接方法アイコン（オンライン/対面/電話）。クリックで サイクル切替＋PATCH 即保存。
-// 値は Interview モデル interviewTool と同一の3値に揃える。アイコン＋tooltip。
-// T-091 fix: 未設定時も「ここで選べる」ことが分かるよう、薄い枠線付きの淡色ボタンで視認性を確保。
-const INTERVIEW_TOOL_CYCLE = ["", "オンライン", "対面", "電話"] as const;
+// T-091: 面接方法アイコン（オンライン/対面/電話）。
+// T-091 fix2: クリックでポップオーバーを開いて単一選択。サイクル切替を廃止して操作の予測可能性を確保。
+// 画面右端近くの列（最終面接など）でも見切れないよう、開く際にビューポート残幅を測って内側に展開する。
+const INTERVIEW_TOOL_OPTIONS = ["オンライン", "対面", "電話"] as const;
 const INTERVIEW_TOOL_ICON: Record<string, string> = {
   "": "–",
   "オンライン": "💻",
@@ -392,22 +402,79 @@ function InterviewToolIcon({ value, entryId, field, onUpdate }: {
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
 }) {
   const cur = value || "";
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const idx = INTERVIEW_TOOL_CYCLE.indexOf(cur as typeof INTERVIEW_TOOL_CYCLE[number]);
-    const next = INTERVIEW_TOOL_CYCLE[(idx + 1) % INTERVIEW_TOOL_CYCLE.length];
-    onUpdate(entryId, { [field]: next || null });
-  };
   const empty = !cur;
+  const [open, setOpen] = useState(false);
+  // openRight=true: 内容を左寄せ（ボタン左端起点に右へ広がる）／false: 右寄せ（ボタン右端起点に左へ広がる）。
+  const [openRight, setOpenRight] = useState(true);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const POPOVER_WIDTH = 120;
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceRight = window.innerWidth - rect.left;
+      setOpenRight(spaceRight >= POPOVER_WIDTH + 8);
+    }
+    setOpen((v) => !v);
+  };
+
+  const select = (next: string) => {
+    setOpen(false);
+    if (next !== cur) onUpdate(entryId, { [field]: next || null });
+  };
+
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      title={INTERVIEW_TOOL_LABEL[cur] || "未設定"}
-      className={`inline-flex items-center justify-center w-[18px] h-[18px] text-[12px] leading-none rounded shrink-0 ${empty ? "border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600" : "hover:bg-blue-50"}`}
-    >
-      {INTERVIEW_TOOL_ICON[cur] ?? "–"}
-    </button>
+    <div ref={wrapRef} className="relative inline-block">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={handleToggle}
+        title={INTERVIEW_TOOL_LABEL[cur] || "未設定"}
+        className={`inline-flex items-center justify-center w-[18px] h-[18px] text-[12px] leading-none rounded shrink-0 ${empty ? "border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600" : "hover:bg-blue-50"}`}
+      >
+        {INTERVIEW_TOOL_ICON[cur] ?? "–"}
+      </button>
+      {open && (
+        <div
+          className={`absolute z-50 top-full mt-1 ${openRight ? "left-0" : "right-0"} bg-white border border-gray-200 rounded-lg shadow-lg py-1`}
+          style={{ width: POPOVER_WIDTH }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {INTERVIEW_TOOL_OPTIONS.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => select(opt)}
+              className={`flex items-center justify-between w-full px-2 py-1 text-[11px] text-left hover:bg-blue-50 ${opt === cur ? "font-semibold text-[#2563EB]" : "text-gray-700"}`}
+            >
+              <span><span className="mr-1">{INTERVIEW_TOOL_ICON[opt]}</span>{INTERVIEW_TOOL_LABEL[opt]}</span>
+              {opt === cur && <span className="text-[#2563EB]">✓</span>}
+            </button>
+          ))}
+          <div className="border-t border-gray-100 my-1" />
+          <button
+            type="button"
+            onClick={() => select("")}
+            className={`flex items-center justify-between w-full px-2 py-1 text-[11px] text-left hover:bg-gray-50 ${empty ? "font-semibold text-gray-700" : "text-gray-500"}`}
+          >
+            <span>クリア</span>
+            {empty && <span className="text-[#2563EB]">✓</span>}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -821,30 +888,33 @@ export default function EntryTable({
         const warn = entry.entryFlagDetail === "一次面接実施前" && (!entry.firstInterviewDate || !entry.firstInterviewTime);
         const overdue = isInterviewOverdue(entry, "first");
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
-          <div className="flex items-center gap-0.5">
-            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id} dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate} /></div>
-            <InterviewToolIcon value={entry.firstInterviewTool} entryId={entry.id} field="firstInterviewTool" onUpdate={onFieldUpdate} />
-          </div>
+          <InlineDateTimeCell
+            dateValue={entry.firstInterviewDate} timeValue={entry.firstInterviewTime} entryId={entry.id}
+            dateField="firstInterviewDate" timeField="firstInterviewTime" onUpdate={onFieldUpdate}
+            bottomLeftSlot={<InterviewToolIcon value={entry.firstInterviewTool} entryId={entry.id} field="firstInterviewTool" onUpdate={onFieldUpdate} />}
+          />
         </td>;
       }
       case "secondInterview": {
         const warn = entry.entryFlagDetail === "二次面接実施前" && (!entry.secondInterviewDate || !entry.secondInterviewTime);
         const overdue = isInterviewOverdue(entry, "second");
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
-          <div className="flex items-center gap-0.5">
-            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id} dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate} /></div>
-            <InterviewToolIcon value={entry.secondInterviewTool} entryId={entry.id} field="secondInterviewTool" onUpdate={onFieldUpdate} />
-          </div>
+          <InlineDateTimeCell
+            dateValue={entry.secondInterviewDate} timeValue={entry.secondInterviewTime} entryId={entry.id}
+            dateField="secondInterviewDate" timeField="secondInterviewTime" onUpdate={onFieldUpdate}
+            bottomLeftSlot={<InterviewToolIcon value={entry.secondInterviewTool} entryId={entry.id} field="secondInterviewTool" onUpdate={onFieldUpdate} />}
+          />
         </td>;
       }
       case "finalInterview": {
         const warn = entry.entryFlagDetail === "最終面接実施前" && (!entry.finalInterviewDate || !entry.finalInterviewTime);
         const overdue = isInterviewOverdue(entry, "final");
         return <td key={col.key} className={`px-1 py-0.5 text-[11px] ${warn ? "bg-red-100" : ""} ${overdue ? "text-red-600 font-bold" : ""}`}>
-          <div className="flex items-center gap-0.5">
-            <div className="flex-1 min-w-0"><InlineDateTimeCell dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id} dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate} /></div>
-            <InterviewToolIcon value={entry.finalInterviewTool} entryId={entry.id} field="finalInterviewTool" onUpdate={onFieldUpdate} />
-          </div>
+          <InlineDateTimeCell
+            dateValue={entry.finalInterviewDate} timeValue={entry.finalInterviewTime} entryId={entry.id}
+            dateField="finalInterviewDate" timeField="finalInterviewTime" onUpdate={onFieldUpdate}
+            bottomLeftSlot={<InterviewToolIcon value={entry.finalInterviewTool} entryId={entry.id} field="finalInterviewTool" onUpdate={onFieldUpdate} />}
+          />
         </td>;
       }
       case "offerDate":
