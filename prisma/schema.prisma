@@ -325,6 +325,13 @@ model Candidate {
   // スカウトNO（手入力。AI抽出対象外）
   scoutNumber String? @map("scout_number")
 
+  // T-091: スカウト運用の手入力欄
+  // 配信日 / 応募日（CAが手で入力。基本情報編集モーダルで保持）
+  // MAS種別: "開放日" / "通常"（プルダウン）
+  scoutDeliveryDate DateTime? @map("scout_delivery_date")
+  applicationDate   DateTime? @map("application_date")
+  masType           String?   @map("mas_type")
+
   // 希望条件（T-064: AI 自動取込 + CA 編集可）
   desiredJobType1       String? @map("desired_job_type_1")
   desiredJobType2       String? @map("desired_job_type_2")

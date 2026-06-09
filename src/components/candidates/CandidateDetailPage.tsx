@@ -90,6 +90,9 @@ type Candidate = {
   desiredJobType2: string | null;
   desiredIndustry1: string | null;
   scoutNumber: string | null;
+  scoutDeliveryDate: string | null;
+  applicationDate: string | null;
+  masType: string | null;
   desiredPrefecture1: string | null;
   desiredPrefecture2: string | null;
   desiredIndustry2: string | null;
@@ -192,6 +195,13 @@ function EditModal({
   const [applicationRoute, setApplicationRoute] = useState(candidate.applicationRoute || "");
   const [mediaSource, setMediaSource] = useState(candidate.mediaSource || "");
   const [scoutNumber, setScoutNumber] = useState(candidate.scoutNumber || "");
+  const [scoutDeliveryDate, setScoutDeliveryDate] = useState(
+    candidate.scoutDeliveryDate ? new Date(candidate.scoutDeliveryDate).toLocaleDateString("sv-SE") : ""
+  );
+  const [applicationDate, setApplicationDate] = useState(
+    candidate.applicationDate ? new Date(candidate.applicationDate).toLocaleDateString("sv-SE") : ""
+  );
+  const [masType, setMasType] = useState(candidate.masType || "");
   const [desiredJobType1, setDesiredJobType1] = useState(candidate.desiredJobType1 || "");
   const [desiredJobType2, setDesiredJobType2] = useState(candidate.desiredJobType2 || "");
   const [desiredIndustry1, setDesiredIndustry1] = useState(candidate.desiredIndustry1 || "");
@@ -235,6 +245,9 @@ function EditModal({
           applicationRoute: applicationRoute || null,
           mediaSource: mediaSource || null,
           scoutNumber: scoutNumber.trim() || null,
+          scoutDeliveryDate: scoutDeliveryDate || null,
+          applicationDate: applicationDate || null,
+          masType: masType || null,
           desiredJobType1: desiredJobType1.trim() || null,
           desiredJobType2: desiredJobType2.trim() || null,
           desiredIndustry1: desiredIndustry1.trim() || null,
@@ -357,6 +370,25 @@ function EditModal({
               <div>
                 <label className="block text-[13px] font-medium text-[#374151] mb-1">メールアドレス</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">配信日</label>
+                <input type="date" value={scoutDeliveryDate} onChange={(e) => setScoutDeliveryDate(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">応募日</label>
+                <input type="date" value={applicationDate} onChange={(e) => setApplicationDate(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">MAS種別</label>
+                <select value={masType} onChange={(e) => setMasType(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
+                  <option value="">選択してください</option>
+                  <option value="開放日">開放日</option>
+                  <option value="通常">通常</option>
+                </select>
               </div>
             </div>
 

@@ -67,6 +67,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.scoutNumber !== undefined) {
     updateData.scoutNumber = body.scoutNumber?.trim() || null;
   }
+  if (body.scoutDeliveryDate !== undefined) {
+    updateData.scoutDeliveryDate = body.scoutDeliveryDate ? new Date(body.scoutDeliveryDate) : null;
+  }
+  if (body.applicationDate !== undefined) {
+    updateData.applicationDate = body.applicationDate ? new Date(body.applicationDate) : null;
+  }
+  if (body.masType !== undefined) {
+    updateData.masType = body.masType?.trim() || null;
+  }
   if (body.desiredJobType1 !== undefined) {
     updateData.desiredJobType1 = body.desiredJobType1?.trim() || null;
   }
