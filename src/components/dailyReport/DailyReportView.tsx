@@ -90,7 +90,7 @@ const GENDER_LABELS: Record<string, string> = { female: "女", male: "男", othe
 const GENDER_COLORS: Record<string, string> = { female: "#EC4899", male: "#3B82F6", other: "#A78BFA", 未設定: "#9CA3AF" };
 const AGE_ORDER = ["20代前半", "20代後半", "30代前半", "30代後半", "40代前半", "45歳以上", "不明"];
 const AGE_COLORS: Record<string, string> = { "20代前半": "#60A5FA", "20代後半": "#3B82F6", "30代前半": "#22C55E", "30代後半": "#16A34A", "40代前半": "#F59E0B", "45歳以上": "#EF4444", 不明: "#9CA3AF" };
-// 求人検索 aiMatchRating（A=好評価→D=要再検討）。選定率は A+B+C÷合計。
+// 求人検索 aiMatchRating（A=好評価→D=要再検討）。T-092: 選定率＝出力数÷(BM数+紹介保留数)。
 const RATING_ORDER = ["A", "B", "C", "D", "未評価"];
 const RATING_COLORS: Record<string, string> = { A: "#16A34A", B: "#22C55E", C: "#F59E0B", D: "#EF4444", 未評価: "#9CA3AF" };
 function todayJst(): string {
@@ -896,7 +896,7 @@ function DailyCharts({ matrix, attributes, jobSearch }: { matrix: DayMatrix; att
           {pie("男女比", genderRef, n > 0)}
           {pie("年代", ageRef, n > 0)}
         </div>
-        <div className="mt-1 text-[10px] text-[#9CA3AF]">求人ABCD＝当日BM（紹介保留含む）の aiMatchRating 構成比。選定率＝(A+B+C)÷合計BM（D・未評価除外）。ランク/男女比/年代＝当日の初回面談者{n}人。</div>
+        <div className="mt-1 text-[10px] text-[#9CA3AF]">求人ABCD＝当日BM（紹介保留含む）の aiMatchRating 構成比。選定率＝出力数÷(BM数+紹介保留数)＝当日の全BOOKMARKのうち出力できた割合。ランク/男女比/年代＝当日の初回面談者{n}人。</div>
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ export interface AssistContext {
   entryRate: number | null; // エントリー÷紹介
   bmCount: number; // 求人検索（BM）数
   exportCount: number; // 出力（提案）数
-  selectionRate: number | null; // (A+B+C)/合計BM
+  selectionRate: number | null; // T-092: 出力数/(BM数+紹介保留数)
   dCount: number; // 当日BM の D 件数
   activeCandidates: number; // 支援中（ACTIVE）求職者数
   plannedCount: number;
@@ -46,7 +46,7 @@ export function buildAssistContext(c: AssistContext): string {
     `- 求人紹介（紹介人数）: ${c.proposalUniq}人`,
     `- エントリー: ${c.entryTotal}件（エントリー率 ${pct(c.entryRate)}）`,
     `- 求人検索 BM数: ${c.bmCount}件 / 出力数: ${c.exportCount}件`,
-    `- 選定率: ${pct(c.selectionRate)}（BM${c.bmCount}／うちD${c.dCount}件）`,
+    `- 選定率: ${pct(c.selectionRate)}（出力${c.exportCount}／BM${c.bmCount}・出力数÷(BM数+紹介保留数)）`,
     `- 支援中（ACTIVE）求職者数: ${c.activeCandidates}人`,
     `- スケジュール: 予定${c.plannedCount}件／完了${c.completedCount}件（消化${digest}%）`,
     "",
