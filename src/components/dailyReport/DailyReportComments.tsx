@@ -107,7 +107,7 @@ export default function DailyReportComments({
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          rows={2}
+          rows={6}
           placeholder="コメントを入力（上司・同僚もコメントできます）"
           className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-[13px] resize-y focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handlePost(); }}
