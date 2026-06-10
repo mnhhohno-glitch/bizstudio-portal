@@ -84,9 +84,9 @@ export default function SalaryTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       <BlockTitle>給与</BlockTitle>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="基本給（円）">
           <NumberInput value={form.baseSalary} onChange={set("baseSalary")} />
         </FormField>
@@ -107,9 +107,9 @@ export default function SalaryTab({
         </FormField>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>通勤</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="通勤経路">
             <TextInput value={form.commuteRoute} onChange={set("commuteRoute")} />
           </FormField>
@@ -128,13 +128,11 @@ export default function SalaryTab({
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>メモ</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
-          <div className="col-span-3">
-            <FormField label="">
-              <TextArea value={form.memo} onChange={set("memo")} rows={3} />
-            </FormField>
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+          <div className="col-span-4">
+            <TextArea value={form.memo} onChange={set("memo")} rows={3} />
           </div>
         </div>
       </div>

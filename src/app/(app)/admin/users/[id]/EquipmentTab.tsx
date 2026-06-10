@@ -64,25 +64,25 @@ function PasswordField({
 
   return (
     <div>
-      <label className="block text-[11px] text-gray-400 mb-1">{label}</label>
+      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
       {/* 現在値: 値あり=●●●●●●＋「表示」、値なし=未設定 */}
-      <div className="flex items-center gap-2 border-b border-gray-300 py-1.5 min-h-[30px]">
+      <div className="flex items-center gap-2 border-b border-gray-300 py-1 min-h-[26px]">
         {hasValue ? (
           <>
-            <span className="font-mono text-sm text-slate-700 flex-1">
+            <span className="font-mono text-[13px] text-slate-700 flex-1 truncate">
               {revealed !== null ? revealed : "●●●●●●"}
             </span>
             <button
               type="button"
               disabled={loading}
               onClick={toggleReveal}
-              className="text-[11px] text-blue-600 hover:underline disabled:opacity-50"
+              className="text-[11px] text-blue-600 hover:underline disabled:opacity-50 shrink-0"
             >
               {loading ? "..." : revealed !== null ? "隠す" : "表示"}
             </button>
           </>
         ) : (
-          <span className="text-sm text-gray-400 flex-1">未設定</span>
+          <span className="text-[13px] text-gray-400 flex-1">未設定</span>
         )}
       </div>
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
@@ -92,7 +92,7 @@ function PasswordField({
         value={newValue}
         onChange={(e) => onChangeNew(e.target.value)}
         placeholder={hasValue ? "変更する場合のみ入力" : "設定する場合は入力"}
-        className="mt-1.5 w-full border-0 border-b border-gray-300 rounded-none px-0 py-1.5 text-sm bg-transparent focus:ring-0 focus:border-blue-600 focus:outline-none"
+        className="mt-1 w-full border-0 border-b border-gray-300 rounded-none px-0 py-1 text-[13px] bg-transparent focus:ring-0 focus:border-blue-600 focus:outline-none"
       />
     </div>
   );
@@ -170,9 +170,9 @@ export default function EquipmentTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       <BlockTitle>PC</BlockTitle>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="PC貸与日">
           <DateInput value={form.pcLentDate} onChange={set("pcLentDate")} />
         </FormField>
@@ -203,9 +203,9 @@ export default function EquipmentTab({
         />
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>携帯</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="携帯番号">
             <TextInput value={form.mobileNumber} onChange={set("mobileNumber")} />
           </FormField>

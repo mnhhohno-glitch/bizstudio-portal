@@ -58,9 +58,9 @@ export default function BankAccountTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       <BlockTitle>給与振込口座</BlockTitle>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="銀行コード">
           <TextInput value={form.bankCode} onChange={set("bankCode")} placeholder="例: 0001" />
         </FormField>
@@ -87,11 +87,9 @@ export default function BankAccountTab({
         <FormField label="口座番号">
           <TextInput value={form.accountNumber} onChange={set("accountNumber")} />
         </FormField>
-        <div className="col-span-2">
-          <FormField label="口座名義（カナ）">
-            <TextInput value={form.accountHolderKana} onChange={set("accountHolderKana")} placeholder="例: オクムラ ユウジ" />
-          </FormField>
-        </div>
+        <FormField label="口座名義（カナ）">
+          <TextInput value={form.accountHolderKana} onChange={set("accountHolderKana")} placeholder="例: オクムラ ユウジ" />
+        </FormField>
       </div>
       <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
     </div>

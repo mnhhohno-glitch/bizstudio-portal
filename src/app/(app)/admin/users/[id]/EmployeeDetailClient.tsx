@@ -32,8 +32,8 @@ const JOB_CATEGORY_LABEL: Record<string, string> = {
 function MiniField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] text-gray-400">{label}</div>
-      <div className="mt-0.5 text-[13px] text-slate-800">{value}</div>
+      <div className="text-[11px] text-gray-400 whitespace-nowrap">{label}</div>
+      <div className="mt-0.5 text-[12px] text-slate-800 whitespace-nowrap">{value}</div>
     </div>
   );
 }
@@ -88,7 +88,7 @@ export default function EmployeeDetailClient({
 
   if (!detail) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white">
+      <div className="max-w-5xl mx-auto rounded-xl border border-gray-200 bg-white">
         <div className="px-6 py-5 border-b border-gray-200">
           <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
             ← 社員管理に戻る
@@ -148,27 +148,27 @@ export default function EmployeeDetailClient({
           : "—";
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white">
+    <div className="max-w-5xl mx-auto rounded-xl border border-gray-200 bg-white">
       {/* 戻るリンク */}
-      <div className="px-6 pt-5">
+      <div className="px-5 pt-4">
         <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
           ← 社員管理に戻る
         </Link>
       </div>
 
       {/* 人物カード（ヘッダー） */}
-      <div className="px-6 pt-4 pb-5 border-b border-gray-200">
-        <div className="flex items-start gap-5">
+      <div className="px-5 py-4 border-b border-gray-200">
+        <div className="flex items-center gap-4">
           {/* イニシャルアバター */}
-          <div className="w-16 h-16 rounded-full bg-[#E6F1FB] text-[#0C447C] font-medium text-xl flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-full bg-[#E6F1FB] text-[#0C447C] font-medium text-base flex items-center justify-center shrink-0">
             {initial}
           </div>
 
           {/* 氏名ブロック */}
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-xl font-medium text-slate-800">{e.name}</span>
-              {e.furigana && <span className="text-xs text-gray-400">{e.furigana}</span>}
+              <span className="text-[17px] font-medium text-slate-800">{e.name}</span>
+              {e.furigana && <span className="text-[11px] text-gray-400">{e.furigana}</span>}
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs ${
                   isActive
@@ -179,7 +179,7 @@ export default function EmployeeDetailClient({
                 {isActive ? "在籍" : "退社"}
               </span>
             </div>
-            <div className="mt-1 text-xs text-gray-500">
+            <div className="mt-0.5 text-[11px] text-gray-500">
               {e.employeeNumber}
               <span className="mx-1.5">・</span>
               <span className="font-mono">{userEmail}</span>
@@ -192,8 +192,8 @@ export default function EmployeeDetailClient({
             </div>
           </div>
 
-          {/* 右ミニグリッド */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 min-w-[280px]">
+          {/* 右ミニグリッド（横1列に4項目） */}
+          <div className="flex items-start gap-x-[18px] shrink-0">
             <MiniField
               label="生年月日"
               value={
@@ -215,14 +215,14 @@ export default function EmployeeDetailClient({
       </div>
 
       {/* タブバー（ヘッダー直下に密着） */}
-      <div className="px-6 border-b border-gray-200">
+      <div className="px-5 border-b border-gray-200">
         <div className="flex">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={`px-3.5 py-3 text-[13px] -mb-px border-b-2 transition-colors ${
+              className={`px-3 py-2.5 text-[12px] -mb-px border-b-2 transition-colors ${
                 tab === t.key
                   ? "border-blue-700 text-blue-700 font-medium"
                   : "border-transparent text-gray-500 hover:text-slate-700"

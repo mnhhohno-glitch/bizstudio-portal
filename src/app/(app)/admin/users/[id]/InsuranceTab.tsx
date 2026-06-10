@@ -66,9 +66,9 @@ export default function InsuranceTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       <BlockTitle>雇用保険</BlockTitle>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="加入状況">
           <TextInput value={form.employmentInsuranceStatus} onChange={set("employmentInsuranceStatus")} placeholder="例: 加入" />
         </FormField>
@@ -89,9 +89,9 @@ export default function InsuranceTab({
         </FormField>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>社会保険</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="加入状況">
             <TextInput value={form.socialInsuranceStatus} onChange={set("socialInsuranceStatus")} placeholder="例: 加入" />
           </FormField>
@@ -104,7 +104,7 @@ export default function InsuranceTab({
           <FormField label="基礎年金番号">
             <TextInput value={form.pensionNumber} onChange={set("pensionNumber")} />
           </FormField>
-          <div className="col-span-3">
+          <div className="col-span-4">
             <FormField label="備考">
               <TextArea value={form.socialInsuranceNote} onChange={set("socialInsuranceNote")} />
             </FormField>
@@ -112,9 +112,9 @@ export default function InsuranceTab({
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>扶養</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="扶養取得日">
             <DateInput value={form.dependentAcquiredDate} onChange={set("dependentAcquiredDate")} />
           </FormField>
@@ -297,7 +297,7 @@ function DependentRow({
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-x-6 gap-y-3">
         <FormField label="氏名">
           <TextInput value={form.name} onChange={set("name")} />
         </FormField>

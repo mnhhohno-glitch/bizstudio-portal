@@ -72,12 +72,12 @@ export default function LeaveTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       {/* 有給残日数 */}
       <BlockTitle>有給残日数</BlockTitle>
       <div className="flex items-end gap-3 max-w-md">
         <div className="flex-1">
-          <label className="block text-[11px] text-gray-400 mb-1">残日数（日）</label>
+          <label className="block text-[10px] text-gray-400 mb-1">残日数（日）</label>
           <input
             type="number"
             step="0.5"
@@ -108,7 +108,7 @@ export default function LeaveTab({
       </p>
 
       {/* 消化サマリ */}
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>消化サマリ（承認済み）</BlockTitle>
         <div className="flex gap-6 text-sm text-slate-700">
           <div>
@@ -126,7 +126,7 @@ export default function LeaveTab({
       </div>
 
       {/* 消化履歴 */}
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>消化履歴</BlockTitle>
         {leaveRequests.length === 0 ? (
           <p className="text-sm text-gray-400">休暇申請はありません。</p>

@@ -76,9 +76,9 @@ export default function BasicInfoTab({
   };
 
   return (
-    <div className="px-6 py-6">
+    <div className="px-5 py-5">
       <BlockTitle>基本情報</BlockTitle>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="社員番号">
           <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} />
         </FormField>
@@ -123,10 +123,10 @@ export default function BasicInfoTab({
         </FormField>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>連絡先</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+          <div className="col-span-3">
             <FormField label="住所">
               <TextInput value={form.address} onChange={set("address")} />
             </FormField>
@@ -137,9 +137,9 @@ export default function BasicInfoTab({
         </div>
       </div>
 
-      <div className="mt-8">
+      <div className="mt-5">
         <BlockTitle>緊急連絡先</BlockTitle>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="氏名">
             <TextInput value={form.emergencyContactName} onChange={set("emergencyContactName")} />
           </FormField>
