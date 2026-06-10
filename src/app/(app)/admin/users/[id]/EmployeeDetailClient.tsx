@@ -11,6 +11,9 @@ import InsuranceTab from "./InsuranceTab";
 import SalaryTab from "./SalaryTab";
 import EquipmentTab from "./EquipmentTab";
 import LeaveTab from "./LeaveTab";
+import EmployeeSearchSwitcher from "./EmployeeSearchSwitcher";
+import type { EmployeeListItem } from "./EmployeeSearchSwitcher";
+import AccountSettingsBar from "./AccountSettingsBar";
 
 type TabKey = "basic" | "bank" | "insurance" | "salary" | "equipment" | "leave";
 
@@ -43,6 +46,10 @@ export default function EmployeeDetailClient({
   userName,
   userEmail,
   userEmployeeNumber,
+  userRole,
+  userLineworksId,
+  userIsMynaviAssignee,
+  allEmployees,
   detail,
   todayJst,
 }: {
@@ -50,6 +57,10 @@ export default function EmployeeDetailClient({
   userName: string;
   userEmail: string;
   userEmployeeNumber: number | null;
+  userRole: string;
+  userLineworksId: string | null;
+  userIsMynaviAssignee: boolean;
+  allEmployees: EmployeeListItem[];
   detail: EmployeeDetailData | null;
   todayJst: string;
 }) {
@@ -88,11 +99,12 @@ export default function EmployeeDetailClient({
 
   if (!detail) {
     return (
-      <div className="max-w-5xl mx-auto rounded-xl border border-gray-200 bg-white">
-        <div className="px-6 py-5 border-b border-gray-200">
+      <div className="max-w-5xl rounded-xl border border-gray-200 bg-white">
+        <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4">
           <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
             ← 社員管理に戻る
           </Link>
+          <EmployeeSearchSwitcher employees={allEmployees} currentUserId={userId} />
         </div>
         <div className="px-6 py-8">
           <h3 className="text-lg font-semibold text-slate-800 mb-2">社員情報（Employee）が未登録です</h3>
@@ -148,12 +160,13 @@ export default function EmployeeDetailClient({
           : "—";
 
   return (
-    <div className="max-w-5xl mx-auto rounded-xl border border-gray-200 bg-white">
-      {/* 戻るリンク */}
-      <div className="px-5 pt-4">
+    <div className="max-w-5xl rounded-xl border border-gray-200 bg-white">
+      {/* 戻るリンク＋他社員検索切替（Task 4） */}
+      <div className="px-5 pt-4 flex items-center justify-between gap-4">
         <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
           ← 社員管理に戻る
         </Link>
+        <EmployeeSearchSwitcher employees={allEmployees} currentUserId={userId} />
       </div>
 
       {/* 人物カード（ヘッダー） */}
@@ -192,8 +205,8 @@ export default function EmployeeDetailClient({
             </div>
           </div>
 
-          {/* 右ミニグリッド（横1列に4項目） */}
-          <div className="flex items-start gap-x-[18px] shrink-0">
+          {/* 右ミニグリッド（横1列に4項目・氏名ブロックと垂直中央で揃える） */}
+          <div className="flex items-center gap-x-[18px] shrink-0">
             <MiniField
               label="生年月日"
               value={
@@ -214,7 +227,18 @@ export default function EmployeeDetailClient({
         </div>
       </div>
 
-      {/* タブバー（ヘッダー直下に密着） */}
+      {/* アカウント設定行（Task 5: 一覧モーダル相当の項目をヘッダーで編集） */}
+      <AccountSettingsBar
+        userId={userId}
+        email={userEmail}
+        role={userRole}
+        jobCategory={e.jobCategory}
+        lineworksId={userLineworksId}
+        isMynaviAssignee={userIsMynaviAssignee}
+        hasEmployee={true}
+      />
+
+      {/* タブバー（アカウント設定行の直下） */}
       <div className="px-5 border-b border-gray-200">
         <div className="flex">
           {TABS.map((t) => (

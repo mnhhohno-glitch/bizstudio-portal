@@ -86,7 +86,7 @@ export default function BasicInfoTab({
           <TextInput value={form.name} onChange={set("name")} />
         </FormField>
         <FormField label="フリガナ">
-          <TextInput value={form.furigana} onChange={set("furigana")} placeholder="例: オクムラ ユウジ" />
+          <TextInput value={form.furigana} onChange={set("furigana")} placeholder="例: ビズスタ タロウ" />
         </FormField>
         <FormField label={`生年月日${age != null ? `（${age}歳）` : ""}`}>
           <DateInput value={form.birthday} onChange={set("birthday")} />

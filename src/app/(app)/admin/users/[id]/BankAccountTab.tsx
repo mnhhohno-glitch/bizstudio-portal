@@ -88,7 +88,7 @@ export default function BankAccountTab({
           <TextInput value={form.accountNumber} onChange={set("accountNumber")} />
         </FormField>
         <FormField label="口座名義（カナ）">
-          <TextInput value={form.accountHolderKana} onChange={set("accountHolderKana")} placeholder="例: オクムラ ユウジ" />
+          <TextInput value={form.accountHolderKana} onChange={set("accountHolderKana")} placeholder="例: ビズスタ タロウ" />
         </FormField>
       </div>
       <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />

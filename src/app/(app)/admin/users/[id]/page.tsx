@@ -31,7 +31,16 @@ export default async function AdminUserDetailPage({
   const { id } = await params;
   const user = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, name: true, email: true, employeeNumber: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      employeeNumber: true,
+      status: true,
+      role: true,
+      lineworksId: true,
+      isMynaviAssignee: true,
+    },
   });
   if (!user) {
     return (
@@ -41,6 +50,29 @@ export default async function AdminUserDetailPage({
       </div>
     );
   }
+
+  // 詳細画面からの社員切替（Task 4）: 全社員の最小情報を一覧として渡す（新API不要）。
+  const allUsers = await prisma.user.findMany({
+    orderBy: [
+      { employeeNumber: { sort: "asc", nulls: "last" } },
+      { name: "asc" },
+    ],
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      employeeNumber: true,
+      employee: { select: { employeeNumber: true } },
+    },
+  });
+  const allEmployees = allUsers.map((u) => ({
+    id: u.id,
+    name: u.name,
+    status: u.status,
+    // 表示用の社員番号: Employee.employeeNumber(String) 優先、無ければ User.employeeNumber(Int)。
+    employeeNumber:
+      u.employee?.employeeNumber ?? (u.employeeNumber != null ? String(u.employeeNumber) : null),
+  }));
 
   const emp = await prisma.employee.findUnique({
     where: { userId: id },
@@ -165,6 +197,10 @@ export default async function AdminUserDetailPage({
         userName={user.name}
         userEmail={user.email}
         userEmployeeNumber={user.employeeNumber}
+        userRole={user.role}
+        userLineworksId={user.lineworksId}
+        userIsMynaviAssignee={user.isMynaviAssignee}
+        allEmployees={allEmployees}
         detail={detail}
         todayJst={todayJstDateString()}
       />
