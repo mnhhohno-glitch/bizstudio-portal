@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 import ManusKeyButton from "./ManusKeyButton";
 import UserStatusButton from "./UserStatusButton";
@@ -258,6 +259,12 @@ export default function UserListClient({ users }: { users: UserData[] }) {
                 </Td>
                 <Td>
                   <div className="flex gap-2">
+                    <Link
+                      href={`/admin/users/${u.id}`}
+                      className="rounded bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      詳細
+                    </Link>
                     <button
                       onClick={() => openEdit(u)}
                       className="rounded bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
