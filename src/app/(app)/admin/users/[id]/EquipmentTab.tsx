@@ -2,13 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardBody } from "@/components/ui/Card";
 import type { EquipmentData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
 import { FormField, TextInput, DateInput, SaveBar, BlockTitle } from "./detail-ui";
 
 // T-096 タブ5: 貸与物。パスワード類5項目はマスク表示:
-// - 初期表示は値の有無のみ（値あり=●●●●●●＋「表示」、値なし=「未設定」）
+// - 初期表示は値の有無のみ（値あり=●●●●●●＋小さい「表示」、値なし=「未設定」）
 // - 「表示」クリック時のみ /secrets API で復号値を取得（初期 props には復号値を含めない）
 // - 変更は平文入力 → 保存 API がサーバ側で暗号化
 
@@ -65,33 +64,35 @@ function PasswordField({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
-      <div className="flex items-center gap-2 mb-1.5">
+      <label className="block text-[11px] text-gray-400 mb-1">{label}</label>
+      {/* 現在値: 値あり=●●●●●●＋「表示」、値なし=未設定 */}
+      <div className="flex items-center gap-2 border-b border-gray-300 py-1.5 min-h-[30px]">
         {hasValue ? (
           <>
-            <span className="font-mono text-sm text-slate-700">
+            <span className="font-mono text-sm text-slate-700 flex-1">
               {revealed !== null ? revealed : "●●●●●●"}
             </span>
             <button
               type="button"
               disabled={loading}
               onClick={toggleReveal}
-              className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+              className="text-[11px] text-blue-600 hover:underline disabled:opacity-50"
             >
               {loading ? "..." : revealed !== null ? "隠す" : "表示"}
             </button>
           </>
         ) : (
-          <span className="text-sm text-slate-400">未設定</span>
+          <span className="text-sm text-gray-400 flex-1">未設定</span>
         )}
-        {error && <span className="text-xs text-red-600">{error}</span>}
       </div>
+      {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
+      {/* 変更入力 */}
       <input
         type="text"
         value={newValue}
         onChange={(e) => onChangeNew(e.target.value)}
         placeholder={hasValue ? "変更する場合のみ入力" : "設定する場合は入力"}
-        className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="mt-1.5 w-full border-0 border-b border-gray-300 rounded-none px-0 py-1.5 text-sm bg-transparent focus:ring-0 focus:border-blue-600 focus:outline-none"
       />
     </div>
   );
@@ -105,7 +106,7 @@ export default function EquipmentTab({
   equipment: EquipmentData | null;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState({
+  const initial = {
     pcLentDate: equipment?.pcLentDate ?? "",
     pcNumber: equipment?.pcNumber ?? "",
     pcType: equipment?.pcType ?? "",
@@ -115,15 +116,16 @@ export default function EquipmentTab({
     appleId: equipment?.appleId ?? "",
     googleAccount: equipment?.googleAccount ?? "",
     mobileManagementNo: equipment?.mobileManagementNo ?? "",
-  });
-  // パスワード類の新規入力値（空 = 変更しない）
-  const [secrets, setSecrets] = useState<Record<SecretField, string>>({
+  };
+  const emptySecrets: Record<SecretField, string> = {
     pcInitialPassword: "",
     lineworksPassword: "",
     appleIdPassword: "",
     googlePassword: "",
     office365Password: "",
-  });
+  };
+  const [form, setForm] = useState(initial);
+  const [secrets, setSecrets] = useState<Record<SecretField, string>>(emptySecrets);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,13 +151,7 @@ export default function EquipmentTab({
         if (v.length > 0) secretPayload[k] = v;
       }
       await patchEmployeeSection(employeeId, "equipment", { ...form, ...secretPayload });
-      setSecrets({
-        pcInitialPassword: "",
-        lineworksPassword: "",
-        appleIdPassword: "",
-        googlePassword: "",
-        office365Password: "",
-      });
+      setSecrets(emptySecrets);
       setSaved(true);
       router.refresh();
     } catch (e) {
@@ -165,88 +161,94 @@ export default function EquipmentTab({
     }
   };
 
+  const handleCancel = () => {
+    setForm(initial);
+    setSecrets(emptySecrets);
+    setSaved(false);
+    setError(null);
+    router.refresh();
+  };
+
   return (
-    <Card>
-      <CardBody>
-        <BlockTitle>PC</BlockTitle>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField label="PC貸与日">
-            <DateInput value={form.pcLentDate} onChange={set("pcLentDate")} />
+    <div className="px-6 py-6">
+      <BlockTitle>PC</BlockTitle>
+      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <FormField label="PC貸与日">
+          <DateInput value={form.pcLentDate} onChange={set("pcLentDate")} />
+        </FormField>
+        <FormField label="PC番号">
+          <TextInput value={form.pcNumber} onChange={set("pcNumber")} />
+        </FormField>
+        <FormField label="PC機種">
+          <TextInput value={form.pcType} onChange={set("pcType")} />
+        </FormField>
+        <FormField label="端末番号">
+          <TextInput value={form.deviceNumber} onChange={set("deviceNumber")} />
+        </FormField>
+        <PasswordField
+          employeeId={employeeId}
+          field="pcInitialPassword"
+          label="PC初期パスワード"
+          hasValue={equipment?.hasPcInitialPassword ?? false}
+          newValue={secrets.pcInitialPassword}
+          onChangeNew={setSecret("pcInitialPassword")}
+        />
+        <PasswordField
+          employeeId={employeeId}
+          field="lineworksPassword"
+          label="LINE WORKS パスワード"
+          hasValue={equipment?.hasLineworksPassword ?? false}
+          newValue={secrets.lineworksPassword}
+          onChangeNew={setSecret("lineworksPassword")}
+        />
+      </div>
+
+      <div className="mt-8">
+        <BlockTitle>携帯</BlockTitle>
+        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+          <FormField label="携帯番号">
+            <TextInput value={form.mobileNumber} onChange={set("mobileNumber")} />
           </FormField>
-          <FormField label="PC番号">
-            <TextInput value={form.pcNumber} onChange={set("pcNumber")} />
+          <FormField label="携帯製造番号">
+            <TextInput value={form.mobileSerialNumber} onChange={set("mobileSerialNumber")} />
           </FormField>
-          <FormField label="PC機種">
-            <TextInput value={form.pcType} onChange={set("pcType")} />
+          <FormField label="管理No">
+            <TextInput value={form.mobileManagementNo} onChange={set("mobileManagementNo")} />
           </FormField>
-          <FormField label="端末番号">
-            <TextInput value={form.deviceNumber} onChange={set("deviceNumber")} />
+          <FormField label="Apple ID">
+            <TextInput value={form.appleId} onChange={set("appleId")} />
           </FormField>
           <PasswordField
             employeeId={employeeId}
-            field="pcInitialPassword"
-            label="PC初期パスワード"
-            hasValue={equipment?.hasPcInitialPassword ?? false}
-            newValue={secrets.pcInitialPassword}
-            onChangeNew={setSecret("pcInitialPassword")}
+            field="appleIdPassword"
+            label="Apple ID パスワード"
+            hasValue={equipment?.hasAppleIdPassword ?? false}
+            newValue={secrets.appleIdPassword}
+            onChangeNew={setSecret("appleIdPassword")}
+          />
+          <FormField label="Google アカウント">
+            <TextInput value={form.googleAccount} onChange={set("googleAccount")} />
+          </FormField>
+          <PasswordField
+            employeeId={employeeId}
+            field="googlePassword"
+            label="Google パスワード"
+            hasValue={equipment?.hasGooglePassword ?? false}
+            newValue={secrets.googlePassword}
+            onChangeNew={setSecret("googlePassword")}
           />
           <PasswordField
             employeeId={employeeId}
-            field="lineworksPassword"
-            label="LINE WORKS パスワード"
-            hasValue={equipment?.hasLineworksPassword ?? false}
-            newValue={secrets.lineworksPassword}
-            onChangeNew={setSecret("lineworksPassword")}
+            field="office365Password"
+            label="Office365 パスワード"
+            hasValue={equipment?.hasOffice365Password ?? false}
+            newValue={secrets.office365Password}
+            onChangeNew={setSecret("office365Password")}
           />
         </div>
+      </div>
 
-        <div className="mt-6">
-          <BlockTitle>携帯</BlockTitle>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="携帯番号">
-              <TextInput value={form.mobileNumber} onChange={set("mobileNumber")} />
-            </FormField>
-            <FormField label="携帯製造番号">
-              <TextInput value={form.mobileSerialNumber} onChange={set("mobileSerialNumber")} />
-            </FormField>
-            <FormField label="管理No">
-              <TextInput value={form.mobileManagementNo} onChange={set("mobileManagementNo")} />
-            </FormField>
-            <FormField label="Apple ID">
-              <TextInput value={form.appleId} onChange={set("appleId")} />
-            </FormField>
-            <PasswordField
-              employeeId={employeeId}
-              field="appleIdPassword"
-              label="Apple ID パスワード"
-              hasValue={equipment?.hasAppleIdPassword ?? false}
-              newValue={secrets.appleIdPassword}
-              onChangeNew={setSecret("appleIdPassword")}
-            />
-            <FormField label="Google アカウント">
-              <TextInput value={form.googleAccount} onChange={set("googleAccount")} />
-            </FormField>
-            <PasswordField
-              employeeId={employeeId}
-              field="googlePassword"
-              label="Google パスワード"
-              hasValue={equipment?.hasGooglePassword ?? false}
-              newValue={secrets.googlePassword}
-              onChangeNew={setSecret("googlePassword")}
-            />
-            <PasswordField
-              employeeId={employeeId}
-              field="office365Password"
-              label="Office365 パスワード"
-              hasValue={equipment?.hasOffice365Password ?? false}
-              newValue={secrets.office365Password}
-              onChangeNew={setSecret("office365Password")}
-            />
-          </div>
-        </div>
-
-        <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} />
-      </CardBody>
-    </Card>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
+    </div>
   );
 }

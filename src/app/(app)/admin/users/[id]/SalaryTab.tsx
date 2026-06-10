@@ -2,10 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardBody } from "@/components/ui/Card";
 import type { SalaryData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, NumberInput, TextArea, SaveBar, BlockTitle } from "./detail-ui";
+import {
+  FormField,
+  TextInput,
+  NumberInput,
+  TextArea,
+  ReadOnlyField,
+  SaveBar,
+  BlockTitle,
+} from "./detail-ui";
 
 // T-096 タブ4: 給与手当。支給総額は DB に持たず、入力中もリアルタイムで自動合計を表示。
 
@@ -25,7 +32,7 @@ export default function SalaryTab({
   salary: SalaryData | null;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState({
+  const initial = {
     baseSalary: salary?.baseSalary != null ? String(salary.baseSalary) : "",
     rankAllowance: salary?.rankAllowance != null ? String(salary.rankAllowance) : "",
     communicationAllowance: salary?.communicationAllowance != null ? String(salary.communicationAllowance) : "",
@@ -37,7 +44,8 @@ export default function SalaryTab({
     commuteFareOneWay: salary?.commuteFareOneWay != null ? String(salary.commuteFareOneWay) : "",
     commuteFareRoundTrip: salary?.commuteFareRoundTrip != null ? String(salary.commuteFareRoundTrip) : "",
     memo: salary?.memo ?? "",
-  });
+  };
+  const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,62 +76,70 @@ export default function SalaryTab({
     }
   };
 
+  const handleCancel = () => {
+    setForm(initial);
+    setSaved(false);
+    setError(null);
+    router.refresh();
+  };
+
   return (
-    <Card>
-      <CardBody>
-        <BlockTitle>給与</BlockTitle>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField label="基本給（円）">
-            <NumberInput value={form.baseSalary} onChange={set("baseSalary")} />
+    <div className="px-6 py-6">
+      <BlockTitle>給与</BlockTitle>
+      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <FormField label="基本給（円）">
+          <NumberInput value={form.baseSalary} onChange={set("baseSalary")} />
+        </FormField>
+        <FormField label="ランク手当（円）">
+          <NumberInput value={form.rankAllowance} onChange={set("rankAllowance")} />
+        </FormField>
+        <FormField label="通信手当（円）">
+          <NumberInput value={form.communicationAllowance} onChange={set("communicationAllowance")} />
+        </FormField>
+        <FormField label="特別手当（円）">
+          <NumberInput value={form.specialAllowance} onChange={set("specialAllowance")} />
+        </FormField>
+        <FormField label="通勤手当（円）">
+          <NumberInput value={form.commuteAllowance} onChange={set("commuteAllowance")} />
+        </FormField>
+        <FormField label="支給総額（自動）">
+          <ReadOnlyField>{total.toLocaleString()}円</ReadOnlyField>
+        </FormField>
+      </div>
+
+      <div className="mt-8">
+        <BlockTitle>通勤</BlockTitle>
+        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+          <FormField label="通勤経路">
+            <TextInput value={form.commuteRoute} onChange={set("commuteRoute")} />
           </FormField>
-          <FormField label="ランク手当（円）">
-            <NumberInput value={form.rankAllowance} onChange={set("rankAllowance")} />
+          <FormField label="区間（自宅側）">
+            <TextInput value={form.commuteFrom} onChange={set("commuteFrom")} />
           </FormField>
-          <FormField label="通信手当（円）">
-            <NumberInput value={form.communicationAllowance} onChange={set("communicationAllowance")} />
+          <FormField label="区間（勤務先側）">
+            <TextInput value={form.commuteTo} onChange={set("commuteTo")} />
           </FormField>
-          <FormField label="特別手当（円）">
-            <NumberInput value={form.specialAllowance} onChange={set("specialAllowance")} />
+          <FormField label="運賃（片道・円）">
+            <NumberInput value={form.commuteFareOneWay} onChange={set("commuteFareOneWay")} />
           </FormField>
-          <FormField label="通勤手当（円）">
-            <NumberInput value={form.commuteAllowance} onChange={set("commuteAllowance")} />
-          </FormField>
-          <FormField label="支給総額（自動計算）">
-            <div className="px-3 py-2 text-sm font-semibold text-slate-800 bg-slate-50 rounded border border-slate-200">
-              {total.toLocaleString()} 円
-            </div>
+          <FormField label="運賃（往復・円）">
+            <NumberInput value={form.commuteFareRoundTrip} onChange={set("commuteFareRoundTrip")} />
           </FormField>
         </div>
+      </div>
 
-        <div className="mt-6">
-          <BlockTitle>通勤</BlockTitle>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="通勤経路">
-              <TextInput value={form.commuteRoute} onChange={set("commuteRoute")} />
-            </FormField>
-            <FormField label="区間（自宅側）">
-              <TextInput value={form.commuteFrom} onChange={set("commuteFrom")} />
-            </FormField>
-            <FormField label="区間（勤務先側）">
-              <TextInput value={form.commuteTo} onChange={set("commuteTo")} />
-            </FormField>
-            <FormField label="運賃（片道・円）">
-              <NumberInput value={form.commuteFareOneWay} onChange={set("commuteFareOneWay")} />
-            </FormField>
-            <FormField label="運賃（往復・円）">
-              <NumberInput value={form.commuteFareRoundTrip} onChange={set("commuteFareRoundTrip")} />
+      <div className="mt-8">
+        <BlockTitle>メモ</BlockTitle>
+        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+          <div className="col-span-3">
+            <FormField label="">
+              <TextArea value={form.memo} onChange={set("memo")} rows={3} />
             </FormField>
           </div>
         </div>
+      </div>
 
-        <div className="mt-6">
-          <FormField label="メモ">
-            <TextArea value={form.memo} onChange={set("memo")} rows={3} />
-          </FormField>
-        </div>
-
-        <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} />
-      </CardBody>
-    </Card>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
+    </div>
   );
 }

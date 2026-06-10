@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { toJstDateString, todayJstDateString } from "@/lib/dailyReport/jstDate";
-import { PageTitle, PageSubtleText } from "@/components/ui/PageTitle";
 import EmployeeDetailClient from "./EmployeeDetailClient";
 import type { EmployeeDetailData } from "./detail-types";
 
@@ -161,19 +160,14 @@ export default async function AdminUserDetailPage({
 
   return (
     <div>
-      <PageTitle>社員詳細</PageTitle>
-      <PageSubtleText>
-        {user.name}（{user.email}）
-      </PageSubtleText>
-      <div className="mt-6">
-        <EmployeeDetailClient
-          userId={user.id}
-          userName={user.name}
-          userEmployeeNumber={user.employeeNumber}
-          detail={detail}
-          todayJst={todayJstDateString()}
-        />
-      </div>
+      <EmployeeDetailClient
+        userId={user.id}
+        userName={user.name}
+        userEmail={user.email}
+        userEmployeeNumber={user.employeeNumber}
+        detail={detail}
+        todayJst={todayJstDateString()}
+      />
     </div>
   );
 }

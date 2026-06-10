@@ -2,10 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardBody } from "@/components/ui/Card";
 import type { EmployeeBasic } from "./detail-types";
 import { calcAge, calcTenure, patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, DateInput, SelectInput, SaveBar, BlockTitle } from "./detail-ui";
+import {
+  FormField,
+  TextInput,
+  DateInput,
+  SelectInput,
+  ReadOnlyField,
+  SaveBar,
+  BlockTitle,
+} from "./detail-ui";
 
 // T-096 タブ1: 基本情報（ヘッダー全項目の編集＋住所・電話・緊急連絡先）
 
@@ -17,7 +24,7 @@ export default function BasicInfoTab({
   todayJst: string;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState({
+  const initial = {
     employeeNumber: employee.employeeNumber,
     name: employee.name,
     furigana: employee.furigana ?? "",
@@ -31,7 +38,8 @@ export default function BasicInfoTab({
     emergencyContactName: employee.emergencyContactName ?? "",
     emergencyContactRelation: employee.emergencyContactRelation ?? "",
     emergencyContactPhone: employee.emergencyContactPhone ?? "",
-  });
+  };
+  const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,88 +68,91 @@ export default function BasicInfoTab({
     }
   };
 
+  const handleCancel = () => {
+    setForm(initial);
+    setSaved(false);
+    setError(null);
+    router.refresh();
+  };
+
   return (
-    <Card>
-      <CardBody>
-        <BlockTitle>基本情報</BlockTitle>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField label="社員番号">
-            <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} />
+    <div className="px-6 py-6">
+      <BlockTitle>基本情報</BlockTitle>
+      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <FormField label="社員番号">
+          <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} />
+        </FormField>
+        <FormField label="氏名">
+          <TextInput value={form.name} onChange={set("name")} />
+        </FormField>
+        <FormField label="フリガナ">
+          <TextInput value={form.furigana} onChange={set("furigana")} placeholder="例: オクムラ ユウジ" />
+        </FormField>
+        <FormField label={`生年月日${age != null ? `（${age}歳）` : ""}`}>
+          <DateInput value={form.birthday} onChange={set("birthday")} />
+        </FormField>
+        <FormField label="性別">
+          <SelectInput
+            value={form.gender}
+            onChange={set("gender")}
+            options={[
+              { value: "", label: "未設定" },
+              { value: "男", label: "男" },
+              { value: "女", label: "女" },
+            ]}
+          />
+        </FormField>
+        <FormField label="在籍状態">
+          <SelectInput
+            value={form.status}
+            onChange={set("status")}
+            options={[
+              { value: "active", label: "在籍" },
+              { value: "disabled", label: "退社" },
+            ]}
+          />
+        </FormField>
+        <FormField label="入社日">
+          <DateInput value={form.hireDate} onChange={set("hireDate")} />
+        </FormField>
+        <FormField label="退社日">
+          <DateInput value={form.resignDate} onChange={set("resignDate")} />
+        </FormField>
+        <FormField label="在籍年数（自動）">
+          <ReadOnlyField>{tenure ?? "—"}</ReadOnlyField>
+        </FormField>
+      </div>
+
+      <div className="mt-8">
+        <BlockTitle>連絡先</BlockTitle>
+        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+          <div className="col-span-2">
+            <FormField label="住所">
+              <TextInput value={form.address} onChange={set("address")} />
+            </FormField>
+          </div>
+          <FormField label="電話番号">
+            <TextInput value={form.phone} onChange={set("phone")} />
           </FormField>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <BlockTitle>緊急連絡先</BlockTitle>
+        <div className="grid grid-cols-3 gap-x-6 gap-y-4">
           <FormField label="氏名">
-            <TextInput value={form.name} onChange={set("name")} />
+            <TextInput value={form.emergencyContactName} onChange={set("emergencyContactName")} />
           </FormField>
-          <FormField label="フリガナ">
-            <TextInput value={form.furigana} onChange={set("furigana")} placeholder="例: オクムラ ユウジ" />
+          <FormField label="続柄">
+            <TextInput value={form.emergencyContactRelation} onChange={set("emergencyContactRelation")} />
           </FormField>
-          <FormField label={`生年月日${age != null ? `（${age}歳）` : ""}`}>
-            <DateInput value={form.birthday} onChange={set("birthday")} />
-          </FormField>
-          <FormField label="性別">
-            <SelectInput
-              value={form.gender}
-              onChange={set("gender")}
-              options={[
-                { value: "", label: "未設定" },
-                { value: "男", label: "男" },
-                { value: "女", label: "女" },
-              ]}
-            />
-          </FormField>
-          <FormField label="在籍状態">
-            <SelectInput
-              value={form.status}
-              onChange={set("status")}
-              options={[
-                { value: "active", label: "在籍" },
-                { value: "disabled", label: "退社" },
-              ]}
-            />
-          </FormField>
-          <FormField label="入社日">
-            <DateInput value={form.hireDate} onChange={set("hireDate")} />
-          </FormField>
-          <FormField label="退社日">
-            <DateInput value={form.resignDate} onChange={set("resignDate")} />
-          </FormField>
-          <FormField label="在籍年数（自動計算）">
-            <div className="px-3 py-2 text-sm text-slate-700 bg-slate-50 rounded border border-slate-200">
-              {tenure ?? "-"}
-            </div>
+          <FormField label="電話番号">
+            <TextInput value={form.emergencyContactPhone} onChange={set("emergencyContactPhone")} />
           </FormField>
         </div>
+      </div>
 
-        <div className="mt-6">
-          <BlockTitle>連絡先</BlockTitle>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <FormField label="住所">
-                <TextInput value={form.address} onChange={set("address")} />
-              </FormField>
-            </div>
-            <FormField label="電話番号">
-              <TextInput value={form.phone} onChange={set("phone")} />
-            </FormField>
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <BlockTitle>緊急連絡先</BlockTitle>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="氏名">
-              <TextInput value={form.emergencyContactName} onChange={set("emergencyContactName")} />
-            </FormField>
-            <FormField label="続柄">
-              <TextInput value={form.emergencyContactRelation} onChange={set("emergencyContactRelation")} />
-            </FormField>
-            <FormField label="電話番号">
-              <TextInput value={form.emergencyContactPhone} onChange={set("emergencyContactPhone")} />
-            </FormField>
-          </div>
-        </div>
-
-        <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} />
-      </CardBody>
-    </Card>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
+    </div>
   );
 }

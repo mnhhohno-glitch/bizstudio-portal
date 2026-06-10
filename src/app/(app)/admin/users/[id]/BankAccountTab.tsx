@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardBody } from "@/components/ui/Card";
 import type { BankAccountData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
 import { FormField, TextInput, SelectInput, SaveBar, BlockTitle } from "./detail-ui";
@@ -17,7 +16,7 @@ export default function BankAccountTab({
   bankAccount: BankAccountData | null;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState({
+  const initial = {
     bankCode: bankAccount?.bankCode ?? "",
     bankName: bankAccount?.bankName ?? "",
     branchCode: bankAccount?.branchCode ?? "",
@@ -25,7 +24,8 @@ export default function BankAccountTab({
     accountType: bankAccount?.accountType ?? "",
     accountNumber: bankAccount?.accountNumber ?? "",
     accountHolderKana: bankAccount?.accountHolderKana ?? "",
-  });
+  };
+  const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,43 +50,50 @@ export default function BankAccountTab({
     }
   };
 
+  const handleCancel = () => {
+    setForm(initial);
+    setSaved(false);
+    setError(null);
+    router.refresh();
+  };
+
   return (
-    <Card>
-      <CardBody>
-        <BlockTitle>給与振込口座</BlockTitle>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField label="銀行コード">
-            <TextInput value={form.bankCode} onChange={set("bankCode")} placeholder="例: 0001" />
-          </FormField>
-          <FormField label="銀行名">
-            <TextInput value={form.bankName} onChange={set("bankName")} />
-          </FormField>
-          <FormField label="支店コード">
-            <TextInput value={form.branchCode} onChange={set("branchCode")} placeholder="例: 123" />
-          </FormField>
-          <FormField label="支店名">
-            <TextInput value={form.branchName} onChange={set("branchName")} />
-          </FormField>
-          <FormField label="口座種別">
-            <SelectInput
-              value={form.accountType}
-              onChange={set("accountType")}
-              options={[
-                { value: "", label: "未設定" },
-                { value: "普通", label: "普通" },
-                { value: "当座", label: "当座" },
-              ]}
-            />
-          </FormField>
-          <FormField label="口座番号">
-            <TextInput value={form.accountNumber} onChange={set("accountNumber")} />
-          </FormField>
+    <div className="px-6 py-6">
+      <BlockTitle>給与振込口座</BlockTitle>
+      <div className="grid grid-cols-3 gap-x-6 gap-y-4">
+        <FormField label="銀行コード">
+          <TextInput value={form.bankCode} onChange={set("bankCode")} placeholder="例: 0001" />
+        </FormField>
+        <FormField label="銀行名">
+          <TextInput value={form.bankName} onChange={set("bankName")} />
+        </FormField>
+        <FormField label="支店コード">
+          <TextInput value={form.branchCode} onChange={set("branchCode")} placeholder="例: 123" />
+        </FormField>
+        <FormField label="支店名">
+          <TextInput value={form.branchName} onChange={set("branchName")} />
+        </FormField>
+        <FormField label="口座種別">
+          <SelectInput
+            value={form.accountType}
+            onChange={set("accountType")}
+            options={[
+              { value: "", label: "未設定" },
+              { value: "普通", label: "普通" },
+              { value: "当座", label: "当座" },
+            ]}
+          />
+        </FormField>
+        <FormField label="口座番号">
+          <TextInput value={form.accountNumber} onChange={set("accountNumber")} />
+        </FormField>
+        <div className="col-span-2">
           <FormField label="口座名義（カナ）">
             <TextInput value={form.accountHolderKana} onChange={set("accountHolderKana")} placeholder="例: オクムラ ユウジ" />
           </FormField>
         </div>
-        <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} />
-      </CardBody>
-    </Card>
+      </div>
+      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
+    </div>
   );
 }
