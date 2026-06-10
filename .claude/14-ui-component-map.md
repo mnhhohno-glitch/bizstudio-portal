@@ -1096,3 +1096,18 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - ヘッダの `<input type="month">` で対象月を切替（参考値・既存目標を再取得）。
 - 計算ロジック: `src/lib/performance/reverseCalc.ts`（逆算）、`src/lib/performance/businessDays.ts`（営業日・週按分、`@holiday-jp/holiday_jp` で祝日除外）。
 - 詳細仕様は `03-portal-spec.md`「T-073: 目標設定機能」参照
+
+## /admin/users/[id]（社員詳細・T-096、2026-06-10）
+
+- page.tsx（Server Component・約180行）: admin 403ガード → prisma.employee.findUnique（userId={id}、bankAccount/insurance/salary/equipment/dependents/leaveRequests(desc,200件) include）→ 日付を "YYYY-MM-DD" 化・PWを有無boolean化して EmployeeDetailClient へ。todayJst も props 渡し
+- EmployeeDetailClient.tsx（約250行）: Employee未登録時は社員番号入力→POST /api/admin/employees。登録済みならヘッダー（社員番号/氏名/生年月日+年齢/性別/在籍状態/入社日/退社日/在籍年数）＋6タブ切替
+- タブ:
+  - BasicInfoTab（基本情報＋連絡先＋緊急連絡先、年齢・在籍年数リアルタイム計算）
+  - BankAccountTab（口座）
+  - InsuranceTab（雇用保険・社会保険・扶養の3ブロック＋DependentsSection 1:N行編集）
+  - SalaryTab（支給総額リアルタイム自動合計）
+  - EquipmentTab（PasswordField: マスク→「表示」クリックで /secrets fetch、空入力=変更しない）
+  - LeaveTab（残日数編集は既存勤怠API、履歴は閲覧のみ）
+- 共有: detail-types.ts（型＋calcAge/calcTenure/patchEmployeeSection）、detail-ui.tsx（FormField等）
+- 主要handler: 各タブ handleSave → PATCH /api/admin/employees/[employeeId] {section, data} → router.refresh()
+- 一覧 UserListClient.tsx の操作列に「詳細」リンク（/admin/users/[u.id]）を追加（既存挙動無変更）

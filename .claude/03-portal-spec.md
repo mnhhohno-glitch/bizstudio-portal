@@ -339,3 +339,23 @@ model InterviewMemo {
 
 ### リグレッション
 - T-071 集計（`computeCaMetricsForRange`）は一切変更せず参考値で呼ぶだけ。年(1/1-今日) entry=428・面談52/56 が不変（内定/承諾は live データ増加で変動するが定義不変）。
+
+### 社員詳細管理（/admin/users[id]・T-096、2026-06-10）
+
+FileMaker「業務管理ファイル（社員管理）」を廃止しportalに一本化。社員詳細を6タブで管理。
+
+- Employee 追加カラム（全nullable）: furigana / birthday(@db.Date) / gender / hire_date / resign_date / address / phone / emergency_contact_name / emergency_contact_relation / emergency_contact_phone
+- 新規テーブル（Employee 1:1）: employee_bank_accounts（口座）/ employee_insurances（雇用保険・社会保険・扶養日付）/ employee_salaries（給与手当・支給総額カラムなし＝表示時計算）/ employee_equipments（貸与物・PW5種は *_encrypted に AES-256-GCM 暗号文）
+- 新規テーブル（1:N）: employee_dependents（扶養家族・sortOrder付き・Employee直紐付け）
+- API（全て admin 限定・route冒頭で getSessionUser + role !== "admin" チェック）:
+  - POST /api/admin/employees — Employee作成＋Userリンク（同番号の未リンクEmployeeがあれば再利用）
+  - GET/PATCH /api/admin/employees/[employeeId] — 詳細取得（PWは有無booleanのみ返す）/ {section, data} 形式のタブ単位部分更新（basic|bank|insurance|salary|equipment、1:1はupsert）
+  - GET .../secrets?field= — PW1項目を復号して返す（ホワイトリスト: pcInitialPassword/lineworksPassword/appleIdPassword/googlePassword/office365Password）
+  - POST/PATCH/DELETE .../dependents — 扶養家族CRUD（id はbody渡し）
+- 暗号化: src/lib/secret-encryption.ts（encryptSecret/decryptSecret）。実体は src/lib/encryption.ts の AES-256-GCM（無変更）、鍵 MANUS_KEY_ENCRYPTION_SECRET（本番・staging両方設定済み）
+- 有休は新規モデルなし: Employee.paidLeave + LeaveRequest を統合表示。残日数編集は既存 PATCH /api/attendance/admin/employees を呼ぶ（approval.ts 無変更）
+- 入力整形の単一ソース: src/lib/employee-detail.ts（日付は "YYYY-MM-DD"→UTC midnight、罠#17準拠）
+- 在籍状態の表示: active=在籍 / disabled=退社（詳細ページは Employee.status、一覧は User.status のまま。退職日カラムは持たず resign_date を別途追加）
+- 年齢・在籍年数・支給総額はDB保存せず表示時計算
+- 既存 PATCH /api/admin/users/[id] は無変更（名前・メール・権限・職種の既存モーダルの責務のまま）
+- FileMaker既存データの移行はしない（社員ごとに手入力運用）
