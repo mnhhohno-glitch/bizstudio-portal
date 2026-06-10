@@ -24,6 +24,9 @@ export default async function AdminUsersPage() {
       { employeeNumber: { sort: "asc", nulls: "last" } },
       { createdAt: "desc" },
     ],
+    include: {
+      employee: { select: { id: true, jobCategory: true } },
+    },
   });
 
   const usersData = users.map((u) => {
@@ -48,6 +51,12 @@ export default async function AdminUsersPage() {
       manusLast4,
       manusSetAt: u.manusApiKeySetAt?.toISOString() ?? null,
       isMynaviAssignee: u.isMynaviAssignee,
+      hasEmployee: !!u.employee,
+      jobCategory: (u.employee?.jobCategory ?? null) as
+        | "CA"
+        | "MARKETING"
+        | "OFFICE_AND_MGMT"
+        | null,
     };
   });
 
