@@ -99,14 +99,15 @@ export default function EmployeeDetailClient({
 
   if (!detail) {
     return (
-      <div className="max-w-7xl rounded-xl border border-gray-200 bg-white">
-        <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4">
+      <div className="max-w-7xl">
+        {/* 戻るリンク＋検索切替（カード外の独立行） */}
+        <div className="mb-3 flex items-center justify-between gap-4">
           <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
             ← 社員管理に戻る
           </Link>
           <EmployeeSearchSwitcher employees={allEmployees} currentUserId={userId} />
         </div>
-        <div className="px-6 py-8">
+        <div className="rounded-xl border border-gray-200 bg-white px-6 py-8">
           <h3 className="text-lg font-semibold text-slate-800 mb-2">社員情報（Employee）が未登録です</h3>
           <p className="text-sm text-slate-600 mb-5">
             {userName} さんにはまだ社員情報（Employee レコード）が紐づいていません。
@@ -160,18 +161,20 @@ export default function EmployeeDetailClient({
           : "—";
 
   return (
-    <div className="max-w-7xl rounded-xl border border-gray-200 bg-white">
-      {/* 戻るリンク＋他社員検索切替（Task 4） */}
-      <div className="px-5 pt-4 flex items-center justify-between gap-4">
+    <div className="max-w-7xl">
+      {/* 戻るリンク＋他社員検索切替（カード外の独立行） */}
+      <div className="mb-3 flex items-center justify-between gap-4">
         <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
           ← 社員管理に戻る
         </Link>
         <EmployeeSearchSwitcher employees={allEmployees} currentUserId={userId} />
       </div>
 
-      {/* 人物カード（ヘッダー） */}
+      {/* カード本体 */}
+      <div className="rounded-xl border border-gray-200 bg-white">
+      {/* 人物ヘッダー（高さを揃え、中身を垂直中央に） */}
       <div className="px-5 py-4 border-b border-gray-200">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 min-h-[56px]">
           {/* イニシャルアバター */}
           <div className="w-12 h-12 rounded-full bg-[#E6F1FB] text-[#0C447C] font-medium text-base flex items-center justify-center shrink-0">
             {initial}
@@ -278,6 +281,7 @@ export default function EmployeeDetailClient({
             leaveRequests={detail.leaveRequests}
           />
         )}
+      </div>
       </div>
     </div>
   );
