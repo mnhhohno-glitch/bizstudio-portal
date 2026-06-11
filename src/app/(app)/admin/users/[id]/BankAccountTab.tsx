@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { BankAccountData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
 import { FormField, TextInput, SelectInput, SaveBar, BlockTitle, ResumeAiButton } from "./detail-ui";
-import { useResumeAiFill } from "./useResumeAiFill";
+import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
+import { filledMessage } from "./resume-ai-merge";
 
 const BANK_AI_KEYS = [
   "bankName",
@@ -22,9 +23,11 @@ const BANK_AI_KEYS = [
 export default function BankAccountTab({
   employeeId,
   bankAccount,
+  aiFillData,
 }: {
   employeeId: string;
   bankAccount: BankAccountData | null;
+  aiFillData?: Record<string, unknown> | null;
 }) {
   const router = useRouter();
   const initial = {
@@ -48,6 +51,8 @@ export default function BankAccountTab({
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）
   const ai = useResumeAiFill(employeeId, setForm, BANK_AI_KEYS);
+  // T-098 追補: 全画面D&Dの解析結果配布（口座項目の空欄のみマージ）
+  const dropFill = useAiFillData(aiFillData, setForm, BANK_AI_KEYS);
 
   // T-097: 銀行コード→銀行名 自動補完。404/通信失敗時は既存値を消さない（手入力尊重）。
   const lookupBank = async (bankCodeRaw: string) => {
@@ -113,7 +118,12 @@ export default function BankAccountTab({
     <div className="px-5 py-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <BlockTitle>給与振込口座</BlockTitle>
-        <ResumeAiButton {...ai} />
+        <div className="flex items-center gap-3">
+          {dropFill.filledCount != null && (
+            <span className="text-[11px] text-green-600">{filledMessage(dropFill.filledCount)}</span>
+          )}
+          <ResumeAiButton {...ai} />
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="銀行コード">

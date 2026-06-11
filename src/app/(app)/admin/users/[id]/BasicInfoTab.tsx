@@ -14,7 +14,8 @@ import {
   BlockTitle,
   ResumeAiButton,
 } from "./detail-ui";
-import { useResumeAiFill } from "./useResumeAiFill";
+import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
+import { filledMessage } from "./resume-ai-merge";
 
 const BASIC_AI_KEYS = [
   "name",
@@ -34,9 +35,11 @@ const BASIC_AI_KEYS = [
 export default function BasicInfoTab({
   employee,
   todayJst,
+  aiFillData,
 }: {
   employee: EmployeeBasic;
   todayJst: string;
+  aiFillData?: Record<string, unknown> | null;
 }) {
   const router = useRouter();
   const initial = {
@@ -64,6 +67,8 @@ export default function BasicInfoTab({
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）
   const ai = useResumeAiFill(employee.id, setForm, BASIC_AI_KEYS);
+  // T-098 追補: 全画面D&Dの解析結果配布（自タブの空欄のみマージ）
+  const dropFill = useAiFillData(aiFillData, setForm, BASIC_AI_KEYS);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
@@ -136,7 +141,12 @@ export default function BasicInfoTab({
     <div className="px-5 py-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <BlockTitle>基本情報</BlockTitle>
-        <ResumeAiButton {...ai} />
+        <div className="flex items-center gap-3">
+          {dropFill.filledCount != null && (
+            <span className="text-[11px] text-green-600">{filledMessage(dropFill.filledCount)}</span>
+          )}
+          <ResumeAiButton {...ai} />
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="社員番号">

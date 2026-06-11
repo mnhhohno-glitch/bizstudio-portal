@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { mergeEmptyOnly } from "./resume-ai-merge";
 
 // T-098: 履歴書・入社書類を /api/admin/employees/{employeeId}/parse-resume に送り、
 // 返却JSON のうち allowedKeys に含まれ、かつ「現在の form 値が空のフィールドのみ」を setForm でマージする。
@@ -8,6 +9,7 @@ import { useRef, useState } from "react";
 
 type FormShape = Record<string, string>;
 
+/** ボタン経路: 単一ファイルを選んで自タブの allowedKeys だけ空欄マージする。 */
 export function useResumeAiFill<T extends FormShape>(
   employeeId: string,
   setForm: React.Dispatch<React.SetStateAction<T>>,
@@ -34,7 +36,7 @@ export function useResumeAiFill<T extends FormShape>(
     setFilledCount(null);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("files", file);
       const res = await fetch(`/api/admin/employees/${employeeId}/parse-resume`, {
         method: "POST",
         body: fd,
@@ -47,19 +49,9 @@ export function useResumeAiFill<T extends FormShape>(
 
       let filled = 0;
       setForm((prev) => {
-        const next = { ...prev };
-        for (const key of allowedKeys) {
-          // 空欄のみマージ: 現在の値が空文字 or 空白のみのときに限る
-          const cur = (prev[key] ?? "").toString();
-          if (cur.trim() !== "") continue;
-          const v = data[key];
-          if (typeof v === "string" && v.trim() !== "") {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (next as any)[key] = v;
-            filled++;
-          }
-        }
-        return next;
+        const r = mergeEmptyOnly(prev, data, allowedKeys);
+        filled = r.filled;
+        return r.next;
       });
       setFilledCount(filled);
     } catch (err) {
@@ -70,4 +62,34 @@ export function useResumeAiFill<T extends FormShape>(
   };
 
   return { inputRef, openPicker, handleFile, loading, error, filledCount };
+}
+
+/**
+ * D&D経路: 親（EmployeeDetailClient）が1回の解析で取得した aiFillData を各タブへ配布する。
+ * aiFillData の参照が変わったとき（＝新しいドロップ）と、aiFillData を持った状態でタブが
+ * マウントされたとき（＝ドロップ後に別タブを開いた）に、自タブの allowedKeys だけ空欄マージする。
+ * 同一参照では再マージしない。
+ */
+export function useAiFillData<T extends FormShape>(
+  aiFillData: Record<string, unknown> | null | undefined,
+  setForm: React.Dispatch<React.SetStateAction<T>>,
+  allowedKeys: readonly (keyof T & string)[],
+) {
+  const appliedRef = useRef<Record<string, unknown> | null | undefined>(undefined);
+  const [filledCount, setFilledCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!aiFillData) return;
+    if (appliedRef.current === aiFillData) return;
+    appliedRef.current = aiFillData;
+    let filled = 0;
+    setForm((prev) => {
+      const r = mergeEmptyOnly(prev, aiFillData, allowedKeys);
+      filled = r.filled;
+      return r.next;
+    });
+    setFilledCount(filled);
+  }, [aiFillData, setForm, allowedKeys]);
+
+  return { filledCount };
 }

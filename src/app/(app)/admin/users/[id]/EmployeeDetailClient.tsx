@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { EmployeeDetailData } from "./detail-types";
@@ -97,6 +97,88 @@ export default function EmployeeDetailClient({
     }
   };
 
+  // T-098 追補: 全画面D&Dで複数ファイルを1回解析→全タブに配布する。
+  const employeeIdForAi = detail?.employee.id ?? null;
+  const [aiFillData, setAiFillData] = useState<Record<string, unknown> | null>(null);
+  const [aiDropLoading, setAiDropLoading] = useState(false);
+  const [aiDropError, setAiDropError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
+  const aiLoadingRef = useRef(false);
+  aiLoadingRef.current = aiDropLoading;
+
+  const handleAiDrop = async (files: File[]) => {
+    if (!employeeIdForAi || aiLoadingRef.current || files.length === 0) return;
+    setAiDropLoading(true);
+    setAiDropError(null);
+    try {
+      const fd = new FormData();
+      files.forEach((f) => fd.append("files", f));
+      const res = await fetch(`/api/admin/employees/${employeeIdForAi}/parse-resume`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `エラー ${res.status}`);
+      }
+      const data = (await res.json()) as Record<string, unknown>;
+      // 新しい参照を渡すことで各タブの useAiFillData が1回だけ空欄マージする
+      setAiFillData(data);
+    } catch (err) {
+      setAiDropError(err instanceof Error ? err.message : "AI解析に失敗しました");
+    } finally {
+      setAiDropLoading(false);
+    }
+  };
+  // 最新の handleAiDrop を ref 経由で document リスナーから呼ぶ（stale closure 回避）
+  const handleDropRef = useRef(handleAiDrop);
+  handleDropRef.current = handleAiDrop;
+
+  // 画面全体のドラッグ＆ドロップ。Employee 未登録（detail なし）では無効。
+  useEffect(() => {
+    if (!detail) return;
+    const hasFiles = (ev: DragEvent) =>
+      Array.from(ev.dataTransfer?.types ?? []).includes("Files");
+    const onEnter = (ev: DragEvent) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      dragCounter.current++;
+      setDragging(true);
+    };
+    const onOver = (ev: DragEvent) => {
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+    };
+    const onLeave = (ev: DragEvent) => {
+      if (!hasFiles(ev)) return;
+      dragCounter.current--;
+      if (dragCounter.current <= 0) {
+        dragCounter.current = 0;
+        setDragging(false);
+      }
+    };
+    const onDrop = (ev: DragEvent) => {
+      if (!ev.dataTransfer) return;
+      ev.preventDefault();
+      dragCounter.current = 0;
+      setDragging(false);
+      if (aiLoadingRef.current) return; // 解析中の多重ドロップ無視
+      const files = Array.from(ev.dataTransfer.files ?? []);
+      if (files.length) handleDropRef.current(files);
+    };
+    document.addEventListener("dragenter", onEnter);
+    document.addEventListener("dragover", onOver);
+    document.addEventListener("dragleave", onLeave);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onEnter);
+      document.removeEventListener("dragover", onOver);
+      document.removeEventListener("dragleave", onLeave);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [detail]);
+
   if (!detail) {
     return (
       <div className="max-w-7xl">
@@ -162,6 +244,22 @@ export default function EmployeeDetailClient({
 
   return (
     <div className="max-w-7xl">
+      {/* T-098 追補: 全画面D&Dオーバーレイ（ドラッグ中 or 解析中のみ・視覚フィードバック） */}
+      {(dragging || aiDropLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-blue-900/20 backdrop-blur-[1px] pointer-events-none">
+          <div className="rounded-xl border-2 border-dashed border-blue-400 bg-white/95 px-10 py-7 text-center shadow-xl">
+            <div className="text-[15px] font-medium text-blue-800">
+              {aiDropLoading ? "解析中…" : "書類をドロップしてAI読み取り"}
+            </div>
+            <div className="mt-1 text-[12px] text-blue-600">
+              {aiDropLoading
+                ? "全タブの空欄をまとめて仮入力します"
+                : "複数可・PDF / Word / 画像（最大5ファイル・合計30MB）"}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 戻るリンク＋他社員検索切替（カード外の独立行） */}
       <div className="mb-3 flex items-center justify-between gap-4">
         <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
@@ -169,6 +267,19 @@ export default function EmployeeDetailClient({
         </Link>
         <EmployeeSearchSwitcher employees={allEmployees} currentUserId={userId} />
       </div>
+
+      {aiDropError && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+          <span>{aiDropError}</span>
+          <button
+            type="button"
+            onClick={() => setAiDropError(null)}
+            className="text-red-500 hover:text-red-700"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* カード本体 */}
       <div className="rounded-xl border border-gray-200 bg-white">
@@ -263,13 +374,16 @@ export default function EmployeeDetailClient({
 
       {/* タブコンテンツ */}
       <div>
-        {tab === "basic" && <BasicInfoTab employee={e} todayJst={todayJst} />}
-        {tab === "bank" && <BankAccountTab employeeId={e.id} bankAccount={detail.bankAccount} />}
+        {tab === "basic" && <BasicInfoTab employee={e} todayJst={todayJst} aiFillData={aiFillData} />}
+        {tab === "bank" && (
+          <BankAccountTab employeeId={e.id} bankAccount={detail.bankAccount} aiFillData={aiFillData} />
+        )}
         {tab === "insurance" && (
           <InsuranceTab
             employeeId={e.id}
             insurance={detail.insurance}
             dependents={detail.dependents}
+            aiFillData={aiFillData}
           />
         )}
         {tab === "salary" && <SalaryTab employeeId={e.id} salary={detail.salary} />}

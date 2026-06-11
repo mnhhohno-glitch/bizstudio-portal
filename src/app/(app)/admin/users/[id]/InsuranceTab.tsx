@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { InsuranceData, DependentData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
 import { FormField, TextInput, DateInput, NumberInput, TextArea, SaveBar, BlockTitle, ResumeAiButton } from "./detail-ui";
-import { useResumeAiFill } from "./useResumeAiFill";
+import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
+import { filledMessage } from "./resume-ai-merge";
 
 // T-098: 社会保険タブで AI から仮入力するのは番号類のみ。
 const INSURANCE_AI_KEYS = ["pensionNumber", "employmentInsuranceNumber"] as const;
@@ -16,10 +17,12 @@ export default function InsuranceTab({
   employeeId,
   insurance,
   dependents,
+  aiFillData,
 }: {
   employeeId: string;
   insurance: InsuranceData | null;
   dependents: DependentData[];
+  aiFillData?: Record<string, unknown> | null;
 }) {
   const router = useRouter();
   const initial = {
@@ -49,6 +52,8 @@ export default function InsuranceTab({
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）— 番号類だけ反映
   const ai = useResumeAiFill(employeeId, setForm, INSURANCE_AI_KEYS);
+  // T-098 追補: 全画面D&Dの解析結果配布（番号類の空欄のみマージ）
+  const dropFill = useAiFillData(aiFillData, setForm, INSURANCE_AI_KEYS);
 
   const handleSave = async () => {
     setSaving(true);
@@ -76,7 +81,12 @@ export default function InsuranceTab({
     <div className="px-5 py-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <BlockTitle>雇用保険</BlockTitle>
-        <ResumeAiButton {...ai} />
+        <div className="flex items-center gap-3">
+          {dropFill.filledCount != null && (
+            <span className="text-[11px] text-green-600">{filledMessage(dropFill.filledCount)}</span>
+          )}
+          <ResumeAiButton {...ai} />
+        </div>
       </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="加入状況">

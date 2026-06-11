@@ -33,6 +33,8 @@ export type EmployeeResumeResult = {
 };
 
 const EMPLOYEE_RESUME_PROMPT = `添付されたファイルは社員の履歴書・入社書類です（PDF/Word/画像のいずれか）。
+複数の書類（履歴書・通帳コピー・年金手帳・雇用保険被保険者証など）が同時に渡される場合があります。
+その場合は全書類を横断して各項目を抽出し、同一項目が複数書類にある場合は最も信頼できる記載を採用してください。
 以下の項目を抽出し、指定キーのJSONのみを返却してください。
 
 ## 抽出項目（基本情報）
@@ -72,16 +74,26 @@ const EMPLOYEE_RESUME_PROMPT = `添付されたファイルは社員の履歴書
  * 失敗時（APIキー未設定 / APIエラー / レスポンス不正 / JSON解析失敗）は throw する。
  * 呼び出し側で catch し、AI解析失敗として扱うこと。
  */
-export async function parseEmployeeResumeWithGemini(
-  fileBuffer: Buffer,
-  mimeType: string,
+export type ResumeFileInput = { buffer: Buffer; mimeType: string };
+
+export async function parseEmployeeResume(
+  files: ResumeFileInput[],
 ): Promise<EmployeeResumeResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY が設定されていません");
   }
+  if (files.length === 0) {
+    throw new Error("ファイルが指定されていません");
+  }
 
-  const base64Data = fileBuffer.toString("base64");
+  // 全ファイルの inlineData を並べ＋プロンプト1本で1リクエストにまとめる
+  const parts = [
+    ...files.map((f) => ({
+      inlineData: { mimeType: f.mimeType, data: f.buffer.toString("base64") },
+    })),
+    { text: EMPLOYEE_RESUME_PROMPT },
+  ];
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
@@ -89,14 +101,7 @@ export async function parseEmployeeResumeWithGemini(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { inlineData: { mimeType, data: base64Data } },
-              { text: EMPLOYEE_RESUME_PROMPT },
-            ],
-          },
-        ],
+        contents: [{ parts }],
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 4000,
@@ -180,4 +185,12 @@ export async function parseEmployeeResumeWithGemini(
     accountNumber: digitsOnly(parsed.accountNumber),
     accountHolderKana: s(parsed.accountHolderKana),
   };
+}
+
+/** 後方互換: 単一ファイル版（既存のボタン経路から呼ばれる）。 */
+export async function parseEmployeeResumeWithGemini(
+  fileBuffer: Buffer,
+  mimeType: string,
+): Promise<EmployeeResumeResult> {
+  return parseEmployeeResume([{ buffer: fileBuffer, mimeType }]);
 }
