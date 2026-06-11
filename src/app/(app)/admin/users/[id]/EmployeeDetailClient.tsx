@@ -99,7 +99,7 @@ export default function EmployeeDetailClient({
 
   if (!detail) {
     return (
-      <div className="max-w-5xl rounded-xl border border-gray-200 bg-white">
+      <div className="max-w-7xl rounded-xl border border-gray-200 bg-white">
         <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4">
           <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
             ← 社員管理に戻る
@@ -160,7 +160,7 @@ export default function EmployeeDetailClient({
           : "—";
 
   return (
-    <div className="max-w-5xl rounded-xl border border-gray-200 bg-white">
+    <div className="max-w-7xl rounded-xl border border-gray-200 bg-white">
       {/* 戻るリンク＋他社員検索切替（Task 4） */}
       <div className="px-5 pt-4 flex items-center justify-between gap-4">
         <Link href="/admin/users" className="text-sm text-blue-600 hover:underline">
