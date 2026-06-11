@@ -1111,3 +1111,18 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 共有: detail-types.ts（型＋calcAge/calcTenure/patchEmployeeSection）、detail-ui.tsx（FormField等）
 - 主要handler: 各タブ handleSave → PATCH /api/admin/employees/[employeeId] {section, data} → router.refresh()
 - 一覧 UserListClient.tsx の操作列に「詳細」リンク（/admin/users/[u.id]）を追加（既存挙動無変更）
+
+## 社員詳細 自動補完（T-097, 2026-06-11）
+
+- BankAccountTab: bankCode 4桁到達/onBlur → GET banks/[code] → setForm bankName。branchCode 3桁到達/onBlur → GET banks/[code]/branches/[branchCode] → setForm branchName。404時は既存値を消さない
+- BasicInfoTab 連絡先: 郵便番号フィールド（住所の前）。7桁到達/onBlur → GET postal-code/[code]。1件=自動入力 / 複数=住所欄下のドロップダウン選択 / 0件=何もしない。補完後も手入力上書き可
+- 共有 TextInput(detail-ui.tsx) に onBlur prop
+
+## 社員詳細 AI仮入力（T-098＋追補: 全画面D&D, 2026-06-11）
+
+- 各タブの個別ボタン（T-098）: detail-ui.tsx の ResumeAiButton ＋ useResumeAiFill(employeeId, setForm, allowedKeys)。単一ファイル・自タブのみ・空欄マージ
+- 全画面D&D（追補）: EmployeeDetailClient が document レベルで dragenter/over/leave/drop（カウンタでチラつき防止）、ドラッグ中/解析中はfixed全画面オーバーレイ。Employee未登録ブランチは無効
+  - 解析結果は親 state aiFillData（新参照=新ドロップ）として 基本情報/社会保険/口座 タブへ配布
+  - 配布マージ useAiFillData(aiFillData, setForm, allowedKeys): aiFillData参照変化時＋タブのマウント時に1回だけ空欄マージ（後から開いたタブも埋まる）、同一参照は再マージしない(appliedRef)
+- 共通マージ: resume-ai-merge.ts の mergeEmptyOnly（ボタン経路・D&D経路の両方が使用）
+- タブ別 allowedKeys: Basic=name/furigana/birthday/gender/postalCode/address/phone/emergencyContact{Name,Relation,Phone}、Insurance=pensionNumber/employmentInsuranceNumber、Bank=bankName/bankCode/branchName/branchCode/accountType/accountNumber/accountHolderKana
