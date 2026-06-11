@@ -4,7 +4,18 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BankAccountData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, SelectInput, SaveBar, BlockTitle } from "./detail-ui";
+import { FormField, TextInput, SelectInput, SaveBar, BlockTitle, ResumeAiButton } from "./detail-ui";
+import { useResumeAiFill } from "./useResumeAiFill";
+
+const BANK_AI_KEYS = [
+  "bankName",
+  "bankCode",
+  "branchName",
+  "branchCode",
+  "accountType",
+  "accountNumber",
+  "accountHolderKana",
+] as const;
 
 // T-096 タブ2: 口座情報
 
@@ -34,6 +45,9 @@ export default function BankAccountTab({
     setForm((f) => ({ ...f, [key]: v }));
     setSaved(false);
   };
+
+  // T-098: 履歴書AI読み取り（空欄のみマージ）
+  const ai = useResumeAiFill(employeeId, setForm, BANK_AI_KEYS);
 
   // T-097: 銀行コード→銀行名 自動補完。404/通信失敗時は既存値を消さない（手入力尊重）。
   const lookupBank = async (bankCodeRaw: string) => {
@@ -97,7 +111,10 @@ export default function BankAccountTab({
 
   return (
     <div className="px-5 py-5">
-      <BlockTitle>給与振込口座</BlockTitle>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <BlockTitle>給与振込口座</BlockTitle>
+        <ResumeAiButton {...ai} />
+      </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="銀行コード">
           <TextInput

@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { InsuranceData, DependentData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, DateInput, NumberInput, TextArea, SaveBar, BlockTitle } from "./detail-ui";
+import { FormField, TextInput, DateInput, NumberInput, TextArea, SaveBar, BlockTitle, ResumeAiButton } from "./detail-ui";
+import { useResumeAiFill } from "./useResumeAiFill";
+
+// T-098: 社会保険タブで AI から仮入力するのは番号類のみ。
+const INSURANCE_AI_KEYS = ["pensionNumber", "employmentInsuranceNumber"] as const;
 
 // T-096 タブ3: 社会保険（雇用保険・社会保険・扶養の3ブロック）＋扶養家族 1:N
 
@@ -43,6 +47,9 @@ export default function InsuranceTab({
     setSaved(false);
   };
 
+  // T-098: 履歴書AI読み取り（空欄のみマージ）— 番号類だけ反映
+  const ai = useResumeAiFill(employeeId, setForm, INSURANCE_AI_KEYS);
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -67,7 +74,10 @@ export default function InsuranceTab({
 
   return (
     <div className="px-5 py-5">
-      <BlockTitle>雇用保険</BlockTitle>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <BlockTitle>雇用保険</BlockTitle>
+        <ResumeAiButton {...ai} />
+      </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="加入状況">
           <TextInput value={form.employmentInsuranceStatus} onChange={set("employmentInsuranceStatus")} placeholder="例: 加入" />

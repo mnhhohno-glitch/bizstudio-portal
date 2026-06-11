@@ -167,3 +167,50 @@ export function BlockTitle({ children }: { children: React.ReactNode }) {
     <h4 className="text-[11px] font-medium text-gray-400 mb-2.5">{children}</h4>
   );
 }
+
+/**
+ * T-098: 履歴書AI読み取りボタン＋隠しファイルinput。
+ * useResumeAiFill から返る ref/openPicker/handleFile/loading/error/filledCount を受け取り、
+ * 控えめなアウトラインボタン＋小さな状態メッセージを描画する。
+ */
+export function ResumeAiButton({
+  inputRef,
+  openPicker,
+  handleFile,
+  loading,
+  error,
+  filledCount,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  openPicker: () => void;
+  handleFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  loading: boolean;
+  error: string | null;
+  filledCount: number | null;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={openPicker}
+        disabled={loading}
+        className="inline-flex items-center gap-1 rounded border border-blue-200 bg-white px-2.5 py-1 text-[11px] text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+      >
+        {loading ? "解析中…" : "履歴書・書類をAI読み取り"}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/jpg,image/webp,image/heic"
+        onChange={handleFile}
+        className="hidden"
+      />
+      {filledCount !== null && !loading && !error && (
+        <span className="text-[11px] text-green-600">
+          {filledCount > 0 ? `${filledCount} 件を仮入力しました（空欄のみ）` : "新たに埋まる空欄はありませんでした"}
+        </span>
+      )}
+      {error && <span className="text-[11px] text-red-600">{error}</span>}
+    </div>
+  );
+}

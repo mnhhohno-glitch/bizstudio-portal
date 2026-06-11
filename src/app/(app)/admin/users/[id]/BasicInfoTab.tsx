@@ -12,7 +12,22 @@ import {
   ReadOnlyField,
   SaveBar,
   BlockTitle,
+  ResumeAiButton,
 } from "./detail-ui";
+import { useResumeAiFill } from "./useResumeAiFill";
+
+const BASIC_AI_KEYS = [
+  "name",
+  "furigana",
+  "birthday",
+  "gender",
+  "postalCode",
+  "address",
+  "phone",
+  "emergencyContactName",
+  "emergencyContactRelation",
+  "emergencyContactPhone",
+] as const;
 
 // T-096 タブ1: 基本情報（ヘッダー全項目の編集＋住所・電話・緊急連絡先）
 
@@ -46,6 +61,9 @@ export default function BasicInfoTab({
   const [error, setError] = useState<string | null>(null);
   // T-097: 郵便番号で複数住所候補が返った場合の選択肢（1件は自動入力するため空のまま）
   const [postalCandidates, setPostalCandidates] = useState<string[]>([]);
+
+  // T-098: 履歴書AI読み取り（空欄のみマージ）
+  const ai = useResumeAiFill(employee.id, setForm, BASIC_AI_KEYS);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
@@ -116,7 +134,10 @@ export default function BasicInfoTab({
 
   return (
     <div className="px-5 py-5">
-      <BlockTitle>基本情報</BlockTitle>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <BlockTitle>基本情報</BlockTitle>
+        <ResumeAiButton {...ai} />
+      </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="社員番号">
           <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} />
