@@ -59,6 +59,7 @@ export async function GET(
       gender: e.gender,
       hireDate: d(e.hireDate),
       resignDate: d(e.resignDate),
+      postalCode: e.postalCode,
       address: e.address,
       phone: e.phone,
       emergencyContactName: e.emergencyContactName,

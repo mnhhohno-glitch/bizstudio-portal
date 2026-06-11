@@ -14,6 +14,7 @@ export type EmployeeBasic = {
   gender: string | null;
   hireDate: string | null;
   resignDate: string | null;
+  postalCode: string | null;
   address: string | null;
   phone: string | null;
   emergencyContactName: string | null;

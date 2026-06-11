@@ -233,6 +233,8 @@ model Employee {
   emergencyContactName     String?   @map("emergency_contact_name")
   emergencyContactRelation String?   @map("emergency_contact_relation")
   emergencyContactPhone    String?   @map("emergency_contact_phone")
+  // T-097: 郵便番号→住所自動補完。nullable で非破壊追加。
+  postalCode               String?   @map("postal_code")
 
   // 担当求職者
   candidates    Candidate[]
@@ -2251,4 +2253,46 @@ model ScoutSequence {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("scout_sequences")
+}
+
+// ========================================
+// T-097: 自動補完用マスタ（銀行・支店・郵便番号）
+// コードはすべてゼロ詰め保持のため String（Int 禁止）。
+// 参照APIは /api/masters/** からログイン確認のみで引く。
+// ========================================
+
+// 金融機関マスタ（コード→銀行名）
+model BankMaster {
+  code      String         @id // 金融機関コード 4桁ゼロ詰め
+  name      String
+  branches  BranchMaster[]
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  @@map("bank_masters")
+}
+
+// 支店マスタ（金融機関コード+支店コード→支店名）
+model BranchMaster {
+  id         String     @id @default(cuid())
+  bankCode   String     @map("bank_code")
+  branchCode String     @map("branch_code") // 支店コード 3桁ゼロ詰め
+  name       String
+  bank       BankMaster @relation(fields: [bankCode], references: [code], onDelete: Cascade)
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@unique([bankCode, branchCode])
+  @@index([bankCode])
+  @@map("branch_masters")
+}
+
+// 郵便番号マスタ（郵便番号→住所。同一番号に複数候補あり）
+model PostalCodeMaster {
+  id         String   @id @default(cuid())
+  postalCode String   @map("postal_code") // 7桁ハイフンなし
+  address    String
+  sortOrder  Int      @default(0) @map("sort_order")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([postalCode])
+  @@map("postal_code_masters")
 }

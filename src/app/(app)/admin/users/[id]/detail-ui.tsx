@@ -23,16 +23,19 @@ export function TextInput({
   value,
   onChange,
   placeholder,
+  onBlur,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  onBlur?: () => void;
 }) {
   return (
     <input
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       placeholder={placeholder}
       className={UNDERLINE_INPUT_CLASS}
     />

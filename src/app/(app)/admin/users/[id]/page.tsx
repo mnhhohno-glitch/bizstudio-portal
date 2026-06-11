@@ -101,6 +101,7 @@ export default async function AdminUserDetailPage({
         gender: emp.gender,
         hireDate: d(emp.hireDate),
         resignDate: d(emp.resignDate),
+        postalCode: emp.postalCode,
         address: emp.address,
         phone: emp.phone,
         emergencyContactName: emp.emergencyContactName,

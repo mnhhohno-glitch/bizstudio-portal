@@ -35,6 +35,44 @@ export default function BankAccountTab({
     setSaved(false);
   };
 
+  // T-097: 銀行コード→銀行名 自動補完。404/通信失敗時は既存値を消さない（手入力尊重）。
+  const lookupBank = async (bankCodeRaw: string) => {
+    const code = bankCodeRaw.replace(/\D/g, "");
+    if (code.length < 4) return;
+    try {
+      const res = await fetch(`/api/masters/banks/${code}`);
+      if (!res.ok) return;
+      const j = await res.json();
+      if (j?.name) setForm((f) => ({ ...f, bankName: j.name }));
+    } catch {
+      /* 補完失敗は無視（手入力で続行可能） */
+    }
+  };
+
+  // T-097: (銀行コード+支店コード)→支店名 自動補完。
+  const lookupBranch = async (bankCodeRaw: string, branchCodeRaw: string) => {
+    const bank = bankCodeRaw.replace(/\D/g, "");
+    const branch = branchCodeRaw.replace(/\D/g, "");
+    if (bank.length < 4 || branch.length < 3) return;
+    try {
+      const res = await fetch(`/api/masters/banks/${bank}/branches/${branch}`);
+      if (!res.ok) return;
+      const j = await res.json();
+      if (j?.name) setForm((f) => ({ ...f, branchName: j.name }));
+    } catch {
+      /* 補完失敗は無視 */
+    }
+  };
+
+  const onBankCodeChange = (v: string) => {
+    set("bankCode")(v);
+    if (v.replace(/\D/g, "").length === 4) lookupBank(v);
+  };
+  const onBranchCodeChange = (v: string) => {
+    set("branchCode")(v);
+    if (v.replace(/\D/g, "").length === 3) lookupBranch(form.bankCode, v);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -62,13 +100,23 @@ export default function BankAccountTab({
       <BlockTitle>給与振込口座</BlockTitle>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="銀行コード">
-          <TextInput value={form.bankCode} onChange={set("bankCode")} placeholder="例: 0001" />
+          <TextInput
+            value={form.bankCode}
+            onChange={onBankCodeChange}
+            onBlur={() => lookupBank(form.bankCode)}
+            placeholder="例: 0001"
+          />
         </FormField>
         <FormField label="銀行名">
           <TextInput value={form.bankName} onChange={set("bankName")} />
         </FormField>
         <FormField label="支店コード">
-          <TextInput value={form.branchCode} onChange={set("branchCode")} placeholder="例: 123" />
+          <TextInput
+            value={form.branchCode}
+            onChange={onBranchCodeChange}
+            onBlur={() => lookupBranch(form.bankCode, form.branchCode)}
+            placeholder="例: 123"
+          />
         </FormField>
         <FormField label="支店名">
           <TextInput value={form.branchName} onChange={set("branchName")} />

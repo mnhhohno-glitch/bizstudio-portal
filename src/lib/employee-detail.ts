@@ -58,6 +58,7 @@ export const BASIC_FIELDS: Record<string, FieldKind> = {
   gender: "string",
   hireDate: "date",
   resignDate: "date",
+  postalCode: "string",
   address: "string",
   phone: "string",
   emergencyContactName: "string",

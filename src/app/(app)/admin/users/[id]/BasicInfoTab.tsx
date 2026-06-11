@@ -33,6 +33,7 @@ export default function BasicInfoTab({
     status: employee.status as string,
     hireDate: employee.hireDate ?? "",
     resignDate: employee.resignDate ?? "",
+    postalCode: employee.postalCode ?? "",
     address: employee.address ?? "",
     phone: employee.phone ?? "",
     emergencyContactName: employee.emergencyContactName ?? "",
@@ -43,9 +44,47 @@ export default function BasicInfoTab({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // T-097: 郵便番号で複数住所候補が返った場合の選択肢（1件は自動入力するため空のまま）
+  const [postalCandidates, setPostalCandidates] = useState<string[]>([]);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
+    setSaved(false);
+  };
+
+  // T-097: 郵便番号→住所 自動補完。1件は自動入力、複数件は候補ドロップダウン、0件は何もしない。
+  const lookupPostal = async (raw: string) => {
+    const code = raw.replace(/\D/g, "");
+    if (code.length < 7) return;
+    try {
+      const res = await fetch(`/api/masters/postal-code/${code}`);
+      if (!res.ok) return;
+      const j = await res.json();
+      const matches: string[] = (j?.matches ?? []).map(
+        (m: { address: string }) => m.address,
+      );
+      if (matches.length === 1) {
+        setForm((f) => ({ ...f, address: matches[0] }));
+        setPostalCandidates([]);
+        setSaved(false);
+      } else if (matches.length > 1) {
+        setPostalCandidates(matches);
+      } else {
+        setPostalCandidates([]);
+      }
+    } catch {
+      setPostalCandidates([]);
+    }
+  };
+
+  const onPostalChange = (v: string) => {
+    set("postalCode")(v);
+    if (v.replace(/\D/g, "").length === 7) lookupPostal(v);
+  };
+
+  const selectPostalCandidate = (addr: string) => {
+    setForm((f) => ({ ...f, address: addr }));
+    setPostalCandidates([]);
     setSaved(false);
   };
 
@@ -126,10 +165,37 @@ export default function BasicInfoTab({
       <div className="mt-5">
         <BlockTitle>連絡先</BlockTitle>
         <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+          <FormField label="郵便番号">
+            <TextInput
+              value={form.postalCode}
+              onChange={onPostalChange}
+              onBlur={() => lookupPostal(form.postalCode)}
+              placeholder="例: 1000001"
+            />
+          </FormField>
+          {/* 郵便番号を独立した行に置くためのスペーサ */}
+          <div className="col-span-3" aria-hidden />
           <div className="col-span-3">
             <FormField label="住所">
               <TextInput value={form.address} onChange={set("address")} />
             </FormField>
+            {postalCandidates.length > 1 && (
+              <div className="mt-1 rounded-md border border-gray-200 bg-white shadow-sm">
+                <div className="px-2 py-1 text-[10px] text-gray-400">
+                  住所候補（複数）— 選択してください
+                </div>
+                {postalCandidates.map((addr, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => selectPostalCandidate(addr)}
+                    className="block w-full px-2 py-1.5 text-left text-[13px] text-slate-700 hover:bg-blue-50"
+                  >
+                    {addr}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <FormField label="電話番号">
             <TextInput value={form.phone} onChange={set("phone")} />
