@@ -491,7 +491,17 @@ export default function DailyReportView({
       {/* カレンダー連携バー（自分モードのみ。閲覧モードでは出さない） */}
       {!viewMode && (
         <div className="px-4 pt-3">
-          <CalendarConnectButton isConnected={calConnected} onConnect={() => void fetchCalendar()} onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }} />
+          <CalendarConnectButton
+            isConnected={calConnected}
+            onConnect={async () => {
+              try {
+                const res = await fetch("/api/calendar/auth");
+                const data = await res.json();
+                if (data.authUrl) window.location.href = data.authUrl;
+              } catch { /* */ }
+            }}
+            onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }}
+          />
         </div>
       )}
 

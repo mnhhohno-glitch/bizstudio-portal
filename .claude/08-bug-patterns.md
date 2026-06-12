@@ -87,6 +87,35 @@
 - 修正コミット: `59ce485`
 - 異常データ流通範囲: 2026/5/7〜5/12 の 22 件、kyuujinPDF / マイページの `job_seeker_id` として外部流通済み
 
+## カテゴリI: コンポーネント再利用・props 移植系
+
+### I-1. Googleカレンダー連携ボタン無反応（onConnect 移植漏れ）
+
+**症状**: 新ダッシュボード（日報タブ）で「🔗 Googleカレンダー / ToDo を連携」「再認証」を押しても無反応。hover スタイルは効くがクリックしても Google 認可画面に遷移しない。
+
+**原因の構造**:
+- `src/components/dailyReport/DailyReportView.tsx` で共通コンポーネント `CalendarConnectButton` を再利用した際、`onConnect` に `() => void fetchCalendar()`（`/api/calendar/events` のイベント再取得）を渡していた
+- 本来の `onConnect` は OAuth 認可フロー（`/api/calendar/auth` で authUrl を取得 → `window.location.href` でリダイレクト）であるべき（正：`SchedulePanel.tsx`）
+- T-069 で日報タブにスケジュール機能を移植した際、ハンドラの中身だけが別物（イベント取得）になり、OAuth フロー呼び出しが漏れた
+- 連携済み時の「再認証」ボタンも同じ `onConnect` を使うため、同時に無反応だった
+
+**露呈の構造**:
+- 既存ユーザーは旧ダッシュボード時代に連携済み（`isConnected=true`）で連携ボタン自体が表示されないため気づかない
+- 新人アカウント・連携解除後の再連携でのみ未連携状態（`isConnected=false`）になり、初めて露呈する
+- User / Employee リンクや role とは無関係（全未連携ユーザーで発生する性質のバグ）
+
+**対処**:
+- `DailyReportView.tsx` の `onConnect` を `SchedulePanel.tsx` と同じ OAuth フロー呼び出しに差し替え（1 箇所）
+- `onDisconnect`・`SchedulePanel.tsx`・`CalendarConnectButton.tsx` 本体は変更なし
+
+**教訓**:
+- **共通コンポーネントを再利用するとき、props で渡すハンドラが元コンポーネントの意味（ここでは「連携＝OAuth 遷移」）を保っているか確認する**
+- 同じ props（`onConnect`）が複数のボタン（連携・再認証）から共有されている場合、片方のバグは両方に波及する
+
+**関連ケース**:
+- T-069（日報タブ移植時の移植漏れ）
+- 修正コミット: `__COMMIT__`
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認

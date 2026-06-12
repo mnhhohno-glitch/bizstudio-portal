@@ -1013,6 +1013,30 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
 
+#### Googleカレンダー連携UI（日報タブ・共通コンポーネント `CalendarConnectButton`）
+新ダッシュボード（日報タブ）の Google カレンダー / ToDo 連携ボタンは `DailyReportView` のヘッダ直下（カレンダー連携バー・自分モードのみ表示）に配置。実体は `src/components/schedule/CalendarConnectButton.tsx`（`SchedulePanel` と共用）。
+
+```
+page.tsx (src/app/(app)/page.tsx)
+├── isDailyReportEnabled() === true → DashboardTabs（日報｜実績表｜タスク｜お知らせ）
+│   └── scheduleTab → DailyReportView (src/components/dailyReport/DailyReportView.tsx)
+│       └── [L492-496] カレンダー連携バー（!viewMode のみ）
+│           └── CalendarConnectButton (src/components/schedule/CalendarConnectButton.tsx)
+│               ├── 未連携: button「🔗 Googleカレンダー / ToDo を連携」
+│               │   └── onConnect → GET /api/calendar/auth → window.location.href = authUrl（OAuth 認可へ遷移）
+│               └── 連携済: span「✅ Googleカレンダー / ToDo 連携中」
+│                   ├── button「再認証」→ onConnect（同上 OAuth フロー再実行・スコープ更新用）
+│                   └── button「解除」→ DELETE /api/calendar/disconnect → onDisconnect
+└── isDailyReportEnabled() === false → 旧ダッシュボード
+    └── SchedulePanel [L432-446] 同じ CalendarConnectButton（onConnect は同じ OAuth フロー）
+
+OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
+  scope: calendar.events + tasks → Google 認可 → /api/calendar/callback → GoogleCalendarConnection upsert
+  → リダイレクト /?calendar_connected=true（フロント側のメッセージ表示は未実装）
+```
+
+- **重要（T-069 移植時の注意）**: `onConnect` には必ず OAuth 認可フロー（`/api/calendar/auth` → `window.location.href = authUrl`）を渡す。`fetchCalendar()`（`/api/calendar/events` のイベント再取得）を渡すと連携ボタン・再認証ボタンが無反応になる（`08-bug-patterns.md` I-1）。未連携ユーザーのみ露呈するため見逃しやすい。
+
 ### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）
 - **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／**粒度切替（週／月／半年）**（`GRANULARITIES`、cohort タブ時は disabled、初期=week）／🎯 目標登録ボタン（TargetModal）。
 - **粒度切替（UIラベルと内部値の対応に注意）**：UI ラベル「週」=内部 `day`（起算日から5日・各列1日）、「月」=内部 `week`（5週）、「半年」=内部 `month`（起算月から6ヶ月）。**ボタン表示ラベルだけ付け替え、`granularity` 値と列生成ロジックの対応は不変**（`day=5日` がラベル「週」になるだけ）。`/api/performance/weekly` に `granularity` を付与し、列ヘッダ・列数（5 or 6）を動的描画。「直近6ヶ月」タブは粒度切替対象外（cohort 固定）。
