@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
         const file = await prisma.candidateFile.create({
           data: {
             candidateId: candidate.id,
-            category: "ORIGINAL",
+            category: "MEETING",
             fileName: pdfFileName,
             fileSize: pdfBuffer.length,
             mimeType: "application/pdf",
