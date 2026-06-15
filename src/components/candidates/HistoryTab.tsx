@@ -372,6 +372,81 @@ function parse3AxisRatings(comment: string | null): { wish: string; pass: string
   return { wish: w?.[1] || "—", pass: p?.[1] || "—", overall: o?.[1] || "—" };
 }
 
+/* ---------- Bookmark sort helpers (pure functions) ---------- */
+// A=最良 … D=最低。空欄/null/「—」は方向に関わらず常に末尾に寄せるため Infinity 扱い。
+const RANK_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+function rankValue(r: string | null | undefined): number {
+  if (!r) return Number.POSITIVE_INFINITY;
+  const v = RANK_ORDER[r];
+  return v === undefined ? Number.POSITIVE_INFINITY : v;
+}
+// 1ランクキーの比較。null/空欄は dir に関わらず常に末尾。
+function compareRank(a: string | null | undefined, b: string | null | undefined, dir: 1 | -1): number {
+  const va = rankValue(a);
+  const vb = rankValue(b);
+  const aMissing = va === Number.POSITIVE_INFINITY;
+  const bMissing = vb === Number.POSITIVE_INFINITY;
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1; // a を末尾へ
+  if (bMissing) return -1; // b を末尾へ
+  return (va - vb) * dir;
+}
+
+type RankKey = "wish" | "pass" | "overall";
+// クリックした主キー + 固定優先順「総合 → 希望 → 通過」の副キー。
+function rankKeyOrder(primary: RankKey): RankKey[] {
+  if (primary === "overall") return ["overall", "wish", "pass"];
+  if (primary === "wish") return ["wish", "overall", "pass"];
+  return ["pass", "overall", "wish"]; // 通過
+}
+// 希望/通過/総合 の AND（複数キー）比較関数を生成。
+// 主キーのみ dir を適用し、副キーは常に良い順（A優先）固定。最終 tie-break は会社名昇順。
+function makeRankComparator(
+  primary: RankKey,
+  dir: 1 | -1,
+): (a: BookmarkFile, b: BookmarkFile) => number {
+  const keys = rankKeyOrder(primary);
+  return (a, b) => {
+    const axisA = parse3AxisRatings(a.aiAnalysisComment);
+    const axisB = parse3AxisRatings(b.aiAnalysisComment);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const cmp = compareRank(axisA?.[k] ?? null, axisB?.[k] ?? null, i === 0 ? dir : 1);
+      if (cmp !== 0) return cmp;
+    }
+    return a.fileName.localeCompare(b.fileName);
+  };
+}
+
+type CompanyMode = "name" | "wantFirst" | "interestFirst";
+// 応募したい/気になる ステータスを mode に応じた優先順位の数値へ。その他(null)は常に末尾(2)。
+function responseRank(resp: string | null, mode: CompanyMode): number {
+  if (mode === "wantFirst") {
+    if (resp === "WANT_TO_APPLY") return 0;
+    if (resp === "INTERESTED") return 1;
+    return 2;
+  }
+  // interestFirst
+  if (resp === "INTERESTED") return 0;
+  if (resp === "WANT_TO_APPLY") return 1;
+  return 2;
+}
+// 会社名列 3状態サイクルの比較関数を生成。同順位は会社名昇順。
+// getResponse は罠#6 の解決済みステータス（fileName ↔ company_name 正規化マッチ）を再利用する。
+function makeCompanyComparator(
+  mode: CompanyMode,
+  getResponse: (f: BookmarkFile) => string | null,
+): (a: BookmarkFile, b: BookmarkFile) => number {
+  return (a, b) => {
+    if (mode !== "name") {
+      const ra = responseRank(getResponse(a), mode);
+      const rb = responseRank(getResponse(b), mode);
+      if (ra !== rb) return ra - rb;
+    }
+    return a.fileName.localeCompare(b.fileName);
+  };
+}
+
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "application/msword",
@@ -418,8 +493,10 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [archiveTarget, setArchiveTarget] = useState<{ kind: "single"; file: BookmarkFile } | { kind: "bulk"; ids: string[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [sortField, setSortField] = useState<"name" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date" | null>(null);
+  const [sortField, setSortField] = useState<"company" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date" | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  // 要件①：会社名列の 3状態サイクル（名前順 → 応募したい順 → 気になる順）。sortField === "company" のときのみ有効。
+  const [companyMode, setCompanyMode] = useState<CompanyMode>("name");
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
   const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
@@ -676,13 +753,34 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   };
 
   // Filtered + sorted files
-  const handleSort = (field: "name" | "rating" | "wish" | "pass" | "overall" | "uploader" | "date") => {
+  // 担当・紹介日列：従来どおりの単独ソート（asc → desc → 解除）。
+  const handleSort = (field: "rating" | "uploader" | "date") => {
     if (sortField === field) {
       if (sortDir === "asc") { setSortDir("desc"); }
       else { setSortField(null); setSortDir("asc"); }
     } else {
       setSortField(field);
       setSortDir(field === "date" ? "desc" : "asc");
+    }
+  };
+
+  // 要件①：会社名列クリックで 名前順 → 応募したい順 → 気になる順 → 名前順 を循環。
+  const handleCompanySort = () => {
+    if (sortField !== "company") {
+      setSortField("company");
+      setCompanyMode("name");
+    } else {
+      setCompanyMode((m) => (m === "name" ? "wantFirst" : m === "wantFirst" ? "interestFirst" : "name"));
+    }
+  };
+
+  // 要件②：希望/通過/総合クリックで AND ソート。主キーのみ asc/desc トグル（解除なし）、副キーは固定。
+  const handleRankSort = (field: RankKey) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc"); // 良い順 A→D
     }
   };
 
@@ -697,22 +795,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       }
       return true;
     });
-    if (sortField) {
+    if (sortField === "company") {
+      // 要件①：会社名 3状態サイクル（罠#6 の解決済みステータス findJobResponse を再利用）
+      result = [...result].sort(makeCompanyComparator(companyMode, (f) => findJobResponse(f.fileName)));
+    } else if (sortField === "wish" || sortField === "pass" || sortField === "overall") {
+      // 要件②：希望/通過/総合 AND（複数キー）ソート
+      result = [...result].sort(makeRankComparator(sortField, sortDir === "asc" ? 1 : -1));
+    } else if (sortField) {
       const dir = sortDir === "asc" ? 1 : -1;
       result = [...result].sort((a, b) => {
-        if (sortField === "name") return a.fileName.localeCompare(b.fileName) * dir;
         if (sortField === "rating") {
           const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
           const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
           return (ra - rb) * dir;
-        }
-        if (sortField === "wish" || sortField === "pass" || sortField === "overall") {
-          const axisA = parse3AxisRatings(a.aiAnalysisComment);
-          const axisB = parse3AxisRatings(b.aiAnalysisComment);
-          const key = sortField === "wish" ? "wish" : sortField === "pass" ? "pass" : "overall";
-          const va = axisA ? (ratingOrder[axisA[key]] ?? 4) : 4;
-          const vb = axisB ? (ratingOrder[axisB[key]] ?? 4) : 4;
-          return (va - vb) * dir;
         }
         if (sortField === "uploader") return a.uploadedBy.name.localeCompare(b.uploadedBy.name) * dir;
         if (sortField === "date") return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
@@ -998,21 +1093,29 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
           <span className="w-4 shrink-0" />
           <span
-            onClick={() => handleSort("name")}
-            className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "name" ? "text-[#2563EB]" : ""}`}
+            onClick={handleCompanySort}
+            title="クリックで 名前順 → 応募したい順 → 気になる順 を切替"
+            className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "company" ? "text-[#2563EB]" : ""}`}
           >
             会社名
-            <SortIcon field="name" current={sortField} dir={sortDir} />
+            {sortField === "company" && (
+              <span className="text-[9px] font-normal">
+                （{companyMode === "name" ? "名前順" : companyMode === "wantFirst" ? "応募したい順" : "気になる順"}）
+              </span>
+            )}
+            <span className="inline-flex flex-col text-[8px] leading-[9px] ml-0.5">
+              <span className={sortField === "company" ? "text-[#2563EB]" : "text-gray-300"}>⇅</span>
+            </span>
           </span>
-          <span onClick={() => handleSort("wish")}
+          <span onClick={() => handleRankSort("wish")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "wish" ? "text-[#2563EB]" : ""}`}>
             希望<SortIcon field="wish" current={sortField} dir={sortDir} />
           </span>
-          <span onClick={() => handleSort("pass")}
+          <span onClick={() => handleRankSort("pass")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "pass" ? "text-[#2563EB]" : ""}`}>
             通過<SortIcon field="pass" current={sortField} dir={sortDir} />
           </span>
-          <span onClick={() => handleSort("overall")}
+          <span onClick={() => handleRankSort("overall")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "overall" ? "text-[#2563EB]" : ""}`}>
             総合<SortIcon field="overall" current={sortField} dir={sortDir} />
           </span>
