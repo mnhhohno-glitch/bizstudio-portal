@@ -1283,7 +1283,7 @@ export default function InterviewForm({
                       router.push(`/tasks/new?${params.toString()}`);
                     }
                   }
-                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "継続", "保留", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />
+                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "継続", "保留", "日程再調整", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>
