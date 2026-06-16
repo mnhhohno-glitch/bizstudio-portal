@@ -764,16 +764,6 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
   };
 
-  // 要件①：会社名列クリックで 名前順 → 応募したい順 → 気になる順 → 名前順 を循環。
-  const handleCompanySort = () => {
-    if (sortField !== "company") {
-      setSortField("company");
-      setCompanyMode("name");
-    } else {
-      setCompanyMode((m) => (m === "name" ? "wantFirst" : m === "wantFirst" ? "interestFirst" : "name"));
-    }
-  };
-
   // 要件②：希望/通過/総合クリックで AND ソート。主キーのみ asc/desc トグル（解除なし）、副キーは固定。
   const handleRankSort = (field: RankKey) => {
     if (sortField === field) {
@@ -1079,6 +1069,35 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             </div>
           </div>
         )}
+
+        {/* Sort segment buttons (会社名軸 3択) */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[12px] text-gray-500 shrink-0">並び替え：</span>
+            <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+              {([
+                { mode: "name", label: "名前順" },
+                { mode: "wantFirst", label: "応募したい順" },
+                { mode: "interestFirst", label: "気になる順" },
+              ] as { mode: CompanyMode; label: string }[]).map((opt, i) => {
+                const active = sortField === "company" && companyMode === opt.mode;
+                return (
+                  <button
+                    key={opt.mode}
+                    onClick={() => { setSortField("company"); setCompanyMode(opt.mode); }}
+                    className={`px-3 py-1 text-[12px] font-medium transition-colors ${i > 0 ? "border-l border-gray-300" : ""} ${
+                      active
+                        ? "bg-[#2563EB] text-white"
+                        : "bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Drop zone hint */}
@@ -1092,21 +1111,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       {files.length > 0 && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
           <span className="w-4 shrink-0" />
-          <span
-            onClick={handleCompanySort}
-            title="クリックで 名前順 → 応募したい順 → 気になる順 を切替"
-            className={`flex-1 min-w-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "company" ? "text-[#2563EB]" : ""}`}
-          >
-            会社名
-            {sortField === "company" && (
-              <span className="text-[9px] font-normal">
-                （{companyMode === "name" ? "名前順" : companyMode === "wantFirst" ? "応募したい順" : "気になる順"}）
-              </span>
-            )}
-            <span className="inline-flex flex-col text-[8px] leading-[9px] ml-0.5">
-              <span className={sortField === "company" ? "text-[#2563EB]" : "text-gray-300"}>⇅</span>
-            </span>
-          </span>
+          <span className="flex-1 min-w-0">会社名</span>
           <span onClick={() => handleRankSort("wish")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${sortField === "wish" ? "text-[#2563EB]" : ""}`}>
             希望<SortIcon field="wish" current={sortField} dir={sortDir} />
