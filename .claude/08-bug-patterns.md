@@ -116,6 +116,39 @@
 - T-069（日報タブ移植時の移植漏れ）
 - 修正コミット: `12f6fea`
 
+## カテゴリJ: 外部API・モデル依存系
+
+### J-1. 退役した Claude モデルID のハードコードによるAIエラー
+
+**症状**: 日報AIボタン（および予定作成「✏️AI」・予定レビュー・RPAエラーチャット）を押下直後にエラー。フロントには 500「AIの応答取得に失敗しました」が出る。即時エラーで、AIの応答が一切返らない。
+
+**原因の構造**:
+- 日報/スケジュール/RPAエラーの各AI機能は **Anthropic Claude** を使用（`ANTHROPIC_API_KEY` / クライアント `src/lib/claude.ts`）。**Gemini ではない**。
+- 各ルートがモデルID `claude-sonnet-4-20250514` をハードコードしていたが、このモデルは **2026-06-15 に退役**。退役モデルIDは上流 Anthropic API で **`404 not_found_error`（`model: ...`）** を返す。
+- 各ルートが 404 を `catch` して 500 に変換しフロントに返すため、フロント側では「コードバグ風の 500」に見えるが、真因は上流 404（モデルID無効）。
+- キー失効・課金・quota の問題ではない（401/403/429 ではない）。後継は **`claude-sonnet-4-6`**（ドロップイン後継。system/messages・`max_tokens` 変更不要）。
+
+**切り分け（Anthropic API のエラー種別）**:
+- **401 `authentication_error`** = APIキー無効・欠落
+- **403 `permission_error` / `billing_error`** = 権限不足・課金
+- **429 `rate_limit_error`** = レート/quota/クレジット
+- **404 `not_found_error`** = **モデルID無効/退役**（本ケース）
+- **500 `api_error`** = 上流の一時障害（コード側 catch の 500 とは別物）
+
+**対処**:
+- 退役モデルID `claude-sonnet-4-20250514` を後継 `claude-sonnet-4-6` に全文置換（route.ts のリトライ箇所含む）。本件では daily-report（assist/chat）・schedule（chat/review）・rpa-error チャット（message/extract）の **6ファイル10箇所** + 知識ドキュメント（03/06/14）を更新。
+- quota/課金確認が必要な場合の確認先は **Anthropic Console**（platform.claude.com）。Google AI Studio / Cloud Console は Gemini 用で無関係。
+
+**教訓**:
+- ハードコードした Claude モデルIDは**退役日を要監視**。退役は突然 404 を引き起こす（本件は退役2日後に発覚）。
+- 切り分けは **HTTPステータス＋`error.type`** で行う（401/403/429/404/500）。フロントの 500 だけ見てコードバグと決めつけない。
+- 将来は **モデルIDを定数集約**して一箇所で更新できるようにする（別タスク）。
+- 退役モデルは複数機能で共有されがち。1機能で発覚したら **リポジトリ全体を grep** して同じIDの他用途も同時に直す。
+
+**関連ケース**:
+- 調査: 日報AI退役モデル調査（2026-06-17）
+- 修正コミット: （本コミット）
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認

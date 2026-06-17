@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   let assistantText = "";
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       system: systemPrompt,
       messages,
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     // Retry once
     try {
       const retryResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 4096,
         system: systemPrompt,
         messages: [

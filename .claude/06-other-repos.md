@@ -123,7 +123,7 @@ OfferBox スカウト文章生成。Railway。master 直 push。
 
 日報AIアシスト用スキル。portal リポジトリ内に新設（Claude.ai プロジェクトには無い・portal専用）。
 - パス: `src/skills/daily-report-advisor/SKILL.md`（references なし）。ローダ `src/lib/load-daily-report-skill.ts:getDailyReportSkill()`（`getJobMatchingSkill` 同型・モジュールキャッシュ）。
-- 利用: `POST /api/daily-report/assist`（Claude `claude-sonnet-4-20250514`）の system に **job-matching-advisor skill と併せて** 注入（cache_control: ephemeral）。
+- 利用: `POST /api/daily-report/assist`（Claude `claude-sonnet-4-6`）の system に **job-matching-advisor skill と併せて** 注入（cache_control: ephemeral）。
 - 役割: CAの所感（■1〜■6）＋当日集計を受け、6項目構造を保った整理本文＋上司視点アドバイス。数字は集計値のみ（捏造禁止）。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%。
 
 ## job-matching-skill

@@ -165,7 +165,7 @@ model InterviewMemo {
   - 通知先＝`LINEWORKS_DAILYREPORT_BOT_ID`(=12416787)/`LINEWORKS_DAILYREPORT_CHANNEL_ID`（日報報告グループ）。⚠️ **本番サービスのみ設定**（staging には未設定＝staging では通知スキップ）。
   - メッセージ＝当日サマリ（面談[初回/既存]・求人紹介BM数・エントリー・選定率[BM/D]・スケジュール消化・**コメント**[統合本文 `reportBody`]）＋**本番直リンク `?date=`**。直リンクは `PORTAL_PUBLIC_URL` or 本番ドメイン定数で固定（`PORTAL_BASE_URL` はサービス毎に staging/本番が異なるため使わない＝staging から送っても本番に飛ばす）。
 - **コメントは統合1本文＋確定制（T-069②後）**：`scheduleNote`/`metricsReflection`（①の2分割）→ **`reportBody`（統合・定型■1〜■6）** に集約（migration `20260608120000_t069_report_body_confirm`、`report_body TEXT` + `comment_confirmed_at TIMESTAMP` を nullable 追加・冪等）。**確定（`commentConfirmedAt`）でないと提出不可**。本文編集で未確定に戻す。入力UIは右アコーディオン＋中央ポップアップ＋自動保存が同一 `reportBody`（CA×日付1レコード）を更新。
-- **日報AIアシスト（T-069③）**：`POST /api/daily-report/assist`（**Claude `claude-sonnet-4-20250514`**・`src/lib/claude.ts`・`ANTHROPIC_API_KEY`。Gemini不使用）。**日報skill `src/skills/daily-report-advisor/SKILL.md`（`getDailyReportSkill`）＋ `job-matching-advisor` skill** を system 注入（cache_control: ephemeral）。当日集計（`computeWeeklyMatrix`＋`computeJobSearchDay`＋支援中ACTIVE数）を**数字として渡す＝AIに計算させない（捏造防止）**。役割＝**■1〜■6 構造保持の整理本文（rewrittenBody）＋上司視点アドバイス（advice）**。JSON `{message, rewrittenBody, advice}`。会話は `DailyReportChat` 保存。旧 `/api/daily-report/chat`（aiBody用ドロワー）は別ルート・不変。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%（skill 内）。
+- **日報AIアシスト（T-069③）**：`POST /api/daily-report/assist`（**Claude `claude-sonnet-4-6`**・`src/lib/claude.ts`・`ANTHROPIC_API_KEY`。Gemini不使用）。**日報skill `src/skills/daily-report-advisor/SKILL.md`（`getDailyReportSkill`）＋ `job-matching-advisor` skill** を system 注入（cache_control: ephemeral）。当日集計（`computeWeeklyMatrix`＋`computeJobSearchDay`＋支援中ACTIVE数）を**数字として渡す＝AIに計算させない（捏造防止）**。役割＝**■1〜■6 構造保持の整理本文（rewrittenBody）＋上司視点アドバイス（advice）**。JSON `{message, rewrittenBody, advice}`。会話は `DailyReportChat` 保存。旧 `/api/daily-report/chat`（aiBody用ドロワー）は別ルート・不変。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%（skill 内）。
 - **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、ABCD＝`aiMatchRating` 構成比、**選定率＝(A+B+C)÷合計BM**（D・未評価除外。D は「見る目」の指標として母数に含める）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
 
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
@@ -202,7 +202,7 @@ model InterviewMemo {
 
 - AI には `metrics.ts` で算出済みの**集計値**と予実サマリのみを渡す（仕様 #10 厳守）。
 - 生の `InterviewRecord` / `JobEntry` / `Candidate` を AI に流してはいけない（数字の整合・PII 双方の事故源）。
-- model は `claude-sonnet-4-20250514` 固定（schedule/chat と揃える）。
+- model は `claude-sonnet-4-6` 固定（schedule/chat と揃える）。
 
 ### 関連ファイル
 
