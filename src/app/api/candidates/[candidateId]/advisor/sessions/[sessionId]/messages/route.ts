@@ -286,9 +286,28 @@ export async function POST(
 
   const useSkill = needsSkillPrompt(content || "", !!file);
   console.log(`[Advisor] Skill mode: ${useSkill ? "FULL" : "LIGHT"}`);
-  const systemPromptText = useSkill
-    ? ADVISOR_PERSONA_PROMPT + getJobMatchingSkill() + CANDIDATE_DATA_HEADER + context
-    : LIGHT_SYSTEM_PROMPT + context;
+  // キャッシュ最適化: FULL時は固定(PERSONA+skill)を独立ブロック化し cache_control 付与、
+  // 可変(候補者context)を別ブロックに分離（候補者横断で skill がキャッシュ読みになる）。
+  // LIGHT時は system が小さくキャッシュ最小長未満のため単一ブロックのまま。
+  // テキスト内容は不変（連結を分割するだけ）。
+  const systemBlocks = useSkill
+    ? [
+        {
+          type: "text" as const,
+          text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkill(),
+          cache_control: { type: "ephemeral" as const },
+        },
+        {
+          type: "text" as const,
+          text: CANDIDATE_DATA_HEADER + context,
+        },
+      ]
+    : [
+        {
+          type: "text" as const,
+          text: LIGHT_SYSTEM_PROMPT + context,
+        },
+      ];
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -305,13 +324,7 @@ export async function POST(
         model: selectModel(content || "", !!file),
         max_tokens: 4000,
         temperature: 0.7,
-        system: [
-          {
-            type: "text",
-            text: systemPromptText,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system: systemBlocks,
         messages: pastMessages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
@@ -332,6 +345,8 @@ export async function POST(
     }
 
     const data = await response.json();
+    const u = data.usage ?? {};
+    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""
       ? rawContent

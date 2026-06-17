@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { getCandidateContext } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
+import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -462,12 +463,14 @@ ${skillContent}
 
 `;
 
+  // キャッシュ最適化: 固定部分(skill+評価ルール)を独立ブロック化し cache_control を付与する。
+  // 可変部分(バッチ指示)は別ブロックに分離（cache_control なし）。テキスト内容は不変。
+  const FIXED_SYSTEM = `${SKILL_HEADER}${EVAL_RULES}`;
+
   if (isLastBatch) {
-    systemPrompt = `${SKILL_HEADER}# このリクエストの分析タスク
+    systemPrompt = `# このリクエストの分析タスク
 
 これは全${totalFiles}件中の最後のバッチ（${start + 1}〜${end}件目）です。
-
-${EVAL_RULES}
 
 ## このバッチの分析後、以下の総合まとめを必ず出力すること
 
@@ -503,22 +506,24 @@ ${EVAL_RULES}
 
 ※これまでのバッチの結果はチャット履歴に含まれています。それを参照して総合まとめを作成してください。`;
   } else {
-    systemPrompt = `${SKILL_HEADER}# このリクエストの分析タスク
+    systemPrompt = `# このリクエストの分析タスク
 
 これは全${totalFiles}件中の${start + 1}〜${end}件目です。
-
-${EVAL_RULES}
 
 - このバッチの分析のみ行い、総合まとめは最終バッチで行います
 - 「---」の区切り線で各求人を明確に分離すること`;
   }
 
-  // 6. Fetch chat history (for last batch to reference previous analysis)
-  const chatMessages = await prisma.advisorChatMessage.findMany({
-    where: { sessionId },
-    orderBy: { createdAt: "asc" },
-  });
-  const pastMessages = chatMessages.slice(-MAX_PAST_MESSAGES);
+  // 6. Fetch chat history — 最終バッチ（総合まとめ生成）のみ過去バッチ結果を同梱する。
+  //    中間バッチは各求人単体分析に履歴不要のため非同梱（input 削減・質不変）。
+  const pastMessages = isLastBatch
+    ? (
+        await prisma.advisorChatMessage.findMany({
+          where: { sessionId },
+          orderBy: { createdAt: "asc" },
+        })
+      ).slice(-MAX_PAST_MESSAGES)
+    : [];
 
   const messagesArray = [
     ...pastMessages.map((m) => ({
@@ -551,14 +556,18 @@ ${EVAL_RULES}
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
+        model: CLAUDE_MODEL_ANALYSIS,
         max_tokens: 16000,
         temperature: 0.7,
         system: [
           {
             type: "text",
-            text: systemPrompt,
+            text: FIXED_SYSTEM,
             cache_control: { type: "ephemeral" },
+          },
+          {
+            type: "text",
+            text: systemPrompt,
           },
         ],
         messages: messagesArray,
@@ -585,6 +594,8 @@ ${EVAL_RULES}
     }
 
     const data = await response.json();
+    const u = data.usage ?? {};
+    console.log(`[analyze-batch usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
     const analysisText = data.content?.[0]?.text || "";
 
     // 8. Save to chat

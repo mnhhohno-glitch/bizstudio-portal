@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { parsePdfWithAI, parseDocWithAI, parseTextFile } from "@/lib/file-parser";
+import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 
 const API_TIMEOUT_MS = 120000;
 
@@ -177,8 +178,8 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-6",
-        max_tokens: 16000,
+        model: CLAUDE_MODEL_DEFAULT,
+        max_tokens: 2000,
         temperature: 0.7,
         system: systemPrompt,
         messages: [
