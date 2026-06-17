@@ -1,3 +1,5 @@
+import { CLAUDE_MODEL_LIGHT } from "@/lib/claude";
+
 const GEMINI_MODEL = "gemini-3-flash-preview";
 
 async function callGemini(
@@ -57,7 +59,7 @@ export async function parseDocWithAI(
   );
 }
 
-/** 画像解析 — Anthropic Claude Opus 4.6 */
+/** 画像解析 — Anthropic Claude（軽処理: CLAUDE_MODEL_LIGHT / Haiku） */
 export async function parseImageWithAI(
   base64Data: string,
   mimeType: string
@@ -73,7 +75,7 @@ export async function parseImageWithAI(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-6",
+      model: CLAUDE_MODEL_LIGHT,
       max_tokens: 2000,
       messages: [
         {
