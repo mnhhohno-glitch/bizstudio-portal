@@ -15,7 +15,8 @@ import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
-const INTERVIEW_DECLINE_ASSIGNEES = "1000004,1000025";
+// 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025)
+const INTERVIEW_DECLINE_ASSIGNEES = "1000027,1000025";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
