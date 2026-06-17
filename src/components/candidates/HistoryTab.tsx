@@ -554,8 +554,9 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [archiveTarget, setArchiveTarget] = useState<{ kind: "single"; file: BookmarkFile } | { kind: "bulk"; ids: string[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  // 2段クロスソート：最大2キー（[0]=1次, [1]=2次）。空配列でも確定タイブレークが効く。
-  const [sortKeys, setSortKeys] = useState<SortKey[]>([]);
+  // 2段クロスソート：最大2キー（[0]=1次, [1]=2次）。初期表示は紹介日 降順（新しい順）。
+  // ✕で解除すると空配列となり確定タイブレーク（総合→会社名）順に戻る。
+  const [sortKeys, setSortKeys] = useState<SortKey[]>([{ basis: "date", dir: "desc" }]);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
   const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
