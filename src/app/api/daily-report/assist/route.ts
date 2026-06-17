@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { anthropic } from "@/lib/claude";
+import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { getDailyReportSkill } from "@/lib/load-daily-report-skill";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
@@ -105,7 +105,7 @@ export async function POST(req: Request) {
   let assistantText = "";
   try {
     const res = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+      model: CLAUDE_MODEL_DEFAULT,
       max_tokens: 4096,
       system: systemBlocks,
       messages,
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
   if (!parsed) {
     try {
       const retry = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: CLAUDE_MODEL_DEFAULT,
         max_tokens: 4096,
         system: systemBlocks,
         messages: [

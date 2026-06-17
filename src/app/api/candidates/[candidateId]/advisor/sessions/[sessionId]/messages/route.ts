@@ -8,6 +8,7 @@ import {
   parseTextFile,
 } from "@/lib/file-parser";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
+import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -146,7 +147,7 @@ function selectModel(message: string, hasFile: boolean): string {
   }
   */
   console.log("[Advisor] Model: Sonnet (all-sonnet mode)");
-  return "claude-sonnet-4-6";
+  return CLAUDE_MODEL_DEFAULT;
 }
 
 export async function GET(

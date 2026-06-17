@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "@/lib/rpa-error/system-prompt";
+import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 
 export async function POST(
   req: Request,
@@ -40,7 +41,7 @@ export async function POST(
 
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: CLAUDE_MODEL_DEFAULT,
       max_tokens: 2048,
       system: systemPrompt,
       messages: messages.map((m) => ({
