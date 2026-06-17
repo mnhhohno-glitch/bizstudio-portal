@@ -377,7 +377,7 @@ AI 分析実行 (analyze-batch)
 - 選択 state: `selectedIds: Set<string>`（BookmarkSection 内、L416）。チェック済みファイル ID 集合。
 - 「全選択」ハンドラ: `toggleAll`（L725〜732）。`filteredFiles` 全件 ID を ON/OFF トグル。チェックボックス UI は L916〜924。
 - 出力済（緑バッジ「出力済」）の判定条件: **`file.lastExportedAt`（!= null）**（描画 L1073〜1078）。型は `BookmarkFile.lastExportedAt: string | null`（L269）。送信先は `lastExportedTo`（"circus" / それ以外は HITO-Link）。
-- 「未出力を選択」ボタン（T-095 追加）: 「全選択」の右横（L925 付近）。ハンドラ `selectUnexported`（L734 付近）が `filteredFiles.filter((f) => !f.lastExportedAt)` の ID だけを `selectedIds` にセット（出力済判定の逆を使用、既存選択は上書き）。
+- 「未出力を選択」（T-095 追加 → 追補でトグル式チェックボックス化）: 「全選択」の右横。`toggleAll` と同型のチェックボックス。ハンドラ `toggleUnexported`（未出力分 `filteredFiles.filter((f) => !f.lastExportedAt)` が全選択済みなら除外／未選択なら追加。出力済の選択状態は不変）+ `unexportedAllChecked`（未出力1件以上かつ全選択済みで checked）。判定は出力済（`file.lastExportedAt`）の逆。
 
 ### 関連 API
 

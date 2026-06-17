@@ -818,10 +818,22 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
   const allChecked = filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.has(f.id));
 
-  // 未出力（出力済バッジ＝lastExportedAt が付いていない）行だけを選択する。
+  // 未出力（出力済バッジ＝lastExportedAt が付いていない）行のみを対象にトグルする。
   // 出力済の表示条件（file.lastExportedAt）と必ず同一ロジックの逆を使う。
-  const selectUnexported = () => {
-    setSelectedIds(new Set(filteredFiles.filter((f) => !f.lastExportedAt).map((f) => f.id)));
+  const unexportedFiles = filteredFiles.filter((f) => !f.lastExportedAt);
+  const unexportedAllChecked = unexportedFiles.length > 0 && unexportedFiles.every((f) => selectedIds.has(f.id));
+  const toggleUnexported = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (unexportedAllChecked) {
+        // すべて選択済み → 未出力分のみ除外（出力済の選択状態は触らない）
+        unexportedFiles.forEach((f) => next.delete(f.id));
+      } else {
+        // 未出力分を追加（出力済の選択状態は触らない）
+        unexportedFiles.forEach((f) => next.add(f.id));
+      }
+      return next;
+    });
   };
 
   const shortDate = (iso: string) => {
@@ -1013,12 +1025,15 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
               />
               全選択
             </label>
-            <button
-              onClick={selectUnexported}
-              className="text-[12px] text-gray-600 hover:text-[#2563EB] font-medium"
-            >
+            <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={unexportedAllChecked}
+                onChange={toggleUnexported}
+                className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+              />
               未出力を選択
-            </button>
+            </label>
             {selectedIds.size > 0 && (
               <>
                 <button
