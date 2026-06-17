@@ -360,7 +360,7 @@ AI 分析実行 (analyze-batch)
 | `wishRating` / `passRating` / `overallRating` | `string` | 3 軸セレクト state（T-055 追加） |
 | `savingComment` | `boolean` | 保存中フラグ |
 | `previewFile` | `BookmarkFile \| null` | PDF プレビュー対象 |
-| `sortField` | `"name" \| "rating" \| "wish" \| "pass" \| "overall" \| "uploader" \| "date" \| null` | ソートカラム |
+| `sortKeys` | `SortKey[]`（最大2、`SortKey = { basis: SortBasis; dir: "asc"\|"desc" }`） | 2段クロスソート（[0]=1次/[1]=2次）。旧 `sortField`/`sortDir`/`companyMode` を統合（T-099 で置換） |
 
 ### 主要 handler
 
@@ -378,6 +378,16 @@ AI 分析実行 (analyze-batch)
 - 「全選択」ハンドラ: `toggleAll`（L725〜732）。`filteredFiles` 全件 ID を ON/OFF トグル。チェックボックス UI は L916〜924。
 - 出力済（緑バッジ「出力済」）の判定条件: **`file.lastExportedAt`（!= null）**（描画 L1073〜1078）。型は `BookmarkFile.lastExportedAt: string | null`（L269）。送信先は `lastExportedTo`（"circus" / それ以外は HITO-Link）。
 - 「未出力を選択」（T-095 追加 → 追補でトグル式チェックボックス化）: 「全選択」の右横。`toggleAll` と同型のチェックボックス。ハンドラ `toggleUnexported`（未出力分 `filteredFiles.filter((f) => !f.lastExportedAt)` が全選択済みなら除外／未選択なら追加。出力済の選択状態は不変）+ `unexportedAllChecked`（未出力1件以上かつ全選択済みで checked）。判定は出力済（`file.lastExportedAt`）の逆。
+
+### ブックマーク 2段クロスソート（T-099）
+
+旧「会社名軸3択 ⊻ 列ヘッダー（排他・希望/通過/総合は内部AND）」を廃止し、最大2段（1次キー＋2次キー）のクロスソートに刷新。
+
+- **キー配列の型**: `type SortBasis = "company_name"|"want"|"interest"|"wish"|"pass"|"overall"|"uploader"|"date"`、`type SortKey = { basis: SortBasis; dir: "asc"|"desc" }`。state は `sortKeys: SortKey[]`（[0]=1次, [1]=2次, 最大2）。
+- **合成比較関数**: `makeCompositeComparator(sortKeys, getResponse)`（純関数, HistoryTab.tsx 上部）。1次 → 2次 → **確定タイブレーク（総合A優先 → 会社名昇順）** の順で評価。空配列でもタイブレークが効くため全キー解除時も安定整列。基準別比較は `compareByBasis`（want/interest は単方向で dir 無視・`responseRank` 流用、wish/pass/overall は `compareRank` で欠損は常に末尾、company_name/uploader/date は localeCompare/時刻×dir）。
+- **昇格ロジック**: `activateBasis(basis)`（BookmarkSection 内）。現1次クリック→方向トグル（want/interest は `hasDirToggle=false` で無変化）／現2次クリック→1次へ昇格（現1次は2次へ・方向維持）／未選択クリック→1次（`defaultDir`：date のみ desc）・現1次を2次へ降格・現2次は破棄。`cycleKeyDir(basis)`＝そのキーの方向のみ変更（優先順位不変、2次もここで変更可）、`removeKey(basis)`＝解除（1次を消すと2次が繰上り）。
+- **チップ UI の場所**: ツールバー（検索行の下）。「表示順：」行に会社名軸3択ボタン（名前順=company_name / 応募したい順=want / 気になる順=interest、各 active に次数バッジ）。その下に「並び替え：」チップバー（1次/2次・基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。列ヘッダー（希望/通過/総合/担当/紹介日）クリックでも `activateBasis`、`DirArrows`+`OrderBadge`（次数バッジ）表示。会社名ヘッダーはプレーン。
+- 補助コンポーネント: `DirArrows`（方向▲▼）、`OrderBadge`（1/2次数バッジ）を HistoryTab.tsx 上部に追加。`SortIcon` は Archived/Jobs セクションが引き続き使用（共用、未削除）。
 
 ### 関連 API
 
