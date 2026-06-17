@@ -372,6 +372,13 @@ AI 分析実行 (analyze-batch)
 | `fetchBookmarkRatings()` | 引数なし | 求人紹介タブ用に 3 軸評価 Map 構築 | L1775 |
 | `parse3AxisRatings(comment)` | `(comment: string \| null) => { wish, pass, overall } \| null` | テキストから 3 軸パース（表示専用） | L365 |
 
+### ブックマーク選択 / 出力済判定（T-095 追記）
+
+- 選択 state: `selectedIds: Set<string>`（BookmarkSection 内、L416）。チェック済みファイル ID 集合。
+- 「全選択」ハンドラ: `toggleAll`（L725〜732）。`filteredFiles` 全件 ID を ON/OFF トグル。チェックボックス UI は L916〜924。
+- 出力済（緑バッジ「出力済」）の判定条件: **`file.lastExportedAt`（!= null）**（描画 L1073〜1078）。型は `BookmarkFile.lastExportedAt: string | null`（L269）。送信先は `lastExportedTo`（"circus" / それ以外は HITO-Link）。
+- 「未出力を選択」ボタン（T-095 追加）: 「全選択」の右横（L925 付近）。ハンドラ `selectUnexported`（L734 付近）が `filteredFiles.filter((f) => !f.lastExportedAt)` の ID だけを `selectedIds` にセット（出力済判定の逆を使用、既存選択は上書き）。
+
 ### 関連 API
 
 - 一覧取得: `src/app/api/candidates/[candidateId]/files/route.ts`
