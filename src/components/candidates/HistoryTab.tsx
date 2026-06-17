@@ -733,6 +733,12 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
   const allChecked = filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.has(f.id));
 
+  // 未出力（出力済バッジ＝lastExportedAt が付いていない）行だけを選択する。
+  // 出力済の表示条件（file.lastExportedAt）と必ず同一ロジックの逆を使う。
+  const selectUnexported = () => {
+    setSelectedIds(new Set(filteredFiles.filter((f) => !f.lastExportedAt).map((f) => f.id)));
+  };
+
   const shortDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getMonth() + 1}/${d.getDate()}`;
@@ -922,6 +928,12 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
               />
               全選択
             </label>
+            <button
+              onClick={selectUnexported}
+              className="text-[12px] text-gray-600 hover:text-[#2563EB] font-medium"
+            >
+              未出力を選択
+            </button>
             {selectedIds.size > 0 && (
               <>
                 <button
