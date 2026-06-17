@@ -387,7 +387,17 @@ AI 分析実行 (analyze-batch)
 - **合成比較関数**: `makeCompositeComparator(sortKeys, getResponse)`（純関数, HistoryTab.tsx 上部）。1次 → 2次 → **確定タイブレーク（総合A優先 → 会社名昇順）** の順で評価。空配列でもタイブレークが効くため全キー解除時も安定整列。基準別比較は `compareByBasis`（want/interest は単方向で dir 無視・`responseRank` 流用、wish/pass/overall は `compareRank` で欠損は常に末尾、company_name/uploader/date は localeCompare/時刻×dir）。
 - **昇格ロジック**: `activateBasis(basis)`（BookmarkSection 内）。現1次クリック→方向トグル（want/interest は `hasDirToggle=false` で無変化）／現2次クリック→1次へ昇格（現1次は2次へ・方向維持）／未選択クリック→1次（`defaultDir`：date のみ desc）・現1次を2次へ降格・現2次は破棄。`cycleKeyDir(basis)`＝そのキーの方向のみ変更（優先順位不変、2次もここで変更可）、`removeKey(basis)`＝解除（1次を消すと2次が繰上り）。
 - **チップ UI の場所**: ツールバー（検索行の下）。「表示順：」行に会社名軸3択ボタン（名前順=company_name / 応募したい順=want / 気になる順=interest、各 active に次数バッジ）。その下に「並び替え：」チップバー（1次/2次・基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。列ヘッダー（希望/通過/総合/担当/紹介日）クリックでも `activateBasis`、`DirArrows`+`OrderBadge`（次数バッジ）表示。会社名ヘッダーはプレーン。
-- 補助コンポーネント: `DirArrows`（方向▲▼）、`OrderBadge`（1/2次数バッジ）を HistoryTab.tsx 上部に追加。`SortIcon` は Archived/Jobs セクションが引き続き使用（共用、未削除）。
+- 補助コンポーネント: `DirArrows`（方向▲▼）、`OrderBadge`（1/2次数バッジ）を HistoryTab.tsx 上部に追加。`SortIcon`（旧式）は Archived セクションが引き続き使用（未削除）。
+
+### 求人紹介(Jobs)へのクロスソート移植＋共通化（T-100）
+
+T-099 のBM比較・操作ロジックを **accessor 駆動に汎用化** し、BM・Jobs で共有（**BM の観測挙動は完全非回帰**）。
+
+- **汎用比較**: `type SortAccessors<T> = { getCompanyName, getRank(x,axis), getResponse, getDate, getUploader? }`。`compareByBasis<T>(a,b,key,acc)` / `makeCompositeComparator<T>(sortKeys,acc)` がジェネリック化（HistoryTab.tsx 上部）。確定タイブレークは `acc.getRank(_,"overall")`→`acc.getCompanyName` で BM/Jobs 共通。
+- **共有フック**: `useCrossSort(initial)` が `{ sortKeys, keyOf, degreeOf, activateBasis, cycleKeyDir, removeKey }` を返す。BM＝`useCrossSort([{basis:"date",dir:"desc"}])`、Jobs＝同初期値で **独立インスタンス**（`jobSortKeys` 等にリネーム束縛）。
+- **共有UI部品**: `SortBasisButtons`（会社名軸3択）/ `SortChipBar`（並び替えチップ）を関数コンポーネント化し BM・Jobs 双方が使用。
+- **Jobs の accessor**: `getCompanyName=job.company_name`、`getRank=findBookmarkRating(company_name)?.[axis]`（BM評価のクロス参照, `bookmarkRatings` Map）、`getResponse=job.candidate_response`（行に直接）、`getDate=job.created_at`。**担当(uploader)・DB列はソート対象外**（getUploader 省略, DB ヘッダー非クリック）。
+- **Jobs state**: `jobSortKeys`（旧 `jobSortField`/`jobSortDir`/`handleJobSort` を置換廃止）。初期=紹介日降順。旧デフォルト（candidate_response 順）は廃止。UI は抽出結果ツールバー直下に `SortBasisButtons`+`SortChipBar`、列ヘッダー（希望/通過/総合/紹介日）が `jobActivateBasis` 参加＋`DirArrows`/`OrderBadge`。
 
 ### 関連 API
 

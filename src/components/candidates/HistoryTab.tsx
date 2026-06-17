@@ -452,36 +452,42 @@ function responseRank(resp: string | null, basis: "want" | "interest"): number {
   return 2;
 }
 
+// 基準ごとの値取得を accessor で受け取り、BM/Jobs 両方で同一ロジックを共有する。
+// getRank は欠損時 null（compareRank 側で常に末尾）。getResponse は罠#6 の解決済みステータス。
+// getUploader 省略可（求人紹介には担当列が無い → uploader 基準は使わない）。
+type SortAccessors<T> = {
+  getCompanyName: (x: T) => string;
+  getRank: (x: T, axis: "wish" | "pass" | "overall") => string | null;
+  getResponse: (x: T) => string | null;
+  getDate: (x: T) => string | number | Date;
+  getUploader?: (x: T) => string;
+};
+
 // 1基準のみの比較。want/interest は単方向（dir 無視）。ランク欠損は方向に関わらず常に末尾。
-// getResponse は罠#6 の解決済みステータス（fileName ↔ company_name 正規化マッチ）を再利用する。
-function compareByBasis(
-  a: BookmarkFile,
-  b: BookmarkFile,
-  key: SortKey,
-  getResponse: (f: BookmarkFile) => string | null,
-): number {
+function compareByBasis<T>(a: T, b: T, key: SortKey, acc: SortAccessors<T>): number {
   const dir: 1 | -1 = key.dir === "asc" ? 1 : -1;
   switch (key.basis) {
     case "company_name":
-      return a.fileName.localeCompare(b.fileName) * dir;
+      return acc.getCompanyName(a).localeCompare(acc.getCompanyName(b)) * dir;
     case "want":
     case "interest": {
-      const ra = responseRank(getResponse(a), key.basis);
-      const rb = responseRank(getResponse(b), key.basis);
+      const ra = responseRank(acc.getResponse(a), key.basis);
+      const rb = responseRank(acc.getResponse(b), key.basis);
       return ra - rb; // 単方向（dir は適用しない）
     }
     case "wish":
     case "pass":
     case "overall": {
-      const axisA = parse3AxisRatings(a.aiAnalysisComment);
-      const axisB = parse3AxisRatings(b.aiAnalysisComment);
       const k = key.basis as "wish" | "pass" | "overall";
-      return compareRank(axisA?.[k] ?? null, axisB?.[k] ?? null, dir);
+      return compareRank(acc.getRank(a, k), acc.getRank(b, k), dir);
     }
-    case "uploader":
-      return a.uploadedBy.name.localeCompare(b.uploadedBy.name) * dir;
+    case "uploader": {
+      const ua = acc.getUploader?.(a) ?? "";
+      const ub = acc.getUploader?.(b) ?? "";
+      return ua.localeCompare(ub) * dir;
+    }
     case "date":
-      return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      return (new Date(acc.getDate(a)).getTime() - new Date(acc.getDate(b)).getTime()) * dir;
     default:
       return 0;
   }
@@ -489,23 +495,133 @@ function compareByBasis(
 
 // 1次 → 2次 → 確定タイブレーク（総合A優先 → 会社名昇順）の順に評価する合成比較関数。
 // キー未指定（空配列）でも確定タイブレークが効くため同値行は毎回同じ順に並ぶ。
-function makeCompositeComparator(
+function makeCompositeComparator<T>(
   sortKeys: SortKey[],
-  getResponse: (f: BookmarkFile) => string | null,
-): (a: BookmarkFile, b: BookmarkFile) => number {
+  acc: SortAccessors<T>,
+): (a: T, b: T) => number {
   return (a, b) => {
     for (const key of sortKeys) {
-      const cmp = compareByBasis(a, b, key, getResponse);
+      const cmp = compareByBasis(a, b, key, acc);
       if (cmp !== 0) return cmp;
     }
-    const ov = compareRank(
-      parse3AxisRatings(a.aiAnalysisComment)?.overall ?? null,
-      parse3AxisRatings(b.aiAnalysisComment)?.overall ?? null,
-      1,
-    );
+    const ov = compareRank(acc.getRank(a, "overall"), acc.getRank(b, "overall"), 1);
     if (ov !== 0) return ov;
-    return a.fileName.localeCompare(b.fileName);
+    return acc.getCompanyName(a).localeCompare(acc.getCompanyName(b));
   };
+}
+
+// 2段クロスソートの state + 操作（keyOf/degreeOf/activateBasis/cycleKeyDir/removeKey）を提供する共有フック。
+// BM・Jobs それぞれが独立した sortKeys を持つ（呼び出し側で別インスタンス）。
+function useCrossSort(initial: SortKey[]) {
+  const [sortKeys, setSortKeys] = useState<SortKey[]>(initial);
+  const keyOf = (basis: SortBasis): SortKey | null => sortKeys.find((k) => k.basis === basis) ?? null;
+  const degreeOf = (basis: SortBasis): number | null => {
+    const i = sortKeys.findIndex((k) => k.basis === basis);
+    return i === -1 ? null : i + 1;
+  };
+  // 基準クリック：押したものを1次へ昇格。
+  //  - 現1次クリック → 方向トグル（want/interest は単方向なので無変化）
+  //  - 現2次クリック → 1次へ昇格（現1次は2次へ、方向は維持）
+  //  - 未選択クリック → 1次に（デフォルト方向）、現1次を2次へ降格、現2次は破棄
+  const activateBasis = (basis: SortBasis) => {
+    setSortKeys((prev) => {
+      const idx = prev.findIndex((k) => k.basis === basis);
+      if (idx === 0) {
+        if (!hasDirToggle(basis)) return prev;
+        const next = [...prev];
+        next[0] = { ...next[0], dir: next[0].dir === "asc" ? "desc" : "asc" };
+        return next;
+      }
+      if (idx === 1) {
+        return [prev[1], prev[0]];
+      }
+      const newKey: SortKey = { basis, dir: defaultDir(basis) };
+      return [newKey, ...prev.slice(0, 1)];
+    });
+  };
+  // チップの ▲▼：そのキーの方向のみ変更し優先順位は変えない（2次の方向もここで変えられる）。
+  const cycleKeyDir = (basis: SortBasis) => {
+    setSortKeys((prev) => prev.map((k) => (k.basis === basis ? { ...k, dir: k.dir === "asc" ? "desc" : "asc" } : k)));
+  };
+  // チップの ✕：そのキーを解除。1次を消すと2次が繰り上がる（filter で自動）。
+  const removeKey = (basis: SortBasis) => {
+    setSortKeys((prev) => prev.filter((k) => k.basis !== basis));
+  };
+  return { sortKeys, keyOf, degreeOf, activateBasis, cycleKeyDir, removeKey };
+}
+
+// 会社名軸3択ボタン（名前順=company_name / 応募したい順=want / 気になる順=interest）。BM・Jobs 共用。
+function SortBasisButtons({ degreeOf, activateBasis }: {
+  degreeOf: (b: SortBasis) => number | null;
+  activateBasis: (b: SortBasis) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[12px] text-gray-500 shrink-0">表示順：</span>
+      <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+        {([
+          { basis: "company_name", label: "名前順" },
+          { basis: "want", label: "応募したい順" },
+          { basis: "interest", label: "気になる順" },
+        ] as { basis: SortBasis; label: string }[]).map((opt, i) => {
+          const deg = degreeOf(opt.basis);
+          return (
+            <button
+              key={opt.basis}
+              onClick={() => activateBasis(opt.basis)}
+              className={`px-3 py-1 text-[12px] font-medium transition-colors flex items-center gap-1 ${i > 0 ? "border-l border-gray-300" : ""} ${
+                deg ? "bg-[#2563EB] text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {opt.label}
+              {deg && (
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-white/90 text-[#2563EB] text-[9px] font-bold leading-none">{deg}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 「並び替え：」1次/2次チップバー（基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。BM・Jobs 共用。
+function SortChipBar({ sortKeys, cycleKeyDir, removeKey }: {
+  sortKeys: SortKey[];
+  cycleKeyDir: (b: SortBasis) => void;
+  removeKey: (b: SortBasis) => void;
+}) {
+  if (sortKeys.length === 0) return null;
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[12px] text-gray-500 shrink-0">並び替え：</span>
+      {sortKeys.map((k, i) => (
+        <span
+          key={k.basis}
+          className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[11px] text-[#2563EB]"
+        >
+          <span className="font-semibold">{i === 0 ? "1次" : "2次"}</span>
+          <span>{BASIS_LABEL[k.basis]}</span>
+          {hasDirToggle(k.basis) && (
+            <button
+              onClick={() => cycleKeyDir(k.basis)}
+              title="昇順/降順を切替"
+              className="hover:bg-blue-100 rounded px-0.5 leading-none"
+            >
+              {k.dir === "asc" ? "▲" : "▼"}
+            </button>
+          )}
+          <button
+            onClick={() => removeKey(k.basis)}
+            title="このキーを解除"
+            className="hover:bg-blue-100 rounded px-0.5 leading-none text-gray-500"
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 const ALLOWED_TYPES = new Set([
@@ -554,9 +670,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [archiveTarget, setArchiveTarget] = useState<{ kind: "single"; file: BookmarkFile } | { kind: "bulk"; ids: string[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  // 2段クロスソート：最大2キー（[0]=1次, [1]=2次）。初期表示は紹介日 降順（新しい順）。
-  // ✕で解除すると空配列となり確定タイブレーク（総合→会社名）順に戻る。
-  const [sortKeys, setSortKeys] = useState<SortKey[]>([{ basis: "date", dir: "desc" }]);
+  // 2段クロスソート：初期表示は紹介日 降順（新しい順）。✕で解除すると確定タイブレーク（総合→会社名）順に戻る。
+  const { sortKeys, keyOf, degreeOf, activateBasis, cycleKeyDir, removeKey } = useCrossSort([{ basis: "date", dir: "desc" }]);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sendDbType, setSendDbType] = useState("hito_mynavi");
   const [sendAreas, setSendAreas] = useState<Set<string>>(new Set());
@@ -812,39 +927,13 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     });
   };
 
-  // ---- 2段クロスソート 操作 ----
-  const keyOf = (basis: SortBasis): SortKey | null => sortKeys.find((k) => k.basis === basis) ?? null;
-  const degreeOf = (basis: SortBasis): number | null => {
-    const i = sortKeys.findIndex((k) => k.basis === basis);
-    return i === -1 ? null : i + 1;
-  };
-  // 基準クリック：押したものを1次へ昇格。
-  //  - 現1次クリック → 方向トグル（want/interest は単方向なので無変化）
-  //  - 現2次クリック → 1次へ昇格（現1次は2次へ、方向は維持）
-  //  - 未選択クリック → 1次に（デフォルト方向）、現1次を2次へ降格、現2次は破棄
-  const activateBasis = (basis: SortBasis) => {
-    setSortKeys((prev) => {
-      const idx = prev.findIndex((k) => k.basis === basis);
-      if (idx === 0) {
-        if (!hasDirToggle(basis)) return prev;
-        const next = [...prev];
-        next[0] = { ...next[0], dir: next[0].dir === "asc" ? "desc" : "asc" };
-        return next;
-      }
-      if (idx === 1) {
-        return [prev[1], prev[0]];
-      }
-      const newKey: SortKey = { basis, dir: defaultDir(basis) };
-      return [newKey, ...prev.slice(0, 1)];
-    });
-  };
-  // チップの ▲▼：そのキーの方向のみ変更し優先順位は変えない（2次の方向もここで変えられる）。
-  const cycleKeyDir = (basis: SortBasis) => {
-    setSortKeys((prev) => prev.map((k) => (k.basis === basis ? { ...k, dir: k.dir === "asc" ? "desc" : "asc" } : k)));
-  };
-  // チップの ✕：そのキーを解除。1次を消すと2次が繰り上がる（filter で自動）。
-  const removeKey = (basis: SortBasis) => {
-    setSortKeys((prev) => prev.filter((k) => k.basis !== basis));
+  // BM の基準別値取得（accessor）。会社名=ファイル名、ランク=AIコメントの3軸パース、応募状況=罠#6解決済、紹介日=createdAt、担当=uploadedBy.name。
+  const bookmarkAccessors: SortAccessors<BookmarkFile> = {
+    getCompanyName: (f) => f.fileName,
+    getRank: (f, axis) => parse3AxisRatings(f.aiAnalysisComment)?.[axis] ?? null,
+    getResponse: (f) => findJobResponse(f.fileName),
+    getDate: (f) => f.createdAt,
+    getUploader: (f) => f.uploadedBy.name,
   };
 
   // Filtered + sorted files（空キーでも確定タイブレーク 総合→会社名 が効く）
@@ -857,7 +946,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       }
       return true;
     });
-    return [...result].sort(makeCompositeComparator(sortKeys, (f) => findJobResponse(f.fileName)));
+    return [...result].sort(makeCompositeComparator(sortKeys, bookmarkAccessors));
   })();
 
   const toggleAll = () => {
@@ -1150,67 +1239,11 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
           </div>
         )}
 
-        {/* Sort: 会社名軸の基準ボタン + 1次/2次チップバー（2段クロスソート） */}
+        {/* Sort: 会社名軸の基準ボタン + 1次/2次チップバー（2段クロスソート, BM/Jobs 共用） */}
         {files.length > 0 && (
           <div className="flex flex-col gap-1.5 mt-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] text-gray-500 shrink-0">表示順：</span>
-              <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
-                {([
-                  { basis: "company_name", label: "名前順" },
-                  { basis: "want", label: "応募したい順" },
-                  { basis: "interest", label: "気になる順" },
-                ] as { basis: SortBasis; label: string }[]).map((opt, i) => {
-                  const deg = degreeOf(opt.basis);
-                  return (
-                    <button
-                      key={opt.basis}
-                      onClick={() => activateBasis(opt.basis)}
-                      className={`px-3 py-1 text-[12px] font-medium transition-colors flex items-center gap-1 ${i > 0 ? "border-l border-gray-300" : ""} ${
-                        deg
-                          ? "bg-[#2563EB] text-white"
-                          : "bg-white text-gray-600 hover:bg-gray-50"
-                      }`}
-                    >
-                      {opt.label}
-                      {deg && (
-                        <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-white/90 text-[#2563EB] text-[9px] font-bold leading-none">{deg}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            {sortKeys.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[12px] text-gray-500 shrink-0">並び替え：</span>
-                {sortKeys.map((k, i) => (
-                  <span
-                    key={k.basis}
-                    className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[11px] text-[#2563EB]"
-                  >
-                    <span className="font-semibold">{i === 0 ? "1次" : "2次"}</span>
-                    <span>{BASIS_LABEL[k.basis]}</span>
-                    {hasDirToggle(k.basis) && (
-                      <button
-                        onClick={() => cycleKeyDir(k.basis)}
-                        title="昇順/降順を切替"
-                        className="hover:bg-blue-100 rounded px-0.5 leading-none"
-                      >
-                        {k.dir === "asc" ? "▲" : "▼"}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => removeKey(k.basis)}
-                      title="このキーを解除"
-                      className="hover:bg-blue-100 rounded px-0.5 leading-none text-gray-500"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
+            <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
+            <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
           </div>
         )}
       </div>
@@ -2195,17 +2228,15 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
   const [submitting, setSubmitting] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
   const [responseFilter, setResponseFilter] = useState<"ALL" | "WANT_TO_APPLY" | "INTERESTED" | "NONE">("ALL");
-  const [jobSortField, setJobSortField] = useState<"wish" | "pass" | "overall" | null>(null);
-  const [jobSortDir, setJobSortDir] = useState<"asc" | "desc">("asc");
-  const handleJobSort = (field: "wish" | "pass" | "overall") => {
-    if (jobSortField === field) {
-      if (jobSortDir === "asc") { setJobSortDir("desc"); }
-      else { setJobSortField(null); setJobSortDir("asc"); }
-    } else {
-      setJobSortField(field);
-      setJobSortDir("asc");
-    }
-  };
+  // 求人紹介(Jobs)の2段クロスソート（BM と独立の sortKeys）。初期表示は紹介日 降順。
+  const {
+    sortKeys: jobSortKeys,
+    keyOf: jobKeyOf,
+    degreeOf: jobDegreeOf,
+    activateBasis: jobActivateBasis,
+    cycleKeyDir: jobCycleKeyDir,
+    removeKey: jobRemoveKey,
+  } = useCrossSort([{ basis: "date", dir: "desc" }]);
 
   // Entries state
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -2554,7 +2585,15 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
   /* ---------- Render ---------- */
   const allJobs = jobsData?.jobs || [];
   const totalJobs = jobsData?.total_jobs ?? 0;
-  const responseOrder: Record<string, number> = { WANT_TO_APPLY: 0, INTERESTED: 1 };
+
+  // Jobs の基準別値取得（accessor）。会社名=company_name、ランク=BM評価のクロス参照(findBookmarkRating)、
+  // 応募状況=candidate_response（行に直接）、紹介日=created_at。担当列は無いため getUploader 省略。
+  const jobAccessors: SortAccessors<Job> = {
+    getCompanyName: (j) => j.company_name,
+    getRank: (j, axis) => findBookmarkRating(j.company_name)?.[axis] ?? null,
+    getResponse: (j) => j.candidate_response,
+    getDate: (j) => j.created_at,
+  };
 
   const jobs = (() => {
     let result = allJobs;
@@ -2566,26 +2605,7 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
         ? result.filter((j) => !j.candidate_response)
         : result.filter((j) => j.candidate_response === responseFilter);
     }
-    const sorted = [...result];
-    if (jobSortField) {
-      const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
-      const dir = jobSortDir === "asc" ? 1 : -1;
-      const key = jobSortField === "wish" ? "wish" : jobSortField === "pass" ? "pass" : "overall";
-      sorted.sort((a, b) => {
-        const axA = findBookmarkRating(a.company_name);
-        const axB = findBookmarkRating(b.company_name);
-        const va = axA ? (ratingOrder[axA[key]] ?? 4) : 4;
-        const vb = axB ? (ratingOrder[axB[key]] ?? 4) : 4;
-        return (va - vb) * dir;
-      });
-    } else {
-      sorted.sort((a, b) => {
-        const ra = a.candidate_response ? (responseOrder[a.candidate_response] ?? 2) : 2;
-        const rb = b.candidate_response ? (responseOrder[b.candidate_response] ?? 2) : 2;
-        return ra - rb;
-      });
-    }
-    return sorted;
+    return [...result].sort(makeCompositeComparator(jobSortKeys, jobAccessors));
   })();
   const filteredEntries = entrySearch
     ? entries.filter((e) => normalize(e.companyName).includes(normalize(entrySearch)))
@@ -2723,6 +2743,14 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
             </div>
           </div>
 
+          {/* Sort: 会社名軸の基準ボタン + 1次/2次チップバー（BM と同一・共用コンポーネント） */}
+          {allJobs.length > 0 && (
+            <div className="flex flex-col gap-1.5 mb-4">
+              <SortBasisButtons degreeOf={jobDegreeOf} activateBasis={jobActivateBasis} />
+              <SortChipBar sortKeys={jobSortKeys} cycleKeyDir={jobCycleKeyDir} removeKey={jobRemoveKey} />
+            </div>
+          )}
+
           {/* コンテンツ */}
           {jobsLoading ? (
             <SkeletonCards />
@@ -2745,20 +2773,23 @@ export default function HistoryTab({ candidateId, candidateName }: { candidateId
               <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none min-w-0">
                 <span className="w-4 shrink-0" />
                 <span className="flex-1 min-w-0">会社名</span>
-                <span onClick={() => handleJobSort("wish")}
-                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "wish" ? "text-[#2563EB]" : ""}`}>
-                  希望<SortIcon field="wish" current={jobSortField} dir={jobSortDir} />
+                <span onClick={() => jobActivateBasis("wish")}
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobDegreeOf("wish") ? "text-[#2563EB]" : ""}`}>
+                  希望<DirArrows dir={jobKeyOf("wish")?.dir ?? null} /><OrderBadge n={jobDegreeOf("wish")} />
                 </span>
-                <span onClick={() => handleJobSort("pass")}
-                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "pass" ? "text-[#2563EB]" : ""}`}>
-                  通過<SortIcon field="pass" current={jobSortField} dir={jobSortDir} />
+                <span onClick={() => jobActivateBasis("pass")}
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobDegreeOf("pass") ? "text-[#2563EB]" : ""}`}>
+                  通過<DirArrows dir={jobKeyOf("pass")?.dir ?? null} /><OrderBadge n={jobDegreeOf("pass")} />
                 </span>
-                <span onClick={() => handleJobSort("overall")}
-                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobSortField === "overall" ? "text-[#2563EB]" : ""}`}>
-                  総合<SortIcon field="overall" current={jobSortField} dir={jobSortDir} />
+                <span onClick={() => jobActivateBasis("overall")}
+                  className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${jobDegreeOf("overall") ? "text-[#2563EB]" : ""}`}>
+                  総合<DirArrows dir={jobKeyOf("overall")?.dir ?? null} /><OrderBadge n={jobDegreeOf("overall")} />
                 </span>
                 <span className="w-[72px] shrink-0">DB</span>
-                <span className="w-[52px] shrink-0">紹介日</span>
+                <span onClick={() => jobActivateBasis("date")}
+                  className={`w-[52px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 whitespace-nowrap ${jobDegreeOf("date") ? "text-[#2563EB]" : ""}`}>
+                  紹介日<DirArrows dir={jobKeyOf("date")?.dir ?? null} /><OrderBadge n={jobDegreeOf("date")} />
+                </span>
                 <span className="w-[28px] shrink-0" />
               </div>
               <div className="divide-y divide-gray-100">
