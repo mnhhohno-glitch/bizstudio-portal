@@ -519,6 +519,51 @@ function AptitudeCell({ value, entryId, onUpdate }: {
   );
 }
 
+// T-102: 桁区切りカンマ付き金額入力（円・整数）。表示はカンマ付き、保存はカンマ除去の整数。
+//  - 編集中は素の入力を保持し、onBlur で整形＋コミット（カーソル破綻を避けるため live 整形はしない）。
+//  - 外部 value 変更（保存反映・再取得）には useEffect で追従。
+//  - 全角数字→半角、数字以外（カンマ等）除去。空欄は null。マイナスは想定外（0以上）のため符号は無視。
+function CommaNumberInput({ value, onCommit, placeholder, className, title }: {
+  value: number | null;
+  onCommit: (n: number | null) => void;
+  placeholder?: string;
+  className?: string;
+  title?: string;
+}) {
+  const fmt = (n: number | null) => (n == null ? "" : n.toLocaleString("ja-JP"));
+  const parse = (s: string): number | null => {
+    const half = s.replace(/[０-９]/g, (d) => String("０１２３４５６７８９".indexOf(d)));
+    const digits = half.replace(/[^\d]/g, "");
+    return digits ? parseInt(digits, 10) : null;
+  };
+  const [text, setText] = useState<string>(fmt(value));
+  const lastValueRef = useRef<number | null>(value);
+  useEffect(() => {
+    if (value !== lastValueRef.current) {
+      lastValueRef.current = value;
+      setText(fmt(value));
+    }
+  }, [value]);
+  return (
+    <input
+      type="text" inputMode="numeric"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        const n = parse(text);
+        setText(fmt(n)); // 整形して即時にカンマ表示へ
+        if (n !== value) {
+          lastValueRef.current = n;
+          onCommit(n);
+        }
+      }}
+      placeholder={placeholder}
+      className={className}
+      title={title}
+    />
+  );
+}
+
 // T-088: 粗利セル（T-087 の InlineRevenueCell を統合・拡張）。
 // 承諾 or 入社済レコードで「課金方式（年収％/固定）」と金額を入力。
 // 確定 revenue はサーバー側で計算（送信は feeType + 必要な入力のみ。表示は entry.revenue を信用）。
@@ -555,9 +600,7 @@ function RevenueCell({ entry, onUpdate }: {
       });
     }
   };
-  const handleIncomeBlur = (v: string) => {
-    const n = v.replace(/[^\d]/g, "");
-    const num = n ? parseInt(n, 10) : null;
+  const handleIncomeCommit = (num: number | null) => {
     if (num === inc) return;
     void onUpdate(entry.id, { feeType: "ANNUAL_RATE", theoreticalAnnualIncome: num, feeRatePercent: rate });
   };
@@ -567,9 +610,7 @@ function RevenueCell({ entry, onUpdate }: {
     if (num === rate) return;
     void onUpdate(entry.id, { feeType: "ANNUAL_RATE", theoreticalAnnualIncome: inc, feeRatePercent: num });
   };
-  const handleRevenueBlur = (v: string) => {
-    const n = v.replace(/[^\d]/g, "");
-    const num = n ? parseInt(n, 10) : null;
+  const handleRevenueCommit = (num: number | null) => {
     if (num === rev) return;
     void onUpdate(entry.id, { feeType: "FIXED", revenue: num });
   };
@@ -605,10 +646,9 @@ function RevenueCell({ entry, onUpdate }: {
           </div>
           {/* 2段目: 理論年収 */}
           <div className="flex items-center gap-1">
-            <input
-              type="text" inputMode="numeric"
-              defaultValue={inc != null ? inc.toLocaleString("ja-JP") : ""}
-              onBlur={(e) => handleIncomeBlur(e.target.value)}
+            <CommaNumberInput
+              value={inc}
+              onCommit={handleIncomeCommit}
               placeholder="理論年収"
               className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
               title="理論年収（円）"
@@ -619,10 +659,9 @@ function RevenueCell({ entry, onUpdate }: {
       ) : (
         <div className="flex items-center gap-1">
           {feeSelect}
-          <input
-            type="text" inputMode="numeric"
-            defaultValue={rev != null ? rev.toLocaleString("ja-JP") : ""}
-            onBlur={(e) => handleRevenueBlur(e.target.value)}
+          <CommaNumberInput
+            value={rev}
+            onCommit={handleRevenueCommit}
             placeholder="金額"
             className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
             title="固定金額（円）"
@@ -646,19 +685,16 @@ function CostCell({ entry, onUpdate }: {
   if (!editable) {
     return <span className="text-[10px] text-[#C0C4CC]">—</span>;
   }
-  const makeBlur = (field: "cost" | "jobDbCost", current: number | null) => (v: string) => {
-    const n = v.replace(/[^\d]/g, "");
-    const num = n ? parseInt(n, 10) : null;
+  const makeCommit = (field: "cost" | "jobDbCost", current: number | null) => (num: number | null) => {
     if (num === current) return;
     void onUpdate(entry.id, { [field]: num });
   };
   const row = (label: string, field: "cost" | "jobDbCost", value: number | null, placeholder: string) => (
     <div className="flex items-center gap-1">
       <span className="text-[9px] text-[#9CA3AF] w-12 shrink-0">{label}</span>
-      <input
-        type="text" inputMode="numeric"
-        defaultValue={value != null ? value.toLocaleString("ja-JP") : ""}
-        onBlur={(e) => makeBlur(field, value)(e.target.value)}
+      <CommaNumberInput
+        value={value}
+        onCommit={makeCommit(field, value)}
         placeholder={placeholder}
         className="w-20 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
         title={`${label}（円・手入力）`}
