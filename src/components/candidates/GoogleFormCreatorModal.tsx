@@ -1204,7 +1204,7 @@ export default function GoogleFormCreatorModal({
                 </div>
               )}
 
-              <div className="space-y-4 mb-4 max-h-[56vh] overflow-y-auto pr-1">
+              <div className="space-y-4 mb-4 pr-1">
                 {sections.length === 0 ? (
                   <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-4 text-center text-[13px] text-gray-500">
                     質問が生成されませんでした。「やり直し」で再生成してください。
@@ -1299,6 +1299,9 @@ export default function GoogleFormCreatorModal({
                 </div>
               )}
 
+              {/* T-100c: 指示で再生成の入力＋下部アクションをスティッキー領域にし、質問リストだけが上でスクロールするようにする。
+                  モーダル本体(overflow-y-auto)を唯一のスクロールコンテナにし、この領域を bottom-0 で固定。 */}
+              <div className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-3 pb-4 bg-white border-t border-gray-200">
               {/* 指示チャット欄＋部分再生成 */}
               <div className="mb-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                 <label className="block text-[13px] font-medium text-[#374151] mb-1.5">
@@ -1347,7 +1350,7 @@ export default function GoogleFormCreatorModal({
                 </div>
               )}
 
-              <div className="flex gap-2 pt-3 border-t border-gray-200">
+              <div className="flex gap-2 pt-1">
                 <button
                   onClick={handleClose}
                   disabled={isRegenerating}
@@ -1381,6 +1384,7 @@ export default function GoogleFormCreatorModal({
               {draftSavedNotice && (
                 <div className="mt-1 text-right text-[12px] text-green-600">{draftSavedNotice}</div>
               )}
+              </div>
             </div>
           );
         })()}
