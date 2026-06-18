@@ -110,8 +110,8 @@ const MONTHLY_ROWS: Row[] = [
   { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
   { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
   { label: "決定", band: "orange", actual: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
-  { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
-  { label: "売上単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+  { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+  { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
 ];
 
 const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
@@ -151,8 +151,8 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
     { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
     { label: "承諾", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
-    { label: "決定売上", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
-    { label: "決定単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+    { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+    { label: "決定粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
   ],
 };
 
@@ -481,8 +481,8 @@ const COHORT_ROWS: CohortRow[] = [
   { label: "書類選考通過", num: (c) => c.documentPass, pct: (c) => c.documentPassRate },
   { label: "内定数", num: (c) => c.offer, pct: (c) => c.offerRate },
   { label: "決定数（内定承諾）", num: (c) => c.decided, pct: (c) => c.decidedRate },
-  { label: "決定売上（粗利金額）", num: (c) => c.decidedRevenue, pct: () => null, fmt: yenFmt, band: "orange" },
-  { label: "売上単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
+  { label: "決定粗利", num: (c) => c.decidedRevenue, pct: () => null, fmt: yenFmt, band: "orange" },
+  { label: "粗利単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
 ];
 
 // 合計・平均の数値書式：人数は小数1桁、件数・売上は整数 or 円表記（行ごとの fmt に従う）。

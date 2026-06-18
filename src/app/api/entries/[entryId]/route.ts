@@ -49,6 +49,8 @@ export async function PATCH(
     "archivedAt",
     // T-087/T-088: 粗利金額（revenue）と課金方式（年収％/固定）。revenue はサーバー側で確定計算する（後段の feeType 分岐）。
     "feeType", "theoreticalAnnualIncome", "feeRatePercent", "revenue",
+    // T-099: 仕入れ値（cost・手入力・円・整数）。粗利は保存せず revenue - (cost ?? 0) で表示計算。
+    "cost",
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,8 +61,9 @@ export async function PATCH(
       // Convert date strings to Date objects
       if (key.endsWith("Date") || key.endsWith("Deadline") || key.endsWith("At") || key === "entryDate") {
         data[key] = val ? new Date(val) : null;
-      } else if (key === "revenue") {
-        // 粗利金額（円）: null=未入力 / 数値=保存。空文字列は null、0 はそのまま保存（実績表は revenue>0 のみ売上扱い）。
+      } else if (key === "revenue" || key === "cost") {
+        // revenue=粗利金額(=売上), cost=仕入れ値（円）: null=未入力 / 数値=保存。
+        // 空文字列は null、0 はそのまま保存。粗利はサーバーに保存しない（read 時に revenue - (cost ?? 0)）。
         if (val === null || val === "" || typeof val === "undefined") {
           data[key] = null;
         } else {

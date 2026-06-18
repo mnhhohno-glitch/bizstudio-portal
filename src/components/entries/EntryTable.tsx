@@ -70,13 +70,17 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
-    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
+    { key: "cost", label: "仕入れ値", width: 100, sortKey: "cost" },
+    { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "入社済": [
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
     // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
-    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
+    { key: "cost", label: "仕入れ値", width: 100, sortKey: "cost" },
+    { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "全件": [],
 };
@@ -266,6 +270,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
     case "acceptanceDate": return entry.acceptanceDate;
     case "joinDate": return entry.joinDate;
     case "revenue": return entry.revenue == null ? null : String(entry.revenue).padStart(15, "0");
+    case "cost": return entry.cost == null ? null : String(entry.cost).padStart(15, "0");
     default: return null;
   }
 }
@@ -619,6 +624,52 @@ function RevenueCell({ entry, onUpdate }: {
   );
 }
 
+// T-099: 仕入れ値セル（手入力・数値）。承諾 or 入社済レコードのみ編集可。保存は PATCH の cost。
+function CostCell({ entry, onUpdate }: {
+  entry: Entry;
+  onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+}) {
+  const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
+  const cost = entry.cost ?? null;
+  if (!editable) {
+    return <span className="text-[10px] text-[#C0C4CC]">—</span>;
+  }
+  const handleBlur = (v: string) => {
+    const n = v.replace(/[^\d]/g, "");
+    const num = n ? parseInt(n, 10) : null;
+    if (num === cost) return;
+    void onUpdate(entry.id, { cost: num });
+  };
+  return (
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <input
+        type="text" inputMode="numeric"
+        defaultValue={cost != null ? cost.toLocaleString("ja-JP") : ""}
+        onBlur={(e) => handleBlur(e.target.value)}
+        placeholder="仕入れ値"
+        className="w-20 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+        title="仕入れ値（円・手入力）"
+      />
+      <span className="text-[10px] text-[#9CA3AF]">円</span>
+    </div>
+  );
+}
+
+// T-099: 粗利セル（表示のみ）。粗利 = revenue - (cost ?? 0)。revenue 未確定（null）なら「—」。
+function GrossProfitCell({ entry }: { entry: Entry }) {
+  const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
+  const rev = entry.revenue ?? null;
+  if (!editable || rev == null) {
+    return <span className="text-[10px] text-[#C0C4CC]">—</span>;
+  }
+  const gross = rev - (entry.cost ?? 0);
+  return (
+    <span className="text-[11px] tabular-nums font-medium text-[#16A34A]" title="粗利 = 売上 − 仕入れ値">
+      ¥{gross.toLocaleString("ja-JP")}
+    </span>
+  );
+}
+
 function MemoCell({ value, entryId, onUpdate }: {
   value: string | null; entryId: string;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
@@ -954,6 +1005,10 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.joinDate} entryId={entry.id} field="joinDate" onUpdate={onFieldUpdate} /></td>;
       case "revenue":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><RevenueCell entry={entry} onUpdate={onFieldUpdate} /></td>;
+      case "cost":
+        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><CostCell entry={entry} onUpdate={onFieldUpdate} /></td>;
+      case "grossProfit":
+        return <td key={col.key} className="px-1 py-0.5 text-right text-[11px]"><GrossProfitCell entry={entry} /></td>;
       case "memo":
         return (
           <td key={col.key} className="px-2 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>
