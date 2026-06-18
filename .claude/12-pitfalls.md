@@ -342,3 +342,13 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - 初回/既存判定は `interviewCount`（=1 初回、>=2 既存）。`interviewType` 文字列（"初回面談" 等）で判定しない（UI 定数外の値が大量混在）。
 
 **関連**: T-066 で集計定義を確定。仕様詳細は `03-portal-spec.md` 「T-066: 日報・予実管理機能」セクション。
+
+## 38. 面談前フォームの事前確認モーダルは portal にある（candidate-intake で探さない）
+
+**罠**: 面談前の「質問事前確認モーダル」（生成質問の確認・チェック・指示で再生成・フォーム作成）の UI は **bizstudio-portal** の `src/components/candidates/GoogleFormCreatorModal.tsx` にある。candidate-intake は `generate_form` / `regenerate_questions` / `create_form_v2` の **API を提供するだけ**でモーダルの .tsx を持たない。candidate-intake 自体の画面 `src/app/records/[candidateId]/page.tsx` は**旧 V1 フロー**（`hearing-question-text` → `create-google-form`、カテゴリ 4 種・モーダルなし）の別物なので、モーダル改修を candidate-intake 側で探すと迷子になる。
+
+**対処**:
+- モーダル改修は portal `GoogleFormCreatorModal.tsx` を起点にする。詳細は `06-other-repos.md`「事前確認モーダルの責務分担」。
+- 途中保存は portal `FormDraft` テーブル + `google-form/draft`（GET/PUT/DELETE）。求職者ごと 1 件・フォーム作成成功で自動削除。
+
+**関連**: 2026/6/18 改修（全カテゴリ事前確認化 / チェック一括削除 / 途中保存）。
