@@ -71,7 +71,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
     { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
-    { key: "cost", label: "仕入れ値", width: 100, sortKey: "cost" },
+    { key: "cost", label: "費用", width: 130, sortKey: "cost" },
     { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "入社済": [
@@ -79,7 +79,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
     // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
     { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
-    { key: "cost", label: "仕入れ値", width: 100, sortKey: "cost" },
+    { key: "cost", label: "費用", width: 130, sortKey: "cost" },
     { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "全件": [],
@@ -624,47 +624,56 @@ function RevenueCell({ entry, onUpdate }: {
   );
 }
 
-// T-099: 仕入れ値セル（手入力・数値）。承諾 or 入社済レコードのみ編集可。保存は PATCH の cost。
+// T-099/T-100: 費用セル（上下2段・手入力・数値）。承諾 or 入社済レコードのみ編集可。
+//   上段＝求人DB費（jobDbCost・T-100）／下段＝仕入れ費（cost・T-099）。各段を個別に PATCH 保存。
 function CostCell({ entry, onUpdate }: {
   entry: Entry;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
 }) {
   const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
   const cost = entry.cost ?? null;
+  const jobDbCost = entry.jobDbCost ?? null;
   if (!editable) {
     return <span className="text-[10px] text-[#C0C4CC]">—</span>;
   }
-  const handleBlur = (v: string) => {
+  const makeBlur = (field: "cost" | "jobDbCost", current: number | null) => (v: string) => {
     const n = v.replace(/[^\d]/g, "");
     const num = n ? parseInt(n, 10) : null;
-    if (num === cost) return;
-    void onUpdate(entry.id, { cost: num });
+    if (num === current) return;
+    void onUpdate(entry.id, { [field]: num });
   };
-  return (
-    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+  const row = (label: string, field: "cost" | "jobDbCost", value: number | null, placeholder: string) => (
+    <div className="flex items-center gap-1">
+      <span className="text-[9px] text-[#9CA3AF] w-12 shrink-0">{label}</span>
       <input
         type="text" inputMode="numeric"
-        defaultValue={cost != null ? cost.toLocaleString("ja-JP") : ""}
-        onBlur={(e) => handleBlur(e.target.value)}
-        placeholder="仕入れ値"
+        defaultValue={value != null ? value.toLocaleString("ja-JP") : ""}
+        onBlur={(e) => makeBlur(field, value)(e.target.value)}
+        placeholder={placeholder}
         className="w-20 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
-        title="仕入れ値（円・手入力）"
+        title={`${label}（円・手入力）`}
       />
       <span className="text-[10px] text-[#9CA3AF]">円</span>
     </div>
   );
+  return (
+    <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {row("求人DB費", "jobDbCost", jobDbCost, "求人DB費")}
+      {row("仕入れ費", "cost", cost, "仕入れ費")}
+    </div>
+  );
 }
 
-// T-099: 粗利セル（表示のみ）。粗利 = revenue - (cost ?? 0)。revenue 未確定（null）なら「—」。
+// T-099/T-100: 粗利セル（表示のみ）。粗利 = revenue - (jobDbCost ?? 0) - (cost ?? 0)。revenue 未確定（null）なら「—」。
 function GrossProfitCell({ entry }: { entry: Entry }) {
   const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
   const rev = entry.revenue ?? null;
   if (!editable || rev == null) {
     return <span className="text-[10px] text-[#C0C4CC]">—</span>;
   }
-  const gross = rev - (entry.cost ?? 0);
+  const gross = rev - (entry.jobDbCost ?? 0) - (entry.cost ?? 0);
   return (
-    <span className="text-[11px] tabular-nums font-medium text-[#16A34A]" title="粗利 = 売上 − 仕入れ値">
+    <span className="text-[11px] tabular-nums font-medium text-[#16A34A]" title="粗利 = 売上 − 求人DB費 − 仕入れ費">
       ¥{gross.toLocaleString("ja-JP")}
     </span>
   );

@@ -1533,8 +1533,10 @@ model JobEntry {
   referralFee       Int? @map("referral_fee")
   revenue           Int? @map("revenue")
   grossProfit       Int? @map("gross_profit")
-  // T-099: 仕入れ値（外部コスト・手入力・円・整数・nullable）。粗利は保存せず revenue - (cost ?? 0) で表示計算する。
+  // T-099: 仕入れ費（外部コスト・手入力・円・整数・nullable）。
   cost              Int? @map("cost")
+  // T-100: 求人DB費（手入力・円・整数・nullable）。粗利は保存せず revenue - (jobDbCost ?? 0) - (cost ?? 0) で表示計算する。
+  jobDbCost         Int? @map("job_db_cost")
   // T-088: 課金方式（年収％ or 固定金額）。承諾レコードで選択。null=未設定（既存 revenue ありは固定扱いで後方互換）。
   feeType                 FeeType? @map("fee_type")
   // T-088: 年収％方式のときの理論年収（円・整数）。固定方式 or 未設定なら null。
