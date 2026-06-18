@@ -349,8 +349,10 @@ export default function GoogleFormCreatorModal({
     return null;
   };
 
-  // T-035 step2: 選択中のカテゴリ（1画面目 categoryValue か 会社別 companyCategoryMap）に
-  // その他系コードが含まれるか。含むときだけ generate→create の間に確認画面を挟む。
+  // 選択中のカテゴリ（1画面目 categoryValue か 会社別 companyCategoryMap）に
+  // その他系コードが含まれるか。
+  // 改修①以降、確認画面は全カテゴリで表示するため、この判定は
+  // 「その他系の自由記入ラベル（achievementCategoryOtherLabel）を送るか」の判断にのみ使う。
   const includesOtherType = (): boolean =>
     isOtherTypeCategory(categoryValue) ||
     Object.values(companyCategoryMap).some((c) => isOtherTypeCategory(c));
@@ -517,20 +519,10 @@ export default function GoogleFormCreatorModal({
       return;
     }
 
-    // T-035 step2: その他系を含む場合は確認画面で停止（create_form_v2 はまだ呼ばない）。
-    if (includesOtherType()) {
-      setStep("confirmQuestions");
-      return;
-    }
-
-    // 通常職種：従来通りそのままフォーム化。
-    const e3 = await runCreate(e2);
-    if (!e3) {
-      setStep("error");
-      return;
-    }
-    setStep("completed");
-    toast.success("Google フォーム作成完了");
+    // 改修①（全カテゴリ事前確認化）: カテゴリに関わらず必ず確認画面で停止する。
+    // create_form_v2 はユーザーが確認画面で「フォーム作成」を押したときのみ実行する
+    // （従来は その他系のみ確認画面・それ以外は即フォーム化していた）。
+    setStep("confirmQuestions");
   };
 
   // T-035 step2: 確認画面「フォーム作成」。保持中の questionsJson でフォーム化（create_form_v2）。
@@ -645,7 +637,7 @@ export default function GoogleFormCreatorModal({
     // generate / create が失敗していた場合: 必要なステージから再開
     const resume: unknown = resumeData;
     const log: string = interviewLogText;
-    let questions: unknown = questionsJson;
+    const questions: unknown = questionsJson;
 
     if (stageStatus.generate === "failed") {
       setStageStatus((s) => ({ ...s, generate: "pending", create: "pending" }));
@@ -654,12 +646,10 @@ export default function GoogleFormCreatorModal({
         setStep("error");
         return;
       }
-      questions = r;
-      // T-035 step2: その他系は確認画面へ戻す（create はユーザー操作で実行）。
-      if (includesOtherType()) {
-        setStep("confirmQuestions");
-        return;
-      }
+      // 改修①（全カテゴリ事前確認化）: 質問生成に成功したら全カテゴリで確認画面へ戻す
+      // （create はユーザーが確認画面で実行する）。
+      setStep("confirmQuestions");
+      return;
     }
 
     if (stageStatus.create === "failed" || (questions !== questionsJson && !formResult)) {
