@@ -567,7 +567,7 @@ export default function GoogleFormCreatorModal({
 
     const q = (questionsJson ?? {}) as PreviewQuestions;
     const sections = q.sections ?? [];
-    let targets: { sectionId: string; itemIndex: number }[] = Object.entries(checkedTargets)
+    const targets: { sectionId: string; itemIndex: number }[] = Object.entries(checkedTargets)
       .filter(([, v]) => v)
       .map(([k]) => {
         const idx = k.lastIndexOf("__");
@@ -614,6 +614,35 @@ export default function GoogleFormCreatorModal({
       setStageStatus((s) => ({ ...s, generate: "done" }));
       toast.error(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  // 改修②（チェック削除）: チェックした質問を questionsJson から一括削除する。
+  // - 各 item のキーは `${sec.id ?? ""}__${itemIndex}`（チェックボックスと同一規則）。
+  // - 元の item オブジェクトは filter で温存（type/choices 等のフィールド欠損なし）。
+  // - 削除後は itemIndex がずれるため checkedTargets を必ずクリアする（調査の「唯一の注意点」）。
+  // - 削除はクライアント state のみ。create_form_v2 / regenerate_questions は渡した配列をそのまま使う。
+  const handleDeleteChecked = () => {
+    const checkedKeys = Object.entries(checkedTargets)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (checkedKeys.length === 0) return;
+    if (!window.confirm(`選択した ${checkedKeys.length} 件の質問を削除しますか？`)) return;
+
+    const checkedSet = new Set(checkedKeys);
+    const q = (questionsJson ?? {}) as PreviewQuestions;
+    const sections = q.sections ?? [];
+    const newSections = sections.map((sec) => {
+      const items = sec.items ?? [];
+      const keptItems = items.filter(
+        (_, ii) => !checkedSet.has(`${sec.id ?? ""}__${ii}`),
+      );
+      return { ...sec, items: keptItems };
+    });
+
+    setQuestionsJson({ ...q, sections: newSections });
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
   };
 
   const handleRetry = async () => {
@@ -1110,6 +1139,22 @@ export default function GoogleFormCreatorModal({
                 )}
               </div>
 
+              {/* 改修②（チェック削除）: チェック中の質問を一括削除。チェック1件以上で活性。 */}
+              {checkedCount > 0 && (
+                <div className="mb-3 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                  <span className="text-[12px] text-red-700">
+                    {checkedCount} 問を選択中
+                  </span>
+                  <button
+                    onClick={handleDeleteChecked}
+                    disabled={isRegenerating}
+                    className="border border-red-300 bg-white text-red-600 rounded-md px-3 py-1.5 text-[12px] font-medium hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    選択した質問を削除
+                  </button>
+                </div>
+              )}
+
               {/* 指示チャット欄＋部分再生成 */}
               <div className="mb-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                 <label className="block text-[13px] font-medium text-[#374151] mb-1.5">
@@ -1151,6 +1196,13 @@ export default function GoogleFormCreatorModal({
                 </div>
               </div>
 
+              {/* 改修②: 全質問を削除した場合はフォーム作成不可（空フォーム防止）。 */}
+              {totalItems === 0 && (
+                <div className="mb-2 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">
+                  質問が1件もありません。フォームを作成するには質問が1件以上必要です（「最初から作り直し」で再生成できます）。
+                </div>
+              )}
+
               <div className="flex gap-2 pt-3 border-t border-gray-200">
                 <button
                   onClick={handleClose}
@@ -1168,7 +1220,7 @@ export default function GoogleFormCreatorModal({
                 </button>
                 <button
                   onClick={handleConfirmCreate}
-                  disabled={isRegenerating || sections.length === 0}
+                  disabled={isRegenerating || totalItems === 0}
                   className="flex-1 bg-[#16A34A] text-white rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50"
                 >
                   フォーム作成
