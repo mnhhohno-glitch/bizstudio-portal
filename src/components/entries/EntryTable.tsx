@@ -70,7 +70,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
-    { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
     { key: "cost", label: "費用", width: 130, sortKey: "cost" },
     { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
@@ -78,7 +78,7 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
     // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
-    { key: "revenue", label: "売上", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
     { key: "cost", label: "費用", width: 130, sortKey: "cost" },
     { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
@@ -539,7 +539,6 @@ function RevenueCell({ entry, onUpdate }: {
   if (!editable) {
     return <span className="text-[10px] text-[#C0C4CC]">—</span>;
   }
-  const fmtYen = (v: number | null) => (v == null ? "—" : `¥${v.toLocaleString("ja-JP")}`);
   const handleFeeType = (newType: "ANNUAL_RATE" | "FIXED") => {
     if (newType === uiFeeType && feeType != null) return;
     // 方式切替時は revenue サーバー再計算。年収％へ切替時は値を保持、固定へ切替時は revenue を維持。
@@ -575,50 +574,61 @@ function RevenueCell({ entry, onUpdate }: {
     void onUpdate(entry.id, { feeType: "FIXED", revenue: num });
   };
 
+  // T-101: 売上セルをコンパクト2段化。売上(revenue)の金額結果は非表示（金額表示は粗利列のみ）。
+  // 入力欄（理論年収・率%・固定金額）は維持＝revenue のサーバー確定計算・保存はこれまで通り。
+  const feeSelect = (
+    <select
+      value={uiFeeType}
+      onChange={(e) => handleFeeType(e.target.value as "ANNUAL_RATE" | "FIXED")}
+      className="text-[10px] border border-gray-200 rounded px-0.5 py-0.5 bg-white"
+    >
+      <option value="ANNUAL_RATE">年収％</option>
+      <option value="FIXED">固定</option>
+    </select>
+  );
   return (
-    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <select
-        value={uiFeeType}
-        onChange={(e) => handleFeeType(e.target.value as "ANNUAL_RATE" | "FIXED")}
-        className="text-[10px] border border-gray-200 rounded px-0.5 py-0.5 bg-white"
-      >
-        <option value="ANNUAL_RATE">年収％</option>
-        <option value="FIXED">固定</option>
-      </select>
+    <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
       {uiFeeType === "ANNUAL_RATE" ? (
         <>
-          <input
-            type="text" inputMode="numeric"
-            defaultValue={inc != null ? inc.toLocaleString("ja-JP") : ""}
-            onBlur={(e) => handleIncomeBlur(e.target.value)}
-            placeholder="年収"
-            className="w-16 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
-            title="理論年収（円）"
-          />
-          <span className="text-[10px] text-[#9CA3AF]">×</span>
-          <input
-            type="number" step="0.01" min="0" max="100"
-            defaultValue={rate != null ? String(rate) : ""}
-            onBlur={(e) => handleRateBlur(e.target.value)}
-            placeholder="%"
-            className="w-10 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
-            title="手数料%"
-          />
-          <span className="text-[10px] text-[#9CA3AF]">=</span>
-          <span className="text-[10px] tabular-nums font-medium text-[#2563EB] min-w-[60px] text-right" title="サーバー側で確定計算した粗利（revenue）">{fmtYen(rev)}</span>
+          {/* 1段目: 年収%▼ + 率% */}
+          <div className="flex items-center gap-1">
+            {feeSelect}
+            <input
+              type="number" step="0.01" min="0" max="100"
+              defaultValue={rate != null ? String(rate) : ""}
+              onBlur={(e) => handleRateBlur(e.target.value)}
+              placeholder="%"
+              className="w-12 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
+              title="手数料%"
+            />
+            <span className="text-[10px] text-[#9CA3AF]">%</span>
+          </div>
+          {/* 2段目: 理論年収 */}
+          <div className="flex items-center gap-1">
+            <input
+              type="text" inputMode="numeric"
+              defaultValue={inc != null ? inc.toLocaleString("ja-JP") : ""}
+              onBlur={(e) => handleIncomeBlur(e.target.value)}
+              placeholder="理論年収"
+              className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+              title="理論年収（円）"
+            />
+            <span className="text-[10px] text-[#9CA3AF]">円</span>
+          </div>
         </>
       ) : (
-        <>
+        <div className="flex items-center gap-1">
+          {feeSelect}
           <input
             type="text" inputMode="numeric"
             defaultValue={rev != null ? rev.toLocaleString("ja-JP") : ""}
             onBlur={(e) => handleRevenueBlur(e.target.value)}
-            placeholder="粗利金額"
-            className="flex-1 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+            placeholder="金額"
+            className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
             title="固定金額（円）"
           />
           <span className="text-[10px] text-[#9CA3AF]">円</span>
-        </>
+        </div>
       )}
     </div>
   );
