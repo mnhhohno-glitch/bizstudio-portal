@@ -24,8 +24,17 @@ type Props = {
 
 type Stage = "extract" | "generate" | "create";
 type StageState = "pending" | "running" | "done" | "failed";
-// T-035 step2: その他系のみ generate と create の間に "confirmQuestions"（質問確認画面）を挟む。
-type ModalStep = "idle" | "processing" | "selectCompany" | "confirmQuestions" | "completed" | "error";
+// 改修①: 全カテゴリで generate と create の間に "confirmQuestions"（質問確認画面）を挟む。
+// （T-035 step2 ではその他系のみだったが、全カテゴリで事前確認するよう変更）
+// 改修③（途中保存）: モーダルを開いた時に下書きがあれば "restorePrompt"（復元確認）を挟む。
+type ModalStep =
+  | "idle"
+  | "restorePrompt"
+  | "processing"
+  | "selectCompany"
+  | "confirmQuestions"
+  | "completed"
+  | "error";
 
 type WorkHistoryEntry = {
   company?: string;
@@ -196,6 +205,11 @@ export default function GoogleFormCreatorModal({
   const [regenerateInstruction, setRegenerateInstruction] = useState<string>("");
   const [regenerateNotice, setRegenerateNotice] = useState<string | null>(null);
 
+  // 改修③（途中保存）: 開いた時に見つかった下書き（復元プロンプト用）と保存状態。
+  const [draftPrompt, setDraftPrompt] = useState<{ questionsJson: unknown; updatedAt: string | null } | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftSavedNotice, setDraftSavedNotice] = useState<string | null>(null);
+
   const pdfCandidates = useMemo(
     () =>
       meetingFiles
@@ -253,13 +267,32 @@ export default function GoogleFormCreatorModal({
           });
           setFormCreatedAt(latest.googleFormCreatedAt);
           setStep("completed");
+          return; // 既存フォームあり → 下書き確認はスキップ
         }
       } catch (err) {
         // サイレントに idle 表示（通常の新規作成フローにフォールバック）
         console.warn("[GoogleFormCreatorModal] Failed to check existing URL:", err);
       }
+
+      // 改修③（途中保存）: フォーム未作成なら下書きを確認 → あれば復元プロンプトを表示。
+      // 同一セッションで既に確認画面まで進んでいる（questionsJson 保持中）場合は復元プロンプトを出さない。
+      if (questionsJson) return;
+      try {
+        const dres = await fetch(`/api/candidates/${candidateId}/google-form/draft`);
+        if (!dres.ok) return;
+        const ddata = await dres.json();
+        if (ddata?.draft?.questionsJson) {
+          setDraftPrompt({
+            questionsJson: ddata.draft.questionsJson,
+            updatedAt: ddata.draft.updatedAt ?? null,
+          });
+          setStep("restorePrompt");
+        }
+      } catch (err) {
+        console.warn("[GoogleFormCreatorModal] Failed to check draft:", err);
+      }
     })();
-  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId]);
+  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId, questionsJson]);
 
   const groups = GOOGLE_FORM_CATEGORY_GROUPS;
   const selectedGroup = groups.find((g) => g.label === groupKey) ?? null;
@@ -289,6 +322,9 @@ export default function GoogleFormCreatorModal({
     setCheckedTargets({});
     setRegenerateInstruction("");
     setRegenerateNotice(null);
+    setDraftPrompt(null);
+    setDraftSaving(false);
+    setDraftSavedNotice(null);
   };
 
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
@@ -465,6 +501,11 @@ export default function GoogleFormCreatorModal({
       setFormResult(result);
       setFormCreatedAt(new Date().toISOString());
       setStageStatus((s) => ({ ...s, create: "done" }));
+      // 改修③（途中保存）: フォーム作成に成功したら下書きを自動削除（残り続けないように）。
+      // 失敗してもフォーム作成自体は成功扱い（fire-and-forget）。
+      fetch(`/api/candidates/${candidateId}/google-form/draft`, { method: "DELETE" }).catch(
+        () => {},
+      );
       return result;
     } catch (e) {
       setStageStatus((s) => ({ ...s, create: "failed" }));
@@ -542,8 +583,60 @@ export default function GoogleFormCreatorModal({
     toast.success("Google フォーム作成完了");
   };
 
+  // 改修③（途中保存）: 現在の questionsJson を下書きとして保存（PUT upsert）。
+  const handleSaveDraft = async () => {
+    if (!questionsJson) return;
+    setDraftSaving(true);
+    setDraftSavedNotice(null);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/google-form/draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionsJson }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `途中保存に失敗しました (HTTP ${res.status})`);
+      }
+      setDraftSavedNotice("保存しました");
+      toast.success("途中保存しました");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  // 改修③（途中保存）: 下書きを復元 → 生成をスキップして確認画面へ。
+  const handleRestoreDraft = () => {
+    if (!draftPrompt) return;
+    setQuestionsJson(draftPrompt.questionsJson);
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
+    setDraftSavedNotice(null);
+    setDraftPrompt(null);
+    setStep("confirmQuestions");
+  };
+
+  // 改修③（途中保存）: 下書きを破棄 → 通常の新規作成フロー（idle）へ。
+  const handleDiscardDraft = async () => {
+    setDraftPrompt(null);
+    setStep("idle");
+    try {
+      await fetch(`/api/candidates/${candidateId}/google-form/draft`, { method: "DELETE" });
+    } catch (e) {
+      console.warn("[GoogleFormCreatorModal] draft delete failed:", e);
+    }
+  };
+
   // T-035 step2: 確認画面「やり直し」。同パラメータで generate_form を再呼び出し → 確認画面を更新。
   const handleRegenerate = async () => {
+    // 改修③: 下書き復元など、解析データが無い状態では最初からの作り直しはできない。
+    if (!resumeData) {
+      toast.error("最初から作り直すには、いったん閉じて履歴書解析からやり直してください。");
+      return;
+    }
     setErrorMessage(null);
     setStageStatus((s) => ({ ...s, generate: "pending" }));
     const e2 = await runGenerate(resumeData, interviewLogText);
@@ -885,6 +978,47 @@ export default function GoogleFormCreatorModal({
           </>
         )}
 
+        {/* 改修③（途中保存）: restorePrompt - 下書き復元の確認 */}
+        {step === "restorePrompt" && (
+          <div>
+            <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-[13px] text-blue-800">
+              この求職者の <span className="font-semibold">フォーム質問の下書き</span> が保存されています。
+              {draftPrompt?.updatedAt && (
+                <span className="block text-[12px] text-blue-700 mt-1">
+                  保存日時: {new Date(draftPrompt.updatedAt).toLocaleDateString("sv-SE")}{" "}
+                  {new Date(draftPrompt.updatedAt).toLocaleTimeString("ja-JP", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </div>
+            <p className="mb-4 text-[13px] text-gray-600">
+              続きから再開するか、破棄して新しく作成し直すかを選んでください。
+            </p>
+            <div className="flex gap-2 pt-2 border-t border-gray-200">
+              <button
+                onClick={handleClose}
+                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
+              >
+                閉じる
+              </button>
+              <button
+                onClick={handleDiscardDraft}
+                className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
+              >
+                破棄して新規作成
+              </button>
+              <button
+                onClick={handleRestoreDraft}
+                className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]"
+              >
+                続きから
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Step 1.5: selectCompany - 会社別カテゴリ選択（T-035） */}
         {step === "selectCompany" && (
           <div>
@@ -1211,6 +1345,14 @@ export default function GoogleFormCreatorModal({
                 >
                   閉じる
                 </button>
+                {/* 改修③（途中保存）: 現在の質問内容を下書き保存。 */}
+                <button
+                  onClick={handleSaveDraft}
+                  disabled={isRegenerating || draftSaving || totalItems === 0}
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {draftSaving ? "保存中..." : "途中保存"}
+                </button>
                 <button
                   onClick={handleRegenerate}
                   disabled={isRegenerating}
@@ -1226,6 +1368,9 @@ export default function GoogleFormCreatorModal({
                   フォーム作成
                 </button>
               </div>
+              {draftSavedNotice && (
+                <div className="mt-1 text-right text-[12px] text-green-600">{draftSavedNotice}</div>
+              )}
             </div>
           );
         })()}

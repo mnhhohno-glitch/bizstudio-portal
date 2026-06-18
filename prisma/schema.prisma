@@ -1860,6 +1860,20 @@ model InterviewRecord {
   @@map("interview_records")
 }
 
+// 改修③（途中保存）: 面談前フォームの質問下書き。
+// - 求職者ごとに1件（candidateId @unique）・PUT で upsert・フォーム作成成功で DELETE。
+// - InterviewRecord（フォーム作成後に作られる isLatest 管理の正レコード）には相乗りさせない独立テーブル。
+// - 純粋追加（既存データ非破壊）。
+model FormDraft {
+  id            String   @id @default(cuid())
+  candidateId   String   @unique @map("candidate_id")
+  questionsJson Json     @map("questions_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("form_drafts")
+}
+
 model WorkHistory {
   id                  String          @id @default(cuid())
   interviewRecordId   String          @map("interview_record_id")
