@@ -1279,13 +1279,23 @@ export default function GoogleFormCreatorModal({
                   <span className="text-[12px] text-red-700">
                     {checkedCount} 問を選択中
                   </span>
-                  <button
-                    onClick={handleDeleteChecked}
-                    disabled={isRegenerating}
-                    className="border border-red-300 bg-white text-red-600 rounded-md px-3 py-1.5 text-[12px] font-medium hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    選択した質問を削除
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* T-100b: チェックを一括解除（質問は削除しない）。チェック1件以上のときのみ表示・活性。 */}
+                    <button
+                      onClick={() => { setCheckedTargets({}); setRegenerateNotice(null); }}
+                      disabled={isRegenerating}
+                      className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-1.5 text-[12px] font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      選択をすべて解除
+                    </button>
+                    <button
+                      onClick={handleDeleteChecked}
+                      disabled={isRegenerating}
+                      className="border border-red-300 bg-white text-red-600 rounded-md px-3 py-1.5 text-[12px] font-medium hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      選択した質問を削除
+                    </button>
+                  </div>
                 </div>
               )}
 
