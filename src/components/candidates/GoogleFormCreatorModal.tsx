@@ -1273,7 +1273,12 @@ export default function GoogleFormCreatorModal({
                 )}
               </div>
 
-              {/* 改修②（チェック削除）: チェック中の質問を一括削除。チェック1件以上で活性。 */}
+              {/* T-100c/T-100e: 選択バー＋指示で再生成の入力＋下部アクションをスティッキー領域にし、
+                  質問リストだけが上でスクロールするようにする。
+                  モーダル本体(overflow-y-auto)を唯一のスクロールコンテナにし、この領域を bottom-0 で固定。 */}
+              <div className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-3 pb-4 bg-white border-t border-gray-200">
+              {/* 改修②（チェック削除）＋一括解除: 選択バー。チェック1件以上で表示。スティッキー領域内に配置し
+                  リストをスクロールしても埋もれないようにする。 */}
               {checkedCount > 0 && (
                 <div className="mb-3 flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2">
                   <span className="text-[12px] text-red-700">
@@ -1299,9 +1304,6 @@ export default function GoogleFormCreatorModal({
                 </div>
               )}
 
-              {/* T-100c: 指示で再生成の入力＋下部アクションをスティッキー領域にし、質問リストだけが上でスクロールするようにする。
-                  モーダル本体(overflow-y-auto)を唯一のスクロールコンテナにし、この領域を bottom-0 で固定。 */}
-              <div className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-3 pb-4 bg-white border-t border-gray-200">
               {/* 指示チャット欄＋部分再生成 */}
               <div className="mb-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                 <label className="block text-[13px] font-medium text-[#374151] mb-1.5">
