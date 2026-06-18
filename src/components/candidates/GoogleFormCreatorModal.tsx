@@ -810,7 +810,7 @@ export default function GoogleFormCreatorModal({
     >
       <div
         className={`bg-white rounded-xl w-full mx-4 p-6 max-h-[92vh] overflow-y-auto shadow-xl ${
-          step === "confirmQuestions" ? "max-w-5xl" : "max-w-2xl"
+          step === "confirmQuestions" ? "max-w-6xl" : "max-w-2xl"
         }`}
         onClick={(e) => e.stopPropagation()}
       >
