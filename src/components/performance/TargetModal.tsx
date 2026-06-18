@@ -275,8 +275,8 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
     { key: "offerRate", label: "内定率", indent: true, kind: "rate", rateKey: "offerRate", ref: (b) => (b ? pct(b.metrics.offer.rate) : "—"), week: "empty" },
     { key: "acceptance", label: "承諾", kind: "count", ref: (b) => (b ? fmtCount(b.metrics.acceptance.count) : "—"), targetValue: targetCounts.acceptance, week: "dash" },
     { key: "acceptanceRate", label: "承諾率", indent: true, kind: "rate", rateKey: "acceptanceRate", ref: (b) => (b ? pct(b.metrics.acceptance.rate) : "—"), week: "empty" },
-    // 売上単価（決定単価）：参考値＝実績の決定売上÷決定数（matrix.selection.decidedUnitPrice）。目標＝上部で手入力した売上単価。
-    { key: "unitPrice", label: "売上単価（決定単価）", kind: "count", ref: (b) => (b ? yen(b.decidedUnitPrice) : "—"),
+    // T-099: 粗利単価（決定粗利単価）：参考値＝実績の決定粗利÷決定数（matrix.selection.decidedUnitPrice、cost控除後）。目標＝上部で手入力した単価。
+    { key: "unitPrice", label: "粗利単価（決定粗利単価）", kind: "count", ref: (b) => (b ? yen(b.decidedUnitPrice) : "—"),
       targetText: yen(parseFloat(unitPrice) || null), week: "empty" },
   ];
 

@@ -125,12 +125,13 @@ export async function computeWeeklyMatrix(params: {
       FROM ents;`),
 
     // 選考状況（JobEntry・candidate.employeeId 軸・archived除く・候補者ユニーク人数＋決定売上）
-    prisma.$queryRawUnsafe<{ dp: number; ofc: number; ac: number; revenue: string | null }[]>(`
+    prisma.$queryRawUnsafe<{ dp: number; ofc: number; ac: number; revenue: string | null; gross: string | null }[]>(`
       SELECT
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.document_pass_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int dp,
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.offer_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ofc,
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ac,
-        COALESCE(SUM(je.revenue) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint revenue
+        COALESCE(SUM(je.revenue) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint revenue,
+        COALESCE(SUM(je.revenue - COALESCE(je.cost, 0)) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint gross
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL;`),
   ]);
@@ -141,8 +142,10 @@ export async function computeWeeklyMatrix(params: {
   const s = sel[0];
 
   const revenue = s.revenue != null ? Number(s.revenue) : 0;
-  const decidedRevenue = revenue > 0 ? revenue : null;
-  const decidedUnitPrice = decidedRevenue != null && s.ac > 0 ? decidedRevenue / s.ac : null;
+  // T-099: 決定粗利 = Σ(revenue - (cost ?? 0))。決定判定（revenue>0）は cost 控除前の売上で行い件数定義を維持。
+  const gross = s.gross != null ? Number(s.gross) : 0;
+  const decidedRevenue = revenue > 0 ? gross : null;
+  const decidedUnitPrice = decidedRevenue != null && s.ac > 0 ? gross / s.ac : null;
 
   return {
     interview: { first: i.iv_first, second: i.iv_second, thirdPlus: i.iv_third, total: i.iv_total },
