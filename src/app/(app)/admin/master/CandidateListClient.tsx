@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 const SUPPORT_TABS = [
   { key: "ACTIVE", label: "支援中" },
@@ -784,8 +785,8 @@ export default function CandidateListClient({
                       </div>
                     </Td>
                     <Td className="overflow-hidden">
-                      <div className="truncate text-[13px]" title={cand.recruiterName || ""}>
-                        {cand.recruiterName || "-"}
+                      <div className="truncate text-[13px]" title={formatRecruiterName(cand.recruiterName) || ""}>
+                        {formatRecruiterName(cand.recruiterName) || "-"}
                       </div>
                     </Td>
                     <Td className="overflow-hidden">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 type Candidate = {
   id: string;
@@ -177,7 +178,7 @@ export default function CandidateHeader({
                 <span className="text-gray-300">|</span>
                 <span>担当:{candidate.employee?.name || "未設定"}</span>
                 <span className="text-gray-300">|</span>
-                <span>担当RC:{candidate.recruiterName || "未設定"}</span>
+                <span>担当RC:{formatRecruiterName(candidate.recruiterName) || "未設定"}</span>
                 <span className="text-gray-300">|</span>
                 <span>経路:{candidate.applicationRoute || "-"}</span>
                 <span className="text-gray-300">|</span>

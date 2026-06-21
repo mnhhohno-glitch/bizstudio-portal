@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 type Slot = {
   id: string;
@@ -238,7 +239,7 @@ export default function ScoutLinkPanel({
           {suggestions.length > 0 && (
             <div className="mt-2 rounded-md border border-[#E5E7EB] bg-[#F9FAFB] p-2">
               <p className="text-[11px] text-[#6B7280] mb-1">
-                候補（担当: {recruiterName}・直近3日の配信あり枠）:
+                候補（担当: {formatRecruiterName(recruiterName)}・直近3日の配信あり枠）:
               </p>
               <div className="flex flex-wrap gap-1">
                 {suggestions.map((s) => (

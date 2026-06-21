@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import ScoutNav from "@/components/scout/ScoutNav";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 
@@ -103,7 +104,7 @@ export default function ByDeliveryDatePage() {
           ) : (
             Object.entries(stats.subBuckets).map(([key, buckets]) => (
               <div key={key} className="mt-6">
-                <h3 className="text-[14px] font-semibold text-[#374151] mb-2">{key}</h3>
+                <h3 className="text-[14px] font-semibold text-[#374151] mb-2">{formatRecruiterName(key)}</h3>
                 <StatsTable buckets={buckets} />
               </div>
             ))
