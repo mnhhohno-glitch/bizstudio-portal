@@ -519,24 +519,25 @@ function useCrossSort(initial: SortKey[]) {
     const i = sortKeys.findIndex((k) => k.basis === basis);
     return i === -1 ? null : i + 1;
   };
-  // 基準クリック：押したものを1次へ昇格。
-  //  - 現1次クリック → 方向トグル（want/interest は単方向なので無変化）
-  //  - 現2次クリック → 1次へ昇格（現1次は2次へ、方向は維持）
-  //  - 未選択クリック → 1次に（デフォルト方向）、現1次を2次へ降格、現2次は破棄
+  // 基準クリック：先勝ち（最初に選んだ条件を1次のまま固定し、後から選んだ条件を2次に追加）。
+  //  - 現1次クリック → 方向トグルのみ（want/interest は単方向なので無変化）。順位は1次のまま
+  //  - 現2次クリック → 方向トグルのみ。順位は2次のまま（1次へ昇格させない）
+  //  - 未選択クリック（キー0個）→ 1次として追加（デフォルト方向）
+  //  - 未選択クリック（キー1個＝1次のみ）→ 2次として末尾追加。1次はそのまま固定
+  //  - 未選択クリック（キー2個）→ 2次（index 1）を新基準で置き換え。1次はそのまま固定
   const activateBasis = (basis: SortBasis) => {
     setSortKeys((prev) => {
       const idx = prev.findIndex((k) => k.basis === basis);
-      if (idx === 0) {
+      if (idx !== -1) {
         if (!hasDirToggle(basis)) return prev;
         const next = [...prev];
-        next[0] = { ...next[0], dir: next[0].dir === "asc" ? "desc" : "asc" };
+        next[idx] = { ...next[idx], dir: next[idx].dir === "asc" ? "desc" : "asc" };
         return next;
       }
-      if (idx === 1) {
-        return [prev[1], prev[0]];
-      }
       const newKey: SortKey = { basis, dir: defaultDir(basis) };
-      return [newKey, ...prev.slice(0, 1)];
+      if (prev.length === 0) return [newKey];
+      if (prev.length === 1) return [...prev, newKey];
+      return [prev[0], newKey];
     });
   };
   // チップの ▲▼：そのキーの方向のみ変更し優先順位は変えない（2次の方向もここで変えられる）。
