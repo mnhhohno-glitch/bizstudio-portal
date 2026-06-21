@@ -66,6 +66,9 @@ export default function CandidateRegistrationModal({
   const [applicationRoute, setApplicationRoute] = useState("");
   const [mediaSource, setMediaSource] = useState("");
   const [scoutNumber, setScoutNumber] = useState("");
+  const [scoutDeliveryDate, setScoutDeliveryDate] = useState("");
+  const [applicationDate, setApplicationDate] = useState("");
+  const [masType, setMasType] = useState("");
   const [desiredJobType1, setDesiredJobType1] = useState("");
   const [desiredJobType2, setDesiredJobType2] = useState("");
   const [desiredIndustry1, setDesiredIndustry1] = useState("");
@@ -218,6 +221,9 @@ export default function CandidateRegistrationModal({
           applicationRoute: applicationRoute || undefined,
           mediaSource: mediaSource || undefined,
           scoutNumber: scoutNumber.trim() || undefined,
+          scoutDeliveryDate: scoutDeliveryDate || undefined,
+          applicationDate: applicationDate || undefined,
+          masType: masType || undefined,
           desiredJobType1: desiredJobType1.trim() || undefined,
           desiredJobType2: desiredJobType2.trim() || undefined,
           desiredIndustry1: desiredIndustry1.trim() || undefined,
@@ -467,6 +473,25 @@ export default function CandidateRegistrationModal({
               <label className="text-[13px] font-medium text-[#374151]">メールアドレス</label>
               <input type="email" placeholder="例: yamada@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={errors.email ? errorInputClass : inputClass} />
               {errors.email && <p className="text-red-500 text-xs mt-0.5">{errors.email}</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">配信日</label>
+              <input type="date" value={scoutDeliveryDate} onChange={(e) => setScoutDeliveryDate(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">応募日</label>
+              <input type="date" value={applicationDate} onChange={(e) => setApplicationDate(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[13px] font-medium text-[#374151]">開放日/通常</label>
+              <select value={masType} onChange={(e) => setMasType(e.target.value)} className={inputClass}>
+                <option value="">選択してください</option>
+                <option value="開放日">開放日</option>
+                <option value="通常">通常</option>
+              </select>
             </div>
           </div>
 
