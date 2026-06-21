@@ -165,6 +165,10 @@ export default function CandidateRegistrationModal({
       if (data.consultantName) setRecruiterName(data.consultantName);
       setApplicationRoute(data.applicationRoute || "スカウト");
       setMediaSource(data.mediaSource || "マイナビ転職");
+      // 応募日・配信日・開放日/通常（解析結果に値があればセット、null/空なら手入力に委ねる）
+      if (data.applicationDate) setApplicationDate(data.applicationDate);
+      if (data.scoutDeliveryDate) setScoutDeliveryDate(data.scoutDeliveryDate);
+      if (data.masType) setMasType(data.masType);
       if (data.desiredJobType1) setDesiredJobType1(data.desiredJobType1);
       if (data.desiredJobType2) setDesiredJobType2(data.desiredJobType2);
       if (data.desiredIndustry1) setDesiredIndustry1(data.desiredIndustry1);

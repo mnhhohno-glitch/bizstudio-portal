@@ -1,7 +1,26 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { findMatchingSlot } from "@/lib/scout/auto-link";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+/**
+ * "YYYY-MM-DD"（AI抽出の応募日）を Date(UTC 00:00) に変換する。
+ * JST暦日として扱うため Date.UTC を使う（罠#17: toISOString().slice は使わない）。
+ * 不正・null は null を返す（推測で埋めない）。
+ */
+function parseYmdToDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const m = String(raw).match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return isNaN(dt.getTime()) ? null : dt;
+}
 
 export async function POST(request: Request) {
   const user = await getSessionUser();
@@ -73,6 +92,7 @@ export async function POST(request: Request) {
 - consultantName: コンサルタント名（スカウト配信者の氏名、例「藤本なつみ」）
 - applicationRoute: 応募経路（マイナビ転職スカウト経由なら「スカウト」、それ以外は推定可能なら値、不明なら null）
 - mediaSource: 媒体名（PDFが「マイナビ転職」のWEB履歴書なら「マイナビ転職」、それ以外は推定可能なら値、不明なら null）
+- applicationDate: 応募日（PDFの「応募内容」枠に記載された応募日時から日付部分を抽出し YYYY-MM-DD 形式で返す。時刻は不要。記載が見つからなければ null。推測で埋めない）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -117,6 +137,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "PDF解析に失敗しました（応答形式エラー）" }, { status: 500 });
     }
 
+    // ---- 応募日 / MAS種別 / 配信日 を算出（pdf-upload と同じ方針）----
+    const applicationDate: string | null = parsed.applicationDate || null;
+    const recruiterName: string | null = parsed.consultantName || null;
+    // MAS種別: 1号機(藤本なつみ)系=「開放日」、それ以外(照合不能含む)=「通常」（既定 通常）
+    let masType = "通常";
+    let scoutDeliveryDate: string | null = null;
+    if (recruiterName?.trim()) {
+      // 半角/全角スペースを全削除して小文字化（auto-link と同じ正規化）
+      const normalizeRc = (s: string) => s.replace(/[\s　]+/g, "").toLowerCase();
+      const target = normalizeRc(recruiterName);
+      const machines = await prisma.scoutMachineMaster.findMany();
+      const machine = machines.find(
+        (m) =>
+          normalizeRc(m.recruiterName) === target ||
+          m.aliases.some((a) => normalizeRc(a) === target),
+      );
+      if (machine?.machineNumber === 1) masType = "開放日";
+      // 配信日: 応募日が取れた場合のみ 担当RC＋応募日 で配信枠を引く
+      const appDate = parseYmdToDate(applicationDate);
+      if (appDate) {
+        try {
+          const matched = await findMatchingSlot({
+            recruiterName: recruiterName.trim(),
+            applicationDate: appDate,
+          });
+          if (matched?.deliveryDate) {
+            // JST暦日で YYYY-MM-DD に整形（罠#17: toISOString().slice は使わない）
+            scoutDeliveryDate = matched.deliveryDate.toLocaleDateString("sv-SE", {
+              timeZone: "Asia/Tokyo",
+            });
+          }
+        } catch (e) {
+          console.error("[parse-resume] findMatchingSlot failed:", e);
+        }
+      }
+    }
+
     return NextResponse.json({
       name: parsed.name || null,
       furigana: parsed.furigana || null,
@@ -136,6 +193,9 @@ export async function POST(request: Request) {
       consultantName: parsed.consultantName || null,
       applicationRoute: parsed.applicationRoute || null,
       mediaSource: parsed.mediaSource || null,
+      applicationDate,
+      masType,
+      scoutDeliveryDate,
     });
   } catch (error) {
     console.error("Parse resume error:", error);
