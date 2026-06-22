@@ -4,6 +4,7 @@ import { formatName, validateName } from "@/lib/formatName";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 
 // GET: 求職者一覧取得
 export async function GET(request: NextRequest) {
@@ -205,6 +206,21 @@ export async function POST(request: NextRequest) {
         employeeId,
       },
     });
+
+    // T-065: 手動登録でもスカウト配信枠へ自動紐付け（PDF経路と同じ共通関数を使用）
+    // ガード: 経路=スカウト かつ recruiterName あり のみ（紹介等を誤紐付けしない）
+    // 日付: applicationDate ?? createdAt（PDF経路と統一）。失敗しても登録は成功させる。
+    if (candidate.applicationRoute === "スカウト" && recruiterName?.trim()) {
+      try {
+        await autoLinkCandidateToSlot({
+          candidateId: candidate.id,
+          recruiterName: recruiterName.trim(),
+          applicationDate: candidate.applicationDate ?? candidate.createdAt,
+        });
+      } catch (e) {
+        console.error("[master/candidates] autoLinkCandidateToSlot failed:", e);
+      }
+    }
 
     return NextResponse.json(candidate, { status: 201 });
   } catch (error) {
