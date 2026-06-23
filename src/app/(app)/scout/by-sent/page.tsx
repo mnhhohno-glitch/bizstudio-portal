@@ -149,17 +149,32 @@ function StatsTable({ buckets, onApply }: { buckets: Bucket[]; onApply?: (bucket
     }),
     { d: 0, o: 0, a: 0 },
   );
+  const oRateTotal = totals.d > 0 ? ((totals.o / totals.d) * 100).toFixed(1) : "0.0";
+  const aRateTotal = totals.d > 0 ? ((totals.a / totals.d) * 100).toFixed(1) : "0.0";
+  // sticky: ヘッダー=上端固定 / 合計=ヘッダー直下固定（ヘッダー高さ分オフセット・1px 重ねて body の透けを防止）
+  const headCls = "sticky top-0 z-20 bg-[#F9FAFB] px-3 py-2";
+  const totalCls = "sticky top-[35px] z-10 border-b-2 border-[#9CA3AF] bg-[#EFF6FF] px-3 py-2";
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+    <div className="max-h-[70vh] overflow-auto rounded-lg border border-[#E5E7EB] bg-white">
       <table className="w-full text-[13px]">
-        <thead className="bg-[#F9FAFB] text-[#6B7280]">
+        <thead className="text-[#6B7280]">
+          {/* 列見出し（上端固定） */}
           <tr>
-            <th className="px-3 py-2 text-left">期間</th>
-            <th className="px-3 py-2 text-right">配信</th>
-            <th className="px-3 py-2 text-right">開封</th>
-            <th className="px-3 py-2 text-right">開封率</th>
-            <th className="px-3 py-2 text-right">応募</th>
-            <th className="px-3 py-2 text-right">応募率</th>
+            <th className={`${headCls} text-left`}>期間</th>
+            <th className={`${headCls} text-right`}>配信</th>
+            <th className={`${headCls} text-right`}>開封</th>
+            <th className={`${headCls} text-right`}>開封率</th>
+            <th className={`${headCls} text-right`}>応募</th>
+            <th className={`${headCls} text-right`}>応募率</th>
+          </tr>
+          {/* 合計行（ヘッダー直下に固定・最上部表示） */}
+          <tr className="font-medium text-[#374151]">
+            <td className={totalCls}>合計</td>
+            <td className={`${totalCls} text-right`}>{totals.d.toLocaleString()}</td>
+            <td className={`${totalCls} text-right`}>{totals.o.toLocaleString()}</td>
+            <td className={`${totalCls} text-right`}>{oRateTotal}%</td>
+            <td className={`${totalCls} text-right`}>{totals.a.toLocaleString()}</td>
+            <td className={`${totalCls} text-right`}>{aRateTotal}%</td>
           </tr>
         </thead>
         <tbody>
@@ -189,18 +204,6 @@ function StatsTable({ buckets, onApply }: { buckets: Bucket[]; onApply?: (bucket
               </tr>
             );
           })}
-          <tr className="border-t-2 border-[#9CA3AF] bg-[#F9FAFB] font-medium">
-            <td className="px-3 py-2">合計</td>
-            <td className="px-3 py-2 text-right">{totals.d.toLocaleString()}</td>
-            <td className="px-3 py-2 text-right">{totals.o.toLocaleString()}</td>
-            <td className="px-3 py-2 text-right">
-              {totals.d > 0 ? ((totals.o / totals.d) * 100).toFixed(1) : "0.0"}%
-            </td>
-            <td className="px-3 py-2 text-right">{totals.a.toLocaleString()}</td>
-            <td className="px-3 py-2 text-right">
-              {totals.d > 0 ? ((totals.a / totals.d) * 100).toFixed(1) : "0.0"}%
-            </td>
-          </tr>
         </tbody>
       </table>
     </div>
