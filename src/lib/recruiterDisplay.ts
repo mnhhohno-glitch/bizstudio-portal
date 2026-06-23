@@ -31,6 +31,18 @@ function toHalfWidthDigits(s: string): string {
 }
 
 /**
+ * 検索・突合の比較用正規化（全角数字→半角・空白除去）。
+ *
+ * これは「比較キーの正規化」であり、`formatRecruiterName` の戻り値（VIEW専用）とは
+ * 用途が異なる。担当RC の絞り込みで「入力された実担当者名」と「号機→実名変換後の表示値」を
+ * 表記揺れ込みで突合するために両辺へ通す。DB保存・集計グルーピングキーには使わない。
+ */
+export function normalizeRecruiterName(value: string | null | undefined): string {
+  if (value == null) return "";
+  return toHalfWidthDigits(value).replace(/[\s　]+/g, "");
+}
+
+/**
  * 「●号機」表記を実名へ変換して返す（表示専用）。
  * 号機表記が含まれなければ入力をそのまま返す。
  *
@@ -42,8 +54,8 @@ function toHalfWidthDigits(s: string): string {
 export function formatRecruiterName(value: string | null | undefined): string {
   if (value == null) return value ?? "";
   const original = value;
-  // 正規化: 全角数字→半角, 半角/全角スペース除去
-  const normalized = toHalfWidthDigits(original).replace(/[\s　]+/g, "");
+  // 正規化: 全角数字→半角, 半角/全角スペース除去（normalizeRecruiterName に集約）
+  const normalized = normalizeRecruiterName(original);
   const match = normalized.match(/([1-6])号機/);
   if (!match) return original;
   const realName = MACHINE_NUMBER_TO_REAL_NAME[match[1]];

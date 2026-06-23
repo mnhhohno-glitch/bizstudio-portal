@@ -1216,6 +1216,19 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 
 - **画面B（CandidateListClient）**: 91d28ed の時点で既に `formatRecruiterName(cand.recruiterName) || "-"` を表示。T-102 で変更なし（既に正しい）。
 - **画面A（InterviewListClient）**: T-102 で修正。**旧実装は `r.interviewer`（面談者＝登録者アカウント）を表示しており誤り**だった。`r.candidate.recruiterName` を `formatRecruiterName` 経由で表示するよう差し替え（`/api/interviews` の candidate select に `recruiterName: true` を追加）。
-  - ⚠️ 担当RC ヘッダのソート（`handleSort("rcName")`）と左フィルタ（`rcName` input）は**サーバ側で今も `interviewer.name` 基準**のまま（T-102 は表示値のみ差し替え、ソート/フィルタは非変更）。表示とソート軸が一致しない点に留意。将来揃えるなら API 側 orderBy/where を `candidate.recruiterName` に変更する別タスクが必要。
-  - `interviewer` フィールド自体は型・API select・ソートで引き続き使用（削除不可）。
+  - `interviewer` フィールド自体は型・API select で引き続き保持（削除不可。将来用）。
 - `formatRecruiterName` は **VIEW-ONLY**。保存値・集計キー・突合キーには使わない（号機表記のまま扱う）。
+
+#### 面談一覧 担当RC のソート/フィルタ基準（T-102追補, 2026-06-23）
+
+担当RC のソート（`rcName` ヘッダ）と左の絞り込み入力（`rcName`）を **表示値（号機→実名変換後）基準** に揃えた。表示・ソート・絞り込みの3つが配信担当の実名で一致する。
+
+- **クライアント側は無変更**。`InterviewListClient` は従来どおり `sortBy=rcName` / `rcName` パラメータを `/api/interviews` に送るのみ。
+- **サーバ側（`/api/interviews` GET）で実装**（面談一覧は **サーバページング**＝全件がクライアントに来ないため client 側では大域整合が取れない）。Prisma の `orderBy`/`where` では JS 変換（`formatRecruiterName`）を表現できないため、`rcName` が絞り込み指定 **または** `sortBy==="rcName"` のときだけ専用パスに分岐:
+  1. `where`（rcName 以外の既存条件）に一致する全行を取得（`select` は `interviewSelect` 定数に抽出し通常パスと共有）
+  2. 絞り込み: `normalizeRecruiterName(formatRecruiterName(recruiterName)).includes(normalizeRecruiterName(入力))` で表示値と部分一致（表記揺れは正規化で吸収）
+  3. ソート: `formatRecruiterName(recruiterName)` を `localeCompare(_, "ja")`。**空（一覧「-」）は昇順/降順に関わらず末尾**
+  4. `total = 絞込後件数`、`slice` でページング
+  - それ以外の列（interviewDate / caName 等）は従来どおり `orderBy + skip/take + count` の高速パスで**完全非変更**。
+- **正規化の単一集約**: `src/lib/recruiterDisplay.ts` に `normalizeRecruiterName()`（全角数字→半角・空白除去の比較用）を追加し、`formatRecruiterName` も内部でこれを使用。号機↔実名の対応表（`MACHINE_NUMBER_TO_REAL_NAME`）は1か所のまま。サーバ/クライアント双方がこの1モジュールを import（`recruiterDisplay.ts` は pure で server-import 可、既に scout 配下の server component が使用）。
+- 担当CA のソート/絞り込み・件数サマリ・他列は非変更。

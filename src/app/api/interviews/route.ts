@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { randomUUID } from "crypto";
 import { checkInputMissing } from "@/lib/interview-input-missing";
 import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
+import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
@@ -29,9 +30,9 @@ export async function GET(req: NextRequest) {
   const where: Prisma.InterviewRecordWhereInput = {};
   const andClauses: Prisma.InterviewRecordWhereInput[] = [];
 
-  if (rcName) {
-    andClauses.push({ interviewer: { name: { contains: rcName } } });
-  }
+  // T-102追補: 担当RC（rcName）の絞り込みは「号機→実名変換後の表示値」に対して行う。
+  // Prisma の where では JS 変換（formatRecruiterName）を表現できないため、ここでは
+  // where に積まず、下の rcName 専用パスで取得後に JS 側で突合する。
   if (caName) {
     andClauses.push({ candidate: { employee: { name: { contains: caName } } } });
   }
@@ -71,13 +72,7 @@ export async function GET(req: NextRequest) {
   };
   const orderBy = orderByMap[sortBy] || [{ interviewDate: "desc" }, { startTime: "asc" }];
 
-  const [interviews, total] = await Promise.all([
-    prisma.interviewRecord.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-      select: {
+  const interviewSelect = {
         id: true,
         interviewDate: true,
         startTime: true,
@@ -173,10 +168,54 @@ export async function GET(req: NextRequest) {
           },
         },
         _count: { select: { workHistories: true } },
-      },
-    }),
-    prisma.interviewRecord.count({ where }),
-  ]);
+  } satisfies Prisma.InterviewRecordSelect;
+
+  type InterviewRow = Prisma.InterviewRecordGetPayload<{ select: typeof interviewSelect }>;
+
+  // 担当RC（rcName）の絞り込み・ソートは「号機→実名変換後の表示値」基準。表示と完全一致させる。
+  const rcFilterActive = rcName.length > 0;
+  const rcSortActive = sortBy === "rcName";
+
+  let interviews: InterviewRow[];
+  let total: number;
+
+  if (rcFilterActive || rcSortActive) {
+    // where（rcName 以外の既存条件）に一致する全行を取得し、JS 側で表示値ベースに
+    // 絞り込み → ソート → ページングする。formatRecruiterName を表示と共有するため乖離しない。
+    const all = await prisma.interviewRecord.findMany({ where, orderBy, select: interviewSelect });
+    let rows = all;
+    if (rcFilterActive) {
+      const q = normalizeRecruiterName(rcName);
+      rows = rows.filter((r) =>
+        normalizeRecruiterName(formatRecruiterName(r.candidate.recruiterName)).includes(q),
+      );
+    }
+    if (rcSortActive) {
+      rows = [...rows].sort((a, b) => {
+        const an = formatRecruiterName(a.candidate.recruiterName).trim();
+        const bn = formatRecruiterName(b.candidate.recruiterName).trim();
+        // 空（一覧では「-」）は昇順・降順に関わらず末尾へ
+        if (!an && !bn) return 0;
+        if (!an) return 1;
+        if (!bn) return -1;
+        const cmp = an.localeCompare(bn, "ja");
+        return sortOrder === "asc" ? cmp : -cmp;
+      });
+    }
+    total = rows.length;
+    interviews = rows.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+  } else {
+    [interviews, total] = await Promise.all([
+      prisma.interviewRecord.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: interviewSelect,
+      }),
+      prisma.interviewRecord.count({ where }),
+    ]);
+  }
 
   const serialized = interviews.map((r) => {
     const { hasMissing, missingFields } = checkInputMissing({
