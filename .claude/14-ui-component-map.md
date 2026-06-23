@@ -1275,6 +1275,13 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - **エントリー管理 担当RC 検索（新規・client側）**: `EntryBoard` に `rcFilter` state＋`displayedEntries` useMemo を追加し、`normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(normalizeRecruiterName(rcFilter))` で表示値ベース部分一致（実名でも号機でもヒット）。`<EntryTable entries={displayedEntries} />` に差し替え（bulk は full `entries` 参照のまま）。`/api/entries` は変更なし。⚠️ client側のためサーバページング(50/件)の現在ページ内のみ・タブ件数には未反映（既存client filterと同じ制約）。
 - ソート/各列/件数サマリ/サーバ where は不変（レイアウトと担当RC追加のみ）。日付比較は各画面の既存 JST ロジックを踏襲（罠#17）。
 
+### 高さ統一・期間1行化・エントリーにフリー検索（T-105追補, 2026-06-24）
+
+- **高さ基準を共通プリミティブに集約**: `FilterField`/`FilterClearButton`/`FilterGroup` のラベルを `leading-4` に統一（ラベル高16px固定）→ グループ間でフィールド上端が揃う。各画面で高さをハードコードしない。
+- **上段を flex 化**: `FilterTopRow` を `grid-cols-3` から `flex flex-wrap items-start` に変更。`FilterGroup` は既定 `shrink-0`＋内側 `flex items-end`（**折り返さず**）で、期間の日付3つ（面談日/登録日・応募日・配信日）を**横1行**に保つ。幅不足時はグループ単位で折り返す。下段の全幅グループ（区分/表示）は `FilterGroup fullWidth`（`w-full`＋`flex-wrap`）。
+- `DateRangeField` 既定幅を `w-[130px]` に。期間は3範囲が並ぶため上段で最も広い列。
+- **エントリー管理にフリー検索追加（client側）**: `EntryBoard` に `freeSearch` state を追加し `displayedEntries` で 氏名/求職者番号/企業名/職種/担当CA に部分一致（rcFilter と AND）。現在ページ内のみ（既存client filterと同じ制約）。クリアは freeSearch も含めてリセット。
+
 ## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
 
 エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。

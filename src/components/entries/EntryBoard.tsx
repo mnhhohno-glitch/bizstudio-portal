@@ -149,6 +149,8 @@ export default function EntryBoard() {
   const [caFilter, setCaFilter] = useState("");
   // T-105: 担当RC（recruiterName）絞り込み。表示値ベースのクライアント側部分一致（実名でも号機でもヒット）。
   const [rcFilter, setRcFilter] = useState("");
+  // T-105追補: フリー検索（client側・表示済みデータに対する氏名/番号/企業名/担当CA 部分一致）。
+  const [freeSearch, setFreeSearch] = useState("");
   const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -779,12 +781,25 @@ export default function EntryBoard() {
   // T-105: 担当RC 絞り込み（クライアント側・表示値ベース部分一致）。
   // 表示と同じ formatRecruiterName を通すため実名でも号機表記でもヒット。表記揺れは normalizeRecruiterName で吸収。
   const displayedEntries = useMemo(() => {
-    const q = normalizeRecruiterName(rcFilter);
-    if (!q) return entries;
-    return entries.filter((e) =>
-      normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(q),
-    );
-  }, [entries, rcFilter]);
+    let result = entries;
+    const rc = normalizeRecruiterName(rcFilter);
+    if (rc) {
+      result = result.filter((e) =>
+        normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(rc),
+      );
+    }
+    const q = freeSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter((e) =>
+        e.candidate.name.toLowerCase().includes(q) ||
+        e.candidate.candidateNumber.toLowerCase().includes(q) ||
+        (e.companyName?.toLowerCase().includes(q) ?? false) ||
+        (e.jobTitle?.toLowerCase().includes(q) ?? false) ||
+        (e.candidate.employee?.name?.toLowerCase().includes(q) ?? false),
+      );
+    }
+    return result;
+  }, [entries, rcFilter, freeSearch]);
 
   const handleExport = () => {
     const params = new URLSearchParams();
@@ -882,12 +897,22 @@ export default function EntryBoard() {
                 className={`w-40 ${FILTER_INPUT_CLS}`}
               />
             </FilterField>
-            {(candidateName || companyName || caFilter || rcFilter) && (
+            <FilterField label="フリー検索">
+              <input
+                type="text"
+                placeholder="氏名/番号/企業名/担当CA"
+                value={freeSearch}
+                onChange={(e) => setFreeSearch(e.target.value)}
+                className={`w-56 ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            {(candidateName || companyName || caFilter || rcFilter || freeSearch) && (
               <FilterClearButton onClick={() => {
                 setCandidateName("");
                 setCompanyName("");
                 setCaFilter("");
                 setRcFilter("");
+                setFreeSearch("");
                 setPage(1);
               }} />
             )}
@@ -895,7 +920,7 @@ export default function EntryBoard() {
         </FilterTopRow>
 
         {/* 表示（全幅） */}
-        <FilterGroup label="表示">
+        <FilterGroup label="表示" fullWidth>
           <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer py-1.5">
             <input
               type="checkbox"

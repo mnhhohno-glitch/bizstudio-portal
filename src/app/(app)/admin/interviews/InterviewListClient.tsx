@@ -537,7 +537,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
         </FilterTopRow>
 
         {/* 区分（全幅）＋ 件数サマリ */}
-        <FilterGroup label="区分">
+        <FilterGroup label="区分" fullWidth>
           <FilterField label="種別">
             <select
               value={typeFilter}

@@ -600,7 +600,7 @@ export default function CandidateListClient({
         </FilterTopRow>
 
         {/* 区分（全幅） */}
-        <FilterGroup label="区分">
+        <FilterGroup label="区分" fullWidth>
           <FilterField label="経路">
             <select
               value={routeFilter}
