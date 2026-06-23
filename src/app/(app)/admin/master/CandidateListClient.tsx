@@ -42,6 +42,9 @@ type CandidateRow = {
   recruiterName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  // T-101: スカウト応募の応募日 / 配信日
+  applicationDate: string | null;
+  scoutDeliveryDate: string | null;
   createdAt: string;
   supportStatus: string;
   supportSubStatus: string | null;
@@ -100,6 +103,17 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleString("ja-JP");
 }
 
+// T-101 / 罠#17: 応募日・配信日は必ず Asia/Tokyo 基準で日付文字列化する。
+// 比較用（YYYY-MM-DD）と表示用（YYYY/MM/DD）の両方をJSTで生成。
+function jstDateStr(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+function fmtJstSlash(iso: string | null): string {
+  const s = jstDateStr(iso);
+  return s ? s.replace(/-/g, "/") : "-";
+}
+
 function formatGender(gender: string | null) {
   if (!gender) return "-";
   switch (gender) {
@@ -137,6 +151,11 @@ export default function CandidateListClient({
   // T-064: スカウト関連フィルター
   const [routeFilter, setRouteFilter] = useState("ALL");
   const [mediaFilter, setMediaFilter] = useState("ALL");
+  // T-101: 応募日 / 配信日 範囲フィルター（JST）
+  const [appDateFrom, setAppDateFrom] = useState("");
+  const [appDateTo, setAppDateTo] = useState("");
+  const [delDateFrom, setDelDateFrom] = useState("");
+  const [delDateTo, setDelDateTo] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
@@ -201,8 +220,21 @@ export default function CandidateListClient({
     if (mediaFilter !== "ALL") {
       result = result.filter((c) => (c.mediaSource || "") === mediaFilter);
     }
+    // T-101: 応募日 / 配信日 範囲フィルター（JST日付文字列で境界比較）
+    if (appDateFrom) {
+      result = result.filter((c) => { const d = jstDateStr(c.applicationDate); return !!d && d >= appDateFrom; });
+    }
+    if (appDateTo) {
+      result = result.filter((c) => { const d = jstDateStr(c.applicationDate); return !!d && d <= appDateTo; });
+    }
+    if (delDateFrom) {
+      result = result.filter((c) => { const d = jstDateStr(c.scoutDeliveryDate); return !!d && d >= delDateFrom; });
+    }
+    if (delDateTo) {
+      result = result.filter((c) => { const d = jstDateStr(c.scoutDeliveryDate); return !!d && d <= delDateTo; });
+    }
     return result;
-  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter, routeFilter, mediaFilter]);
+  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]);
 
   const tabCounts = useMemo(() => {
     // Apply all filters except supportTab so counts reflect current filter state
@@ -625,8 +657,48 @@ export default function CandidateListClient({
           </select>
         </div>
 
+        {/* T-101: 応募日（範囲） */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">応募日（開始〜終了）</label>
+          <div className="flex items-center gap-1">
+            <input
+              type="date"
+              value={appDateFrom}
+              onChange={(e) => { setAppDateFrom(e.target.value); setCurrentPage(1); }}
+              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            />
+            <span className="text-xs text-gray-400">〜</span>
+            <input
+              type="date"
+              value={appDateTo}
+              onChange={(e) => { setAppDateTo(e.target.value); setCurrentPage(1); }}
+              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* T-101: 配信日（範囲） */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-500">配信日（開始〜終了）</label>
+          <div className="flex items-center gap-1">
+            <input
+              type="date"
+              value={delDateFrom}
+              onChange={(e) => { setDelDateFrom(e.target.value); setCurrentPage(1); }}
+              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            />
+            <span className="text-xs text-gray-400">〜</span>
+            <input
+              type="date"
+              value={delDateTo}
+              onChange={(e) => { setDelDateTo(e.target.value); setCurrentPage(1); }}
+              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+            />
+          </div>
+        </div>
+
         {/* クリアボタン */}
-        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL") && (
+        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
           <button
             onClick={() => {
               setCaFilter("ALL");
@@ -636,6 +708,10 @@ export default function CandidateListClient({
               setEndReasonFilter("ALL");
               setRouteFilter("ALL");
               setMediaFilter("ALL");
+              setAppDateFrom("");
+              setAppDateTo("");
+              setDelDateFrom("");
+              setDelDateTo("");
               setCurrentPage(1);
             }}
             className="text-sm text-[#2563EB] hover:text-[#1D4ED8] hover:underline py-1.5"
@@ -713,13 +789,15 @@ export default function CandidateListClient({
                 <col style={{ width: "3%" }} />
                 <col style={{ width: "7%" }} />
                 <col style={{ width: "9%" }} />
-                <col style={{ width: "10%" }} />
+                <col style={{ width: "9%" }} />
                 <col style={{ width: "4%" }} />
                 <col style={{ width: "7%" }} />
                 <col style={{ width: "9%" }} />
-                <col style={{ width: "13%" }} />
-                <col style={{ width: "13%" }} />
-                <col style={{ width: "13%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "11%" }} />
               </colgroup>
               <thead>
                 <tr>
@@ -736,6 +814,9 @@ export default function CandidateListClient({
                   <Th>フリガナ</Th>
                   <Th>性別</Th>
                   <Th>担当CA</Th>
+                  {/* T-101 */}
+                  <Th>応募日 / 配信日</Th>
+                  <Th>経路</Th>
                   <Th>担当RC</Th>
                   <Th>登録日時</Th>
                   <Th>支援状況</Th>
@@ -782,6 +863,17 @@ export default function CandidateListClient({
                     <Td className="overflow-hidden">
                       <div className="truncate text-[13px]" title={cand.employee?.name || ""}>
                         {cand.employee?.name || "-"}
+                      </div>
+                    </Td>
+                    {/* T-101: 応募日 / 配信日 */}
+                    <Td className="overflow-hidden">
+                      <div className="truncate text-[13px]">{fmtJstSlash(cand.applicationDate)}</div>
+                      <div className="truncate text-[11px] text-gray-500">{fmtJstSlash(cand.scoutDeliveryDate)}</div>
+                    </Td>
+                    {/* T-101: 経路（媒体） */}
+                    <Td className="overflow-hidden">
+                      <div className="truncate text-[13px]" title={cand.mediaSource || ""}>
+                        {cand.mediaSource || "-"}
                       </div>
                     </Td>
                     <Td className="overflow-hidden">
@@ -832,7 +924,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={12}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

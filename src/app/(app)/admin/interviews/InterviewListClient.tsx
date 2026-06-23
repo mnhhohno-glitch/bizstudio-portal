@@ -32,6 +32,10 @@ type InterviewRow = {
     phone: string | null;
     email: string | null;
     address: string | null;
+    // T-101: スカウト応募の応募日 / 配信日 / 媒体
+    applicationDate: string | null;
+    scoutDeliveryDate: string | null;
+    mediaSource: string | null;
     employee: Employee | null;
   };
   interviewer: Employee;
@@ -70,7 +74,11 @@ const TYPE_OPTIONS = ["新規面談", "既存面談", "フォロー面談", "面
 const TOOL_FILTER_OPTIONS = ["オンライン", "電話", "対面"];
 const TYPE_FILTER_OPTIONS = ["新規面談", "既存面談"];
 
-const COL_WIDTHS = [60, 100, 100, 110, 90, 100, 130, 80, 130, 220, 110, 110, 180];
+// T-101: 経路（媒体）フィルタ選択肢。求職者管理一覧の媒体プルダウンと揃える。
+const MEDIA_FILTER_OPTIONS = ["マイナビ転職", "マイナビエージェント", "indeed", "日経HR", "自社HP", "dodaMaps"];
+
+// T-101: 応募/配信の2列を「操作」の右・「担当RC」の左に追加（+2列）
+const COL_WIDTHS = [60, 110, 90, 100, 100, 110, 90, 100, 130, 80, 130, 220, 110, 110, 180];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -106,6 +114,16 @@ function genderLabel(g: string | null) {
   return "-";
 }
 
+// T-101 / 罠#17: 応募日・配信日は必ず Asia/Tokyo 基準で日付文字列化する。
+function jstDateStr(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // YYYY-MM-DD
+}
+function fmtJstSlash(iso: string | null): string {
+  const s = jstDateStr(iso);
+  return s ? s.replace(/-/g, "/") : "-";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -137,6 +155,12 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
   // T-068: クライアント側フィルタ（サーバ query は変更しない方針）
   const [typeFilter, setTypeFilter] = useState("");
   const [toolFilter, setToolFilter] = useState("");
+  // T-101: 応募日 / 配信日 範囲・経路（媒体）フィルタ（クライアント側・JST）
+  const [appDateFrom, setAppDateFrom] = useState("");
+  const [appDateTo, setAppDateTo] = useState("");
+  const [delDateFrom, setDelDateFrom] = useState("");
+  const [delDateTo, setDelDateTo] = useState("");
+  const [mediaFilter, setMediaFilter] = useState("");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Date nav
@@ -244,6 +268,11 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     setSearch("");
     setTypeFilter("");
     setToolFilter("");
+    setAppDateFrom("");
+    setAppDateTo("");
+    setDelDateFrom("");
+    setDelDateTo("");
+    setMediaFilter("");
     setPage(1);
   };
 
@@ -256,6 +285,20 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     if (typeFilter === "新規面談" && !isNew(r)) return false;
     if (typeFilter === "既存面談" && !isExisting(r)) return false;
     if (toolFilter && r.interviewTool !== toolFilter) return false;
+    // T-101: 応募日 / 配信日 範囲・経路（媒体）。すべて既存フィルタと AND 結合。
+    if (appDateFrom || appDateTo) {
+      const d = jstDateStr(r.candidate.applicationDate);
+      if (!d) return false;
+      if (appDateFrom && d < appDateFrom) return false;
+      if (appDateTo && d > appDateTo) return false;
+    }
+    if (delDateFrom || delDateTo) {
+      const d = jstDateStr(r.candidate.scoutDeliveryDate);
+      if (!d) return false;
+      if (delDateFrom && d < delDateFrom) return false;
+      if (delDateTo && d > delDateTo) return false;
+    }
+    if (mediaFilter && (r.candidate.mediaSource || "") !== mediaFilter) return false;
     return true;
   });
   const newCount = displayedInterviews.filter(isNew).length;
@@ -481,6 +524,50 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           <option value="">方法: すべて</option>
           {TOOL_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        {/* T-101: 経路（媒体） */}
+        <select
+          value={mediaFilter}
+          onChange={(e) => { setMediaFilter(e.target.value); setPage(1); }}
+          className="w-[140px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="経路（媒体）"
+        >
+          <option value="">経路: すべて</option>
+          {MEDIA_FILTER_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {/* T-101: 応募日（範囲） */}
+        <span className="text-[12px] text-gray-500">応募</span>
+        <input
+          type="date"
+          value={appDateFrom}
+          onChange={(e) => { setAppDateFrom(e.target.value); setPage(1); }}
+          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="応募日（開始）"
+        />
+        <span className="text-[13px] text-gray-500">〜</span>
+        <input
+          type="date"
+          value={appDateTo}
+          onChange={(e) => { setAppDateTo(e.target.value); setPage(1); }}
+          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="応募日（終了）"
+        />
+        {/* T-101: 配信日（範囲） */}
+        <span className="text-[12px] text-gray-500">配信</span>
+        <input
+          type="date"
+          value={delDateFrom}
+          onChange={(e) => { setDelDateFrom(e.target.value); setPage(1); }}
+          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="配信日（開始）"
+        />
+        <span className="text-[13px] text-gray-500">〜</span>
+        <input
+          type="date"
+          value={delDateTo}
+          onChange={(e) => { setDelDateTo(e.target.value); setPage(1); }}
+          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          title="配信日（終了）"
+        />
         <input
           type="text"
           placeholder="求職者名"
@@ -511,6 +598,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           <thead>
             <tr className="bg-[#185FA5] text-white text-[12px] whitespace-nowrap">
               <th className="px-2 py-2.5 text-center font-medium">操作<SortIcon hidden /></th>
+              {/* T-101 */}
+              <th className="px-2 py-2.5 text-left font-medium">応募日 / 配信日<SortIcon hidden /></th>
+              <th className="px-2 py-2.5 text-left font-medium">経路<SortIcon hidden /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("rcName")}>担当RC<SortIcon col="rcName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("caName")}>担当CA<SortIcon col="caName" /></th>
               <th className="px-2 py-2.5 text-left font-medium cursor-pointer select-none" onClick={() => handleSort("interviewDate")}>面談日<SortIcon col="interviewDate" /></th>
@@ -527,9 +617,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={13} className="py-12 text-center text-gray-400">読み込み中...</td></tr>
+              <tr><td colSpan={15} className="py-12 text-center text-gray-400">読み込み中...</td></tr>
             ) : displayedInterviews.length === 0 ? (
-              <tr><td colSpan={13} className="py-12 text-center text-gray-400">該当する面談記録がありません</td></tr>
+              <tr><td colSpan={15} className="py-12 text-center text-gray-400">該当する面談記録がありません</td></tr>
             ) : displayedInterviews.map((r) => {
               const age = calcAge(r.candidateBirthday);
               const rb = r.resultFlag ? RESULT_BADGE[r.resultFlag] : null;
@@ -552,6 +642,13 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                       title="削除"
                     >🗑</button>
                   </td>
+                  {/* T-101: 応募日 / 配信日 */}
+                  <td className="px-2 py-2 overflow-hidden">
+                    <div className="text-[13px] truncate">{fmtJstSlash(r.candidate.applicationDate)}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{fmtJstSlash(r.candidate.scoutDeliveryDate)}</div>
+                  </td>
+                  {/* T-101: 経路（媒体） */}
+                  <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.candidate.mediaSource || "-"}>{r.candidate.mediaSource || "-"}</td>
                   {/* 担当RC */}
                   <td className="px-2 py-2 overflow-hidden" title={`${r.interviewer.employeeNumber} ${r.interviewer.name}`}>
                     <div className="text-[11px] text-gray-400 truncate">{r.interviewer.employeeNumber}</div>

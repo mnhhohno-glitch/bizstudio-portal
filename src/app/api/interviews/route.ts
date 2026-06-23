@@ -98,6 +98,10 @@ export async function GET(req: NextRequest) {
             phone: true,
             email: true,
             address: true,
+            // T-101: スカウト応募の応募日 / 配信日 / 媒体（一覧表示・検索用）
+            applicationDate: true,
+            scoutDeliveryDate: true,
+            mediaSource: true,
             employee: { select: { id: true, employeeNumber: true, name: true } },
           },
         },

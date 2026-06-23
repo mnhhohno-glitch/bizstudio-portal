@@ -53,6 +53,9 @@ export default async function CandidateMasterPage() {
     recruiterName: c.recruiterName,
     applicationRoute: c.applicationRoute,
     mediaSource: c.mediaSource,
+    // T-101: スカウト応募の応募日 / 配信日（一覧表示・検索用）
+    applicationDate: c.applicationDate ? c.applicationDate.toISOString() : null,
+    scoutDeliveryDate: c.scoutDeliveryDate ? c.scoutDeliveryDate.toISOString() : null,
     createdAt: c.createdAt.toISOString(),
     supportStatus: (c.supportStatus as string) || "BEFORE",
     supportSubStatus: (c.supportSubStatus as string | null) ?? null,
