@@ -1251,6 +1251,16 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - 求職者管理（CandidateListClient 担当RC `<Td>`）／面談管理（InterviewListClient 担当RC `<td>`）／エントリー管理（EntryTable `rc` case）。
 - **ソート/絞り込みは非変更**: 面談一覧の担当RC サーバ側ソート/絞り込み・エントリーの client 側 `getFieldValue("rc")` はいずれも `formatRecruiterName`/`normalizeRecruiterName` の1行値を使用（2段化は描画のみ）。
 
+##### 全号機2段化＋一斉配信対応（T-104追補2, 2026-06-24）
+
+実DB調査で `recruiterName` は **①号機表記 `RPA N号機`**（1444/414/204/166/104/33件）と **②号機担当の実名直挿し**（`藤本なつみ`/`上原千遥`/`岡田かなこ` 等、表記揺れ＝空白有無あり）と **③一斉配信担当**（`大野 望`/`藤本 夏海`）と **④名簿外実名**（`小野 有加`/`大野 将幸`）が混在。旧 `formatRecruiterName` は①しか変換せず、②は素通り→1行（「4号機だけ2段」に見えた真因＝見たレコードが①か②かの違い）。
+
+- **正準名簿に集約**: `recruiterDisplay.ts` に `RC_ROSTER`（実名・unit・machineNo の配列）を1ソースとして新設。`MACHINE_NUMBER_TO_REAL_NAME`（号機→実名）と `NORMALIZED_NAME_TO_DISPLAY`（正規化実名→{name,unit}）はここから導出。号機は `(RPA○号機)`、一斉配信（大野 望・藤本 夏海）は `(一斉配信)`。
+- **`formatRecruiterName` の出力は不変**（①号機表記→`実名(RPA○号機)`、それ以外は原文）。**ソート/絞り込み・他画面（scout/by-*・CandidateHeader 等）は現状維持**。
+- **`splitRecruiterDisplay` を拡張**（表示専用）: ①末尾ユニット `(RPA[1-6]号機|一斉配信)` で分割 → ②未分割なら正規化実名で `NORMALIZED_NAME_TO_DISPLAY` 引き（②実名直挿し・③一斉配信を2段化）→ ③名簿外は1段・空/`"-"`/null は「-」。表記揺れは `normalizeRecruiterName`（空白除去・全角半角）で吸収。
+- **取り違え防止**: 判定キーは full name 正規化。`藤本なつみ`(1号機) と `藤本夏海`(一斉配信)、`大野望`(一斉配信) と `大野将幸`(名簿外1行) は別キーで分離。一斉配信を付けるのは 大野 望・藤本 夏海 のみ。
+- 3画面（CandidateListClient/InterviewListClient/EntryTable）は既存の `splitRecruiterDisplay` 呼び出しのまま自動反映（コード変更なし）。集計・突合・DB値は不変。
+
 ## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
 
 エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。
