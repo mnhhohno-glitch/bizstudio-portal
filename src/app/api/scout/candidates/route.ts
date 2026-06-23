@@ -88,8 +88,18 @@ export async function GET(req: NextRequest) {
       applicationDate: true,
       createdAt: true,
       recruiterName: true,
+      masType: true,
       supportStatus: true,
       supportSubStatus: true,
+      // 配信担当(号機)・配信種別は紐付く配信枠から取得
+      scoutDeliverySlot: {
+        select: {
+          deliveryCategoryLarge: true,
+          deliveryCategoryMedium: true,
+          deliveryCategorySmall: true,
+          machine: { select: { recruiterName: true, machineNumber: true, isMachine: true } },
+        },
+      },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -107,6 +117,7 @@ export async function GET(req: NextRequest) {
           ? "有効"
           : "無効";
     const appliedSrc = c.applicationDate ?? c.createdAt;
+    const slot = c.scoutDeliverySlot;
     return {
       id: c.id,
       candidateNumber: c.candidateNumber,
@@ -116,6 +127,17 @@ export async function GET(req: NextRequest) {
       category,
       appliedDate: appliedSrc ? jstYmd(appliedSrc) : null,
       recruiterName: c.recruiterName,
+      masType: c.masType,
+      machine: slot?.machine
+        ? {
+            recruiterName: slot.machine.recruiterName,
+            machineNumber: slot.machine.machineNumber,
+            isMachine: slot.machine.isMachine,
+          }
+        : null,
+      deliveryCategoryLarge: slot?.deliveryCategoryLarge ?? null,
+      deliveryCategoryMedium: slot?.deliveryCategoryMedium ?? null,
+      deliveryCategorySmall: slot?.deliveryCategorySmall ?? null,
       supportStatus: c.supportStatus,
       supportSubStatus: c.supportSubStatus,
     };

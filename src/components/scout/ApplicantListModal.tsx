@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 
 export type ApplicantQuery = { slotId?: string; date?: string; media?: string };
+
+type Machine = { recruiterName: string; machineNumber: number | null; isMachine: boolean };
 
 type Applicant = {
   id: string;
@@ -14,9 +17,39 @@ type Applicant = {
   category: string;
   appliedDate: string | null;
   recruiterName: string | null;
+  masType: string | null;
+  machine: Machine | null;
+  deliveryCategoryLarge: string | null;
+  deliveryCategoryMedium: string | null;
+  deliveryCategorySmall: string | null;
   supportStatus: string;
   supportSubStatus: string | null;
 };
+
+/** 配信担当を「実名(RPA○号機)」表記で返す。号機は recruiterDisplay の正規対応表を通す。 */
+function recruiterLabel(c: Applicant): string {
+  const m = c.machine;
+  if (m?.isMachine && m.machineNumber != null) {
+    // "RPA○号機" → 実名(RPA○号機)（T-104 の MACHINE_NUMBER_TO_REAL_NAME）
+    return formatRecruiterName(`RPA${m.machineNumber}号機`);
+  }
+  if (m?.recruiterName) return m.recruiterName; // 社員枠など号機なし
+  return c.recruiterName ? formatRecruiterName(c.recruiterName) : "—";
+}
+
+/** 配信種別を「中分類 / 小分類」（無ければ大分類）で返す。配信枠管理の表記に合わせる。 */
+function deliveryTypeLabel(c: Applicant): string {
+  const mid = c.deliveryCategoryMedium;
+  const small = c.deliveryCategorySmall;
+  if (mid) return small ? `${mid} / ${small}` : mid;
+  return c.deliveryCategoryLarge ?? "—";
+}
+
+/** 支援状況を portal 求職者一覧と同じ日本語表記（＋サブステータス併記）で返す。 */
+function supportLabel(c: Applicant): string {
+  const main = SUPPORT_STATUS_LABEL[c.supportStatus] ?? c.supportStatus;
+  return c.supportSubStatus ? `${main} / ${c.supportSubStatus}` : main;
+}
 
 /**
  * スカウト集計の数値クリックで応募者一覧を表示する共通モーダル。
@@ -92,6 +125,8 @@ export default function ApplicantListModal({
                     <th className="px-2 py-1.5 text-center font-medium">区分</th>
                     <th className="px-2 py-1.5 text-left font-medium">応募日</th>
                     <th className="px-2 py-1.5 text-left font-medium">配信担当</th>
+                    <th className="px-2 py-1.5 text-left font-medium">配信種別</th>
+                    <th className="px-2 py-1.5 text-left font-medium">開放日</th>
                     <th className="px-2 py-1.5 text-left font-medium">支援状況</th>
                   </tr>
                 </thead>
@@ -127,13 +162,10 @@ export default function ApplicantListModal({
                         </span>
                       </td>
                       <td className="px-2 py-1.5">{c.appliedDate ?? "—"}</td>
-                      <td className="px-2 py-1.5">
-                        {c.recruiterName ? formatRecruiterName(c.recruiterName) : "—"}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        {c.supportStatus}
-                        {c.supportSubStatus ? ` / ${c.supportSubStatus}` : ""}
-                      </td>
+                      <td className="px-2 py-1.5">{recruiterLabel(c)}</td>
+                      <td className="px-2 py-1.5">{deliveryTypeLabel(c)}</td>
+                      <td className="px-2 py-1.5">{c.masType ?? "—"}</td>
+                      <td className="px-2 py-1.5">{supportLabel(c)}</td>
                     </tr>
                   ))}
                 </tbody>
