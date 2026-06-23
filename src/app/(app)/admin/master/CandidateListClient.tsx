@@ -870,9 +870,9 @@ export default function CandidateListClient({
                       <div className="truncate text-[13px]">{fmtJstSlash(cand.applicationDate)}</div>
                       <div className="truncate text-[11px] text-gray-500">{fmtJstSlash(cand.scoutDeliveryDate)}</div>
                     </Td>
-                    {/* T-101: 経路（媒体） */}
-                    <Td className="overflow-hidden">
-                      <div className="truncate text-[13px]" title={cand.mediaSource || ""}>
+                    {/* T-101: 経路（媒体）。マイナビ転職/エージェントの判別のため省略せず全文折り返し表示 */}
+                    <Td className="whitespace-normal break-words">
+                      <div className="text-[13px] break-words" title={cand.mediaSource || ""}>
                         {cand.mediaSource || "-"}
                       </div>
                     </Td>

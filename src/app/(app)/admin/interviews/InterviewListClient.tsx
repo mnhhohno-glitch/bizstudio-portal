@@ -650,8 +650,8 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                     <div className="text-[13px] truncate">{fmtJstSlash(r.candidate.applicationDate)}</div>
                     <div className="text-[11px] text-gray-500 truncate">{fmtJstSlash(r.candidate.scoutDeliveryDate)}</div>
                   </td>
-                  {/* T-101: 経路（媒体） */}
-                  <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.candidate.mediaSource || "-"}>{r.candidate.mediaSource || "-"}</td>
+                  {/* T-101: 経路（媒体）。マイナビ転職/エージェントの判別のため省略せず全文折り返し表示 */}
+                  <td className="px-2 py-2 text-[13px] whitespace-normal break-words" title={r.candidate.mediaSource || "-"}>{r.candidate.mediaSource || "-"}</td>
                   {/* 担当RC（T-102: スカウト配信担当 recruiterName。号機表記は表示時に実名変換。空は「-」） */}
                   <td className="px-2 py-2 overflow-hidden" title={formatRecruiterName(r.candidate.recruiterName) || "-"}>
                     <div className="text-[13px] truncate">{formatRecruiterName(r.candidate.recruiterName) || "-"}</div>
