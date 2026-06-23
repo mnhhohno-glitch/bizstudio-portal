@@ -1,0 +1,16 @@
+fix(T-066): Google Tasks API エラー詳細をユーザーに伝達
+
+根本原因: Google Cloud Console で Google Tasks API が disabled。エラー本文
+"Google Tasks API has not been used in project ... or it is disabled" は
+従来の isScopeError では拾えず、フロントには汎用エラーとして握り潰されていた。
+
+修正:
+- googleTasks.ts: エラー分類を scope_insufficient / api_disabled / error の3種に拡張
+- sync-task route: api_disabled を 403 + reason=api_disabled + 詳細メッセージで返す
+- EntryBoard.tsx: api_disabled トーストで Cloud Console での有効化を案内、
+  その他エラーも詳細メッセージを表示
+
+注: 本コード変更だけでは復旧しない。本質的修正は将幸さんが Google Cloud Console
+で Tasks API を有効化すること。有効化後の再認証は不要（既存トークンで動作）。
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

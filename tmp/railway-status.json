@@ -1,0 +1,405 @@
+{
+  "id": "1159a112-d0fa-4061-8138-c9ef04b94da0",
+  "name": "bizstudio-portal",
+  "deletedAt": null,
+  "workspace": {
+    "name": "mnhhohno-glitch's Projects"
+  },
+  "environments": {
+    "edges": [
+      {
+        "node": {
+          "id": "8bb80bef-0e2d-407a-b8e4-2b776edd9884",
+          "name": "production",
+          "canAccess": true,
+          "deletedAt": null,
+          "serviceInstances": {
+            "edges": [
+              {
+                "node": {
+                  "id": "725b11a1-8229-4a1d-a8a7-2a2c3b7370e5",
+                  "serviceId": "dd4e43d5-f6a6-45b7-ba1b-0f06fa885707",
+                  "serviceName": "bizstudio-portal-staging",
+                  "environmentId": "8bb80bef-0e2d-407a-b8e4-2b776edd9884",
+                  "latestDeployment": {
+                    "canRedeploy": true,
+                    "id": "f19587a6-0d26-4900-be44-cbd26fa81ffb",
+                    "meta": {
+                      "branch": "staging",
+                      "buildOnly": false,
+                      "commitAuthor": "mnhhohno-glitch",
+                      "commitHash": "8a2668e3289440a5411a4d2b2cb3ee04aac7dcdd",
+                      "commitMessage": "Merge branch 'master' into staging",
+                      "fileServiceManifest": {},
+                      "imageDigest": "sha256:cff9fab00bf111a238915b55e0dbe1ed5cebece370dd8e413e800969ade14301",
+                      "logsV2": true,
+                      "nixpacksProviders": [],
+                      "plan": "pro",
+                      "propertyFileMapping": {},
+                      "railpackInfo": {
+                        "detectedProviders": [
+                          "node"
+                        ],
+                        "metadata": {
+                          "nodePackageManager": "npm",
+                          "nodeRuntime": "next",
+                          "providers": "node"
+                        },
+                        "railpackVersion": "0.24.0",
+                        "resolvedPackages": {
+                          "node": {
+                            "requestedVersion": "22",
+                            "resolvedVersion": "22.22.3"
+                          }
+                        }
+                      },
+                      "reason": "deploy",
+                      "repo": "mnhhohno-glitch/bizstudio-portal",
+                      "rootDirectory": null,
+                      "runtime": "V2",
+                      "serviceManifest": {
+                        "build": {
+                          "buildCommand": null,
+                          "buildEnvironment": "V3",
+                          "builder": "RAILPACK",
+                          "dockerfilePath": null,
+                          "nixpacksConfigPath": null,
+                          "nixpacksPlan": null,
+                          "watchPatterns": []
+                        },
+                        "deploy": {
+                          "cronSchedule": null,
+                          "drainingSeconds": null,
+                          "healthcheckPath": null,
+                          "healthcheckTimeout": null,
+                          "ipv6EgressEnabled": false,
+                          "limitOverride": null,
+                          "multiRegionConfig": {
+                            "us-west2": {
+                              "numReplicas": 1
+                            }
+                          },
+                          "numReplicas": 1,
+                          "overlapSeconds": null,
+                          "preDeployCommand": null,
+                          "region": null,
+                          "registryCredentials": null,
+                          "requiredMountPath": null,
+                          "restartPolicyMaxRetries": 10,
+                          "restartPolicyType": "ON_FAILURE",
+                          "runtime": "V2",
+                          "sleepApplication": false,
+                          "startCommand": null,
+                          "useLegacyStacker": false
+                        }
+                      },
+                      "volumeMounts": []
+                    },
+                    "status": "SUCCESS",
+                    "createdAt": "2026-05-29T21:45:24.400Z",
+                    "deploymentStopped": false
+                  },
+                  "activeDeployments": [
+                    {
+                      "id": "f19587a6-0d26-4900-be44-cbd26fa81ffb",
+                      "status": "SUCCESS",
+                      "createdAt": "2026-05-29T21:45:24.400Z",
+                      "meta": {
+                        "branch": "staging",
+                        "buildOnly": false,
+                        "commitAuthor": "mnhhohno-glitch",
+                        "commitHash": "8a2668e3289440a5411a4d2b2cb3ee04aac7dcdd",
+                        "commitMessage": "Merge branch 'master' into staging",
+                        "fileServiceManifest": {},
+                        "imageDigest": "sha256:cff9fab00bf111a238915b55e0dbe1ed5cebece370dd8e413e800969ade14301",
+                        "logsV2": true,
+                        "nixpacksProviders": [],
+                        "plan": "pro",
+                        "propertyFileMapping": {},
+                        "railpackInfo": {
+                          "detectedProviders": [
+                            "node"
+                          ],
+                          "metadata": {
+                            "nodePackageManager": "npm",
+                            "nodeRuntime": "next",
+                            "providers": "node"
+                          },
+                          "railpackVersion": "0.24.0",
+                          "resolvedPackages": {
+                            "node": {
+                              "requestedVersion": "22",
+                              "resolvedVersion": "22.22.3"
+                            }
+                          }
+                        },
+                        "reason": "deploy",
+                        "repo": "mnhhohno-glitch/bizstudio-portal",
+                        "rootDirectory": null,
+                        "runtime": "V2",
+                        "serviceManifest": {
+                          "build": {
+                            "buildCommand": null,
+                            "buildEnvironment": "V3",
+                            "builder": "RAILPACK",
+                            "dockerfilePath": null,
+                            "nixpacksConfigPath": null,
+                            "nixpacksPlan": null,
+                            "watchPatterns": []
+                          },
+                          "deploy": {
+                            "cronSchedule": null,
+                            "drainingSeconds": null,
+                            "healthcheckPath": null,
+                            "healthcheckTimeout": null,
+                            "ipv6EgressEnabled": false,
+                            "limitOverride": null,
+                            "multiRegionConfig": {
+                              "us-west2": {
+                                "numReplicas": 1
+                              }
+                            },
+                            "numReplicas": 1,
+                            "overlapSeconds": null,
+                            "preDeployCommand": null,
+                            "region": null,
+                            "registryCredentials": null,
+                            "requiredMountPath": null,
+                            "restartPolicyMaxRetries": 10,
+                            "restartPolicyType": "ON_FAILURE",
+                            "runtime": "V2",
+                            "sleepApplication": false,
+                            "startCommand": null,
+                            "useLegacyStacker": false
+                          }
+                        },
+                        "volumeMounts": []
+                      }
+                    }
+                  ],
+                  "source": {
+                    "repo": "mnhhohno-glitch/bizstudio-portal",
+                    "image": null
+                  },
+                  "domains": {
+                    "serviceDomains": [
+                      {
+                        "id": "0d2a0e60-b81c-43c1-8835-2ee54ad08ccf",
+                        "domain": "bizstudio-portal-staging-production.up.railway.app",
+                        "targetPort": 8080
+                      }
+                    ],
+                    "customDomains": []
+                  },
+                  "cronSchedule": null,
+                  "nextCronRunAt": null,
+                  "startCommand": null
+                }
+              },
+              {
+                "node": {
+                  "id": "fbb005c3-99bb-4bf5-8a80-72cff87b024a",
+                  "serviceId": "0ff66b94-21cf-4526-9d98-ed28d5cea2ff",
+                  "serviceName": "bizstudio-portal",
+                  "environmentId": "8bb80bef-0e2d-407a-b8e4-2b776edd9884",
+                  "latestDeployment": {
+                    "canRedeploy": true,
+                    "id": "8ab6f299-92d6-43fc-99bc-eae4904cf1ff",
+                    "meta": {
+                      "branch": "master",
+                      "buildOnly": false,
+                      "commitAuthor": "mnhhohno-glitch",
+                      "commitHash": "9a9e8ef3020364cd7bd5063f6c8a6a6cf0eb22a2",
+                      "commitMessage": "docs(scripts): add T-067 meeting attachment unification announcement script\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+                      "fileServiceManifest": {},
+                      "imageDigest": "sha256:d266adc3645fa7543f72659843ce2b024edfebbaca92f1f5597189e05f1c2854",
+                      "logsV2": true,
+                      "nixpacksProviders": [],
+                      "plan": "pro",
+                      "propertyFileMapping": {},
+                      "railpackInfo": {
+                        "detectedProviders": [
+                          "node"
+                        ],
+                        "metadata": {
+                          "nodePackageManager": "npm",
+                          "nodeRuntime": "next",
+                          "providers": "node"
+                        },
+                        "railpackVersion": "0.24.0",
+                        "resolvedPackages": {
+                          "node": {
+                            "requestedVersion": "22",
+                            "resolvedVersion": "22.22.3"
+                          }
+                        }
+                      },
+                      "reason": "deploy",
+                      "repo": "mnhhohno-glitch/bizstudio-portal",
+                      "rootDirectory": null,
+                      "runtime": "V2",
+                      "serviceManifest": {
+                        "build": {
+                          "buildCommand": null,
+                          "buildEnvironment": "V3",
+                          "builder": "RAILPACK",
+                          "dockerfilePath": null,
+                          "nixpacksConfigPath": null,
+                          "nixpacksPlan": null,
+                          "watchPatterns": []
+                        },
+                        "deploy": {
+                          "cronSchedule": null,
+                          "drainingSeconds": null,
+                          "healthcheckPath": null,
+                          "healthcheckTimeout": null,
+                          "ipv6EgressEnabled": false,
+                          "limitOverride": null,
+                          "multiRegionConfig": {
+                            "us-west2": {
+                              "numReplicas": 1
+                            }
+                          },
+                          "numReplicas": 1,
+                          "overlapSeconds": null,
+                          "preDeployCommand": null,
+                          "region": null,
+                          "registryCredentials": null,
+                          "requiredMountPath": null,
+                          "restartPolicyMaxRetries": 10,
+                          "restartPolicyType": "ON_FAILURE",
+                          "runtime": "V2",
+                          "sleepApplication": false,
+                          "startCommand": null,
+                          "useLegacyStacker": false
+                        }
+                      },
+                      "volumeMounts": []
+                    },
+                    "status": "SUCCESS",
+                    "createdAt": "2026-05-31T01:14:58.609Z",
+                    "deploymentStopped": false
+                  },
+                  "activeDeployments": [
+                    {
+                      "id": "8ab6f299-92d6-43fc-99bc-eae4904cf1ff",
+                      "status": "SUCCESS",
+                      "createdAt": "2026-05-31T01:14:58.609Z",
+                      "meta": {
+                        "branch": "master",
+                        "buildOnly": false,
+                        "commitAuthor": "mnhhohno-glitch",
+                        "commitHash": "9a9e8ef3020364cd7bd5063f6c8a6a6cf0eb22a2",
+                        "commitMessage": "docs(scripts): add T-067 meeting attachment unification announcement script\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+                        "fileServiceManifest": {},
+                        "imageDigest": "sha256:d266adc3645fa7543f72659843ce2b024edfebbaca92f1f5597189e05f1c2854",
+                        "logsV2": true,
+                        "nixpacksProviders": [],
+                        "plan": "pro",
+                        "propertyFileMapping": {},
+                        "railpackInfo": {
+                          "detectedProviders": [
+                            "node"
+                          ],
+                          "metadata": {
+                            "nodePackageManager": "npm",
+                            "nodeRuntime": "next",
+                            "providers": "node"
+                          },
+                          "railpackVersion": "0.24.0",
+                          "resolvedPackages": {
+                            "node": {
+                              "requestedVersion": "22",
+                              "resolvedVersion": "22.22.3"
+                            }
+                          }
+                        },
+                        "reason": "deploy",
+                        "repo": "mnhhohno-glitch/bizstudio-portal",
+                        "rootDirectory": null,
+                        "runtime": "V2",
+                        "serviceManifest": {
+                          "build": {
+                            "buildCommand": null,
+                            "buildEnvironment": "V3",
+                            "builder": "RAILPACK",
+                            "dockerfilePath": null,
+                            "nixpacksConfigPath": null,
+                            "nixpacksPlan": null,
+                            "watchPatterns": []
+                          },
+                          "deploy": {
+                            "cronSchedule": null,
+                            "drainingSeconds": null,
+                            "healthcheckPath": null,
+                            "healthcheckTimeout": null,
+                            "ipv6EgressEnabled": false,
+                            "limitOverride": null,
+                            "multiRegionConfig": {
+                              "us-west2": {
+                                "numReplicas": 1
+                              }
+                            },
+                            "numReplicas": 1,
+                            "overlapSeconds": null,
+                            "preDeployCommand": null,
+                            "region": null,
+                            "registryCredentials": null,
+                            "requiredMountPath": null,
+                            "restartPolicyMaxRetries": 10,
+                            "restartPolicyType": "ON_FAILURE",
+                            "runtime": "V2",
+                            "sleepApplication": false,
+                            "startCommand": null,
+                            "useLegacyStacker": false
+                          }
+                        },
+                        "volumeMounts": []
+                      }
+                    }
+                  ],
+                  "source": {
+                    "repo": "mnhhohno-glitch/bizstudio-portal",
+                    "image": null
+                  },
+                  "domains": {
+                    "serviceDomains": [
+                      {
+                        "id": "2b0e3d07-1f58-436b-b28f-f4f74c752f23",
+                        "domain": "bizstudio-portal-production.up.railway.app",
+                        "targetPort": 8080
+                      }
+                    ],
+                    "customDomains": []
+                  },
+                  "cronSchedule": null,
+                  "nextCronRunAt": null,
+                  "startCommand": null
+                }
+              }
+            ]
+          },
+          "volumeInstances": {
+            "edges": []
+          }
+        }
+      }
+    ]
+  },
+  "services": {
+    "edges": [
+      {
+        "node": {
+          "id": "0ff66b94-21cf-4526-9d98-ed28d5cea2ff",
+          "name": "bizstudio-portal"
+        }
+      },
+      {
+        "node": {
+          "id": "dd4e43d5-f6a6-45b7-ba1b-0f06fa885707",
+          "name": "bizstudio-portal-staging"
+        }
+      }
+    ]
+  }
+}

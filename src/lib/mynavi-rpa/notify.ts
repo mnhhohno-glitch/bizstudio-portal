@@ -1,4 +1,5 @@
 import { sendBotMessage } from "@/lib/lineworks";
+import { prisma } from "@/lib/prisma";
 import type { RpaExecutionBatch } from "@prisma/client";
 
 /**
@@ -36,6 +37,22 @@ function formatJstTime(date: Date): string {
 }
 
 /**
+ * 応募者行用の JST 日時整形（"yyyy/m/d HH:mm" 形式）。
+ * Railway は UTC 稼働のため Asia/Tokyo を明示し、月日はゼロ埋めしない numeric。
+ */
+function formatApplyDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+/**
  * バッチ完了通知
  */
 export async function notifyMynaviBatchCompletion(
@@ -55,8 +72,24 @@ export async function notifyMynaviBatchCompletion(
 
     const timeRange = `${formatJst(start)}-${formatJstTime(end)} (${durationMin}分)`;
 
+    // 処理対象（処理件数に数えた全員）を 1 人 1 行で表示する。
+    // 表示日時は本来「マイナビ応募日時」を使いたいが、現状その値は
+    // データパイプライン上のどこにも取り込まれていない（Gemini 解析対象外、
+    // mynaviScoutSentAt も未書き込み）。そのため取り込み処理日時 processedAt に
+    // フォールバックし、processedAt 昇順（取り込み順 ≒ 応募順）で並べる。
+    const logs = await prisma.mynaviRpaProcessingLog.findMany({
+      where: { batchId: batch.id },
+      select: { candidateName: true, processedAt: true },
+      orderBy: { processedAt: "asc" },
+    });
+    const applicantLines = logs.map((l) => {
+      const name = l.candidateName?.trim() || "（氏名不明）";
+      return `${formatApplyDateTime(l.processedAt)} ${name}`;
+    });
+
     const message = [
       "📊 マイナビ転職応募取り込み 完了",
+      ...applicantLines,
       `処理時刻: ${timeRange}`,
       `処理件数: ${batch.totalCount}件`,
       `　通常送信: ${batch.normalCount}件`,

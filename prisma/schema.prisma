@@ -222,6 +222,20 @@ model Employee {
   jobCategory            EmployeeJobCategory? @map("job_category")
   lineUserId             String?              @map("line_user_id") // LINE ユーザーID
 
+  // T-096: FileMaker 相当の社員詳細（基本情報）。全カラム nullable で非破壊追加。
+  furigana                 String?
+  birthday                 DateTime? @db.Date
+  gender                   String? // "男" | "女"
+  hireDate                 DateTime? @map("hire_date") @db.Date
+  resignDate               DateTime? @map("resign_date") @db.Date
+  address                  String?
+  phone                    String?
+  emergencyContactName     String?   @map("emergency_contact_name")
+  emergencyContactRelation String?   @map("emergency_contact_relation")
+  emergencyContactPhone    String?   @map("emergency_contact_phone")
+  // T-097: 郵便番号→住所自動補完。nullable で非破壊追加。
+  postalCode               String?   @map("postal_code")
+
   // 担当求職者
   candidates    Candidate[]
   taskAssignees TaskAssignee[]
@@ -239,10 +253,149 @@ model Employee {
   // T-073: 実績表の月次目標
   performanceTargets PerformanceTarget[]
 
+  // T-096: 社員詳細管理（FileMaker 相当）
+  bankAccount EmployeeBankAccount?
+  insurance   EmployeeInsurance?
+  salary      EmployeeSalary?
+  equipment   EmployeeEquipment?
+  dependents  EmployeeDependent[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("employees")
+}
+
+// ========================================
+// T-096: 社員詳細管理（FileMaker 相当）
+// 機微情報を含むため、参照・更新は admin 限定 API のみから行うこと。
+// ========================================
+
+// 口座情報（Employee 1:1）
+model EmployeeBankAccount {
+  id         String   @id @default(cuid())
+  employeeId String   @unique @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  bankCode          String? @map("bank_code")
+  bankName          String? @map("bank_name")
+  branchCode        String? @map("branch_code")
+  branchName        String? @map("branch_name")
+  accountType       String? @map("account_type") // "普通" | "当座"
+  accountNumber     String? @map("account_number")
+  accountHolderKana String? @map("account_holder_kana")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employee_bank_accounts")
+}
+
+// 社会保険・雇用保険・扶養（Employee 1:1）
+model EmployeeInsurance {
+  id         String   @id @default(cuid())
+  employeeId String   @unique @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // 雇用保険
+  employmentInsuranceStatus       String?   @map("employment_insurance_status")
+  employmentInsuranceAcquiredDate DateTime? @map("employment_insurance_acquired_date") @db.Date
+  employmentInsuranceLostDate     DateTime? @map("employment_insurance_lost_date") @db.Date
+  employmentInsuranceArea         String?   @map("employment_insurance_area")
+  employmentInsuranceNumber       String?   @map("employment_insurance_number")
+  separationNoticeRequestDate     DateTime? @map("separation_notice_request_date") @db.Date
+
+  // 社会保険
+  socialInsuranceStatus       String?   @map("social_insurance_status")
+  socialInsuranceAcquiredDate DateTime? @map("social_insurance_acquired_date") @db.Date
+  socialInsuranceLostDate     DateTime? @map("social_insurance_lost_date") @db.Date
+  pensionNumber               String?   @map("pension_number")
+  socialInsuranceNote         String?   @map("social_insurance_note") @db.Text
+
+  // 扶養
+  dependentAcquiredDate DateTime? @map("dependent_acquired_date") @db.Date
+  dependentLostDate     DateTime? @map("dependent_lost_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employee_insurances")
+}
+
+// 給与手当（Employee 1:1）。支給総額カラムは持たず表示時に自動計算する。
+model EmployeeSalary {
+  id         String   @id @default(cuid())
+  employeeId String   @unique @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  baseSalary             Int?    @map("base_salary")
+  rankAllowance          Int?    @map("rank_allowance")
+  communicationAllowance Int?    @map("communication_allowance")
+  specialAllowance       Int?    @map("special_allowance")
+  commuteAllowance       Int?    @map("commute_allowance")
+  commuteRoute           String? @map("commute_route")
+  commuteFrom            String? @map("commute_from")
+  commuteTo              String? @map("commute_to")
+  commuteFareOneWay      Int?    @map("commute_fare_one_way")
+  commuteFareRoundTrip   Int?    @map("commute_fare_round_trip")
+  memo                   String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employee_salaries")
+}
+
+// 貸与物（Employee 1:1）。〜PasswordEncrypted は AES-256-GCM 暗号化済み文字列
+// （src/lib/secret-encryption.ts 経由でのみ読み書きする。平文・暗号文を一覧 API で返さない）。
+model EmployeeEquipment {
+  id         String   @id @default(cuid())
+  employeeId String   @unique @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // PC
+  pcLentDate                 DateTime? @map("pc_lent_date") @db.Date
+  pcNumber                   String?   @map("pc_number")
+  pcType                     String?   @map("pc_type")
+  deviceNumber               String?   @map("device_number")
+  pcInitialPasswordEncrypted String?   @map("pc_initial_password_encrypted")
+  lineworksPasswordEncrypted String?   @map("lineworks_password_encrypted")
+
+  // 携帯
+  mobileNumber               String? @map("mobile_number")
+  mobileSerialNumber         String? @map("mobile_serial_number")
+  appleId                    String? @map("apple_id")
+  appleIdPasswordEncrypted   String? @map("apple_id_password_encrypted")
+  googleAccount              String? @map("google_account")
+  googlePasswordEncrypted    String? @map("google_password_encrypted")
+  office365PasswordEncrypted String? @map("office365_password_encrypted")
+  mobileManagementNo         String? @map("mobile_management_no")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employee_equipments")
+}
+
+// 扶養家族（Employee 1:N）
+model EmployeeDependent {
+  id         String   @id @default(cuid())
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  name         String?
+  kana         String?
+  gender       String?
+  relation     String?
+  birthday     DateTime? @db.Date
+  annualIncome Int?      @map("annual_income")
+  sortOrder    Int       @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId])
+  @@map("employee_dependents")
 }
 
 // T-073: 実績表の CA 月次目標。1 CA × 1 月で 1 レコード。
@@ -1380,6 +1533,10 @@ model JobEntry {
   referralFee       Int? @map("referral_fee")
   revenue           Int? @map("revenue")
   grossProfit       Int? @map("gross_profit")
+  // T-099: 仕入れ費（外部コスト・手入力・円・整数・nullable）。
+  cost              Int? @map("cost")
+  // T-100: 求人DB費（手入力・円・整数・nullable）。粗利は保存せず revenue - (jobDbCost ?? 0) - (cost ?? 0) で表示計算する。
+  jobDbCost         Int? @map("job_db_cost")
   // T-088: 課金方式（年収％ or 固定金額）。承諾レコードで選択。null=未設定（既存 revenue ありは固定扱いで後方互換）。
   feeType                 FeeType? @map("fee_type")
   // T-088: 年収％方式のときの理論年収（円・整数）。固定方式 or 未設定なら null。
@@ -1703,6 +1860,20 @@ model InterviewRecord {
   // T-080: 取り込み済み判定・追跡用
   @@index([legacyFmInterviewNo])
   @@map("interview_records")
+}
+
+// 改修③（途中保存）: 面談前フォームの質問下書き。
+// - 求職者ごとに1件（candidateId @unique）・PUT で upsert・フォーム作成成功で DELETE。
+// - InterviewRecord（フォーム作成後に作られる isLatest 管理の正レコード）には相乗りさせない独立テーブル。
+// - 純粋追加（既存データ非破壊）。
+model FormDraft {
+  id            String   @id @default(cuid())
+  candidateId   String   @unique @map("candidate_id")
+  questionsJson Json     @map("questions_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("form_drafts")
 }
 
 model WorkHistory {
@@ -2100,4 +2271,46 @@ model ScoutSequence {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("scout_sequences")
+}
+
+// ========================================
+// T-097: 自動補完用マスタ（銀行・支店・郵便番号）
+// コードはすべてゼロ詰め保持のため String（Int 禁止）。
+// 参照APIは /api/masters/** からログイン確認のみで引く。
+// ========================================
+
+// 金融機関マスタ（コード→銀行名）
+model BankMaster {
+  code      String         @id // 金融機関コード 4桁ゼロ詰め
+  name      String
+  branches  BranchMaster[]
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  @@map("bank_masters")
+}
+
+// 支店マスタ（金融機関コード+支店コード→支店名）
+model BranchMaster {
+  id         String     @id @default(cuid())
+  bankCode   String     @map("bank_code")
+  branchCode String     @map("branch_code") // 支店コード 3桁ゼロ詰め
+  name       String
+  bank       BankMaster @relation(fields: [bankCode], references: [code], onDelete: Cascade)
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@unique([bankCode, branchCode])
+  @@index([bankCode])
+  @@map("branch_masters")
+}
+
+// 郵便番号マスタ（郵便番号→住所。同一番号に複数候補あり）
+model PostalCodeMaster {
+  id         String   @id @default(cuid())
+  postalCode String   @map("postal_code") // 7桁ハイフンなし
+  address    String
+  sortOrder  Int      @default(0) @map("sort_order")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([postalCode])
+  @@map("postal_code_masters")
 }

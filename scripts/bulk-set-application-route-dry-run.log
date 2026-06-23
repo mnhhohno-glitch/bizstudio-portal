@@ -1,0 +1,24 @@
+﻿=== T-064 applicationRoute 一括設定バッチ ===
+モード: DRY RUN（書き込みなし）
+開始時刻: 2026-05-25T04:00:41.650Z
+
+対象件数 (applicationRoute=null): 3833件
+
+mediaSource 別内訳:
+  (null): 3833件
+
+recruiterName 内訳:
+  recruiterName あり: 0件
+  recruiterName なし/空: 3833件
+
+対象レコードの createdAt 範囲:
+  最古: 2026-02-17T12:40:27.657Z
+  最新: 2026-05-16T20:48:26.674Z
+
+mediaSource=null の件数（"マイナビ転職" 設定対象）: 3833件
+
+[DRY RUN] 書き込みはスキップしました。
+
+本実行で見込まれる更新:
+  applicationRoute: 3833件 → "スカウト"
+  mediaSource: 3833件 → "マイナビ転職"

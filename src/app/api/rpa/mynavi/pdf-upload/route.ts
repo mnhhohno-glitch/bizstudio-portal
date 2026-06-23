@@ -10,10 +10,27 @@ import { notifyMynaviDuplicateSkip, notifyMynaviError } from "@/lib/mynavi-rpa/n
 import { generateNextCandidateNumber } from "@/lib/candidate-number";
 import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
-import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+import { autoLinkCandidateToSlot, findMatchingSlot } from "@/lib/scout/auto-link";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+/**
+ * "YYYY-MM-DD"（AI抽出の応募日）を Date(UTC 00:00) に変換する。
+ * JST暦日として保存するため Date.UTC を使う（罠#17: toISOString().slice は使わない）。
+ * 不正・null は null を返す（推測で埋めない）。
+ */
+function parseYmdToDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const m = String(raw).match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return isNaN(dt.getTime()) ? null : dt;
+}
 
 /** CandidateFile.uploadedByUserId 用のシステムユーザーを解決する */
 async function resolveSystemUserId(): Promise<string | null> {
@@ -128,21 +145,24 @@ export async function POST(req: NextRequest) {
       ? recruiterNameFromRequest.trim()
       : (parsed.consultantName?.trim() || null);
 
-    // T-064 Phase A: ScoutMachineMaster で正規化（マッチしたら正規名を使う）
+    // T-064 Phase A: ScoutMachineMaster で正規化（aliases 込みで照合し、正規名・号機番号を取得）
     let recruiterName = recruiterNameRaw;
+    let matchedMachine: { recruiterName: string; machineNumber: number | null } | null = null;
     if (recruiterNameRaw) {
-      const machine = await prisma.scoutMachineMaster.findFirst({
-        where: {
-          OR: [
-            { recruiterName: recruiterNameRaw },
-            // 半角/全角スペース揺れ吸収
-            { recruiterName: recruiterNameRaw.replace(/\s+/g, " ") },
-            { recruiterName: recruiterNameRaw.replace(/\s+/g, "　") },
-          ],
-        },
-      });
-      if (machine) recruiterName = machine.recruiterName;
+      // 半角/全角スペースを全削除して小文字化（auto-link と同じ正規化）
+      const normalizeRc = (s: string) => s.replace(/[\s　]+/g, "").toLowerCase();
+      const target = normalizeRc(recruiterNameRaw);
+      const machines = await prisma.scoutMachineMaster.findMany();
+      matchedMachine =
+        machines.find(
+          (m) =>
+            normalizeRc(m.recruiterName) === target ||
+            m.aliases.some((a) => normalizeRc(a) === target),
+        ) ?? null;
+      if (matchedMachine) recruiterName = matchedMachine.recruiterName;
     }
+    // MAS種別: 1号機(藤本なつみ)系=「開放日」、それ以外(他号機・社員送信・照合不能含む)=「通常」
+    const masType = matchedMachine?.machineNumber === 1 ? "開放日" : "通常";
 
     // ---- 二重処理チェック ----
     const phoneNormalized = normalizePhoneNumber(parsed.phone);
@@ -214,6 +234,8 @@ export async function POST(req: NextRequest) {
         // マイナビRPA新フローは経路・媒体が固定
         applicationRoute: "スカウト",
         mediaSource: "マイナビ転職",
+        // MAS種別（開放日/通常）を担当RCの号機から自動判定してセット
+        masType,
         birthday: parsed.birthDate,
         ...(parsed.desiredJobType1 ? { desiredJobType1: parsed.desiredJobType1 } : {}),
         ...(parsed.desiredJobType2 ? { desiredJobType2: parsed.desiredJobType2 } : {}),
@@ -223,6 +245,31 @@ export async function POST(req: NextRequest) {
         ...(parsed.desiredPrefecture2 ? { desiredPrefecture2: parsed.desiredPrefecture2 } : {}),
         ...(parsed.desiredEmploymentType ? { desiredEmploymentType: parsed.desiredEmploymentType } : {}),
         ...(typeof parsed.desiredSalaryMin === "number" ? { desiredSalaryMin: parsed.desiredSalaryMin } : {}),
+      },
+    });
+
+    // ---- T-091/T-064: 応募日・配信日の自動セット ----
+    // 応募日: AI抽出値があれば採用、無ければ createdAt（取り込み日）をフォールバック
+    const extractedApplicationDate = parseYmdToDate(resumeData?.applicationDate);
+    const effectiveApplicationDate = extractedApplicationDate ?? candidate.createdAt;
+    // 配信日: 担当RC＋応募日で配信枠を引き、見つかればその配信日をセット（無ければ手入力に委ねる）
+    let scoutDeliveryDate: Date | null = null;
+    if (recruiterName?.trim()) {
+      try {
+        const matched = await findMatchingSlot({
+          recruiterName: recruiterName.trim(),
+          applicationDate: effectiveApplicationDate,
+        });
+        scoutDeliveryDate = matched?.deliveryDate ?? null;
+      } catch (e) {
+        console.error("[rpa/mynavi/pdf-upload] findMatchingSlot failed:", e);
+      }
+    }
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        applicationDate: effectiveApplicationDate,
+        ...(scoutDeliveryDate ? { scoutDeliveryDate } : {}),
       },
     });
 
@@ -247,7 +294,7 @@ export async function POST(req: NextRequest) {
         const file = await prisma.candidateFile.create({
           data: {
             candidateId: candidate.id,
-            category: "ORIGINAL",
+            category: "MEETING",
             fileName: pdfFileName,
             fileSize: pdfBuffer.length,
             mimeType: "application/pdf",
@@ -274,7 +321,8 @@ export async function POST(req: NextRequest) {
       const linkRes = await autoLinkCandidateToSlot({
         candidateId: candidate.id,
         recruiterName: recruiterName?.trim() ?? null,
-        applicationDate: candidate.createdAt,
+        // 抽出した応募日（無ければ createdAt）で紐付け。scoutDeliveryDate と同じ枠に揃える
+        applicationDate: effectiveApplicationDate,
       });
       scoutLinkResult = linkRes.reason;
       scoutLinkedSlotId = linkRes.slotId ?? null;

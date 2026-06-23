@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import ScoutNav from "@/components/scout/ScoutNav";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 type Stats = { subBuckets: Record<string, Bucket[]> };
@@ -122,7 +123,7 @@ function Section({
             ) : (
               rows.map((r) => (
                 <tr key={r.key} className="border-t border-[#F3F4F6]">
-                  <td className="px-3 py-1.5">{r.key}</td>
+                  <td className="px-3 py-1.5">{formatRecruiterName(r.key)}</td>
                   <td className="px-3 py-1.5 text-right">{r.d.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{r.o.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">

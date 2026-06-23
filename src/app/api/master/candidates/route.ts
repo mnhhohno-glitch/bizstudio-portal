@@ -4,6 +4,7 @@ import { formatName, validateName } from "@/lib/formatName";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 
 // GET: 求職者一覧取得
 export async function GET(request: NextRequest) {
@@ -86,6 +87,9 @@ const createSchema = z.object({
   applicationRoute: z.string().optional().or(z.literal("")),
   mediaSource: z.string().optional().or(z.literal("")),
   scoutNumber: z.string().optional().nullable(),
+  scoutDeliveryDate: z.string().optional().nullable(),
+  applicationDate: z.string().optional().nullable(),
+  masType: z.string().optional().nullable(),
   desiredJobType1: z.string().optional().nullable(),
   desiredJobType2: z.string().optional().nullable(),
   desiredIndustry1: z.string().optional().nullable(),
@@ -127,6 +131,9 @@ export async function POST(request: NextRequest) {
       applicationRoute,
       mediaSource,
       scoutNumber,
+      scoutDeliveryDate,
+      applicationDate,
+      masType,
       desiredJobType1,
       desiredJobType2,
       desiredIndustry1,
@@ -184,6 +191,10 @@ export async function POST(request: NextRequest) {
         ...(applicationRoute?.trim() ? { applicationRoute: applicationRoute.trim() } : {}),
         ...(mediaSource?.trim() ? { mediaSource: mediaSource.trim() } : {}),
         ...(scoutNumber?.trim() ? { scoutNumber: scoutNumber.trim() } : {}),
+        // 配信日・応募日は JST暦日として正午UTCで保存（罠#17: TZ巻き戻り回避）
+        ...(scoutDeliveryDate?.trim() ? { scoutDeliveryDate: new Date(scoutDeliveryDate.trim() + "T12:00:00.000Z") } : {}),
+        ...(applicationDate?.trim() ? { applicationDate: new Date(applicationDate.trim() + "T12:00:00.000Z") } : {}),
+        ...(masType?.trim() ? { masType: masType.trim() } : {}),
         ...(desiredJobType1?.trim() ? { desiredJobType1: desiredJobType1.trim() } : {}),
         ...(desiredJobType2?.trim() ? { desiredJobType2: desiredJobType2.trim() } : {}),
         ...(desiredIndustry1?.trim() ? { desiredIndustry1: desiredIndustry1.trim() } : {}),
@@ -195,6 +206,21 @@ export async function POST(request: NextRequest) {
         employeeId,
       },
     });
+
+    // T-065: 手動登録でもスカウト配信枠へ自動紐付け（PDF経路と同じ共通関数を使用）
+    // ガード: 経路=スカウト かつ recruiterName あり のみ（紹介等を誤紐付けしない）
+    // 日付: applicationDate ?? createdAt（PDF経路と統一）。失敗しても登録は成功させる。
+    if (candidate.applicationRoute === "スカウト" && recruiterName?.trim()) {
+      try {
+        await autoLinkCandidateToSlot({
+          candidateId: candidate.id,
+          recruiterName: recruiterName.trim(),
+          applicationDate: candidate.applicationDate ?? candidate.createdAt,
+        });
+      } catch (e) {
+        console.error("[master/candidates] autoLinkCandidateToSlot failed:", e);
+      }
+    }
 
     return NextResponse.json(candidate, { status: 201 });
   } catch (error) {

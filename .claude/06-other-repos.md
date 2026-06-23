@@ -51,6 +51,25 @@ candidate-intake `src/constants/flags.ts` と portal `src/constants/candidate-fl
 - create-form は成功時に InterviewRecord（isLatest=true）に `google_form_*` を update
 - 関連: `12-pitfalls.md` 罠ポイント #28（extract_resume の multipart 必須）
 
+### 事前確認モーダルの責務分担（portal が UI、candidate-intake は API のみ）
+
+面談前フォームの「質問事前確認モーダル」UI は **bizstudio-portal にある**。
+candidate-intake はモーダルの .tsx を**持たない**（API 提供のみ）。
+
+- モーダル本体: portal `src/components/candidates/GoogleFormCreatorModal.tsx`
+  （`CandidateDetailPage.tsx` で開閉。ステップ: idle → selectCompany → confirmQuestions → completed）
+- candidate-intake 側は次の API を提供するだけ:
+  - `generate_form`（questionsJson を返す。固定カテゴリは決定論的展開＝Gemini なし、その他系のみ動的生成）
+  - `regenerate_questions`（previousQuestionsJson + instruction + targets で部分再生成）
+  - `create_form_v2`（questionsJson を受け取り GAS V2 で実フォーム作成）
+- **罠**: candidate-intake 自体の画面 `src/app/records/[candidateId]/page.tsx` は**旧 V1 フロー**
+  （`hearing-question-text` → `create-google-form`、カテゴリ 4 種・モーダルなし）で、portal のモーダルとは**別物**。
+  モーダル改修を candidate-intake で探さないこと。
+- 改修履歴（2026/6/18, portal staging）:
+  - 全カテゴリで事前確認モーダルを表示（従来は「その他」系のみ。それ以外は即フォーム化していた）
+  - 確認画面でチェックした質問を一括削除
+  - 途中保存（`FormDraft` テーブル + `google-form/draft` GET/PUT/DELETE。求職者ごと 1 件、フォーム作成成功で自動削除）
+
 ### generate_form API の per-company 対応（T-035）
 
 候補者単位の単一 `achievementCategory` だけでなく、会社別 `companyCategoryMap` を受け取って per-company にテンプレ展開できる。
@@ -123,7 +142,7 @@ OfferBox スカウト文章生成。Railway。master 直 push。
 
 日報AIアシスト用スキル。portal リポジトリ内に新設（Claude.ai プロジェクトには無い・portal専用）。
 - パス: `src/skills/daily-report-advisor/SKILL.md`（references なし）。ローダ `src/lib/load-daily-report-skill.ts:getDailyReportSkill()`（`getJobMatchingSkill` 同型・モジュールキャッシュ）。
-- 利用: `POST /api/daily-report/assist`（Claude `claude-sonnet-4-20250514`）の system に **job-matching-advisor skill と併せて** 注入（cache_control: ephemeral）。
+- 利用: `POST /api/daily-report/assist`（Claude `claude-sonnet-4-6`）の system に **job-matching-advisor skill と併せて** 注入（cache_control: ephemeral）。
 - 役割: CAの所感（■1〜■6）＋当日集計を受け、6項目構造を保った整理本文＋上司視点アドバイス。数字は集計値のみ（捏造禁止）。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%。
 
 ## job-matching-skill

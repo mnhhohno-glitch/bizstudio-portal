@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 
 export async function POST(
   _req: Request,
@@ -38,7 +39,7 @@ export async function POST(
 
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: CLAUDE_MODEL_DEFAULT,
       max_tokens: 1024,
       system: `以下のチャット履歴から、RPAエラーの情報を抽出してJSON形式で返してください。
 号機は1〜7の数字、フロー名は「00.スカウトメール送信」（1〜6号機）または「01.応募者一次返信・情報取り込み」（7号機）です。

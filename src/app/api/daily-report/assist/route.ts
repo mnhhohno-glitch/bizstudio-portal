@@ -1,5 +1,5 @@
 // T-069③：日報AIアシスト。CAの所感（■1〜■6）＋当日集計を受け、6項目構造を保った整理本文＋上司視点アドバイスを返す。
-// - Claude（claude-sonnet-4-20250514・既存日報/スケジュールと同じ）。Gemini は使わない。
+// - Claude（claude-sonnet-4-6・既存日報/スケジュールと同じ）。Gemini は使わない。
 // - 日報skill＋job-matching-advisor skill を system に注入（cache_control: ephemeral）。
 // - 数字は集計値のみ渡す（AIに計算・捏造させない）。会話は DailyReportChat に保存。
 // - 旧 /api/daily-report/chat（aiBody 用ドロワー）は触らない。別ルート。
@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { anthropic } from "@/lib/claude";
+import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { getDailyReportSkill } from "@/lib/load-daily-report-skill";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
@@ -105,7 +105,7 @@ export async function POST(req: Request) {
   let assistantText = "";
   try {
     const res = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: CLAUDE_MODEL_DEFAULT,
       max_tokens: 4096,
       system: systemBlocks,
       messages,
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
   if (!parsed) {
     try {
       const retry = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: CLAUDE_MODEL_DEFAULT,
         max_tokens: 4096,
         system: systemBlocks,
         messages: [

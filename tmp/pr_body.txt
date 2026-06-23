@@ -1,0 +1,24 @@
+## 根本原因
+本番DB の `GoogleCalendarConnection` を実検証したところ、トークン・スコープは正常だが Google Tasks API 呼び出しが 403 で失敗していた。レスポンスは：
+
+> Google Tasks API has not been used in project 1057460139974 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=1057460139974
+
+つまり **Google Cloud Console で Google Tasks API が有効化されていない** のが根本原因。OAuth スコープ拡張・再認証・コード実装はすべて正しく動作しているが、Google プロジェクト側で Tasks API が disabled。
+
+## このPRで修正する内容
+本質的な復旧は将幸さんが Cloud Console で API 有効化する必要がある（コード変更だけでは直らない）。ただし現状コードでは 403 + "has not been used" を generic error として握り潰し、ユーザー側に分かりやすいエラーが出ない。そこを改善：
+
+- `googleTasks.ts`: エラー分類を `scope_insufficient` / `api_disabled` / `error` の3種に拡張
+- `sync-task` route: `api_disabled` を 403 + 詳細メッセージで返却
+- `EntryBoard.tsx`: `api_disabled` 受信時にトーストで Cloud Console での有効化を案内
+
+これにより、次に同様の設定不備が起きた際にユーザーが具体的に何をすべきか画面で分かるようになる。
+
+## 将幸さんが追加でやる作業
+1. https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=1057460139974 を開く
+2. 「有効にする」ボタン押下
+3. 数分待ってから再度エントリー管理で面接時刻を保存して動作確認
+
+**再認証は不要**。既存の accessToken は既に `tasks` スコープを持っており、API 有効化されれば即動作する。
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

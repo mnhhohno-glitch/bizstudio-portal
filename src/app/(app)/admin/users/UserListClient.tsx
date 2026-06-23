@@ -2,9 +2,12 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Table, Th, Td, TableWrap } from "@/components/ui/Table";
 import ManusKeyButton from "./ManusKeyButton";
 import UserStatusButton from "./UserStatusButton";
+
+type JobCategory = "CA" | "MARKETING" | "OFFICE_AND_MGMT" | null;
 
 type UserData = {
   id: string;
@@ -18,6 +21,8 @@ type UserData = {
   manusLast4: string | null;
   manusSetAt: string | null;
   isMynaviAssignee: boolean;
+  hasEmployee: boolean;
+  jobCategory: JobCategory;
 };
 
 type EditForm = {
@@ -26,6 +31,13 @@ type EditForm = {
   employeeNumber: string;
   role: string;
   lineworksId: string;
+  jobCategory: "" | "CA" | "MARKETING" | "OFFICE_AND_MGMT";
+};
+
+const JOB_CATEGORY_LABEL: Record<Exclude<JobCategory, null>, string> = {
+  CA: "CA",
+  MARKETING: "マーケ",
+  OFFICE_AND_MGMT: "オフィス/管理",
 };
 
 export default function UserListClient({ users }: { users: UserData[] }) {
@@ -37,7 +49,8 @@ export default function UserListClient({ users }: { users: UserData[] }) {
 
   // Edit modal
   const [editUserId, setEditUserId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<EditForm>({ name: "", email: "", employeeNumber: "", role: "member", lineworksId: "" });
+  const [editForm, setEditForm] = useState<EditForm>({ name: "", email: "", employeeNumber: "", role: "member", lineworksId: "", jobCategory: "" });
+  const [editTargetHasEmployee, setEditTargetHasEmployee] = useState<boolean>(true);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -86,7 +99,9 @@ export default function UserListClient({ users }: { users: UserData[] }) {
       employeeNumber: u.employeeNumber != null ? String(u.employeeNumber) : "",
       role: u.role,
       lineworksId: u.lineworksId ?? "",
+      jobCategory: u.jobCategory ?? "",
     });
+    setEditTargetHasEmployee(u.hasEmployee);
     setEditError(null);
   };
 
@@ -104,6 +119,9 @@ export default function UserListClient({ users }: { users: UserData[] }) {
           employeeNumber: editForm.employeeNumber || null,
           role: editForm.role,
           lineworksId: editForm.lineworksId || null,
+          ...(editTargetHasEmployee
+            ? { jobCategory: editForm.jobCategory === "" ? null : editForm.jobCategory }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -160,6 +178,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
               <Th>名前</Th>
               <Th>メール</Th>
               <Th>権限</Th>
+              <Th>職種</Th>
               <Th>LINE WORKS ID</Th>
               <Th>Manus連携</Th>
               <Th>マイナビ担当</Th>
@@ -178,6 +197,23 @@ export default function UserListClient({ users }: { users: UserData[] }) {
                 <Td>{u.name}</Td>
                 <Td><span className="font-mono">{u.email}</span></Td>
                 <Td>{u.role}</Td>
+                <Td>
+                  {u.jobCategory ? (
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] ${
+                        u.jobCategory === "CA"
+                          ? "border-[#2563EB]/30 bg-[#2563EB]/10 text-[#2563EB]"
+                          : "border-[#6B7280]/30 bg-[#6B7280]/10 text-[#6B7280]"
+                      }`}
+                    >
+                      {JOB_CATEGORY_LABEL[u.jobCategory]}
+                    </span>
+                  ) : (
+                    <span className="text-[#6B7280]/60 text-xs">
+                      {u.hasEmployee ? "未設定" : "—"}
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   <span className="font-mono text-xs">
                     {u.lineworksId || <span className="text-[#6B7280]/60">未設定</span>}
@@ -223,6 +259,12 @@ export default function UserListClient({ users }: { users: UserData[] }) {
                 </Td>
                 <Td>
                   <div className="flex gap-2">
+                    <Link
+                      href={`/admin/users/${u.id}`}
+                      className="rounded bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      詳細
+                    </Link>
                     <button
                       onClick={() => openEdit(u)}
                       className="rounded bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
@@ -248,7 +290,7 @@ export default function UserListClient({ users }: { users: UserData[] }) {
             {filtered.length === 0 && (
               <tr>
                 <Td><span className="text-[#374151]/60">社員がいません</span></Td>
-                <Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td>
+                <Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td><Td></Td>
               </tr>
             )}
           </tbody>
@@ -306,6 +348,25 @@ export default function UserListClient({ users }: { users: UserData[] }) {
                   <option value="member">member</option>
                   <option value="admin">admin</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">職種（CA区分）</label>
+                {editTargetHasEmployee ? (
+                  <select
+                    value={editForm.jobCategory}
+                    onChange={(e) => setEditForm({ ...editForm, jobCategory: e.target.value as EditForm["jobCategory"] })}
+                    className="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">未設定（非CA）</option>
+                    <option value="CA">CA</option>
+                    <option value="MARKETING">マーケ</option>
+                    <option value="OFFICE_AND_MGMT">オフィス/管理</option>
+                  </select>
+                ) : (
+                  <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    この社員には Employee レコードが未登録のため、職種を設定できません。
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">LINE WORKS ID</label>

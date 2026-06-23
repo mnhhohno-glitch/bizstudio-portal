@@ -70,13 +70,17 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
-    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
+    { key: "cost", label: "費用", width: 130, sortKey: "cost" },
+    { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "入社済": [
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
     { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
     // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
-    { key: "revenue", label: "粗利金額", width: 240, sortKey: "revenue" },
+    { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
+    { key: "cost", label: "費用", width: 130, sortKey: "cost" },
+    { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "全件": [],
 };
@@ -266,6 +270,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
     case "acceptanceDate": return entry.acceptanceDate;
     case "joinDate": return entry.joinDate;
     case "revenue": return entry.revenue == null ? null : String(entry.revenue).padStart(15, "0");
+    case "cost": return entry.cost == null ? null : String(entry.cost).padStart(15, "0");
     default: return null;
   }
 }
@@ -514,6 +519,51 @@ function AptitudeCell({ value, entryId, onUpdate }: {
   );
 }
 
+// T-102: 桁区切りカンマ付き金額入力（円・整数）。表示はカンマ付き、保存はカンマ除去の整数。
+//  - 編集中は素の入力を保持し、onBlur で整形＋コミット（カーソル破綻を避けるため live 整形はしない）。
+//  - 外部 value 変更（保存反映・再取得）には useEffect で追従。
+//  - 全角数字→半角、数字以外（カンマ等）除去。空欄は null。マイナスは想定外（0以上）のため符号は無視。
+function CommaNumberInput({ value, onCommit, placeholder, className, title }: {
+  value: number | null;
+  onCommit: (n: number | null) => void;
+  placeholder?: string;
+  className?: string;
+  title?: string;
+}) {
+  const fmt = (n: number | null) => (n == null ? "" : n.toLocaleString("ja-JP"));
+  const parse = (s: string): number | null => {
+    const half = s.replace(/[０-９]/g, (d) => String("０１２３４５６７８９".indexOf(d)));
+    const digits = half.replace(/[^\d]/g, "");
+    return digits ? parseInt(digits, 10) : null;
+  };
+  const [text, setText] = useState<string>(fmt(value));
+  const lastValueRef = useRef<number | null>(value);
+  useEffect(() => {
+    if (value !== lastValueRef.current) {
+      lastValueRef.current = value;
+      setText(fmt(value));
+    }
+  }, [value]);
+  return (
+    <input
+      type="text" inputMode="numeric"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        const n = parse(text);
+        setText(fmt(n)); // 整形して即時にカンマ表示へ
+        if (n !== value) {
+          lastValueRef.current = n;
+          onCommit(n);
+        }
+      }}
+      placeholder={placeholder}
+      className={className}
+      title={title}
+    />
+  );
+}
+
 // T-088: 粗利セル（T-087 の InlineRevenueCell を統合・拡張）。
 // 承諾 or 入社済レコードで「課金方式（年収％/固定）」と金額を入力。
 // 確定 revenue はサーバー側で計算（送信は feeType + 必要な入力のみ。表示は entry.revenue を信用）。
@@ -534,7 +584,6 @@ function RevenueCell({ entry, onUpdate }: {
   if (!editable) {
     return <span className="text-[10px] text-[#C0C4CC]">—</span>;
   }
-  const fmtYen = (v: number | null) => (v == null ? "—" : `¥${v.toLocaleString("ja-JP")}`);
   const handleFeeType = (newType: "ANNUAL_RATE" | "FIXED") => {
     if (newType === uiFeeType && feeType != null) return;
     // 方式切替時は revenue サーバー再計算。年収％へ切替時は値を保持、固定へ切替時は revenue を維持。
@@ -551,9 +600,7 @@ function RevenueCell({ entry, onUpdate }: {
       });
     }
   };
-  const handleIncomeBlur = (v: string) => {
-    const n = v.replace(/[^\d]/g, "");
-    const num = n ? parseInt(n, 10) : null;
+  const handleIncomeCommit = (num: number | null) => {
     if (num === inc) return;
     void onUpdate(entry.id, { feeType: "ANNUAL_RATE", theoreticalAnnualIncome: num, feeRatePercent: rate });
   };
@@ -563,59 +610,118 @@ function RevenueCell({ entry, onUpdate }: {
     if (num === rate) return;
     void onUpdate(entry.id, { feeType: "ANNUAL_RATE", theoreticalAnnualIncome: inc, feeRatePercent: num });
   };
-  const handleRevenueBlur = (v: string) => {
-    const n = v.replace(/[^\d]/g, "");
-    const num = n ? parseInt(n, 10) : null;
+  const handleRevenueCommit = (num: number | null) => {
     if (num === rev) return;
     void onUpdate(entry.id, { feeType: "FIXED", revenue: num });
   };
 
+  // T-101: 売上セルをコンパクト2段化。売上(revenue)の金額結果は非表示（金額表示は粗利列のみ）。
+  // 入力欄（理論年収・率%・固定金額）は維持＝revenue のサーバー確定計算・保存はこれまで通り。
+  const feeSelect = (
+    <select
+      value={uiFeeType}
+      onChange={(e) => handleFeeType(e.target.value as "ANNUAL_RATE" | "FIXED")}
+      className="text-[10px] border border-gray-200 rounded px-0.5 py-0.5 bg-white"
+    >
+      <option value="ANNUAL_RATE">年収％</option>
+      <option value="FIXED">固定</option>
+    </select>
+  );
   return (
-    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <select
-        value={uiFeeType}
-        onChange={(e) => handleFeeType(e.target.value as "ANNUAL_RATE" | "FIXED")}
-        className="text-[10px] border border-gray-200 rounded px-0.5 py-0.5 bg-white"
-      >
-        <option value="ANNUAL_RATE">年収％</option>
-        <option value="FIXED">固定</option>
-      </select>
+    <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
       {uiFeeType === "ANNUAL_RATE" ? (
         <>
-          <input
-            type="text" inputMode="numeric"
-            defaultValue={inc != null ? inc.toLocaleString("ja-JP") : ""}
-            onBlur={(e) => handleIncomeBlur(e.target.value)}
-            placeholder="年収"
-            className="w-16 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
-            title="理論年収（円）"
-          />
-          <span className="text-[10px] text-[#9CA3AF]">×</span>
-          <input
-            type="number" step="0.01" min="0" max="100"
-            defaultValue={rate != null ? String(rate) : ""}
-            onBlur={(e) => handleRateBlur(e.target.value)}
-            placeholder="%"
-            className="w-10 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
-            title="手数料%"
-          />
-          <span className="text-[10px] text-[#9CA3AF]">=</span>
-          <span className="text-[10px] tabular-nums font-medium text-[#2563EB] min-w-[60px] text-right" title="サーバー側で確定計算した粗利（revenue）">{fmtYen(rev)}</span>
+          {/* 1段目: 年収%▼ + 率% */}
+          <div className="flex items-center gap-1">
+            {feeSelect}
+            <input
+              type="number" step="0.01" min="0" max="100"
+              defaultValue={rate != null ? String(rate) : ""}
+              onBlur={(e) => handleRateBlur(e.target.value)}
+              placeholder="%"
+              className="w-12 text-[10px] border border-gray-200 rounded px-0.5 py-0.5 text-right tabular-nums"
+              title="手数料%"
+            />
+            <span className="text-[10px] text-[#9CA3AF]">%</span>
+          </div>
+          {/* 2段目: 理論年収 */}
+          <div className="flex items-center gap-1">
+            <CommaNumberInput
+              value={inc}
+              onCommit={handleIncomeCommit}
+              placeholder="理論年収"
+              className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+              title="理論年収（円）"
+            />
+            <span className="text-[10px] text-[#9CA3AF]">円</span>
+          </div>
         </>
       ) : (
-        <>
-          <input
-            type="text" inputMode="numeric"
-            defaultValue={rev != null ? rev.toLocaleString("ja-JP") : ""}
-            onBlur={(e) => handleRevenueBlur(e.target.value)}
-            placeholder="粗利金額"
-            className="flex-1 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+        <div className="flex items-center gap-1">
+          {feeSelect}
+          <CommaNumberInput
+            value={rev}
+            onCommit={handleRevenueCommit}
+            placeholder="金額"
+            className="w-24 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
             title="固定金額（円）"
           />
           <span className="text-[10px] text-[#9CA3AF]">円</span>
-        </>
+        </div>
       )}
     </div>
+  );
+}
+
+// T-099/T-100: 費用セル（上下2段・手入力・数値）。承諾 or 入社済レコードのみ編集可。
+//   上段＝求人DB費（jobDbCost・T-100）／下段＝仕入れ費（cost・T-099）。各段を個別に PATCH 保存。
+function CostCell({ entry, onUpdate }: {
+  entry: Entry;
+  onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+}) {
+  const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
+  const cost = entry.cost ?? null;
+  const jobDbCost = entry.jobDbCost ?? null;
+  if (!editable) {
+    return <span className="text-[10px] text-[#C0C4CC]">—</span>;
+  }
+  const makeCommit = (field: "cost" | "jobDbCost", current: number | null) => (num: number | null) => {
+    if (num === current) return;
+    void onUpdate(entry.id, { [field]: num });
+  };
+  const row = (label: string, field: "cost" | "jobDbCost", value: number | null, placeholder: string) => (
+    <div className="flex items-center gap-1">
+      <span className="text-[9px] text-[#9CA3AF] w-12 shrink-0">{label}</span>
+      <CommaNumberInput
+        value={value}
+        onCommit={makeCommit(field, value)}
+        placeholder={placeholder}
+        className="w-20 text-[10px] border border-gray-200 rounded px-1 py-0.5 text-right tabular-nums"
+        title={`${label}（円・手入力）`}
+      />
+      <span className="text-[10px] text-[#9CA3AF]">円</span>
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {row("求人DB費", "jobDbCost", jobDbCost, "求人DB費")}
+      {row("仕入れ費", "cost", cost, "仕入れ費")}
+    </div>
+  );
+}
+
+// T-099/T-100: 粗利セル（表示のみ）。粗利 = revenue - (jobDbCost ?? 0) - (cost ?? 0)。revenue 未確定（null）なら「—」。
+function GrossProfitCell({ entry }: { entry: Entry }) {
+  const editable = entry.entryFlagDetail === "承諾" || entry.entryFlag === "入社済";
+  const rev = entry.revenue ?? null;
+  if (!editable || rev == null) {
+    return <span className="text-[10px] text-[#C0C4CC]">—</span>;
+  }
+  const gross = rev - (entry.jobDbCost ?? 0) - (entry.cost ?? 0);
+  return (
+    <span className="text-[11px] tabular-nums font-medium text-[#16A34A]" title="粗利 = 売上 − 求人DB費 − 仕入れ費">
+      ¥{gross.toLocaleString("ja-JP")}
+    </span>
   );
 }
 
@@ -954,6 +1060,10 @@ export default function EntryTable({
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.joinDate} entryId={entry.id} field="joinDate" onUpdate={onFieldUpdate} /></td>;
       case "revenue":
         return <td key={col.key} className="px-1 py-0.5 text-[11px]"><RevenueCell entry={entry} onUpdate={onFieldUpdate} /></td>;
+      case "cost":
+        return <td key={col.key} className="px-1 py-0.5 text-[11px]"><CostCell entry={entry} onUpdate={onFieldUpdate} /></td>;
+      case "grossProfit":
+        return <td key={col.key} className="px-1 py-0.5 text-right text-[11px]"><GrossProfitCell entry={entry} /></td>;
       case "memo":
         return (
           <td key={col.key} className="px-2 py-0.5 text-center" onClick={(e) => e.stopPropagation()}>

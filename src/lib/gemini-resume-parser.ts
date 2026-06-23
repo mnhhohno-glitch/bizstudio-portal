@@ -25,6 +25,7 @@ export type GeminiResumeResult = {
   consultantName: string | null;
   applicationRoute: string | null;
   mediaSource: string | null;
+  applicationDate: string | null;
 };
 
 const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）のPDFから抽出したテキストです。
@@ -53,6 +54,7 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 - consultantName: コンサルタント名（スカウト配信者の氏名、例「藤本なつみ」）
 - applicationRoute: 応募経路（マイナビ転職スカウト経由なら「スカウト」、それ以外は推定可能なら値、不明なら null）
 - mediaSource: 媒体名（PDFが「マイナビ転職」のWEB履歴書なら「マイナビ転職」、それ以外は推定可能なら値、不明なら null）
+- applicationDate: 応募日（PDFの「応募内容」枠に記載された応募日時から日付部分を抽出し YYYY-MM-DD 形式で返す。時刻は不要。記載が見つからなければ null。推測で埋めない）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -153,5 +155,6 @@ export async function parseResumeWithGemini(
     consultantName: (parsed.consultantName as string) || null,
     applicationRoute: (parsed.applicationRoute as string) || null,
     mediaSource: (parsed.mediaSource as string) || null,
+    applicationDate: (parsed.applicationDate as string) || null,
   };
 }

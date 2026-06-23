@@ -195,7 +195,6 @@ export default function TaskNewPage() {
   const [naiteiRegion, setNaiteiRegion] = useState("");
   const [naiteiPrefecture, setNaiteiPrefecture] = useState("");
   const [naiteiEmploymentType, setNaiteiEmploymentType] = useState("");
-  const [naiteiCandidateSearch, setNaiteiCandidateSearch] = useState("");
 
   // step 2 - カテゴリ固有: テンプレート添付ファイル
   const [templateAttachFiles, setTemplateAttachFiles] = useState<File[]>([]);
@@ -602,6 +601,8 @@ export default function TaskNewPage() {
       case 2: {
         const cat = is3pointSet ? active3ptCategory : selectedCategory;
         if (!cat) return false;
+        // 内定承諾報告: 対象者（求職者）必須。未選択では先へ進めない。
+        if (isNaitei && !candidateId) return false;
         // 履歴書作成: 志望動機の大中小必須
         if (isRirekisho) {
           if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
@@ -783,6 +784,12 @@ export default function TaskNewPage() {
   /* ----- submit ----- */
   const handleSubmit = async () => {
     if (submitting) return;
+    // 内定承諾報告は対象者（求職者）を必須化。氏名の手入力は廃止したため求職者選択が無いと作成不可。
+    if (isNaitei && !candidateId) {
+      alert("対象者（求職者）を選択してください。内定承諾報告では「求職者選択」での指定が必要です。");
+      setStep(0);
+      return;
+    }
     setSubmitting(true);
     try {
       // 追加のfieldValues
@@ -816,8 +823,10 @@ export default function TaskNewPage() {
 
       // 内定承諾報告: カスタムフィールドをセット
       if (isNaitei && selectedCategory) {
+        // 対象者フルネームは Step0 で選択した求職者の氏名から自動導出（手入力欄は廃止）
         const nameField = selectedCategory.fields.find((f) => f.label === "対象者フルネーム");
-        if (nameField && naiteiCandidateSearch) extraFieldValues.push({ fieldId: nameField.id, value: naiteiCandidateSearch });
+        const targetName = selectedCandidate?.name ?? "";
+        if (nameField && targetName) extraFieldValues.push({ fieldId: nameField.id, value: targetName });
         const jobField = selectedCategory.fields.find((f) => f.label === "内定した職種");
         if (jobField && selectedMajorName) extraFieldValues.push({ fieldId: jobField.id, value: [selectedMajorName, selectedMiddleName, selectedMinorName].filter(Boolean).join(" > ") });
         const indField = selectedCategory.fields.find((f) => f.label === "内定した業種");
@@ -1720,28 +1729,26 @@ export default function TaskNewPage() {
                   {/* ===== 内定承諾報告: カスタムフィールド ===== */}
                   {isNaitei && (
                     <>
-                      {/* 対象者（候補者検索） */}
+                      {/* 対象者（Step0「求職者選択」から自動導出。手入力は廃止） */}
                       <div>
                         <label className="mb-1 block text-[13px] font-medium text-[#374151]">
                           対象者<span className="ml-1 text-red-500">*</span>
                         </label>
-                        <input
-                          type="text"
-                          value={naiteiCandidateSearch}
-                          onChange={(e) => {
-                            setNaiteiCandidateSearch(e.target.value);
-                            const fld = selectedCategory?.fields.find((f) => f.label === "対象者フルネーム");
-                            if (fld) setFieldValue(fld.id, e.target.value);
-                          }}
-                          placeholder="候補者名を入力"
-                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                          list="naitei-candidate-list"
-                        />
-                        <datalist id="naitei-candidate-list">
-                          {candidates.filter((c) => naiteiCandidateSearch && c.name.includes(naiteiCandidateSearch)).slice(0, 10).map((c) => (
-                            <option key={c.id} value={c.name}>{c.name}（{c.candidateNo}）</option>
-                          ))}
-                        </datalist>
+                        {selectedCandidate ? (
+                          <div className="flex items-center gap-2 rounded-[6px] border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2 text-[14px] text-[#374151]">
+                            <span>👤</span>
+                            <span className="font-medium">{selectedCandidate.name}</span>
+                            <span className="text-[12px] text-[#9CA3AF]">{selectedCandidate.candidateNo}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2 rounded-[6px] border border-red-300 bg-red-50 px-3 py-2 text-[13px] text-red-600">
+                            <span>求職者が未選択です。最初の「求職者選択」で対象者を指定してください。</span>
+                            <button type="button" onClick={() => setStep(0)} className="shrink-0 rounded-[6px] bg-white px-2 py-1 text-[12px] font-medium text-[#2563EB] border border-[#2563EB] hover:bg-[#EEF2FF]">
+                              求職者を選択
+                            </button>
+                          </div>
+                        )}
+                        <p className="mt-1 text-[12px] text-[#9CA3AF]">対象者は「求職者選択」で選んだ求職者から自動設定されます。</p>
                       </div>
 
                       {/* 内定した職種（3階層） */}

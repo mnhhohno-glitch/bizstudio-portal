@@ -165,7 +165,7 @@ model InterviewMemo {
   - 通知先＝`LINEWORKS_DAILYREPORT_BOT_ID`(=12416787)/`LINEWORKS_DAILYREPORT_CHANNEL_ID`（日報報告グループ）。⚠️ **本番サービスのみ設定**（staging には未設定＝staging では通知スキップ）。
   - メッセージ＝当日サマリ（面談[初回/既存]・求人紹介BM数・エントリー・選定率[BM/D]・スケジュール消化・**コメント**[統合本文 `reportBody`]）＋**本番直リンク `?date=`**。直リンクは `PORTAL_PUBLIC_URL` or 本番ドメイン定数で固定（`PORTAL_BASE_URL` はサービス毎に staging/本番が異なるため使わない＝staging から送っても本番に飛ばす）。
 - **コメントは統合1本文＋確定制（T-069②後）**：`scheduleNote`/`metricsReflection`（①の2分割）→ **`reportBody`（統合・定型■1〜■6）** に集約（migration `20260608120000_t069_report_body_confirm`、`report_body TEXT` + `comment_confirmed_at TIMESTAMP` を nullable 追加・冪等）。**確定（`commentConfirmedAt`）でないと提出不可**。本文編集で未確定に戻す。入力UIは右アコーディオン＋中央ポップアップ＋自動保存が同一 `reportBody`（CA×日付1レコード）を更新。
-- **日報AIアシスト（T-069③）**：`POST /api/daily-report/assist`（**Claude `claude-sonnet-4-20250514`**・`src/lib/claude.ts`・`ANTHROPIC_API_KEY`。Gemini不使用）。**日報skill `src/skills/daily-report-advisor/SKILL.md`（`getDailyReportSkill`）＋ `job-matching-advisor` skill** を system 注入（cache_control: ephemeral）。当日集計（`computeWeeklyMatrix`＋`computeJobSearchDay`＋支援中ACTIVE数）を**数字として渡す＝AIに計算させない（捏造防止）**。役割＝**■1〜■6 構造保持の整理本文（rewrittenBody）＋上司視点アドバイス（advice）**。JSON `{message, rewrittenBody, advice}`。会話は `DailyReportChat` 保存。旧 `/api/daily-report/chat`（aiBody用ドロワー）は別ルート・不変。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%（skill 内）。
+- **日報AIアシスト（T-069③）**：`POST /api/daily-report/assist`（**Claude `claude-sonnet-4-6`**・`src/lib/claude.ts`・`ANTHROPIC_API_KEY`。Gemini不使用）。**日報skill `src/skills/daily-report-advisor/SKILL.md`（`getDailyReportSkill`）＋ `job-matching-advisor` skill** を system 注入（cache_control: ephemeral）。当日集計（`computeWeeklyMatrix`＋`computeJobSearchDay`＋支援中ACTIVE数）を**数字として渡す＝AIに計算させない（捏造防止）**。役割＝**■1〜■6 構造保持の整理本文（rewrittenBody）＋上司視点アドバイス（advice）**。JSON `{message, rewrittenBody, advice}`。会話は `DailyReportChat` 保存。旧 `/api/daily-report/chat`（aiBody用ドロワー）は別ルート・不変。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%（skill 内）。
 - **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、ABCD＝`aiMatchRating` 構成比、**選定率＝(A+B+C)÷合計BM**（D・未評価除外。D は「見る目」の指標として母数に含める）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
 
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
@@ -202,7 +202,7 @@ model InterviewMemo {
 
 - AI には `metrics.ts` で算出済みの**集計値**と予実サマリのみを渡す（仕様 #10 厳守）。
 - 生の `InterviewRecord` / `JobEntry` / `Candidate` を AI に流してはいけない（数字の整合・PII 双方の事故源）。
-- model は `claude-sonnet-4-20250514` 固定（schedule/chat と揃える）。
+- model は `claude-sonnet-4-6` 固定（schedule/chat と揃える）。
 
 ### 関連ファイル
 
@@ -339,3 +339,48 @@ model InterviewMemo {
 
 ### リグレッション
 - T-071 集計（`computeCaMetricsForRange`）は一切変更せず参考値で呼ぶだけ。年(1/1-今日) entry=428・面談52/56 が不変（内定/承諾は live データ増加で変動するが定義不変）。
+
+### 社員詳細管理（/admin/users[id]・T-096、2026-06-10）
+
+FileMaker「業務管理ファイル（社員管理）」を廃止しportalに一本化。社員詳細を6タブで管理。
+
+- Employee 追加カラム（全nullable）: furigana / birthday(@db.Date) / gender / hire_date / resign_date / address / phone / emergency_contact_name / emergency_contact_relation / emergency_contact_phone
+- 新規テーブル（Employee 1:1）: employee_bank_accounts（口座）/ employee_insurances（雇用保険・社会保険・扶養日付）/ employee_salaries（給与手当・支給総額カラムなし＝表示時計算）/ employee_equipments（貸与物・PW5種は *_encrypted に AES-256-GCM 暗号文）
+- 新規テーブル（1:N）: employee_dependents（扶養家族・sortOrder付き・Employee直紐付け）
+- API（全て admin 限定・route冒頭で getSessionUser + role !== "admin" チェック）:
+  - POST /api/admin/employees — Employee作成＋Userリンク（同番号の未リンクEmployeeがあれば再利用）
+  - GET/PATCH /api/admin/employees/[employeeId] — 詳細取得（PWは有無booleanのみ返す）/ {section, data} 形式のタブ単位部分更新（basic|bank|insurance|salary|equipment、1:1はupsert）
+  - GET .../secrets?field= — PW1項目を復号して返す（ホワイトリスト: pcInitialPassword/lineworksPassword/appleIdPassword/googlePassword/office365Password）
+  - POST/PATCH/DELETE .../dependents — 扶養家族CRUD（id はbody渡し）
+- 暗号化: src/lib/secret-encryption.ts（encryptSecret/decryptSecret）。実体は src/lib/encryption.ts の AES-256-GCM（無変更）、鍵 MANUS_KEY_ENCRYPTION_SECRET（本番・staging両方設定済み）
+- 有休は新規モデルなし: Employee.paidLeave + LeaveRequest を統合表示。残日数編集は既存 PATCH /api/attendance/admin/employees を呼ぶ（approval.ts 無変更）
+- 入力整形の単一ソース: src/lib/employee-detail.ts（日付は "YYYY-MM-DD"→UTC midnight、罠#17準拠）
+- 在籍状態の表示: active=在籍 / disabled=退社（詳細ページは Employee.status、一覧は User.status のまま。退職日カラムは持たず resign_date を別途追加）
+- 年齢・在籍年数・支給総額はDB保存せず表示時計算
+- 既存 PATCH /api/admin/users/[id] は無変更（名前・メール・権限・職種の既存モーダルの責務のまま）
+- FileMaker既存データの移行はしない（社員ごとに手入力運用）
+
+### 自動補完マスタ（T-097, 2026-06-11）
+
+社員詳細の入力補助。マスタは画面に持たず、コード入力時にAPIで引く。
+
+- BankMaster: code(4桁String PK) → name。BranchMaster: (bankCode, branchCode)UNIQUE → name、bankCode FK。PostalCodeMaster: postalCode(7桁String @index) → address（同一郵便番号に複数行あり）
+- Employee.postalCode(nullable) 追加
+- 検索API（getSessionUser でログイン確認のみ・admin限定にしない。コードは数字以外除去＋ゼロ詰め正規化してから検索）:
+  - GET /api/masters/banks/[code] → { code, name }
+  - GET /api/masters/banks/[code]/branches/[branchCode] → { name }
+  - GET /api/masters/postal-code/[code] → { matches: [{ address }] }（複数候補）
+- 大量投入: scripts/seed-masters-t097.ts を `railway run npx tsx ... --dry-run/--execute` で本番webコンテナに前景実行。createMany 2000件チャンク・skipDuplicates。PostalCodeMaster は cuid PK のため count>0 ならスキップで二重投入防止。TSVは prisma/seeds/data/（LF・UTF-8・コードゼロ詰め）。投入実績: 銀行1205 / 支店29524 / 郵便124629
+- migration.sql に1万行超のINSERTは書かない（deploy肥大化のためスクリプト分離）
+
+### 社員履歴書AI解析（T-098＋追補, 2026-06-11）
+
+履歴書・入社書類をAIで読み取り、社員詳細タブに仮入力（人が確認して保存・自動保存しない）。
+
+- API: POST /api/admin/employees/[employeeId]/parse-resume（admin限定・DB/Drive保存しない読み捨て）
+  - 複数ファイル: formData.getAll("files")（後方互換で単一 "file" も受理）
+  - 制限: 最大5ファイル / 各10MB / 合計30MB、対応mimeType = PDF / Word(.doc,.docx) / 画像(PNG/JPEG/WebP/HEIC)、maxDuration 300
+  - parser: src/lib/employee-resume-parser.ts の parseEmployeeResume(files[]) が全ファイルのinlineDataを1リクエストにまとめ、Gemini(gemini-3-flash-preview)が横断抽出（同一項目は最も信頼できる記載を採用）
+  - 返却: 社員タブのstateキー準拠フラットJSON（読めない項目はnull）。後処理で型正規化（性別"男"/"女"のみ、コードはゼロ詰め、accountType"普通"/"当座"のみ、日付YYYY-MM-DD・罠#17準拠）
+  - 既存 candidates/parse-resume（求職者向け）とは別経路で独立運用
+- AI連携の標準: PDF→構造化JSONはGemini(GEMINI_API_KEY)、CA向けチャットはClaude(ANTHROPIC_API_KEY, src/lib/claude.ts)。ファイルは base64 inlineData でGeminiに直接渡す（OCR/抽出ライブラリ不要）

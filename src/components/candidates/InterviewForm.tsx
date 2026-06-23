@@ -15,7 +15,8 @@ import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
-const INTERVIEW_DECLINE_ASSIGNEES = "1000004,1000025";
+// 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025) / 大野 望(1000004)
+const INTERVIEW_DECLINE_ASSIGNEES = "1000027,1000025,1000004";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
@@ -1283,7 +1284,7 @@ export default function InterviewForm({
                       router.push(`/tasks/new?${params.toString()}`);
                     }
                   }
-                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "継続", "保留", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />
+                }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "継続", "保留", "日程再調整", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />
               </div>
               <div className="col-span-2 flex items-center gap-1.5"><span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)", minWidth: 54 }}>フラグ</span><RoField v={formatCandidateFlagBadge(candidate?.supportStatus, candidate?.supportSubStatus)} /></div>
             </div>

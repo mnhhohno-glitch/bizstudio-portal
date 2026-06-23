@@ -360,7 +360,7 @@ AI 分析実行 (analyze-batch)
 | `wishRating` / `passRating` / `overallRating` | `string` | 3 軸セレクト state（T-055 追加） |
 | `savingComment` | `boolean` | 保存中フラグ |
 | `previewFile` | `BookmarkFile \| null` | PDF プレビュー対象 |
-| `sortField` | `"name" \| "rating" \| "wish" \| "pass" \| "overall" \| "uploader" \| "date" \| null` | ソートカラム |
+| `sortKeys` | `SortKey[]`（最大2、`SortKey = { basis: SortBasis; dir: "asc"\|"desc" }`） | 2段クロスソート（[0]=1次/[1]=2次）。旧 `sortField`/`sortDir`/`companyMode` を統合（T-099 で置換） |
 
 ### 主要 handler
 
@@ -377,7 +377,27 @@ AI 分析実行 (analyze-batch)
 - 選択 state: `selectedIds: Set<string>`（BookmarkSection 内、L416）。チェック済みファイル ID 集合。
 - 「全選択」ハンドラ: `toggleAll`（L725〜732）。`filteredFiles` 全件 ID を ON/OFF トグル。チェックボックス UI は L916〜924。
 - 出力済（緑バッジ「出力済」）の判定条件: **`file.lastExportedAt`（!= null）**（描画 L1073〜1078）。型は `BookmarkFile.lastExportedAt: string | null`（L269）。送信先は `lastExportedTo`（"circus" / それ以外は HITO-Link）。
-- 「未出力を選択」ボタン（T-095 追加）: 「全選択」の右横（L925 付近）。ハンドラ `selectUnexported`（L734 付近）が `filteredFiles.filter((f) => !f.lastExportedAt)` の ID だけを `selectedIds` にセット（出力済判定の逆を使用、既存選択は上書き）。
+- 「未出力を選択」（T-095 追加 → 追補でトグル式チェックボックス化）: 「全選択」の右横。`toggleAll` と同型のチェックボックス。ハンドラ `toggleUnexported`（未出力分 `filteredFiles.filter((f) => !f.lastExportedAt)` が全選択済みなら除外／未選択なら追加。出力済の選択状態は不変）+ `unexportedAllChecked`（未出力1件以上かつ全選択済みで checked）。判定は出力済（`file.lastExportedAt`）の逆。
+
+### ブックマーク 2段クロスソート（T-099）
+
+旧「会社名軸3択 ⊻ 列ヘッダー（排他・希望/通過/総合は内部AND）」を廃止し、最大2段（1次キー＋2次キー）のクロスソートに刷新。
+
+- **キー配列の型**: `type SortBasis = "company_name"|"want"|"interest"|"wish"|"pass"|"overall"|"uploader"|"date"`、`type SortKey = { basis: SortBasis; dir: "asc"|"desc" }`。state は `sortKeys: SortKey[]`（[0]=1次, [1]=2次, 最大2）。
+- **合成比較関数**: `makeCompositeComparator(sortKeys, getResponse)`（純関数, HistoryTab.tsx 上部）。1次 → 2次 → **確定タイブレーク（総合A優先 → 会社名昇順）** の順で評価。空配列でもタイブレークが効くため全キー解除時も安定整列。基準別比較は `compareByBasis`（want/interest は単方向で dir 無視・`responseRank` 流用、wish/pass/overall は `compareRank` で欠損は常に末尾、company_name/uploader/date は localeCompare/時刻×dir）。
+- **昇格ロジック**: `activateBasis(basis)`（BookmarkSection 内）。現1次クリック→方向トグル（want/interest は `hasDirToggle=false` で無変化）／現2次クリック→1次へ昇格（現1次は2次へ・方向維持）／未選択クリック→1次（`defaultDir`：date のみ desc）・現1次を2次へ降格・現2次は破棄。`cycleKeyDir(basis)`＝そのキーの方向のみ変更（優先順位不変、2次もここで変更可）、`removeKey(basis)`＝解除（1次を消すと2次が繰上り）。
+- **チップ UI の場所**: ツールバー（検索行の下）。「表示順：」行に会社名軸3択ボタン（名前順=company_name / 応募したい順=want / 気になる順=interest、各 active に次数バッジ）。その下に「並び替え：」チップバー（1次/2次・基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。列ヘッダー（希望/通過/総合/担当/紹介日）クリックでも `activateBasis`、`DirArrows`+`OrderBadge`（次数バッジ）表示。会社名ヘッダーはプレーン。
+- 補助コンポーネント: `DirArrows`（方向▲▼）、`OrderBadge`（1/2次数バッジ）を HistoryTab.tsx 上部に追加。`SortIcon`（旧式）は Archived セクションが引き続き使用（未削除）。
+
+### 求人紹介(Jobs)へのクロスソート移植＋共通化（T-100）
+
+T-099 のBM比較・操作ロジックを **accessor 駆動に汎用化** し、BM・Jobs で共有（**BM の観測挙動は完全非回帰**）。
+
+- **汎用比較**: `type SortAccessors<T> = { getCompanyName, getRank(x,axis), getResponse, getDate, getUploader? }`。`compareByBasis<T>(a,b,key,acc)` / `makeCompositeComparator<T>(sortKeys,acc)` がジェネリック化（HistoryTab.tsx 上部）。確定タイブレークは `acc.getRank(_,"overall")`→`acc.getCompanyName` で BM/Jobs 共通。
+- **共有フック**: `useCrossSort(initial)` が `{ sortKeys, keyOf, degreeOf, activateBasis, cycleKeyDir, removeKey }` を返す。BM＝`useCrossSort([{basis:"date",dir:"desc"}])`、Jobs＝同初期値で **独立インスタンス**（`jobSortKeys` 等にリネーム束縛）。
+- **共有UI部品**: `SortBasisButtons`（会社名軸3択）/ `SortChipBar`（並び替えチップ）を関数コンポーネント化し BM・Jobs 双方が使用。
+- **Jobs の accessor**: `getCompanyName=job.company_name`、`getRank=findBookmarkRating(company_name)?.[axis]`（BM評価のクロス参照, `bookmarkRatings` Map）、`getResponse=job.candidate_response`（行に直接）、`getDate=job.created_at`。**担当(uploader)・DB列はソート対象外**（getUploader 省略, DB ヘッダー非クリック）。
+- **Jobs state**: `jobSortKeys`（旧 `jobSortField`/`jobSortDir`/`handleJobSort` を置換廃止）。初期=紹介日降順。旧デフォルト（candidate_response 順）は廃止。UI は抽出結果ツールバー直下に `SortBasisButtons`+`SortChipBar`、列ヘッダー（希望/通過/総合/紹介日）が `jobActivateBasis` 参加＋`DirArrows`/`OrderBadge`。
 
 ### 関連 API
 
@@ -1011,7 +1031,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
   - **旧・折りたたみ「スケジュールを編集」（`SchedulePanel`）は撤去**（手動/AI/同期/完了を上段に移植済み）。`SchedulePanel` 自体は flag-OFF レガシーレイアウト（page.tsx）で残存・不変。カレンダー同期の重複バグは別課題で未対応。
 - **下段**: 左＝当日実績表（当月実績と同項目・当日値、合計行/決定は #FFF4E6）｜中＝`DailyCharts`（**縦棒4本（箱型・隙間ゼロ）**＝初回面談・既存面談(＝求人面談2回目+既存面談3回目以降)・紹介・エントリー（書類通過以降は日々頻繁でないため除外）。`barPercentage:1.0/categoryPercentage:1.0/borderWidth:1` で連続したバーに＋**円3種**＝当日初回面談者の ランク/男女比/年代（職種希望は実用不可のため非表示。属性集計APIには残置）｜右＝所感2欄（**気づき**＝「予定通りに行かなかった内容…」、**振り返り**＝当日数字、`flex-1 min-h-[180px]` で縦に拡大）。
 - **コメント＝右アコーディオン＋ポップアップ（T-069②後）**：所感を画面下段から外し、**統合1本文 `reportBody`**（定型■1〜■6）に。入力は **右スライドのアコーディオン**（「📝 コメント入力」）＋ **中央モーダル**（「👁 コメント表示」、表示・編集可）。両方＋自動保存が **同じ `reportBody`（CA×日付1レコード・重複なし）** を更新。新規（本文空）でアコーディオンを開くと**定型文初期表示**（記入済みは保存内容、上書きしない）。
-- **日報AIアシスト（T-069③）**：アコーディオン最下部のチャット入力 → `POST /api/daily-report/assist`（Claude `claude-sonnet-4-20250514`）。**日報skill（`src/skills/daily-report-advisor/SKILL.md`・`getDailyReportSkill`）＋ job-matching-advisor skill** を system 注入（cache_control: ephemeral）。当日集計（面談/紹介/エントリー/BM/選定率/支援中ACTIVE数）を**数字として渡す（AIに計算させない＝捏造防止）**。返り値 JSON `{ message, rewrittenBody(■1〜■6保持), advice(上司視点) }`。「本文に反映」で `rewrittenBody`→`reportBody`（`onBodyChange` 経由で自動保存＋未確定化）→ 確定→提出。会話は `DailyReportChat` に保存。旧 `/api/daily-report/chat`（aiBody用）は別物・不変。Gemini 不使用。
+- **日報AIアシスト（T-069③）**：アコーディオン最下部のチャット入力 → `POST /api/daily-report/assist`（Claude `claude-sonnet-4-6`）。**日報skill（`src/skills/daily-report-advisor/SKILL.md`・`getDailyReportSkill`）＋ job-matching-advisor skill** を system 注入（cache_control: ephemeral）。当日集計（面談/紹介/エントリー/BM/選定率/支援中ACTIVE数）を**数字として渡す（AIに計算させない＝捏造防止）**。返り値 JSON `{ message, rewrittenBody(■1〜■6保持), advice(上司視点) }`。「本文に反映」で `rewrittenBody`→`reportBody`（`onBodyChange` 経由で自動保存＋未確定化）→ 確定→提出。会話は `DailyReportChat` に保存。旧 `/api/daily-report/chat`（aiBody用）は別物・不変。Gemini 不使用。
 - **確定→提出制限**：「確定」で `commentConfirmedAt` セット。**確定済みでないと「提出」は disabled**（本文編集で未確定に戻る＝サーバが reportBody 編集時に commentConfirmedAt を NULL 化、提出も未確定なら 400）。
 - **自動保存＋提出（T-069②）**：`reportBody` は**自動保存**（2.5秒 debounce＋日付移動/離脱前 keepalive、`dirtyRef`）。下書き保存ボタンなし。**右上に「提出」**（`status=SUBMITTED`・`submittedAt`、確定済みのみ）。**提出時のみ LINE WORKS 通知**（本文は `reportBody` を【コメント】ブロックで載せる）。POST の update は body 提供フィールドのみ反映（旧 comment/aiBody を潰さない）。
 - **下段は2列**（コメント欄を外した分）：当日実績（`300px`・やや広く）｜グラフ（`1fr`・広く）。
@@ -1019,6 +1039,30 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
 - 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
+
+#### Googleカレンダー連携UI（日報タブ・共通コンポーネント `CalendarConnectButton`）
+新ダッシュボード（日報タブ）の Google カレンダー / ToDo 連携ボタンは `DailyReportView` のヘッダ直下（カレンダー連携バー・自分モードのみ表示）に配置。実体は `src/components/schedule/CalendarConnectButton.tsx`（`SchedulePanel` と共用）。
+
+```
+page.tsx (src/app/(app)/page.tsx)
+├── isDailyReportEnabled() === true → DashboardTabs（日報｜実績表｜タスク｜お知らせ）
+│   └── scheduleTab → DailyReportView (src/components/dailyReport/DailyReportView.tsx)
+│       └── [L492-496] カレンダー連携バー（!viewMode のみ）
+│           └── CalendarConnectButton (src/components/schedule/CalendarConnectButton.tsx)
+│               ├── 未連携: button「🔗 Googleカレンダー / ToDo を連携」
+│               │   └── onConnect → GET /api/calendar/auth → window.location.href = authUrl（OAuth 認可へ遷移）
+│               └── 連携済: span「✅ Googleカレンダー / ToDo 連携中」
+│                   ├── button「再認証」→ onConnect（同上 OAuth フロー再実行・スコープ更新用）
+│                   └── button「解除」→ DELETE /api/calendar/disconnect → onDisconnect
+└── isDailyReportEnabled() === false → 旧ダッシュボード
+    └── SchedulePanel [L432-446] 同じ CalendarConnectButton（onConnect は同じ OAuth フロー）
+
+OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
+  scope: calendar.events + tasks → Google 認可 → /api/calendar/callback → GoogleCalendarConnection upsert
+  → リダイレクト /?calendar_connected=true（フロント側のメッセージ表示は未実装）
+```
+
+- **重要（T-069 移植時の注意）**: `onConnect` には必ず OAuth 認可フロー（`/api/calendar/auth` → `window.location.href = authUrl`）を渡す。`fetchCalendar()`（`/api/calendar/events` のイベント再取得）を渡すと連携ボタン・再認証ボタンが無反応になる（`08-bug-patterns.md` I-1）。未連携ユーザーのみ露呈するため見逃しやすい。
 
 ### 構成（T-071 FileMaker 形に作り替え。旧・期間ボタン式（日/週/月/3か月/半期/年/期間指定）は廃止）
 - **ヘッダ**: 担当セレクト（`GET /api/performance/advisors`、初期=本人 `selfEmployeeId`）／**起算日ピッカー** `<input type="date">`（初期=今日 JST）／**粒度切替（週／月／半年）**（`GRANULARITIES`、cohort タブ時は disabled、初期=week）／🎯 目標登録ボタン（TargetModal）。
@@ -1103,3 +1147,65 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - ヘッダの `<input type="month">` で対象月を切替（参考値・既存目標を再取得）。
 - 計算ロジック: `src/lib/performance/reverseCalc.ts`（逆算）、`src/lib/performance/businessDays.ts`（営業日・週按分、`@holiday-jp/holiday_jp` で祝日除外）。
 - 詳細仕様は `03-portal-spec.md`「T-073: 目標設定機能」参照
+
+## /admin/users/[id]（社員詳細・T-096、2026-06-10）
+
+- page.tsx（Server Component・約180行）: admin 403ガード → prisma.employee.findUnique（userId={id}、bankAccount/insurance/salary/equipment/dependents/leaveRequests(desc,200件) include）→ 日付を "YYYY-MM-DD" 化・PWを有無boolean化して EmployeeDetailClient へ。todayJst も props 渡し
+- EmployeeDetailClient.tsx（約250行）: Employee未登録時は社員番号入力→POST /api/admin/employees。登録済みならヘッダー（社員番号/氏名/生年月日+年齢/性別/在籍状態/入社日/退社日/在籍年数）＋6タブ切替
+- タブ:
+  - BasicInfoTab（基本情報＋連絡先＋緊急連絡先、年齢・在籍年数リアルタイム計算）
+  - BankAccountTab（口座）
+  - InsuranceTab（雇用保険・社会保険・扶養の3ブロック＋DependentsSection 1:N行編集）
+  - SalaryTab（支給総額リアルタイム自動合計）
+  - EquipmentTab（PasswordField: マスク→「表示」クリックで /secrets fetch、空入力=変更しない）
+  - LeaveTab（残日数編集は既存勤怠API、履歴は閲覧のみ）
+- 共有: detail-types.ts（型＋calcAge/calcTenure/patchEmployeeSection）、detail-ui.tsx（FormField等）
+- 主要handler: 各タブ handleSave → PATCH /api/admin/employees/[employeeId] {section, data} → router.refresh()
+- 一覧 UserListClient.tsx の操作列に「詳細」リンク（/admin/users/[u.id]）を追加（既存挙動無変更）
+
+## 社員詳細 自動補完（T-097, 2026-06-11）
+
+- BankAccountTab: bankCode 4桁到達/onBlur → GET banks/[code] → setForm bankName。branchCode 3桁到達/onBlur → GET banks/[code]/branches/[branchCode] → setForm branchName。404時は既存値を消さない
+- BasicInfoTab 連絡先: 郵便番号フィールド（住所の前）。7桁到達/onBlur → GET postal-code/[code]。1件=自動入力 / 複数=住所欄下のドロップダウン選択 / 0件=何もしない。補完後も手入力上書き可
+- 共有 TextInput(detail-ui.tsx) に onBlur prop
+
+## 社員詳細 AI仮入力（T-098＋追補: 全画面D&D, 2026-06-11）
+
+- 各タブの個別ボタン（T-098）: detail-ui.tsx の ResumeAiButton ＋ useResumeAiFill(employeeId, setForm, allowedKeys)。単一ファイル・自タブのみ・空欄マージ
+- 全画面D&D（追補）: EmployeeDetailClient が document レベルで dragenter/over/leave/drop（カウンタでチラつき防止）、ドラッグ中/解析中はfixed全画面オーバーレイ。Employee未登録ブランチは無効
+  - 解析結果は親 state aiFillData（新参照=新ドロップ）として 基本情報/社会保険/口座 タブへ配布
+  - 配布マージ useAiFillData(aiFillData, setForm, allowedKeys): aiFillData参照変化時＋タブのマウント時に1回だけ空欄マージ（後から開いたタブも埋まる）、同一参照は再マージしない(appliedRef)
+- 共通マージ: resume-ai-merge.ts の mergeEmptyOnly（ボタン経路・D&D経路の両方が使用）
+- タブ別 allowedKeys: Basic=name/furigana/birthday/gender/postalCode/address/phone/emergencyContact{Name,Relation,Phone}、Insurance=pensionNumber/employmentInsuranceNumber、Bank=bankName/bankCode/branchName/branchCode/accountType/accountNumber/accountHolderKana
+
+---
+
+## 一覧画面マップ: 面談一覧 / 求職者管理一覧（T-101, 2026-06-23）
+
+両一覧に「応募日 / 配信日 / 経路（媒体）」の表示列＋検索を追加した際に把握した構造マップ。
+**3項目の連携元は全て `Candidate` 直持ち**（`applicationDate` / `scoutDeliveryDate` / `mediaSource`）。join 不要・求職者1人1件（T-091手入力欄）。詳細は `02-data-sources.md` 参照。
+
+### 画面A: 面談管理一覧 InterviewListClient
+
+- パス: `src/app/(app)/admin/interviews/InterviewListClient.tsx`（クライアント）/ ページ `src/app/(app)/admin/interviews/page.tsx`
+- 取得元: **`GET /api/interviews`**（`src/app/api/interviews/route.ts`）。`page/pageSize` でサーバページネーション（PAGE_SIZE=30）。行型 `InterviewRow`（候補は `r.candidate.*` にネスト）。
+- フィルタの二層構造（重要）:
+  - **サーバ側**（API query へ送る）: rcName / caName / dateFrom/To（面談日）/ candidateName / search
+  - **クライアント側**（`displayedInterviews = interviews.filter(...)`, T-068 由来）: typeFilter / toolFilter、**＋T-101 で応募日範囲 / 配信日範囲 / 経路(媒体) を追加**。件数サマリ（新規/既存●件）もこの `displayedInterviews` から算出するため自動連動。
+  - ⚠️ クライアント側フィルタは現在ページの30件のみが対象（T-068踏襲の既知の制約）。
+- 列構成（T-101後, COL_WIDTHS=15要素）: 操作 → **応募日/配信日** → **経路** → 担当RC → 担当CA → 面談日 → 開始/終了 → 回数/結果 → 求職者氏名 → 年齢/性別 → 電話 → メール/住所 → 転職時期/評価 → 希望都道府県 → 第一希望職種。新2列は「操作の右・担当RC の左」。colSpan（loading/空）=15。
+
+### 画面B: 求職者管理一覧 CandidateListClient
+
+- パス: `src/app/(app)/admin/master/CandidateListClient.tsx`（クライアント）/ ページ `src/app/(app)/admin/master/page.tsx`（server component, `serialized` で行整形）
+- 取得元: 初期は page.tsx の SSR（`prisma.candidate.findMany` → `serialized`）。リフレッシュ時のみ **`GET /api/master/candidates?include=employee`**（`...c` 全フィールド spread のため Date は ISO 文字列で返る）。**全件クライアント保持・全フィルタがクライアント側**（`filtered` useMemo）。
+- 行型 `CandidateRow`。T-101 で `applicationDate` / `scoutDeliveryDate` を追加（`mediaSource`/`applicationRoute`/`recruiterName` は T-064 で既存）。page.tsx の `serialized` にも両日付を `toISOString()` で追加すること（SSR初期表示用）。
+- フィルタ: 支援タブ / フリー検索 / 担当CA / 登録日範囲 / 性別 / 終了理由 / 経路(applicationRoute=スカウト/応募) / 媒体(mediaSource) ＝ T-064既存。**T-101 で応募日範囲 / 配信日範囲を追加**。クリアボタン条件＆ハンドラに新state追加。
+  - ⚠️ 用語衝突注意: 画面Bの既存「経路」フィルタは `applicationRoute`（スカウト/応募）。T-101の「経路」列は **媒体名 `mediaSource`** を表示（タスク定義の経路＝媒体名）。媒体プルダウンは既存を流用したため追加せず、列表示のみ追加。
+- 列構成（T-101後, colgroup=12列）: ☑ → 求職者番号 → 氏名 → フリガナ → 性別 → 担当CA → **応募日/配信日** → **経路** → 担当RC → 登録日時 → 支援状況 → ステータス。新2列は「担当CA の右・担当RC の左」。空 colSpan=12。
+
+### 共通実装（罠#17 / JST）
+
+- 日付は必ず `Asia/Tokyo` 基準で文字列化。両ファイルにヘルパ `jstDateStr(iso)`（`toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"})` → `YYYY-MM-DD`、比較・範囲境界用）と `fmtJstSlash(iso)`（表示用 `YYYY/MM/DD`、null は "-"）を定義。
+- 範囲フィルタは JST 日付文字列の辞書順比較（`d >= from` / `d <= to`）。日付が無い行は範囲指定時に除外（登録日範囲の既存挙動と同じ通常フィルタ意味論）。`toISOString().slice(0,10)` / `getDay()` は使わない。
+- 応募/配信セルは「面談日」セル同様の上下2段（上=応募日, 下=配信日, 11px グレー）。経路セルは1行 truncate。

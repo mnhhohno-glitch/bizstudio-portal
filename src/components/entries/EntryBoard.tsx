@@ -80,6 +80,10 @@ export type Entry = {
   theoreticalAnnualIncome?: number | null;
   // Decimal は JSON で string 化されることがあるので両方受ける
   feeRatePercent?: number | string | null;
+  // T-099: 仕入れ費（手入力・円・nullable）。
+  cost?: number | null;
+  // T-100: 求人DB費（手入力・円・nullable）。粗利は revenue - (jobDbCost ?? 0) - (cost ?? 0) で表示計算（非保存）。
+  jobDbCost?: number | null;
 };
 
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
