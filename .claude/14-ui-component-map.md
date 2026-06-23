@@ -1261,6 +1261,20 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - **取り違え防止**: 判定キーは full name 正規化。`藤本なつみ`(1号機) と `藤本夏海`(一斉配信)、`大野望`(一斉配信) と `大野将幸`(名簿外1行) は別キーで分離。一斉配信を付けるのは 大野 望・藤本 夏海 のみ。
 - 3画面（CandidateListClient/InterviewListClient/EntryTable）は既存の `splitRecruiterDisplay` 呼び出しのまま自動反映（コード変更なし）。集計・突合・DB値は不変。
 
+## フィルタUI 2行レイアウト統一＋エントリー管理 担当RC検索（T-105, 2026-06-24）
+
+3画面のフィルタを共通の2段レイアウトに統一（常時表示・モーダル化しない）。
+
+- **共通プリミティブ**: `src/components/filters/FilterLayout.tsx`（表示専用・state は各画面が保持）。
+  - `FilterShell`（枠 `bg-[#F9FAFB]` の2段コンテナ）／`FilterTopRow`（`lg:grid-cols-3`）／`FilterGroup`（薄い見出しで区切り）／`FilterField`（ラベルを入力上に）／`DateRangeField`（開始〜終了を1枠）／`FilterClearButton`／`FILTER_INPUT_CLS`（既存トークン: border-gray-300/rounded-md/text-sm/focus #2563EB）。
+  - 構成: 上段＝担当者 / 期間 / 検索、下段＝全幅（区分 or 表示）。各画面に存在する項目のみ描画。
+- **画面別マッピング**（state・配線は不変、レイアウトのみ再構成）:
+  - 求職者管理（CandidateListClient, 全client）: 担当者=担当CA ／ 期間=登録日・応募日・配信日 ／ 検索=フリー検索+クリア ／ 区分=経路・媒体・性別・終了理由(ENDEDタブ時)。旧の大きな検索バーは検索グループのフリー検索に統合。支援タブ・件数は不変。
+  - 面談管理（InterviewListClient）: 担当者=担当RC(server)・担当CA(server) ／ 期間=面談日(server)・応募日(client)・配信日(client) ／ 検索=求職者名(server)・フリー検索(server) ／ 区分=種別・方法・経路(client)＋件数サマリ(ml-auto)。action bar(新規/全表示/エクスポート/日月ナビ)は不変。クリアは既存「全表示」が担う。
+  - エントリー管理（EntryBoard）: 担当者=担当RC(新規・client)・担当CA(server) ／ 検索=求職者名(server)・企業名(server)+クリア ／ 下段「表示」=無効/アーカイブ/URL未入力トグル。期間/区分は項目なしのため非表示。
+- **エントリー管理 担当RC 検索（新規・client側）**: `EntryBoard` に `rcFilter` state＋`displayedEntries` useMemo を追加し、`normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(normalizeRecruiterName(rcFilter))` で表示値ベース部分一致（実名でも号機でもヒット）。`<EntryTable entries={displayedEntries} />` に差し替え（bulk は full `entries` 参照のまま）。`/api/entries` は変更なし。⚠️ client側のためサーバページング(50/件)の現在ページ内のみ・タブ件数には未反映（既存client filterと同じ制約）。
+- ソート/各列/件数サマリ/サーバ where は不変（レイアウトと担当RC追加のみ）。日付比較は各画面の既存 JST ロジックを踏襲（罠#17）。
+
 ## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
 
 エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。

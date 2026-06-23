@@ -8,6 +8,7 @@ import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
+import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 
 const SUPPORT_TABS = [
   { key: "ACTIVE", label: "支援中" },
@@ -539,187 +540,120 @@ export default function CandidateListClient({
         ))}
       </div>
 
-      {/* 検索バー */}
-      <div className="mt-4">
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-            🔍
-          </span>
-          <input
-            type="text"
-            placeholder="求職者ID、氏名、担当CAで検索..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg pl-9 pr-4 py-3 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          />
-        </div>
-      </div>
+      {/* フィルタ（T-105: 上段 担当者/期間/検索 ＋ 下段 区分 の2段） */}
+      <FilterShell>
+        <FilterTopRow>
+          {/* 担当者 */}
+          <FilterGroup label="担当者">
+            <FilterField label="担当CA">
+              <select
+                value={caFilter}
+                onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
+                className={`w-40 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="ALL">ALL</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </FilterField>
+          </FilterGroup>
 
-      {/* 詳細フィルタ */}
-      <div className="mt-3 flex flex-wrap items-end gap-3">
-        {/* 担当CA */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">担当CA</label>
-          <select
-            value={caFilter}
-            onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
-            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          >
-            <option value="ALL">ALL</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>{emp.name}</option>
-            ))}
-          </select>
-        </div>
+          {/* 期間 */}
+          <FilterGroup label="期間">
+            <DateRangeField label="登録日" from={dateFrom} to={dateTo}
+              onFrom={(v) => { setDateFrom(v); setCurrentPage(1); }} onTo={(v) => { setDateTo(v); setCurrentPage(1); }} />
+            <DateRangeField label="応募日" from={appDateFrom} to={appDateTo}
+              onFrom={(v) => { setAppDateFrom(v); setCurrentPage(1); }} onTo={(v) => { setAppDateTo(v); setCurrentPage(1); }} />
+            <DateRangeField label="配信日" from={delDateFrom} to={delDateTo}
+              onFrom={(v) => { setDelDateFrom(v); setCurrentPage(1); }} onTo={(v) => { setDelDateTo(v); setCurrentPage(1); }} />
+          </FilterGroup>
 
-        {/* 登録日（開始） */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">登録日（開始）</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
-            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          />
-        </div>
+          {/* 検索 */}
+          <FilterGroup label="検索">
+            <FilterField label="フリー検索">
+              <input
+                type="text"
+                placeholder="求職者ID、氏名、担当CA"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={`w-56 ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
+              <FilterClearButton onClick={() => {
+                setCaFilter("ALL");
+                setDateFrom("");
+                setDateTo("");
+                setGenderFilter("ALL");
+                setEndReasonFilter("ALL");
+                setRouteFilter("ALL");
+                setMediaFilter("ALL");
+                setAppDateFrom("");
+                setAppDateTo("");
+                setDelDateFrom("");
+                setDelDateTo("");
+                setCurrentPage(1);
+              }} />
+            )}
+          </FilterGroup>
+        </FilterTopRow>
 
-        {/* 登録日（終了） */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">登録日（終了）</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
-            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          />
-        </div>
-
-        {/* 性別 */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">性別</label>
-          <select
-            value={genderFilter}
-            onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
-            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          >
-            <option value="ALL">ALL</option>
-            <option value="male">男性</option>
-            <option value="female">女性</option>
-          </select>
-        </div>
-
-        {/* 支援終了理由（支援終了タブのみ表示） */}
-        {supportTab === "ENDED" && (
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">終了理由</label>
+        {/* 区分（全幅） */}
+        <FilterGroup label="区分">
+          <FilterField label="経路">
             <select
-              value={endReasonFilter}
-              onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
-              className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+              value={routeFilter}
+              onChange={(e) => { setRouteFilter(e.target.value); setCurrentPage(1); }}
+              className={`w-32 ${FILTER_INPUT_CLS}`}
             >
               <option value="ALL">ALL</option>
-              {SUPPORT_END_REASONS.map((r) => (
-                <option key={r.code} value={r.code}>{r.label}</option>
-              ))}
+              <option value="スカウト">スカウト</option>
+              <option value="応募">応募</option>
             </select>
-          </div>
-        )}
-
-        {/* T-064: 経路 */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">経路</label>
-          <select
-            value={routeFilter}
-            onChange={(e) => { setRouteFilter(e.target.value); setCurrentPage(1); }}
-            className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          >
-            <option value="ALL">ALL</option>
-            <option value="スカウト">スカウト</option>
-            <option value="応募">応募</option>
-          </select>
-        </div>
-
-        {/* T-064: 媒体 */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">媒体</label>
-          <select
-            value={mediaFilter}
-            onChange={(e) => { setMediaFilter(e.target.value); setCurrentPage(1); }}
-            className="w-40 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-          >
-            <option value="ALL">ALL</option>
-            <option value="マイナビ転職">マイナビ転職</option>
-            <option value="マイナビエージェント">マイナビエージェント</option>
-            <option value="indeed">indeed</option>
-            <option value="日経HR">日経HR</option>
-            <option value="自社HP">自社HP</option>
-            <option value="dodaMaps">dodaMaps</option>
-          </select>
-        </div>
-
-        {/* T-101: 応募日（範囲） */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">応募日（開始〜終了）</label>
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              value={appDateFrom}
-              onChange={(e) => { setAppDateFrom(e.target.value); setCurrentPage(1); }}
-              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-            <span className="text-xs text-gray-400">〜</span>
-            <input
-              type="date"
-              value={appDateTo}
-              onChange={(e) => { setAppDateTo(e.target.value); setCurrentPage(1); }}
-              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-        </div>
-
-        {/* T-101: 配信日（範囲） */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-gray-500">配信日（開始〜終了）</label>
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              value={delDateFrom}
-              onChange={(e) => { setDelDateFrom(e.target.value); setCurrentPage(1); }}
-              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-            <span className="text-xs text-gray-400">〜</span>
-            <input
-              type="date"
-              value={delDateTo}
-              onChange={(e) => { setDelDateTo(e.target.value); setCurrentPage(1); }}
-              className="w-32 border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
-            />
-          </div>
-        </div>
-
-        {/* クリアボタン */}
-        {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
-          <button
-            onClick={() => {
-              setCaFilter("ALL");
-              setDateFrom("");
-              setDateTo("");
-              setGenderFilter("ALL");
-              setEndReasonFilter("ALL");
-              setRouteFilter("ALL");
-              setMediaFilter("ALL");
-              setAppDateFrom("");
-              setAppDateTo("");
-              setDelDateFrom("");
-              setDelDateTo("");
-              setCurrentPage(1);
-            }}
-            className="text-sm text-[#2563EB] hover:text-[#1D4ED8] hover:underline py-1.5"
-          >
-            クリア
-          </button>
-        )}
-      </div>
+          </FilterField>
+          <FilterField label="媒体">
+            <select
+              value={mediaFilter}
+              onChange={(e) => { setMediaFilter(e.target.value); setCurrentPage(1); }}
+              className={`w-40 ${FILTER_INPUT_CLS}`}
+            >
+              <option value="ALL">ALL</option>
+              <option value="マイナビ転職">マイナビ転職</option>
+              <option value="マイナビエージェント">マイナビエージェント</option>
+              <option value="indeed">indeed</option>
+              <option value="日経HR">日経HR</option>
+              <option value="自社HP">自社HP</option>
+              <option value="dodaMaps">dodaMaps</option>
+            </select>
+          </FilterField>
+          <FilterField label="性別">
+            <select
+              value={genderFilter}
+              onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
+              className={`w-32 ${FILTER_INPUT_CLS}`}
+            >
+              <option value="ALL">ALL</option>
+              <option value="male">男性</option>
+              <option value="female">女性</option>
+            </select>
+          </FilterField>
+          {supportTab === "ENDED" && (
+            <FilterField label="終了理由">
+              <select
+                value={endReasonFilter}
+                onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
+                className={`w-40 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="ALL">ALL</option>
+                {SUPPORT_END_REASONS.map((r) => (
+                  <option key={r.code} value={r.code}>{r.label}</option>
+                ))}
+              </select>
+            </FilterField>
+          )}
+        </FilterGroup>
+      </FilterShell>
 
       {/* 選択中ツールバー */}
       {selectedIds.length > 0 && (

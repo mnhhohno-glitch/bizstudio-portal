@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { TimeInput } from "@/components/ui/TimeInput";
 import { getMissingFieldLabels } from "@/lib/interview-input-missing";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
+import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -479,118 +480,101 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-[16px]">🔍</span>
-        <input
-          type="text"
-          placeholder="担当RC"
-          value={rcName}
-          onChange={(e) => { setRcName(e.target.value); setPage(1); }}
-          className="w-[110px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <input
-          type="text"
-          placeholder="担当CA"
-          value={caName}
-          onChange={(e) => { setCaName(e.target.value); setPage(1); }}
-          className="w-[110px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <span className="text-[13px] text-gray-500">〜</span>
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="w-[120px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="面談種別"
-        >
-          <option value="">種別: すべて</option>
-          {TYPE_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select
-          value={toolFilter}
-          onChange={(e) => setToolFilter(e.target.value)}
-          className="w-[120px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="面談方法"
-        >
-          <option value="">方法: すべて</option>
-          {TOOL_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        {/* T-101: 経路（媒体） */}
-        <select
-          value={mediaFilter}
-          onChange={(e) => { setMediaFilter(e.target.value); setPage(1); }}
-          className="w-[140px] border border-gray-300 rounded px-2 py-1.5 text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="経路（媒体）"
-        >
-          <option value="">経路: すべて</option>
-          {MEDIA_FILTER_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-        {/* T-101: 応募日（範囲） */}
-        <span className="text-[12px] text-gray-500">応募</span>
-        <input
-          type="date"
-          value={appDateFrom}
-          onChange={(e) => { setAppDateFrom(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="応募日（開始）"
-        />
-        <span className="text-[13px] text-gray-500">〜</span>
-        <input
-          type="date"
-          value={appDateTo}
-          onChange={(e) => { setAppDateTo(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="応募日（終了）"
-        />
-        {/* T-101: 配信日（範囲） */}
-        <span className="text-[12px] text-gray-500">配信</span>
-        <input
-          type="date"
-          value={delDateFrom}
-          onChange={(e) => { setDelDateFrom(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="配信日（開始）"
-        />
-        <span className="text-[13px] text-gray-500">〜</span>
-        <input
-          type="date"
-          value={delDateTo}
-          onChange={(e) => { setDelDateTo(e.target.value); setPage(1); }}
-          className="w-[130px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          title="配信日（終了）"
-        />
-        <input
-          type="text"
-          placeholder="求職者名"
-          value={candidateName}
-          onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
-          className="w-[110px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <input
-          type="text"
-          placeholder="フリー検索…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-[180px] border border-gray-300 rounded px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        />
-        <span className="ml-auto inline-flex items-center gap-2 rounded-md border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-1.5 text-[12px] text-[#374151]">
-          <span className="font-medium">新規面談 <span className="text-[#2563EB]">{newCount}</span> 件</span>
-          <span className="text-gray-300">｜</span>
-          <span className="font-medium">既存面談 <span className="text-[#2563EB]">{existingCount}</span> 件</span>
-        </span>
-      </div>
+      {/* フィルタ（T-105: 上段 担当者/期間/検索 ＋ 下段 区分 の2段） */}
+      <FilterShell>
+        <FilterTopRow>
+          {/* 担当者 */}
+          <FilterGroup label="担当者">
+            <FilterField label="担当RC">
+              <input
+                type="text"
+                placeholder="実名/号機"
+                value={rcName}
+                onChange={(e) => { setRcName(e.target.value); setPage(1); }}
+                className={`w-[120px] ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            <FilterField label="担当CA">
+              <input
+                type="text"
+                value={caName}
+                onChange={(e) => { setCaName(e.target.value); setPage(1); }}
+                className={`w-[120px] ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+          </FilterGroup>
+
+          {/* 期間 */}
+          <FilterGroup label="期間">
+            <DateRangeField label="面談日" from={dateFrom} to={dateTo}
+              onFrom={(v) => { setDateFrom(v); setPage(1); }} onTo={(v) => { setDateTo(v); setPage(1); }} />
+            <DateRangeField label="応募日" from={appDateFrom} to={appDateTo}
+              onFrom={(v) => { setAppDateFrom(v); setPage(1); }} onTo={(v) => { setAppDateTo(v); setPage(1); }} />
+            <DateRangeField label="配信日" from={delDateFrom} to={delDateTo}
+              onFrom={(v) => { setDelDateFrom(v); setPage(1); }} onTo={(v) => { setDelDateTo(v); setPage(1); }} />
+          </FilterGroup>
+
+          {/* 検索 */}
+          <FilterGroup label="検索">
+            <FilterField label="求職者名">
+              <input
+                type="text"
+                value={candidateName}
+                onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
+                className={`w-[120px] ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            <FilterField label="フリー検索">
+              <input
+                type="text"
+                placeholder="氏名/番号/電話/メール"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={`w-[180px] ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+          </FilterGroup>
+        </FilterTopRow>
+
+        {/* 区分（全幅）＋ 件数サマリ */}
+        <FilterGroup label="区分">
+          <FilterField label="種別">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className={`w-[120px] ${FILTER_INPUT_CLS}`}
+            >
+              <option value="">すべて</option>
+              {TYPE_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </FilterField>
+          <FilterField label="方法">
+            <select
+              value={toolFilter}
+              onChange={(e) => setToolFilter(e.target.value)}
+              className={`w-[120px] ${FILTER_INPUT_CLS}`}
+            >
+              <option value="">すべて</option>
+              {TOOL_FILTER_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </FilterField>
+          <FilterField label="経路">
+            <select
+              value={mediaFilter}
+              onChange={(e) => { setMediaFilter(e.target.value); setPage(1); }}
+              className={`w-[150px] ${FILTER_INPUT_CLS}`}
+            >
+              <option value="">すべて</option>
+              {MEDIA_FILTER_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </FilterField>
+          <span className="ml-auto self-end inline-flex items-center gap-2 rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] text-[#374151]">
+            <span className="font-medium">新規面談 <span className="text-[#2563EB]">{newCount}</span> 件</span>
+            <span className="text-gray-300">｜</span>
+            <span className="font-medium">既存面談 <span className="text-[#2563EB]">{existingCount}</span> 件</span>
+          </span>
+        </FilterGroup>
+      </FilterShell>
 
       {/* Table */}
       <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB]">

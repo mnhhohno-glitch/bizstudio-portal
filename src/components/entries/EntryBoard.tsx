@@ -13,6 +13,8 @@ import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
 import InterviewGuideCopyModal from "./InterviewGuideCopyModal";
 import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
+import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
+import { FilterShell, FilterTopRow, FilterGroup, FilterField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 
 export type Entry = {
   id: string;
@@ -145,6 +147,8 @@ export default function EntryBoard() {
   const [candidateName, setCandidateName] = useState(initialCandidateName);
   const [companyName, setCompanyName] = useState("");
   const [caFilter, setCaFilter] = useState("");
+  // T-105: 担当RC（recruiterName）絞り込み。表示値ベースのクライアント側部分一致（実名でも号機でもヒット）。
+  const [rcFilter, setRcFilter] = useState("");
   const [caOptions, setCaOptions] = useState<string[]>([]);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -772,6 +776,16 @@ export default function EntryBoard() {
     }
   };
 
+  // T-105: 担当RC 絞り込み（クライアント側・表示値ベース部分一致）。
+  // 表示と同じ formatRecruiterName を通すため実名でも号機表記でもヒット。表記揺れは normalizeRecruiterName で吸収。
+  const displayedEntries = useMemo(() => {
+    const q = normalizeRecruiterName(rcFilter);
+    if (!q) return entries;
+    return entries.filter((e) =>
+      normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(q),
+    );
+  }, [entries, rcFilter]);
+
   const handleExport = () => {
     const params = new URLSearchParams();
     if (activeTab !== "全件") params.set("entryFlag", activeTab);
@@ -824,84 +838,95 @@ export default function EntryBoard() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="relative w-40">
-          <input
-            type="text"
-            value={candidateName}
-            onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
-            placeholder="求職者名で検索"
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-full pr-7"
-          />
-          {candidateName && (
-            <button
-              type="button"
-              onClick={() => { setCandidateName(""); setPage(1); }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xs leading-none"
-              aria-label="クリア"
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <select
-          value={caFilter}
-          onChange={(e) => { setCaFilter(e.target.value); setPage(1); }}
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-        >
-          <option value="">担当CA（全員）</option>
-          {caOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-        <div className="relative w-40">
-          <input
-            type="text"
-            value={companyName}
-            onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
-            placeholder="企業名で検索"
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB] w-full pr-7"
-          />
-          {companyName && (
-            <button
-              type="button"
-              onClick={() => { setCompanyName(""); setPage(1); }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xs leading-none"
-              aria-label="クリア"
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={includeInactive}
-            onChange={(e) => { setIncludeInactive(e.target.checked); setPage(1); }}
-            className="rounded border-gray-300 text-[#2563EB]"
-          />
-          無効も表示
-        </label>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={includeArchived}
-            onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }}
-            className="rounded border-gray-300 text-[#2563EB]"
-          />
-          アーカイブも表示
-        </label>
-        {(activeTab === "書類選考" || activeTab === "面接") && (
-          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+      {/* フィルタ（T-105: 上段 担当者/検索 ＋ 下段 表示 の2段。期間/区分はエントリー管理には無し） */}
+      <FilterShell>
+        <FilterTopRow>
+          {/* 担当者 */}
+          <FilterGroup label="担当者">
+            <FilterField label="担当RC">
+              <input
+                type="text"
+                value={rcFilter}
+                onChange={(e) => setRcFilter(e.target.value)}
+                placeholder="実名/号機"
+                className={`w-[120px] ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            <FilterField label="担当CA">
+              <select
+                value={caFilter}
+                onChange={(e) => { setCaFilter(e.target.value); setPage(1); }}
+                className={`w-40 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="">全員</option>
+                {caOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </FilterField>
+          </FilterGroup>
+
+          {/* 検索 */}
+          <FilterGroup label="検索">
+            <FilterField label="求職者名">
+              <input
+                type="text"
+                value={candidateName}
+                onChange={(e) => { setCandidateName(e.target.value); setPage(1); }}
+                className={`w-40 ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            <FilterField label="企業名">
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => { setCompanyName(e.target.value); setPage(1); }}
+                className={`w-40 ${FILTER_INPUT_CLS}`}
+              />
+            </FilterField>
+            {(candidateName || companyName || caFilter || rcFilter) && (
+              <FilterClearButton onClick={() => {
+                setCandidateName("");
+                setCompanyName("");
+                setCaFilter("");
+                setRcFilter("");
+                setPage(1);
+              }} />
+            )}
+          </FilterGroup>
+        </FilterTopRow>
+
+        {/* 表示（全幅） */}
+        <FilterGroup label="表示">
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer py-1.5">
             <input
               type="checkbox"
-              checked={urlMissingOnly}
-              onChange={(e) => { setUrlMissingOnly(e.target.checked); setPage(1); }}
+              checked={includeInactive}
+              onChange={(e) => { setIncludeInactive(e.target.checked); setPage(1); }}
               className="rounded border-gray-300 text-[#2563EB]"
             />
-            URL未入力のみ
+            無効も表示
           </label>
-        )}
-      </div>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer py-1.5">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }}
+              className="rounded border-gray-300 text-[#2563EB]"
+            />
+            アーカイブも表示
+          </label>
+          {(activeTab === "書類選考" || activeTab === "面接") && (
+            <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer py-1.5">
+              <input
+                type="checkbox"
+                checked={urlMissingOnly}
+                onChange={(e) => { setUrlMissingOnly(e.target.checked); setPage(1); }}
+                className="rounded border-gray-300 text-[#2563EB]"
+              />
+              URL未入力のみ
+            </label>
+          )}
+        </FilterGroup>
+      </FilterShell>
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (() => {
@@ -982,7 +1007,7 @@ export default function EntryBoard() {
         <div className="text-center py-12 text-gray-400 text-sm">該当するエントリーがありません</div>
       ) : (
         <EntryTable
-          entries={entries}
+          entries={displayedEntries}
           flagData={flagData}
           activeTab={activeTab}
           sortField={sortField}
