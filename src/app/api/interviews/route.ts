@@ -102,6 +102,8 @@ export async function GET(req: NextRequest) {
             applicationDate: true,
             scoutDeliveryDate: true,
             mediaSource: true,
+            // T-102: 担当RC＝スカウト配信担当（号機表記は表示時に実名変換）
+            recruiterName: true,
             employee: { select: { id: true, employeeNumber: true, name: true } },
           },
         },

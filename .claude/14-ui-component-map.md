@@ -1209,3 +1209,13 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - 日付は必ず `Asia/Tokyo` 基準で文字列化。両ファイルにヘルパ `jstDateStr(iso)`（`toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"})` → `YYYY-MM-DD`、比較・範囲境界用）と `fmtJstSlash(iso)`（表示用 `YYYY/MM/DD`、null は "-"）を定義。
 - 範囲フィルタは JST 日付文字列の辞書順比較（`d >= from` / `d <= to`）。日付が無い行は範囲指定時に除外（登録日範囲の既存挙動と同じ通常フィルタ意味論）。`toISOString().slice(0,10)` / `getDay()` は使わない。
 - 応募/配信セルは「面談日」セル同様の上下2段（上=応募日, 下=配信日, 11px グレー）。経路セルは1行 truncate。
+
+### 担当RC 列の表示ソース（T-102, 2026-06-23）
+
+両一覧の「担当RC」列は **スカウト配信担当 = `Candidate.recruiterName`** を表示する（号機表記は表示時のみ `formatRecruiterName`（`src/lib/recruiterDisplay.ts`, 91d28ed）で実名変換。空文字/NULL は「-」）。
+
+- **画面B（CandidateListClient）**: 91d28ed の時点で既に `formatRecruiterName(cand.recruiterName) || "-"` を表示。T-102 で変更なし（既に正しい）。
+- **画面A（InterviewListClient）**: T-102 で修正。**旧実装は `r.interviewer`（面談者＝登録者アカウント）を表示しており誤り**だった。`r.candidate.recruiterName` を `formatRecruiterName` 経由で表示するよう差し替え（`/api/interviews` の candidate select に `recruiterName: true` を追加）。
+  - ⚠️ 担当RC ヘッダのソート（`handleSort("rcName")`）と左フィルタ（`rcName` input）は**サーバ側で今も `interviewer.name` 基準**のまま（T-102 は表示値のみ差し替え、ソート/フィルタは非変更）。表示とソート軸が一致しない点に留意。将来揃えるなら API 側 orderBy/where を `candidate.recruiterName` に変更する別タスクが必要。
+  - `interviewer` フィールド自体は型・API select・ソートで引き続き使用（削除不可）。
+- `formatRecruiterName` は **VIEW-ONLY**。保存値・集計キー・突合キーには使わない（号機表記のまま扱う）。

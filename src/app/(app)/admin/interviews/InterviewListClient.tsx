@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { TimeInput } from "@/components/ui/TimeInput";
 import { getMissingFieldLabels } from "@/lib/interview-input-missing";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -36,6 +37,8 @@ type InterviewRow = {
     applicationDate: string | null;
     scoutDeliveryDate: string | null;
     mediaSource: string | null;
+    // T-102: スカウト配信担当（担当RC列の表示ソース）
+    recruiterName: string | null;
     employee: Employee | null;
   };
   interviewer: Employee;
@@ -649,10 +652,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   </td>
                   {/* T-101: 経路（媒体） */}
                   <td className="px-2 py-2 text-[13px] overflow-hidden truncate" title={r.candidate.mediaSource || "-"}>{r.candidate.mediaSource || "-"}</td>
-                  {/* 担当RC */}
-                  <td className="px-2 py-2 overflow-hidden" title={`${r.interviewer.employeeNumber} ${r.interviewer.name}`}>
-                    <div className="text-[11px] text-gray-400 truncate">{r.interviewer.employeeNumber}</div>
-                    <div className="text-[13px] truncate">{r.interviewer.name}</div>
+                  {/* 担当RC（T-102: スカウト配信担当 recruiterName。号機表記は表示時に実名変換。空は「-」） */}
+                  <td className="px-2 py-2 overflow-hidden" title={formatRecruiterName(r.candidate.recruiterName) || "-"}>
+                    <div className="text-[13px] truncate">{formatRecruiterName(r.candidate.recruiterName) || "-"}</div>
                   </td>
                   {/* 担当CA */}
                   <td className="px-2 py-2 overflow-hidden" title={r.candidate.employee ? `${r.candidate.employee.employeeNumber} ${r.candidate.employee.name}` : "-"}>
