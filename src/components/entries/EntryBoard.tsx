@@ -17,7 +17,7 @@ import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from ".
 export type Entry = {
   id: string;
   candidateId: string;
-  candidate: { id: string; name: string; candidateNumber: string; employeeId?: string; employee?: { name: string } | null };
+  candidate: { id: string; name: string; candidateNumber: string; employeeId?: string; recruiterName?: string | null; employee?: { name: string } | null };
   companyName: string;
   jobTitle: string;
   externalJobNo: string | null;

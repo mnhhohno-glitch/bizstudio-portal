@@ -1233,6 +1233,15 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - **正規化の単一集約**: `src/lib/recruiterDisplay.ts` に `normalizeRecruiterName()`（全角数字→半角・空白除去の比較用）を追加し、`formatRecruiterName` も内部でこれを使用。号機↔実名の対応表（`MACHINE_NUMBER_TO_REAL_NAME`）は1か所のまま。サーバ/クライアント双方がこの1モジュールを import（`recruiterDisplay.ts` は pure で server-import 可、既に scout 配下の server component が使用）。
 - 担当CA のソート/絞り込み・件数サマリ・他列は非変更。
 
+#### 担当RC 表示形式「実名(RPA○号機)」＋エントリー管理への適用（T-104, 2026-06-24）
+
+- **表示形式変更（単一集約）**: `src/lib/recruiterDisplay.ts` の `MACHINE_NUMBER_TO_REAL_NAME` の値を **「実名(RPA○号機)」** に変更（例 1号機→`藤本 なつみ(RPA1号機)`、4号機→`上原 千遥(RPA4号機)`、6号機→`安藤 嘉富(RPA6号機)`）。`formatRecruiterName` のマッチ/正規化ロジックは不変。号機表記でない実名（藤本 夏海・大野 望 等）は変換せずそのまま、空は「-」。
+- 出力に号機表記も含むため、面談一覧の担当RC絞り込みは **実名部分（「上原」「岡田」）でも号機部分（「4号機」「RPA4」）でも部分一致でヒット**（`normalizeRecruiterName(formatRecruiterName(...))` 経由）。ソートも新表示値（実名先頭）基準で機能・空は末尾。`formatRecruiterName` は冪等的（出力を再投入しても同値）なので二重適用しても壊れない。
+- **3画面の担当RC は全て `formatRecruiterName` 経由**:
+  - 求職者管理一覧（CandidateListClient）・面談管理一覧（InterviewListClient）: 既に経由済み → lib 変更が自動反映。
+  - **エントリー管理（`src/components/entries/EntryTable.tsx`）: T-104 で担当RC列を新規追加**（担当CA の右）。`COMMON_COLS` に `{ key:"rc", label:"担当RC", sortKey:"rc" }`、`getFieldValue` と `renderCell` に `rc` ケース（`formatRecruiterName(entry.candidate.recruiterName)`）。データは `Entry.candidate.recruiterName`（`/api/entries` の candidate select に `recruiterName: true` 追加、`EntryBoard.tsx` の `Entry` 型に `recruiterName?: string | null` 追加）。エントリー一覧のソートは `applySortAndGroup` によるクライアント側（`handleSort` は再フェッチせず state のみ）なので担当RC列ソートも client 側で表示値基準・空は末尾。
+- 同 lib を使う他画面（`scout/by-media`・`by-sent`・`ScoutLinkPanel`・`CandidateHeader`）も新表示形式に追従（VIEW専用なので集計/突合キーには影響なし）。
+
 ## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
 
 エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。

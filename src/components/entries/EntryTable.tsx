@@ -5,6 +5,7 @@ import Link from "next/link";
 import { SELECTION_ENDED_DETAILS, HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import { normalizeTimeInput } from "@/lib/timeFormat";
+import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -40,6 +41,8 @@ type Props = {
 const COMMON_COLS: ColConfig[] = [
   { key: "candidate", label: "求職者", width: 110, sortKey: "candidate" },
   { key: "ca", label: "担当CA", width: 70, sortKey: "ca" },
+  // T-104: 担当RC（スカウト配信担当・実名(RPA○号機)表示）。担当CA の右に追加。
+  { key: "rc", label: "担当RC", width: 110, sortKey: "rc" },
   { key: "company", label: "紹介先企業", width: 280, sortKey: "company" },
   { key: "jobDb", label: "求人DB", width: 200, sortKey: "jobDb" },
   { key: "entryFlags", label: "エントリーフラグ", width: 110, sortKey: "entryFlag" },
@@ -249,6 +252,7 @@ function getFieldValue(entry: Entry, key: string): string | null {
   switch (key) {
     case "candidate": return entry.candidate.name;
     case "ca": return entry.candidate.employee?.name || null;
+    case "rc": return formatRecruiterName(entry.candidate.recruiterName) || null;
     case "company": return entry.companyName;
     case "jobDb": return entry.jobDb;
     case "entryFlag": return entry.entryFlag;
@@ -828,6 +832,11 @@ export default function EntryTable({
         );
       case "ca":
         return <td key={col.key} className="px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-600">{entry.candidate.employee?.name || "-"}</td>;
+      case "rc": {
+        // T-104: 担当RC＝スカウト配信担当。号機表記は formatRecruiterName で「実名(RPA○号機)」表示。空は「-」。
+        const rc = formatRecruiterName(entry.candidate.recruiterName) || "-";
+        return <td key={col.key} className="px-2 py-1.5 text-[11px] text-gray-600 whitespace-normal break-words" title={rc}>{rc}</td>;
+      }
       case "company":
         return (
           <td key={col.key} className="px-2 py-1.5" title={entry.companyName}>
