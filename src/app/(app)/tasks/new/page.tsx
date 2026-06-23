@@ -552,6 +552,18 @@ export default function TaskNewPage() {
     offerPrefillApplied.current = true;
   }, [loading, categories, candidates, searchParams]);
 
+  // 内定承諾報告: 可視の「対象者」欄に候補者「氏名（candidateNumber）」を自動充填する。
+  // ライブの実ラベルは「対象者」（seed の「対象者フルネーム」ではない）。ラベル解決は fields 配列基準。
+  // 候補者選択（手動 / prefill=offer-acceptance の candidateId 由来）に追従して更新。手入力での上書きは
+  // 候補者を選び直すまで保持される（deps に fieldValues を含めないため手入力では再発火しない）。
+  useEffect(() => {
+    if (!isNaitei || !selectedCategory || !selectedCandidate) return;
+    const targetField = selectedCategory.fields.find((f) => f.label === "対象者");
+    if (!targetField) return;
+    const value = `${selectedCandidate.name}（${selectedCandidate.candidateNo}）`;
+    setFieldValues((prev) => (prev[targetField.id] === value ? prev : { ...prev, [targetField.id]: value }));
+  }, [isNaitei, selectedCategory, selectedCandidate]);
+
   /* ----- job category cascading ----- */
   useEffect(() => {
     if (!selectedMajorId) {
@@ -910,10 +922,8 @@ export default function TaskNewPage() {
 
       // 内定承諾報告: カスタムフィールドをセット
       if (isNaitei && selectedCategory) {
-        // 対象者フルネームは Step0 で選択した求職者の氏名から自動導出（手入力欄は廃止）
-        const nameField = selectedCategory.fields.find((f) => f.label === "対象者フルネーム");
-        const targetName = selectedCandidate?.name ?? "";
-        if (nameField && targetName) extraFieldValues.push({ fieldId: nameField.id, value: targetName });
+        // 対象者（ライブ実ラベル「対象者」）は可視テンプレ項目。氏名（candidateNumber）を自動充填する
+        // 効果で fieldValues に入り normalFieldValues 経由で送信されるため、ここでは push しない（二重格納防止）。
         const jobField = selectedCategory.fields.find((f) => f.label === "内定した職種");
         if (jobField && selectedMajorName) extraFieldValues.push({ fieldId: jobField.id, value: [selectedMajorName, selectedMiddleName, selectedMinorName].filter(Boolean).join(" > ") });
         const indField = selectedCategory.fields.find((f) => f.label === "内定した業種");
