@@ -115,6 +115,29 @@ const REGIONS = [
 
 const EMPLOYMENT_TYPES = ["正社員", "契約社員", "派遣社員", "アルバイト", "業務委託"];
 
+// 内定承諾報告の紹介手数料（税抜き）算出。
+// 理論年収方式: round(理論年収 × 手数料% / 100)。固定方式: 入力金額（整数丸め）。
+// 値が揃っていなければ null（"-" 表示・未保存）。
+function computeReferralFee(
+  mode: "FIXED" | "ANNUAL_RATE",
+  theoryIncome: string,
+  feeRate: string,
+  fixedFee: string,
+): number | null {
+  const num = (s: string): number | null => {
+    const n = parseFloat((s ?? "").toString().replace(/[^\d.]/g, ""));
+    return Number.isNaN(n) ? null : n;
+  };
+  if (mode === "ANNUAL_RATE") {
+    const inc = num(theoryIncome);
+    const rate = num(feeRate);
+    if (inc == null || rate == null) return null;
+    return Math.round((inc * rate) / 100);
+  }
+  const f = num(fixedFee);
+  return f == null ? null : Math.round(f);
+}
+
 /* ========================================================== */
 
 export default function TaskNewPage() {
@@ -195,6 +218,11 @@ export default function TaskNewPage() {
   const [naiteiRegion, setNaiteiRegion] = useState("");
   const [naiteiPrefecture, setNaiteiPrefecture] = useState("");
   const [naiteiEmploymentType, setNaiteiEmploymentType] = useState("");
+  // 内定承諾報告: 課金方式（固定/理論年収）と算出用入力。理論年収・紹介手数料は generic 描画を隠してここで制御。
+  const [naiteiFeeMode, setNaiteiFeeMode] = useState<"FIXED" | "ANNUAL_RATE">("FIXED");
+  const [naiteiTheoryIncome, setNaiteiTheoryIncome] = useState(""); // 理論年収（円）
+  const [naiteiFeeRate, setNaiteiFeeRate] = useState("");           // 手数料%
+  const [naiteiFixedFee, setNaiteiFixedFee] = useState("");         // 固定方式の紹介手数料（円）
 
   // step 2 - カテゴリ固有: テンプレート添付ファイル
   const [templateAttachFiles, setTemplateAttachFiles] = useState<File[]>([]);
@@ -466,6 +494,64 @@ export default function TaskNewPage() {
     declinePrefillApplied.current = true;
   }, [loading, categories, employees, candidates, searchParams]);
 
+  // 内定承諾報告プリセット (prefill=offer-acceptance) — エントリーボードの「承諾報告」確認から遷移
+  // 企業名/承諾日/入社日は generic テンプレ項目へ、課金方式・理論年収・手数料%はカスタム state へ流し込む。
+  const offerPrefillApplied = useRef(false);
+  useEffect(() => {
+    if (offerPrefillApplied.current) return;
+    if (searchParams.get("prefill") !== "offer-acceptance") return;
+    if (loading) return;
+    if (categories.length === 0 || candidates.length === 0) return;
+
+    // カテゴリ: 内定承諾報告
+    const catName = searchParams.get("categoryName") || NAITEI_CATEGORY;
+    const resolvedCat = categories.find((c) => c.name === catName) ?? null;
+    if (resolvedCat) setCategoryId(resolvedCat.id);
+
+    // 対象者（求職者）
+    const candId = searchParams.get("candidateId");
+    if (candId) {
+      const found = candidates.find((c) => c.id === candId || c.candidateNo === candId);
+      if (found) {
+        setWithCandidate(true);
+        setCandidateId(found.id);
+        setCandidateSearch(found.name);
+      }
+    }
+
+    // generic テンプレ項目（企業名 / 内定承諾日 / 入社日）をラベル一致でプリセット
+    if (resolvedCat) {
+      const companyName = searchParams.get("companyName");
+      const acceptanceDate = searchParams.get("acceptanceDate"); // YYYY-MM-DD (JST)
+      const joinDate = searchParams.get("joinDate");             // YYYY-MM-DD (JST)
+      const updates: Record<string, string> = {};
+      for (const field of resolvedCat.fields) {
+        if (field.label === "企業名" && companyName) updates[field.id] = companyName;
+        else if (field.label === "内定承諾日" && acceptanceDate) updates[field.id] = acceptanceDate;
+        else if (field.label === "入社日" && joinDate) updates[field.id] = joinDate;
+      }
+      if (Object.keys(updates).length > 0) setFieldValues((prev) => ({ ...prev, ...updates }));
+    }
+
+    // 課金方式ラジオの初期値（feeType）と算出用入力
+    const feeType = searchParams.get("feeType"); // ANNUAL_RATE / FIXED
+    if (feeType === "ANNUAL_RATE") {
+      setNaiteiFeeMode("ANNUAL_RATE");
+      const ti = searchParams.get("theoreticalAnnualIncome");
+      const fr = searchParams.get("feeRatePercent");
+      if (ti) setNaiteiTheoryIncome(ti);
+      if (fr) setNaiteiFeeRate(fr);
+    } else {
+      setNaiteiFeeMode("FIXED");
+      const rev = searchParams.get("revenue");
+      if (rev) setNaiteiFixedFee(rev);
+    }
+
+    // テンプレート入力ステップ（index 2）に着地
+    setStep(2);
+    offerPrefillApplied.current = true;
+  }, [loading, categories, candidates, searchParams]);
+
   /* ----- job category cascading ----- */
   useEffect(() => {
     if (!selectedMajorId) {
@@ -652,7 +738,8 @@ export default function TaskNewPage() {
 
     // 内定承諾報告: カスタムUIで代替するフィールドを非表示
     if (isNaitei) {
-      const hiddenLabels = ["対象者フルネーム", "内定した職種", "内定した業種", "内定した勤務地（都道府県）", "雇用形態"];
+      // 理論年収 / 紹介手数料（税抜き）は課金方式ラジオのカスタムUIで制御するため generic 描画から除外。
+      const hiddenLabels = ["対象者フルネーム", "内定した職種", "内定した業種", "内定した勤務地（都道府県）", "雇用形態", "理論年収", "紹介手数料（税抜き）"];
       return cat.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
@@ -835,6 +922,16 @@ export default function TaskNewPage() {
         if (locField && naiteiPrefecture) extraFieldValues.push({ fieldId: locField.id, value: `${naiteiRegion} ${naiteiPrefecture}` });
         const empField = selectedCategory.fields.find((f) => f.label === "雇用形態");
         if (empField && naiteiEmploymentType) extraFieldValues.push({ fieldId: empField.id, value: naiteiEmploymentType });
+        // 課金方式: 理論年収方式のときのみ理論年収を保存。紹介手数料（税抜き）は算出値を保存。
+        const theoryField = selectedCategory.fields.find((f) => f.label === "理論年収");
+        const theoryDigits = naiteiTheoryIncome.replace(/[^\d]/g, "");
+        if (theoryField && naiteiFeeMode === "ANNUAL_RATE" && theoryDigits) {
+          extraFieldValues.push({ fieldId: theoryField.id, value: theoryDigits });
+        }
+        const feeField = selectedCategory.fields.find((f) => f.label === "紹介手数料（税抜き）");
+        if (feeField && naiteiComputedFee != null) {
+          extraFieldValues.push({ fieldId: feeField.id, value: String(naiteiComputedFee) });
+        }
       }
 
       // FM登録依頼: カスタムフィールドをセット
@@ -1119,6 +1216,9 @@ export default function TaskNewPage() {
 
   const selectCls =
     "w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
+
+  // 内定承諾報告: 課金方式に応じた紹介手数料（税抜き）の算出結果（表示・保存共通）。
+  const naiteiComputedFee = computeReferralFee(naiteiFeeMode, naiteiTheoryIncome, naiteiFeeRate, naiteiFixedFee);
 
   /* ----- loading ----- */
   if (loading) {
@@ -1825,6 +1925,44 @@ export default function TaskNewPage() {
                           <option value="">選択してください</option>
                           {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
+                      </div>
+
+                      {/* 紹介手数料（課金方式: 固定 / 理論年収） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">紹介手数料（税抜き）<span className="ml-1 text-red-500">*</span></p>
+                        <div className="flex gap-5">
+                          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
+                            <input type="radio" name="naiteiFeeMode" checked={naiteiFeeMode === "FIXED"} onChange={() => setNaiteiFeeMode("FIXED")} className="accent-[#2563EB]" />
+                            固定
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
+                            <input type="radio" name="naiteiFeeMode" checked={naiteiFeeMode === "ANNUAL_RATE"} onChange={() => setNaiteiFeeMode("ANNUAL_RATE")} className="accent-[#2563EB]" />
+                            理論年収
+                          </label>
+                        </div>
+                        {naiteiFeeMode === "ANNUAL_RATE" ? (
+                          <>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="mb-1 block text-[12px] text-[#6B7280]">理論年収（円）</label>
+                                <input type="text" inputMode="numeric" value={naiteiTheoryIncome} onChange={(e) => setNaiteiTheoryIncome(e.target.value)} placeholder="例: 4000000" className={selectCls} />
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-[12px] text-[#6B7280]">手数料%</label>
+                                <input type="text" inputMode="decimal" value={naiteiFeeRate} onChange={(e) => setNaiteiFeeRate(e.target.value)} placeholder="例: 35" className={selectCls} />
+                              </div>
+                            </div>
+                            <p className="text-[13px] text-[#374151]">
+                              紹介手数料（税抜き）: <span className="font-bold text-[#16A34A]">{naiteiComputedFee != null ? `¥${naiteiComputedFee.toLocaleString("ja-JP")}` : "—"}</span>
+                              <span className="ml-2 text-[12px] text-[#9CA3AF]">理論年収 × 手数料% で自動算出</span>
+                            </p>
+                          </>
+                        ) : (
+                          <div>
+                            <label className="mb-1 block text-[12px] text-[#6B7280]">紹介手数料（税抜き・円）</label>
+                            <input type="text" inputMode="numeric" value={naiteiFixedFee} onChange={(e) => setNaiteiFixedFee(e.target.value)} placeholder="例: 1200000" className={selectCls} />
+                          </div>
+                        )}
                       </div>
                     </>
                   )}

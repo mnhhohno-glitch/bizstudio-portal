@@ -188,6 +188,8 @@ export default function EntryBoard() {
   const [taskDialogAction, setTaskDialogAction] = useState<TaskSyncAction>("create");
   const [taskDialogSlots, setTaskDialogSlots] = useState<TaskSyncSlot[]>([]);
   const [taskDialogEntryId, setTaskDialogEntryId] = useState<string | null>(null);
+  // 内定+承諾になった瞬間に表示する「承諾報告タスク作成」確認ダイアログ対象
+  const [offerAcceptEntry, setOfferAcceptEntry] = useState<Entry | null>(null);
   const [taskLoading, setTaskLoading] = useState(false);
 
   const fetchEntries = useCallback(async () => {
@@ -390,6 +392,35 @@ export default function EntryBoard() {
     setTaskDialogOpen(true);
   }, [calendarConnected]);
 
+  // 今回の更新で entryFlagDetail が「承諾」になり、かつ親フラグが「内定」のときだけ確認ダイアログを開く。
+  // 既に承諾済みの行で他フラグ（企業対応等）のみ更新した場合は flags に entryFlagDetail を含まないため発火しない。
+  const maybeOfferAcceptancePrompt = useCallback((entry: Entry, flags: Record<string, string | null>) => {
+    if (flags.entryFlagDetail === "承諾" && entry.entryFlag === "内定") {
+      setOfferAcceptEntry(entry);
+    }
+  }, []);
+
+  // 内定承諾報告タスク作成画面へ、エントリー値をプリセットして遷移（罠#17: 日付は JST 文字列化）
+  const goToOfferAcceptanceTask = (entry: Entry) => {
+    const jstYmd = (iso: string | null) =>
+      iso ? new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : "";
+    const params = new URLSearchParams();
+    params.set("prefill", "offer-acceptance");
+    params.set("categoryName", "内定承諾報告");
+    params.set("candidateId", entry.candidateId);
+    if (entry.companyName) params.set("companyName", entry.companyName);
+    if (entry.theoreticalAnnualIncome != null) params.set("theoreticalAnnualIncome", String(entry.theoreticalAnnualIncome));
+    if (entry.feeRatePercent != null && entry.feeRatePercent !== "") params.set("feeRatePercent", String(entry.feeRatePercent));
+    if (entry.revenue != null) params.set("revenue", String(entry.revenue));
+    if (entry.feeType) params.set("feeType", entry.feeType);
+    const acc = jstYmd(entry.acceptanceDate);
+    if (acc) params.set("acceptanceDate", acc);
+    const join = jstYmd(entry.joinDate);
+    if (join) params.set("joinDate", join);
+    params.set("step", "2");
+    window.location.href = `/tasks/new?${params.toString()}`;
+  };
+
   const handleFlagUpdate = async (entryId: string, flags: Record<string, string | null>) => {
     try {
       const res = await fetch(`/api/entries/${entryId}/flags`, {
@@ -406,6 +437,7 @@ export default function EntryBoard() {
       setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
       refreshCounts();
       maybeOpenCompleteForEndFlag(data.entry as Entry, flags);
+      maybeOfferAcceptancePrompt(data.entry as Entry, flags);
     } catch {
       toast.error("更新に失敗しました");
     }
@@ -1123,6 +1155,32 @@ export default function EntryBoard() {
           setTaskDialogEntryId(null);
         }}
       />
+
+      {/* 内定+承諾: 承諾報告タスク作成 確認ダイアログ */}
+      {offerAcceptEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setOfferAcceptEntry(null)}>
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[400px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold mb-3 text-[#374151]">承諾報告のタスクを作成しますか？</h3>
+            <p className="text-sm text-gray-600 mb-5">
+              {offerAcceptEntry.candidate.name}（{offerAcceptEntry.companyName}）の内定承諾報告タスクを作成します。エントリーから取得した値を自動入力した状態で作成画面を開きます。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setOfferAcceptEntry(null)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => { const e = offerAcceptEntry; setOfferAcceptEntry(null); goToOfferAcceptanceTask(e); }}
+                className="px-4 py-2 text-sm bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8]"
+              >
+                作成する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
