@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import ScoutNav from "@/components/scout/ScoutNav";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import ApplicantListModal, { type ApplicantQuery } from "@/components/scout/ApplicantListModal";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 
@@ -29,6 +30,19 @@ export default function ByDeliveryDatePage() {
   const [axis, setAxis] = useState<"overall" | "media" | "machine" | "category">("overall");
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
+  // 応募数クリック→応募者一覧モーダル
+  const [modalQuery, setModalQuery] = useState<ApplicantQuery | null>(null);
+  const [modalTitle, setModalTitle] = useState("");
+
+  // 日単位のときのみ応募数をクリック可能にする（key=配信日 YYYY-MM-DD）。media 軸では媒体も絞る。
+  const openApplicants = useCallback(
+    (bucketKey: string, mediaKey?: string) => {
+      setModalQuery({ date: bucketKey, ...(mediaKey ? { media: mediaKey } : {}) });
+      setModalTitle(`${bucketKey}${mediaKey ? ` / ${mediaKey}` : ""} の応募者`);
+    },
+    [],
+  );
+  const canClickApply = groupBy === "day";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,7 +110,7 @@ export default function ByDeliveryDatePage() {
       ) : !stats ? (
         <p className="mt-6 text-[#9CA3AF]">データがありません</p>
       ) : axis === "overall" ? (
-        <StatsTable buckets={stats.overall} />
+        <StatsTable buckets={stats.overall} onApply={canClickApply ? (k) => openApplicants(k) : undefined} />
       ) : (
         <>
           {Object.entries(stats.subBuckets).length === 0 ? (
@@ -105,17 +119,28 @@ export default function ByDeliveryDatePage() {
             Object.entries(stats.subBuckets).map(([key, buckets]) => (
               <div key={key} className="mt-6">
                 <h3 className="text-[14px] font-semibold text-[#374151] mb-2">{formatRecruiterName(key)}</h3>
-                <StatsTable buckets={buckets} />
+                {/* 媒体軸のみ応募数クリックで media 絞り込み一覧（号機/種別軸は API 非対応のため非クリック） */}
+                <StatsTable
+                  buckets={buckets}
+                  onApply={axis === "media" && canClickApply ? (k) => openApplicants(k, key) : undefined}
+                />
               </div>
             ))
           )}
         </>
       )}
+
+      <ApplicantListModal
+        open={modalQuery != null}
+        onClose={() => setModalQuery(null)}
+        title={modalTitle}
+        query={modalQuery}
+      />
     </div>
   );
 }
 
-function StatsTable({ buckets }: { buckets: Bucket[] }) {
+function StatsTable({ buckets, onApply }: { buckets: Bucket[]; onApply?: (bucketKey: string) => void }) {
   const totals = buckets.reduce(
     (acc, b) => ({
       d: acc.d + b.deliveryCount,
@@ -147,7 +172,19 @@ function StatsTable({ buckets }: { buckets: Bucket[] }) {
                 <td className="px-3 py-1.5 text-right">{b.deliveryCount.toLocaleString()}</td>
                 <td className="px-3 py-1.5 text-right">{b.openCount.toLocaleString()}</td>
                 <td className="px-3 py-1.5 text-right">{oRate.toFixed(1)}%</td>
-                <td className="px-3 py-1.5 text-right">{b.applyCount.toLocaleString()}</td>
+                <td className="px-3 py-1.5 text-right">
+                  {onApply && b.applyCount > 0 ? (
+                    <button
+                      onClick={() => onApply(b.key)}
+                      className="text-[#2563EB] hover:underline"
+                      title="応募者一覧を表示"
+                    >
+                      {b.applyCount.toLocaleString()}
+                    </button>
+                  ) : (
+                    b.applyCount.toLocaleString()
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-right">{aRate.toFixed(1)}%</td>
               </tr>
             );

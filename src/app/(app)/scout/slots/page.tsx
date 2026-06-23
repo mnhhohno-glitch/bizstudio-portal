@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
+import ApplicantListModal from "@/components/scout/ApplicantListModal";
 
 type Slot = {
   id: string;
@@ -170,6 +171,8 @@ export default function ScoutSlotsPage() {
   // === レコード一覧タブ用 state ===
   const [listRows, setListRows] = useState<ListRow[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  // 応募数クリック→応募者一覧モーダル（枠単位）
+  const [applicantModal, setApplicantModal] = useState<{ slotId: string; title: string } | null>(null);
   const [startDate, setStartDate] = useState(today());
   const [endDate, setEndDate] = useState(today());
   const [fLarge, setFLarge] = useState("");
@@ -628,6 +631,50 @@ export default function ScoutSlotsPage() {
                 </tr>
               </thead>
               <tbody>
+                {/* 合計行（最上部固定表示）。率は行平均ではなく Σ/Σ で再計算。 */}
+                {listRows.length > 0 && (() => {
+                  const t = listRows.reduce(
+                    (a, r) => ({
+                      deliveryCount: a.deliveryCount + r.deliveryCount,
+                      openCount: a.openCount + r.openCount,
+                      applyCount: a.applyCount + r.applyCount,
+                      a20: a.a20 + r.ageGroups["20s"],
+                      a30: a.a30 + r.ageGroups["30s"],
+                      a40: a.a40 + r.ageGroups["40s"],
+                      a50: a.a50 + r.ageGroups["50s"],
+                      foreign: a.foreign + r.ageGroups.foreign,
+                      valid: a.valid + r.validApplyCount,
+                      invalid: a.invalid + r.invalidApplyCount,
+                    }),
+                    { deliveryCount: 0, openCount: 0, applyCount: 0, a20: 0, a30: 0, a40: 0, a50: 0, foreign: 0, valid: 0, invalid: 0 },
+                  );
+                  const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
+                  return (
+                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151]">
+                      <td className="px-2 py-2 border-r border-[#E5E7EB] whitespace-nowrap">合計（{listRows.length}件）</td>
+                      <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
+                      <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
+                      <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
+                      <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.deliveryCount.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.openCount.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.openCount, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.applyCount.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.applyCount, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.applyCount, t.openCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a20}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a30}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a40}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a50}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.foreign}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#16A34A]">{t.valid}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#DC2626]">{t.invalid}</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#16A34A]">{pct(t.valid, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#DC2626]">{pct(t.invalid, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-center"></td>
+                    </tr>
+                  );
+                })()}
                 {listRows.length === 0 ? (
                   <tr>
                     <td colSpan={21} className="px-3 py-6 text-center text-[#9CA3AF]">
@@ -680,7 +727,24 @@ export default function ScoutSlotsPage() {
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.deliveryCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openRate.toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyCount.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">
+                        {r.applyCount > 0 ? (
+                          <button
+                            onClick={() =>
+                              setApplicantModal({
+                                slotId: r.id,
+                                title: `${r.deliveryDate} ${r.machine?.recruiterName ?? ""} ${r.hourSlot}:00 の応募者`,
+                              })
+                            }
+                            className="text-[#2563EB] hover:underline"
+                            title="応募者一覧を表示"
+                          >
+                            {r.applyCount.toLocaleString()}
+                          </button>
+                        ) : (
+                          r.applyCount.toLocaleString()
+                        )}
+                      </td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate1.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate2.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["20s"]}</td>
@@ -1174,6 +1238,14 @@ export default function ScoutSlotsPage() {
           </div>
         </div>
       )}
+
+      {/* 応募数クリック→応募者一覧 */}
+      <ApplicantListModal
+        open={applicantModal != null}
+        onClose={() => setApplicantModal(null)}
+        title={applicantModal?.title ?? ""}
+        query={applicantModal ? { slotId: applicantModal.slotId } : null}
+      />
     </div>
   );
 }
