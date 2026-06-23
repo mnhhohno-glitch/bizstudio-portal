@@ -1177,3 +1177,35 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - 配布マージ useAiFillData(aiFillData, setForm, allowedKeys): aiFillData参照変化時＋タブのマウント時に1回だけ空欄マージ（後から開いたタブも埋まる）、同一参照は再マージしない(appliedRef)
 - 共通マージ: resume-ai-merge.ts の mergeEmptyOnly（ボタン経路・D&D経路の両方が使用）
 - タブ別 allowedKeys: Basic=name/furigana/birthday/gender/postalCode/address/phone/emergencyContact{Name,Relation,Phone}、Insurance=pensionNumber/employmentInsuranceNumber、Bank=bankName/bankCode/branchName/branchCode/accountType/accountNumber/accountHolderKana
+
+---
+
+## 一覧画面マップ: 面談一覧 / 求職者管理一覧（T-101, 2026-06-23）
+
+両一覧に「応募日 / 配信日 / 経路（媒体）」の表示列＋検索を追加した際に把握した構造マップ。
+**3項目の連携元は全て `Candidate` 直持ち**（`applicationDate` / `scoutDeliveryDate` / `mediaSource`）。join 不要・求職者1人1件（T-091手入力欄）。詳細は `02-data-sources.md` 参照。
+
+### 画面A: 面談管理一覧 InterviewListClient
+
+- パス: `src/app/(app)/admin/interviews/InterviewListClient.tsx`（クライアント）/ ページ `src/app/(app)/admin/interviews/page.tsx`
+- 取得元: **`GET /api/interviews`**（`src/app/api/interviews/route.ts`）。`page/pageSize` でサーバページネーション（PAGE_SIZE=30）。行型 `InterviewRow`（候補は `r.candidate.*` にネスト）。
+- フィルタの二層構造（重要）:
+  - **サーバ側**（API query へ送る）: rcName / caName / dateFrom/To（面談日）/ candidateName / search
+  - **クライアント側**（`displayedInterviews = interviews.filter(...)`, T-068 由来）: typeFilter / toolFilter、**＋T-101 で応募日範囲 / 配信日範囲 / 経路(媒体) を追加**。件数サマリ（新規/既存●件）もこの `displayedInterviews` から算出するため自動連動。
+  - ⚠️ クライアント側フィルタは現在ページの30件のみが対象（T-068踏襲の既知の制約）。
+- 列構成（T-101後, COL_WIDTHS=15要素）: 操作 → **応募日/配信日** → **経路** → 担当RC → 担当CA → 面談日 → 開始/終了 → 回数/結果 → 求職者氏名 → 年齢/性別 → 電話 → メール/住所 → 転職時期/評価 → 希望都道府県 → 第一希望職種。新2列は「操作の右・担当RC の左」。colSpan（loading/空）=15。
+
+### 画面B: 求職者管理一覧 CandidateListClient
+
+- パス: `src/app/(app)/admin/master/CandidateListClient.tsx`（クライアント）/ ページ `src/app/(app)/admin/master/page.tsx`（server component, `serialized` で行整形）
+- 取得元: 初期は page.tsx の SSR（`prisma.candidate.findMany` → `serialized`）。リフレッシュ時のみ **`GET /api/master/candidates?include=employee`**（`...c` 全フィールド spread のため Date は ISO 文字列で返る）。**全件クライアント保持・全フィルタがクライアント側**（`filtered` useMemo）。
+- 行型 `CandidateRow`。T-101 で `applicationDate` / `scoutDeliveryDate` を追加（`mediaSource`/`applicationRoute`/`recruiterName` は T-064 で既存）。page.tsx の `serialized` にも両日付を `toISOString()` で追加すること（SSR初期表示用）。
+- フィルタ: 支援タブ / フリー検索 / 担当CA / 登録日範囲 / 性別 / 終了理由 / 経路(applicationRoute=スカウト/応募) / 媒体(mediaSource) ＝ T-064既存。**T-101 で応募日範囲 / 配信日範囲を追加**。クリアボタン条件＆ハンドラに新state追加。
+  - ⚠️ 用語衝突注意: 画面Bの既存「経路」フィルタは `applicationRoute`（スカウト/応募）。T-101の「経路」列は **媒体名 `mediaSource`** を表示（タスク定義の経路＝媒体名）。媒体プルダウンは既存を流用したため追加せず、列表示のみ追加。
+- 列構成（T-101後, colgroup=12列）: ☑ → 求職者番号 → 氏名 → フリガナ → 性別 → 担当CA → **応募日/配信日** → **経路** → 担当RC → 登録日時 → 支援状況 → ステータス。新2列は「担当CA の右・担当RC の左」。空 colSpan=12。
+
+### 共通実装（罠#17 / JST）
+
+- 日付は必ず `Asia/Tokyo` 基準で文字列化。両ファイルにヘルパ `jstDateStr(iso)`（`toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"})` → `YYYY-MM-DD`、比較・範囲境界用）と `fmtJstSlash(iso)`（表示用 `YYYY/MM/DD`、null は "-"）を定義。
+- 範囲フィルタは JST 日付文字列の辞書順比較（`d >= from` / `d <= to`）。日付が無い行は範囲指定時に除外（登録日範囲の既存挙動と同じ通常フィルタ意味論）。`toISOString().slice(0,10)` / `getDay()` は使わない。
+- 応募/配信セルは「面談日」セル同様の上下2段（上=応募日, 下=配信日, 11px グレー）。経路セルは1行 truncate。
