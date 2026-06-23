@@ -4,7 +4,15 @@ import { useEffect, useState } from "react";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 
-export type ApplicantQuery = { slotId?: string; date?: string; media?: string };
+export type ApplicantQuery = {
+  slotId?: string;
+  date?: string;
+  media?: string;
+  appliedDate?: string;
+  from?: string;
+  to?: string;
+  machineLabel?: string;
+};
 
 type Machine = { recruiterName: string; machineNumber: number | null; isMachine: boolean };
 
@@ -78,6 +86,10 @@ export default function ApplicantListModal({
     if (query.slotId) params.set("slotId", query.slotId);
     if (query.date) params.set("date", query.date);
     if (query.media) params.set("media", query.media);
+    if (query.appliedDate) params.set("appliedDate", query.appliedDate);
+    if (query.from) params.set("from", query.from);
+    if (query.to) params.set("to", query.to);
+    if (query.machineLabel) params.set("machineLabel", query.machineLabel);
     fetch(`/api/scout/candidates?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { candidates: [] }))
       .then((d) => {

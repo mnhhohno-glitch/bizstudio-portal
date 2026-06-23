@@ -578,10 +578,11 @@ export default function ScoutSlotsPage() {
           )}
 
           {/* テーブル */}
-          <div className="mt-3 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-[#E5E7EB] bg-white">
             <table className="text-[11px]" style={{ minWidth: 1400 }}>
               <thead className="bg-[#F9FAFB] text-[#6B7280]">
-                <tr>
+                {/* 列見出しを上端固定（縦sticky・横スクロールは維持） */}
+                <tr className="[&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:bg-[#F9FAFB]">
                   <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <div>スカウトNO</div>
                     <div className="text-[10px] text-[#9CA3AF]">種別 | 媒体</div>
@@ -650,7 +651,7 @@ export default function ScoutSlotsPage() {
                   );
                   const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
                   return (
-                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151]">
+                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151] [&>td]:sticky [&>td]:top-[38px] [&>td]:z-10 [&>td]:bg-[#EFF6FF]">
                       <td className="px-2 py-2 border-r border-[#E5E7EB] whitespace-nowrap">合計（{listRows.length}件）</td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>

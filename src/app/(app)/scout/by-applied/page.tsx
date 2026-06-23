@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import ScoutNav from "@/components/scout/ScoutNav";
+import ApplicantListModal, { type ApplicantQuery } from "@/components/scout/ApplicantListModal";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 
@@ -20,6 +21,18 @@ export default function ByAppliedDatePage() {
   const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
   const [stats, setStats] = useState<{ overall: Bucket[] } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [modalQuery, setModalQuery] = useState<ApplicantQuery | null>(null);
+  const [modalTitle, setModalTitle] = useState("");
+
+  // 応募数クリック→応募者一覧（applied バケットは stats と同一基準＝枠×先頭応募者の UTC暦日）。日単位のみ。
+  const canClickApply = groupBy === "day";
+  const openApplicants = useCallback(
+    (appliedDate: string) => {
+      setModalQuery({ appliedDate, from, to });
+      setModalTitle(`${appliedDate} の応募者（応募日基準）`);
+    },
+    [from, to],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,24 +88,49 @@ export default function ByAppliedDatePage() {
         <p className="mt-6 text-[#9CA3AF]">読み込み中...</p>
       ) : !stats ? (
         <p className="mt-6 text-[#9CA3AF]">データがありません</p>
-      ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+      ) : (() => {
+        const applyTotal = stats.overall.reduce((s, b) => s + b.applyCount, 0);
+        const headCls = "sticky top-0 z-20 bg-[#F9FAFB] px-3 py-2";
+        const totalCls = "sticky top-[35px] z-10 border-b-2 border-[#9CA3AF] bg-[#EFF6FF] px-3 py-2";
+        return (
+        <div className="mt-4 max-h-[70vh] overflow-auto rounded-lg border border-[#E5E7EB] bg-white">
           <table className="w-full text-[13px]">
-            <thead className="bg-[#F9FAFB] text-[#6B7280]">
+            <thead className="text-[#6B7280]">
               <tr>
-                <th className="px-3 py-2 text-left">応募日</th>
-                <th className="px-3 py-2 text-right">応募数</th>
-                <th className="px-3 py-2 text-right">設定数</th>
-                <th className="px-3 py-2 text-right">設定率</th>
-                <th className="px-3 py-2 text-right">実施数</th>
-                <th className="px-3 py-2 text-right">実施率</th>
+                <th className={`${headCls} text-left`}>応募日</th>
+                <th className={`${headCls} text-right`}>応募数</th>
+                <th className={`${headCls} text-right`}>設定数</th>
+                <th className={`${headCls} text-right`}>設定率</th>
+                <th className={`${headCls} text-right`}>実施数</th>
+                <th className={`${headCls} text-right`}>実施率</th>
+              </tr>
+              {/* 合計行（ヘッダー直下に固定・最上部表示） */}
+              <tr className="font-medium text-[#374151]">
+                <td className={totalCls}>合計</td>
+                <td className={`${totalCls} text-right`}>{applyTotal.toLocaleString()}</td>
+                <td className={`${totalCls} text-right text-[#9CA3AF]`}>-</td>
+                <td className={`${totalCls} text-right text-[#9CA3AF]`}>-</td>
+                <td className={`${totalCls} text-right text-[#9CA3AF]`}>-</td>
+                <td className={`${totalCls} text-right text-[#9CA3AF]`}>-</td>
               </tr>
             </thead>
             <tbody>
               {stats.overall.map((b) => (
                 <tr key={b.key} className="border-t border-[#F3F4F6]">
                   <td className="px-3 py-1.5">{b.key}</td>
-                  <td className="px-3 py-1.5 text-right">{b.applyCount.toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    {canClickApply && b.applyCount > 0 ? (
+                      <button
+                        onClick={() => openApplicants(b.key)}
+                        className="text-[#2563EB] hover:underline"
+                        title="応募者一覧を表示"
+                      >
+                        {b.applyCount.toLocaleString()}
+                      </button>
+                    ) : (
+                      b.applyCount.toLocaleString()
+                    )}
+                  </td>
                   <td className="px-3 py-1.5 text-right text-[#9CA3AF]">-</td>
                   <td className="px-3 py-1.5 text-right text-[#9CA3AF]">-</td>
                   <td className="px-3 py-1.5 text-right text-[#9CA3AF]">-</td>
@@ -102,7 +140,15 @@ export default function ByAppliedDatePage() {
             </tbody>
           </table>
         </div>
-      )}
+        );
+      })()}
+
+      <ApplicantListModal
+        open={modalQuery != null}
+        onClose={() => setModalQuery(null)}
+        title={modalTitle}
+        query={modalQuery}
+      />
     </div>
   );
 }

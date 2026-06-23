@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import ScoutNav from "@/components/scout/ScoutNav";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import ApplicantListModal, { type ApplicantQuery } from "@/components/scout/ApplicantListModal";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 type Stats = { subBuckets: Record<string, Bucket[]> };
@@ -22,6 +23,23 @@ export default function ByMediaPage() {
   const [mediaStats, setMediaStats] = useState<Stats | null>(null);
   const [machineStats, setMachineStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [modalQuery, setModalQuery] = useState<ApplicantQuery | null>(null);
+  const [modalTitle, setModalTitle] = useState("");
+
+  const openMedia = useCallback(
+    (mediaKey: string) => {
+      setModalQuery({ media: mediaKey, from, to });
+      setModalTitle(`${mediaKey}（期間内）の応募者`);
+    },
+    [from, to],
+  );
+  const openAccount = useCallback(
+    (machineLabel: string) => {
+      setModalQuery({ machineLabel, from, to });
+      setModalTitle(`${formatRecruiterName(machineLabel)}（期間内）の応募者`);
+    },
+    [from, to],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,10 +101,17 @@ export default function ByMediaPage() {
         <p className="mt-6 text-[#9CA3AF]">読み込み中...</p>
       ) : (
         <>
-          <Section title="媒体別" rows={summarize(mediaStats)} />
-          <Section title="アカウント別（号機・社員）" rows={summarize(machineStats)} />
+          <Section title="媒体別" rows={summarize(mediaStats)} showTotals={false} onApply={openMedia} />
+          <Section title="アカウント別（号機・社員）" rows={summarize(machineStats)} showTotals onApply={openAccount} />
         </>
       )}
+
+      <ApplicantListModal
+        open={modalQuery != null}
+        onClose={() => setModalQuery(null)}
+        title={modalTitle}
+        query={modalQuery}
+      />
     </div>
   );
 }
@@ -94,24 +119,43 @@ export default function ByMediaPage() {
 function Section({
   title,
   rows,
+  showTotals,
+  onApply,
 }: {
   title: string;
   rows: Array<{ key: string; d: number; o: number; a: number }>;
+  showTotals: boolean;
+  onApply: (key: string) => void;
 }) {
+  const totals = rows.reduce((acc, r) => ({ d: acc.d + r.d, o: acc.o + r.o, a: acc.a + r.a }), { d: 0, o: 0, a: 0 });
+  const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
+  const headCls = "sticky top-0 z-20 bg-[#F9FAFB] px-3 py-2";
+  const totalCls = "sticky top-[35px] z-10 border-b-2 border-[#9CA3AF] bg-[#EFF6FF] px-3 py-2";
   return (
     <div className="mt-6">
       <h2 className="text-[14px] font-semibold text-[#374151] mb-2">{title}</h2>
-      <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
+      <div className="max-h-[70vh] overflow-auto rounded-lg border border-[#E5E7EB] bg-white">
         <table className="w-full text-[13px]">
-          <thead className="bg-[#F9FAFB] text-[#6B7280]">
+          <thead className="text-[#6B7280]">
             <tr>
-              <th className="px-3 py-2 text-left">名称</th>
-              <th className="px-3 py-2 text-right">配信</th>
-              <th className="px-3 py-2 text-right">開封</th>
-              <th className="px-3 py-2 text-right">開封率</th>
-              <th className="px-3 py-2 text-right">応募</th>
-              <th className="px-3 py-2 text-right">応募率</th>
+              <th className={`${headCls} text-left`}>名称</th>
+              <th className={`${headCls} text-right`}>配信</th>
+              <th className={`${headCls} text-right`}>開封</th>
+              <th className={`${headCls} text-right`}>開封率</th>
+              <th className={`${headCls} text-right`}>応募</th>
+              <th className={`${headCls} text-right`}>応募率</th>
             </tr>
+            {/* アカウント別のみ上部合計行（ヘッダー直下固定）。率は Σ/Σ で再計算。 */}
+            {showTotals && rows.length > 0 && (
+              <tr className="font-medium text-[#374151]">
+                <td className={totalCls}>合計</td>
+                <td className={`${totalCls} text-right`}>{totals.d.toLocaleString()}</td>
+                <td className={`${totalCls} text-right`}>{totals.o.toLocaleString()}</td>
+                <td className={`${totalCls} text-right`}>{pct(totals.o, totals.d)}%</td>
+                <td className={`${totalCls} text-right`}>{totals.a.toLocaleString()}</td>
+                <td className={`${totalCls} text-right`}>{pct(totals.a, totals.d)}%</td>
+              </tr>
+            )}
           </thead>
           <tbody>
             {rows.length === 0 ? (
@@ -126,13 +170,17 @@ function Section({
                   <td className="px-3 py-1.5">{formatRecruiterName(r.key)}</td>
                   <td className="px-3 py-1.5 text-right">{r.d.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{r.o.toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right">{pct(r.o, r.d)}%</td>
                   <td className="px-3 py-1.5 text-right">
-                    {r.d > 0 ? ((r.o / r.d) * 100).toFixed(1) : "0.0"}%
+                    {r.a > 0 ? (
+                      <button onClick={() => onApply(r.key)} className="text-[#2563EB] hover:underline" title="応募者一覧を表示">
+                        {r.a.toLocaleString()}
+                      </button>
+                    ) : (
+                      r.a.toLocaleString()
+                    )}
                   </td>
-                  <td className="px-3 py-1.5 text-right">{r.a.toLocaleString()}</td>
-                  <td className="px-3 py-1.5 text-right">
-                    {r.d > 0 ? ((r.a / r.d) * 100).toFixed(1) : "0.0"}%
-                  </td>
+                  <td className="px-3 py-1.5 text-right">{pct(r.a, r.d)}%</td>
                 </tr>
               ))
             )}
