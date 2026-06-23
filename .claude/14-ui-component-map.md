@@ -1232,3 +1232,12 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - それ以外の列（interviewDate / caName 等）は従来どおり `orderBy + skip/take + count` の高速パスで**完全非変更**。
 - **正規化の単一集約**: `src/lib/recruiterDisplay.ts` に `normalizeRecruiterName()`（全角数字→半角・空白除去の比較用）を追加し、`formatRecruiterName` も内部でこれを使用。号機↔実名の対応表（`MACHINE_NUMBER_TO_REAL_NAME`）は1か所のまま。サーバ/クライアント双方がこの1モジュールを import（`recruiterDisplay.ts` は pure で server-import 可、既に scout 配下の server component が使用）。
 - 担当CA のソート/絞り込み・件数サマリ・他列は非変更。
+
+## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
+
+エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。
+
+- 起点（`src/components/entries/EntryBoard.tsx`）: `maybeOfferAcceptancePrompt(entry, flags)`（`handleFlagUpdate` の PATCH 成功後に呼出、`flags.entryFlagDetail==="承諾" && entry.entryFlag==="内定"` で発火）→ state `offerAcceptEntry` に対象を入れ確認モーダルを表示（`TaskSyncConfirmDialog` 直後にレンダ）。「作成する」で `goToOfferAcceptanceTask(entry)` が `window.location.href = /tasks/new?prefill=offer-acceptance&...`（日付は JST/sv-SE、null は付与しない）。
+- 受信（`src/app/(app)/tasks/new/page.tsx`）: useEffect（`offerPrefillApplied` ref で1回）。カテゴリ「内定承諾報告」を name 一致で `setCategoryId`、候補者を `candidateId`（`id`/`candidateNo`）一致で選択、企業名/内定承諾日/入社日 → `resolvedCat.fields` のラベル一致で `setFieldValues[field.id]`、feeType/理論年収/手数料%/revenue → 課金方式 state（`naiteiFeeMode`/`naiteiTheoryIncome`/`naiteiFeeRate`/`naiteiFixedFee`）、`setStep(2)`。
+- 課金方式UI: `isNaitei` カスタムブロック内（雇用形態の下）。helper: module `computeReferralFee()`。「理論年収」「紹介手数料（税抜き）」は `getVisibleFields` の `hiddenLabels` に追加し generic 描画から除外（submit 時に `extraFieldValues` でラベル格納）。
+- テンプレ値プリセットの確立パターン（**ラベル一致→`setFieldValues[field.id]`**）: 既存 `prefill=entry`（page.tsx:379-390）/ `prefill=interview-decline`（451-463）と同方式。新導線も踏襲。
