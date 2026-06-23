@@ -1242,6 +1242,15 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - **エントリー管理（`src/components/entries/EntryTable.tsx`）: T-104 で担当RC列を新規追加**（担当CA の右）。`COMMON_COLS` に `{ key:"rc", label:"担当RC", sortKey:"rc" }`、`getFieldValue` と `renderCell` に `rc` ケース（`formatRecruiterName(entry.candidate.recruiterName)`）。データは `Entry.candidate.recruiterName`（`/api/entries` の candidate select に `recruiterName: true` 追加、`EntryBoard.tsx` の `Entry` 型に `recruiterName?: string | null` 追加）。エントリー一覧のソートは `applySortAndGroup` によるクライアント側（`handleSort` は再フェッチせず state のみ）なので担当RC列ソートも client 側で表示値基準・空は末尾。
 - 同 lib を使う他画面（`scout/by-media`・`by-sent`・`ScoutLinkPanel`・`CandidateHeader`）も新表示形式に追従（VIEW専用なので集計/突合キーには影響なし）。
 
+##### 担当RC 2段表示（T-104追補, 2026-06-24）
+
+セル幅で末尾が切れる問題に対し、号機アカウントを **実名(上段)／(RPA○号機)(下段)** の改行2段表示にした。
+
+- **分割ヘルパー**: `src/lib/recruiterDisplay.ts` に `splitRecruiterDisplay(value)` を追加（表示専用）。`formatRecruiterName` の出力末尾の半角 `(RPA[1-6]号機)` を正規表現 `^(.*?)\s*(\(RPA[1-6]号機\))$` で分離し `{ name, unit }` を返す。号機なし実名→`{name, unit:null}`、空→`{name:"-", unit:null}`。**`formatRecruiterName`/`normalizeRecruiterName` 本体は不変**（ソート/絞り込み/集計の互換維持）。
+- 3画面のセルは `splitRecruiterDisplay` で2段描画（`unit` が null なら1段）。セルは `whitespace-normal break-words`。`title` 属性は従来どおり `formatRecruiterName(...)` の1行値。
+  - 求職者管理（CandidateListClient 担当RC `<Td>`）／面談管理（InterviewListClient 担当RC `<td>`）／エントリー管理（EntryTable `rc` case）。
+- **ソート/絞り込みは非変更**: 面談一覧の担当RC サーバ側ソート/絞り込み・エントリーの client 側 `getFieldValue("rc")` はいずれも `formatRecruiterName`/`normalizeRecruiterName` の1行値を使用（2段化は描画のみ）。
+
 ## prefill=offer-acceptance 導線（内定承諾報告タスク, master 6d8433b, 2026-06-23）
 
 エントリーの内定承諾を起点に `/tasks/new` の内定承諾報告テンプレートへ値をプリセットして遷移する導線。

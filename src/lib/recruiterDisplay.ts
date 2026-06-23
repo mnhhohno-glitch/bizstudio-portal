@@ -62,3 +62,23 @@ export function formatRecruiterName(value: string | null | undefined): string {
   const realName = MACHINE_NUMBER_TO_REAL_NAME[match[1]];
   return realName ?? original;
 }
+
+/**
+ * 担当RCの2段表示用の分割ヘルパー（表示専用・T-104追補）。
+ *
+ * `formatRecruiterName` の出力（「実名(RPA○号機)」形式）を受け、末尾の半角括弧
+ * `(RPA[1-6]号機)` があれば name(実名) と unit(号機表記) に分離して返す。
+ *  - 号機アカウント: `{ name: "上原 千遥", unit: "(RPA4号機)" }`
+ *  - 実名アカウント(号機なし): `{ name: 実名, unit: null }`
+ *  - 空(NULL/空文字): `{ name: "-", unit: null }`
+ *
+ * ⚠️ 表示専用。ソート/絞り込み/集計/突合は引き続き `formatRecruiterName` /
+ * `normalizeRecruiterName` の値を使うこと（本ヘルパーの戻り値は画面描画専用）。
+ */
+export function splitRecruiterDisplay(value: string | null | undefined): { name: string; unit: string | null } {
+  const formatted = formatRecruiterName(value);
+  if (!formatted) return { name: "-", unit: null };
+  const m = formatted.match(/^(.*?)\s*(\(RPA[1-6]号機\))$/);
+  if (m) return { name: m[1].trim(), unit: m[2] };
+  return { name: formatted, unit: null };
+}

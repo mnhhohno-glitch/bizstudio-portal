@@ -5,7 +5,7 @@ import Link from "next/link";
 import { SELECTION_ENDED_DETAILS, HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import { normalizeTimeInput } from "@/lib/timeFormat";
-import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -833,9 +833,14 @@ export default function EntryTable({
       case "ca":
         return <td key={col.key} className="px-2 py-1.5 whitespace-nowrap text-[11px] text-gray-600">{entry.candidate.employee?.name || "-"}</td>;
       case "rc": {
-        // T-104: 担当RC＝スカウト配信担当。号機表記は formatRecruiterName で「実名(RPA○号機)」表示。空は「-」。
-        const rc = formatRecruiterName(entry.candidate.recruiterName) || "-";
-        return <td key={col.key} className="px-2 py-1.5 text-[11px] text-gray-600 whitespace-normal break-words" title={rc}>{rc}</td>;
+        // T-104追補: 担当RC＝スカウト配信担当。実名(上段)/(RPA○号機)(下段)の2段表示。空は「-」。
+        const rc = splitRecruiterDisplay(entry.candidate.recruiterName);
+        return (
+          <td key={col.key} className="px-2 py-1.5 text-[11px] text-gray-600 whitespace-normal break-words" title={formatRecruiterName(entry.candidate.recruiterName) || "-"}>
+            <div>{rc.name}</div>
+            {rc.unit && <div className="text-[10px] text-gray-400">{rc.unit}</div>}
+          </td>
+        );
       }
       case "company":
         return (

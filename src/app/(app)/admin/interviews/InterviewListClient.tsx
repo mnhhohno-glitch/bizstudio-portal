@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { TimeInput } from "@/components/ui/TimeInput";
 import { getMissingFieldLabels } from "@/lib/interview-input-missing";
-import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -652,9 +652,17 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   </td>
                   {/* T-101: 経路（媒体）。マイナビ転職/エージェントの判別のため省略せず全文折り返し表示 */}
                   <td className="px-2 py-2 text-[13px] whitespace-normal break-words" title={r.candidate.mediaSource || "-"}>{r.candidate.mediaSource || "-"}</td>
-                  {/* 担当RC（T-102: スカウト配信担当 recruiterName。号機表記は表示時に実名変換。空は「-」） */}
-                  <td className="px-2 py-2 overflow-hidden" title={formatRecruiterName(r.candidate.recruiterName) || "-"}>
-                    <div className="text-[13px] truncate">{formatRecruiterName(r.candidate.recruiterName) || "-"}</div>
+                  {/* 担当RC（T-102: スカウト配信担当。T-104追補: 実名/(RPA○号機)の2段表示。空は「-」） */}
+                  <td className="px-2 py-2 whitespace-normal break-words" title={formatRecruiterName(r.candidate.recruiterName) || "-"}>
+                    {(() => {
+                      const rc = splitRecruiterDisplay(r.candidate.recruiterName);
+                      return (
+                        <>
+                          <div className="text-[13px]">{rc.name}</div>
+                          {rc.unit && <div className="text-[11px] text-gray-500">{rc.unit}</div>}
+                        </>
+                      );
+                    })()}
                   </td>
                   {/* 担当CA */}
                   <td className="px-2 py-2 overflow-hidden" title={r.candidate.employee ? `${r.candidate.employee.employeeNumber} ${r.candidate.employee.name}` : "-"}>
