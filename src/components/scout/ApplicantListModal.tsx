@@ -99,7 +99,7 @@ export default function ApplicantListModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="flex max-h-[85vh] w-[780px] flex-col overflow-hidden rounded-lg bg-white shadow-xl"
+        className="flex max-h-[85vh] w-[min(1100px,95vw)] flex-col overflow-hidden rounded-lg bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3">
@@ -108,7 +108,7 @@ export default function ApplicantListModal({
             ✕
           </button>
         </div>
-        <div className="overflow-y-auto p-4">
+        <div className="overflow-auto p-4">
           {loading ? (
             <p className="py-8 text-center text-[13px] text-[#9CA3AF]">読み込み中...</p>
           ) : rows.length === 0 ? (
@@ -116,9 +116,9 @@ export default function ApplicantListModal({
           ) : (
             <>
               <p className="mb-2 text-[12px] text-[#6B7280]">{rows.length}名</p>
-              <table className="w-full text-[12px]">
+              <table className="w-full min-w-max text-[12px]">
                 <thead className="bg-[#F9FAFB] text-[#6B7280]">
-                  <tr>
+                  <tr className="whitespace-nowrap">
                     <th className="px-2 py-1.5 text-left font-medium">求職者番号</th>
                     <th className="px-2 py-1.5 text-left font-medium">氏名</th>
                     <th className="px-2 py-1.5 text-right font-medium">年齢</th>
@@ -132,7 +132,7 @@ export default function ApplicantListModal({
                 </thead>
                 <tbody>
                   {rows.map((c) => (
-                    <tr key={c.id} className="border-t border-[#F3F4F6]">
+                    <tr key={c.id} className="whitespace-nowrap border-t border-[#F3F4F6]">
                       <td className="px-2 py-1.5 font-mono text-[#6B7280]">{c.candidateNumber}</td>
                       <td className="px-2 py-1.5">
                         <a
