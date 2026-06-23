@@ -15,6 +15,13 @@ const TAG_OPTIONS = [
   { label: "休憩", color: "#9CA3AF" },
   { label: "最優先", color: "#DC2626" },
   { label: "月末", color: "#EA580C" },
+  { label: "レクチャー", color: "#6B7280" },
+  { label: "研修", color: "#6B7280" },
+  { label: "スカウト", color: "#6B7280" },
+  { label: "分析", color: "#6B7280" },
+  { label: "資料作成", color: "#6B7280" },
+  { label: "RA業務", color: "#6B7280" },
+  { label: "面接", color: "#6B7280" },
   { label: "その他", color: "#6B7280" },
 ];
 
