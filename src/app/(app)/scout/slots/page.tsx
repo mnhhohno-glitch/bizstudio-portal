@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
 import ApplicantListModal from "@/components/scout/ApplicantListModal";
+import { TableVirtuoso, type TableComponents } from "react-virtuoso";
 
 type Slot = {
   id: string;
@@ -127,6 +128,27 @@ type SortKey =
   | "applyCount"
   | "applyRate1";
 type SortSpec = { column: SortKey; order: "asc" | "desc" };
+
+// T-066: 配信枠管理 list タブの仮想化（TableVirtuoso）用コンポーネント。
+// 再マウント/スクロールジャンク回避のため module スコープで固定（state を参照しない表示専用）。
+//  - Table: テーブル幅 minWidth:1400（横スクロール）維持
+//  - TableRow: 明細行スタイル（56px・hover）
+//  - EmptyPlaceholder: 0件表示
+const slotsVirtuosoComponents: TableComponents<ListRow> = {
+  Table: ({ style, ...props }) => (
+    <table {...props} className="text-[11px]" style={{ ...style, minWidth: 1400 }} />
+  ),
+  TableRow: ({ item: _item, ...props }) => (
+    <tr {...props} className="border-t border-[#F3F4F6] hover:bg-[#F9FAFB] align-middle" style={{ height: 56 }} />
+  ),
+  EmptyPlaceholder: () => (
+    <tbody>
+      <tr>
+        <td colSpan={21} className="px-3 py-6 text-center text-[#9CA3AF]">該当するレコードがありません</td>
+      </tr>
+    </tbody>
+  ),
+};
 
 export default function ScoutSlotsPage() {
   const [tab, setTab] = useState<Tab>("list");
@@ -577,11 +599,15 @@ export default function ScoutSlotsPage() {
             </div>
           )}
 
-          {/* テーブル */}
-          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-[#E5E7EB] bg-white">
-            <table className="text-[11px]" style={{ minWidth: 1400 }}>
-              <thead className="bg-[#F9FAFB] text-[#6B7280]">
-                {/* 列見出しを上端固定（縦sticky・横スクロールは維持） */}
+          {/* テーブル（T-066: TableVirtuoso で tbody を仮想化。ヘッダ＋合計行は fixedHeaderContent= sticky thead に固定） */}
+          <TableVirtuoso
+            data={listRows}
+            className="mt-3 rounded-lg border border-[#E5E7EB] bg-white"
+            style={{ height: "70vh", overflowX: "auto" }}
+            components={slotsVirtuosoComponents}
+            fixedHeaderContent={() => (
+              <>
+                {/* 列見出し（fixedHeaderContent=sticky thead で上端固定・横スクロール維持） */}
                 <tr className="[&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:bg-[#F9FAFB]">
                   <th className="w-[120px] px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">
                     <div>スカウトNO</div>
@@ -630,9 +656,7 @@ export default function ScoutSlotsPage() {
                   <th className="w-[44px] px-2 py-2 text-right font-medium border-r border-[#E5E7EB] leading-tight">無効<br />応募率</th>
                   <th className="w-[44px] px-2 py-2 text-center font-medium">操作</th>
                 </tr>
-              </thead>
-              <tbody>
-                {/* 合計行（最上部固定表示）。率は行平均ではなく Σ/Σ で再計算。 */}
+                {/* 合計行（ヘッダ直下に固定。fixedHeaderContent=sticky thead 内のため td 個別 sticky は不要・背景のみ維持）。率は行平均ではなく Σ/Σ で再計算。 */}
                 {listRows.length > 0 && (() => {
                   const t = listRows.reduce(
                     (a, r) => ({
@@ -653,8 +677,7 @@ export default function ScoutSlotsPage() {
                   // T-064 step40: 応募率は小数第2位（開封率は第1位を維持）
                   const pctApply = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(2) : "0.00");
                   return (
-                    // step40: 2段ヘッダ(text-[11px]×2行+py-2)の実高 ≒47px に合計行の sticky top を合わせる
-                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151] [&>td]:sticky [&>td]:top-[47px] [&>td]:z-10 [&>td]:bg-[#EFF6FF]">
+                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151] [&>td]:bg-[#EFF6FF]">
                       <td className="px-2 py-2 border-r border-[#E5E7EB] whitespace-nowrap">合計（{listRows.length}件）</td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
@@ -679,15 +702,10 @@ export default function ScoutSlotsPage() {
                     </tr>
                   );
                 })()}
-                {listRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={21} className="px-3 py-6 text-center text-[#9CA3AF]">
-                      該当するレコードがありません
-                    </td>
-                  </tr>
-                ) : (
-                  listRows.map((r) => (
-                    <tr key={r.id} className="border-t border-[#F3F4F6] hover:bg-[#F9FAFB] align-middle" style={{ height: 56 }}>
+              </>
+            )}
+            itemContent={(_index, r) => (
+              <>
                       <td className="px-2 py-1.5 border-r border-[#E5E7EB] whitespace-nowrap">
                         <div
                           className="font-mono text-[#374151] cursor-pointer hover:text-[#2563EB]"
@@ -770,12 +788,9 @@ export default function ScoutSlotsPage() {
                           </button>
                         )}
                       </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+              </>
+            )}
+          />
 
           <p className="mt-3 text-[11px] text-[#9CA3AF]">
             応募率(配信)= 応募数 / 配信数、応募率(開封)= 応募数 / 開封数。年代別カウントは「応募日（Candidate.createdAt）」基準。〜20代は30未満、50代〜は50以上。<br />
