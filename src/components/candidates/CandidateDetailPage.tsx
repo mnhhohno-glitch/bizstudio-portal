@@ -12,6 +12,7 @@ import SupportEndModal from "@/components/candidates/SupportEndModal";
 import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
 import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
+import DashboardTab from "@/components/candidates/DashboardTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import ScoutLinkPanel from "@/components/scout/ScoutLinkPanel";
 import { Toaster } from "sonner";
@@ -116,6 +117,7 @@ const TOP_VIEWS = [
   { key: "basic", label: "基本" },
   { key: "interview", label: "面談履歴" },
   { key: "settings-history", label: "設定履歴" },
+  { key: "dashboard", label: "ダッシュボード" },
 ] as const;
 
 type TopViewKey = (typeof TOP_VIEWS)[number]["key"];
@@ -1877,6 +1879,8 @@ function CandidateDetailPageBody() {
         />
       ) : activeView === "settings-history" ? (
         <SettingsHistoryTab candidateId={candidateId} />
+      ) : activeView === "dashboard" ? (
+        <DashboardTab candidateId={candidateId} />
       ) : (
         <>
           {/* 基本タブ: 候補者ヘッダー */}
