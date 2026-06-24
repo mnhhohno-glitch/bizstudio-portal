@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
 import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
@@ -437,7 +436,6 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 export default function InterviewForm({
   interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted,
 }: InterviewFormProps) {
-  const router = useRouter();
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<AnyRecord>({});
@@ -1281,7 +1279,8 @@ export default function InterviewForm({
                       // T-043: 面談日・時刻を Step 3 の「面談日」フィールドに自動セットするため転送
                       if (form.interviewDate) params.set("interviewDate", form.interviewDate);
                       if (form.startTime) params.set("startTime", form.startTime);
-                      router.push(`/tasks/new?${params.toString()}`);
+                      // タスク作成画面は新規タブで開き、元の面談入力画面を保持する
+                      window.open(`/tasks/new?${params.toString()}`, "_blank", "noopener");
                     }
                   }
                 }} type="select" options={["面談前", "求人紹介 送付前", "求人紹介 送付済", "継続", "保留", "日程再調整", "連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"]} isMissing={miss.has("form.resultFlag")} />

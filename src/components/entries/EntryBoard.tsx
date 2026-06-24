@@ -424,7 +424,8 @@ export default function EntryBoard() {
     const join = jstYmd(entry.joinDate);
     if (join) params.set("joinDate", join);
     params.set("step", "2");
-    window.location.href = `/tasks/new?${params.toString()}`;
+    // タスク作成画面は新規タブで開き、元のエントリー画面（選択・フィルタ）を保持する
+    window.open(`/tasks/new?${params.toString()}`, "_blank", "noopener");
   };
 
   const handleFlagUpdate = async (entryId: string, flags: Record<string, string | null>) => {
@@ -672,7 +673,8 @@ export default function EntryBoard() {
         entryDescription: buildDescription(info.entries),
         step: "5",
       });
-      window.location.href = `/tasks/new?${params.toString()}`;
+      // タスク作成画面は新規タブで開き、元のエントリー画面（選択・フィルタ）を保持する
+      window.open(`/tasks/new?${params.toString()}`, "_blank", "noopener");
       return;
     }
 

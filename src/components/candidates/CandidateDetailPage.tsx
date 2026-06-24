@@ -1239,6 +1239,8 @@ function CandidateTasksTab({ candidateId, employees }: { candidateId: string; em
         <div className="flex items-center gap-2">
           <a
             href={`/tasks/new?candidateId=${candidateId}`}
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
           >
             タスクを作成
@@ -1353,6 +1355,8 @@ function CandidateTasksTab({ candidateId, employees }: { candidateId: string; em
                   <p className="text-[#6B7280]">この求職者に紐づくタスクはありません</p>
                   <a
                     href={`/tasks/new?candidateId=${candidateId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="mt-3 inline-block rounded-[8px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#1D4ED8]"
                   >
                     タスクを作成
