@@ -15,6 +15,7 @@ type DashboardData = {
   nextContactDate: string | null;
   interestedCount: number;
   wantToApplyCount: number;
+  mypageReaction: { total: number; interested: number; wantToApply: number; unanswered: number };
   lastProposalDate: string | null;
   deliveryCount: number;
   entryCompanies: number;
@@ -88,11 +89,13 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
     { stage: "二次", value: data.funnel.second },
     { stage: "内定", value: data.funnel.offer },
   ];
-  const responseTotal = data.interestedCount + data.wantToApplyCount;
-  const donutData = [
-    { name: "気になる", value: data.interestedCount },
-    { name: "応募したい", value: data.wantToApplyCount },
+  // マイページ反応（母数ベース3分類: 未回答/気になる/応募したい）
+  const reactionEntries = [
+    { name: "未回答", value: data.mypageReaction.unanswered, color: "#9CA3AF" },
+    { name: "気になる", value: data.mypageReaction.interested, color: "#CA8A04" },
+    { name: "応募したい", value: data.mypageReaction.wantToApply, color: "#2563EB" },
   ];
+  const reactionTotal = data.mypageReaction.total;
 
   // 追補1: 主要指標 縦リスト（14項目・単位付き・null は「—」・通過率は青字）
   const pctStr = (v: number | null) => (v === null ? DASH : `${v}%`);
@@ -200,22 +203,26 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
         <div className="flex flex-col gap-4 lg:col-span-3">
           <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
             <div className="mb-2 text-[12px] font-medium text-[#6B7280]">マイページ反応の構成</div>
-            {responseTotal === 0 ? (
+            {reactionTotal === 0 ? (
               <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
             ) : (
               <div className="flex flex-col items-center gap-3">
                 <ResponsiveContainer width="100%" height={150}>
                   <PieChart>
-                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
-                      <Cell fill="#CA8A04" />
-                      <Cell fill="#2563EB" />
+                    <Pie data={reactionEntries.filter((r) => r.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
+                      {reactionEntries.filter((r) => r.value > 0).map((r) => <Cell key={r.name} fill={r.color} />)}
                     </Pie>
                     <Tooltip formatter={(value, name) => [`${value} 件`, name]} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="flex flex-col gap-1 self-stretch text-[12px]">
-                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "#CA8A04" }} />気になる</span><span className="font-semibold">{data.interestedCount}件</span></div>
-                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "#2563EB" }} />応募したい</span><span className="font-semibold">{data.wantToApplyCount}件</span></div>
+                  {reactionEntries.map((r) => (
+                    <div key={r.name} className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: r.color }} />{r.name}</span>
+                      <span className="font-semibold">{r.value}件</span>
+                    </div>
+                  ))}
+                  <div className="mt-0.5 text-[11px] text-[#9CA3AF]">計 {reactionTotal} 件（マイページ掲載中）</div>
                 </div>
               </div>
             )}

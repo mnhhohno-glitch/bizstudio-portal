@@ -1871,6 +1871,44 @@ function CandidateDetailPageBody() {
         </div>
       </div>
 
+      {/* 全タブ共通: 候補者の基本情報ヘッダー（基本/面談履歴/設定履歴/ダッシュボード すべての上に固定表示） */}
+      <CandidateHeader
+        candidate={candidate}
+        onStatusChange={async (val) => {
+          await fetch(`/api/candidates/${candidate.id}/update`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supportStatus: val }),
+          });
+          fetchCandidate();
+        }}
+        onEditBasicInfo={() => setEditModalOpen(true)}
+        onGuideUrlCopy={() => {
+          const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
+          if (guide) {
+            const url = `${window.location.origin}/g/${guide.token}`;
+            navigator.clipboard.writeText(url);
+          }
+        }}
+        onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
+        onJobOutput={handleOpenJobOutput}
+        onMypageOpen={() => {
+          setMypageModalOpen(true);
+          fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
+            .then((r) => r.json())
+            .then((r) => console.log("[SyncCaComments]", r))
+            .catch(() => {});
+        }}
+        hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
+        mypageLoading={mypageLoading}
+        jobOutputLoading={jobOutputLoading}
+        supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
+        onSupportEndClick={() => setShowEndModal(true)}
+        onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
+        googleFormDisabled={googleFormDisabled}
+        googleFormDisabledReason={googleFormDisabledReason}
+      />
+
       {/* 行3以降: ビューに応じたコンテンツ */}
       {activeView === "interview" ? (
         <InterviewHistoryTab
@@ -1883,44 +1921,6 @@ function CandidateDetailPageBody() {
         <DashboardTab candidateId={candidateId} />
       ) : (
         <>
-          {/* 基本タブ: 候補者ヘッダー */}
-          <CandidateHeader
-            candidate={candidate}
-            onStatusChange={async (val) => {
-              await fetch(`/api/candidates/${candidate.id}/update`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ supportStatus: val }),
-              });
-              fetchCandidate();
-            }}
-            onEditBasicInfo={() => setEditModalOpen(true)}
-            onGuideUrlCopy={() => {
-              const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
-              if (guide) {
-                const url = `${window.location.origin}/g/${guide.token}`;
-                navigator.clipboard.writeText(url);
-              }
-            }}
-            onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
-            onJobOutput={handleOpenJobOutput}
-            onMypageOpen={() => {
-              setMypageModalOpen(true);
-              fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
-                .then((r) => r.json())
-                .then((r) => console.log("[SyncCaComments]", r))
-                .catch(() => {});
-            }}
-            hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
-            mypageLoading={mypageLoading}
-            jobOutputLoading={jobOutputLoading}
-            supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
-            onSupportEndClick={() => setShowEndModal(true)}
-            onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
-            googleFormDisabled={googleFormDisabled}
-            googleFormDisabledReason={googleFormDisabledReason}
-          />
-
           {/* T-064: スカウト紐付けパネル（applicationRoute === "スカウト" の時のみ表示） */}
           <ScoutLinkPanel
             candidateId={candidate.id}

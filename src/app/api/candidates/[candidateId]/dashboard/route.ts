@@ -114,6 +114,7 @@ export async function GET(
     notesAgg,
     bookmarkAgg,
     bookmarkCount,
+    mypageBaseCount,
     openTasks,
   ] = await Promise.all([
     fetchMypageStats(candidate.candidateNumber),
@@ -137,6 +138,8 @@ export async function GET(
       _max: { lastExportedAt: true },
     }),
     prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } } }),
+    // マイページ反応の母数: マイページに出ている求人数（送信済 かつ 紹介保留=archived を除く）
+    prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null }, archivedAt: null } }),
     prisma.task.findMany({
       where: { candidateId, status: { not: "COMPLETED" }, dueDate: { not: null } },
       select: { dueDate: true },
@@ -146,6 +149,13 @@ export async function GET(
   /* ----- ①本人の動き ----- */
   const interestedCount = responses.find((r) => r.response === "INTERESTED")?._count._all ?? 0;
   const wantToApplyCount = responses.find((r) => r.response === "WANT_TO_APPLY")?._count._all ?? 0;
+  // マイページ反応（母数ベース3分類）: 未回答 = 母数 − 気になる − 応募したい（負はクランプ）
+  const mypageReaction = {
+    total: mypageBaseCount,
+    interested: interestedCount,
+    wantToApply: wantToApplyCount,
+    unanswered: Math.max(0, mypageBaseCount - interestedCount - wantToApplyCount),
+  };
 
   /* ----- ②こちらの対応 ----- */
   const bookmarkMaxExport = bookmarkAgg._max.lastExportedAt ?? null;
@@ -234,6 +244,7 @@ export async function GET(
     // ①本人の動き
     interestedCount,
     wantToApplyCount,
+    mypageReaction, // 母数ベース3分類 { total, interested, wantToApply, unanswered }
     // ②こちらの対応
     lastProposalDate: fmtJstDate(lastProposal),
     deliveryCount,
