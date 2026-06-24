@@ -46,15 +46,17 @@ function maxDate(...ds: (Date | null | undefined)[]): Date | null {
 
 type DailyView = { date: string; count: number };
 
-// 今日(JST)から過去30日の連続日付に views_daily_30d を当て、無い日は 0 とした昇順30要素を返す。
+// 今日(JST)から過去14日（直近2週間）の連続日付に閲覧ログを当て、無い日は 0 とした昇順14要素を返す。
+// kyuujin の views_daily_30d をそのまま受け取り、portal 側で直近14日に絞って0埋めする。
 // 罠#17: JST 基準（toJstDateString = sv-SE/Asia/Tokyo）。toISOString().slice は使わない。
+const VIEW_TREND_DAYS = 14;
 function buildViewsDaily(raw: { date?: string; count?: number }[]): DailyView[] {
   const today = todayJstDateString(); // "YYYY-MM-DD"（JST）
   const anchor = new Date(`${today}T12:00:00+09:00`); // JST 正午基準（DST/丸め回避）
   const byDate = new Map<string, number>();
   for (const r of raw) if (r && typeof r.date === "string") byDate.set(r.date, typeof r.count === "number" ? r.count : 0);
   const out: DailyView[] = [];
-  for (let i = 29; i >= 0; i--) {
+  for (let i = VIEW_TREND_DAYS - 1; i >= 0; i--) {
     const d = new Date(anchor.getTime() - i * 86_400_000);
     const ds = toJstDateString(d);
     out.push({ date: ds, count: byDate.get(ds) ?? 0 });

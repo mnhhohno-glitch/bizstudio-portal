@@ -58,10 +58,6 @@ function Card({ label, value, sub, accent }: { label: string; value: React.React
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="mb-2 mt-6 text-[14px] font-semibold text-[#374151]">{children}</h3>;
-}
-
 const FUNNEL_COLORS = ["#2563EB", "#3B82F6", "#60A5FA", "#93C5FD", "#16A34A"];
 
 export default function DashboardTab({ candidateId }: { candidateId: string }) {
@@ -97,13 +93,6 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
     { name: "気になる", value: data.interestedCount },
     { name: "応募したい", value: data.wantToApplyCount },
   ];
-
-  const passRow = (label: string, v: number | null) => (
-    <div className="flex items-center justify-between rounded-md bg-[#F9FAFB] px-3 py-2">
-      <span className="text-[12px] text-[#6B7280]">{label}</span>
-      <span className="text-[15px] font-semibold text-[#374151]">{v === null ? DASH : `${v}%`}</span>
-    </div>
-  );
 
   // 追補1: 主要指標 縦リスト（14項目・単位付き・null は「—」・通過率は青字）
   const pctStr = (v: number | null) => (v === null ? DASH : `${v}%`);
@@ -150,43 +139,8 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
         <Card label="次回連絡予定" value={dash(data.nextContactDate)} sub="面談予定/タスク期限" />
       </div>
 
-      {/* ===== ① 本人の動き ===== */}
-      <SectionTitle>① 本人の動き</SectionTitle>
-      {/* T-110: マイページ閲覧の30日推移（折れ線・JST日別・0埋め30点） */}
-      <div className="mb-3 rounded-lg border border-[#E5E7EB] bg-white p-4">
-        <div className="flex items-baseline justify-between">
-          <div className="text-[12px] font-medium text-[#6B7280]">マイページ閲覧の30日推移</div>
-          <div className="text-[10px] text-[#9CA3AF]">日別・2026-06-25 から蓄積</div>
-        </div>
-        <div className="mt-2">
-          <ResponsiveContainer width="100%" height={160}>
-            <LineChart data={data.viewsDaily} margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
-              <XAxis dataKey="date" tickFormatter={fmtMD} interval={4} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
-              <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
-              <Tooltip labelFormatter={(d) => fmtMD(String(d))} formatter={(value) => [`${value} 回`, "閲覧"]} />
-              <Line type="monotone" dataKey="count" stroke="#2563EB" strokeWidth={2} dot={{ r: 2 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card label="マイページ閲覧回数" value={dash(data.mypageAccessCount)} sub="累計（直近30日ではありません）" accent="#2563EB" />
-        <Card label="気になる" value={data.interestedCount} accent="#CA8A04" />
-        <Card label="応募したい" value={data.wantToApplyCount} accent="#2563EB" />
-      </div>
-
-      {/* ===== ② こちらの対応 ===== */}
-      <SectionTitle>② こちらの対応</SectionTitle>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card label="最終求人提案日" value={dash(data.lastProposalDate)} />
-        <Card label="求人配信数" value={data.deliveryCount} sub="マイページ送信済（出力済BM）" />
-        <Card label="最終接触日" value={dash(data.lastContactDate)} />
-      </div>
-
-      {/* ===== ③ 選考・反応（左=主要指標 / 中央=ファネル+通過率 / 右=ドーナツ2つ） ===== */}
-      <SectionTitle>③ 選考の進み</SectionTitle>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+      {/* ===== 信号バー下: 3カラム（左=主要指標 / 中央=折れ線+ファネル / 右=ドーナツ2つ） ===== */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
         {/* 左: 主要指標 縦リスト */}
         <div className="lg:col-span-4">
           <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
@@ -205,10 +159,28 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
           </div>
         </div>
 
-        {/* 中央: 選考ファネル + 通過率 + 社数 */}
+        {/* 中央: マイページ閲覧の動き（折れ線・直近2週間） + 選考の進み（ファネル） */}
         <div className="flex flex-col gap-4 lg:col-span-5">
           <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-            <div className="mb-2 text-[12px] text-[#6B7280]">選考ファネル（会社単位）</div>
+            <div className="flex items-baseline justify-between">
+              <div className="text-[12px] font-medium text-[#6B7280]">マイページ閲覧の動き（直近2週間）</div>
+              <div className="text-[10px] text-[#9CA3AF]">日別・2026-06-25 から蓄積</div>
+            </div>
+            <div className="mt-2">
+              <ResponsiveContainer width="100%" height={150}>
+                <LineChart data={data.viewsDaily} margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={fmtMD} interval={2} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+                  <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+                  <Tooltip labelFormatter={(d) => fmtMD(String(d))} formatter={(value) => [`${value} 回`, "閲覧"]} />
+                  <Line type="monotone" dataKey="count" stroke="#2563EB" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-1 text-[11px] text-[#9CA3AF]">閲覧が増えた直後は応募意欲が高いタイミング。配信・面談アクションの目安。</div>
+          </div>
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">選考の進み（会社単位）</div>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={funnelData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
@@ -220,25 +192,14 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          </div>
-          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-            <div className="mb-2 text-[12px] text-[#6B7280]">通過率（母数3社未満は{DASH}）</div>
-            <div className="flex flex-col gap-2">
-              {passRow("書類通過率", data.passRate.doc)}
-              {passRow("一次通過率", data.passRate.first)}
-              {passRow("二次通過率", data.passRate.second)}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Card label="エントリー社数" value={data.entryCompanies} />
-            <Card label="選考中企業数" value={data.inSelectionCompanies} accent="#16A34A" />
+            <div className="mt-1 text-[11px] text-[#9CA3AF]">エントリー{data.entryCompanies}社 → 内定{data.funnel.offer}社。各段階の通過率は左の指標を参照。</div>
           </div>
         </div>
 
         {/* 右: マイページ反応ドーナツ + 選考段階ドーナツ */}
         <div className="flex flex-col gap-4 lg:col-span-3">
           <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-            <div className="mb-2 text-[12px] text-[#6B7280]">マイページ反応</div>
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">マイページ反応の構成</div>
             {responseTotal === 0 ? (
               <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
             ) : (
