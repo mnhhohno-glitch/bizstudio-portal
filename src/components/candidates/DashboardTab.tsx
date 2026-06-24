@@ -21,6 +21,7 @@ type DashboardData = {
   inSelectionCompanies: number;
   funnel: { entry: number; doc: number; first: number; second: number; offer: number };
   passRate: { doc: number | null; first: number | null; second: number | null };
+  stageBreakdown: { document: number; first: number; second: number; offer: number };
 };
 
 /* ---------- Helpers ---------- */
@@ -96,6 +97,34 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
     </div>
   );
 
+  // 追補1: 主要指標 縦リスト（14項目・単位付き・null は「—」・通過率は青字）
+  const pctStr = (v: number | null) => (v === null ? DASH : `${v}%`);
+  const metricRows: { label: string; value: string; blue?: boolean }[] = [
+    { label: "最終ログイン日時", value: dash(data.lastLoginAt) },
+    { label: "マイページ閲覧回数（累計）", value: data.mypageAccessCount == null ? DASH : `${data.mypageAccessCount}回` },
+    { label: "最終求人提案日", value: dash(data.lastProposalDate) },
+    { label: "求人配信数", value: `${data.deliveryCount}件` },
+    { label: "最終接触日", value: dash(data.lastContactDate) },
+    { label: "次回連絡予定日", value: dash(data.nextContactDate) },
+    { label: "放置日数", value: data.idleDays == null ? DASH : `${data.idleDays}日` },
+    { label: "気になる求人数", value: `${data.interestedCount}件` },
+    { label: "応募したい求人数", value: `${data.wantToApplyCount}件` },
+    { label: "エントリー社数", value: `${data.entryCompanies}社` },
+    { label: "選考中企業数", value: `${data.inSelectionCompanies}社` },
+    { label: "書類選考通過率", value: pctStr(data.passRate.doc), blue: true },
+    { label: "一次面接通過率", value: pctStr(data.passRate.first), blue: true },
+    { label: "二次面接通過率", value: pctStr(data.passRate.second), blue: true },
+  ];
+
+  // 追補2: 選考段階の内訳ドーナツ
+  const stageEntries = [
+    { name: "書類選考", value: data.stageBreakdown.document, color: "#93C5FD" },
+    { name: "一次面接", value: data.stageBreakdown.first, color: "#60A5FA" },
+    { name: "二次面接", value: data.stageBreakdown.second, color: "#3B82F6" },
+    { name: "内定", value: data.stageBreakdown.offer, color: "#16A34A" },
+  ];
+  const stageTotal = stageEntries.reduce((s, x) => s + x.value, 0);
+
   return (
     <div className="pb-8">
       {/* ===== 最上段: 放置日数 信号 + 3カード ===== */}
@@ -129,26 +158,43 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
         <Card label="最終接触日" value={dash(data.lastContactDate)} />
       </div>
 
-      {/* ===== ③ 選考の進み ===== */}
+      {/* ===== ③ 選考・反応（左=主要指標 / 中央=ファネル+通過率 / 右=ドーナツ2つ） ===== */}
       <SectionTitle>③ 選考の進み</SectionTitle>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* ファネル（主役） */}
-        <div className="rounded-lg border border-[#E5E7EB] bg-white p-4 lg:col-span-2">
-          <div className="mb-2 text-[12px] text-[#6B7280]">選考ファネル（会社単位）</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={funnelData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
-              <YAxis type="category" dataKey="stage" width={64} tick={{ fontSize: 12, fill: "#374151" }} />
-              <Tooltip formatter={(value) => [`${value} 社`, ""]} />
-              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                {funnelData.map((_, i) => <Cell key={i} fill={FUNNEL_COLORS[i]} />)}
-                <LabelList dataKey="value" position="right" style={{ fontSize: 12, fill: "#374151" }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {/* 左: 主要指標 縦リスト */}
+        <div className="lg:col-span-4">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">主要指標</div>
+            <div>
+              {metricRows.map((row, i) => (
+                <div
+                  key={row.label}
+                  className={`flex items-center justify-between rounded px-2 py-1.5 ${i % 2 === 1 ? "bg-[#F9FAFB]" : ""}`}
+                >
+                  <span className="text-[12px] text-[#6B7280]">{row.label}</span>
+                  <span className={`text-[13px] font-semibold ${row.blue ? "text-[#2563EB]" : "text-[#374151]"}`}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        {/* 通過率 + 社数 */}
-        <div className="flex flex-col gap-3">
+
+        {/* 中央: 選考ファネル + 通過率 + 社数 */}
+        <div className="flex flex-col gap-4 lg:col-span-5">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] text-[#6B7280]">選考ファネル（会社単位）</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={funnelData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
+                <YAxis type="category" dataKey="stage" width={64} tick={{ fontSize: 12, fill: "#374151" }} />
+                <Tooltip formatter={(value) => [`${value} 社`, ""]} />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                  {funnelData.map((_, i) => <Cell key={i} fill={FUNNEL_COLORS[i]} />)}
+                  <LabelList dataKey="value" position="right" style={{ fontSize: 12, fill: "#374151" }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
           <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
             <div className="mb-2 text-[12px] text-[#6B7280]">通過率（母数3社未満は{DASH}）</div>
             <div className="flex flex-col gap-2">
@@ -162,31 +208,57 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
             <Card label="選考中企業数" value={data.inSelectionCompanies} accent="#16A34A" />
           </div>
         </div>
-      </div>
 
-      {/* ===== 補助: マイページ反応ドーナツ ===== */}
-      <SectionTitle>マイページ反応</SectionTitle>
-      <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-        {responseTotal === 0 ? (
-          <div className="py-8 text-center text-[13px] text-[#9CA3AF]">反応データがありません</div>
-        ) : (
-          <div className="flex items-center gap-6">
-            <ResponsiveContainer width={180} height={180}>
-              <PieChart>
-                <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                  <Cell fill="#CA8A04" />
-                  <Cell fill="#2563EB" />
-                </Pie>
-                <Tooltip formatter={(value, name) => [`${value} 件`, name]} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex flex-col gap-2 text-[13px]">
-              <div className="flex items-center gap-2"><span className="inline-block h-3 w-3 rounded-sm" style={{ background: "#CA8A04" }} />気になる <span className="font-semibold">{data.interestedCount}</span></div>
-              <div className="flex items-center gap-2"><span className="inline-block h-3 w-3 rounded-sm" style={{ background: "#2563EB" }} />応募したい <span className="font-semibold">{data.wantToApplyCount}</span></div>
-              <div className="text-[11px] text-[#9CA3AF]">計 {responseTotal} 件の反応</div>
-            </div>
+        {/* 右: マイページ反応ドーナツ + 選考段階ドーナツ */}
+        <div className="flex flex-col gap-4 lg:col-span-3">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] text-[#6B7280]">マイページ反応</div>
+            {responseTotal === 0 ? (
+              <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
+                      <Cell fill="#CA8A04" />
+                      <Cell fill="#2563EB" />
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [`${value} 件`, name]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-col gap-1 self-stretch text-[12px]">
+                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "#CA8A04" }} />気になる</span><span className="font-semibold">{data.interestedCount}件</span></div>
+                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "#2563EB" }} />応募したい</span><span className="font-semibold">{data.wantToApplyCount}件</span></div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] text-[#6B7280]">選考段階の内訳</div>
+            {stageTotal === 0 ? (
+              <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={stageEntries.filter((s) => s.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
+                      {stageEntries.filter((s) => s.value > 0).map((s) => <Cell key={s.name} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [`${value} 社`, name]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-col gap-1 self-stretch text-[12px]">
+                  {stageEntries.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.name}</span>
+                      <span className="font-semibold">{s.value}社</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -178,6 +178,29 @@ export async function GET(
     second: rate(funnel.offer, funnel.second),
   };
 
+  // 選考段階の内訳: 選考継続中の社を「現ステージ」で排他分類（会社単位 distinct・最も進んだ段階で1社1分類）。
+  // 落ち・辞退・クローズ(SELECTION_ENDED_DETAILS)・無効・アーカイブ済みは除外（選考継続中社数と整合）。
+  const stageRank = (e: (typeof entries)[number]): number => {
+    if (e.entryFlag === "内定" || e.entryFlag === "入社済") return 4; // 内定
+    if (e.entryFlag === "面接") return e.secondInterviewDate != null ? 3 : 2; // 二次 / 一次
+    if (e.entryFlag === "書類選考") return 1; // 書類選考
+    return 0;
+  };
+  const companyStage = new Map<string, number>();
+  for (const e of entries) {
+    if (SELECTION_ENDED_DETAILS.includes(e.entryFlagDetail ?? "")) continue;
+    if (!e.isActive || e.archivedAt) continue;
+    const r = stageRank(e);
+    if (r > 0) companyStage.set(e.companyName, Math.max(companyStage.get(e.companyName) ?? 0, r));
+  }
+  const stageBreakdown = { document: 0, first: 0, second: 0, offer: 0 };
+  for (const r of companyStage.values()) {
+    if (r === 4) stageBreakdown.offer++;
+    else if (r === 3) stageBreakdown.second++;
+    else if (r === 2) stageBreakdown.first++;
+    else if (r === 1) stageBreakdown.document++;
+  }
+
   return NextResponse.json({
     // 閲覧系（kyuujinPDF）
     lastLoginAt: mypage.lastLoginAt, // JST "YYYY/MM/DD HH:mm" | null
@@ -197,5 +220,6 @@ export async function GET(
     inSelectionCompanies,
     funnel,
     passRate, // %（doc/first/second）| null（母数<3）
+    stageBreakdown, // 選考継続中の現ステージ内訳（会社単位 distinct・排他）
   });
 }
