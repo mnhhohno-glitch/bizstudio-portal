@@ -412,6 +412,16 @@ function compareRank(a: string | null | undefined, b: string | null | undefined,
   return (va - vb) * dir;
 }
 
+// 紹介日キーは「JST の暦日（YYYY-MM-DD）」単位で比較する（罠#17）。
+// フル日時(getTime)で比べると同一表示日でも秒単位で全行異なり、1次=紹介日だけで順序が確定して
+// 2次キーへフォールスルーしなくなるため。null/未設定/不正値は "" を返し、呼び出し側で常に末尾へ。
+function jstDateKey(v: string | number | Date | null | undefined): string {
+  if (v == null || v === "") return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // 'YYYY-MM-DD'
+}
+
 // ---- 2段（1次/2次）クロスソートモデル ----
 // 並び替えキーは最大2つ（1次・2次）。各キーは基準 + 方向。
 type SortBasis = "company_name" | "want" | "interest" | "wish" | "pass" | "overall" | "uploader" | "date";
@@ -486,8 +496,17 @@ function compareByBasis<T>(a: T, b: T, key: SortKey, acc: SortAccessors<T>): num
       const ub = acc.getUploader?.(b) ?? "";
       return ua.localeCompare(ub) * dir;
     }
-    case "date":
-      return (new Date(acc.getDate(a)).getTime() - new Date(acc.getDate(b)).getTime()) * dir;
+    case "date": {
+      // JST 暦日単位で比較（同一日は 0 を返し 2次キーへフォールスルー）。desc=新しい日が上。
+      const da = jstDateKey(acc.getDate(a));
+      const db = jstDateKey(acc.getDate(b));
+      const aMissing = da === "";
+      const bMissing = db === "";
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1; // 未設定は方向不問で末尾
+      if (bMissing) return -1;
+      return da.localeCompare(db) * dir;
+    }
     default:
       return 0;
   }
