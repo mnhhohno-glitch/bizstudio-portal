@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LabelList,
-  PieChart, Pie,
+  PieChart, Pie, LineChart, Line, CartesianGrid,
 } from "recharts";
 
 /* ---------- Types ---------- */
@@ -22,7 +22,15 @@ type DashboardData = {
   funnel: { entry: number; doc: number; first: number; second: number; offer: number };
   passRate: { doc: number | null; first: number | null; second: number | null };
   stageBreakdown: { document: number; first: number; second: number; offer: number };
+  viewsDaily: { date: string; count: number }[];
 };
+
+// "YYYY-MM-DD" → "M/D"
+function fmtMD(d: string): string {
+  const parts = (d ?? "").split("-");
+  if (parts.length < 3) return d ?? "";
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+}
 
 /* ---------- Helpers ---------- */
 const DASH = "—";
@@ -144,6 +152,24 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
 
       {/* ===== ① 本人の動き ===== */}
       <SectionTitle>① 本人の動き</SectionTitle>
+      {/* T-110: マイページ閲覧の30日推移（折れ線・JST日別・0埋め30点） */}
+      <div className="mb-3 rounded-lg border border-[#E5E7EB] bg-white p-4">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[12px] font-medium text-[#6B7280]">マイページ閲覧の30日推移</div>
+          <div className="text-[10px] text-[#9CA3AF]">日別・2026-06-25 から蓄積</div>
+        </div>
+        <div className="mt-2">
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={data.viewsDaily} margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+              <XAxis dataKey="date" tickFormatter={fmtMD} interval={4} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+              <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+              <Tooltip labelFormatter={(d) => fmtMD(String(d))} formatter={(value) => [`${value} 回`, "閲覧"]} />
+              <Line type="monotone" dataKey="count" stroke="#2563EB" strokeWidth={2} dot={{ r: 2 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card label="マイページ閲覧回数" value={dash(data.mypageAccessCount)} sub="累計（直近30日ではありません）" accent="#2563EB" />
         <Card label="気になる" value={data.interestedCount} accent="#CA8A04" />

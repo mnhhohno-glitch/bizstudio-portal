@@ -44,24 +44,43 @@ function maxDate(...ds: (Date | null | undefined)[]): Date | null {
   return m;
 }
 
+type DailyView = { date: string; count: number };
+
+// 今日(JST)から過去30日の連続日付に views_daily_30d を当て、無い日は 0 とした昇順30要素を返す。
+// 罠#17: JST 基準（toJstDateString = sv-SE/Asia/Tokyo）。toISOString().slice は使わない。
+function buildViewsDaily(raw: { date?: string; count?: number }[]): DailyView[] {
+  const today = todayJstDateString(); // "YYYY-MM-DD"（JST）
+  const anchor = new Date(`${today}T12:00:00+09:00`); // JST 正午基準（DST/丸め回避）
+  const byDate = new Map<string, number>();
+  for (const r of raw) if (r && typeof r.date === "string") byDate.set(r.date, typeof r.count === "number" ? r.count : 0);
+  const out: DailyView[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(anchor.getTime() - i * 86_400_000);
+    const ds = toJstDateString(d);
+    out.push({ date: ds, count: byDate.get(ds) ?? 0 });
+  }
+  return out;
+}
+
 // 閲覧系を kyuujinPDF から安全に取得（失敗で全体を落とさない）
-async function fetchMypageStats(candidateNumber: string): Promise<{ lastLoginAt: string | null; accessCount: number | null }> {
+async function fetchMypageStats(candidateNumber: string): Promise<{ lastLoginAt: string | null; accessCount: number | null; viewsDaily: DailyView[] }> {
   const secret = process.env.KYUUJIN_API_SECRET;
-  if (!secret) return { lastLoginAt: null, accessCount: null };
+  if (!secret) return { lastLoginAt: null, accessCount: null, viewsDaily: buildViewsDaily([]) };
   const base = process.env.KYUUJIN_API_URL || "https://web-production-95808.up.railway.app";
   try {
     const res = await fetch(`${base}/api/external/mypage/by-job-seeker/${candidateNumber}`, {
       headers: { "x-api-secret": secret },
       next: { revalidate: 0 },
     });
-    if (!res.ok) return { lastLoginAt: null, accessCount: null };
-    const data: { access_count?: number | null; last_accessed_at?: string | null; url?: string | null } = await res.json();
+    if (!res.ok) return { lastLoginAt: null, accessCount: null, viewsDaily: buildViewsDaily([]) };
+    const data: { access_count?: number | null; last_accessed_at?: string | null; url?: string | null; views_daily_30d?: { date?: string; count?: number }[] } = await res.json();
     return {
       lastLoginAt: fmtJstDateTime(data.last_accessed_at),
       accessCount: typeof data.access_count === "number" ? data.access_count : null,
+      viewsDaily: buildViewsDaily(Array.isArray(data.views_daily_30d) ? data.views_daily_30d : []),
     };
   } catch {
-    return { lastLoginAt: null, accessCount: null };
+    return { lastLoginAt: null, accessCount: null, viewsDaily: buildViewsDaily([]) };
   }
 }
 
@@ -205,6 +224,7 @@ export async function GET(
     // 閲覧系（kyuujinPDF）
     lastLoginAt: mypage.lastLoginAt, // JST "YYYY/MM/DD HH:mm" | null
     mypageAccessCount: mypage.accessCount, // 累計 | null
+    viewsDaily: mypage.viewsDaily, // 過去30日（JST日付・0埋め・昇順）[{date,count}]
     // 信号
     idleDays, // 日数 | null
     lastContactDate: fmtJstDate(lastContact),
