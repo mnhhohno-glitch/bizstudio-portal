@@ -55,7 +55,7 @@ export default function ScoutDashboardPage() {
             <Card label="開封数" value={totals.open.toLocaleString()} />
             <Card label="開封率" value={`${openRate.toFixed(1)}%`} />
             <Card label="応募数" value={totals.apply.toLocaleString()} />
-            <Card label="応募率" value={`${applyRate.toFixed(1)}%`} />
+            <Card label="応募率" value={`${applyRate.toFixed(2)}%`} />
           </div>
 
           <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-5">

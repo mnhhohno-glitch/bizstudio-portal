@@ -150,7 +150,7 @@ function StatsTable({ buckets, onApply }: { buckets: Bucket[]; onApply?: (bucket
     { d: 0, o: 0, a: 0 },
   );
   const oRateTotal = totals.d > 0 ? ((totals.o / totals.d) * 100).toFixed(1) : "0.0";
-  const aRateTotal = totals.d > 0 ? ((totals.a / totals.d) * 100).toFixed(1) : "0.0";
+  const aRateTotal = totals.d > 0 ? ((totals.a / totals.d) * 100).toFixed(2) : "0.00";
   // sticky: ヘッダー=上端固定 / 合計=ヘッダー直下固定（ヘッダー高さ分オフセット・1px 重ねて body の透けを防止）
   const headCls = "sticky top-0 z-20 bg-[#F9FAFB] px-3 py-2";
   const totalCls = "sticky top-[35px] z-10 border-b-2 border-[#9CA3AF] bg-[#EFF6FF] px-3 py-2";
@@ -200,7 +200,7 @@ function StatsTable({ buckets, onApply }: { buckets: Bucket[]; onApply?: (bucket
                     b.applyCount.toLocaleString()
                   )}
                 </td>
-                <td className="px-3 py-1.5 text-right">{aRate.toFixed(1)}%</td>
+                <td className="px-3 py-1.5 text-right">{aRate.toFixed(2)}%</td>
               </tr>
             );
           })}

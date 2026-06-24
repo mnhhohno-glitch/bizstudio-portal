@@ -129,6 +129,8 @@ function Section({
 }) {
   const totals = rows.reduce((acc, r) => ({ d: acc.d + r.d, o: acc.o + r.o, a: acc.a + r.a }), { d: 0, o: 0, a: 0 });
   const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
+  // T-064 step40: 応募率は小数第2位（開封率は第1位を維持）
+  const pctApply = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(2) : "0.00");
   const headCls = "sticky top-0 z-20 bg-[#F9FAFB] px-3 py-2";
   const totalCls = "sticky top-[35px] z-10 border-b-2 border-[#9CA3AF] bg-[#EFF6FF] px-3 py-2";
   return (
@@ -153,7 +155,7 @@ function Section({
                 <td className={`${totalCls} text-right`}>{totals.o.toLocaleString()}</td>
                 <td className={`${totalCls} text-right`}>{pct(totals.o, totals.d)}%</td>
                 <td className={`${totalCls} text-right`}>{totals.a.toLocaleString()}</td>
-                <td className={`${totalCls} text-right`}>{pct(totals.a, totals.d)}%</td>
+                <td className={`${totalCls} text-right`}>{pctApply(totals.a, totals.d)}%</td>
               </tr>
             )}
           </thead>
@@ -180,7 +182,7 @@ function Section({
                       r.a.toLocaleString()
                     )}
                   </td>
-                  <td className="px-3 py-1.5 text-right">{pct(r.a, r.d)}%</td>
+                  <td className="px-3 py-1.5 text-right">{pctApply(r.a, r.d)}%</td>
                 </tr>
               ))
             )}

@@ -650,8 +650,11 @@ export default function ScoutSlotsPage() {
                     { deliveryCount: 0, openCount: 0, applyCount: 0, a20: 0, a30: 0, a40: 0, a50: 0, foreign: 0, valid: 0, invalid: 0 },
                   );
                   const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
+                  // T-064 step40: 応募率は小数第2位（開封率は第1位を維持）
+                  const pctApply = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(2) : "0.00");
                   return (
-                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151] [&>td]:sticky [&>td]:top-[38px] [&>td]:z-10 [&>td]:bg-[#EFF6FF]">
+                    // step40: 2段ヘッダ(text-[11px]×2行+py-2)の実高 ≒47px に合計行の sticky top を合わせる
+                    <tr className="border-b-2 border-[#9CA3AF] bg-[#EFF6FF] font-semibold text-[#374151] [&>td]:sticky [&>td]:top-[47px] [&>td]:z-10 [&>td]:bg-[#EFF6FF]">
                       <td className="px-2 py-2 border-r border-[#E5E7EB] whitespace-nowrap">合計（{listRows.length}件）</td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
@@ -661,8 +664,8 @@ export default function ScoutSlotsPage() {
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.openCount.toLocaleString()}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.openCount, t.deliveryCount)}%</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.applyCount.toLocaleString()}</td>
-                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.applyCount, t.deliveryCount)}%</td>
-                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.applyCount, t.openCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pctApply(t.applyCount, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pctApply(t.applyCount, t.openCount)}%</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a20}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a30}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.a40}</td>
@@ -670,8 +673,8 @@ export default function ScoutSlotsPage() {
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.foreign}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#16A34A]">{t.valid}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#DC2626]">{t.invalid}</td>
-                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#16A34A]">{pct(t.valid, t.deliveryCount)}%</td>
-                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#DC2626]">{pct(t.invalid, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#16A34A]">{pctApply(t.valid, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB] text-[#DC2626]">{pctApply(t.invalid, t.deliveryCount)}%</td>
                       <td className="px-2 py-2 text-center"></td>
                     </tr>
                   );
@@ -746,8 +749,8 @@ export default function ScoutSlotsPage() {
                           r.applyCount.toLocaleString()
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate1.toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate2.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate1.toFixed(2)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.applyRate2.toFixed(2)}%</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["20s"]}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["30s"]}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups["40s"]}</td>
@@ -755,8 +758,8 @@ export default function ScoutSlotsPage() {
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.ageGroups.foreign}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#16A34A]">{r.validApplyCount}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#DC2626]">{r.invalidApplyCount}</td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#16A34A]">{r.validApplyRate.toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#DC2626]">{r.invalidApplyRate.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#16A34A]">{r.validApplyRate.toFixed(2)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB] text-[#DC2626]">{r.invalidApplyRate.toFixed(2)}%</td>
                       <td className="px-2 py-1.5 text-center">
                         {!r.isMachine && (
                           <button
