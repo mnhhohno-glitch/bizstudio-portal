@@ -1871,7 +1871,8 @@ function CandidateDetailPageBody() {
         </div>
       </div>
 
-      {/* 全タブ共通: 候補者の基本情報ヘッダー（基本/面談履歴/設定履歴/ダッシュボード すべての上に固定表示） */}
+      {/* 候補者の基本情報ヘッダー: 基本・ダッシュボードタブのみ表示（面談履歴・設定履歴では非表示） */}
+      {(activeView === "basic" || activeView === "dashboard") && (
       <CandidateHeader
         candidate={candidate}
         onStatusChange={async (val) => {
@@ -1908,6 +1909,7 @@ function CandidateDetailPageBody() {
         googleFormDisabled={googleFormDisabled}
         googleFormDisabledReason={googleFormDisabledReason}
       />
+      )}
 
       {/* 行3以降: ビューに応じたコンテンツ */}
       {activeView === "interview" ? (
