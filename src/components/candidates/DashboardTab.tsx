@@ -280,7 +280,7 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
             <div className="text-[12px] text-[#6B7280]">次回連絡予定</div>
             <button
               onClick={() => setContactModalOpen(true)}
-              className="rounded border border-[#E5E7EB] px-2 py-0.5 text-[11px] text-[#2563EB] hover:bg-[#EEF2FF]"
+              className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8]"
             >
               設定
             </button>
@@ -406,12 +406,15 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
       {/* ===== T-111追補: 次回連絡予定・連絡記録 モーダル（上段カードの「設定」から開く） ===== */}
       {contactModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setContactModalOpen(false)}>
-          <div className="flex max-h-[88vh] w-[560px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3">
               <h3 className="text-[14px] font-semibold text-[#374151]">次回連絡予定・連絡記録</h3>
               <button onClick={() => setContactModalOpen(false)} className="text-[18px] leading-none text-[#9CA3AF] hover:text-[#374151]">✕</button>
             </div>
             <div className="overflow-y-auto p-4">
+             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              {/* 左カラム: 次回連絡予定 + 連絡登録 */}
+              <div>
               {/* 次回連絡予定の設定 */}
               <div className="mb-2 text-[13px] font-semibold text-[#374151]">次回連絡予定</div>
               <div className="grid grid-cols-2 gap-3">
@@ -456,9 +459,12 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
               <div className="mt-2">
                 <button onClick={addLog} disabled={addingLog} className="rounded-md bg-[#16A34A] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#15803D] disabled:opacity-50">追加</button>
               </div>
+              </div>{/* /左カラム */}
 
-              {/* 連絡履歴 */}
-              <div className="mt-4 mb-2 text-[13px] font-semibold text-[#374151]">連絡履歴</div>
+              {/* 右カラム: 連絡履歴（スクロール） */}
+              <div>
+              <div className="mb-2 text-[13px] font-semibold text-[#374151]">連絡履歴</div>
+              <div className="max-h-[60vh] overflow-y-auto pr-1">
               {logs.length === 0 ? (
                 <div className="py-6 text-center text-[12px] text-[#9CA3AF]">連絡記録はまだありません</div>
               ) : (
@@ -477,6 +483,9 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
                   ))}
                 </ul>
               )}
+              </div>{/* /履歴スクロール */}
+              </div>{/* /右カラム */}
+             </div>{/* /grid */}
             </div>
           </div>
         </div>
