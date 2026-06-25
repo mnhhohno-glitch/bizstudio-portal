@@ -1682,16 +1682,29 @@ function CandidateDetailPageBody() {
     if (jobOutputLoading) return;
     setJobOutputLoading(true);
     const fallbackUrl = "https://web-production-95808.up.railway.app/projects";
+    // 操作者の姓を取得し op_last_name として付与（kyuujinPDF のマイページ案内文の差出人姓に使う）。
+    // User.name はフルネーム1カラムのため、空白区切りの先頭トークン（姓）のみを渡す。取れなければ付けない。
+    let opQuery = "";
+    try {
+      const sres = await fetch("/api/auth/session");
+      if (sres.ok) {
+        const su = await sres.json();
+        const lastName = (su?.name ?? "").trim().split(/[\s　]+/)[0] ?? "";
+        if (lastName) opQuery = `?op_last_name=${encodeURIComponent(lastName)}`;
+      }
+    } catch {
+      // セッション取得失敗時は付与しない（kyuujinPDF 側でフォールバック）
+    }
     try {
       const res = await fetch(`/api/candidates/${candidateId}/jobs`);
       const data = await res.json();
       if (data.project_id) {
-        window.open(`https://web-production-95808.up.railway.app/projects/${data.project_id}`, "_blank");
+        window.open(`https://web-production-95808.up.railway.app/projects/${data.project_id}${opQuery}`, "_blank");
       } else {
-        window.open(fallbackUrl, "_blank");
+        window.open(`${fallbackUrl}${opQuery}`, "_blank");
       }
     } catch {
-      window.open(fallbackUrl, "_blank");
+      window.open(`${fallbackUrl}${opQuery}`, "_blank");
     } finally {
       setJobOutputLoading(false);
     }
