@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { findMatchingSlot } from "@/lib/scout/auto-link";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -140,21 +139,11 @@ export async function POST(request: Request) {
     // ---- 応募日 / MAS種別 / 配信日 を算出（pdf-upload と同じ方針）----
     const applicationDate: string | null = parsed.applicationDate || null;
     const recruiterName: string | null = parsed.consultantName || null;
-    // MAS種別: 1号機(藤本なつみ)系=「開放日」、それ以外(照合不能含む)=「通常」（既定 通常）
-    let masType = "通常";
+    // T-067 Phase2a: 旧「1号機=開放日」判定を廃止。モーダルは配信日(Excel)・登録日を持たないため masType は null（CAが手入力）。
+    const masType: string | null = null;
     let scoutDeliveryDate: string | null = null;
     if (recruiterName?.trim()) {
-      // 半角/全角スペースを全削除して小文字化（auto-link と同じ正規化）
-      const normalizeRc = (s: string) => s.replace(/[\s　]+/g, "").toLowerCase();
-      const target = normalizeRc(recruiterName);
-      const machines = await prisma.scoutMachineMaster.findMany();
-      const machine = machines.find(
-        (m) =>
-          normalizeRc(m.recruiterName) === target ||
-          m.aliases.some((a) => normalizeRc(a) === target),
-      );
-      if (machine?.machineNumber === 1) masType = "開放日";
-      // 配信日: 応募日が取れた場合のみ 担当RC＋応募日 で配信枠を引く
+      // 配信日: 応募日が取れた場合のみ 担当RC＋応募日 で配信枠を引く（モーダルのプレビュー用。Phase2bで見直し）
       const appDate = parseYmdToDate(applicationDate);
       if (appDate) {
         try {

@@ -486,6 +486,10 @@ model Candidate {
   applicationDate   DateTime? @map("application_date")
   masType           String?   @map("mas_type")
 
+  // T-067: マイナビ登録日（RPAがマイナビ管理画面から取得）。masType判定（配信日−登録日≤7日→開放日）の入力。
+  // JST暦日を UTC 00:00 で保存（罠#17）。RPA未改修期間は null。
+  mynaviRegisteredDate DateTime? @map("mynavi_registered_date")
+
   // T-111: 次回連絡予定（面談に依存せず直接設定・修正可）。UTC保存・表示時JST（罠#17）。
   nextContactAt      DateTime? @map("next_contact_at")
   nextContactPurpose String?   @map("next_contact_purpose")

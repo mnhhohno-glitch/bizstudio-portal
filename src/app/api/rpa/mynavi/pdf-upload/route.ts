@@ -80,6 +80,13 @@ export async function POST(req: NextRequest) {
     const recruiterNameFromRequest =
       (form.get("recruiterName") ? String(form.get("recruiterName")) : null)
       ?? req.nextUrl.searchParams.get("recruiterName");
+    // T-067: RPAがExcel照合した正しい配信日 / マイナビ登録日（form/query 両対応・任意・"YYYY-MM-DD"）
+    const scoutDeliveryDateFromRequest =
+      (form.get("scoutDeliveryDate") ? String(form.get("scoutDeliveryDate")) : null)
+      ?? req.nextUrl.searchParams.get("scoutDeliveryDate");
+    const mynaviRegisteredDateFromRequest =
+      (form.get("mynaviRegisteredDate") ? String(form.get("mynaviRegisteredDate")) : null)
+      ?? req.nextUrl.searchParams.get("mynaviRegisteredDate");
 
     if (!batchId) {
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
@@ -161,8 +168,8 @@ export async function POST(req: NextRequest) {
         ) ?? null;
       if (matchedMachine) recruiterName = matchedMachine.recruiterName;
     }
-    // MAS種別: 1号機(藤本なつみ)系=「開放日」、それ以外(他号機・社員送信・照合不能含む)=「通常」
-    const masType = matchedMachine?.machineNumber === 1 ? "開放日" : "通常";
+    // T-067 Phase2a: 旧「1号機=開放日」の誤判定を廃止。masType はこのPhaseでは新規付与しない（null）。
+    // 真判定（配信日 − マイナビ登録日 ≤ 7日 → 開放日）は Phase2b で judgeMasType により実装する。
 
     // ---- 二重処理チェック ----
     const phoneNormalized = normalizePhoneNumber(parsed.phone);
@@ -234,8 +241,7 @@ export async function POST(req: NextRequest) {
         // マイナビRPA新フローは経路・媒体が固定
         applicationRoute: "スカウト",
         mediaSource: "マイナビ転職",
-        // MAS種別（開放日/通常）を担当RCの号機から自動判定してセット
-        masType,
+        // T-067 Phase2a: masType は新規付与しない（旧「1号機=開放日」判定を廃止）。Phase2bで配信日−登録日から判定。
         birthday: parsed.birthDate,
         ...(parsed.desiredJobType1 ? { desiredJobType1: parsed.desiredJobType1 } : {}),
         ...(parsed.desiredJobType2 ? { desiredJobType2: parsed.desiredJobType2 } : {}),
@@ -248,13 +254,15 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // ---- T-091/T-064: 応募日・配信日の自動セット ----
+    // ---- T-091/T-064/T-067: 応募日・配信日・登録日の自動セット ----
     // 応募日: AI抽出値があれば採用、無ければ createdAt（取り込み日）をフォールバック
     const extractedApplicationDate = parseYmdToDate(resumeData?.applicationDate);
     const effectiveApplicationDate = extractedApplicationDate ?? candidate.createdAt;
-    // 配信日: 担当RC＋応募日で配信枠を引き、見つかればその配信日をセット（無ければ手入力に委ねる）
-    let scoutDeliveryDate: Date | null = null;
-    if (recruiterName?.trim()) {
+    // T-067: 配信日は RPA がExcel照合した値（scoutDeliveryDate）を最優先で採用。
+    //        来ない間のみ従来の findMatchingSlot（応募日ベース推測）をフォールバックで残す。
+    const deliveryDateFromRpa = parseYmdToDate(scoutDeliveryDateFromRequest);
+    let scoutDeliveryDate: Date | null = deliveryDateFromRpa;
+    if (!scoutDeliveryDate && recruiterName?.trim()) {
       try {
         const matched = await findMatchingSlot({
           recruiterName: recruiterName.trim(),
@@ -265,11 +273,14 @@ export async function POST(req: NextRequest) {
         console.error("[rpa/mynavi/pdf-upload] findMatchingSlot failed:", e);
       }
     }
+    // T-067: マイナビ登録日（RPA照合値があれば保存）。masType判定（Phase2b）の入力。
+    const mynaviRegisteredDate = parseYmdToDate(mynaviRegisteredDateFromRequest);
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
         applicationDate: effectiveApplicationDate,
         ...(scoutDeliveryDate ? { scoutDeliveryDate } : {}),
+        ...(mynaviRegisteredDate ? { mynaviRegisteredDate } : {}),
       },
     });
 
