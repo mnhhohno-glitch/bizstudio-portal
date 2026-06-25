@@ -111,6 +111,8 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
   const [logMethod, setLogMethod] = useState<"TEL" | "MESSAGE">("TEL");
   const [logContent, setLogContent] = useState("");
   const [addingLog, setAddingLog] = useState(false);
+  // T-111追補: 次回連絡予定・連絡記録をまとめるモーダル
+  const [contactModalOpen, setContactModalOpen] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     const res = await fetch(`/api/candidates/${candidateId}/dashboard`);
@@ -272,7 +274,20 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
         </div>
         <Card label="最終ログイン" value={dash(data.lastLoginAt)} sub="マイページ" />
         <Card label="最終接触" value={dash(data.lastContactDate)} sub="面談/メモ/求人提案の最新" />
-        <Card label="次回連絡予定" value={dash(data.nextContactDate)} sub="面談予定/タスク期限" />
+        {/* 次回連絡予定カード: 「設定」ボタンでモーダルを開く */}
+        <div className="rounded-lg border border-[#E5E7EB] bg-white px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[12px] text-[#6B7280]">次回連絡予定</div>
+            <button
+              onClick={() => setContactModalOpen(true)}
+              className="rounded border border-[#E5E7EB] px-2 py-0.5 text-[11px] text-[#2563EB] hover:bg-[#EEF2FF]"
+            >
+              設定
+            </button>
+          </div>
+          <div className="mt-1 text-[20px] font-semibold leading-tight text-[#374151]">{dash(data.nextContactDate)}</div>
+          <div className="mt-0.5 text-[11px] text-[#9CA3AF]">{data.nextContactPurpose ? data.nextContactPurpose : "面談予定/タスク期限"}</div>
+        </div>
       </div>
 
       {/* ===== 信号バー下: 3カラム（左=主要指標 / 中央=折れ線+ファネル / 右=ドーナツ2つ） ===== */}
@@ -388,75 +403,84 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
         </div>
       </div>
 
-      {/* ===== T-111: 次回連絡予定 + 連絡記録（面談非依存で直接設定／連絡履歴） ===== */}
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* 次回連絡予定 */}
-        <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-          <div className="mb-3 text-[13px] font-semibold text-[#374151]">次回連絡予定</div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-[#6B7280]">日付</span>
-              <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-[#6B7280]">時間</span>
-              <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
-            </label>
-          </div>
-          <label className="mt-3 flex flex-col gap-1">
-            <span className="text-[11px] text-[#6B7280]">目的</span>
-            <select value={nextPurpose} onChange={(e) => setNextPurpose(e.target.value)} className="rounded border border-[#E5E7EB] bg-white px-2 py-1.5 text-[13px]">
-              <option value="">選択してください</option>
-              {CONTACT_PURPOSES.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </label>
-          <label className="mt-3 flex flex-col gap-1">
-            <span className="text-[11px] text-[#6B7280]">補足</span>
-            <textarea value={nextNote} onChange={(e) => setNextNote(e.target.value)} rows={2} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="自由入力" />
-          </label>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button onClick={saveNextContact} disabled={savingNext || !nextDate} className="rounded-md bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">保存</button>
-            <button onClick={clearNextContact} disabled={savingNext} className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#6B7280] hover:bg-[#F9FAFB] disabled:opacity-50">クリア</button>
-            {data.nextContactAt && (
-              <span className="text-[11px] text-[#9CA3AF]">現在: {fmtJstDateTime(data.nextContactAt)}{data.nextContactPurpose ? ` / ${data.nextContactPurpose}` : ""}</span>
-            )}
-          </div>
-          <p className="mt-2 text-[11px] text-[#9CA3AF]">面談が無くても設定できます。保存すると上段カード・主要指標の「次回連絡予定」に反映されます。</p>
-        </div>
+      {/* ===== T-111追補: 次回連絡予定・連絡記録 モーダル（上段カードの「設定」から開く） ===== */}
+      {contactModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setContactModalOpen(false)}>
+          <div className="flex max-h-[88vh] w-[560px] max-w-full flex-col overflow-hidden rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3">
+              <h3 className="text-[14px] font-semibold text-[#374151]">次回連絡予定・連絡記録</h3>
+              <button onClick={() => setContactModalOpen(false)} className="text-[18px] leading-none text-[#9CA3AF] hover:text-[#374151]">✕</button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {/* 次回連絡予定の設定 */}
+              <div className="mb-2 text-[13px] font-semibold text-[#374151]">次回連絡予定</div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[#6B7280]">日付</span>
+                  <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[#6B7280]">時間</span>
+                  <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
+                </label>
+              </div>
+              <label className="mt-3 flex flex-col gap-1">
+                <span className="text-[11px] text-[#6B7280]">目的</span>
+                <select value={nextPurpose} onChange={(e) => setNextPurpose(e.target.value)} className="rounded border border-[#E5E7EB] bg-white px-2 py-1.5 text-[13px]">
+                  <option value="">選択してください</option>
+                  {CONTACT_PURPOSES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <label className="mt-3 flex flex-col gap-1">
+                <span className="text-[11px] text-[#6B7280]">補足</span>
+                <textarea value={nextNote} onChange={(e) => setNextNote(e.target.value)} rows={2} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="自由入力" />
+              </label>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button onClick={saveNextContact} disabled={savingNext || !nextDate} className="rounded-md bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">保存</button>
+                <button onClick={clearNextContact} disabled={savingNext} className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#6B7280] hover:bg-[#F9FAFB] disabled:opacity-50">クリア</button>
+                {data.nextContactAt && (
+                  <span className="text-[11px] text-[#9CA3AF]">現在: {fmtJstDateTime(data.nextContactAt)}{data.nextContactPurpose ? ` / ${data.nextContactPurpose}` : ""}</span>
+                )}
+              </div>
+              <p className="mt-2 text-[11px] text-[#9CA3AF]">面談が無くても設定できます。保存すると上段カード・主要指標の「次回連絡予定」に反映されます。</p>
 
-        {/* 連絡記録 */}
-        <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-          <div className="mb-3 text-[13px] font-semibold text-[#374151]">連絡記録</div>
-          <div className="flex gap-1">
-            <button onClick={() => setLogMethod("TEL")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "TEL" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>電話</button>
-            <button onClick={() => setLogMethod("MESSAGE")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "MESSAGE" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>メール・LINE</button>
-          </div>
-          <textarea value={logContent} onChange={(e) => setLogContent(e.target.value)} rows={2} className="mt-2 w-full rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="連絡内容" />
-          <div className="mt-2">
-            <button onClick={addLog} disabled={addingLog} className="rounded-md bg-[#16A34A] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#15803D] disabled:opacity-50">追加</button>
-          </div>
-          <div className="mt-3 max-h-[260px] overflow-y-auto">
-            {logs.length === 0 ? (
-              <div className="py-6 text-center text-[12px] text-[#9CA3AF]">連絡記録はまだありません</div>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {logs.map((l) => (
-                  <li key={l.id} className="rounded border border-[#F3F4F6] bg-[#F9FAFB] px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${l.method === "TEL" ? "bg-[#DBEAFE] text-[#2563EB]" : "bg-[#DCFCE7] text-[#16A34A]"}`}>{l.method === "TEL" ? "電話" : "メール・LINE"}</span>
-                        <span className="text-[11px] text-[#9CA3AF]">{fmtJstDateTime(l.contactedAt)}{l.author?.name ? ` ・ ${l.author.name}` : ""}</span>
+              <div className="my-4 border-t border-[#E5E7EB]" />
+
+              {/* 連絡登録 */}
+              <div className="mb-2 text-[13px] font-semibold text-[#374151]">連絡登録</div>
+              <div className="flex gap-1">
+                <button onClick={() => setLogMethod("TEL")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "TEL" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>電話</button>
+                <button onClick={() => setLogMethod("MESSAGE")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "MESSAGE" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>メール・LINE</button>
+              </div>
+              <textarea value={logContent} onChange={(e) => setLogContent(e.target.value)} rows={2} className="mt-2 w-full rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="連絡内容" />
+              <div className="mt-2">
+                <button onClick={addLog} disabled={addingLog} className="rounded-md bg-[#16A34A] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#15803D] disabled:opacity-50">追加</button>
+              </div>
+
+              {/* 連絡履歴 */}
+              <div className="mt-4 mb-2 text-[13px] font-semibold text-[#374151]">連絡履歴</div>
+              {logs.length === 0 ? (
+                <div className="py-6 text-center text-[12px] text-[#9CA3AF]">連絡記録はまだありません</div>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {logs.map((l) => (
+                    <li key={l.id} className="rounded border border-[#F3F4F6] bg-[#F9FAFB] px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${l.method === "TEL" ? "bg-[#DBEAFE] text-[#2563EB]" : "bg-[#DCFCE7] text-[#16A34A]"}`}>{l.method === "TEL" ? "電話" : "メール・LINE"}</span>
+                          <span className="text-[11px] text-[#9CA3AF]">{fmtJstDateTime(l.contactedAt)}{l.author?.name ? ` ・ ${l.author.name}` : ""}</span>
+                        </div>
+                        <button onClick={() => deleteLog(l.id)} className="shrink-0 text-[11px] text-[#9CA3AF] hover:text-[#DC2626]">削除</button>
                       </div>
-                      <button onClick={() => deleteLog(l.id)} className="shrink-0 text-[11px] text-[#9CA3AF] hover:text-[#DC2626]">削除</button>
-                    </div>
-                    <div className="mt-1 whitespace-pre-wrap text-[13px] text-[#374151]">{l.content}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
+                      <div className="mt-1 whitespace-pre-wrap text-[13px] text-[#374151]">{l.content}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
