@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { toast } from "sonner";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LabelList,
   PieChart, Pie, LineChart, Line, CartesianGrid,
 } from "recharts";
+import { CONTACT_PURPOSES } from "@/constants/contact-purpose";
 
 /* ---------- Types ---------- */
 type DashboardData = {
@@ -13,6 +15,9 @@ type DashboardData = {
   idleDays: number | null;
   lastContactDate: string | null;
   nextContactDate: string | null;
+  nextContactAt: string | null;
+  nextContactPurpose: string | null;
+  nextContactNote: string | null;
   interestedCount: number;
   wantToApplyCount: number;
   mypageReaction: { total: number; interested: number; wantToApply: number; unanswered: number };
@@ -25,6 +30,34 @@ type DashboardData = {
   stageBreakdown: { document: number; first: number; second: number; offer: number };
   viewsDaily: { date: string; count: number }[];
 };
+
+type ContactLog = {
+  id: string;
+  method: "TEL" | "MESSAGE";
+  content: string;
+  contactedAt: string;
+  author: { id: string; name: string } | null;
+};
+
+/* ---------- JST date/time helpers（罠#17: 必ず Asia/Tokyo 経由・toISOString().slice 禁止）---------- */
+// ISO(UTC) → JST の { date:"YYYY-MM-DD", time:"HH:MM" }
+function isoToJstParts(iso: string | null): { date: string; time: string } {
+  if (!iso) return { date: "", time: "" };
+  const s = new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD HH:MM:SS"
+  const [date, time] = s.split(" ");
+  return { date: date ?? "", time: (time ?? "").slice(0, 5) };
+}
+// JST の date(+time) → ISO(UTC)。ブラウザTZに依存しないよう +09:00 を明示。
+function jstPartsToIso(date: string, time: string): string | null {
+  if (!date) return null;
+  return new Date(`${date}T${time || "00:00"}:00+09:00`).toISOString();
+}
+// ISO → JST "YYYY/MM/DD HH:MM"
+function fmtJstDateTime(iso: string): string {
+  const s = new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const [d, t] = s.split(" ");
+  return `${(d ?? "").replace(/-/g, "/")} ${(t ?? "").slice(0, 5)}`;
+}
 
 // "YYYY-MM-DD" → "M/D"
 function fmtMD(d: string): string {
@@ -66,17 +99,117 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // T-111: 次回連絡予定フォーム
+  const [nextDate, setNextDate] = useState("");
+  const [nextTime, setNextTime] = useState("");
+  const [nextPurpose, setNextPurpose] = useState("");
+  const [nextNote, setNextNote] = useState("");
+  const [savingNext, setSavingNext] = useState(false);
+
+  // T-111: 連絡記録
+  const [logs, setLogs] = useState<ContactLog[]>([]);
+  const [logMethod, setLogMethod] = useState<"TEL" | "MESSAGE">("TEL");
+  const [logContent, setLogContent] = useState("");
+  const [addingLog, setAddingLog] = useState(false);
+
+  const loadDashboard = useCallback(async () => {
+    const res = await fetch(`/api/candidates/${candidateId}/dashboard`);
+    if (!res.ok) throw new Error();
+    const d: DashboardData = await res.json();
+    setData(d);
+    // フォーム初期値をサーバ値へ同期（保存後の再取得でも最新に揃える）
+    const parts = isoToJstParts(d.nextContactAt);
+    setNextDate(parts.date);
+    setNextTime(parts.time);
+    setNextPurpose(d.nextContactPurpose ?? "");
+    setNextNote(d.nextContactNote ?? "");
+  }, [candidateId]);
+
+  const loadLogs = useCallback(async () => {
+    const res = await fetch(`/api/candidates/${candidateId}/contact-logs`);
+    if (res.ok) setLogs((await res.json()).logs ?? []);
+  }, [candidateId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(false);
-    fetch(`/api/candidates/${candidateId}/dashboard`)
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((d) => { if (!cancelled) setData(d); })
+    Promise.all([loadDashboard(), loadLogs()])
       .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [candidateId]);
+  }, [loadDashboard, loadLogs]);
+
+  const saveNextContact = async () => {
+    setSavingNext(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nextContactAt: jstPartsToIso(nextDate, nextTime),
+          nextContactPurpose: nextPurpose || null,
+          nextContactNote: nextNote || null,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("次回連絡予定を保存しました");
+      await loadDashboard();
+    } catch {
+      toast.error("保存に失敗しました");
+    } finally {
+      setSavingNext(false);
+    }
+  };
+
+  const clearNextContact = async () => {
+    setSavingNext(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nextContactAt: null, nextContactPurpose: null, nextContactNote: null }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("次回連絡予定をクリアしました");
+      await loadDashboard();
+    } catch {
+      toast.error("クリアに失敗しました");
+    } finally {
+      setSavingNext(false);
+    }
+  };
+
+  const addLog = async () => {
+    if (!logContent.trim()) { toast.error("連絡内容を入力してください"); return; }
+    setAddingLog(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/contact-logs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: logMethod, content: logContent }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("連絡記録を追加しました");
+      setLogContent("");
+      await Promise.all([loadLogs(), loadDashboard()]); // 最終接触日・放置日数の連動
+    } catch {
+      toast.error("追加に失敗しました");
+    } finally {
+      setAddingLog(false);
+    }
+  };
+
+  const deleteLog = async (id: string) => {
+    if (!confirm("この連絡記録を削除しますか？")) return;
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/contact-logs/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      await Promise.all([loadLogs(), loadDashboard()]);
+    } catch {
+      toast.error("削除に失敗しました");
+    }
+  };
 
   if (loading) return <div className="py-12 text-center text-[#9CA3AF]">読み込み中...</div>;
   if (error || !data) return <div className="py-12 text-center text-[#DC2626]">ダッシュボードの取得に失敗しました</div>;
@@ -250,6 +383,76 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== T-111: 次回連絡予定 + 連絡記録（面談非依存で直接設定／連絡履歴） ===== */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* 次回連絡予定 */}
+        <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+          <div className="mb-3 text-[13px] font-semibold text-[#374151]">次回連絡予定</div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-[#6B7280]">日付</span>
+              <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-[#6B7280]">時間</span>
+              <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" />
+            </label>
+          </div>
+          <label className="mt-3 flex flex-col gap-1">
+            <span className="text-[11px] text-[#6B7280]">目的</span>
+            <select value={nextPurpose} onChange={(e) => setNextPurpose(e.target.value)} className="rounded border border-[#E5E7EB] bg-white px-2 py-1.5 text-[13px]">
+              <option value="">選択してください</option>
+              {CONTACT_PURPOSES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label className="mt-3 flex flex-col gap-1">
+            <span className="text-[11px] text-[#6B7280]">補足</span>
+            <textarea value={nextNote} onChange={(e) => setNextNote(e.target.value)} rows={2} className="rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="自由入力" />
+          </label>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button onClick={saveNextContact} disabled={savingNext || !nextDate} className="rounded-md bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50">保存</button>
+            <button onClick={clearNextContact} disabled={savingNext} className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px] text-[#6B7280] hover:bg-[#F9FAFB] disabled:opacity-50">クリア</button>
+            {data.nextContactAt && (
+              <span className="text-[11px] text-[#9CA3AF]">現在: {fmtJstDateTime(data.nextContactAt)}{data.nextContactPurpose ? ` / ${data.nextContactPurpose}` : ""}</span>
+            )}
+          </div>
+          <p className="mt-2 text-[11px] text-[#9CA3AF]">面談が無くても設定できます。保存すると上段カード・主要指標の「次回連絡予定」に反映されます。</p>
+        </div>
+
+        {/* 連絡記録 */}
+        <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+          <div className="mb-3 text-[13px] font-semibold text-[#374151]">連絡記録</div>
+          <div className="flex gap-1">
+            <button onClick={() => setLogMethod("TEL")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "TEL" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>電話</button>
+            <button onClick={() => setLogMethod("MESSAGE")} className={`rounded px-3 py-1.5 text-[12px] ${logMethod === "MESSAGE" ? "bg-[#2563EB] text-white" : "border border-[#E5E7EB] text-[#6B7280]"}`}>メール・LINE</button>
+          </div>
+          <textarea value={logContent} onChange={(e) => setLogContent(e.target.value)} rows={2} className="mt-2 w-full rounded border border-[#E5E7EB] px-2 py-1.5 text-[13px]" placeholder="連絡内容" />
+          <div className="mt-2">
+            <button onClick={addLog} disabled={addingLog} className="rounded-md bg-[#16A34A] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#15803D] disabled:opacity-50">追加</button>
+          </div>
+          <div className="mt-3 max-h-[260px] overflow-y-auto">
+            {logs.length === 0 ? (
+              <div className="py-6 text-center text-[12px] text-[#9CA3AF]">連絡記録はまだありません</div>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {logs.map((l) => (
+                  <li key={l.id} className="rounded border border-[#F3F4F6] bg-[#F9FAFB] px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${l.method === "TEL" ? "bg-[#DBEAFE] text-[#2563EB]" : "bg-[#DCFCE7] text-[#16A34A]"}`}>{l.method === "TEL" ? "電話" : "メール・LINE"}</span>
+                        <span className="text-[11px] text-[#9CA3AF]">{fmtJstDateTime(l.contactedAt)}{l.author?.name ? ` ・ ${l.author.name}` : ""}</span>
+                      </div>
+                      <button onClick={() => deleteLog(l.id)} className="shrink-0 text-[11px] text-[#9CA3AF] hover:text-[#DC2626]">削除</button>
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap text-[13px] text-[#374151]">{l.content}</div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>

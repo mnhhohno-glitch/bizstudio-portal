@@ -129,6 +129,7 @@ model User {
   documents       Document[]       @relation("UserDocuments")
   manuals         Manual[]         @relation("UserManuals")
   candidateNotes  CandidateNote[]  @relation("UserCandidateNotes")
+  contactLogs     ContactLog[]     @relation("UserContactLogs")
   tasksCreated    Task[]           @relation("TaskCreator")
   taskComments    TaskComment[]    @relation("TaskComments")
   taskAttachments TaskAttachment[] @relation("UploadedAttachments")
@@ -485,6 +486,11 @@ model Candidate {
   applicationDate   DateTime? @map("application_date")
   masType           String?   @map("mas_type")
 
+  // T-111: 次回連絡予定（面談に依存せず直接設定・修正可）。UTC保存・表示時JST（罠#17）。
+  nextContactAt      DateTime? @map("next_contact_at")
+  nextContactPurpose String?   @map("next_contact_purpose")
+  nextContactNote    String?   @map("next_contact_note") @db.Text
+
   // 希望条件（T-064: AI 自動取込 + CA 編集可）
   desiredJobType1       String? @map("desired_job_type_1")
   desiredJobType2       String? @map("desired_job_type_2")
@@ -504,6 +510,7 @@ model Candidate {
 
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
+  contactLogs            ContactLog[]
   jimuSessions           JimuSession[]
   tasks                  Task[]
   files                  CandidateFile[]
@@ -552,6 +559,29 @@ model CandidateNote {
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@map("candidate_notes")
+}
+
+// T-111: 連絡記録の手段。TEL=電話 / MESSAGE=メール・LINE
+enum ContactMethod {
+  TEL
+  MESSAGE
+}
+
+// T-111: 連絡記録（済んだ連絡を時系列で残す）。最終接触日の算出にも参加。
+model ContactLog {
+  id           String        @id @default(cuid())
+  candidateId  String        @map("candidate_id")
+  candidate    Candidate     @relation(fields: [candidateId], references: [id])
+  method       ContactMethod
+  content      String        @db.Text
+  contactedAt  DateTime      @map("contacted_at")
+  authorUserId String        @map("author_user_id")
+  author       User          @relation("UserContactLogs", fields: [authorUserId], references: [id])
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@index([candidateId])
+  @@index([contactedAt])
+  @@map("contact_logs")
 }
 
 model GuideEntry {

@@ -76,6 +76,16 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.masType !== undefined) {
     updateData.masType = body.masType?.trim() || null;
   }
+  // T-111: 次回連絡予定（面談非依存・直接設定/修正/クリア）。日時はクライアントが JST→ISO 化して送る前提。
+  if (body.nextContactAt !== undefined) {
+    updateData.nextContactAt = body.nextContactAt ? new Date(body.nextContactAt) : null;
+  }
+  if (body.nextContactPurpose !== undefined) {
+    updateData.nextContactPurpose = body.nextContactPurpose?.trim() || null;
+  }
+  if (body.nextContactNote !== undefined) {
+    updateData.nextContactNote = body.nextContactNote?.trim() || null;
+  }
   if (body.desiredJobType1 !== undefined) {
     updateData.desiredJobType1 = body.desiredJobType1?.trim() || null;
   }

@@ -102,7 +102,7 @@ export async function GET(
   const { candidateId } = await params;
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { candidateNumber: true },
+    select: { candidateNumber: true, nextContactAt: true, nextContactPurpose: true, nextContactNote: true },
   });
   if (!candidate) return NextResponse.json({ error: "求職者が見つかりません" }, { status: 404 });
 
@@ -112,6 +112,7 @@ export async function GET(
     responses,
     latestInterview,
     notesAgg,
+    contactLogAgg,
     bookmarkAgg,
     bookmarkCount,
     mypageBaseCount,
@@ -133,6 +134,7 @@ export async function GET(
       select: { interviewDate: true, detail: { select: { nextInterviewDate: true } } },
     }),
     prisma.candidateNote.aggregate({ where: { candidateId }, _max: { createdAt: true } }),
+    prisma.contactLog.aggregate({ where: { candidateId }, _max: { contactedAt: true } }),
     prisma.candidateFile.aggregate({
       where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } },
       _max: { lastExportedAt: true },
@@ -165,18 +167,29 @@ export async function GET(
   const deliveryCount = bookmarkCount;
 
   /* ----- 信号バー: 最終接触 / 放置日数 / 次回連絡 ----- */
-  // 最終接触日 = 面談実施 / 連絡メモ / 求人提案(送信) の最新（タスク完了は含めない）
-  const lastContact = maxDate(latestInterview?.interviewDate ?? null, notesAgg._max.createdAt ?? null, bookmarkMaxExport);
+  // 最終接触日 = 面談実施 / 連絡メモ / 連絡記録(ContactLog) / 求人提案(送信) の最新（タスク完了は含めない）
+  const lastContact = maxDate(
+    latestInterview?.interviewDate ?? null,
+    notesAgg._max.createdAt ?? null,
+    contactLogAgg._max.contactedAt ?? null,
+    bookmarkMaxExport,
+  );
   const todayStr = todayJstDateString();
   const lastContactJst = lastContact ? toJstDateString(lastContact) : null;
   const idleDays = lastContactJst ? diffJstDays(todayStr, lastContactJst) : null;
 
-  // 次回連絡予定日 = 最新面談の次回予定 と 未完了タスク期限 のうち「今日以降で最も近い日」
-  const nextCandidates: string[] = [];
-  if (latestInterview?.detail?.nextInterviewDate) nextCandidates.push(toJstDateString(latestInterview.detail.nextInterviewDate));
-  for (const t of openTasks) if (t.dueDate) nextCandidates.push(toJstDateString(t.dueDate));
-  const futureNext = nextCandidates.filter((s) => s >= todayStr).sort();
-  const nextContactStr = futureNext.length > 0 ? futureNext[0].replace(/-/g, "/") : null;
+  // 次回連絡予定: T-111 で直接設定した Candidate.nextContactAt を最優先。未設定のときのみ
+  // 従来の「最新面談の次回予定 / 未完了タスク期限のうち今日以降で最も近い日」へフォールバック。
+  let nextContactStr: string | null;
+  if (candidate.nextContactAt) {
+    nextContactStr = fmtJstDate(candidate.nextContactAt); // YYYY/MM/DD
+  } else {
+    const nextCandidates: string[] = [];
+    if (latestInterview?.detail?.nextInterviewDate) nextCandidates.push(toJstDateString(latestInterview.detail.nextInterviewDate));
+    for (const t of openTasks) if (t.dueDate) nextCandidates.push(toJstDateString(t.dueDate));
+    const futureNext = nextCandidates.filter((s) => s >= todayStr).sort();
+    nextContactStr = futureNext.length > 0 ? futureNext[0].replace(/-/g, "/") : null;
+  }
 
   /* ----- ③選考の進み（会社単位 distinct） ----- */
   const distinctCompanies = (pred: (e: (typeof entries)[number]) => boolean) =>
@@ -241,6 +254,10 @@ export async function GET(
     idleDays, // 日数 | null
     lastContactDate: fmtJstDate(lastContact),
     nextContactDate: nextContactStr,
+    // T-111: 次回連絡予定の編集ブロック初期値（直接設定がある場合のみ非null）
+    nextContactAt: candidate.nextContactAt ? candidate.nextContactAt.toISOString() : null,
+    nextContactPurpose: candidate.nextContactPurpose,
+    nextContactNote: candidate.nextContactNote,
     // ①本人の動き
     interestedCount,
     wantToApplyCount,
