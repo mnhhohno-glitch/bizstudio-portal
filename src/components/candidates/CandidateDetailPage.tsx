@@ -12,6 +12,7 @@ import SupportEndModal from "@/components/candidates/SupportEndModal";
 import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
 import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
+import DashboardTab from "@/components/candidates/DashboardTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import ScoutLinkPanel from "@/components/scout/ScoutLinkPanel";
 import { Toaster } from "sonner";
@@ -116,6 +117,7 @@ const TOP_VIEWS = [
   { key: "basic", label: "基本" },
   { key: "interview", label: "面談履歴" },
   { key: "settings-history", label: "設定履歴" },
+  { key: "dashboard", label: "ダッシュボード" },
 ] as const;
 
 type TopViewKey = (typeof TOP_VIEWS)[number]["key"];
@@ -1873,6 +1875,46 @@ function CandidateDetailPageBody() {
         </div>
       </div>
 
+      {/* 候補者の基本情報ヘッダー: 基本・ダッシュボードタブのみ表示（面談履歴・設定履歴では非表示） */}
+      {(activeView === "basic" || activeView === "dashboard") && (
+      <CandidateHeader
+        candidate={candidate}
+        onStatusChange={async (val) => {
+          await fetch(`/api/candidates/${candidate.id}/update`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supportStatus: val }),
+          });
+          fetchCandidate();
+        }}
+        onEditBasicInfo={() => setEditModalOpen(true)}
+        onGuideUrlCopy={() => {
+          const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
+          if (guide) {
+            const url = `${window.location.origin}/g/${guide.token}`;
+            navigator.clipboard.writeText(url);
+          }
+        }}
+        onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
+        onJobOutput={handleOpenJobOutput}
+        onMypageOpen={() => {
+          setMypageModalOpen(true);
+          fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
+            .then((r) => r.json())
+            .then((r) => console.log("[SyncCaComments]", r))
+            .catch(() => {});
+        }}
+        hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
+        mypageLoading={mypageLoading}
+        jobOutputLoading={jobOutputLoading}
+        supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
+        onSupportEndClick={() => setShowEndModal(true)}
+        onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
+        googleFormDisabled={googleFormDisabled}
+        googleFormDisabledReason={googleFormDisabledReason}
+      />
+      )}
+
       {/* 行3以降: ビューに応じたコンテンツ */}
       {activeView === "interview" ? (
         <InterviewHistoryTab
@@ -1881,46 +1923,10 @@ function CandidateDetailPageBody() {
         />
       ) : activeView === "settings-history" ? (
         <SettingsHistoryTab candidateId={candidateId} />
+      ) : activeView === "dashboard" ? (
+        <DashboardTab candidateId={candidateId} />
       ) : (
         <>
-          {/* 基本タブ: 候補者ヘッダー */}
-          <CandidateHeader
-            candidate={candidate}
-            onStatusChange={async (val) => {
-              await fetch(`/api/candidates/${candidate.id}/update`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ supportStatus: val }),
-              });
-              fetchCandidate();
-            }}
-            onEditBasicInfo={() => setEditModalOpen(true)}
-            onGuideUrlCopy={() => {
-              const guide = candidate.guideEntries.find((e) => e.guideType === "INTERVIEW");
-              if (guide) {
-                const url = `${window.location.origin}/g/${guide.token}`;
-                navigator.clipboard.writeText(url);
-              }
-            }}
-            onScheduleOpen={() => { setScheduleModalOpen(true); setScheduleMethod(""); setScheduleError(""); setScheduleCopiedType(null); }}
-            onJobOutput={handleOpenJobOutput}
-            onMypageOpen={() => {
-              setMypageModalOpen(true);
-              fetch(`/api/candidates/${candidateId}/sync-ca-comments`, { method: "POST" })
-                .then((r) => r.json())
-                .then((r) => console.log("[SyncCaComments]", r))
-                .catch(() => {});
-            }}
-            hasGuideUrl={!!candidate.guideEntries.find((e) => e.guideType === "INTERVIEW")}
-            mypageLoading={mypageLoading}
-            jobOutputLoading={jobOutputLoading}
-            supportEndReasonLabel={candidate.supportEndReason ? (REASON_LABEL_MAP[candidate.supportEndReason] || candidate.supportEndReason) : undefined}
-            onSupportEndClick={() => setShowEndModal(true)}
-            onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
-            googleFormDisabled={googleFormDisabled}
-            googleFormDisabledReason={googleFormDisabledReason}
-          />
-
           {/* T-064: スカウト紐付けパネル（applicationRoute === "スカウト" の時のみ表示） */}
           <ScoutLinkPanel
             candidateId={candidate.id}

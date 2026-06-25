@@ -593,6 +593,9 @@ export default function CandidateListClient({
                 setAppDateTo("");
                 setDelDateFrom("");
                 setDelDateTo("");
+                // フリー検索もクリア（debouncedSearch も即時に空へ＝結果も全件に戻す）
+                setSearch("");
+                setDebouncedSearch("");
                 setCurrentPage(1);
               }} />
             )}

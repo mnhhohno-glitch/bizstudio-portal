@@ -430,6 +430,8 @@ function InterviewToolIcon({ value, entryId, field, onUpdate, alert = false }: {
   const [open, setOpen] = useState(false);
   // openRight=true: 内容を左寄せ（ボタン左端起点に右へ広がる）／false: 右寄せ（ボタン右端起点に左へ広がる）。
   const [openRight, setOpenRight] = useState(true);
+  // openUp=true: 下の空きが足りないので上方向（ボタン上端起点）に開く。最下行で画面外に隠れるのを防ぐ。
+  const [openUp, setOpenUp] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -443,6 +445,8 @@ function InterviewToolIcon({ value, entryId, field, onUpdate, alert = false }: {
   }, [open]);
 
   const POPOVER_WIDTH = 120;
+  // 選択肢3つ＋区切り＋クリアでおよそ160px。下の空きがこれ未満なら上開きに反転する目安。
+  const POPOVER_HEIGHT = 160;
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -450,6 +454,9 @@ function InterviewToolIcon({ value, entryId, field, onUpdate, alert = false }: {
       const rect = btnRef.current.getBoundingClientRect();
       const spaceRight = window.innerWidth - rect.left;
       setOpenRight(spaceRight >= POPOVER_WIDTH + 8);
+      // 下の空きが足りなければ上方向に開く（最下行はみ出し対策）。横位置は従来どおり。
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpenUp(spaceBelow < POPOVER_HEIGHT);
     }
     setOpen((v) => !v);
   };
@@ -478,7 +485,7 @@ function InterviewToolIcon({ value, entryId, field, onUpdate, alert = false }: {
       </button>
       {open && (
         <div
-          className={`absolute z-50 top-full mt-1 ${openRight ? "left-0" : "right-0"} bg-white border border-gray-200 rounded-lg shadow-lg py-1`}
+          className={`absolute z-50 ${openUp ? "bottom-full mb-1" : "top-full mt-1"} ${openRight ? "left-0" : "right-0"} bg-white border border-gray-200 rounded-lg shadow-lg py-1`}
           style={{ width: POPOVER_WIDTH }}
           onClick={(e) => e.stopPropagation()}
         >

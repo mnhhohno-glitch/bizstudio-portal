@@ -1,0 +1,259 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LabelList,
+  PieChart, Pie, LineChart, Line, CartesianGrid,
+} from "recharts";
+
+/* ---------- Types ---------- */
+type DashboardData = {
+  lastLoginAt: string | null;
+  mypageAccessCount: number | null;
+  idleDays: number | null;
+  lastContactDate: string | null;
+  nextContactDate: string | null;
+  interestedCount: number;
+  wantToApplyCount: number;
+  mypageReaction: { total: number; interested: number; wantToApply: number; unanswered: number };
+  lastProposalDate: string | null;
+  deliveryCount: number;
+  entryCompanies: number;
+  inSelectionCompanies: number;
+  funnel: { entry: number; doc: number; first: number; second: number; offer: number };
+  passRate: { doc: number | null; first: number | null; second: number | null };
+  stageBreakdown: { document: number; first: number; second: number; offer: number };
+  viewsDaily: { date: string; count: number }[];
+};
+
+// "YYYY-MM-DD" → "M/D"
+function fmtMD(d: string): string {
+  const parts = (d ?? "").split("-");
+  if (parts.length < 3) return d ?? "";
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+}
+
+/* ---------- Helpers ---------- */
+const DASH = "—";
+function dash(v: string | number | null | undefined): string {
+  if (v === null || v === undefined || v === "") return DASH;
+  return String(v);
+}
+
+// 放置日数 信号色: 緑 ≤7 / 黄 8〜14 / 赤 15〜 / 灰 null
+function idleSignal(d: number | null): { bg: string; fg: string; label: string } {
+  if (d === null) return { bg: "#F3F4F6", fg: "#6B7280", label: "接触記録なし" };
+  if (d <= 7) return { bg: "#DCFCE7", fg: "#16A34A", label: "良好" };
+  if (d <= 14) return { bg: "#FEF9C3", fg: "#CA8A04", label: "やや放置" };
+  return { bg: "#FEE2E2", fg: "#DC2626", label: "要対応" };
+}
+
+/* ---------- Small UI atoms ---------- */
+function Card({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: string }) {
+  return (
+    <div className="rounded-lg border border-[#E5E7EB] bg-white px-4 py-3">
+      <div className="text-[12px] text-[#6B7280]">{label}</div>
+      <div className="mt-1 text-[20px] font-semibold leading-tight" style={{ color: accent ?? "#374151" }}>{value}</div>
+      {sub && <div className="mt-0.5 text-[11px] text-[#9CA3AF]">{sub}</div>}
+    </div>
+  );
+}
+
+const FUNNEL_COLORS = ["#2563EB", "#3B82F6", "#60A5FA", "#93C5FD", "#16A34A"];
+
+export default function DashboardTab({ candidateId }: { candidateId: string }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    fetch(`/api/candidates/${candidateId}/dashboard`)
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setError(true); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [candidateId]);
+
+  if (loading) return <div className="py-12 text-center text-[#9CA3AF]">読み込み中...</div>;
+  if (error || !data) return <div className="py-12 text-center text-[#DC2626]">ダッシュボードの取得に失敗しました</div>;
+
+  const sig = idleSignal(data.idleDays);
+  const funnelData = [
+    { stage: "エントリー", value: data.funnel.entry },
+    { stage: "書類", value: data.funnel.doc },
+    { stage: "一次", value: data.funnel.first },
+    { stage: "二次", value: data.funnel.second },
+    { stage: "内定", value: data.funnel.offer },
+  ];
+  // マイページ反応（母数ベース3分類: 未回答/気になる/応募したい）
+  const reactionEntries = [
+    { name: "未回答", value: data.mypageReaction.unanswered, color: "#9CA3AF" },
+    { name: "気になる", value: data.mypageReaction.interested, color: "#CA8A04" },
+    { name: "応募したい", value: data.mypageReaction.wantToApply, color: "#2563EB" },
+  ];
+  const reactionTotal = data.mypageReaction.total;
+
+  // 追補1: 主要指標 縦リスト（14項目・単位付き・null は「—」・通過率は青字）
+  const pctStr = (v: number | null) => (v === null ? DASH : `${v}%`);
+  const metricRows: { label: string; value: string; blue?: boolean }[] = [
+    { label: "最終ログイン日時", value: dash(data.lastLoginAt) },
+    { label: "マイページ閲覧回数（累計）", value: data.mypageAccessCount == null ? DASH : `${data.mypageAccessCount}回` },
+    { label: "最終求人提案日", value: dash(data.lastProposalDate) },
+    { label: "求人配信数", value: `${data.deliveryCount}件` },
+    { label: "最終接触日", value: dash(data.lastContactDate) },
+    { label: "次回連絡予定日", value: dash(data.nextContactDate) },
+    { label: "放置日数", value: data.idleDays == null ? DASH : `${data.idleDays}日` },
+    { label: "気になる求人数", value: `${data.interestedCount}件` },
+    { label: "応募したい求人数", value: `${data.wantToApplyCount}件` },
+    { label: "エントリー社数", value: `${data.entryCompanies}社` },
+    { label: "選考中企業数", value: `${data.inSelectionCompanies}社` },
+    { label: "書類選考通過率", value: pctStr(data.passRate.doc), blue: true },
+    { label: "一次面接通過率", value: pctStr(data.passRate.first), blue: true },
+    { label: "二次面接通過率", value: pctStr(data.passRate.second), blue: true },
+  ];
+
+  // 追補2: 選考段階の内訳ドーナツ
+  const stageEntries = [
+    { name: "書類選考", value: data.stageBreakdown.document, color: "#93C5FD" },
+    { name: "一次面接", value: data.stageBreakdown.first, color: "#60A5FA" },
+    { name: "二次面接", value: data.stageBreakdown.second, color: "#3B82F6" },
+    { name: "内定", value: data.stageBreakdown.offer, color: "#16A34A" },
+  ];
+  const stageTotal = stageEntries.reduce((s, x) => s + x.value, 0);
+
+  return (
+    <div className="pb-8">
+      {/* ===== 最上段: 放置日数 信号 + 3カード ===== */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <div className="rounded-lg border px-4 py-3" style={{ backgroundColor: sig.bg, borderColor: sig.fg + "55" }}>
+          <div className="text-[12px]" style={{ color: sig.fg }}>放置日数</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-[34px] font-bold leading-none" style={{ color: sig.fg }}>{data.idleDays === null ? DASH : data.idleDays}</span>
+            {data.idleDays !== null && <span className="text-[13px]" style={{ color: sig.fg }}>日</span>}
+          </div>
+          <div className="mt-1 text-[11px] font-medium" style={{ color: sig.fg }}>{sig.label}</div>
+        </div>
+        <Card label="最終ログイン" value={dash(data.lastLoginAt)} sub="マイページ" />
+        <Card label="最終接触" value={dash(data.lastContactDate)} sub="面談/メモ/求人提案の最新" />
+        <Card label="次回連絡予定" value={dash(data.nextContactDate)} sub="面談予定/タスク期限" />
+      </div>
+
+      {/* ===== 信号バー下: 3カラム（左=主要指標 / 中央=折れ線+ファネル / 右=ドーナツ2つ） ===== */}
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {/* 左: 主要指標 縦リスト */}
+        <div className="lg:col-span-4">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">主要指標</div>
+            <div>
+              {metricRows.map((row, i) => (
+                <div
+                  key={row.label}
+                  className={`flex items-center justify-between rounded px-2 py-1.5 ${i % 2 === 1 ? "bg-[#F9FAFB]" : ""}`}
+                >
+                  <span className="text-[12px] text-[#6B7280]">{row.label}</span>
+                  <span className={`text-[13px] font-semibold ${row.blue ? "text-[#2563EB]" : "text-[#374151]"}`}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 中央: マイページ閲覧の動き（折れ線・直近2週間） + 選考の進み（ファネル） */}
+        <div className="flex flex-col gap-4 lg:col-span-5">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="flex items-baseline justify-between">
+              <div className="text-[12px] font-medium text-[#6B7280]">マイページ閲覧の動き（直近2週間）</div>
+              <div className="text-[10px] text-[#9CA3AF]">日別・2026-06-25 から蓄積</div>
+            </div>
+            <div className="mt-2">
+              <ResponsiveContainer width="100%" height={150}>
+                <LineChart data={data.viewsDaily} margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={fmtMD} interval={2} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+                  <YAxis allowDecimals={false} width={28} tick={{ fontSize: 10, fill: "#9CA3AF" }} />
+                  <Tooltip labelFormatter={(d) => fmtMD(String(d))} formatter={(value) => [`${value} 回`, "閲覧"]} />
+                  <Line type="monotone" dataKey="count" stroke="#2563EB" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-1 text-[11px] text-[#9CA3AF]">閲覧が増えた直後は応募意欲が高いタイミング。配信・面談アクションの目安。</div>
+          </div>
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">選考の進み（会社単位）</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={funnelData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
+                <YAxis type="category" dataKey="stage" width={64} tick={{ fontSize: 12, fill: "#374151" }} />
+                <Tooltip formatter={(value) => [`${value} 社`, ""]} />
+                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                  {funnelData.map((_, i) => <Cell key={i} fill={FUNNEL_COLORS[i]} />)}
+                  <LabelList dataKey="value" position="right" style={{ fontSize: 12, fill: "#374151" }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mt-1 text-[11px] text-[#9CA3AF]">エントリー{data.entryCompanies}社 → 内定{data.funnel.offer}社。各段階の通過率は左の指標を参照。</div>
+          </div>
+        </div>
+
+        {/* 右: マイページ反応ドーナツ + 選考段階ドーナツ */}
+        <div className="flex flex-col gap-4 lg:col-span-3">
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] font-medium text-[#6B7280]">マイページ反応の構成</div>
+            {reactionTotal === 0 ? (
+              <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={reactionEntries.filter((r) => r.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
+                      {reactionEntries.filter((r) => r.value > 0).map((r) => <Cell key={r.name} fill={r.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [`${value} 件`, name]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-col gap-1 self-stretch text-[12px]">
+                  {reactionEntries.map((r) => (
+                    <div key={r.name} className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: r.color }} />{r.name}</span>
+                      <span className="font-semibold">{r.value}件</span>
+                    </div>
+                  ))}
+                  <div className="mt-0.5 text-[11px] text-[#9CA3AF]">計 {reactionTotal} 件（マイページ掲載中）</div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+            <div className="mb-2 text-[12px] text-[#6B7280]">選考段階の内訳</div>
+            {stageTotal === 0 ? (
+              <div className="py-8 text-center text-[13px] text-[#9CA3AF]">該当なし</div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={stageEntries.filter((s) => s.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={66} paddingAngle={2}>
+                      {stageEntries.filter((s) => s.value > 0).map((s) => <Cell key={s.name} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [`${value} 社`, name]} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-col gap-1 self-stretch text-[12px]">
+                  {stageEntries.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.name}</span>
+                      <span className="font-semibold">{s.value}社</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
