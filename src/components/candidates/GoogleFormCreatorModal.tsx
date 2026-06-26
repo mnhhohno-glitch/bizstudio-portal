@@ -256,16 +256,26 @@ export default function GoogleFormCreatorModal({
         if (!res.ok) return;
         const data = await res.json();
         const records: InterviewRecordForGoogleForm[] = data.records || [];
-        const latest = records.find((r) => r.isLatest);
 
-        if (latest?.googleFormEditUrl && latest?.googleFormViewUrl) {
+        // 出力済みフォームのURLは、フォーム作成後に面談が追加されると isLatest=false に降格した
+        // 旧レコードへ取り残されることがある。そのため isLatest だけでなく全レコードから
+        // edit/view 両URLを持つものを探し、複数あれば作成日時が最新のものを採用する。
+        const formRecord = records
+          .filter((r) => r.googleFormEditUrl && r.googleFormViewUrl)
+          .sort(
+            (a, b) =>
+              new Date(b.googleFormCreatedAt ?? 0).getTime() -
+              new Date(a.googleFormCreatedAt ?? 0).getTime(),
+          )[0];
+
+        if (formRecord?.googleFormEditUrl && formRecord?.googleFormViewUrl) {
           setFormResult({
-            formId: latest.googleFormId || "",
-            editUrl: latest.googleFormEditUrl,
-            viewUrl: latest.googleFormViewUrl,
+            formId: formRecord.googleFormId || "",
+            editUrl: formRecord.googleFormEditUrl,
+            viewUrl: formRecord.googleFormViewUrl,
             persisted: true,
           });
-          setFormCreatedAt(latest.googleFormCreatedAt);
+          setFormCreatedAt(formRecord.googleFormCreatedAt);
           setStep("completed");
           return; // 既存フォームあり → 下書き確認はスキップ
         }
