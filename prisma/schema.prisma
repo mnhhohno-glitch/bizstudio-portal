@@ -528,6 +528,7 @@ model Candidate {
   settingsHistories      CandidateSettingsHistory[]
   mynaviProcessingLogs   MynaviRpaProcessingLog[]
   bsDocumentFolders      BSDocumentFolder[]
+  savedJobs              CandidateSavedJob[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1637,6 +1638,30 @@ model CandidateJobResponse {
   @@unique([candidateId, externalJobId])
   @@index([candidateId])
   @@map("candidate_job_responses")
+}
+
+// 求職者ブックマーク連携 段階1: job-platform(HITO-Link求人検索) で見つけた求人を
+// 求職者に紐づけて保存する器。保存者CAは記録しない（確定）。表示用スナップショットを保持し、
+// 表示時に job-platform(Supabase) を毎回跨がない（A-68 案A）。
+model CandidateSavedJob {
+  id             String    @id @default(cuid())
+  candidateId    String    @map("candidate_id")
+  candidate      Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  source         String    @default("job-platform") // 媒体非依存・将来拡張用
+  externalJobRef String    @map("external_job_ref") // job-platform jobs.id (uuid文字列)
+  // 表示用スナップショット（必要表示分のみ。仕事内容の全文等は保存しない）
+  jobTitle       String    @map("job_title")
+  companyName    String?   @map("company_name")
+  jobUrl         String?   @map("job_url")
+  salaryText     String?   @map("salary_text")
+  note           String? // 任意：CAメモ
+  savedAt        DateTime  @default(now()) @map("saved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([candidateId, source, externalJobRef]) // 同一求職者×同一求人の重複保存防止
+  @@index([candidateId])
+  @@map("candidate_saved_jobs")
 }
 
 model EntryFlagMaster {
