@@ -54,6 +54,12 @@ export async function GET(req: Request) {
   const targetMonths: string[] = [];
   for (let i = months; i >= 1; i--) targetMonths.push(shiftMonth(thisMonth, -i));
 
+  // 新規/既存(scoped)は直近6ヶ月全体でランク付け（各月=cell, ランク窓=全期間）→ Σ月=合計。
+  const cohortRankWindow = {
+    from: new Date(`${targetMonths[0]}-01T00:00:00+09:00`),
+    to: new Date(new Date(`${shiftMonth(targetMonths[targetMonths.length - 1], 1)}-01T00:00:00+09:00`).getTime() - 1),
+  };
+
   // 各月の userId 解決（全員は不要）。個別は employee の userId が要る（求人紹介＝User.id 軸）。
   let userId = "__nonexistent__";
   if (!allCas) {
@@ -109,7 +115,7 @@ export async function GET(req: Request) {
 
       const [funnelRows, mx] = await Promise.all([
         runFunnel(mStart, mEnd),
-        computeWeeklyMatrix({ employeeId, userId, from, to, allCas }),
+        computeWeeklyMatrix({ employeeId, userId, from, to, allCas, rankWindow: cohortRankWindow }),
       ]);
 
       const r = funnelRows[0] ?? { cohort: 0, dp: 0, offer: 0, accept: 0 };
@@ -119,12 +125,12 @@ export async function GET(req: Request) {
           yearMonth: ym,
           // 面談（月別人数・record）。%（構成比）は UI で ÷合計面談。
           interview: { first: mx.interview.first, second: mx.interview.second, thirdPlus: mx.interview.thirdPlus, total: mx.interview.total },
-          // 求人紹介（月別 人数・候補者ユニーク）。% は UI で ÷合計提案。
-          proposal: { fresh: mx.proposal.fresh.uniq, existing: mx.proposal.existing.uniq, total: mx.proposal.total.uniq },
-          proposalRecs: { fresh: mx.proposal.fresh.recs, existing: mx.proposal.existing.recs, total: mx.proposal.total.recs },
-          // エントリー（月別 人数）。total = コホート基（その月エントリー人数）。% は UI で ÷合計エントリー。
-          entry: { fresh: mx.entry.fresh.uniq, existing: mx.entry.existing.uniq, total: mx.entry.total.uniq },
-          entryRecs: { fresh: mx.entry.fresh.recs, existing: mx.entry.existing.recs, total: mx.entry.total.recs },
+          // 求人紹介（期間内 初回/2回目以降・件数=scoped）。% は UI で ÷合計提案。pure=純粋新規。
+          proposal: { fresh: mx.proposal.scoped.fresh, existing: mx.proposal.scoped.existing, total: mx.proposal.scoped.total },
+          proposalPure: mx.proposal.scoped.pureFresh,
+          // エントリー（期間内 初回/2回目以降・件数=scoped）。% は UI で ÷合計エントリー。
+          entry: { fresh: mx.entry.scoped.fresh, existing: mx.entry.scoped.existing, total: mx.entry.scoped.total },
+          entryPure: mx.entry.scoped.pureFresh,
           // 選考（コホート隣接段階基準・前段が分母）。recs=件数(社数)
           documentPass: r.dp,
           offer: r.offer,
@@ -154,7 +160,7 @@ export async function GET(req: Request) {
   };
   const [summaryFunnelRows, summaryMx] = await Promise.all([
     runFunnel(summaryRange.mStart, summaryRange.mEnd),
-    computeWeeklyMatrix({ employeeId, userId, from: summaryRange.from, to: summaryRange.to, allCas }),
+    computeWeeklyMatrix({ employeeId, userId, from: summaryRange.from, to: summaryRange.to, allCas, rankWindow: cohortRankWindow }),
   ]);
   const sr = summaryFunnelRows[0] ?? { cohort: 0, dp: 0, offer: 0, accept: 0 };
   // 売上は月の加算（決定売上＝粗利は単純合計）。売上単価は通算売上 ÷ 通算決定人数。
@@ -166,10 +172,10 @@ export async function GET(req: Request) {
       thirdPlus: summaryMx.interview.thirdPlus,
       total: summaryMx.interview.total,
     },
-    proposal: { fresh: summaryMx.proposal.fresh.uniq, existing: summaryMx.proposal.existing.uniq, total: summaryMx.proposal.total.uniq },
-    proposalRecs: { fresh: summaryMx.proposal.fresh.recs, existing: summaryMx.proposal.existing.recs, total: summaryMx.proposal.total.recs },
-    entry: { fresh: summaryMx.entry.fresh.uniq, existing: summaryMx.entry.existing.uniq, total: summaryMx.entry.total.uniq },
-    entryRecs: { fresh: summaryMx.entry.fresh.recs, existing: summaryMx.entry.existing.recs, total: summaryMx.entry.total.recs },
+    proposal: { fresh: summaryMx.proposal.scoped.fresh, existing: summaryMx.proposal.scoped.existing, total: summaryMx.proposal.scoped.total },
+    proposalPure: summaryMx.proposal.scoped.pureFresh,
+    entry: { fresh: summaryMx.entry.scoped.fresh, existing: summaryMx.entry.scoped.existing, total: summaryMx.entry.scoped.total },
+    entryPure: summaryMx.entry.scoped.pureFresh,
     documentPass: sr.dp,
     offer: sr.offer,
     decided: sr.accept,
@@ -206,17 +212,9 @@ export async function GET(req: Request) {
   const average = {
     interview: { first: avgInterviewFirst, second: avgInterviewSecond, thirdPlus: avgInterviewThirdPlus, total: avgInterviewTotal },
     proposal: { fresh: avgProposalFresh, existing: avgProposalExisting, total: avgProposalTotal },
-    proposalRecs: {
-      fresh: avg(results.map((r) => r.proposalRecs.fresh)),
-      existing: avg(results.map((r) => r.proposalRecs.existing)),
-      total: avg(results.map((r) => r.proposalRecs.total)),
-    },
+    proposalPure: avg(results.map((r) => r.proposalPure)),
     entry: { fresh: avgEntryFresh, existing: avgEntryExisting, total: avgEntryTotal },
-    entryRecs: {
-      fresh: avg(results.map((r) => r.entryRecs.fresh)),
-      existing: avg(results.map((r) => r.entryRecs.existing)),
-      total: avg(results.map((r) => r.entryRecs.total)),
-    },
+    entryPure: avg(results.map((r) => r.entryPure)),
     documentPass: avgDP,
     offer: avgOffer,
     decided: avgDecided,

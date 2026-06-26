@@ -20,10 +20,19 @@ export interface CountUniqPer {
   perPerson: number | null; // 1人当たり = 件数 ÷ 人数
 }
 
+// 期間内 初回/2回目以降 定義（rankWindow 全体での ROW_NUMBER 基準・件数ベースで加算可能）。
+// fresh=期間内初回 / existing=期間内2回目以降 / total=期間内総件数（fresh+existing）/ pureFresh=BizStudio全期間で初回（純粋新規・補助表示）。
+export interface ScopedNewExisting {
+  fresh: number;
+  existing: number;
+  total: number;
+  pureFresh: number;
+}
+
 export interface WeeklyMatrix {
   interview: { first: number; second: number; thirdPlus: number; total: number };
-  proposal: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer };
-  entry: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer };
+  proposal: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer; scoped: ScopedNewExisting };
+  entry: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer; scoped: ScopedNewExisting };
   selection: {
     documentPass: number; // 人数（COUNT DISTINCT）
     offer: number;
@@ -51,15 +60,62 @@ export async function computeWeeklyMatrix(params: {
   from: Date;
   to: Date;
   allCas?: boolean; // true なら全CA合算（担当・User フィルタを外す。数え方は同じ）
+  // 新規/既存（scoped）の「期間内 初回/2回目以降」ランクを計算する全体窓。
+  // 週セル集計では各週を [from,to]、ランク窓を表示期間全体（全列カバー範囲）にすることで Σ週=合計 が成立する。
+  // 省略時は [from,to]（＝その範囲内ランク）。
+  rankWindow?: { from: Date; to: Date };
 }): Promise<WeeklyMatrix> {
   const { employeeId, userId, from, to, allCas } = params;
   const F = tsLit(from);
   const T = tsLit(to);
+  const rw = params.rankWindow ?? { from, to };
+  const RF = tsLit(rw.from);
+  const RT = tsLit(rw.to);
   // 全員モードでは担当軸フィルタを外す（対象を全候補者に広げるだけ）。
   const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
   void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
 
-  const [iv, prop, ent, sel] = await Promise.all([
+  // 提案イベント（両ソース統合・dedup）の共通 CTE 文。scoped 計算で再利用。
+  const PROPOSAL_EVENTS = `
+      SELECT je.candidate_id, je.job_intro_date AS pdate
+      FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+      WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
+      UNION ALL
+      SELECT cf.candidate_id, cf.last_exported_at AS pdate
+      FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
+      WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM job_entries je2
+          WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
+            AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+              = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+        )`;
+  const ENTRY_EVENTS = `
+      SELECT je.candidate_id, je.entry_date AS pdate
+      FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+      WHERE ${empPred} AND je.archived_at IS NULL
+        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')`;
+  // 期間内 初回/2回目以降（scoped）: rankWindow 全体で候補者ごとに ROW_NUMBER。
+  //   fresh=cell内 rn=1 / existing=cell内 rn>=2 / total=cell内総数。
+  //   pureFresh=純粋新規（BizStudio全期間で初回・候補者単位）: cell内のwindow初回(rn=1)かつ全期間初回もwindow内(first_all>=RF)。
+  //   ※ pdate=first_all 方式は同時刻の重複イベントで二重計上されるため rn=1 ベースで候補者単位に数える。
+  const scopedSql = (eventsSql: string) => `
+    WITH events AS (${eventsSql}),
+    fa AS (SELECT candidate_id, MIN(pdate) AS first_all FROM events GROUP BY candidate_id),
+    win AS (
+      SELECT e.candidate_id, e.pdate, fa.first_all,
+        ROW_NUMBER() OVER (PARTITION BY e.candidate_id ORDER BY e.pdate) AS rn
+      FROM events e JOIN fa ON fa.candidate_id = e.candidate_id
+      WHERE e.pdate BETWEEN TIMESTAMP '${RF}' AND TIMESTAMP '${RT}'
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int sc_new,
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn >= 2)::int sc_ex,
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot,
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1 AND first_all >= TIMESTAMP '${RF}')::int sc_pure
+    FROM win;`;
+
+  const [iv, prop, ent, sel, propScoped, entScoped] = await Promise.all([
     // 面談（candidate.employeeId 軸・notDeclined）。second は予約語のため別名にする。
     prisma.$queryRawUnsafe<{ iv_first: number; iv_second: number; iv_third: number; iv_total: number }[]>(`
       SELECT
@@ -140,12 +196,19 @@ export async function computeWeeklyMatrix(params: {
         COALESCE(SUM(je.revenue - COALESCE(je.job_db_cost, 0) - COALESCE(je.cost, 0)) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint gross
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL;`),
+
+    // 提案 scoped（期間内 初回/2回目以降・純粋新規）
+    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_pure: number }[]>(scopedSql(PROPOSAL_EVENTS)),
+    // エントリー scoped
+    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_pure: number }[]>(scopedSql(ENTRY_EVENTS)),
   ]);
 
   const i = iv[0];
   const pr = prop[0];
   const en = ent[0];
   const s = sel[0];
+  const ps = propScoped[0];
+  const es = entScoped[0];
 
   const revenue = s.revenue != null ? Number(s.revenue) : 0;
   // T-100: 決定粗利 = Σ(revenue - (jobDbCost ?? 0) - (cost ?? 0))。決定判定（revenue>0）は控除前の売上で行い件数定義を維持。
@@ -159,11 +222,13 @@ export async function computeWeeklyMatrix(params: {
       fresh: { recs: pr.new_recs, uniq: pr.new_uniq, perPerson: per(pr.new_recs, pr.new_uniq) },
       existing: { recs: pr.ex_recs, uniq: pr.ex_uniq, perPerson: per(pr.ex_recs, pr.ex_uniq) },
       total: { recs: pr.tot_recs, uniq: pr.tot_uniq, perPerson: per(pr.tot_recs, pr.tot_uniq) },
+      scoped: { fresh: ps.sc_new, existing: ps.sc_ex, total: ps.sc_tot, pureFresh: ps.sc_pure },
     },
     entry: {
       fresh: { recs: en.new_recs, uniq: en.new_uniq, perPerson: per(en.new_recs, en.new_uniq) },
       existing: { recs: en.ex_recs, uniq: en.ex_uniq, perPerson: per(en.ex_recs, en.ex_uniq) },
       total: { recs: en.tot_recs, uniq: en.tot_uniq, perPerson: per(en.tot_recs, en.tot_uniq) },
+      scoped: { fresh: es.sc_new, existing: es.sc_ex, total: es.sc_tot, pureFresh: es.sc_pure },
     },
     selection: {
       documentPass: s.dp,

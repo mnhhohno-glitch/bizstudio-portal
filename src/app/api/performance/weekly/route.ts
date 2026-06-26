@@ -81,9 +81,11 @@ export async function GET(req: Request) {
   const anchorMonth = anchorDate.slice(0, 7);
 
   // 各列の実績＋TOTAL（全列カバー範囲で再集計）＋面談ランク割合（円グラフ用・TOTAL範囲）を並列
+  // 新規/既存(scoped)は表示期間全体でランク付けする（各週=cell, ランク窓=全列カバー範囲）→ Σ週=合計。
+  const rankWindow = { from: columns[0].from, to: columns[columns.length - 1].to };
   const [columnMatrices, totalMatrix, interviewRanks] = await Promise.all([
-    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas }))),
-    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
+    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas, rankWindow }))),
+    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas, rankWindow }),
     computeInterviewRankBreakdown({ employeeId: resolvedEmployeeId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
   ]);
 

@@ -76,10 +76,12 @@ export async function GET(req: Request) {
   const monthFrom = jstStart(monthFirst);
   const monthTo = jstEnd(monthLastBucket.endDate);
 
+  // 新規/既存(scoped)は当月全体でランク付け（各週=cell, ランク窓=当月）→ Σ週=合計。
+  const rankWindow = { from: monthFrom, to: monthTo };
   // 各週マトリクス＋TOTAL（当月通算再集計）＋属性を並列。
   const [columnMatrices, totalMatrix, attributes] = await Promise.all([
-    Promise.all(buckets.map((b) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: jstStart(b.startDate), to: jstEnd(b.endDate), allCas }))),
-    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas }),
+    Promise.all(buckets.map((b) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: jstStart(b.startDate), to: jstEnd(b.endDate), allCas, rankWindow }))),
+    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas, rankWindow }),
     computeInterviewAttributes({ employeeId: resolvedEmployeeId, from: monthFrom, to: monthTo, allCas }),
   ]);
 
