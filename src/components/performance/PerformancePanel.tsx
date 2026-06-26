@@ -430,16 +430,16 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
                 const a = r.actual(c.matrix); // 2軸行では各週=件数
                 const tgt = hasTarget ? c.targets[r.targetKey!] : null;
                 return (
-                  <td key={c.index} className="px-3 py-2 text-center tabular-nums">
-                    {/* 2軸行は週=件数。目標(人数ベース)は達成率列に集約し、週セルには出さない。 */}
+                  <td key={c.index} className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
+                    {/* 2軸行は「人数（総数）」。目標(人数ベース)は達成率列に集約し、週セルには出さない。 */}
                     {hasTarget && !isDual && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
-                    <span className="text-[#374151] font-medium">{fmt(r, a)}</span>
+                    <span className="text-[#374151] font-medium">{isDual ? fmtUT(r.uniq!(c.matrix), a, 0) : fmt(r, a)}</span>
                   </td>
                 );
               })}
               <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
                 {isDual ? (
-                  <span className="text-[#374151] font-semibold">総数{numFmt(totalActual)}件<span className="text-[#9CA3AF]">｜</span>人数{numFmt(totalUniq)}人</span>
+                  <span className="text-[#374151] font-semibold">{fmtUT(totalUniq, totalActual, 0)}</span>
                 ) : (
                   <>
                     {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
@@ -453,7 +453,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               </td>
               <td className="px-3 py-2 text-center tabular-nums text-[#6B7280] whitespace-nowrap">
                 {isDual
-                  ? <span>平均{numFmt(n > 0 && totalActual != null ? totalActual / n : null, 1)}件｜{numFmt(n > 0 && totalUniq != null ? totalUniq / n : null, 1)}人</span>
+                  ? <span>{fmtUT(n > 0 && totalUniq != null ? totalUniq / n : null, n > 0 && totalActual != null ? totalActual / n : null, 1)}</span>
                   : (r.fmt ? r.fmt(avg) : numFmt(avg, 1))}
               </td>
               <td className="px-3 py-2 text-center tabular-nums">
@@ -502,6 +502,8 @@ const COHORT_ROWS: CohortRow[] = [
 // 既存の cohort セルは numFmt(n) で整数表示だが、合計・平均は小数になり得るため別フォーマッタで桁数を分ける。
 const numFmtCell = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(0));
 const numFmtAvg = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(1));
+// 2軸行のセル表記「人数（総数）」：主数字=人数(uniq)、全角括弧内=総数(件数 recs)。ラベル文字なし。d=小数桁。
+const fmtUT = (uniq: number | null | undefined, recs: number | null | undefined, d = 0) => `${numFmt(uniq, d)}（${numFmt(recs, d)}）`;
 
 function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; total: CohortSummary | null; average: CohortSummary | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
@@ -560,7 +562,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 const pv = r.pct(c);
                 return (
                   <Fragment key={c.yearMonth}>
-                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6]">{r.fmt ? r.fmt(n) : numFmtCell(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6] whitespace-nowrap">{r.uniq ? fmtUT(r.uniq(c), n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}</td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </Fragment>
                 );
@@ -573,7 +575,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 return (
                   <>
                     <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-semibold border-l-2 border-[#9CA3AF] whitespace-nowrap">
-                      {r.uniq ? <>{numFmtCell(n)}件<span className="text-[#9CA3AF]">｜</span>{numFmtCell(u)}人</> : (r.fmt ? r.fmt(n) : numFmtCell(n))}
+                      {r.uniq ? fmtUT(u, n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}
                     </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
@@ -587,7 +589,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 return (
                   <>
                     <td className="px-2 py-1 text-right tabular-nums text-[#6B7280] border-l border-[#5A5A5A] whitespace-nowrap">
-                      {r.uniq ? <>{numFmtAvg(n)}件<span className="text-[#9CA3AF]">｜</span>{numFmtAvg(u)}人</> : (r.fmt ? r.fmt(n) : numFmtAvg(n))}
+                      {r.uniq ? fmtUT(u, n, 1) : (r.fmt ? r.fmt(n) : numFmtAvg(n))}
                     </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
