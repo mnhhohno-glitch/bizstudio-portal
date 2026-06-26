@@ -136,6 +136,9 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     || "https://web-production-95808.up.railway.app";
   const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
     || "https://ai-resume-generator-production-66cb.up.railway.app";
+  // 求人検索（job-platform）。独自ドメイン移行時は環境変数で差し替え。
+  const jobPlatformUrl = process.env.NEXT_PUBLIC_JOB_PLATFORM_URL
+    || "https://bizstudio-job-platform.vercel.app/jobs";
 
   const apps: AppItem[] = [
     {
@@ -149,6 +152,12 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
       href: jobAnalyzerUrl,
       label: "求人出力",
       icon: "📄",
+      requiresAuth: false,
+    },
+    {
+      href: jobPlatformUrl,
+      label: "求人検索",
+      icon: "🔍",
       requiresAuth: false,
     },
     {
