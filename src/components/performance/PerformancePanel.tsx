@@ -72,6 +72,10 @@ type NonMatrixTab = "cohort" | "monthly";
 function todayJst(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
+// 起算日デフォルト＝当月の月初（JST）。当日(JST)を取得しその月の1日にする（罠#17・toISOString 不使用）。
+function monthStartJst(): string {
+  return `${todayJst().slice(0, 7)}-01`;
+}
 const numFmt = (v: number | null | undefined, d = 0) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
 const pctFmt = (r: number | null | undefined) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
 const yenFmt = (v: number | null | undefined) => (v == null ? "—" : `¥${Math.round(v).toLocaleString()}`);
@@ -165,7 +169,7 @@ const SUBHEAD_CLS = "text-[#D1D5DB]"; // 目標｜実績 等のサブ文字
 export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
-  const [anchorDate, setAnchorDate] = useState<string>(() => todayJst());
+  const [anchorDate, setAnchorDate] = useState<string>(() => monthStartJst());
   const [granularity, setGranularity] = useState<Granularity>("week");
   const [tab, setTab] = useState<TabKey>("monthly");
   const [weekly, setWeekly] = useState<WeeklyResp | null>(null);
