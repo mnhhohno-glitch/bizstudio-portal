@@ -50,6 +50,31 @@ export interface WeeklyMatrix {
   };
 }
 
+// 合計列を「各列(週/月)の合算」にする（提案/エントリーの新規/既存/合計＝件数・人数、選考の人数・件数）。
+// 期間の実ユニーク(DISTINCT)ではなく Σ列にすることで、縦(新規+既存=合計)・横(Σ週=合計)が件数も人数も一致する。
+// 売上・1人当たり(CUP)・面談は対象外（total の値をそのまま使う）。total を破壊的に上書きする。
+export function applyAdditiveTotals(total: WeeklyMatrix, columns: WeeklyMatrix[]): void {
+  const sum = (sel: (m: WeeklyMatrix) => number) => columns.reduce((s, m) => s + sel(m), 0);
+  const seg = (pick: (m: WeeklyMatrix) => ScopedSeg): ScopedSeg => ({
+    recs: sum((m) => pick(m).recs),
+    uniq: sum((m) => pick(m).uniq),
+  });
+  for (const k of ["proposal", "entry"] as const) {
+    total[k].scoped = {
+      fresh: seg((m) => m[k].scoped.fresh),
+      existing: seg((m) => m[k].scoped.existing),
+      total: seg((m) => m[k].scoped.total),
+      pureFresh: sum((m) => m[k].scoped.pureFresh),
+    };
+  }
+  total.selection.documentPass = sum((m) => m.selection.documentPass);
+  total.selection.offer = sum((m) => m.selection.offer);
+  total.selection.acceptance = sum((m) => m.selection.acceptance);
+  total.selection.documentPassRecs = sum((m) => m.selection.documentPassRecs);
+  total.selection.offerRecs = sum((m) => m.selection.offerRecs);
+  total.selection.acceptanceRecs = sum((m) => m.selection.acceptanceRecs);
+}
+
 // timestamp(無tz, UTC 保存) 列と比較するための UTC wall-clock リテラル。
 function tsLit(d: Date): string {
   return d.toISOString().replace("T", " ").replace("Z", "");
@@ -81,12 +106,15 @@ export async function computeWeeklyMatrix(params: {
   void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
 
   // 提案イベント（両ソース統合・dedup）の共通 CTE 文。scoped 計算で再利用。
+  // 件数の重複排除：同一求職者・同一日(JST)・同一求人を 1 件に寄せる（GROUP BY、pdate は当日最古）。
+  //   JE 側＝external_job_id、CF(BOOKMARK) 側＝file_name を「求人」キーに使う。
   const PROPOSAL_EVENTS = `
-      SELECT je.candidate_id, je.job_intro_date AS pdate
+      SELECT je.candidate_id, MIN(je.job_intro_date) AS pdate
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
+      GROUP BY je.candidate_id, je.external_job_id, (je.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
       UNION ALL
-      SELECT cf.candidate_id, cf.last_exported_at AS pdate
+      SELECT cf.candidate_id, MIN(cf.last_exported_at) AS pdate
       FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
       WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
         AND NOT EXISTS (
@@ -94,33 +122,37 @@ export async function computeWeeklyMatrix(params: {
           WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
             AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
               = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
-        )`;
+        )
+      GROUP BY cf.candidate_id, cf.file_name, (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
   const ENTRY_EVENTS = `
-      SELECT je.candidate_id, je.entry_date AS pdate
+      SELECT je.candidate_id, MIN(je.entry_date) AS pdate
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL
-        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')`;
-  // 期間内 初回/2回目以降（scoped）: rankWindow 全体で候補者ごとに ROW_NUMBER。
-  //   fresh=cell内 rn=1 / existing=cell内 rn>=2 / total=cell内総数。
-  //   pureFresh=純粋新規（BizStudio全期間で初回・候補者単位）: cell内のwindow初回(rn=1)かつ全期間初回もwindow内(first_all>=RF)。
-  //   ※ pdate=first_all 方式は同時刻の重複イベントで二重計上されるため rn=1 ベースで候補者単位に数える。
+        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')
+      GROUP BY je.candidate_id, je.external_job_id, (je.entry_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
+  // 期間内 初回/2回目以降（scoped）: 「週ごと・求職者単位」で振り分け、件数も人数も縦横で加算一致させる。
+  //   first_win = rankWindow 内での候補者の初回イベント日時。cell 内イベントは
+  //     first_win が cell 内（first_win>=F）→ 新規（その求職者の初回週）、first_win<F → 既存（2回目以降の週）。
+  //   候補者ごとにクラスが一意なので per-cell で 新規+既存=合計（件数・人数とも）。1週目は全員初登場で既存=0。
+  //   合計列は各週の合算（DISTINCT 再集計しない）＝route 側で Σ列。
+  //   pureFresh=純粋新規（BizStudio 全期間で初回・候補者単位）: cell が初回週(first_win∈cell) かつ 全期間初回も window 内(first_all>=RF)。
   const scopedSql = (eventsSql: string) => `
     WITH events AS (${eventsSql}),
     fa AS (SELECT candidate_id, MIN(pdate) AS first_all FROM events GROUP BY candidate_id),
     win AS (
       SELECT e.candidate_id, e.pdate, fa.first_all,
-        ROW_NUMBER() OVER (PARTITION BY e.candidate_id ORDER BY e.pdate) AS rn
+        MIN(e.pdate) OVER (PARTITION BY e.candidate_id) AS first_win
       FROM events e JOIN fa ON fa.candidate_id = e.candidate_id
       WHERE e.pdate BETWEEN TIMESTAMP '${RF}' AND TIMESTAMP '${RT}'
     )
     SELECT
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int sc_new,
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn >= 2)::int sc_ex,
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_win >= TIMESTAMP '${F}')::int sc_new,
+      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_win <  TIMESTAMP '${F}')::int sc_ex,
       COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot,
-      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int sc_new_u,
-      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn >= 2)::int sc_ex_u,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_win >= TIMESTAMP '${F}')::int sc_new_u,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_win <  TIMESTAMP '${F}')::int sc_ex_u,
       COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot_u,
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1 AND first_all >= TIMESTAMP '${RF}')::int sc_pure
+      COUNT(DISTINCT candidate_id) FILTER (WHERE first_win BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_all >= TIMESTAMP '${RF}')::int sc_pure
     FROM win;`;
 
   const [iv, prop, ent, sel, propScoped, entScoped] = await Promise.all([

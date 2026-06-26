@@ -11,7 +11,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { computeWeeklyMatrix, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeWeeklyMatrix, applyAdditiveTotals, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { weeklyBusinessDays, monthBusinessDays, allocateToWeeks, type WeekBucket } from "@/lib/performance/businessDays";
 import { computeInterviewAttributes } from "@/lib/performance/attributes";
 
@@ -84,6 +84,8 @@ export async function GET(req: Request) {
     computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas, rankWindow }),
     computeInterviewAttributes({ employeeId: resolvedEmployeeId, from: monthFrom, to: monthTo, allCas }),
   ]);
+  // 合計列の人数・件数を各週の合算に置換（縦横一致）。
+  applyAdditiveTotals(totalMatrix, columnMatrices);
 
   // 目標（当月の PerformanceTarget。週按分は initial面談・提案・エントリーのみ）。
   const targetRow = allCas ? null : await prisma.performanceTarget.findUnique({

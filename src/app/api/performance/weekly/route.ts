@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { computeWeeklyMatrix, computeInterviewRankBreakdown, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeWeeklyMatrix, computeInterviewRankBreakdown, applyAdditiveTotals, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { buildColumns, type Granularity } from "@/lib/performance/columns";
 import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/performance/businessDays";
 
@@ -88,6 +88,8 @@ export async function GET(req: Request) {
     computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas, rankWindow }),
     computeInterviewRankBreakdown({ employeeId: resolvedEmployeeId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
   ]);
+  // 合計列の人数・件数（提案/エントリー/選考）を各週の合算に置換（DISTINCT 再集計をやめ縦横一致させる）。
+  applyAdditiveTotals(totalMatrix, columnMatrices);
 
   // 目標：全員モードは目標なし。個別のみ対象月の PerformanceTarget をまとめて取得。
   const neededMonths = Array.from(new Set([anchorMonth, ...columns.map((c) => c.yearMonth)]));

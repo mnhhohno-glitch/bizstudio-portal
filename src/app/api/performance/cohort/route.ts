@@ -165,6 +165,13 @@ export async function GET(req: Request) {
   const sr = summaryFunnelRows[0] ?? { cohort: 0, dp: 0, offer: 0, accept: 0 };
   // 売上は月の加算（決定売上＝粗利は単純合計）。売上単価は通算売上 ÷ 通算決定人数。
   const sumRevenue = results.reduce((s, r) => s + (r.decidedRevenue ?? 0), 0);
+  // 合計列の人数・件数（提案/エントリー/選考）は各月の合算にする（縦横一致・DISTINCT 再集計しない）。
+  // 率（コホート率）は従来どおり通算コホート(sr)基準、売上・単価も従来どおり（対象外）。
+  const sumR = (sel: (r: (typeof results)[number]) => number) => results.reduce((s, r) => s + sel(r), 0);
+  const segSum = (pick: (r: (typeof results)[number]) => { recs: number; uniq: number }) => ({
+    recs: sumR((r) => pick(r).recs),
+    uniq: sumR((r) => pick(r).uniq),
+  });
   const total = {
     interview: {
       first: summaryMx.interview.first,
@@ -172,16 +179,16 @@ export async function GET(req: Request) {
       thirdPlus: summaryMx.interview.thirdPlus,
       total: summaryMx.interview.total,
     },
-    proposal: { fresh: summaryMx.proposal.scoped.fresh, existing: summaryMx.proposal.scoped.existing, total: summaryMx.proposal.scoped.total },
-    proposalPure: summaryMx.proposal.scoped.pureFresh,
-    entry: { fresh: summaryMx.entry.scoped.fresh, existing: summaryMx.entry.scoped.existing, total: summaryMx.entry.scoped.total },
-    entryPure: summaryMx.entry.scoped.pureFresh,
-    documentPass: sr.dp,
-    offer: sr.offer,
-    decided: sr.accept,
-    documentPassRecs: sr.dp_recs,
-    offerRecs: sr.offer_recs,
-    decidedRecs: sr.accept_recs,
+    proposal: { fresh: segSum((r) => r.proposal.fresh), existing: segSum((r) => r.proposal.existing), total: segSum((r) => r.proposal.total) },
+    proposalPure: sumR((r) => r.proposalPure),
+    entry: { fresh: segSum((r) => r.entry.fresh), existing: segSum((r) => r.entry.existing), total: segSum((r) => r.entry.total) },
+    entryPure: sumR((r) => r.entryPure),
+    documentPass: sumR((r) => r.documentPass),
+    offer: sumR((r) => r.offer),
+    decided: sumR((r) => r.decided),
+    documentPassRecs: sumR((r) => r.documentPassRecs),
+    offerRecs: sumR((r) => r.offerRecs),
+    decidedRecs: sumR((r) => r.decidedRecs),
     documentPassRate: rate(sr.dp, sr.cohort),
     offerRate: rate(sr.offer, sr.dp),
     decidedRate: rate(sr.accept, sr.offer),
