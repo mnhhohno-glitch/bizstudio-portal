@@ -4,18 +4,30 @@ import { getSessionUser } from "@/lib/auth";
 import { createTask, updateTask, completeTask } from "@/lib/googleTasks";
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "@/lib/googleCalendar";
 
-type Slot = "first" | "second" | "final";
+type Slot = "first" | "second" | "final" | "offer" | "prep";
 type Action = "create" | "update" | "complete";
 
 const SLOT_LABEL: Record<Slot, string> = {
   first: "一次面接",
   second: "二次面接",
   final: "最終面接",
+  offer: "オファー面談",
+  prep: "面接対策",
 };
 
+const SLOTS: Slot[] = ["first", "second", "final", "offer", "prep"];
 function isSlot(v: unknown): v is Slot {
-  return v === "first" || v === "second" || v === "final";
+  return typeof v === "string" && (SLOTS as string[]).includes(v);
 }
+
+// slot ごとの JobEntry 列名（date/time/gtask/gcal）。一次/二次/最終と全く同じ追跡パターン。
+const SLOT_FIELDS: Record<Slot, { dateK: string; timeK: string; gtaskK: string; gcalK: string }> = {
+  first: { dateK: "firstInterviewDate", timeK: "firstInterviewTime", gtaskK: "firstInterviewGtaskId", gcalK: "firstInterviewGcalId" },
+  second: { dateK: "secondInterviewDate", timeK: "secondInterviewTime", gtaskK: "secondInterviewGtaskId", gcalK: "secondInterviewGcalId" },
+  final: { dateK: "finalInterviewDate", timeK: "finalInterviewTime", gtaskK: "finalInterviewGtaskId", gcalK: "finalInterviewGcalId" },
+  offer: { dateK: "offerMeetingDate", timeK: "offerMeetingTime", gtaskK: "offerMeetingGtaskId", gcalK: "offerMeetingGcalId" },
+  prep: { dateK: "interviewPrepDate", timeK: "interviewPrepTime", gtaskK: "interviewPrepGtaskId", gcalK: "interviewPrepGcalId" },
+};
 
 function isAction(v: unknown): v is Action {
   return v === "create" || v === "update" || v === "complete";
@@ -63,7 +75,7 @@ export async function POST(
   const { slot, action } = body;
   if (!isSlot(slot)) {
     return NextResponse.json(
-      { error: "slot must be 'first' | 'second' | 'final'" },
+      { error: "slot must be 'first' | 'second' | 'final' | 'offer' | 'prep'" },
       { status: 400 }
     );
   }
@@ -92,44 +104,16 @@ export async function POST(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const dateCol =
-    slot === "first"
-      ? entry.firstInterviewDate
-      : slot === "second"
-        ? entry.secondInterviewDate
-        : entry.finalInterviewDate;
-  const timeCol =
-    slot === "first"
-      ? entry.firstInterviewTime
-      : slot === "second"
-        ? entry.secondInterviewTime
-        : entry.finalInterviewTime;
-  const gtaskId =
-    slot === "first"
-      ? entry.firstInterviewGtaskId
-      : slot === "second"
-        ? entry.secondInterviewGtaskId
-        : entry.finalInterviewGtaskId;
-  const gcalId =
-    slot === "first"
-      ? entry.firstInterviewGcalId
-      : slot === "second"
-        ? entry.secondInterviewGcalId
-        : entry.finalInterviewGcalId;
+  const fk = SLOT_FIELDS[slot];
+  const er = entry as unknown as Record<string, Date | string | null>;
+  const dateCol = er[fk.dateK] as Date | null;
+  const timeCol = er[fk.timeK] as string | null;
+  const gtaskId = er[fk.gtaskK] as string | null;
+  const gcalId = er[fk.gcalK] as string | null;
 
   // gtask / gcal の更新フィールドをまとめて生成（成功した分だけ書き込む）
-  const gtaskField = (value: string | null) =>
-    slot === "first"
-      ? { firstInterviewGtaskId: value }
-      : slot === "second"
-        ? { secondInterviewGtaskId: value }
-        : { finalInterviewGtaskId: value };
-  const gcalField = (value: string | null) =>
-    slot === "first"
-      ? { firstInterviewGcalId: value }
-      : slot === "second"
-        ? { secondInterviewGcalId: value }
-        : { finalInterviewGcalId: value };
+  const gtaskField = (value: string | null) => ({ [fk.gtaskK]: value });
+  const gcalField = (value: string | null) => ({ [fk.gcalK]: value });
 
   // タスクタイトル: {企業名}_{求職者名} {ラベル}{HH:MM}
   const buildTaskTitle = (time: string): string =>

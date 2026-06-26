@@ -76,6 +76,8 @@ export type Entry = {
   firstInterviewGtaskId?: string | null;
   secondInterviewGtaskId?: string | null;
   finalInterviewGtaskId?: string | null;
+  offerMeetingGtaskId?: string | null;
+  interviewPrepGtaskId?: string | null;
   // T-088: 課金方式（年収％/固定）と粗利関連。承諾 or 入社済レコードで入力可。
   // revenue は T-087 で先に追加済み（L61）。ここでは追加しない。
   feeType?: "ANNUAL_RATE" | "FIXED" | null;
@@ -102,16 +104,20 @@ function formatInterviewDateTime(dateIso: string | null, time: string | null): s
   return `${ymd.replace(/-/g, "/")} ${time}`;
 }
 
-const INTERVIEW_SLOT_DEFS: { slot: "first" | "second" | "final"; label: string; dateField: keyof Entry; timeField: keyof Entry; gtaskField: keyof Entry }[] = [
+const INTERVIEW_SLOT_DEFS: { slot: "first" | "second" | "final" | "offer" | "prep"; label: string; dateField: keyof Entry; timeField: keyof Entry; gtaskField: keyof Entry }[] = [
   { slot: "first", label: "一次面接", dateField: "firstInterviewDate", timeField: "firstInterviewTime", gtaskField: "firstInterviewGtaskId" },
   { slot: "second", label: "二次面接", dateField: "secondInterviewDate", timeField: "secondInterviewTime", gtaskField: "secondInterviewGtaskId" },
   { slot: "final", label: "最終面接", dateField: "finalInterviewDate", timeField: "finalInterviewTime", gtaskField: "finalInterviewGtaskId" },
+  { slot: "offer", label: "オファー面談", dateField: "offerMeetingDate", timeField: "offerMeetingTime", gtaskField: "offerMeetingGtaskId" },
+  { slot: "prep", label: "面接対策", dateField: "interviewPrepDate", timeField: "interviewPrepTime", gtaskField: "interviewPrepGtaskId" },
 ];
 
 const INTERVIEW_DATE_TIME_FIELDS = new Set([
   "firstInterviewDate", "firstInterviewTime",
   "secondInterviewDate", "secondInterviewTime",
   "finalInterviewDate", "finalInterviewTime",
+  "offerMeetingDate", "offerMeetingTime",
+  "interviewPrepDate", "interviewPrepTime",
 ]);
 
 export type FlagData = {

@@ -1599,6 +1599,12 @@ model JobEntry {
   secondInterviewGcalId String? @map("second_interview_gcal_id")
   finalInterviewGcalId  String? @map("final_interview_gcal_id")
 
+  // === オファー面談 / 面接対策 も一次/二次/最終と同じパターンで Google カレンダー・ToDo へ同期 ===
+  offerMeetingGtaskId  String? @map("offer_meeting_gtask_id")
+  offerMeetingGcalId   String? @map("offer_meeting_gcal_id")
+  interviewPrepGtaskId String? @map("interview_prep_gtask_id")
+  interviewPrepGcalId  String? @map("interview_prep_gcal_id")
+
   @@index([candidateId])
   @@index([externalJobId])
   @@index([entryFlag])

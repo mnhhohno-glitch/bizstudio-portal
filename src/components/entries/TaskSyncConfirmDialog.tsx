@@ -3,7 +3,7 @@
 export type TaskSyncAction = "create" | "update" | "complete";
 
 export type TaskSyncSlot = {
-  slot: "first" | "second" | "final";
+  slot: "first" | "second" | "final" | "offer" | "prep";
   label: string;
   detail: string;
 };
