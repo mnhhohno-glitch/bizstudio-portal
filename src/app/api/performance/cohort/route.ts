@@ -198,12 +198,17 @@ export async function GET(req: Request) {
   const avgInterviewSecond = avg(results.map((r) => r.interview.second));
   const avgInterviewThirdPlus = avg(results.map((r) => r.interview.thirdPlus));
   const avgInterviewTotal = avg(results.map((r) => r.interview.total));
-  const avgProposalFresh = avg(results.map((r) => r.proposal.fresh));
-  const avgProposalExisting = avg(results.map((r) => r.proposal.existing));
-  const avgProposalTotal = avg(results.map((r) => r.proposal.total));
-  const avgEntryFresh = avg(results.map((r) => r.entry.fresh));
-  const avgEntryExisting = avg(results.map((r) => r.entry.existing));
-  const avgEntryTotal = avg(results.map((r) => r.entry.total));
+  // 提案/エントリーは {recs,uniq} の2軸。recs/uniq を別々に平均する。
+  const avgSeg = (sel: (r: (typeof results)[number]) => { recs: number; uniq: number }) => ({
+    recs: avg(results.map((r) => sel(r).recs)),
+    uniq: avg(results.map((r) => sel(r).uniq)),
+  });
+  const avgProposalFresh = avgSeg((r) => r.proposal.fresh);
+  const avgProposalExisting = avgSeg((r) => r.proposal.existing);
+  const avgProposalTotal = avgSeg((r) => r.proposal.total);
+  const avgEntryFresh = avgSeg((r) => r.entry.fresh);
+  const avgEntryExisting = avgSeg((r) => r.entry.existing);
+  const avgEntryTotal = avgSeg((r) => r.entry.total);
   const avgDP = avg(results.map((r) => r.documentPass));
   const avgOffer = avg(results.map((r) => r.offer));
   const avgDecided = avg(results.map((r) => r.decided));

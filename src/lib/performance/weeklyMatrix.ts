@@ -20,12 +20,17 @@ export interface CountUniqPer {
   perPerson: number | null; // 1人当たり = 件数 ÷ 人数
 }
 
-// 期間内 初回/2回目以降 定義（rankWindow 全体での ROW_NUMBER 基準・件数ベースで加算可能）。
-// fresh=期間内初回 / existing=期間内2回目以降 / total=期間内総件数（fresh+existing）/ pureFresh=BizStudio全期間で初回（純粋新規・補助表示）。
+// 期間内 初回/2回目以降 定義（rankWindow 全体での ROW_NUMBER 基準）。
+// 各区分は recs=件数（加算可能・Σ週=合計）と uniq=人数（ユニーク候補者数・非加算）の2軸。
+// fresh=期間内初回 / existing=期間内2回目以降 / total=期間内総数（fresh+existing）/ pureFresh=BizStudio全期間で初回（純粋新規・候補者単位）。
+export interface ScopedSeg {
+  recs: number; // 件数（社数）
+  uniq: number; // 人数（ユニーク候補者数）
+}
 export interface ScopedNewExisting {
-  fresh: number;
-  existing: number;
-  total: number;
+  fresh: ScopedSeg;
+  existing: ScopedSeg;
+  total: ScopedSeg;
   pureFresh: number;
 }
 
@@ -112,6 +117,9 @@ export async function computeWeeklyMatrix(params: {
       COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int sc_new,
       COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn >= 2)::int sc_ex,
       COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1)::int sc_new_u,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn >= 2)::int sc_ex_u,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot_u,
       COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND rn = 1 AND first_all >= TIMESTAMP '${RF}')::int sc_pure
     FROM win;`;
 
@@ -198,9 +206,9 @@ export async function computeWeeklyMatrix(params: {
       WHERE ${empPred} AND je.archived_at IS NULL;`),
 
     // 提案 scoped（期間内 初回/2回目以降・純粋新規）
-    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_pure: number }[]>(scopedSql(PROPOSAL_EVENTS)),
+    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_new_u: number; sc_ex_u: number; sc_tot_u: number; sc_pure: number }[]>(scopedSql(PROPOSAL_EVENTS)),
     // エントリー scoped
-    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_pure: number }[]>(scopedSql(ENTRY_EVENTS)),
+    prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_new_u: number; sc_ex_u: number; sc_tot_u: number; sc_pure: number }[]>(scopedSql(ENTRY_EVENTS)),
   ]);
 
   const i = iv[0];
@@ -222,13 +230,23 @@ export async function computeWeeklyMatrix(params: {
       fresh: { recs: pr.new_recs, uniq: pr.new_uniq, perPerson: per(pr.new_recs, pr.new_uniq) },
       existing: { recs: pr.ex_recs, uniq: pr.ex_uniq, perPerson: per(pr.ex_recs, pr.ex_uniq) },
       total: { recs: pr.tot_recs, uniq: pr.tot_uniq, perPerson: per(pr.tot_recs, pr.tot_uniq) },
-      scoped: { fresh: ps.sc_new, existing: ps.sc_ex, total: ps.sc_tot, pureFresh: ps.sc_pure },
+      scoped: {
+        fresh: { recs: ps.sc_new, uniq: ps.sc_new_u },
+        existing: { recs: ps.sc_ex, uniq: ps.sc_ex_u },
+        total: { recs: ps.sc_tot, uniq: ps.sc_tot_u },
+        pureFresh: ps.sc_pure,
+      },
     },
     entry: {
       fresh: { recs: en.new_recs, uniq: en.new_uniq, perPerson: per(en.new_recs, en.new_uniq) },
       existing: { recs: en.ex_recs, uniq: en.ex_uniq, perPerson: per(en.ex_recs, en.ex_uniq) },
       total: { recs: en.tot_recs, uniq: en.tot_uniq, perPerson: per(en.tot_recs, en.tot_uniq) },
-      scoped: { fresh: es.sc_new, existing: es.sc_ex, total: es.sc_tot, pureFresh: es.sc_pure },
+      scoped: {
+        fresh: { recs: es.sc_new, uniq: es.sc_new_u },
+        existing: { recs: es.sc_ex, uniq: es.sc_ex_u },
+        total: { recs: es.sc_tot, uniq: es.sc_tot_u },
+        pureFresh: es.sc_pure,
+      },
     },
     selection: {
       documentPass: s.dp,

@@ -11,7 +11,8 @@ import TargetModal from "./TargetModal";
 
 type Advisor = { id: string; name: string };
 type CUP = { recs: number; uniq: number; perPerson: number | null };
-type Scoped = { fresh: number; existing: number; total: number; pureFresh: number };
+type Seg = { recs: number; uniq: number }; // 件数+人数の2軸
+type Scoped = { fresh: Seg; existing: Seg; total: Seg; pureFresh: number };
 type WeeklyMatrix = {
   interview: { first: number; second: number; thirdPlus: number; total: number };
   proposal: { fresh: CUP; existing: CUP; total: CUP; scoped: Scoped };
@@ -30,9 +31,9 @@ type WeeklyResp = {
 type Cohort = {
   yearMonth: string;
   interview: { first: number; second: number; thirdPlus: number; total: number };
-  proposal: { fresh: number; existing: number; total: number };
+  proposal: { fresh: Seg; existing: Seg; total: Seg };
   proposalPure: number;
-  entry: { fresh: number; existing: number; total: number };
+  entry: { fresh: Seg; existing: Seg; total: Seg };
   entryPure: number;
   documentPass: number; offer: number; decided: number;
   documentPassRecs: number; offerRecs: number; decidedRecs: number;
@@ -112,12 +113,12 @@ const MONTHLY_ROWS: Row[] = [
   { label: "求人面談（2回目）", actual: (m) => m.interview.second, pct: (m) => ratio(m.interview.second, m.interview.total) },
   { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
   { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, pct: (m) => (m.interview.total > 0 ? 1 : null) },
-  { label: "初回提案", actual: (m) => m.proposal.scoped.fresh, title: (m) => `純粋新規 ${m.proposal.scoped.pureFresh}件`, pct: (m) => ratio(m.proposal.scoped.fresh, m.proposal.scoped.total) },
-  { label: "既存提案", actual: (m) => m.proposal.scoped.existing, pct: (m) => ratio(m.proposal.scoped.existing, m.proposal.scoped.total) },
-  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.scoped.total, targetKey: "proposalUniq", hideInlineTarget: true, pct: (m) => ratio(m.proposal.scoped.total, m.interview.total) },
-  { label: "新規エントリー", actual: (m) => m.entry.scoped.fresh, title: (m) => `純粋新規 ${m.entry.scoped.pureFresh}件`, pct: (m) => ratio(m.entry.scoped.fresh, m.entry.scoped.total) },
-  { label: "既存エントリー", actual: (m) => m.entry.scoped.existing, pct: (m) => ratio(m.entry.scoped.existing, m.entry.scoped.total) },
-  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.scoped.total, targetKey: "entryUniq", hideInlineTarget: true, pct: (m) => ratio(m.entry.scoped.total, m.proposal.scoped.total) },
+  { label: "初回提案", actual: (m) => m.proposal.scoped.fresh.recs, uniq: (m) => m.proposal.scoped.fresh.uniq, title: (m) => `純粋新規 ${m.proposal.scoped.pureFresh}件`, pct: (m) => ratio(m.proposal.scoped.fresh.uniq, m.proposal.scoped.total.uniq) },
+  { label: "既存提案", actual: (m) => m.proposal.scoped.existing.recs, uniq: (m) => m.proposal.scoped.existing.uniq, pct: (m) => ratio(m.proposal.scoped.existing.uniq, m.proposal.scoped.total.uniq) },
+  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.scoped.total.uniq, m.interview.total) },
+  { label: "新規エントリー", actual: (m) => m.entry.scoped.fresh.recs, uniq: (m) => m.entry.scoped.fresh.uniq, title: (m) => `純粋新規 ${m.entry.scoped.pureFresh}件`, pct: (m) => ratio(m.entry.scoped.fresh.uniq, m.entry.scoped.total.uniq) },
+  { label: "既存エントリー", actual: (m) => m.entry.scoped.existing.recs, uniq: (m) => m.entry.scoped.existing.uniq, pct: (m) => ratio(m.entry.scoped.existing.uniq, m.entry.scoped.total.uniq) },
+  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.scoped.total.recs, uniq: (m) => m.entry.scoped.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.scoped.total.uniq, m.proposal.scoped.total.uniq) },
   { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
   { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
   { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
@@ -133,18 +134,18 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
     { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
   ],
-  // 求人紹介：期間内 初回/2回目以降（単一件数・週を足すと合計）＋ 合計1人当たり。
+  // 求人紹介：期間内 初回/2回目以降を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
   proposal: [
-    { label: "初回提案", band: true, actual: (m) => m.proposal.scoped.fresh, title: (m) => `純粋新規 ${m.proposal.scoped.pureFresh}件` },
-    { label: "既存提案", band: true, actual: (m) => m.proposal.scoped.existing },
-    { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.scoped.total, targetKey: "proposalUniq", hideInlineTarget: true },
+    { label: "初回提案", band: true, actual: (m) => m.proposal.scoped.fresh.recs, uniq: (m) => m.proposal.scoped.fresh.uniq, title: (m) => `純粋新規 ${m.proposal.scoped.pureFresh}件` },
+    { label: "既存提案", band: true, actual: (m) => m.proposal.scoped.existing.recs, uniq: (m) => m.proposal.scoped.existing.uniq },
+    { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq" },
     { label: "合計提案 1人当たり", indent: true, actual: (m) => m.proposal.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
-  // エントリー：期間内 初回/2回目以降（単一件数・週を足すと合計）＋ 合計1人当たり。
+  // エントリー：期間内 初回/2回目以降を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
   entry: [
-    { label: "新規エントリー", band: true, actual: (m) => m.entry.scoped.fresh, title: (m) => `純粋新規 ${m.entry.scoped.pureFresh}件` },
-    { label: "既存エントリー", band: true, actual: (m) => m.entry.scoped.existing },
-    { label: "合計エントリー", band: true, isTotal: true, actual: (m) => m.entry.scoped.total, targetKey: "entryUniq", hideInlineTarget: true },
+    { label: "新規エントリー", band: true, actual: (m) => m.entry.scoped.fresh.recs, uniq: (m) => m.entry.scoped.fresh.uniq, title: (m) => `純粋新規 ${m.entry.scoped.pureFresh}件` },
+    { label: "既存エントリー", band: true, actual: (m) => m.entry.scoped.existing.recs, uniq: (m) => m.entry.scoped.existing.uniq },
+    { label: "合計エントリー", band: true, isTotal: true, actual: (m) => m.entry.scoped.total.recs, uniq: (m) => m.entry.scoped.total.uniq, targetKey: "entryUniq" },
     { label: "合計エントリー 1人当たり", indent: true, actual: (m) => m.entry.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
   // 選考状況：件数｜人数の2軸行（週=件数・合計=総数件｜人数人）。
@@ -487,12 +488,12 @@ const COHORT_ROWS: CohortRow[] = [
   { label: "求人面談（2回目）", num: (c) => c.interview.second, pct: (c) => ratio(c.interview.second, c.interview.total) },
   { label: "既存面談（3回目以降）", num: (c) => c.interview.thirdPlus, pct: (c) => ratio(c.interview.thirdPlus, c.interview.total) },
   { label: "合計面談", num: (c) => c.interview.total, pct: (c) => (c.interview.total > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "初回求人紹介", num: (c) => c.proposal.fresh, title: (c) => `純粋新規 ${c.proposalPure.toFixed(0)}件`, pct: (c) => ratio(c.proposal.fresh, c.proposal.total) },
-  { label: "既存求人紹介", num: (c) => c.proposal.existing, pct: (c) => ratio(c.proposal.existing, c.proposal.total) },
-  { label: "合計求人紹介", num: (c) => c.proposal.total, pct: (c) => (c.proposal.total > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "新規エントリー", num: (c) => c.entry.fresh, title: (c) => `純粋新規 ${c.entryPure.toFixed(0)}件`, pct: (c) => ratio(c.entry.fresh, c.entry.total) },
-  { label: "既存エントリー", num: (c) => c.entry.existing, pct: (c) => ratio(c.entry.existing, c.entry.total) },
-  { label: "合計エントリー", num: (c) => c.entry.total, pct: (c) => (c.entry.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "初回求人紹介", num: (c) => c.proposal.fresh.recs, uniq: (c) => c.proposal.fresh.uniq, title: (c) => `純粋新規 ${c.proposalPure.toFixed(0)}件`, pct: (c) => ratio(c.proposal.fresh.uniq, c.proposal.total.uniq) },
+  { label: "既存求人紹介", num: (c) => c.proposal.existing.recs, uniq: (c) => c.proposal.existing.uniq, pct: (c) => ratio(c.proposal.existing.uniq, c.proposal.total.uniq) },
+  { label: "合計求人紹介", num: (c) => c.proposal.total.recs, uniq: (c) => c.proposal.total.uniq, pct: (c) => (c.proposal.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "新規エントリー", num: (c) => c.entry.fresh.recs, uniq: (c) => c.entry.fresh.uniq, title: (c) => `純粋新規 ${c.entryPure.toFixed(0)}件`, pct: (c) => ratio(c.entry.fresh.uniq, c.entry.total.uniq) },
+  { label: "既存エントリー", num: (c) => c.entry.existing.recs, uniq: (c) => c.entry.existing.uniq, pct: (c) => ratio(c.entry.existing.uniq, c.entry.total.uniq) },
+  { label: "合計エントリー", num: (c) => c.entry.total.recs, uniq: (c) => c.entry.total.uniq, pct: (c) => (c.entry.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true },
   { label: "書類選考通過", num: (c) => c.documentPassRecs, uniq: (c) => c.documentPass, pct: (c) => c.documentPassRate },
   { label: "内定数", num: (c) => c.offerRecs, uniq: (c) => c.offer, pct: (c) => c.offerRate },
   { label: "決定数（内定承諾）", num: (c) => c.decidedRecs, uniq: (c) => c.decided, pct: (c) => c.decidedRate },
