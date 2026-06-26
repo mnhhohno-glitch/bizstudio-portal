@@ -316,6 +316,30 @@ export default function CandidateListClient({
     }
   }, []);
 
+  // T-115: 別画面で基本情報を編集して戻ったとき、一覧を自動で最新化する。
+  // window focus / visibilitychange(visible復帰) / pageshow(同一タブのブラウザバック=bfcache復元) で再取得。
+  // フィルタ・ページング・検索の state は別管理のため、refreshCandidates は条件を維持したままデータのみ差し替える。
+  const lastRefreshRef = useRef(0);
+  useEffect(() => {
+    const maybeRefresh = () => {
+      const now = Date.now();
+      if (now - lastRefreshRef.current < 1000) return; // focus と visibilitychange の同時発火など多重取得を抑制
+      lastRefreshRef.current = now;
+      refreshCandidates();
+    };
+    const onFocus = () => maybeRefresh();
+    const onVisible = () => { if (document.visibilityState === "visible") maybeRefresh(); };
+    const onPageShow = () => maybeRefresh();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [refreshCandidates]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]

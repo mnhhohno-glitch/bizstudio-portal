@@ -1992,7 +1992,7 @@ function CandidateDetailPageBody() {
           candidate={candidate}
           employees={employees}
           onClose={() => setEditModalOpen(false)}
-          onSaved={fetchCandidate}
+          onSaved={() => { fetchCandidate(); router.refresh(); }}
         />
       )}
 
