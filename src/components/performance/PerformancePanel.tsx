@@ -15,7 +15,7 @@ type WeeklyMatrix = {
   interview: { first: number; second: number; thirdPlus: number; total: number };
   proposal: { fresh: CUP; existing: CUP; total: CUP };
   entry: { fresh: CUP; existing: CUP; total: CUP };
-  selection: { documentPass: number; offer: number; acceptance: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
+  selection: { documentPass: number; offer: number; acceptance: number; documentPassRecs: number; offerRecs: number; acceptanceRecs: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
 };
 type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
 type ColOut = { index: number; label: string; subLabel: string | null; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
@@ -30,8 +30,11 @@ type Cohort = {
   yearMonth: string;
   interview: { first: number; second: number; thirdPlus: number; total: number };
   proposal: { fresh: number; existing: number; total: number };
+  proposalRecs: { fresh: number; existing: number; total: number };
   entry: { fresh: number; existing: number; total: number };
+  entryRecs: { fresh: number; existing: number; total: number };
   documentPass: number; offer: number; decided: number;
+  documentPassRecs: number; offerRecs: number; decidedRecs: number;
   documentPassRate: number | null; offerRate: number | null; decidedRate: number | null;
   decidedRevenue: number | null; decidedUnitPrice: number | null;
 };
@@ -84,7 +87,10 @@ type Row = {
   // 帯色：true=薄青(#EFF6FF、提案/エントリー人数の補助強調)、"orange"=薄オレンジ(#FFF4E6、合計・決定の強調・直近6ヶ月と統一)。
   band?: boolean | "orange";
   isTotal?: boolean;
+  // 単一値行（面談/1人当たり/売上）は actual のみ。
+  // 件数｜人数の2軸行は actual=件数(週セル/総数/平均件)・uniq=人数(合計の人数/平均人)。
   actual: (m: WeeklyMatrix) => number | null;
+  uniq?: (m: WeeklyMatrix) => number; // 定義あり=「総数◯件｜人数◯人」表示の2軸行
   targetKey?: TKey;
   fmt?: (v: number | null) => string;
   pct?: (m: WeeklyMatrix) => number | null;
@@ -101,15 +107,15 @@ const MONTHLY_ROWS: Row[] = [
   { label: "求人面談（2回目）", actual: (m) => m.interview.second, pct: (m) => ratio(m.interview.second, m.interview.total) },
   { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
   { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, pct: (m) => (m.interview.total > 0 ? 1 : null) },
-  { label: "初回提案", actual: (m) => m.proposal.fresh.uniq, pct: (m) => ratio(m.proposal.fresh.uniq, m.proposal.total.uniq) },
-  { label: "既存提案", actual: (m) => m.proposal.existing.uniq, pct: (m) => ratio(m.proposal.existing.uniq, m.proposal.total.uniq) },
-  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.total.uniq, m.interview.total) },
-  { label: "新規エントリー", actual: (m) => m.entry.fresh.uniq, pct: (m) => ratio(m.entry.fresh.uniq, m.entry.total.uniq) },
-  { label: "既存エントリー", actual: (m) => m.entry.existing.uniq, pct: (m) => ratio(m.entry.existing.uniq, m.entry.total.uniq) },
-  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.total.uniq, m.proposal.total.uniq) },
-  { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
-  { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
-  { label: "決定", band: "orange", actual: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
+  { label: "初回提案", actual: (m) => m.proposal.fresh.recs, uniq: (m) => m.proposal.fresh.uniq, pct: (m) => ratio(m.proposal.fresh.uniq, m.proposal.total.uniq) },
+  { label: "既存提案", actual: (m) => m.proposal.existing.recs, uniq: (m) => m.proposal.existing.uniq, pct: (m) => ratio(m.proposal.existing.uniq, m.proposal.total.uniq) },
+  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.total.recs, uniq: (m) => m.proposal.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.total.uniq, m.interview.total) },
+  { label: "新規エントリー", actual: (m) => m.entry.fresh.recs, uniq: (m) => m.entry.fresh.uniq, pct: (m) => ratio(m.entry.fresh.uniq, m.entry.total.uniq) },
+  { label: "既存エントリー", actual: (m) => m.entry.existing.recs, uniq: (m) => m.entry.existing.uniq, pct: (m) => ratio(m.entry.existing.uniq, m.entry.total.uniq) },
+  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.total.recs, uniq: (m) => m.entry.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.total.uniq, m.proposal.total.uniq) },
+  { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
+  { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
+  { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
   { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
   { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
 ];
@@ -122,35 +128,29 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
     { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
   ],
-  // 求人紹介：人数行に帯色。
+  // 求人紹介：件数｜人数の2軸行（週=件数・合計=総数件｜人数人）＋ 1人当たり。
   proposal: [
-    { label: "初回提案 人数", band: true, actual: (m) => m.proposal.fresh.uniq },
-    { label: "初回提案 件数", indent: true, actual: (m) => m.proposal.fresh.recs },
+    { label: "初回提案", band: true, actual: (m) => m.proposal.fresh.recs, uniq: (m) => m.proposal.fresh.uniq },
     { label: "初回提案 1人当たり", indent: true, actual: (m) => m.proposal.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "既存提案 人数", band: true, actual: (m) => m.proposal.existing.uniq },
-    { label: "既存提案 件数", indent: true, actual: (m) => m.proposal.existing.recs },
+    { label: "既存提案", band: true, actual: (m) => m.proposal.existing.recs, uniq: (m) => m.proposal.existing.uniq },
     { label: "既存提案 1人当たり", indent: true, actual: (m) => m.proposal.existing.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "合計提案 人数", band: true, isTotal: true, actual: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
-    { label: "合計提案 件数", indent: true, actual: (m) => m.proposal.total.recs },
+    { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.total.recs, uniq: (m) => m.proposal.total.uniq, targetKey: "proposalUniq" },
     { label: "合計提案 1人当たり", indent: true, actual: (m) => m.proposal.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
-  // エントリー：人数行に帯色。
+  // エントリー：件数｜人数の2軸行に統合（週=件数・合計=総数件｜人数人）＋ 1人当たり。
   entry: [
-    { label: "新規エントリー 人数", band: true, actual: (m) => m.entry.fresh.uniq },
-    { label: "新規エントリー 件数", indent: true, actual: (m) => m.entry.fresh.recs },
+    { label: "新規エントリー", band: true, actual: (m) => m.entry.fresh.recs, uniq: (m) => m.entry.fresh.uniq },
     { label: "新規エントリー 1人当たり", indent: true, actual: (m) => m.entry.fresh.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "既存エントリー 人数", band: true, actual: (m) => m.entry.existing.uniq },
-    { label: "既存エントリー 件数", indent: true, actual: (m) => m.entry.existing.recs },
+    { label: "既存エントリー", band: true, actual: (m) => m.entry.existing.recs, uniq: (m) => m.entry.existing.uniq },
     { label: "既存エントリー 1人当たり", indent: true, actual: (m) => m.entry.existing.perPerson, fmt: (v) => numFmt(v, 1) },
-    { label: "合計エントリー 人数", band: true, isTotal: true, actual: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
-    { label: "合計エントリー 件数", indent: true, actual: (m) => m.entry.total.recs },
+    { label: "合計エントリー", band: true, isTotal: true, actual: (m) => m.entry.total.recs, uniq: (m) => m.entry.total.uniq, targetKey: "entryUniq" },
     { label: "合計エントリー 1人当たり", indent: true, actual: (m) => m.entry.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
-  // 選考状況：色なし。
+  // 選考状況：件数｜人数の2軸行（週=件数・合計=総数件｜人数人）。
   selection: [
-    { label: "書類通過", actual: (m) => m.selection.documentPass, targetKey: "documentPass" },
-    { label: "内定", actual: (m) => m.selection.offer, targetKey: "offer" },
-    { label: "承諾", actual: (m) => m.selection.acceptance, targetKey: "acceptance" },
+    { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass" },
+    { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer" },
+    { label: "承諾", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance" },
     { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
     { label: "決定粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
   ],
@@ -414,9 +414,12 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
       <tbody className="divide-y divide-[#F3F4F6]">
         {rows.map((r) => {
           const hasTarget = !!r.targetKey;
-          const totalActual = r.actual(total.matrix);
+          const isDual = !!r.uniq; // 件数｜人数の2軸行
+          const totalActual = r.actual(total.matrix); // 2軸行では件数（総数）
+          const totalUniq = r.uniq ? r.uniq(total.matrix) : null; // 2軸行の人数
+          const n = columns.length;
           // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
-          const avg = totalActual == null || columns.length === 0 ? null : totalActual / columns.length;
+          const avg = totalActual == null || n === 0 ? null : totalActual / n;
           // 帯色（提案/エントリーの人数行のみ）。合計行は上罫線＋太字。
           const rowBg = r.band === "orange" ? "bg-[#FFF4E6]" : r.band ? "bg-[#EFF6FF]" : "bg-white";
           const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
@@ -424,26 +427,34 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
             <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#E0EAFF]`}>
               <td className={`sticky left-0 ${rowBg} px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
               {columns.map((c) => {
-                const a = r.actual(c.matrix);
+                const a = r.actual(c.matrix); // 2軸行では各週=件数
                 const tgt = hasTarget ? c.targets[r.targetKey!] : null;
                 return (
                   <td key={c.index} className="px-3 py-2 text-center tabular-nums">
-                    {hasTarget && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
+                    {/* 2軸行は週=件数。目標(人数ベース)は達成率列に集約し、週セルには出さない。 */}
+                    {hasTarget && !isDual && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
                     <span className="text-[#374151] font-medium">{fmt(r, a)}</span>
                   </td>
                 );
               })}
-              <td className="px-3 py-2 text-center tabular-nums">
-                {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
-                <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>
-                {/* T-071 ③ 当月実績の合計列にのみ転換率%（隣接段比 or 構成比、当月通算人数ベース）。
-                    週列・平均列・達成率列には出さない（週別の率は「率の窓問題」で意味を持たないため）。 */}
+              <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
+                {isDual ? (
+                  <span className="text-[#374151] font-semibold">総数{numFmt(totalActual)}件<span className="text-[#9CA3AF]">｜</span>人数{numFmt(totalUniq)}人</span>
+                ) : (
+                  <>
+                    {hasTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
+                    <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>
+                  </>
+                )}
+                {/* T-071 ③ 当月実績の合計列にのみ転換率%（隣接段比 or 構成比、当月通算人数ベース）。 */}
                 {r.pct && (
                   <span className="text-[11px] text-[#2563EB] ml-1">｜{pctFmt(r.pct(total.matrix))}</span>
                 )}
               </td>
-              <td className="px-3 py-2 text-center tabular-nums text-[#6B7280]">
-                {r.fmt ? r.fmt(avg) : numFmt(avg, 1)}
+              <td className="px-3 py-2 text-center tabular-nums text-[#6B7280] whitespace-nowrap">
+                {isDual
+                  ? <span>平均{numFmt(n > 0 && totalActual != null ? totalActual / n : null, 1)}件｜{numFmt(n > 0 && totalUniq != null ? totalUniq / n : null, 1)}人</span>
+                  : (r.fmt ? r.fmt(avg) : numFmt(avg, 1))}
               </td>
               <td className="px-3 py-2 text-center tabular-nums">
                 {hasTarget ? <span className="text-[#2563EB] font-medium">{pctFmt(total.achievement[r.targetKey!])}</span> : <span className="text-[#C0C4CC]">—</span>}
@@ -461,7 +472,9 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
 type CohortLike = Omit<Cohort, "yearMonth">;
 type CohortRow = {
   label: string;
+  // num=件数（月セル/総数/平均件）、uniq=人数（定義あり=「総数◯件｜人数◯人」2軸行）。
   num: (c: CohortLike) => number | null;
+  uniq?: (c: CohortLike) => number | null;
   pct: (c: CohortLike) => number | null;
   fmt?: (v: number | null) => string;
   band?: "blue" | "orange"; // 合計＝オレンジ、売上系＝オレンジ
@@ -472,15 +485,15 @@ const COHORT_ROWS: CohortRow[] = [
   { label: "求人面談（2回目）", num: (c) => c.interview.second, pct: (c) => ratio(c.interview.second, c.interview.total) },
   { label: "既存面談（3回目以降）", num: (c) => c.interview.thirdPlus, pct: (c) => ratio(c.interview.thirdPlus, c.interview.total) },
   { label: "合計面談", num: (c) => c.interview.total, pct: (c) => (c.interview.total > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "初回求人紹介", num: (c) => c.proposal.fresh, pct: (c) => ratio(c.proposal.fresh, c.proposal.total) },
-  { label: "既存求人紹介", num: (c) => c.proposal.existing, pct: (c) => ratio(c.proposal.existing, c.proposal.total) },
-  { label: "合計求人紹介", num: (c) => c.proposal.total, pct: (c) => (c.proposal.total > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "新規エントリー", num: (c) => c.entry.fresh, pct: (c) => ratio(c.entry.fresh, c.entry.total) },
-  { label: "既存エントリー", num: (c) => c.entry.existing, pct: (c) => ratio(c.entry.existing, c.entry.total) },
-  { label: "合計エントリー", num: (c) => c.entry.total, pct: (c) => (c.entry.total > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "書類選考通過", num: (c) => c.documentPass, pct: (c) => c.documentPassRate },
-  { label: "内定数", num: (c) => c.offer, pct: (c) => c.offerRate },
-  { label: "決定数（内定承諾）", num: (c) => c.decided, pct: (c) => c.decidedRate },
+  { label: "初回求人紹介", num: (c) => c.proposalRecs.fresh, uniq: (c) => c.proposal.fresh, pct: (c) => ratio(c.proposal.fresh, c.proposal.total) },
+  { label: "既存求人紹介", num: (c) => c.proposalRecs.existing, uniq: (c) => c.proposal.existing, pct: (c) => ratio(c.proposal.existing, c.proposal.total) },
+  { label: "合計求人紹介", num: (c) => c.proposalRecs.total, uniq: (c) => c.proposal.total, pct: (c) => (c.proposal.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "新規エントリー", num: (c) => c.entryRecs.fresh, uniq: (c) => c.entry.fresh, pct: (c) => ratio(c.entry.fresh, c.entry.total) },
+  { label: "既存エントリー", num: (c) => c.entryRecs.existing, uniq: (c) => c.entry.existing, pct: (c) => ratio(c.entry.existing, c.entry.total) },
+  { label: "合計エントリー", num: (c) => c.entryRecs.total, uniq: (c) => c.entry.total, pct: (c) => (c.entry.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "書類選考通過", num: (c) => c.documentPassRecs, uniq: (c) => c.documentPass, pct: (c) => c.documentPassRate },
+  { label: "内定数", num: (c) => c.offerRecs, uniq: (c) => c.offer, pct: (c) => c.offerRate },
+  { label: "決定数（内定承諾）", num: (c) => c.decidedRecs, uniq: (c) => c.decided, pct: (c) => c.decidedRate },
   { label: "決定粗利", num: (c) => c.decidedRevenue, pct: () => null, fmt: yenFmt, band: "orange" },
   { label: "粗利単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
 ];
@@ -552,24 +565,30 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                   </Fragment>
                 );
               })}
-              {/* 合計列：人数は通算ユニーク（API側で COUNT DISTINCT 再集計）、件数・売上は加算、率は通算コホート率。 */}
+              {/* 合計列：件数（社数・加算）と人数（通算ユニーク・COUNT DISTINCT）を併記。率は通算コホート率。 */}
               {(() => {
                 const n = total ? r.num(total) : null;
+                const u = total && r.uniq ? r.uniq(total) : null;
                 const pv = total ? r.pct(total) : null;
                 return (
                   <>
-                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-semibold border-l-2 border-[#9CA3AF]">{r.fmt ? r.fmt(n) : numFmtCell(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-semibold border-l-2 border-[#9CA3AF] whitespace-nowrap">
+                      {r.uniq ? <>{numFmtCell(n)}件<span className="text-[#9CA3AF]">｜</span>{numFmtCell(u)}人</> : (r.fmt ? r.fmt(n) : numFmtCell(n))}
+                    </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
                 );
               })()}
-              {/* 平均列：各月実績の÷6固定平均。率は平均人数の隣接段比。 */}
+              {/* 平均列：各月実績の÷6固定平均（件数・人数）。率は平均人数の隣接段比。 */}
               {(() => {
                 const n = average ? r.num(average) : null;
+                const u = average && r.uniq ? r.uniq(average) : null;
                 const pv = average ? r.pct(average) : null;
                 return (
                   <>
-                    <td className="px-2 py-1 text-right tabular-nums text-[#6B7280] border-l border-[#5A5A5A]">{r.fmt ? r.fmt(n) : numFmtAvg(n)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#6B7280] border-l border-[#5A5A5A] whitespace-nowrap">
+                      {r.uniq ? <>{numFmtAvg(n)}件<span className="text-[#9CA3AF]">｜</span>{numFmtAvg(u)}人</> : (r.fmt ? r.fmt(n) : numFmtAvg(n))}
+                    </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
                 );

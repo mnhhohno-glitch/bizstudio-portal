@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 
   // 月別 funnel SQL（共通化：レンジを引数化）。
   const runFunnel = (mStart: string, mEnd: string) =>
-    prisma.$queryRawUnsafe<{ cohort: number; dp: number; offer: number; accept: number }[]>(`
+    prisma.$queryRawUnsafe<{ cohort: number; dp: number; offer: number; accept: number; dp_recs: number; offer_recs: number; accept_recs: number }[]>(`
       WITH cohort AS (
         SELECT DISTINCT je.candidate_id
         FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
@@ -79,12 +79,24 @@ export async function GET(req: Request) {
         FROM cohort co JOIN job_entries je ON je.candidate_id = co.candidate_id
         WHERE je.archived_at IS NULL
         GROUP BY co.candidate_id
+      ),
+      ev AS (
+        -- 件数（社数）: コホート候補者の job_entries で各段階日付を持つ行数（人数とは別軸）。
+        SELECT
+          COUNT(*) FILTER (WHERE je.document_pass_date IS NOT NULL)::int dp_recs,
+          COUNT(*) FILTER (WHERE je.offer_date IS NOT NULL)::int offer_recs,
+          COUNT(*) FILTER (WHERE je.acceptance_date IS NOT NULL)::int accept_recs
+        FROM cohort co JOIN job_entries je ON je.candidate_id = co.candidate_id
+        WHERE je.archived_at IS NULL
       )
       SELECT
         (SELECT COUNT(*) FROM cohort)::int cohort,
         COUNT(*) FILTER (WHERE has_dp)::int dp,
         COUNT(*) FILTER (WHERE has_offer)::int offer,
-        COUNT(*) FILTER (WHERE has_accept)::int accept
+        COUNT(*) FILTER (WHERE has_accept)::int accept,
+        (SELECT dp_recs FROM ev)::int dp_recs,
+        (SELECT offer_recs FROM ev)::int offer_recs,
+        (SELECT accept_recs FROM ev)::int accept_recs
       FROM progressed;`);
 
   // 月別 result と internal な cohortBase（その月のコホート＝entry した人数）を並走で算出。
@@ -109,12 +121,17 @@ export async function GET(req: Request) {
           interview: { first: mx.interview.first, second: mx.interview.second, thirdPlus: mx.interview.thirdPlus, total: mx.interview.total },
           // 求人紹介（月別 人数・候補者ユニーク）。% は UI で ÷合計提案。
           proposal: { fresh: mx.proposal.fresh.uniq, existing: mx.proposal.existing.uniq, total: mx.proposal.total.uniq },
+          proposalRecs: { fresh: mx.proposal.fresh.recs, existing: mx.proposal.existing.recs, total: mx.proposal.total.recs },
           // エントリー（月別 人数）。total = コホート基（その月エントリー人数）。% は UI で ÷合計エントリー。
           entry: { fresh: mx.entry.fresh.uniq, existing: mx.entry.existing.uniq, total: mx.entry.total.uniq },
-          // 選考（コホート隣接段階基準・前段が分母）
+          entryRecs: { fresh: mx.entry.fresh.recs, existing: mx.entry.existing.recs, total: mx.entry.total.recs },
+          // 選考（コホート隣接段階基準・前段が分母）。recs=件数(社数)
           documentPass: r.dp,
           offer: r.offer,
           decided: r.accept, // 決定数＝内定承諾
+          documentPassRecs: r.dp_recs,
+          offerRecs: r.offer_recs,
+          decidedRecs: r.accept_recs,
           documentPassRate: rate(r.dp, r.cohort), // ÷コホートエントリー
           offerRate: rate(r.offer, r.dp), // ÷書類通過
           decidedRate: rate(r.accept, r.offer), // ÷内定
@@ -150,10 +167,15 @@ export async function GET(req: Request) {
       total: summaryMx.interview.total,
     },
     proposal: { fresh: summaryMx.proposal.fresh.uniq, existing: summaryMx.proposal.existing.uniq, total: summaryMx.proposal.total.uniq },
+    proposalRecs: { fresh: summaryMx.proposal.fresh.recs, existing: summaryMx.proposal.existing.recs, total: summaryMx.proposal.total.recs },
     entry: { fresh: summaryMx.entry.fresh.uniq, existing: summaryMx.entry.existing.uniq, total: summaryMx.entry.total.uniq },
+    entryRecs: { fresh: summaryMx.entry.fresh.recs, existing: summaryMx.entry.existing.recs, total: summaryMx.entry.total.recs },
     documentPass: sr.dp,
     offer: sr.offer,
     decided: sr.accept,
+    documentPassRecs: sr.dp_recs,
+    offerRecs: sr.offer_recs,
+    decidedRecs: sr.accept_recs,
     documentPassRate: rate(sr.dp, sr.cohort),
     offerRate: rate(sr.offer, sr.dp),
     decidedRate: rate(sr.accept, sr.offer),
@@ -184,10 +206,23 @@ export async function GET(req: Request) {
   const average = {
     interview: { first: avgInterviewFirst, second: avgInterviewSecond, thirdPlus: avgInterviewThirdPlus, total: avgInterviewTotal },
     proposal: { fresh: avgProposalFresh, existing: avgProposalExisting, total: avgProposalTotal },
+    proposalRecs: {
+      fresh: avg(results.map((r) => r.proposalRecs.fresh)),
+      existing: avg(results.map((r) => r.proposalRecs.existing)),
+      total: avg(results.map((r) => r.proposalRecs.total)),
+    },
     entry: { fresh: avgEntryFresh, existing: avgEntryExisting, total: avgEntryTotal },
+    entryRecs: {
+      fresh: avg(results.map((r) => r.entryRecs.fresh)),
+      existing: avg(results.map((r) => r.entryRecs.existing)),
+      total: avg(results.map((r) => r.entryRecs.total)),
+    },
     documentPass: avgDP,
     offer: avgOffer,
     decided: avgDecided,
+    documentPassRecs: avg(results.map((r) => r.documentPassRecs)),
+    offerRecs: avg(results.map((r) => r.offerRecs)),
+    decidedRecs: avg(results.map((r) => r.decidedRecs)),
     documentPassRate: rate(avgDP, avgCohortBase),
     offerRate: rate(avgOffer, avgDP),
     decidedRate: rate(avgDecided, avgOffer),

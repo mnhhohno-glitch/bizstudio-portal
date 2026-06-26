@@ -25,9 +25,12 @@ export interface WeeklyMatrix {
   proposal: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer };
   entry: { fresh: CountUniqPer; existing: CountUniqPer; total: CountUniqPer };
   selection: {
-    documentPass: number; // 人数
+    documentPass: number; // 人数（COUNT DISTINCT）
     offer: number;
     acceptance: number;
+    documentPassRecs: number; // 件数（社数・COUNT(*)）。週セルの加算可能な値。
+    offerRecs: number;
+    acceptanceRecs: number;
     decidedRevenue: number | null;
     decidedUnitPrice: number | null;
   };
@@ -125,11 +128,14 @@ export async function computeWeeklyMatrix(params: {
       FROM ents;`),
 
     // 選考状況（JobEntry・candidate.employeeId 軸・archived除く・候補者ユニーク人数＋決定売上）
-    prisma.$queryRawUnsafe<{ dp: number; ofc: number; ac: number; revenue: string | null; gross: string | null }[]>(`
+    prisma.$queryRawUnsafe<{ dp: number; ofc: number; ac: number; dp_recs: number; ofc_recs: number; ac_recs: number; revenue: string | null; gross: string | null }[]>(`
       SELECT
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.document_pass_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int dp,
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.offer_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ofc,
         COUNT(DISTINCT je.candidate_id) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ac,
+        COUNT(*) FILTER (WHERE je.document_pass_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int dp_recs,
+        COUNT(*) FILTER (WHERE je.offer_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ofc_recs,
+        COUNT(*) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int ac_recs,
         COALESCE(SUM(je.revenue) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint revenue,
         COALESCE(SUM(je.revenue - COALESCE(je.job_db_cost, 0) - COALESCE(je.cost, 0)) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint gross
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
@@ -163,6 +169,9 @@ export async function computeWeeklyMatrix(params: {
       documentPass: s.dp,
       offer: s.ofc,
       acceptance: s.ac,
+      documentPassRecs: s.dp_recs,
+      offerRecs: s.ofc_recs,
+      acceptanceRecs: s.ac_recs,
       decidedRevenue,
       decidedUnitPrice,
     },
