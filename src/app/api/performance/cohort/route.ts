@@ -59,6 +59,32 @@ export async function GET(req: Request) {
     userId = emp?.userId ?? "__nonexistent__";
   }
 
+  // 目標（各月の PerformanceTarget・月目標）。当月/月次タブと同一マッピング。全員モードは目標なし。
+  type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
+  const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "unitPrice"];
+  type TgtRow = { interviewCount: number; existingInterviewCount: number | null; introductionCount: number; entryCount: number; documentPassCount: number; offerCount: number; acceptanceCount: number; unitPrice: number };
+  const targetValueOf = (t: TgtRow, key: TKey): number | null => {
+    switch (key) {
+      case "interviewTotal": return (t.interviewCount ?? 0) + (t.existingInterviewCount ?? 0);
+      case "interviewFirst": return t.interviewCount;
+      case "interviewExisting": return t.existingInterviewCount;
+      case "proposalUniq": return t.introductionCount;
+      case "entryUniq": return t.entryCount;
+      case "documentPass": return t.documentPassCount;
+      case "offer": return t.offerCount;
+      case "acceptance": return t.acceptanceCount;
+      case "unitPrice": return t.unitPrice;
+    }
+  };
+  const targetRows = allCas ? [] : await prisma.performanceTarget.findMany({ where: { employeeId, yearMonth: { in: targetMonths } } });
+  const targetByMonth = new Map(targetRows.map((t) => [t.yearMonth, t]));
+  const buildTargets = (ym: string): Record<TKey, number | null> => {
+    const t = targetByMonth.get(ym);
+    const o = {} as Record<TKey, number | null>;
+    for (const k of TKEYS) o[k] = t ? targetValueOf(t as unknown as TgtRow, k) : null;
+    return o;
+  };
+
   // 各月 result（発生月ベース＝当月/月次タブと同一の computeWeeklyMatrix を6ヶ月分回す）。
   const results = await Promise.all(
     targetMonths.map(async (ym) => {
@@ -92,9 +118,21 @@ export async function GET(req: Request) {
         // 決定売上・売上単価（その月に acceptance_date がある粗利・単価）。決定数と同一 acceptance_date 軸。
         decidedRevenue: mx.selection.decidedRevenue,
         decidedUnitPrice: mx.selection.decidedUnitPrice,
+        // その月の目標（月目標）。
+        targets: buildTargets(ym),
       };
     }),
   );
+
+  // 合計・平均の目標：件数系は present 月の合算/平均、単価は present 月の平均。
+  const totalTargets = {} as Record<TKey, number | null>;
+  const avgTargets = {} as Record<TKey, number | null>;
+  for (const k of TKEYS) {
+    const vals = results.map((r) => r.targets[k]).filter((v): v is number => v != null);
+    const sum = vals.reduce((s, v) => s + v, 0);
+    totalTargets[k] = vals.length === 0 ? null : k === "unitPrice" ? sum / vals.length : sum;
+    avgTargets[k] = vals.length === 0 ? null : sum / vals.length;
+  }
 
   // 合計列：各月の合算（縦横一致・DISTINCT 再集計しない）。面談 total のみ通算 mx を使う。
   const summaryRange = {
@@ -134,6 +172,7 @@ export async function GET(req: Request) {
     decidedRate: rate(tDecided, tOffer),
     decidedRevenue: sumRevenue,
     decidedUnitPrice: tDecided > 0 ? sumRevenue / tDecided : null,
+    targets: totalTargets,
   };
 
   // T-071 ③ 平均列：各月実績の平均（÷6固定。当月含む6ヶ月の月平均）。
@@ -175,6 +214,7 @@ export async function GET(req: Request) {
     decidedRate: rate(avgDecided, avgOffer),
     decidedRevenue: avgRevenue,
     decidedUnitPrice: avgDecided > 0 ? avgRevenue / avgDecided : null,
+    targets: avgTargets,
   };
 
   return NextResponse.json({

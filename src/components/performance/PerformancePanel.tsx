@@ -37,6 +37,7 @@ type Cohort = {
   documentPassRecs: number; offerRecs: number; decidedRecs: number;
   documentPassRate: number | null; offerRate: number | null; decidedRate: number | null;
   decidedRevenue: number | null; decidedUnitPrice: number | null;
+  targets: Partial<Record<TKey, number | null>>; // 各月の月目標（直近6ヶ月タブ）
 };
 // T-071 ③ 合計列・平均列。Cohort と shape は同じ（yearMonth なし、数値は小数を含む）。
 type CohortSummary = Omit<Cohort, "yearMonth">;
@@ -481,23 +482,24 @@ type CohortRow = {
   band?: "blue" | "orange"; // 合計＝オレンジ、売上系＝オレンジ
   isTotal?: boolean;
   title?: (c: CohortLike) => string; // 合計セルのホバー（純粋新規）
+  targetKey?: TKey; // 月目標（各月・合計・平均セルに「目標｜実績」で表示）
 };
 const COHORT_ROWS: CohortRow[] = [
-  { label: "初回面談", num: (c) => c.interview.first, pct: (c) => ratio(c.interview.first, c.interview.total) },
+  { label: "初回面談", num: (c) => c.interview.first, pct: (c) => ratio(c.interview.first, c.interview.total), targetKey: "interviewFirst" },
   { label: "求人面談（2回目）", num: (c) => c.interview.second, pct: (c) => ratio(c.interview.second, c.interview.total) },
-  { label: "既存面談（3回目以降）", num: (c) => c.interview.thirdPlus, pct: (c) => ratio(c.interview.thirdPlus, c.interview.total) },
-  { label: "合計面談", num: (c) => c.interview.total, pct: (c) => (c.interview.total > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "既存面談（3回目以降）", num: (c) => c.interview.thirdPlus, pct: (c) => ratio(c.interview.thirdPlus, c.interview.total), targetKey: "interviewExisting" },
+  { label: "合計面談", num: (c) => c.interview.total, pct: (c) => (c.interview.total > 0 ? 1 : null), band: "orange", isTotal: true, targetKey: "interviewTotal" },
   { label: "初回求人紹介", num: (c) => c.proposal.fresh.recs, uniq: (c) => c.proposal.fresh.uniq, pct: (c) => ratio(c.proposal.fresh.uniq, c.proposal.total.uniq) },
   { label: "既存求人紹介", num: (c) => c.proposal.existing.recs, uniq: (c) => c.proposal.existing.uniq, pct: (c) => ratio(c.proposal.existing.uniq, c.proposal.total.uniq) },
-  { label: "合計求人紹介", num: (c) => c.proposal.total.recs, uniq: (c) => c.proposal.total.uniq, pct: (c) => (c.proposal.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true },
+  { label: "合計求人紹介", num: (c) => c.proposal.total.recs, uniq: (c) => c.proposal.total.uniq, pct: (c) => (c.proposal.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true, targetKey: "proposalUniq" },
   { label: "新規エントリー", num: (c) => c.entry.fresh.recs, uniq: (c) => c.entry.fresh.uniq, pct: (c) => ratio(c.entry.fresh.uniq, c.entry.total.uniq) },
   { label: "既存エントリー", num: (c) => c.entry.existing.recs, uniq: (c) => c.entry.existing.uniq, pct: (c) => ratio(c.entry.existing.uniq, c.entry.total.uniq) },
-  { label: "合計エントリー", num: (c) => c.entry.total.recs, uniq: (c) => c.entry.total.uniq, pct: (c) => (c.entry.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true },
-  { label: "書類選考通過", num: (c) => c.documentPassRecs, uniq: (c) => c.documentPass, pct: (c) => c.documentPassRate },
-  { label: "内定数", num: (c) => c.offerRecs, uniq: (c) => c.offer, pct: (c) => c.offerRate },
-  { label: "決定数（内定承諾）", num: (c) => c.decidedRecs, uniq: (c) => c.decided, pct: (c) => c.decidedRate },
+  { label: "合計エントリー", num: (c) => c.entry.total.recs, uniq: (c) => c.entry.total.uniq, pct: (c) => (c.entry.total.uniq > 0 ? 1 : null), band: "orange", isTotal: true, targetKey: "entryUniq" },
+  { label: "書類選考通過", num: (c) => c.documentPassRecs, uniq: (c) => c.documentPass, pct: (c) => c.documentPassRate, targetKey: "documentPass" },
+  { label: "内定数", num: (c) => c.offerRecs, uniq: (c) => c.offer, pct: (c) => c.offerRate, targetKey: "offer" },
+  { label: "決定数（内定承諾）", num: (c) => c.decidedRecs, uniq: (c) => c.decided, pct: (c) => c.decidedRate, targetKey: "acceptance" },
   { label: "決定粗利", num: (c) => c.decidedRevenue, pct: () => null, fmt: yenFmt, band: "orange" },
-  { label: "粗利単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange" },
+  { label: "粗利単価（1人当単価）", num: (c) => c.decidedUnitPrice, pct: () => null, fmt: yenFmt, band: "orange", targetKey: "unitPrice" },
 ];
 
 // 合計・平均の数値書式：人数は小数1桁、件数・売上は整数 or 円表記（行ごとの fmt に従う）。
@@ -509,6 +511,9 @@ const fmtUT = (uniq: number | null | undefined, recs: number | null | undefined,
 
 function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; total: CohortSummary | null; average: CohortSummary | null }) {
   if (!cohorts || cohorts.length === 0) return <div className="py-8 text-center text-[12px] text-[#9CA3AF]">データなし</div>;
+  // 月目標：各月・合計・平均の実績セルに「目標｜実績」で前置（targetKey のある行のみ・目標未登録は非表示）。
+  const tgtOf = (r: CohortRow, c: CohortLike | null) => (r.targetKey && c ? (c.targets?.[r.targetKey] ?? null) : null);
+  const tgtSpan = (r: CohortRow, v: number | null) => (v != null ? <span className="text-[#9CA3AF]">{r.fmt ? r.fmt(v) : numFmtAvg(v)}｜</span> : null);
   // T-071 ③ 合計列・平均列を月の後ろに追加。達成率列は作らない。
   return (
     // 段階列＝最長項目名が収まる固定幅（折り返さない）、月6列＋合計＋平均＝残り幅を均等配分、全幅。
@@ -564,7 +569,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 const pv = r.pct(c);
                 return (
                   <Fragment key={c.yearMonth}>
-                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6] whitespace-nowrap">{r.uniq ? fmtUT(r.uniq(c), n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-[#374151] font-medium border-l border-[#F3F4F6] whitespace-nowrap">{tgtSpan(r, tgtOf(r, c))}{r.uniq ? fmtUT(r.uniq(c), n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}</td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </Fragment>
                 );
@@ -577,7 +582,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 return (
                   <>
                     <td className={`px-2 py-1 text-right tabular-nums text-[#374151] font-semibold border-l-2 border-[#9CA3AF] whitespace-nowrap${r.title ? " underline decoration-dotted decoration-[#9CA3AF] underline-offset-2 cursor-help" : ""}`} title={r.title && total ? r.title(total) : undefined}>
-                      {r.uniq ? fmtUT(u, n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}
+                      {tgtSpan(r, tgtOf(r, total))}{r.uniq ? fmtUT(u, n, 0) : (r.fmt ? r.fmt(n) : numFmtCell(n))}
                     </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
@@ -591,7 +596,7 @@ function CohortTable({ cohorts, total, average }: { cohorts: Cohort[] | null; to
                 return (
                   <>
                     <td className="px-2 py-1 text-right tabular-nums text-[#6B7280] border-l border-[#5A5A5A] whitespace-nowrap">
-                      {r.uniq ? fmtUT(u, n, 1) : (r.fmt ? r.fmt(n) : numFmtAvg(n))}
+                      {tgtSpan(r, tgtOf(r, average))}{r.uniq ? fmtUT(u, n, 1) : (r.fmt ? r.fmt(n) : numFmtAvg(n))}
                     </td>
                     <td className="px-2 py-1 text-right tabular-nums text-[11px] text-[#2563EB]">{pv != null ? pctFmt(pv) : ""}</td>
                   </>
