@@ -75,12 +75,10 @@ export async function GET(req: Request) {
         yearMonth: ym,
         // 面談（月別人数・record）。%（構成比）は UI で ÷合計面談。
         interview: { first: mx.interview.first, second: mx.interview.second, thirdPlus: mx.interview.thirdPlus, total: mx.interview.total },
-        // 求人紹介（期間内 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計提案。pure=純粋新規。
+        // 求人紹介（全期間 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計提案。
         proposal: { fresh: mx.proposal.scoped.fresh, existing: mx.proposal.scoped.existing, total: mx.proposal.scoped.total },
-        proposalPure: mx.proposal.scoped.pureFresh,
-        // エントリー（期間内 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計エントリー。
+        // エントリー（全期間 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計エントリー。
         entry: { fresh: mx.entry.scoped.fresh, existing: mx.entry.scoped.existing, total: mx.entry.scoped.total },
-        entryPure: mx.entry.scoped.pureFresh,
         documentPass: dp,
         offer,
         decided,
@@ -124,9 +122,7 @@ export async function GET(req: Request) {
       total: summaryMx.interview.total,
     },
     proposal: { fresh: segSum((r) => r.proposal.fresh), existing: segSum((r) => r.proposal.existing), total: segSum((r) => r.proposal.total) },
-    proposalPure: sumR((r) => r.proposalPure),
     entry: { fresh: segSum((r) => r.entry.fresh), existing: segSum((r) => r.entry.existing), total: segSum((r) => r.entry.total) },
-    entryPure: sumR((r) => r.entryPure),
     documentPass: tDP,
     offer: tOffer,
     decided: tDecided,
@@ -167,9 +163,7 @@ export async function GET(req: Request) {
   const average = {
     interview: { first: avgInterviewFirst, second: avgInterviewSecond, thirdPlus: avgInterviewThirdPlus, total: avgInterviewTotal },
     proposal: { fresh: avgProposalFresh, existing: avgProposalExisting, total: avgProposalTotal },
-    proposalPure: avg(results.map((r) => r.proposalPure)),
     entry: { fresh: avgEntryFresh, existing: avgEntryExisting, total: avgEntryTotal },
-    entryPure: avg(results.map((r) => r.entryPure)),
     documentPass: avgDP,
     offer: avgOffer,
     decided: avgDecided,
