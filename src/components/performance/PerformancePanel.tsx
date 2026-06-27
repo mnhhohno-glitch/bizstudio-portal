@@ -121,7 +121,7 @@ const MONTHLY_ROWS: Row[] = [
   { label: "新規エントリー", actual: (m) => m.entry.scoped.fresh.recs, uniq: (m) => m.entry.scoped.fresh.uniq, pct: (m) => ratio(m.entry.scoped.fresh.uniq, m.entry.scoped.total.uniq) },
   { label: "既存エントリー", actual: (m) => m.entry.scoped.existing.recs, uniq: (m) => m.entry.scoped.existing.uniq, pct: (m) => ratio(m.entry.scoped.existing.uniq, m.entry.scoped.total.uniq) },
   { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.scoped.total.recs, uniq: (m) => m.entry.scoped.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.scoped.total.uniq, m.proposal.scoped.total.uniq) },
-  { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.total.uniq) },
+  { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.scoped.total.uniq) },
   { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
   { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
   { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
