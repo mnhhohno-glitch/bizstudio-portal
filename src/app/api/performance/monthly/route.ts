@@ -17,25 +17,44 @@ import { computeInterviewAttributes } from "@/lib/performance/attributes";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
-const TKEYS: TKey[] = ["interviewFirst", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance"];
-// 週按分する対象（書類通過以降は週按分しない＝T-073方針）。
+type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
+const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "unitPrice"];
+// 週按分する対象（面談各行・紹介・エントリーのみ。書類通過以降・粗利単価は週按分しない）。
 const WEEK_ALLOCATED: Record<TKey, boolean> = {
-  interviewFirst: true, proposalUniq: true, entryUniq: true, documentPass: false, offer: false, acceptance: false,
+  interviewTotal: true, interviewFirst: true, interviewExisting: true, proposalUniq: true, entryUniq: true,
+  documentPass: false, offer: false, acceptance: false, unitPrice: false,
 };
-const TARGET_FIELD: Record<TKey, "interviewCount" | "introductionCount" | "entryCount" | "documentPassCount" | "offerCount" | "acceptanceCount"> = {
-  interviewFirst: "interviewCount", proposalUniq: "introductionCount", entryUniq: "entryCount",
-  documentPass: "documentPassCount", offer: "offerCount", acceptance: "acceptanceCount",
+
+// PerformanceTarget 行 → 段階の目標値。interviewTotal=初回+既存、unitPrice=単価。未設定は null。
+type TargetRowLike = {
+  interviewCount: number; existingInterviewCount: number | null; introductionCount: number; entryCount: number;
+  documentPassCount: number; offerCount: number; acceptanceCount: number; unitPrice: number;
 };
+function targetValueOf(t: TargetRowLike, key: TKey): number | null {
+  switch (key) {
+    case "interviewTotal": return (t.interviewCount ?? 0) + (t.existingInterviewCount ?? 0);
+    case "interviewFirst": return t.interviewCount;
+    case "interviewExisting": return t.existingInterviewCount;
+    case "proposalUniq": return t.introductionCount;
+    case "entryUniq": return t.entryCount;
+    case "documentPass": return t.documentPassCount;
+    case "offer": return t.offerCount;
+    case "acceptance": return t.acceptanceCount;
+    case "unitPrice": return t.unitPrice;
+  }
+}
 
 function actualOf(m: WeeklyMatrix, key: TKey): number {
   switch (key) {
+    case "interviewTotal": return m.interview.total;
     case "interviewFirst": return m.interview.first;
+    case "interviewExisting": return m.interview.thirdPlus;
     case "proposalUniq": return m.proposal.total.uniq;
     case "entryUniq": return m.entry.total.uniq;
     case "documentPass": return m.selection.documentPass;
     case "offer": return m.selection.offer;
     case "acceptance": return m.selection.acceptance;
+    case "unitPrice": return m.selection.decidedUnitPrice ?? 0;
   }
 }
 function rate(num: number, den: number | null): number | null {
@@ -97,10 +116,10 @@ export async function GET(req: Request) {
   const perColumnTargets: Record<TKey, (number | null)[]> = {} as Record<TKey, (number | null)[]>;
   const totalTargets: Record<TKey, number | null> = {} as Record<TKey, number | null>;
   for (const key of TKEYS) {
-    const monthT = targetRow ? (targetRow[TARGET_FIELD[key]] as number) : null;
+    const monthT = targetRow ? targetValueOf(targetRow as unknown as TargetRowLike, key) : null;
     totalTargets[key] = monthT;
     if (monthT == null || !WEEK_ALLOCATED[key]) {
-      perColumnTargets[key] = buckets.map(() => null); // 書類通過以降・目標なしは週按分しない
+      perColumnTargets[key] = buckets.map(() => null); // 書類通過以降・粗利単価・目標なしは週按分しない
     } else {
       perColumnTargets[key] = allocateToWeeks(monthT, buckets);
     }

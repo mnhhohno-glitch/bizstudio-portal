@@ -19,27 +19,44 @@ import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/perfo
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
-const TKEYS: TKey[] = ["interviewFirst", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance"];
-
-// PerformanceTarget のフィールド名
-const TARGET_FIELD: Record<TKey, "interviewCount" | "introductionCount" | "entryCount" | "documentPassCount" | "offerCount" | "acceptanceCount"> = {
-  interviewFirst: "interviewCount",
-  proposalUniq: "introductionCount",
-  entryUniq: "entryCount",
-  documentPass: "documentPassCount",
-  offer: "offerCount",
-  acceptance: "acceptanceCount",
+type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
+const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "unitPrice"];
+// 週按分する対象（面談各行・紹介・エントリーのみ。書類通過以降・粗利単価は週按分しない＝週列では目標を出さない）。
+const WEEK_ALLOCATED: Record<TKey, boolean> = {
+  interviewTotal: true, interviewFirst: true, interviewExisting: true, proposalUniq: true, entryUniq: true,
+  documentPass: false, offer: false, acceptance: false, unitPrice: false,
 };
+
+// PerformanceTarget 行 → 段階の目標値。interviewTotal=初回+既存、unitPrice=単価。未設定は null。
+type TargetRowLike = {
+  interviewCount: number; existingInterviewCount: number | null; introductionCount: number; entryCount: number;
+  documentPassCount: number; offerCount: number; acceptanceCount: number; unitPrice: number;
+};
+function targetValueOf(t: TargetRowLike, key: TKey): number | null {
+  switch (key) {
+    case "interviewTotal": return (t.interviewCount ?? 0) + (t.existingInterviewCount ?? 0);
+    case "interviewFirst": return t.interviewCount;
+    case "interviewExisting": return t.existingInterviewCount;
+    case "proposalUniq": return t.introductionCount;
+    case "entryUniq": return t.entryCount;
+    case "documentPass": return t.documentPassCount;
+    case "offer": return t.offerCount;
+    case "acceptance": return t.acceptanceCount;
+    case "unitPrice": return t.unitPrice;
+  }
+}
 
 function actualOf(m: WeeklyMatrix, key: TKey): number {
   switch (key) {
+    case "interviewTotal": return m.interview.total;
     case "interviewFirst": return m.interview.first;
+    case "interviewExisting": return m.interview.thirdPlus;
     case "proposalUniq": return m.proposal.total.uniq;
     case "entryUniq": return m.entry.total.uniq;
     case "documentPass": return m.selection.documentPass;
     case "offer": return m.selection.offer;
     case "acceptance": return m.selection.acceptance;
+    case "unitPrice": return m.selection.decidedUnitPrice ?? 0;
   }
 }
 function rate(num: number, den: number | null): number | null {
@@ -104,7 +121,7 @@ export async function GET(req: Request) {
   // 粒度別の目標算出
   function targetVal(ym: string, key: TKey): number | null {
     const t = targetByMonth.get(ym);
-    return t ? (t[TARGET_FIELD[key]] as number) : null;
+    return t ? targetValueOf(t as unknown as TargetRowLike, key) : null;
   }
 
   // perColumnTargets[key] = 各列の目標、totalTargets[key] = TOTAL目標
@@ -114,21 +131,31 @@ export async function GET(req: Request) {
   for (const key of TKEYS) {
     if (granularity === "week") {
       const monthT = targetVal(anchorMonth, key);
-      const buckets: WeekBucket[] = columns.map((c) => ({ weekIndex: c.index, startDate: c.fromDateStr, endDate: c.toDateStr, businessDays: c.businessDays }));
-      perColumnTargets[key] = monthT == null ? columns.map(() => null) : allocateToWeeks(monthT, buckets);
+      // 週按分しない行（書類通過/内定/承諾/粗利単価）は週列に目標を出さない（合計のみ）。
+      if (monthT == null || !WEEK_ALLOCATED[key]) {
+        perColumnTargets[key] = columns.map(() => null);
+      } else {
+        const buckets: WeekBucket[] = columns.map((c) => ({ weekIndex: c.index, startDate: c.fromDateStr, endDate: c.toDateStr, businessDays: c.businessDays }));
+        perColumnTargets[key] = allocateToWeeks(monthT, buckets);
+      }
       totalTargets[key] = monthT;
     } else if (granularity === "day") {
       const monthT = targetVal(anchorMonth, key);
-      const mBiz = monthBusinessDays(anchorMonth);
-      const perDay = monthT != null && mBiz > 0 ? monthT / mBiz : null;
-      perColumnTargets[key] = columns.map((c) => (perDay == null ? null : c.businessDays > 0 ? perDay : 0));
-      totalTargets[key] = perDay == null ? null : perColumnTargets[key].reduce((s: number, v) => s + (v ?? 0), 0);
+      if (monthT == null || !WEEK_ALLOCATED[key]) {
+        perColumnTargets[key] = columns.map(() => null);
+        totalTargets[key] = monthT;
+      } else {
+        const mBiz = monthBusinessDays(anchorMonth);
+        const perDay = mBiz > 0 ? monthT / mBiz : null;
+        perColumnTargets[key] = columns.map((c) => (perDay == null ? null : c.businessDays > 0 ? perDay : 0));
+        totalTargets[key] = perDay == null ? null : perColumnTargets[key].reduce((s: number, v) => s + (v ?? 0), 0);
+      }
     } else {
-      // month：各列の月の登録目標をそのまま。TOTAL は登録分の合計（全 null なら null）。
+      // month：各列の月の登録目標をそのまま。TOTAL は登録分の合計（単価は非加算のため合計は出さない）。
       const vals = columns.map((c) => targetVal(c.yearMonth, key));
       perColumnTargets[key] = vals;
       const present = vals.filter((v): v is number => v != null);
-      totalTargets[key] = present.length > 0 ? present.reduce((s, v) => s + v, 0) : null;
+      totalTargets[key] = key === "unitPrice" ? null : present.length > 0 ? present.reduce((s, v) => s + v, 0) : null;
     }
   }
 

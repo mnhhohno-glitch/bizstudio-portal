@@ -19,7 +19,7 @@ type WeeklyMatrix = {
   entry: { fresh: CUP; existing: CUP; total: CUP; scoped: Scoped };
   selection: { documentPass: number; offer: number; acceptance: number; documentPassRecs: number; offerRecs: number; acceptanceRecs: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
 };
-type TKey = "interviewFirst" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance";
+type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
 type ColOut = { index: number; label: string; subLabel: string | null; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
 type Granularity = "day" | "week" | "month";
 type WeeklyResp = {
@@ -113,8 +113,8 @@ type Row = {
 const MONTHLY_ROWS: Row[] = [
   { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst", pct: (m) => ratio(m.interview.first, m.interview.total) },
   { label: "求人面談（2回目）", actual: (m) => m.interview.second, pct: (m) => ratio(m.interview.second, m.interview.total) },
-  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
-  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, pct: (m) => (m.interview.total > 0 ? 1 : null) },
+  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, targetKey: "interviewExisting", pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
+  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, targetKey: "interviewTotal", pct: (m) => (m.interview.total > 0 ? 1 : null) },
   { label: "初回提案", actual: (m) => m.proposal.scoped.fresh.recs, uniq: (m) => m.proposal.scoped.fresh.uniq, pct: (m) => ratio(m.proposal.scoped.fresh.uniq, m.proposal.scoped.total.uniq) },
   { label: "既存提案", actual: (m) => m.proposal.scoped.existing.recs, uniq: (m) => m.proposal.scoped.existing.uniq, pct: (m) => ratio(m.proposal.scoped.existing.uniq, m.proposal.scoped.total.uniq) },
   { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.scoped.total.uniq, m.interview.total) },
@@ -125,7 +125,7 @@ const MONTHLY_ROWS: Row[] = [
   { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
   { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
   { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
-  { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+  { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, targetKey: "unitPrice", fmt: yenFmt },
 ];
 
 const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
@@ -133,8 +133,8 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
   interview: [
     { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst" },
     { label: "求人面談（2回目）", actual: (m) => m.interview.second },
-    { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus },
-    { label: "合計面談", isTotal: true, actual: (m) => m.interview.total },
+    { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, targetKey: "interviewExisting" },
+    { label: "合計面談", isTotal: true, actual: (m) => m.interview.total, targetKey: "interviewTotal" },
   ],
   // 求人紹介：期間内 初回/2回目以降を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
   proposal: [
@@ -156,7 +156,7 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer" },
     { label: "承諾", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance" },
     { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
-    { label: "決定粗利単価", actual: (m) => m.selection.decidedUnitPrice, fmt: yenFmt },
+    { label: "決定粗利単価", actual: (m) => m.selection.decidedUnitPrice, targetKey: "unitPrice", fmt: yenFmt },
   ],
 };
 
@@ -421,6 +421,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           const isDual = !!r.uniq; // 件数｜人数の2軸行
           const totalActual = r.actual(total.matrix); // 2軸行では件数（総数）
           const totalUniq = r.uniq ? r.uniq(total.matrix) : null; // 2軸行の人数
+          const totalTgt = hasTarget ? total.targets[r.targetKey!] : null; // 合計列の目標（月目標）
           const n = columns.length;
           // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
           const avg = totalActual == null || n === 0 ? null : totalActual / n;
@@ -432,24 +433,20 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               <td className={`sticky left-0 ${rowBg} px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
               {columns.map((c) => {
                 const a = r.actual(c.matrix); // 2軸行では各週=件数
+                // 目標：週按分のある行(面談/提案/エントリー)のみ列の目標が入る。書類通過以降は route 側で null＝非表示。
                 const tgt = hasTarget ? c.targets[r.targetKey!] : null;
                 return (
                   <td key={c.index} className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
-                    {/* 選考2軸行は「人数（総数）」。目標(人数ベース)は達成率列に集約し週セルには出さない。 */}
-                    {hasTarget && !isDual && !r.hideInlineTarget && <span className="text-[#9CA3AF]">{numFmt(tgt, 1)}｜</span>}
+                    {tgt != null && <span className="text-[#9CA3AF]">{r.fmt ? r.fmt(tgt) : numFmt(tgt, 1)}｜</span>}
                     <span className="text-[#374151] font-medium">{isDual ? fmtUT(r.uniq!(c.matrix), a, 0) : fmt(r, a)}</span>
                   </td>
                 );
               })}
-              <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap" title={r.title ? r.title(total.matrix) : undefined}>
-                {isDual ? (
-                  <span className="text-[#374151] font-semibold">{fmtUT(totalUniq, totalActual, 0)}</span>
-                ) : (
-                  <>
-                    {hasTarget && !r.hideInlineTarget && <span className="text-[#9CA3AF]">{numFmt(total.targets[r.targetKey!], 1)}｜</span>}
-                    <span className={`text-[#374151] font-semibold${r.title ? " underline decoration-dotted decoration-[#9CA3AF] underline-offset-2 cursor-help" : ""}`}>{fmt(r, totalActual)}</span>
-                  </>
-                )}
+              <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
+                {totalTgt != null && <span className="text-[#9CA3AF]">{r.fmt ? r.fmt(totalTgt) : numFmt(totalTgt, 1)}｜</span>}
+                {isDual
+                  ? <span className="text-[#374151] font-semibold">{fmtUT(totalUniq, totalActual, 0)}</span>
+                  : <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>}
                 {/* T-071 ③ 当月実績の合計列にのみ転換率%（隣接段比 or 構成比、当月通算人数ベース）。 */}
                 {r.pct && (
                   <span className="text-[11px] text-[#2563EB] ml-1">｜{pctFmt(r.pct(total.matrix))}</span>
