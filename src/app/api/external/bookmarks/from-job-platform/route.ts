@@ -8,7 +8,8 @@ import { prisma } from "@/lib/prisma";
  * これにより既存 AI 評価（analyze-batch・extractedText のみ参照）に無改修で乗る。
  *
  * - 認証: x-api-secret（JOB_PLATFORM_API_SECRET）。saved-jobs と同一。
- * - 保存者CA は記録しない（uploadedByUserId = システム共通ユーザー anonymous@local）。
+ * - 保存者: body.savedByUserId（job-platform が portal SSO で得た User.id）が実在＆active なら
+ *   uploadedByUserId に採用（担当列に本人名表示）。無い/不正は anonymous@local にフォールバック（後方互換）。
  * - extractedText（求人本文）必須。空は 400（AI評価対象外＝主目的未達のため）。
  * - fileName = 求人票_{会社名}_{10桁以上の数値ID}.pdf（数値ID無ければ 求人票_{会社名}.pdf）。
  *   ※ extractSearchNames p1（数値ID 10桁以上を末尾除去）/ p4（ID無し）で会社名を抽出。
@@ -94,6 +95,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "System user not found" }, { status: 500 });
   }
 
+  // 保存者本人（job-platform が portal SSO で取得した User.id）。実在＆status=active のみ採用。
+  // 無い/不正/非active は従来どおりシステムユーザー(anonymous@local)へフォールバック（後方互換）。
+  let uploaderUserId = systemUserId;
+  let savedBy: string | null = null;
+  const savedByUserId = str(body.savedByUserId);
+  if (savedByUserId) {
+    const u = await prisma.user.findUnique({ where: { id: savedByUserId }, select: { id: true, status: true } });
+    if (u && u.status === "active") {
+      uploaderUserId = u.id;
+      savedBy = u.id;
+    }
+  }
+
   const rawJobs: JobInput[] = Array.isArray(body.jobs) ? (body.jobs as JobInput[]) : [body as JobInput];
 
   let created = 0;
@@ -133,9 +147,10 @@ export async function POST(request: Request) {
       });
       if (existing) {
         // スナップショット更新（重複作成しない）。AI評価結果(aiMatchRating等)は触らない。
+        // 保存者が明示された場合のみ uploadedByUserId も是正（既存Anonymous行の担当を本人に更新可能）。
         await prisma.candidateFile.update({
           where: { id: existing.id },
-          data: { fileName, fileSize, extractedText, memo },
+          data: { fileName, fileSize, extractedText, memo, ...(savedBy ? { uploadedByUserId: savedBy } : {}) },
         });
         updated++;
       } else {
@@ -153,7 +168,7 @@ export async function POST(request: Request) {
             sourceType: "job-platform",
             externalJobRef,
             memo,
-            uploadedByUserId: systemUserId,
+            uploadedByUserId: uploaderUserId,
           },
         });
         created++;

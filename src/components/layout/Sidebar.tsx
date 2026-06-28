@@ -158,7 +158,8 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
       href: jobPlatformUrl,
       label: "求人検索",
       icon: "🔍",
-      requiresAuth: false,
+      requiresAuth: true,
+      appId: "job_platform", // portal SSO（issue-app-token → ?auth_token= で job-platform を開く）
     },
     {
       href: resumeGeneratorUrl,

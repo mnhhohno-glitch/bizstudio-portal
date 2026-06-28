@@ -9,6 +9,7 @@ const APP_URL_FALLBACKS: Record<string, string> = {
   job_analyzer: "https://web-production-95808.up.railway.app",
   candidate_intake: "https://candidate-intake-production.up.railway.app",
   "ai-resume-generator": "https://ai-resume-generator-production-66cb.up.railway.app",
+  job_platform: "https://bizstudio-job-platform.vercel.app/jobs",
 };
 
 const APP_URL_ENV_MAP: Record<string, string | undefined> = {
@@ -16,11 +17,13 @@ const APP_URL_ENV_MAP: Record<string, string | undefined> = {
   job_analyzer: process.env.NEXT_PUBLIC_JOB_ANALYZER_URL || APP_URL_FALLBACKS.job_analyzer,
   candidate_intake: process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL || APP_URL_FALLBACKS.candidate_intake,
   "ai-resume-generator": process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL || APP_URL_FALLBACKS["ai-resume-generator"],
+  job_platform: process.env.NEXT_PUBLIC_JOB_PLATFORM_URL || APP_URL_FALLBACKS.job_platform,
 };
 
 const APP_ID_REGISTRY: Record<string, boolean> = {
   material_creator: true,
   "ai-resume-generator": true,
+  job_platform: true, // 求人検索（job-platform）SSO 連携
 };
 
 export async function POST(request: NextRequest) {
