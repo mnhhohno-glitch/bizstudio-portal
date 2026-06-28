@@ -26,6 +26,7 @@ export type GeminiResumeResult = {
   applicationRoute: string | null;
   mediaSource: string | null;
   applicationDate: string | null;
+  mynaviMemberNo: string | null;
 };
 
 const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）のPDFから抽出したテキストです。
@@ -55,6 +56,7 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 - applicationRoute: 応募経路（マイナビ転職スカウト経由なら「スカウト」、それ以外は推定可能なら値、不明なら null）
 - mediaSource: 媒体名（PDFが「マイナビ転職」のWEB履歴書なら「マイナビ転職」、それ以外は推定可能なら値、不明なら null）
 - applicationDate: 応募日（PDFの「応募内容」枠に記載された応募日時から日付部分を抽出し YYYY-MM-DD 形式で返す。時刻は不要。記載が見つからなければ null。推測で埋めない）
+- mynaviMemberNo: マイナビ会員No（「会員No.：」または「会員番号：」というラベルの直後にある"ちょうど10桁の数字"を抽出する。ラベルが見つからない／10桁の数字でない場合は null。電話番号・郵便番号・日付・スカウトNo・その他の番号と混同しない）
 
 ## ルール
 - テキストに含まれない項目はnullにする
@@ -156,5 +158,6 @@ export async function parseResumeWithGemini(
     applicationRoute: (parsed.applicationRoute as string) || null,
     mediaSource: (parsed.mediaSource as string) || null,
     applicationDate: (parsed.applicationDate as string) || null,
+    mynaviMemberNo: (parsed.mynaviMemberNo as string) || null,
   };
 }

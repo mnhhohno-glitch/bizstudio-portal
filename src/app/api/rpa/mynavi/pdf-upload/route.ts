@@ -32,6 +32,31 @@ function parseYmdToDate(raw: string | null | undefined): Date | null {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
+/**
+ * T-067 Phase B-3: マイナビ会員No（10桁数字）を解決する。
+ * 1) AI抽出値が ^\d{10}$ ならそれを採用（誤った値は入れない）。
+ * 2) null/不正なら PDFテキストから「会員No.：1234567890」を正規表現でフォールバック抽出。
+ * どちらも取れなければ null。
+ */
+async function resolveMynaviMemberNo(
+  aiValue: string | null | undefined,
+  pdfBuffer: Buffer,
+): Promise<string | null> {
+  const ai = (aiValue ?? "").trim();
+  if (/^\d{10}$/.test(ai)) return ai;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require("pdf-parse");
+    const data = await pdfParse(pdfBuffer);
+    const text: string = typeof data?.text === "string" ? data.text : "";
+    const m = text.match(/会員(?:No|ＮＯ|番号)[.．:：\s]*(\d{10})/);
+    if (m) return m[1];
+  } catch (e) {
+    console.error("[rpa/mynavi/pdf-upload] memberNo fallback failed:", e instanceof Error ? e.message : String(e));
+  }
+  return null;
+}
+
 /** CandidateFile.uploadedByUserId 用のシステムユーザーを解決する */
 async function resolveSystemUserId(): Promise<string | null> {
   const anon = await prisma.user.findUnique({
@@ -227,11 +252,15 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- Candidate 新規登録 ----
+    // T-067 Phase B-3: マイナビ会員No（10桁）を AI抽出→PDF正規表現フォールバックで解決
+    const mynaviMemberNo = await resolveMynaviMemberNo(resumeData?.mynaviMemberNo, pdfBuffer);
+
     const candidateNumber = await generateNextCandidateNumber();
     const candidate = await prisma.candidate.create({
       data: {
         candidateNumber,
         name: parsed.name,
+        ...(mynaviMemberNo ? { mynaviMemberNo } : {}),
         ...(parsed.nameKana ? { nameKana: parsed.nameKana } : {}),
         ...(parsed.gender ? { gender: parsed.gender } : {}),
         ...(parsed.email ? { email: parsed.email } : {}),
