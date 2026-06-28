@@ -33,15 +33,20 @@ function parseYmdToDate(raw: string | null | undefined): Date | null {
 }
 
 /**
- * T-067 Phase B-3: マイナビ会員No（10桁数字）を解決する。
- * 1) AI抽出値が ^\d{10}$ ならそれを採用（誤った値は入れない）。
+ * T-067: マイナビ会員No（10桁数字）を解決する。
+ * 0) リクエスト由来（URLクエリ/form）の値が ^\d{10}$ ならそれを最優先で採用
+ *    （RPAが本人検索に使った会員No＝PDF記載より確実・将幸さん確定）。
+ * 1) 次に AI抽出値が ^\d{10}$ ならそれを採用（誤った値は入れない）。
  * 2) null/不正なら PDFテキストから「会員No.：1234567890」を正規表現でフォールバック抽出。
- * どちらも取れなければ null。
+ * どれも取れなければ null。
  */
 async function resolveMynaviMemberNo(
+  requestValue: string | null | undefined,
   aiValue: string | null | undefined,
   pdfBuffer: Buffer,
 ): Promise<string | null> {
+  const req = (requestValue ?? "").trim();
+  if (/^\d{10}$/.test(req)) return req;
   const ai = (aiValue ?? "").trim();
   if (/^\d{10}$/.test(ai)) return ai;
   try {
@@ -112,6 +117,10 @@ export async function POST(req: NextRequest) {
     const mynaviRegisteredDateFromRequest =
       (form.get("mynaviRegisteredDate") ? String(form.get("mynaviRegisteredDate")) : null)
       ?? req.nextUrl.searchParams.get("mynaviRegisteredDate");
+    // T-067: RPAが本人検索に使った会員No（form/query 両対応・任意・10桁）。PDF抽出より優先。
+    const mynaviMemberNoFromRequest =
+      (form.get("mynaviMemberNo") ? String(form.get("mynaviMemberNo")) : null)
+      ?? req.nextUrl.searchParams.get("mynaviMemberNo");
 
     if (!batchId) {
       return NextResponse.json({ error: "batchId は必須です" }, { status: 400 });
@@ -253,7 +262,7 @@ export async function POST(req: NextRequest) {
 
     // ---- Candidate 新規登録 ----
     // T-067 Phase B-3: マイナビ会員No（10桁）を AI抽出→PDF正規表現フォールバックで解決
-    const mynaviMemberNo = await resolveMynaviMemberNo(resumeData?.mynaviMemberNo, pdfBuffer);
+    const mynaviMemberNo = await resolveMynaviMemberNo(mynaviMemberNoFromRequest, resumeData?.mynaviMemberNo, pdfBuffer);
 
     const candidateNumber = await generateNextCandidateNumber();
     const candidate = await prisma.candidate.create({
