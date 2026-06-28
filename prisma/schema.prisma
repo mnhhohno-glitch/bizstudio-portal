@@ -490,6 +490,9 @@ model Candidate {
   // JST暦日を UTC 00:00 で保存（罠#17）。RPA未改修期間は null。
   mynaviRegisteredDate DateTime? @map("mynavi_registered_date")
 
+  // T-067 Phase B-3: マイナビ会員No（応募PDFから抽出した10桁数字）。ScoutSendRecord との照合キー。
+  mynaviMemberNo String? @map("mynavi_member_no")
+
   // T-111: 次回連絡予定（面談に依存せず直接設定・修正可）。UTC保存・表示時JST（罠#17）。
   nextContactAt      DateTime? @map("next_contact_at")
   nextContactPurpose String?   @map("next_contact_purpose")
@@ -534,6 +537,7 @@ model Candidate {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([scoutDeliverySlotId])
+  @@index([mynaviMemberNo])
   @@map("candidates")
 }
 
