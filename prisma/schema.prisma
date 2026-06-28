@@ -2338,6 +2338,22 @@ model ScoutSequence {
   @@map("scout_sequences")
 }
 
+// T-067 Phase B-1: スカウト配信明細（1配信=1レコード）。
+// 「06.送信結果蓄積ファイル」の明細（会員No・配信日・担当者・号機）をRPAから受け取り保存。
+// 会員No照合で応募者の「正しい配信日」を引くための土台（既存の件数集計 ScoutDeliverySlot とは別系統）。
+model ScoutSendRecord {
+  id            String   @id @default(cuid())
+  memberNo      String   @map("member_no") // マイナビ会員No（照合キー）
+  deliveryDate  DateTime @map("delivery_date") @db.Date // 配信日（YYYY-MM-DD・時刻なし）。罠#17: UTC変換しない
+  recruiterName String?  @map("recruiter_name") // 担当者名（号機判定用・任意）
+  machineNumber Int?     @map("machine_number") // 号機番号（1〜5・任意）
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([memberNo, deliveryDate, machineNumber]) // 同一会員No×配信日×号機の重複登録防止（冪等）
+  @@index([memberNo])
+  @@map("scout_send_records")
+}
+
 // ========================================
 // T-097: 自動補完用マスタ（銀行・支店・郵便番号）
 // コードはすべてゼロ詰め保持のため String（Int 禁止）。
