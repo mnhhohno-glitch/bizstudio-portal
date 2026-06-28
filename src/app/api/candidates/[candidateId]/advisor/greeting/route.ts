@@ -142,7 +142,8 @@ export async function POST(
 
     for (const file of meetingFiles) {
       try {
-        const parsed = await parseMeetingFile(file);
+        if (!file.driveFileId) continue; // PDF実体が無い行はスキップ
+        const parsed = await parseMeetingFile({ driveFileId: file.driveFileId, fileName: file.fileName, mimeType: file.mimeType });
         meetingFilesContent += `--- ファイル名: ${file.fileName} ---\n${parsed}\n\n`;
       } catch (e) {
         console.error(`Greeting meeting file parse error: ${file.fileName}`, e);

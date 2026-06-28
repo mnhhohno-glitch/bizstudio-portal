@@ -67,6 +67,9 @@ export async function POST(
     }
 
     // Google Drive からダウンロード
+    if (!pdfFile.driveFileId || !txtFile.driveFileId) {
+      return NextResponse.json({ error: "ファイル実体が見つかりません" }, { status: 404 });
+    }
     let pdfData: { base64: string; mimeType: string };
     let txtData: { base64: string; mimeType: string };
     try {

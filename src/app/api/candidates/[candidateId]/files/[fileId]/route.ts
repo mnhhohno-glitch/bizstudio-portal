@@ -62,6 +62,10 @@ export async function GET(
 
   const { searchParams } = new URL(req.url);
   if (searchParams.get("download") === "true") {
+    // 案Z: PDF実体が無い行（job-platform由来等で driveFileId=null）はダウンロード不可。
+    if (!file.driveFileId) {
+      return withCors(NextResponse.json({ error: "ダウンロード可能なファイル実体がありません" }, { status: 404 }), origin);
+    }
     try {
       const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
       const buffer = Buffer.from(base64, "base64");
@@ -215,8 +219,8 @@ export async function DELETE(
     );
   }
 
-  // Google Driveから削除
-  await deletePdfFromDrive(file.driveFileId);
+  // Google Driveから削除（PDF実体が無い行は Drive 削除をスキップ）
+  if (file.driveFileId) await deletePdfFromDrive(file.driveFileId);
 
   // DBから削除
   await prisma.candidateFile.delete({ where: { id: fileId } });

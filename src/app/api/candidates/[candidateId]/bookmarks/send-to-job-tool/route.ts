@@ -142,6 +142,7 @@ export async function POST(
       const batch = bookmarkFiles.slice(i, i + DOWNLOAD_BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (file) => {
+          if (!file.driveFileId) throw new Error("no_drive_file"); // PDF実体が無い行は送信対象外
           const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
           return {
             fileName: file.fileName,

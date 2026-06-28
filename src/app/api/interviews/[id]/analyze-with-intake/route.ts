@@ -80,11 +80,11 @@ export async function POST(
     let interviewLog = "";
     let pdfBuffer = "";
 
-    if (txtFiles.length > 0) {
+    if (txtFiles.length > 0 && txtFiles[0].driveFileId) {
       const target = txtFiles[0];
       console.log(`[analyze-with-intake] Downloading txt from Drive: ${target.fileName} (${target.driveFileId})`);
       try {
-        const { base64 } = await downloadFileFromDrive(target.driveFileId);
+        const { base64 } = await downloadFileFromDrive(target.driveFileId!);
         interviewLog = Buffer.from(base64, "base64").toString("utf-8");
         console.log(`[analyze-with-intake] txt loaded: ${interviewLog.length} chars`);
       } catch (e) {
@@ -93,11 +93,11 @@ export async function POST(
       }
     }
 
-    if (pdfFiles.length > 0) {
+    if (pdfFiles.length > 0 && pdfFiles[0].driveFileId) {
       const target = pdfFiles[0];
       console.log(`[analyze-with-intake] Downloading pdf from Drive: ${target.fileName} (${target.driveFileId})`);
       try {
-        const { base64 } = await downloadFileFromDrive(target.driveFileId);
+        const { base64 } = await downloadFileFromDrive(target.driveFileId!);
         pdfBuffer = base64;
         console.log(`[analyze-with-intake] pdf loaded: ${pdfBuffer.length} base64 chars`);
       } catch (e) {

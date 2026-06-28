@@ -43,6 +43,7 @@ export async function POST(
 
   for (const file of files) {
     try {
+      if (!file.driveFileId) { failed++; continue; } // PDF実体が無い行は添付不可
       const { base64 } = await downloadFileFromDrive(file.driveFileId);
       const buffer = Buffer.from(base64, "base64");
 

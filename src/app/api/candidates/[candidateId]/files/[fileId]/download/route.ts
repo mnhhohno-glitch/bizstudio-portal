@@ -17,7 +17,7 @@ export async function GET(
     select: { driveFileId: true, fileName: true, mimeType: true },
   });
 
-  if (!file) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!file || !file.driveFileId) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
   const buffer = Buffer.from(base64, "base64");

@@ -44,7 +44,7 @@ export async function GET(
     select: { driveFileId: true, fileName: true, mimeType: true },
   });
 
-  if (!file) {
+  if (!file || !file.driveFileId) {
     return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
   }
 

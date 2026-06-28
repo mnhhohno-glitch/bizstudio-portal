@@ -67,6 +67,7 @@ export async function POST(
 
     await Promise.allSettled(
       batch.map(async (file) => {
+        if (!file.driveFileId) return; // PDF実体が無い行（job-platform由来等）はテキスト抽出対象外
         try {
           // Download PDF from Google Drive
           const driveResponse = await drive.files.get(

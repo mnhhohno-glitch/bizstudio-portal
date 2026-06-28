@@ -66,8 +66,8 @@ export async function POST(
       );
     }
 
-    // 1. 古い docx を Google Drive から削除
-    await deletePdfFromDrive(existing.driveFileId);
+    // 1. 古い docx を Google Drive から削除（PDF実体が無い行はスキップ）
+    if (existing.driveFileId) await deletePdfFromDrive(existing.driveFileId);
 
     // 2. 新しい docx をアップロード
     const fileBuffer = Buffer.from(await file.arrayBuffer());

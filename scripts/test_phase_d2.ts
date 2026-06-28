@@ -124,6 +124,9 @@ async function main() {
   // 3. Drive からファイル取得
   console.log("[3/8] Drive download starting...");
   const t3 = Date.now();
+  if (!pdfFile.driveFileId || !txtFile.driveFileId) {
+    throw new Error("driveFileId が null（PDF実体なし）のためテスト不可");
+  }
   const [pdfData, txtData] = await Promise.all([
     downloadFileFromDrive(pdfFile.driveFileId),
     downloadFileFromDrive(txtFile.driveFileId),

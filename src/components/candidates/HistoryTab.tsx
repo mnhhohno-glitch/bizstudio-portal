@@ -279,8 +279,8 @@ type BookmarkFile = {
   fileName: string;
   fileSize: number;
   mimeType: string;
-  driveFileId: string;
-  driveViewUrl: string;
+  driveFileId: string | null; // 案Z: job-platform 由来は PDF 実体なし
+  driveViewUrl: string | null;
   memo: string | null;
   extractedAt: string | null;
   aiMatchRating: string | null;
@@ -1375,14 +1375,17 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
                 <span className="w-[70px] shrink-0 flex items-center gap-0.5 justify-end">
-                  <a
-                    href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
-                    download
-                    className="text-gray-400 hover:text-gray-700 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors"
-                    title="ダウンロード"
-                  >
-                    ⬇
-                  </a>
+                  {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}
+                  {file.driveFileId && (
+                    <a
+                      href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+                      download
+                      className="text-gray-400 hover:text-gray-700 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors"
+                      title="ダウンロード"
+                    >
+                      ⬇
+                    </a>
+                  )}
                   <button
                     onClick={() => handleArchive(file)}
                     disabled={archivingId === file.id}
@@ -1568,7 +1571,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       )}
 
       {/* PDF Preview popup */}
-      {previewFile && (
+      {previewFile && previewFile.driveViewUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
           <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
@@ -1587,14 +1590,14 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <a href={getPreviewUrl(previewFile.driveViewUrl)} target="_blank" rel="noopener noreferrer"
+                <a href={getPreviewUrl(previewFile.driveViewUrl!)} target="_blank" rel="noopener noreferrer"
                   className="text-[12px] text-blue-600 hover:underline">新しいタブで開く</a>
                 <button onClick={() => setPreviewFile(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
             </div>
             <div className="flex-1 min-h-0">
               <iframe
-                src={getPreviewUrl(previewFile.driveViewUrl)}
+                src={getPreviewUrl(previewFile.driveViewUrl!)}
                 className="w-full h-full border-0"
                 title={previewFile.fileName}
               />
@@ -2207,19 +2210,19 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
       )}
 
       {/* PDF Preview popup */}
-      {previewFile && (
+      {previewFile && previewFile.driveViewUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
           <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
               <span className="text-[13px] font-medium truncate">{previewFile.fileName}</span>
               <div className="flex items-center gap-2 shrink-0">
-                <a href={getPreviewUrl(previewFile.driveViewUrl)} target="_blank" rel="noopener noreferrer"
+                <a href={getPreviewUrl(previewFile.driveViewUrl!)} target="_blank" rel="noopener noreferrer"
                   className="text-[12px] text-blue-600 hover:underline">新しいタブで開く</a>
                 <button onClick={() => setPreviewFile(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
             </div>
             <div className="flex-1 min-h-0">
-              <iframe src={getPreviewUrl(previewFile.driveViewUrl)} className="w-full h-full border-0" title={previewFile.fileName} />
+              <iframe src={getPreviewUrl(previewFile.driveViewUrl!)} className="w-full h-full border-0" title={previewFile.fileName} />
             </div>
           </div>
         </div>

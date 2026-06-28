@@ -10,8 +10,8 @@ type CandidateFile = {
   fileName: string;
   fileSize: number;
   mimeType: string;
-  driveFileId: string;
-  driveViewUrl: string;
+  driveFileId: string | null; // 案Z: job-platform 由来は PDF 実体なし
+  driveViewUrl: string | null;
   folderId: string | null;
   memo: string | null;
   uploadedBy: { id: string; name: string };
@@ -208,6 +208,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     f.fileName.toLowerCase().endsWith(".xlsx");
 
   const handleWordEdit = (file: CandidateFile) => {
+    if (!file.driveFileId) return; // PDF実体が無い行は編集元DLなし
     window.open(
       `https://drive.google.com/uc?export=download&id=${file.driveFileId}`,
       "_blank",
@@ -266,6 +267,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   };
 
   const handleExcelEdit = (file: CandidateFile) => {
+    if (!file.driveFileId) return; // PDF実体が無い行は編集元DLなし
     window.open(
       `https://drive.google.com/uc?export=download&id=${file.driveFileId}`,
       "_blank",
@@ -697,19 +699,24 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
               🔗 URL発行
             </button>
           )}
-          <button
-            onClick={() => window.open(getPreviewUrl(file.driveViewUrl), "_blank")}
-            className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium"
-          >
-            👁 プレビュー
-          </button>
-          <a
-            href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
-            download
-            className="text-gray-500 hover:text-gray-700 text-sm font-medium"
-          >
-            ⬇ DL
-          </a>
+          {/* 案Z: PDF実体が無い行（driveViewUrl/driveFileId=null）はプレビュー・DLを出さない */}
+          {file.driveViewUrl && (
+            <button
+              onClick={() => window.open(getPreviewUrl(file.driveViewUrl!), "_blank")}
+              className="text-[#2563EB] hover:text-[#1D4ED8] text-sm font-medium"
+            >
+              👁 プレビュー
+            </button>
+          )}
+          {file.driveFileId && (
+            <a
+              href={`https://drive.google.com/uc?export=download&id=${file.driveFileId}`}
+              download
+              className="text-gray-500 hover:text-gray-700 text-sm font-medium"
+            >
+              ⬇ DL
+            </a>
+          )}
           <button
             onClick={() => handleDelete(file.id)}
             disabled={deletingId === file.id}

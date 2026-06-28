@@ -124,6 +124,7 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
   if (keyFiles.length > 0) {
     context += `## 主要書類の内容\n\n`;
     for (const file of keyFiles) {
+      if (!file.driveFileId) continue; // PDF実体が無い行はスキップ（BOOKMARK除外済だが型安全のため）
       try {
         const { base64 } = await downloadFileFromDrive(file.driveFileId);
         let parsedText: string;

@@ -66,7 +66,7 @@ export async function POST(
       );
     }
 
-    await deletePdfFromDrive(existing.driveFileId);
+    if (existing.driveFileId) await deletePdfFromDrive(existing.driveFileId);
 
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const { fileId: newDriveId, webViewLink } = await uploadFileToDrive(

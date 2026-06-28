@@ -32,6 +32,9 @@ export async function POST(
 
   // Single file: direct download without zipping
   if (files.length === 1) {
+    if (!files[0].driveFileId) {
+      return NextResponse.json({ error: "ダウンロード可能なファイル実体がありません" }, { status: 404 });
+    }
     try {
       const { base64, mimeType } = await downloadFileFromDrive(files[0].driveFileId);
       const buffer = Buffer.from(base64, "base64");
@@ -91,6 +94,7 @@ export async function POST(
 
       for (const file of files) {
         try {
+          if (!file.driveFileId) continue; // PDF実体が無い行はzipに含めない
           const { base64 } = await downloadFileFromDrive(file.driveFileId);
           const buffer = Buffer.from(base64, "base64");
           archive.append(buffer, { name: uniqueEntryName(file.fileName) });

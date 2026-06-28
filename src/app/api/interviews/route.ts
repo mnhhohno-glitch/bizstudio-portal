@@ -485,6 +485,7 @@ async function copyCandidateFilesToInterview(
 
     for (const file of files) {
       try {
+        if (!file.driveFileId) continue; // PDF実体が無い行はスキップ
         const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
         const buffer = Buffer.from(base64, "base64");
 

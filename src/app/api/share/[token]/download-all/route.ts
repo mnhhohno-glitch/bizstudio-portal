@@ -65,6 +65,7 @@ export async function GET(
 
   const downloadPromise = (async () => {
     for (const file of files) {
+      if (!file.driveFileId) continue; // PDF実体が無い行はzipに含めない
       const { base64 } = await downloadFileFromDrive(file.driveFileId);
       const buffer = Buffer.from(base64, "base64");
       archive.append(buffer, { name: file.fileName });
