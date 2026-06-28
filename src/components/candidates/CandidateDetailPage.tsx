@@ -132,6 +132,11 @@ const SUB_TABS = [
 
 type SubTabKey = (typeof SUB_TABS)[number]["key"];
 
+// 案Z 段階D-2: HistoryTab(紹介履歴) 内部のサブタブキー。
+// ?tab=bookmark 等で指定されたら外側タブは "history" を開き、HistoryTab に初期サブタブとして渡す。
+const HISTORY_SUB_TABS = ["bookmark", "jobs", "entries", "archived"] as const;
+type HistorySubTab = (typeof HISTORY_SUB_TABS)[number];
+
 const ROUTE_OPTIONS = ["スカウト", "応募"];
 const MEDIA_OPTIONS = [
   "マイナビ転職",
@@ -1645,7 +1650,16 @@ function CandidateDetailPageBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeView = (searchParams.get("view") as TopViewKey) || "basic";
-  const activeTab = (searchParams.get("tab") as SubTabKey) || "history";
+  // ?tab= は SUB_TABS(history/documents/...) のキー、または HistoryTab 内部サブタブ(bookmark/jobs/entries/archived)を指す。
+  // 内部サブタブ指定時は外側 activeTab を "history" にして HistoryTab を開き、初期サブタブを渡す（案Z 段階D-2: ?tab=bookmark 対応）。
+  const rawTab = searchParams.get("tab");
+  const historyInitialSubTab: HistorySubTab | undefined =
+    rawTab && (HISTORY_SUB_TABS as readonly string[]).includes(rawTab) ? (rawTab as HistorySubTab) : undefined;
+  const activeTab: SubTabKey = historyInitialSubTab
+    ? "history"
+    : rawTab && (SUB_TABS as readonly { key: string }[]).some((t) => t.key === rawTab)
+      ? (rawTab as SubTabKey)
+      : "history";
   const fromInterviews = searchParams.get("from") === "interviews";
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
@@ -1973,7 +1987,7 @@ function CandidateDetailPageBody() {
               <CandidateTasksTab candidateId={candidateId} employees={employees} />
             )}
             {activeTab === "history" && (
-              <HistoryTab candidateId={candidateId} candidateName={candidate.name} />
+              <HistoryTab candidateId={candidateId} candidateName={candidate.name} initialSubTab={historyInitialSubTab} />
             )}
             {activeTab === "notes" && (
               <NotesTab

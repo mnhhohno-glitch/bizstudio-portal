@@ -2234,8 +2234,8 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
-export default function HistoryTab({ candidateId, candidateName }: { candidateId: string; candidateName?: string }) {
-  const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries" | "archived">("bookmark");
+export default function HistoryTab({ candidateId, candidateName, initialSubTab }: { candidateId: string; candidateName?: string; initialSubTab?: "bookmark" | "jobs" | "entries" | "archived" }) {
+  const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries" | "archived">(initialSubTab ?? "bookmark");
   const [bookmarkCount, setBookmarkCount] = useState(0);
   const [archivedCount, setArchivedCount] = useState(0);
 
