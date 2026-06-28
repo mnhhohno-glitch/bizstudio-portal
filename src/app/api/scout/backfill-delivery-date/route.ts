@@ -11,8 +11,10 @@ import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
  * - 各対象を ScoutSendRecord.memberNo で照合し、最新（最大）の deliveryDate を採用してセット。
  * - 罠#17: deliveryDate は @db.Date 由来の Date をそのままコピー（文字列変換しない＝TZずれなし）。
  *
+ * T-067: 配信日セットの後ろで masType（開放日/通常）も自動判定する（両日付が揃った行のみ）。
+ *
  * body(任意): { overwriteExisting?: boolean }  // true のとき既存の scoutDeliveryDate も対象（将来拡張・既定 false）
- * res: { scanned, matched, updated, skipped }
+ * res: { scanned, matched, updated, skipped, masTypeScanned, masTypeUpdated }
  */
 export async function POST(req: NextRequest) {
   if (!verifyRpaSecret(req)) {
@@ -66,6 +68,30 @@ export async function POST(req: NextRequest) {
 
   const matched = updated;
   const skipped = scanned - matched;
-  console.log(`[BackfillDeliveryDate] scanned=${scanned} matched=${matched} updated=${updated} skipped=${skipped} overwriteExisting=${overwriteExisting}`);
-  return NextResponse.json({ scanned, matched, updated, skipped });
+
+  // 4) masType（開放日/通常）自動判定: 配信日・登録日が両方揃った Candidate を全件対象に、
+  //    diffDays = 配信日 − 登録日（JST暦日・罠#17）が 0..7（境界含む）→ "開放日"、それ以外（<0 or >7）→ "通常"。
+  //    両日付が揃ったときの計算値を正とし、現在値と異なる場合のみ上書き（冪等）。片方欠ける行は対象外＝触らない。
+  const toJstYmd = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD"（罠#17）
+  const datedCandidates = await prisma.candidate.findMany({
+    where: { scoutDeliveryDate: { not: null }, mynaviRegisteredDate: { not: null } },
+    select: { id: true, scoutDeliveryDate: true, mynaviRegisteredDate: true, masType: true },
+  });
+  const masTypeScanned = datedCandidates.length;
+  let masTypeUpdated = 0;
+  for (const c of datedCandidates) {
+    if (!c.scoutDeliveryDate || !c.mynaviRegisteredDate) continue;
+    const diffDays = Math.round(
+      (Date.parse(toJstYmd(c.scoutDeliveryDate) + "T00:00:00Z")
+        - Date.parse(toJstYmd(c.mynaviRegisteredDate) + "T00:00:00Z")) / 86_400_000,
+    );
+    const masType = diffDays >= 0 && diffDays <= 7 ? "開放日" : "通常";
+    if (masType !== c.masType) {
+      await prisma.candidate.update({ where: { id: c.id }, data: { masType } });
+      masTypeUpdated++;
+    }
+  }
+
+  console.log(`[BackfillDeliveryDate] scanned=${scanned} matched=${matched} updated=${updated} skipped=${skipped} masTypeScanned=${masTypeScanned} masTypeUpdated=${masTypeUpdated} overwriteExisting=${overwriteExisting}`);
+  return NextResponse.json({ scanned, matched, updated, skipped, masTypeScanned, masTypeUpdated });
 }
