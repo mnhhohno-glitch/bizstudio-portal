@@ -2853,11 +2853,6 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                           )}
                         </div>
                         <p className="text-[12px] text-gray-500 truncate">{job.job_title}</p>
-                        {/* ホバーでスタイル付きツールチップ表示 */}
-                        <div className="hidden group-hover/job:block absolute left-0 top-full z-20 mt-1 max-w-md bg-gray-800 text-white text-[12px] rounded-lg px-3 py-2 shadow-lg whitespace-normal break-words pointer-events-none">
-                          <p className="font-medium">{job.company_name}</p>
-                          {job.job_title && <p className="mt-0.5 text-gray-300">{job.job_title}</p>}
-                        </div>
                       </div>
                       <span className="w-[56px] shrink-0 text-center">{badge(axis?.wish)}</span>
                       <span className="w-[56px] shrink-0 text-center">{badge(axis?.pass)}</span>
