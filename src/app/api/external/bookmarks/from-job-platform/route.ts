@@ -143,14 +143,19 @@ export async function POST(request: Request) {
           externalJobRef,
           archivedAt: null,
         },
-        select: { id: true },
+        select: { id: true, extractedAt: true },
       });
       if (existing) {
         // スナップショット更新（重複作成しない）。AI評価結果(aiMatchRating等)は触らない。
         // 保存者が明示された場合のみ uploadedByUserId も是正（既存Anonymous行の担当を本人に更新可能）。
+        // extractedAt は「テキスト化済み」シグナル（AI分析フィルタが参照）。未設定なら立てる（既存値は維持）。
         await prisma.candidateFile.update({
           where: { id: existing.id },
-          data: { fileName, fileSize, extractedText, memo, ...(savedBy ? { uploadedByUserId: savedBy } : {}) },
+          data: {
+            fileName, fileSize, extractedText, memo,
+            ...(existing.extractedAt ? {} : { extractedAt: new Date() }),
+            ...(savedBy ? { uploadedByUserId: savedBy } : {}),
+          },
         });
         updated++;
       } else {
@@ -165,6 +170,8 @@ export async function POST(request: Request) {
             driveViewUrl: null,
             driveFolderId: null,
             extractedText,
+            // テキスト化済みシグナル: 保存時点で求人本文を受領済み＝AI分析フィルタ(extractedAt必須)を通すため立てる。
+            extractedAt: new Date(),
             sourceType: "job-platform",
             externalJobRef,
             memo,
