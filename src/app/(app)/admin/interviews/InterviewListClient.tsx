@@ -141,6 +141,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
   // Data
   const [interviews, setInterviews] = useState<InterviewRow[]>([]);
   const [total, setTotal] = useState(0);
+  // サーバー集計の内訳件数（全フィルタ後・全件横断）。サマリ表示に使う。
+  const [newTotal, setNewTotal] = useState(0);
+  const [existingTotal, setExistingTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // Pagination / sort
@@ -210,6 +213,14 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     if (dateTo) params.set("dateTo", dateTo);
     if (candidateName) params.set("candidateName", candidateName);
     if (debouncedSearch) params.set("search", debouncedSearch);
+    // サーバー移管した5フィルタ（空のときは付与しない）。
+    if (typeFilter) params.set("type", typeFilter);
+    if (toolFilter) params.set("tool", toolFilter);
+    if (mediaFilter) params.set("media", mediaFilter);
+    if (appDateFrom) params.set("appDateFrom", appDateFrom);
+    if (appDateTo) params.set("appDateTo", appDateTo);
+    if (delDateFrom) params.set("delDateFrom", delDateFrom);
+    if (delDateTo) params.set("delDateTo", delDateTo);
 
     try {
       const res = await fetch(`/api/interviews?${params}`);
@@ -217,12 +228,15 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
       const data = await res.json();
       setInterviews(data.interviews);
       setTotal(data.total);
+      setNewTotal(data.newTotal ?? 0);
+      setExistingTotal(data.existingTotal ?? 0);
     } catch {
       toast.error("面談一覧の取得に失敗しました");
     } finally {
       setLoading(false);
     }
-  }, [page, sortBy, sortOrder, rcName, caName, dateFrom, dateTo, candidateName, debouncedSearch]);
+  }, [page, sortBy, sortOrder, rcName, caName, dateFrom, dateTo, candidateName, debouncedSearch,
+      typeFilter, toolFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -280,33 +294,12 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     setPage(1);
   };
 
-  // T-068: クライアント側で 回数(interviewCount) / interviewTool を AND 絞り込み。
-  // 種別フィールド(interviewType)は未入力が多いため、業務定義に従い「1回目=新規 / 2回目以降=既存」
-  // を回数ベースで判定する。サマリも同じ判定式を共有する。
-  const isNew = (r: InterviewRow) => r.interviewCount === 1;
-  const isExisting = (r: InterviewRow) => r.interviewCount !== null && r.interviewCount >= 2;
-  const displayedInterviews = interviews.filter((r) => {
-    if (typeFilter === "新規面談" && !isNew(r)) return false;
-    if (typeFilter === "既存面談" && !isExisting(r)) return false;
-    if (toolFilter && r.interviewTool !== toolFilter) return false;
-    // T-101: 応募日 / 配信日 範囲・経路（媒体）。すべて既存フィルタと AND 結合。
-    if (appDateFrom || appDateTo) {
-      const d = jstDateStr(r.candidate.applicationDate);
-      if (!d) return false;
-      if (appDateFrom && d < appDateFrom) return false;
-      if (appDateTo && d > appDateTo) return false;
-    }
-    if (delDateFrom || delDateTo) {
-      const d = jstDateStr(r.candidate.scoutDeliveryDate);
-      if (!d) return false;
-      if (delDateFrom && d < delDateFrom) return false;
-      if (delDateTo && d > delDateTo) return false;
-    }
-    if (mediaFilter && (r.candidate.mediaSource || "") !== mediaFilter) return false;
-    return true;
-  });
-  const newCount = displayedInterviews.filter(isNew).length;
-  const existingCount = displayedInterviews.filter(isExisting).length;
+  // 区分/方法/経路/応募日/配信日 はサーバー側 where に移管済み（/api/interviews）。
+  // クライアント側の二重絞り込みは撤去し、サーバーが返した現在ページをそのまま表示する。
+  const displayedInterviews = interviews;
+  // サマリ（新規/既存）はサーバー集計の内訳＝全フィルタ後・全件横断（回数ベース 1=新規 / >=2=既存）。
+  const newCount = newTotal;
+  const existingCount = existingTotal;
 
   // Sort handler
   const handleSort = (col: string) => {
@@ -541,7 +534,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           <FilterField label="種別">
             <select
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
+              onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
               className={`w-[120px] ${FILTER_INPUT_CLS}`}
             >
               <option value="">すべて</option>
@@ -551,7 +544,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
           <FilterField label="方法">
             <select
               value={toolFilter}
-              onChange={(e) => setToolFilter(e.target.value)}
+              onChange={(e) => { setToolFilter(e.target.value); setPage(1); }}
               className={`w-[120px] ${FILTER_INPUT_CLS}`}
             >
               <option value="">すべて</option>

@@ -26,8 +26,19 @@ export async function GET(req: NextRequest) {
   const dateTo = sp.get("dateTo") || "";
   const candidateName = sp.get("candidateName")?.trim() || "";
   const search = sp.get("search")?.trim() || "";
+  // T-068/T-101: 旧クライアント側フィルタをサーバー移管（区分/方法/経路/応募日/配信日）。
+  const type = sp.get("type")?.trim() || "";      // "新規面談"(回数1) / "既存面談"(回数>=2)
+  const tool = sp.get("tool")?.trim() || "";       // interviewTool 完全一致
+  const media = sp.get("media")?.trim() || "";     // candidate.mediaSource 完全一致
+  const appDateFrom = sp.get("appDateFrom") || ""; // candidate.applicationDate（応募日・JST）
+  const appDateTo = sp.get("appDateTo") || "";
+  const delDateFrom = sp.get("delDateFrom") || ""; // candidate.scoutDeliveryDate（配信日・JST）
+  const delDateTo = sp.get("delDateTo") || "";
 
-  const where: Prisma.InterviewRecordWhereInput = {};
+  // 応募日/配信日は JST 日付基準（クライアントの jstDateStr と一致・前日ずれ防止）。+09:00 で JST 日境界を UTC 化。
+  const jstStart = (d: string) => new Date(`${d}T00:00:00+09:00`);
+  const jstEnd = (d: string) => new Date(`${d}T23:59:59.999+09:00`);
+
   const andClauses: Prisma.InterviewRecordWhereInput[] = [];
 
   // T-102追補: 担当RC（rcName）の絞り込みは「号機→実名変換後の表示値」に対して行う。
@@ -58,7 +69,31 @@ export async function GET(req: NextRequest) {
       ],
     });
   }
-  if (andClauses.length > 0) where.AND = andClauses;
+  // サーバー移管した5フィルタ（区分=type は内訳件数のため別扱い・下で付与）。
+  if (tool) andClauses.push({ interviewTool: tool });
+  if (media) andClauses.push({ candidate: { mediaSource: media } });
+  if (appDateFrom || appDateTo) {
+    const r: Prisma.DateTimeNullableFilter = {};
+    if (appDateFrom) r.gte = jstStart(appDateFrom);
+    if (appDateTo) r.lte = jstEnd(appDateTo);
+    andClauses.push({ candidate: { applicationDate: r } });
+  }
+  if (delDateFrom || delDateTo) {
+    const r: Prisma.DateTimeNullableFilter = {};
+    if (delDateFrom) r.gte = jstStart(delDateFrom);
+    if (delDateTo) r.lte = jstEnd(delDateTo);
+    andClauses.push({ candidate: { scoutDeliveryDate: r } });
+  }
+
+  // type（区分）以外の全フィルタ＝whereBase。内訳件数(newTotal/existingTotal)はこれを基準に出す。
+  const whereBase: Prisma.InterviewRecordWhereInput = andClauses.length > 0 ? { AND: andClauses } : {};
+  const typeClause: Prisma.InterviewRecordWhereInput | null =
+    type === "新規面談" ? { interviewCount: 1 }
+    : type === "既存面談" ? { interviewCount: { gte: 2 } }
+    : null;
+  const where: Prisma.InterviewRecordWhereInput = typeClause ? { AND: [...andClauses, typeClause] } : whereBase;
+  const newWhere: Prisma.InterviewRecordWhereInput = { AND: [...andClauses, { interviewCount: 1 }] };
+  const existingWhere: Prisma.InterviewRecordWhereInput = { AND: [...andClauses, { interviewCount: { gte: 2 } }] };
 
   const orderByMap: Record<string, Prisma.InterviewRecordOrderByWithRelationInput | Prisma.InterviewRecordOrderByWithRelationInput[]> = {
     interviewDate: [{ interviewDate: sortOrder }, { startTime: "asc" }],
@@ -178,18 +213,28 @@ export async function GET(req: NextRequest) {
 
   let interviews: InterviewRow[];
   let total: number;
+  let newTotal: number;
+  let existingTotal: number;
+  const isNewRow = (r: InterviewRow) => r.interviewCount === 1;
+  const isExistingRow = (r: InterviewRow) => r.interviewCount !== null && r.interviewCount >= 2;
 
   if (rcFilterActive || rcSortActive) {
-    // where（rcName 以外の既存条件）に一致する全行を取得し、JS 側で表示値ベースに
-    // 絞り込み → ソート → ページングする。formatRecruiterName を表示と共有するため乖離しない。
-    const all = await prisma.interviewRecord.findMany({ where, orderBy, select: interviewSelect });
-    let rows = all;
+    // whereBase（rcName・type 以外の条件）に一致する全行を取得し、JS 側で表示値ベースに
+    // rcName 絞り込み → 内訳件数算出 → type 絞り込み → ソート → ページング。
+    const all = await prisma.interviewRecord.findMany({ where: whereBase, orderBy, select: interviewSelect });
+    let baseRows = all;
     if (rcFilterActive) {
       const q = normalizeRecruiterName(rcName);
-      rows = rows.filter((r) =>
+      baseRows = baseRows.filter((r) =>
         normalizeRecruiterName(formatRecruiterName(r.candidate.recruiterName)).includes(q),
       );
     }
+    // 内訳（type を除いた全フィルタ＋rcName 後・全件横断）。
+    newTotal = baseRows.filter(isNewRow).length;
+    existingTotal = baseRows.filter(isExistingRow).length;
+    let rows = typeClause
+      ? baseRows.filter(type === "新規面談" ? isNewRow : isExistingRow)
+      : baseRows;
     if (rcSortActive) {
       rows = [...rows].sort((a, b) => {
         const an = formatRecruiterName(a.candidate.recruiterName).trim();
@@ -205,7 +250,7 @@ export async function GET(req: NextRequest) {
     total = rows.length;
     interviews = rows.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
   } else {
-    [interviews, total] = await Promise.all([
+    [interviews, total, newTotal, existingTotal] = await Promise.all([
       prisma.interviewRecord.findMany({
         where,
         orderBy,
@@ -214,6 +259,8 @@ export async function GET(req: NextRequest) {
         select: interviewSelect,
       }),
       prisma.interviewRecord.count({ where }),
+      prisma.interviewRecord.count({ where: newWhere }),
+      prisma.interviewRecord.count({ where: existingWhere }),
     ]);
   }
 
@@ -240,7 +287,7 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json({ interviews: serialized, total, page, pageSize });
+  return NextResponse.json({ interviews: serialized, total, newTotal, existingTotal, page, pageSize });
 }
 
 export async function POST(req: Request) {
