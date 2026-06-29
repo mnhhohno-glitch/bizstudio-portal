@@ -1,5 +1,58 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
+
+// D-3: 求人検索由来PDFの生成元（Railway pdf-service）。本番は環境変数で上書き可。
+const PDF_SERVICE_URL = process.env.PDF_SERVICE_URL || "https://bizstudio-job-platform-production.up.railway.app";
+const PDF_GEN_TIMEOUT_MS = 30000;
+
+/**
+ * D-3: pdf-service でPDFを生成 → 既存のGoogle Drive保管プラミングで求職者フォルダへ保管
+ *      → CandidateFile の driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新。
+ * 失敗時は throw（呼び出し側で try/catch 隔離＝保存自体は巻き込まない）。extractedText は触らない。
+ */
+async function generateAndStorePdf(params: {
+  fileId: string;
+  candidateId: string;
+  sid: string;
+  fileName: string;
+}): Promise<void> {
+  const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
+  if (!parentFolderId) throw new Error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID 未設定");
+
+  // 1) pdf-service からPDFバイナリ取得（タイムアウト付き）
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PDF_GEN_TIMEOUT_MS);
+  let pdfBuffer: Buffer;
+  try {
+    const token = process.env.PDF_SERVICE_TOKEN; // 将来用・設定時のみ送信（現状 /generate は未要求）
+    const res = await fetch(`${PDF_SERVICE_URL}/generate?sid=${encodeURIComponent(params.sid)}`, {
+      signal: controller.signal,
+      ...(token ? { headers: { "x-api-token": token } } : {}),
+    });
+    if (!res.ok) throw new Error(`pdf-service responded ${res.status}`);
+    pdfBuffer = Buffer.from(await res.arrayBuffer());
+    if (pdfBuffer.length === 0) throw new Error("pdf-service returned empty body");
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // 2) 既存の保管プラミングで求職者フォルダ（candidateId 名）へアップロード（既存ブックマークと同一場所）
+  const folderId = await getOrCreateFolder(params.candidateId, parentFolderId);
+  const { fileId: driveFileId, webViewLink } = await uploadFileToDrive(params.fileName, pdfBuffer, folderId, "application/pdf");
+
+  // 3) CandidateFile を更新（fileName/extractedText/sourceType 等は維持・PDF実体情報のみ追加）
+  await prisma.candidateFile.update({
+    where: { id: params.fileId },
+    data: {
+      driveFileId,
+      driveViewUrl: webViewLink,
+      driveFolderId: folderId,
+      mimeType: "application/pdf",
+      fileSize: pdfBuffer.length,
+    },
+  });
+}
 
 /**
  * POST /api/external/bookmarks/from-job-platform
@@ -112,6 +165,8 @@ export async function POST(request: Request) {
 
   let created = 0;
   let updated = 0;
+  let pdfStored = 0;
+  let pdfFailed = 0;
   const errors: { index: number; error: string }[] = [];
 
   for (let i = 0; i < rawJobs.length; i++) {
@@ -143,8 +198,10 @@ export async function POST(request: Request) {
           externalJobRef,
           archivedAt: null,
         },
-        select: { id: true, extractedAt: true },
+        select: { id: true, extractedAt: true, driveFileId: true },
       });
+      let fileId: string;
+      let needsPdf: boolean; // driveFileId が未設定の行だけPDF生成（冪等・重複生成しない）
       if (existing) {
         // スナップショット更新（重複作成しない）。AI評価結果(aiMatchRating等)は触らない。
         // 保存者が明示された場合のみ uploadedByUserId も是正（既存Anonymous行の担当を本人に更新可能）。
@@ -158,8 +215,10 @@ export async function POST(request: Request) {
           },
         });
         updated++;
+        fileId = existing.id;
+        needsPdf = !existing.driveFileId; // 既にPDF保管済みなら再生成しない
       } else {
-        await prisma.candidateFile.create({
+        const createdRow = await prisma.candidateFile.create({
           data: {
             candidateId: candidate.id,
             category: "BOOKMARK",
@@ -177,8 +236,23 @@ export async function POST(request: Request) {
             memo,
             uploadedByUserId: uploaderUserId,
           },
+          select: { id: true },
         });
         created++;
+        fileId = createdRow.id;
+        needsPdf = true;
+      }
+
+      // D-3: PDF生成→Drive保管→URL埋め（driveFileId未設定の行のみ・冪等）。
+      // 失敗しても保存(CandidateFile作成/更新)は成功扱いのまま（PDFは後で再生成可能）＝失敗隔離。
+      if (needsPdf) {
+        try {
+          await generateAndStorePdf({ fileId, candidateId: candidate.id, sid: externalJobRef, fileName });
+          pdfStored++;
+        } catch (pdfErr) {
+          console.error(`[external/bookmarks/from-job-platform] PDF gen/store failed (sid=${externalJobRef}):`, pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
+          pdfFailed++;
+        }
       }
     } catch (e) {
       console.error("[external/bookmarks/from-job-platform] save failed:", e);
@@ -193,6 +267,8 @@ export async function POST(request: Request) {
     created,
     updated, // 既存と同一求人の再保存（冪等・スナップショット更新）
     skipped: errors.length,
+    pdfStored,  // D-3: PDF生成→Drive保管に成功した数
+    pdfFailed,  // D-3: PDF生成/保管に失敗した数（保存自体は成功・後で再生成可）
     errors,
   });
 }
