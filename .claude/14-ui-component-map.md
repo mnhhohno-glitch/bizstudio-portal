@@ -715,6 +715,44 @@ EntryBoard (1083 行)
 
 ---
 
+## タスク作成ウィザード（/tasks/new）＋ エントリー「タスク依頼中」バッジ（T-120）
+
+エントリー管理の「タスク作成」（エントリー対応依頼）の導線・デフォルト担当者・依頼中バッジの構造マップ。
+
+### タスク作成ウィザード本体
+
+- パス: `src/app/(app)/tasks/new/page.tsx`
+- ステップ（`STEPS`、L34-41）: `求職者選択 → カテゴリ選択 → テンプレート入力 → 担当者選択 → 追加情報 → 確認・作成`
+- 担当者選択（Step 3, L2052-2100）は**複数選択（チェックボックス）**。state は `assigneeIds: string[]`（= `Employee.id` の配列）。
+- 作成は `POST /api/tasks`（送信 body は L987 周辺）。`assigneeIds`（最低1名）/ `completionType`（"any" | "all"）/ `fieldValues` / `taskRequestedEntryIds`(任意, T-120) 等。
+- **プリセット（prefill=entry）** L373-435: URL クエリ `categoryName` / `assignees`(社員番号CSV) / `title` / `entryDate` / `entryCount` / `entryDescription` / `entryIds`(T-120) / `step` を一括適用。`assignees` は `split(",")` 後に `employees`(=`/api/employees`) の `employeeNo` で `Employee.id` に解決（L394-401）。他に prefill=`interview-decline` / `offer-acceptance` 導線あり。
+
+### デフォルト担当者の出所（Task 担当者構造）
+
+- `Task` 担当者は**多対多**（中間テーブル `TaskAssignee`、`prisma/schema.prisma`）。単数 `assigneeId` は持たない。`POST /api/tasks` は `assigneeIds: string[]` を受け `assignees.create` で複数行を作る。
+- エントリー管理「タスク作成」のデフォルト担当者は **`EntryBoard.tsx` の `handleCreateTasks` 内にハードコード**。社員番号で指定（`/api/employees` の `employeeNo` で `Employee.id` 解決）。
+  - **T-120 で 佐藤 葵(`1000025`) のみ → 佐藤 葵 ＋ 見ル野 未来(`1000027`) の2名に変更。**
+  - 単数経路（候補者1名）: `assignees: "1000025,1000027"` を URL に積み `/tasks/new?...&step=5` を新規タブで開く（実作成はウィザード側）。
+  - 複数経路（候補者2名以上）: `["1000025","1000027"]` を `Employee.id` 解決し、候補者ごとに `POST /api/tasks` を直接ループ。
+- 関連社員番号: 見ル野 未来=`1000027` / 佐藤 葵=`1000025` / 大野 望=`1000004`（`InterviewForm.tsx` の `INTERVIEW_DECLINE_ASSIGNEES` も同パターンで利用）。
+
+### EntryTable「タスク依頼中」バッジ（T-120）
+
+- 表示先: `EntryTable.tsx` の `case "candidate"`（求職者名セル、L831 周辺）。求職者名 `<Link>` の右に `flex items-center gap-1.5` で並べる amber 系 pill。
+- **表示条件: `entry.taskRequestedAt != null && entry.entryFlag === "エントリー"`**。
+  - タスク作成（エントリー対応依頼）で選択行に `taskRequestedAt`(now) が記録される（下記フロー）。
+  - **エントリータブ所属の間だけ表示**。フラグが「書類選考」以降へ進めば条件が外れて**自動的に消える**（明示クリア処理は持たない＝事故りにくい）。タスクの完了状態には連動しない（トリガはタブ移動のみ）。
+- `Entry` 型（`EntryBoard.tsx` L18〜、`EntryTable` も import）に `taskRequestedAt?: string \| null` を追加。`GET /api/entries` は `include`（JobEntry scalar 全返却）のため列追加だけで自動的に返る。
+
+### taskRequestedAt 記録フロー（バッジ点灯）
+
+- マーキングは `POST /api/tasks` の任意 `taskRequestedEntryIds: string[]` で実施（`route.ts`）。作成成功後に `prisma.jobEntry.updateMany({ where:{ id:{ in } }, data:{ taskRequestedAt: new Date() } })`。失敗してもタスク作成は成功扱い（バッジが付かないだけ）。
+- 複数経路: 各 `POST` body に `taskRequestedEntryIds: info.entries.map(e=>e.id)`。成功後に `EntryBoard.fetchEntries()` で即時バッジ反映。
+- 単数経路: 選択 entry ID を URL `entryIds`(CSV) → ウィザードが作成 `POST` に `taskRequestedEntryIds` として同梱 → **実作成完了時**に記録。ウィザード中断時は付かない（正確）。元のエントリー画面は次回 `fetchEntries`（タブ切替・フラグ更新等）で反映。
+- `taskRequestedAt` は存在チェック専用のタイムスタンプ。日付の文字列整形は不要なので罠 #17（`toISOString().slice` 禁止）には抵触しない（`new Date()` をそのまま保存）。
+
+---
+
 ## CandidateDetailPage.tsx
 
 ### 基本情報
