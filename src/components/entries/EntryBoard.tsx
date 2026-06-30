@@ -13,7 +13,6 @@ import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
 import InterviewGuideCopyModal from "./InterviewGuideCopyModal";
 import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
-import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
 import { FilterShell, FilterTopRow, FilterGroup, FilterField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 
 export type Entry = {
@@ -146,8 +145,11 @@ export default function EntryBoard() {
   const [activeTab, setActiveTab] = useState(initialCandidateName ? "全件" : "エントリー");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0); // 全フィルタ適用後・現在タブの総件数（サーバー集計）
   const [totalPages, setTotalPages] = useState(1);
   const [flagData, setFlagData] = useState<FlagData | null>(null);
+  // 項目別日付範囲フィルタ（param名→値）。空欄はその項目で絞らない。値が1つでもあれば無効を自動包含。
+  const [dateFilters, setDateFilters] = useState<Record<string, string>>({});
 
   // Filters
   const [candidateName, setCandidateName] = useState(initialCandidateName);
@@ -214,21 +216,26 @@ export default function EntryBoard() {
     if (candidateName) params.set("candidateName", candidateName);
     if (companyName) params.set("companyName", companyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
+    if (rcFilter) params.set("rcName", rcFilter);
+    if (freeSearch.trim()) params.set("freeSearch", freeSearch.trim());
     if (includeInactive) params.set("includeInactive", "true");
     if (includeArchived) params.set("includeArchived", "true");
     if (urlMissingOnly) params.set("urlMissingOnly", "true");
+    for (const [k, v] of Object.entries(dateFilters)) { if (v) params.set(k, v); }
 
     try {
       const res = await fetch(`/api/entries?${params}`);
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries || []);
+        setTotal(data.total || 0);
         setTotalPages(data.totalPages || 1);
         setCounts(data.counts || {});
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
+  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, rcFilter, freeSearch,
+      includeInactive, includeArchived, urlMissingOnly, dateFilters]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -289,9 +296,12 @@ export default function EntryBoard() {
     if (candidateName) params.set("candidateName", candidateName);
     if (companyName) params.set("companyName", companyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
+    if (rcFilter) params.set("rcName", rcFilter);
+    if (freeSearch.trim()) params.set("freeSearch", freeSearch.trim());
     if (includeInactive) params.set("includeInactive", "true");
     if (includeArchived) params.set("includeArchived", "true");
     if (urlMissingOnly) params.set("urlMissingOnly", "true");
+    for (const [k, v] of Object.entries(dateFilters)) { if (v) params.set(k, v); }
     try {
       const res = await fetch(`/api/entries?${params}`);
       if (res.ok) {
@@ -299,7 +309,7 @@ export default function EntryBoard() {
         setCounts(data.counts || {});
       }
     } catch { /* */ }
-  }, [candidateName, companyName, caFilter, includeInactive, includeArchived, urlMissingOnly]);
+  }, [candidateName, companyName, caFilter, rcFilter, freeSearch, includeInactive, includeArchived, urlMissingOnly, dateFilters]);
 
   // T-066: Google カレンダー連携状態を取得（既存の /api/calendar/events を流用）
   useEffect(() => {
@@ -788,26 +798,9 @@ export default function EntryBoard() {
 
   // T-105: 担当RC 絞り込み（クライアント側・表示値ベース部分一致）。
   // 表示と同じ formatRecruiterName を通すため実名でも号機表記でもヒット。表記揺れは normalizeRecruiterName で吸収。
-  const displayedEntries = useMemo(() => {
-    let result = entries;
-    const rc = normalizeRecruiterName(rcFilter);
-    if (rc) {
-      result = result.filter((e) =>
-        normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(rc),
-      );
-    }
-    const q = freeSearch.trim().toLowerCase();
-    if (q) {
-      result = result.filter((e) =>
-        e.candidate.name.toLowerCase().includes(q) ||
-        e.candidate.candidateNumber.toLowerCase().includes(q) ||
-        (e.companyName?.toLowerCase().includes(q) ?? false) ||
-        (e.jobTitle?.toLowerCase().includes(q) ?? false) ||
-        (e.candidate.employee?.name?.toLowerCase().includes(q) ?? false),
-      );
-    }
-    return result;
-  }, [entries, rcFilter, freeSearch]);
+  // 担当RC・フリー検索はサーバー（/api/entries の rcName/freeSearch）に移管済み。
+  // クライアント二重フィルタは撤去し、サーバーが返した現在ページをそのまま表示する。
+  const displayedEntries = entries;
 
   const handleExport = () => {
     const params = new URLSearchParams();
@@ -840,7 +833,7 @@ export default function EntryBoard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-4 overflow-x-auto">
+      <div className="flex items-center border-b border-gray-200 mb-4 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -853,15 +846,19 @@ export default function EntryBoard() {
           >
             {tab.label}
             {counts[tab.key] != null && (
-              <span className="ml-1 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
+              <span className="ml-1 text-xs bg-gray-100 text-gray-900 rounded-full px-1.5 py-0.5">
                 {counts[tab.key]}
               </span>
             )}
           </button>
         ))}
+        {/* 全N件（全フィルタ適用後・現在タブ。サーバー total） */}
+        <span className="ml-auto pl-3 pr-1 text-sm text-gray-900 whitespace-nowrap flex-shrink-0">
+          全 <span className="font-semibold">{total.toLocaleString()}</span> 件
+        </span>
       </div>
 
-      {/* フィルタ（T-105: 上段 担当者/検索 ＋ 下段 表示 の2段。期間/区分はエントリー管理には無し） */}
+      {/* フィルタ（T-105: 上段 担当者/検索 ＋ 下段 表示。日付検索は別グループ） */}
       <FilterShell>
         <FilterTopRow>
           {/* 担当者 */}
@@ -870,7 +867,7 @@ export default function EntryBoard() {
               <input
                 type="text"
                 value={rcFilter}
-                onChange={(e) => setRcFilter(e.target.value)}
+                onChange={(e) => { setRcFilter(e.target.value); setPage(1); }}
                 placeholder="実名/号機"
                 className={`w-[120px] ${FILTER_INPUT_CLS}`}
               />
@@ -908,9 +905,9 @@ export default function EntryBoard() {
             <FilterField label="フリー検索">
               <input
                 type="text"
-                placeholder="氏名/番号/企業名/担当CA"
+                placeholder="氏名/番号/企業名/求人名/担当CA"
                 value={freeSearch}
-                onChange={(e) => setFreeSearch(e.target.value)}
+                onChange={(e) => { setFreeSearch(e.target.value); setPage(1); }}
                 className={`w-56 ${FILTER_INPUT_CLS}`}
               />
             </FilterField>
@@ -957,6 +954,37 @@ export default function EntryBoard() {
               />
               URL未入力のみ
             </label>
+          )}
+        </FilterGroup>
+
+        {/* 日付で絞り込み（項目別レンジ・JST境界。値が1つでもあれば無効エントリーも自動対象） */}
+        <FilterGroup label="日付で絞り込み" fullWidth>
+          {([
+            ["エントリー日", "entryFrom", "entryTo"],
+            ["書類提出", "docSubmitFrom", "docSubmitTo"],
+            ["書類通過", "docPassFrom", "docPassTo"],
+            ["一次面接", "firstIntFrom", "firstIntTo"],
+            ["二次面接", "secondIntFrom", "secondIntTo"],
+            ["最終面接", "finalIntFrom", "finalIntTo"],
+            ["内定", "offerFrom", "offerTo"],
+            ["承諾", "acceptFrom", "acceptTo"],
+            ["入社", "joinFrom", "joinTo"],
+          ] as [string, string, string][]).map(([label, fk, tk]) => (
+            <FilterField key={fk} label={label}>
+              <input type="date" value={dateFilters[fk] || ""}
+                onChange={(e) => { setDateFilters((p) => ({ ...p, [fk]: e.target.value })); setPage(1); }}
+                className={`w-[140px] ${FILTER_INPUT_CLS}`} />
+              <span className="px-1 text-gray-400">〜</span>
+              <input type="date" value={dateFilters[tk] || ""}
+                onChange={(e) => { setDateFilters((p) => ({ ...p, [tk]: e.target.value })); setPage(1); }}
+                className={`w-[140px] ${FILTER_INPUT_CLS}`} />
+            </FilterField>
+          ))}
+          {Object.values(dateFilters).some(Boolean) && (
+            <>
+              <span className="text-xs text-amber-600 py-1.5 whitespace-nowrap">※日付検索中は無効エントリーも対象</span>
+              <FilterClearButton onClick={() => { setDateFilters({}); setPage(1); }} />
+            </>
           )}
         </FilterGroup>
       </FilterShell>
@@ -1072,7 +1100,7 @@ export default function EntryBoard() {
           >
             &lt;
           </button>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-gray-800 font-medium">
             {page} / {totalPages}
           </span>
           <button

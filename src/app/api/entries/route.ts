@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
+import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
 
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
@@ -14,9 +15,9 @@ export async function GET(req: NextRequest) {
   const careerAdvisorId = sp.get("careerAdvisorId");
   const candidateName = sp.get("candidateName");
   const companyName = sp.get("companyName");
-  const dateFrom = sp.get("dateFrom");
-  const dateTo = sp.get("dateTo");
   const careerAdvisorName = sp.get("careerAdvisorName");
+  const rcName = sp.get("rcName")?.trim() || "";          // 担当RC（formatRecruiterName 後にJS突合）
+  const freeSearch = sp.get("freeSearch")?.trim() || "";  // 氏名/番号/企業名/求人名/担当CA の部分一致
   const includeInactive = sp.get("includeInactive") === "true";
   const includeArchived = sp.get("includeArchived") === "true";
   const urlMissingOnly = sp.get("urlMissingOnly") === "true";
@@ -24,75 +25,105 @@ export async function GET(req: NextRequest) {
   const sortBy = sp.get("sortBy") || "updatedAt";
   const sortOrder = sp.get("sortOrder") || "desc";
 
-  const where: Prisma.JobEntryWhereInput = {};
+  // 罠#17: 日付範囲は JST 日境界（+09:00）で統一。toISOString().slice()/getDay() は使わない。
+  const jstStart = (d: string) => new Date(`${d}T00:00:00+09:00`);
+  const jstEnd = (d: string) => new Date(`${d}T23:59:59.999+09:00`);
+  const dateRange = (from: string, to: string): Prisma.DateTimeFilter | null => {
+    if (!from && !to) return null;
+    const r: Prisma.DateTimeFilter = {};
+    if (from) r.gte = jstStart(from);
+    if (to) r.lte = jstEnd(to);
+    return r;
+  };
+  // 項目別日付範囲。entryDate は旧 dateFrom/dateTo もJSTで受ける（後方互換・境界ずれ解消）。
+  const DATE_PARAMS: [from: string, to: string, col: string][] = [
+    ["entryFrom", "entryTo", "entryDate"],
+    ["docSubmitFrom", "docSubmitTo", "documentSubmitDate"],
+    ["docPassFrom", "docPassTo", "documentPassDate"],
+    ["firstIntFrom", "firstIntTo", "firstInterviewDate"],
+    ["secondIntFrom", "secondIntTo", "secondInterviewDate"],
+    ["finalIntFrom", "finalIntTo", "finalInterviewDate"],
+    ["offerFrom", "offerTo", "offerDate"],
+    ["acceptFrom", "acceptTo", "acceptanceDate"],
+    ["joinFrom", "joinTo", "joinDate"],
+  ];
 
-  if (!includeArchived) where.archivedAt = null;
-  if (!includeInactive) where.isActive = true;
-  if (entryFlag) where.entryFlag = entryFlag;
-  if (careerAdvisorId) where.careerAdvisorId = careerAdvisorId;
-  if (companyName) where.companyName = { contains: companyName, mode: "insensitive" };
+  // type(entryFlag)・rcName 以外の全条件＝andClauses + 単一フィールド。countBase にも流用。
+  const andClauses: Prisma.JobEntryWhereInput[] = [];
+  let hasDateFilter = false;
+  for (const [fp, tp, col] of DATE_PARAMS) {
+    let from = sp.get(fp) || "";
+    let to = sp.get(tp) || "";
+    if (col === "entryDate") { from = from || sp.get("dateFrom") || ""; to = to || sp.get("dateTo") || ""; }
+    const r = dateRange(from, to);
+    if (r) { andClauses.push({ [col]: r } as Prisma.JobEntryWhereInput); hasDateFilter = true; }
+  }
+  if (urlMissingOnly) andClauses.push({ OR: [{ jobDbUrl: null }, { jobDbUrl: "" }] });
+  if (freeSearch) {
+    andClauses.push({ OR: [
+      { candidate: { name: { contains: freeSearch, mode: "insensitive" } } },
+      { candidate: { candidateNumber: { contains: freeSearch, mode: "insensitive" } } },
+      { companyName: { contains: freeSearch, mode: "insensitive" } },
+      { jobTitle: { contains: freeSearch, mode: "insensitive" } },
+      { candidate: { employee: { name: { contains: freeSearch, mode: "insensitive" } } } },
+    ] });
+  }
+
+  const singleClauses: Prisma.JobEntryWhereInput = {};
+  if (!includeArchived) singleClauses.archivedAt = null;
+  // 日付検索作動時は「無効」を自動包含（既定の isActive=true 除外を外す）。includeInactive 明示は当然包含。
+  if (!includeInactive && !hasDateFilter) singleClauses.isActive = true;
+  if (careerAdvisorId) singleClauses.careerAdvisorId = careerAdvisorId;
+  if (companyName) singleClauses.companyName = { contains: companyName, mode: "insensitive" };
   if (candidateName || careerAdvisorName) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const candidateWhere: any = {};
     if (candidateName) candidateWhere.name = { contains: candidateName, mode: "insensitive" };
     if (careerAdvisorName) candidateWhere.employee = { name: careerAdvisorName };
-    where.candidate = candidateWhere;
+    singleClauses.candidate = candidateWhere;
   }
-  if (dateFrom || dateTo) {
-    where.entryDate = {};
-    if (dateFrom) (where.entryDate as Prisma.DateTimeFilter).gte = new Date(dateFrom);
-    if (dateTo) (where.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
-  }
-  if (hasJoined === "true") where.hasJoined = true;
-  if (urlMissingOnly) {
-    where.OR = [{ jobDbUrl: null }, { jobDbUrl: "" }];
-  }
+  if (hasJoined === "true") singleClauses.hasJoined = true;
 
-  const [entries, total] = await Promise.all([
-    prisma.jobEntry.findMany({
-      where,
-      include: {
-        candidate: { select: { id: true, name: true, candidateNumber: true, employeeId: true, recruiterName: true, employee: { select: { name: true } } } },
-      },
-      orderBy: { [sortBy]: sortOrder },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    prisma.jobEntry.count({ where }),
-  ]);
+  // countBase = entryFlag を除いた全条件（タブ別件数用）。where = countBase + entryFlag。
+  const countBase: Prisma.JobEntryWhereInput = andClauses.length > 0 ? { ...singleClauses, AND: andClauses } : { ...singleClauses };
+  const where: Prisma.JobEntryWhereInput = entryFlag ? { ...countBase, entryFlag } : countBase;
 
-  // Counts for tabs — apply same filters as main query so tab counts reflect current filter state
-  const countBase: Prisma.JobEntryWhereInput = {};
-  if (!includeArchived) countBase.archivedAt = null;
-  if (!includeInactive) countBase.isActive = true;
-  if (careerAdvisorId) countBase.careerAdvisorId = careerAdvisorId;
-  if (companyName) countBase.companyName = { contains: companyName, mode: "insensitive" };
-  if (candidateName || careerAdvisorName) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candidateWhere: any = {};
-    if (candidateName) candidateWhere.name = { contains: candidateName, mode: "insensitive" };
-    if (careerAdvisorName) candidateWhere.employee = { name: careerAdvisorName };
-    countBase.candidate = candidateWhere;
-  }
-  if (dateFrom || dateTo) {
-    countBase.entryDate = {};
-    if (dateFrom) (countBase.entryDate as Prisma.DateTimeFilter).gte = new Date(dateFrom);
-    if (dateTo) (countBase.entryDate as Prisma.DateTimeFilter).lte = new Date(dateTo + "T23:59:59Z");
-  }
-
-  if (urlMissingOnly) {
-    countBase.OR = [{ jobDbUrl: null }, { jobDbUrl: "" }];
-  }
-
+  const include = {
+    candidate: { select: { id: true, name: true, candidateNumber: true, employeeId: true, recruiterName: true, employee: { select: { name: true } } } },
+  } as const;
+  const orderBy = { [sortBy]: sortOrder } as Prisma.JobEntryOrderByWithRelationInput;
   const flagValues = ["求人紹介", "応募", "エントリー", "書類選考", "面接", "内定", "入社済"];
-  const countResults = await Promise.all([
-    ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...countBase, entryFlag: f } })),
-    prisma.jobEntry.count({ where: countBase }),
-  ]);
 
+  let entries: Prisma.JobEntryGetPayload<{ include: typeof include }>[];
+  let total: number;
   const counts: Record<string, number> = {};
-  flagValues.forEach((f, i) => { counts[f] = countResults[i]; });
-  counts["全件"] = countResults[flagValues.length];
+
+  const rcActive = rcName.length > 0;
+  if (rcActive) {
+    // 担当RC は formatRecruiterName（号機→実名）後にJS突合のため where に積めない。
+    // countBase（entryFlag・rc 以外）で全件取得 → rc 絞り込み → 件数算出 → entryFlag 絞り → ページング。
+    const q = normalizeRecruiterName(rcName);
+    const all = await prisma.jobEntry.findMany({ where: countBase, include, orderBy });
+    const rcAll = all.filter((e) =>
+      normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(q),
+    );
+    flagValues.forEach((f) => { counts[f] = rcAll.filter((e) => e.entryFlag === f).length; });
+    counts["全件"] = rcAll.length;
+    const filtered = entryFlag ? rcAll.filter((e) => e.entryFlag === entryFlag) : rcAll;
+    total = filtered.length;
+    entries = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
+  } else {
+    const countResults = await Promise.all([
+      prisma.jobEntry.findMany({ where, include, orderBy, skip: (page - 1) * limit, take: limit }),
+      prisma.jobEntry.count({ where }),
+      ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...countBase, entryFlag: f } })),
+      prisma.jobEntry.count({ where: countBase }),
+    ]);
+    entries = countResults[0] as Prisma.JobEntryGetPayload<{ include: typeof include }>[];
+    total = countResults[1] as number;
+    flagValues.forEach((f, i) => { counts[f] = countResults[2 + i] as number; });
+    counts["全件"] = countResults[2 + flagValues.length] as number;
+  }
 
   return NextResponse.json({
     entries,
