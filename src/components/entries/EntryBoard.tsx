@@ -1087,7 +1087,12 @@ export default function EntryBoard() {
             label={item.label}
             initialFrom={dateFilters[item.fromKey] || ""}
             initialTo={dateFilters[item.toKey] || ""}
-            onApply={(from, to) => { setDateFilters((p) => ({ ...p, [item.fromKey]: from, [item.toKey]: to })); setPage(1); }}
+            onApply={(from, to) => {
+              setDateFilters((p) => ({ ...p, [item.fromKey]: from, [item.toKey]: to }));
+              // 日付適用時は基本「全件」スコープで見せる（ステージタブ絞り込みで0件になる取りこぼし防止）。
+              if ((from || to) && activeTab !== "全件") handleTabChange("全件");
+              else setPage(1);
+            }}
             onClear={() => { setDateFilters((p) => ({ ...p, [item.fromKey]: "", [item.toKey]: "" })); setPage(1); }}
             onClose={() => setDateModalKey(null)}
           />
