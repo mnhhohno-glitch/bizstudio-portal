@@ -136,6 +136,91 @@ const TABS = [
   { key: "全件", label: "全件" },
 ];
 
+// 項目別日付フィルタ（業務フロー順）。fromKey/toKey は /api/entries の param 名・dateFilters のキー。
+const DATE_ITEMS: { label: string; fromKey: string; toKey: string }[] = [
+  { label: "エントリー日", fromKey: "entryFrom", toKey: "entryTo" },
+  { label: "書類提出", fromKey: "docSubmitFrom", toKey: "docSubmitTo" },
+  { label: "書類通過", fromKey: "docPassFrom", toKey: "docPassTo" },
+  { label: "一次面接", fromKey: "firstIntFrom", toKey: "firstIntTo" },
+  { label: "二次面接", fromKey: "secondIntFrom", toKey: "secondIntTo" },
+  { label: "最終面接", fromKey: "finalIntFrom", toKey: "finalIntTo" },
+  { label: "内定", fromKey: "offerFrom", toKey: "offerTo" },
+  { label: "承諾", fromKey: "acceptFrom", toKey: "acceptTo" },
+  { label: "入社", fromKey: "joinFrom", toKey: "joinTo" },
+];
+
+// "YYYY-MM-DD" → "YYYY/M/D"（前ゼロ除去）。
+const fmtChipDate = (s: string): string => {
+  const [y, m, d] = s.split("-");
+  return `${y}/${parseInt(m, 10)}/${parseInt(d, 10)}`;
+};
+const rangeText = (from: string, to: string): string => {
+  if (from && to) return `${fmtChipDate(from)} 〜 ${fmtChipDate(to)}`;
+  if (from) return `${fmtChipDate(from)} 〜`;
+  return `〜 ${fmtChipDate(to)}`;
+};
+
+// クイック選択用（JST基準・YYYY-MM-DD）。罠#17: toISOString()/getDay() 不使用。
+const jstTodayStr = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+const monthRange = (offset: number): [string, string] => {
+  const [y, m] = jstTodayStr().split("-").map(Number);
+  const ys = new Date(y, m - 1 + offset, 1).getFullYear();
+  const ms = new Date(y, m - 1 + offset, 1).getMonth(); // 0-based
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const last = new Date(ys, ms + 1, 0).getDate();
+  return [`${ys}-${pad(ms + 1)}-01`, `${ys}-${pad(ms + 1)}-${pad(last)}`];
+};
+const yearRange = (): [string, string] => {
+  const y = jstTodayStr().slice(0, 4);
+  return [`${y}-01-01`, `${y}-12-31`];
+};
+
+// 1項目の日付レンジ選択モーダル（既存トークンに準拠）。
+function DateRangeModal({ label, initialFrom, initialTo, onApply, onClear, onClose }: {
+  label: string; initialFrom: string; initialTo: string;
+  onApply: (from: string, to: string) => void; onClear: () => void; onClose: () => void;
+}) {
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
+  const inputCls = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none";
+  const quick = (r: [string, string]) => { setFrom(r[0]); setTo(r[1]); };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-gray-200">
+          <h2 className="text-base font-semibold text-gray-800">{label}で絞り込み</h2>
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex gap-1.5">
+            {([["今月", monthRange(0)], ["先月", monthRange(-1)], ["今年", yearRange()]] as [string, [string, string]][]).map(([lab, r]) => (
+              <button key={lab} type="button" onClick={() => quick(r)}
+                className="px-2.5 py-1 text-xs font-medium border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50">{lab}</button>
+            ))}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">開始</label>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">終了</label>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between gap-2">
+          <button type="button" onClick={() => { onClear(); onClose(); }}
+            className="px-4 py-2 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50">クリア</button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 text-sm font-medium border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50">キャンセル</button>
+            <button type="button" onClick={() => { onApply(from, to); onClose(); }} disabled={!from && !to}
+              className="px-4 py-2 text-sm font-medium bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8] disabled:opacity-50">適用</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function EntryBoard() {
   const searchParams = useSearchParams();
   const initialCandidateName = useMemo(() => searchParams.get("candidateName") ?? "", [searchParams]);
@@ -150,6 +235,8 @@ export default function EntryBoard() {
   const [flagData, setFlagData] = useState<FlagData | null>(null);
   // 項目別日付範囲フィルタ（param名→値）。空欄はその項目で絞らない。値が1つでもあれば無効を自動包含。
   const [dateFilters, setDateFilters] = useState<Record<string, string>>({});
+  // 日付モーダルで開いている項目の fromKey（null=閉）。
+  const [dateModalKey, setDateModalKey] = useState<string | null>(null);
 
   // Filters
   const [candidateName, setCandidateName] = useState(initialCandidateName);
@@ -957,37 +1044,55 @@ export default function EntryBoard() {
           )}
         </FilterGroup>
 
-        {/* 日付で絞り込み（項目別レンジ・JST境界。値が1つでもあれば無効エントリーも自動対象） */}
+        {/* 日付で絞り込み（チップ＋モーダル。JST境界。値が1つでもあれば無効エントリーも自動対象） */}
         <FilterGroup label="日付で絞り込み" fullWidth>
-          {([
-            ["エントリー日", "entryFrom", "entryTo"],
-            ["書類提出", "docSubmitFrom", "docSubmitTo"],
-            ["書類通過", "docPassFrom", "docPassTo"],
-            ["一次面接", "firstIntFrom", "firstIntTo"],
-            ["二次面接", "secondIntFrom", "secondIntTo"],
-            ["最終面接", "finalIntFrom", "finalIntTo"],
-            ["内定", "offerFrom", "offerTo"],
-            ["承諾", "acceptFrom", "acceptTo"],
-            ["入社", "joinFrom", "joinTo"],
-          ] as [string, string, string][]).map(([label, fk, tk]) => (
-            <FilterField key={fk} label={label}>
-              <input type="date" value={dateFilters[fk] || ""}
-                onChange={(e) => { setDateFilters((p) => ({ ...p, [fk]: e.target.value })); setPage(1); }}
-                className={`w-[140px] ${FILTER_INPUT_CLS}`} />
-              <span className="px-1 text-gray-400">〜</span>
-              <input type="date" value={dateFilters[tk] || ""}
-                onChange={(e) => { setDateFilters((p) => ({ ...p, [tk]: e.target.value })); setPage(1); }}
-                className={`w-[140px] ${FILTER_INPUT_CLS}`} />
-            </FilterField>
-          ))}
-          {Object.values(dateFilters).some(Boolean) && (
-            <>
-              <span className="text-xs text-amber-600 py-1.5 whitespace-nowrap">※日付検索中は無効エントリーも対象</span>
-              <FilterClearButton onClick={() => { setDateFilters({}); setPage(1); }} />
-            </>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {DATE_ITEMS.map((it) => {
+              const from = dateFilters[it.fromKey] || "";
+              const to = dateFilters[it.toKey] || "";
+              const active = !!(from || to);
+              return active ? (
+                <span key={it.fromKey}
+                  className="inline-flex items-center gap-1 rounded-full border border-[#2563EB] bg-blue-50 text-[#1D4ED8] text-xs px-2 py-1">
+                  <button type="button" onClick={() => setDateModalKey(it.fromKey)} className="font-medium hover:underline">
+                    {it.label} {rangeText(from, to)}
+                  </button>
+                  <button type="button" aria-label={`${it.label}の絞り込みを解除`}
+                    onClick={() => { setDateFilters((p) => ({ ...p, [it.fromKey]: "", [it.toKey]: "" })); setPage(1); }}
+                    className="text-[#1D4ED8] hover:text-[#1E3A8A]">×</button>
+                </span>
+              ) : (
+                <button key={it.fromKey} type="button" onClick={() => setDateModalKey(it.fromKey)}
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white text-gray-600 text-xs px-2 py-1 hover:bg-gray-50">
+                  {it.label} <span aria-hidden>📅</span>
+                </button>
+              );
+            })}
+            {Object.values(dateFilters).some(Boolean) && (
+              <>
+                <span className="text-xs text-amber-600 ml-1 whitespace-nowrap">※日付検索中は無効エントリーも対象</span>
+                <FilterClearButton onClick={() => { setDateFilters({}); setPage(1); }} />
+              </>
+            )}
+          </div>
         </FilterGroup>
       </FilterShell>
+
+      {/* 日付レンジ選択モーダル */}
+      {dateModalKey && (() => {
+        const item = DATE_ITEMS.find((i) => i.fromKey === dateModalKey);
+        if (!item) return null;
+        return (
+          <DateRangeModal
+            label={item.label}
+            initialFrom={dateFilters[item.fromKey] || ""}
+            initialTo={dateFilters[item.toKey] || ""}
+            onApply={(from, to) => { setDateFilters((p) => ({ ...p, [item.fromKey]: from, [item.toKey]: to })); setPage(1); }}
+            onClear={() => { setDateFilters((p) => ({ ...p, [item.fromKey]: "", [item.toKey]: "" })); setPage(1); }}
+            onClose={() => setDateModalKey(null)}
+          />
+        );
+      })()}
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (() => {
