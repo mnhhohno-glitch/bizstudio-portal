@@ -250,7 +250,9 @@ export default function TaskNewPage() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [showCandidateFilePicker, setShowCandidateFilePicker] = useState(false);
-  const [candidateFilesForPicker, setCandidateFilesForPicker] = useState<{ id: string; fileName: string; fileSize: number; mimeType: string; driveFileId: string; category: string }[]>([]);
+  const [candidateFilesForPicker, setCandidateFilesForPicker] = useState<{ id: string; fileName: string; fileSize: number; mimeType: string; driveFileId: string; category: string; folderId: string | null; updatedAt: string }[]>([]);
+  const [pickerFolders, setPickerFolders] = useState<{ id: string; name: string }[]>([]);
+  const [pickerCollapsedFolders, setPickerCollapsedFolders] = useState<Set<string>>(new Set());
   const [pickerSelectedIds, setPickerSelectedIds] = useState<Set<string>>(new Set());
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerAttaching, setPickerAttaching] = useState(false);
@@ -1192,10 +1194,20 @@ export default function TaskNewPage() {
     setPickerLoading(true);
     setPickerSelectedIds(new Set());
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/files`);
-      if (res.ok) {
-        const data = await res.json();
+      const [filesRes, foldersRes] = await Promise.all([
+        fetch(`/api/candidates/${candidateId}/files`),
+        fetch(`/api/candidates/${candidateId}/bs-folders`),
+      ]);
+      if (filesRes.ok) {
+        const data = await filesRes.json();
         setCandidateFilesForPicker(data.files || []);
+      }
+      if (foldersRes.ok) {
+        const data = await foldersRes.json();
+        const folders = (data.folders || []) as { id: string; name: string }[];
+        setPickerFolders(folders);
+        // 会社別フォルダは初期状態で折りたたみ（BS作成書類・ブックマークは展開のまま）
+        setPickerCollapsedFolders(new Set(folders.map((f) => f.id)));
       }
     } catch { /* */ }
     finally { setPickerLoading(false); }
@@ -1228,6 +1240,55 @@ export default function TaskNewPage() {
     ORIGINAL: "原本", BS_DOCUMENT: "BS作成書類", APPLICATION: "応募企業",
     INTERVIEW_PREP: "面接対策", MEETING: "面談", BOOKMARK: "ブックマーク",
   };
+
+  /* ----- 求職者ファイルピッカー: 管理画面（当社作成書類）と同じフォルダ構造でグルーピング ----- */
+  type PickerFile = (typeof candidateFilesForPicker)[number];
+  const sortByUpdatedDesc = (arr: PickerFile[]) =>
+    [...arr].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  const buildPickerGroups = (): { key: string; label: string; folderId: string | null; files: PickerFile[] }[] => {
+    const groups: { key: string; label: string; folderId: string | null; files: PickerFile[] }[] = [];
+    const folderIdSet = new Set(pickerFolders.map((f) => f.id));
+
+    // 1. 会社別フォルダ（BS作成書類のサブフォルダ）名前昇順・デフォルト折りたたみ
+    const sortedFolders = [...pickerFolders].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+    for (const folder of sortedFolders) {
+      const folderFiles = sortByUpdatedDesc(candidateFilesForPicker.filter((f) => f.folderId === folder.id));
+      if (folderFiles.length === 0) continue;
+      groups.push({ key: `folder:${folder.id}`, label: folder.name, folderId: folder.id, files: folderFiles });
+    }
+
+    // 2. BS作成書類（フォルダ未所属。存在しないフォルダ参照もここに退避）
+    const bsRoot = sortByUpdatedDesc(
+      candidateFilesForPicker.filter(
+        (f) => (f.category || "OTHER") === "BS_DOCUMENT" && (!f.folderId || !folderIdSet.has(f.folderId))
+      )
+    );
+    if (bsRoot.length > 0) {
+      groups.push({ key: "BS_DOCUMENT", label: CATEGORY_LABELS.BS_DOCUMENT, folderId: null, files: bsRoot });
+    }
+
+    // 3. その他カテゴリ（管理画面の並び順 + ブックマーク）
+    const grouped = candidateFilesForPicker.reduce<Record<string, PickerFile[]>>((acc, f) => {
+      const cat = f.category || "OTHER";
+      if (cat === "BS_DOCUMENT") return acc; // 上で処理済み
+      (acc[cat] ||= []).push(f);
+      return acc;
+    }, {});
+    const OTHER_ORDER = ["ORIGINAL", "APPLICATION", "INTERVIEW_PREP", "MEETING", "BOOKMARK"];
+    for (const cat of OTHER_ORDER) {
+      if (grouped[cat]?.length) {
+        groups.push({ key: cat, label: CATEGORY_LABELS[cat] || cat, folderId: null, files: sortByUpdatedDesc(grouped[cat]) });
+        delete grouped[cat];
+      }
+    }
+    // 想定外カテゴリも末尾に
+    for (const [cat, catFiles] of Object.entries(grouped)) {
+      if (catFiles.length) groups.push({ key: cat, label: CATEGORY_LABELS[cat] || cat, folderId: null, files: sortByUpdatedDesc(catFiles) });
+    }
+    return groups;
+  };
+  const pickerGroups = buildPickerGroups();
 
   const selectCls =
     "w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]";
@@ -2635,25 +2696,34 @@ export default function TaskNewPage() {
                 <p className="text-center text-sm text-gray-400 py-8">ファイルがありません</p>
               ) : (
                 <div className="space-y-1">
-                  {Object.entries(
-                    candidateFilesForPicker.reduce<Record<string, typeof candidateFilesForPicker>>((acc, f) => {
-                      const cat = f.category || "OTHER";
-                      if (!acc[cat]) acc[cat] = [];
-                      acc[cat].push(f);
-                      return acc;
-                    }, {})
-                  ).map(([cat, catFiles]) => (
-                    <div key={cat} className="mb-3">
-                      <p className="text-[12px] font-semibold text-gray-500 mb-1">{CATEGORY_LABELS[cat] || cat}</p>
-                      {catFiles.map((f) => (
-                        <label key={f.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded px-1">
-                          <input type="checkbox" checked={pickerSelectedIds.has(f.id)} onChange={() => setPickerSelectedIds((prev) => { const n = new Set(prev); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
-                          <span className="text-[13px] text-gray-700 truncate">{f.fileName}</span>
-                          <span className="text-[11px] text-gray-400 shrink-0">{formatFileSize(f.fileSize)}</span>
-                        </label>
-                      ))}
-                    </div>
-                  ))}
+                  {pickerGroups.map((group) => {
+                    const isFolder = group.folderId !== null;
+                    const collapsed = isFolder && pickerCollapsedFolders.has(group.folderId as string);
+                    return (
+                      <div key={group.key} className="mb-3">
+                        {isFolder ? (
+                          <button
+                            type="button"
+                            onClick={() => setPickerCollapsedFolders((prev) => { const n = new Set(prev); const id = group.folderId as string; if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+                            className="flex w-full items-center gap-1.5 text-left mb-1"
+                          >
+                            <span className="w-3 text-[10px] text-gray-400">{collapsed ? "▶" : "▼"}</span>
+                            <span className="text-[12px] font-semibold text-gray-500">📁 {group.label}</span>
+                            <span className="text-[11px] text-gray-400">({group.files.length})</span>
+                          </button>
+                        ) : (
+                          <p className="text-[12px] font-semibold text-gray-500 mb-1">{group.label}</p>
+                        )}
+                        {!collapsed && group.files.map((f) => (
+                          <label key={f.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded px-1">
+                            <input type="checkbox" checked={pickerSelectedIds.has(f.id)} onChange={() => setPickerSelectedIds((prev) => { const n = new Set(prev); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB]" />
+                            <span className="text-[13px] text-gray-700 truncate">{f.fileName}</span>
+                            <span className="text-[11px] text-gray-400 shrink-0">{formatFileSize(f.fileSize)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
