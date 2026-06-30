@@ -831,9 +831,17 @@ export default function EntryTable({
       case "candidate":
         return (
           <td key={col.key} className="px-2 py-1.5 whitespace-nowrap">
-            <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
-              {entry.candidate.name}
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
+                {entry.candidate.name}
+              </Link>
+              {/* T-120: タスク作成（エントリー対応依頼）の依頼中バッジ。エントリータブの間だけ表示し、書類選考以降で自動的に消える。 */}
+              {entry.taskRequestedAt && entry.entryFlag === "エントリー" && (
+                <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                  タスク依頼中
+                </span>
+              )}
+            </div>
             <div className="text-gray-400 text-[10px]">{entry.candidate.candidateNumber}</div>
           </td>
         );

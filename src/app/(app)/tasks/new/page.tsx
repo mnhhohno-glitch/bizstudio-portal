@@ -995,6 +995,11 @@ export default function TaskNewPage() {
           assigneeIds,
           completionType: assigneeIds.length > 1 ? completionType : "any",
           fieldValues: allFieldValues,
+          // T-120: エントリーボードから持ち回った JobEntry ID。実作成完了時に taskRequestedAt を記録させる。
+          taskRequestedEntryIds: (searchParams.get("entryIds") || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
         }),
       });
 

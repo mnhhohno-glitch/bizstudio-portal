@@ -154,6 +154,8 @@ export async function POST(request: Request) {
       assigneeIds,
       fieldValues,
       completionType,
+      // T-120: タスク依頼対象の JobEntry ID 配列（任意）。作成成功後にこの行へ taskRequestedAt を記録する。
+      taskRequestedEntryIds,
     } = body;
 
     if (!title?.trim()) {
@@ -192,6 +194,19 @@ export async function POST(request: Request) {
         assignees: { include: { employee: { select: { name: true } } } },
       },
     });
+
+    // T-120: 指定された JobEntry 行に「タスク依頼中」を記録（バッジ表示用）。
+    // 失敗してもタスク作成自体は成功扱いにする（バッジは付かないだけ）。
+    if (Array.isArray(taskRequestedEntryIds) && taskRequestedEntryIds.length > 0) {
+      try {
+        await prisma.jobEntry.updateMany({
+          where: { id: { in: taskRequestedEntryIds } },
+          data: { taskRequestedAt: new Date() },
+        });
+      } catch (markError) {
+        console.error("T-120: taskRequestedAt の記録に失敗:", markError);
+      }
+    }
 
     // completionType="all" の場合、全担当者分の TaskAssigneeStatus を生成
     if ((completionType || "any") === "all" && assigneeIds.length > 1) {

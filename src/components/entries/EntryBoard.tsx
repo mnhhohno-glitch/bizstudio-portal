@@ -87,6 +87,8 @@ export type Entry = {
   cost?: number | null;
   // T-100: 求人DB費（手入力・円・nullable）。粗利は revenue - (jobDbCost ?? 0) - (cost ?? 0) で表示計算（非保存）。
   jobDbCost?: number | null;
+  // T-120: タスク作成（エントリー対応依頼）で依頼対象になった日時。バッジ「タスク依頼中」表示に使用。
+  taskRequestedAt?: string | null;
 };
 
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
@@ -769,11 +771,14 @@ export default function EntryBoard() {
         prefill: "entry",
         candidateId,
         categoryName: CATEGORY_NAME,
-        assignees: "1000025",
+        // T-120: デフォルト担当者を佐藤 葵(1000025) ＋ 見ル野 未来(1000027) の2名に。
+        assignees: "1000025,1000027",
         title: `エントリー対応依頼 - ${info.name}`,
         entryDate: latestEntryDate(info.entries),
         entryCount: String(info.entries.length),
         entryDescription: buildDescription(info.entries),
+        // T-120: 選択した JobEntry ID をウィザードへ渡し、実作成完了時に taskRequestedAt を記録させる。
+        entryIds: info.entries.map((e) => e.id).join(","),
         step: "5",
       });
       // タスク作成画面は新規タブで開き、元のエントリー画面（選択・フィルタ）を保持する
@@ -801,7 +806,8 @@ export default function EntryBoard() {
         toast.error("カテゴリ「エントリー対応（求職者対応）」が見つかりません");
         return;
       }
-      const assigneeIds = ["1000025"]
+      // T-120: デフォルト担当者を佐藤 葵(1000025) ＋ 見ル野 未来(1000027) の2名に。
+      const assigneeIds = ["1000025", "1000027"]
         .map((num) => employees.find((e) => e.employeeNo === num)?.id)
         .filter((id): id is string => !!id);
       if (assigneeIds.length === 0) {
@@ -833,6 +839,8 @@ export default function EntryBoard() {
               assigneeIds,
               completionType: "any",
               fieldValues,
+              // T-120: 選択した各 JobEntry に「タスク依頼中」を記録（バッジ表示用）。
+              taskRequestedEntryIds: info.entries.map((e) => e.id),
             }),
           });
           if (res.ok) ok++;
@@ -847,6 +855,8 @@ export default function EntryBoard() {
       } else {
         toast.error(`${ok}件成功、${fail}件失敗しました`);
       }
+      // T-120: taskRequestedAt 反映後の「タスク依頼中」バッジを即時表示するため再取得。
+      fetchEntries();
     } catch {
       toast.error("タスク作成に失敗しました");
     }

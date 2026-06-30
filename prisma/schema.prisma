@@ -1536,6 +1536,11 @@ model JobEntry {
   companyFlag     String? @map("company_flag")
   personFlag      String? @map("person_flag")
 
+  // T-120: タスク作成（エントリー対応依頼）でこの行が依頼対象になった日時。
+  // バッジ「タスク依頼中」は taskRequestedAt != null かつ entryFlag === "エントリー" の間だけ表示し、
+  // 書類選考以降へ進めば条件が外れて自動的に消える（明示クリア処理は持たない）。
+  taskRequestedAt DateTime? @map("task_requested_at")
+
   hasJobPosting Boolean @default(false) @map("has_job_posting")
   hasEntry      Boolean @default(false) @map("has_entry")
   hasJoined     Boolean @default(false) @map("has_joined")
