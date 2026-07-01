@@ -266,6 +266,29 @@ const MAX_PAST_MESSAGES = 30;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_CHAT_MESSAGE_CHARS = 4000;
 
+// T-126 Phase2: run 内で候補者context を byte-identical に保つためのプロセス内キャッシュ。
+//   getCandidateContext は主要書類を parsePdfWithAI で毎回 OCR するため出力が毎回わずかに変動し、
+//   そのままでは system 第2ブロック(候補者context)が cache read されず毎バッチ write(1.25x) になる。
+//   sessionId 単位でキャッシュして run 内の全バッチで同一テキストを使う（＝第2ブロックが cache read 化）。
+//   Railway は単一プロセス常駐のためプロセス内 Map で run 全バッチをカバーできる。
+const RUN_CONTEXT_TTL_MS = 30 * 60 * 1000;
+const runContextCache = new Map<string, { context: string; ts: number }>();
+
+function getCachedRunContext(sessionId: string): string | null {
+  const hit = runContextCache.get(sessionId);
+  if (hit && Date.now() - hit.ts < RUN_CONTEXT_TTL_MS) return hit.context;
+  return null;
+}
+
+function setCachedRunContext(sessionId: string, context: string): void {
+  // 期限切れエントリを掃除してから保存（メモリリーク防止）。
+  const now = Date.now();
+  for (const [k, v] of runContextCache) {
+    if (now - v.ts >= RUN_CONTEXT_TTL_MS) runContextCache.delete(k);
+  }
+  runContextCache.set(sessionId, { context, ts: now });
+}
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ candidateId: string }> }
@@ -335,22 +358,31 @@ export async function POST(
     return NextResponse.json({ error: "No files in this batch" }, { status: 400 });
   }
 
-  // 3. Get candidate context directly (no HTTP fetch needed)
-  let candidateContext = "";
-  try {
-    candidateContext = await getCandidateContext(candidateId);
-    // Strip bookmark section (we send job postings separately)
-    const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
-    if (bookmarkIdx !== -1) {
-      candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
+  // 3. Get candidate context.
+  //    T-126 Phase2: run内は sessionId 単位でキャッシュし、全バッチで byte-identical にする
+  //    （第2キャッシュブロックを read 化＋主要書類の再OCRを1回に削減）。
+  let candidateContext = getCachedRunContext(sessionId) ?? "";
+  if (!candidateContext) {
+    try {
+      candidateContext = await getCandidateContext(candidateId);
+      // Strip bookmark section (we send job postings separately)
+      const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
+      if (bookmarkIdx !== -1) {
+        candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
+      }
+    } catch (e) {
+      console.error("[AnalyzeBatch] Context error:", e);
     }
-  } catch (e) {
-    console.error("[AnalyzeBatch] Context error:", e);
-  }
 
-  // Truncate context to prevent oversized payloads
-  if (candidateContext.length > MAX_CONTEXT_CHARS) {
-    candidateContext = candidateContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
+    // Truncate context to prevent oversized payloads
+    if (candidateContext.length > MAX_CONTEXT_CHARS) {
+      candidateContext = candidateContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
+    }
+
+    // 空文字はキャッシュしない（次バッチで再取得を試みる）。
+    if (candidateContext.trim() !== "") {
+      setCachedRunContext(sessionId, candidateContext);
+    }
   }
 
   // 4. Build job posting section for this batch (uses DB-stored extracted text - no PDF binary)
