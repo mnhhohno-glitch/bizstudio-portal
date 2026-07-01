@@ -58,12 +58,16 @@ export default function AdvisorFloatingPanel({
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
 
+  // T-126 Phase2: サーバ側 analyze-batch の hasValidThreeAxisMarkers と判定を厳密に一致させる。
+  //   （** を除去 / 通過率・総合の ■ は任意）。ここが厳しすぎるとサーバが valid とみなす求人まで
+  //   「破損」と数えてしまい、invalid-only 再実行のバッチ数がサーバの対象件数とズレる。
   const hasValidThreeAxisMarkers = (comment: string | null | undefined): boolean => {
     if (!comment) return false;
+    const c = comment.replace(/\*\*/g, "");
     return (
-      /■\s*本人希望[：:]\s*[ABCD]/.test(comment) &&
-      /■\s*通過率[：:]\s*[ABCD]/.test(comment) &&
-      /■\s*総合[：:]\s*[ABCD]/.test(comment)
+      /■\s*本人希望[：:]\s*[ABCD]/.test(c) &&
+      /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c) &&
+      /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c)
     );
   };
 
@@ -275,8 +279,11 @@ export default function AdvisorFloatingPanel({
           : `全${totalFiles}件の分析が完了しました`
       );
       if (skipped > 0) {
+        // T-126 Phase2: 再実行で成功済みファイルまで再生成(=二重課金)しないよう、
+        //   「未評価/破損のみ」を自動ON にする。次の「全件分析」はスキップ分だけを対象にする。
+        setInvalidOnlyMode(true);
         toast.warning(
-          `${skipped}件の求人でAIレスポンスのフォーマットが不正だったため、既存の評価を保持しました。もう一度「全件分析」を実行してください。`
+          `${skipped}件の求人でAIレスポンスのフォーマットが不正だったため、既存の評価を保持しました。「未評価/破損のみ」をONにしたので、もう一度「全件分析」を押すとスキップ分だけを再実行します。`
         );
       }
       window.dispatchEvent(new Event("bookmark-ratings-updated"));

@@ -17,6 +17,36 @@ function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   return hasDesire && hasPass && hasOverall;
 }
 
+// T-126 Phase2: 最終バッチの総合まとめ生成に渡す過去バッチ結果を圧縮する。
+// 総合まとめに必要なのは「会社名 + 3軸レーティング」のみで、◆推薦本文・◆選考分析の長文は不要。
+// 会社名見出し行と ■本人希望/■通過率/■総合 行だけ残し、それ以外の本文を落として入力トークンを削減する。
+// ※ 出力フォーマットは一切変えない。圧縮するのは「最終バッチへ渡す入力(履歴)」のみ。
+function compressBatchResultForSummary(content: string): string {
+  const kept: string[] = [];
+  for (const rawLine of content.split("\n")) {
+    const t = rawLine.trim();
+    if (t === "") continue;
+    const noBold = t.replace(/\*\*/g, "");
+    // 会社名見出し（## 【…】 / **【…】** / 裸【…】 / 求人N:）
+    if (/^(?:#{1,3}\s*)?【[^】]+】/.test(noBold) || /^(?:#{1,3}\s*)?求人\d+[：:]/.test(noBold)) {
+      kept.push(t);
+      continue;
+    }
+    // 3軸マーカー行（本人希望 / 通過率 / 総合）
+    if (/^■?\s*(?:本人希望|通過率|総合)\s*[：:]\s*[ABCD]/.test(noBold)) {
+      kept.push(t);
+      continue;
+    }
+    // バッチラベル・総合まとめ見出しは残す（文脈保持）
+    if (t.startsWith("【求人分析") || t.includes("総合優先順位")) {
+      kept.push(t);
+      continue;
+    }
+  }
+  // 圧縮で全滅した場合は元テキストにフォールバック（安全策）。
+  return kept.length > 0 ? kept.join("\n") : content;
+}
+
 function extractRatingsAndComments(
   analysisText: string,
   batchFiles: { id: string; fileName: string }[]
@@ -517,6 +547,8 @@ ${skillContent}
 
   // 6. Fetch chat history — 最終バッチ（総合まとめ生成）のみ過去バッチ結果を同梱する。
   //    中間バッチは各求人単体分析に履歴不要のため非同梱（input 削減・質不変）。
+  //    T-126 Phase2: 最終バッチの履歴は compressBatchResultForSummary で会社名+3軸だけに圧縮し、
+  //    uncached input を削減する（最終バッチの入力膨張=最高額コールの主因）。
   const pastMessages = isLastBatch
     ? (
         await prisma.advisorChatMessage.findMany({
@@ -527,15 +559,23 @@ ${skillContent}
     : [];
 
   const messagesArray = [
-    ...pastMessages.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content.length > MAX_CHAT_MESSAGE_CHARS
-        ? m.content.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
-        : m.content,
-    })),
+    ...pastMessages.map((m) => {
+      // assistant（過去バッチ結果）は総合まとめに必要な要点だけへ圧縮。
+      const compressed =
+        m.role === "assistant" ? compressBatchResultForSummary(m.content) : m.content;
+      return {
+        role: m.role as "user" | "assistant",
+        content:
+          compressed.length > MAX_CHAT_MESSAGE_CHARS
+            ? compressed.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
+            : compressed,
+      };
+    }),
     {
+      // T-126 Phase2: 候補者情報は system の第2キャッシュブロックへ移動（run内不変=バッチ間で cache read 化）。
+      // user ターンには可変部（このバッチの求人票）だけを置く。
       role: "user" as const,
-      content: `## 候補者情報\n${candidateContext}\n\n## 検討中の求人票（${start + 1}〜${end}件目 / 全${totalFiles}件）\n${jobsSection}\n\n上記の求人について分析してください。`,
+      content: `## 検討中の求人票（${start + 1}〜${end}件目 / 全${totalFiles}件）\n${jobsSection}\n\n上記の求人について分析してください。`,
     },
   ];
 
@@ -544,6 +584,29 @@ ${skillContent}
   if (!anthropicApiKey) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
+
+  // T-126 Phase2: run の総バッチ数。1バッチだけの run では cache_control を付けない
+  //   （write割増(1.25x)の純損になり、read の恩恵も得られないため）。
+  //   複数バッチ run のみ、固定プレフィックス(skill)と候補者context をキャッシュブロック化して
+  //   バッチ2件目以降を cache read にする。
+  const totalBatches = Math.ceil(totalFiles / batchSize);
+  const isMultiBatch = totalBatches > 1;
+  const cacheControl = isMultiBatch ? { type: "ephemeral" as const } : undefined;
+
+  // system ブロックの並び順: ①固定プレフィックス(skill+評価ルール) → ②候補者context → ③可変(バッチ指示)。
+  // ①②は run 内で不変なので cache_control を付ける（複数バッチ時）。③は毎バッチ変わるので付けない。
+  type SystemBlock = { type: "text"; text: string; cache_control?: { type: "ephemeral" } };
+  const systemBlocks: SystemBlock[] = [
+    { type: "text", text: FIXED_SYSTEM, ...(cacheControl ? { cache_control: cacheControl } : {}) },
+  ];
+  if (candidateContext && candidateContext.trim() !== "") {
+    systemBlocks.push({
+      type: "text",
+      text: `## 候補者情報\n${candidateContext}`,
+      ...(cacheControl ? { cache_control: cacheControl } : {}),
+    });
+  }
+  systemBlocks.push({ type: "text", text: systemPrompt });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -560,17 +623,7 @@ ${skillContent}
         model: CLAUDE_MODEL_ANALYSIS,
         max_tokens: 16000,
         temperature: 0.7,
-        system: [
-          {
-            type: "text",
-            text: FIXED_SYSTEM,
-            cache_control: { type: "ephemeral" },
-          },
-          {
-            type: "text",
-            text: systemPrompt,
-          },
-        ],
+        system: systemBlocks,
         messages: messagesArray,
       }),
       signal: controller.signal,
