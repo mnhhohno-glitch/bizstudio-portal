@@ -352,3 +352,19 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - 途中保存は portal `FormDraft` テーブル + `google-form/draft`（GET/PUT/DELETE）。求職者ごと 1 件・フォーム作成成功で自動削除。
 
 **関連**: 2026/6/18 改修（全カテゴリ事前確認化 / チェック一括削除 / 途中保存）。
+
+## 39. プロンプトキャッシュは byte 一致が条件（非決定テキストに cache_control を付けると毎回 write で逆効果）
+
+**罠**: Anthropic の prompt cache（`cache_control: { type: "ephemeral" }`）は、**キャッシュ対象ブロックのプレフィックスが byte 単位で一致**して初めて cache_read（入力単価の10%）になる。1文字でも違えば cache_creation（write, 入力単価の **1.25倍**）扱いで再課金され、read の恩恵はゼロ。**「cache_control を付けた＝安くなった」ではない**。むしろ毎回 write になると、キャッシュ無し（素の入力単価 1.0倍）より高くつき、最適化が逆効果になる。
+
+**症状**: マルチバッチ run で2バッチ目以降も `cache_creation` が出続け、`cache_read` が増えない（＝キャッシュされていない）。トークン内訳を見ないと「キャッシュ導入済み」と誤認したまま余計に課金され続ける。
+
+**原因（T-126 Phase2, 2026/7/2 で実際に踏んだ）**: `analyze-batch` で候補者context を system の第2キャッシュブロックにしたが、context を生成する `getCandidateContext()` が主要書類を `parsePdfWithAI`（Claude による OCR・**非決定的**）で毎回パースするため、出力テキストが呼び出しごとに数トークン変動していた。結果、第2ブロックが毎バッチ cache_creation（write, 1.25倍）になり、context をキャッシュ外の user ターンに置いていた元実装（1.0倍）より高くなっていた。
+
+**対処**:
+- **cache_control を付けるブロックには、run 内で不変が保証されたテキストだけを入れる**。日時・年齢・相対時刻・**AI生成／OCR結果**・未ソートの集合など、実行のたびに揺れる要素が1つでも混ざると byte 不一致で write ループになる。揺れる要素はキャッシュ外（user ターン等）へ出すか、run 内で1回だけ計算して byte 固定する。
+  - T-126 の解決策: `sessionId` 単位のプロセス内キャッシュで context を run 内 byte-identical に固定（副次効果で主要書類の再OCRも run 1回に削減）。バッチ2件目単価 $0.234→$0.178（-24%）。
+- **シングルバッチ run（総バッチ=1）は cache_control を付けない**。次の read の機会が無いため、write 割増（1.25倍）の純損になる。
+- **変更後は必ず usage の `cache_read_input_tokens` / `cache_creation_input_tokens` を実測して、狙ったブロックが read されているか確認する**。トークン内訳を見ずに「キャッシュ済み」と判断しない（記録は AdvisorUsageLog / `[usage]` ログ）。
+
+**関連**: T-126（2026/7/2）。usage 永続化は `AdvisorUsageLog`（`src/lib/advisor-usage.ts` / `scripts/advisor-usage-report.ts`）。コスト監視は成功ファイル数ベースでなくこのログの cache_read/creation/costUsd で行う。
