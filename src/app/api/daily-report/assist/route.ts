@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { getDailyReportSkill } from "@/lib/load-daily-report-skill";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
@@ -111,6 +112,8 @@ export async function POST(req: Request) {
       messages,
     });
     assistantText = res.content[0]?.type === "text" ? res.content[0].text : "";
+    // T-126: usage を永続化。
+    await recordAdvisorUsage({ endpoint: "daily-report-assist", model: CLAUDE_MODEL_DEFAULT, usage: res.usage });
   } catch (e) {
     console.error("[daily-report/assist] Claude error:", e);
     return NextResponse.json({ error: "AI の応答取得に失敗しました" }, { status: 500 });
@@ -129,6 +132,8 @@ export async function POST(req: Request) {
           { role: "user", content: '前回のレスポンスが JSON 形式ではありませんでした。必ず { "message": "...", "rewrittenBody": "...", "advice": "..." } の形式で返してください。コードブロック記法は使わないでください。' },
         ],
       });
+      // T-126: JSON 整形リトライも記録（isRetry=true）。
+      await recordAdvisorUsage({ endpoint: "daily-report-assist", model: CLAUDE_MODEL_DEFAULT, usage: retry.usage, isRetry: true, note: "json-retry" });
       parsed = tryParse(retry.content[0]?.type === "text" ? retry.content[0].text : "");
     } catch (e) { console.error("[daily-report/assist] retry failed:", e); }
   }

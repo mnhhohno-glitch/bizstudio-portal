@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getCandidateContext } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -580,6 +581,18 @@ ${skillContent}
     if (!response.ok) {
       const errText = await response.text();
       console.error("[AnalyzeBatch] Anthropic error:", response.status, errText);
+      // T-126: 失敗コールも記録（課金トークンは無いが失敗率の可視化に使う）。
+      await recordAdvisorUsage({
+        endpoint: "analyze-batch",
+        model: CLAUDE_MODEL_ANALYSIS,
+        usage: null,
+        candidateId,
+        batchIndex,
+        batchTotal: Math.ceil(totalFiles / batchSize),
+        fileCount: batchFiles.length,
+        isRetry: mode === "invalid-only",
+        note: `error-${response.status}`,
+      });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
       }
@@ -596,6 +609,18 @@ ${skillContent}
     const data = await response.json();
     const u = data.usage ?? {};
     console.log(`[analyze-batch usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
+    // T-126: usage を永続化。invalid-only は再実行経路なので isRetry=true。
+    await recordAdvisorUsage({
+      endpoint: "analyze-batch",
+      model: CLAUDE_MODEL_ANALYSIS,
+      usage: u,
+      candidateId,
+      batchIndex,
+      batchTotal: Math.ceil(totalFiles / batchSize),
+      fileCount: batchFiles.length,
+      isRetry: mode === "invalid-only",
+      note: isLastBatch ? "last-batch" : null,
+    });
     const analysisText = data.content?.[0]?.text || "";
 
     // 8. Save to chat

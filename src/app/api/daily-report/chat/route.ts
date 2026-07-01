@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { buildDailyReportSystemPrompt } from "@/lib/dailyReport/prompt";
 import { computeCaMetrics } from "@/lib/dailyReport/metrics";
 import {
@@ -101,6 +102,8 @@ export async function POST(req: Request) {
       messages,
     });
     assistantText = response.content[0]?.type === "text" ? response.content[0].text : "";
+    // T-126: usage を永続化。
+    await recordAdvisorUsage({ endpoint: "daily-report-chat", model: CLAUDE_MODEL_DEFAULT, usage: response.usage });
   } catch (e) {
     console.error("[daily-report/chat] Claude API error:", e);
     return NextResponse.json({ error: "AI の応答取得に失敗しました" }, { status: 500 });
@@ -138,6 +141,8 @@ export async function POST(req: Request) {
           },
         ],
       });
+      // T-126: JSON 整形リトライも記録（isRetry=true）。
+      await recordAdvisorUsage({ endpoint: "daily-report-chat", model: CLAUDE_MODEL_DEFAULT, usage: retry.usage, isRetry: true, note: "json-retry" });
       const retryText = retry.content[0]?.type === "text" ? retry.content[0].text : "";
       parsed = tryParse(retryText);
     } catch (e) {

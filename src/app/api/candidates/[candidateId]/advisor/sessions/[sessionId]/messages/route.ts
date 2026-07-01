@@ -9,6 +9,7 @@ import {
 } from "@/lib/file-parser";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -309,6 +310,8 @@ export async function POST(
         },
       ];
 
+  const usedModel = selectModel(content || "", !!file);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -321,7 +324,7 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: selectModel(content || "", !!file),
+        model: usedModel,
         max_tokens: 4000,
         temperature: 0.7,
         system: systemBlocks,
@@ -338,6 +341,14 @@ export async function POST(
     if (!response.ok) {
       const errText = await response.text();
       console.error("Anthropic API error:", response.status, errText);
+      // T-126: 失敗コールも記録（失敗率の可視化）。
+      await recordAdvisorUsage({
+        endpoint: "advisor-chat",
+        model: usedModel,
+        usage: null,
+        candidateId,
+        note: `error-${response.status}`,
+      });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
       }
@@ -347,6 +358,14 @@ export async function POST(
     const data = await response.json();
     const u = data.usage ?? {};
     console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
+    // T-126: usage を永続化。FULL/LIGHT はスキルモードで判別（note）。
+    await recordAdvisorUsage({
+      endpoint: "advisor-chat",
+      model: usedModel,
+      usage: u,
+      candidateId,
+      note: useSkill ? "skill-full" : "skill-light",
+    });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""
       ? rawContent

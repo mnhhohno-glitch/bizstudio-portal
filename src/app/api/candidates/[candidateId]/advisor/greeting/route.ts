@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { parsePdfWithAI, parseDocWithAI, parseTextFile } from "@/lib/file-parser";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 const API_TIMEOUT_MS = 120000;
 
@@ -195,6 +196,14 @@ export async function POST(
     if (!response.ok) {
       const errText = await response.text();
       console.error("Greeting Anthropic API error:", response.status, errText);
+      // T-126: 失敗コールも記録。
+      await recordAdvisorUsage({
+        endpoint: "greeting",
+        model: CLAUDE_MODEL_DEFAULT,
+        usage: null,
+        candidateId,
+        note: `error-${response.status}`,
+      });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
       }
@@ -202,6 +211,14 @@ export async function POST(
     }
 
     const data = await response.json();
+    // T-126: usage を永続化（greeting は単発・低頻度）。
+    await recordAdvisorUsage({
+      endpoint: "greeting",
+      model: CLAUDE_MODEL_DEFAULT,
+      usage: data.usage,
+      candidateId,
+      note: format,
+    });
     const rawContent = data.content?.[0]?.text;
     const greetingText = rawContent && rawContent.trim() !== ""
       ? rawContent

@@ -1491,6 +1491,32 @@ model AdvisorChatMessage {
   @@map("advisor_chat_messages")
 }
 
+// T-126: AIアドバイザー系 Anthropic API の usage/コストを1コール1行で永続化する。
+// Railway ログはデプロイ単位で消えるため、長期のコスト追跡・無駄コール可視化の唯一の記録。
+// candidateId は FK を張らない（テストユーザー混在・ログ書込みが本体を落とさないため意図的に非リレーション）。
+model AdvisorUsageLog {
+  id                  String   @id @default(cuid())
+  createdAt           DateTime @default(now()) @map("created_at")
+  endpoint            String // analyze-batch / advisor-chat / greeting / daily-report-assist / daily-report-chat
+  candidateId         String?  @map("candidate_id")
+  batchIndex          Int?     @map("batch_index")
+  batchTotal          Int?     @map("batch_total")
+  fileCount           Int?     @map("file_count")
+  model               String // 実際に使用したモデルID
+  inputTokens         Int      @map("input_tokens")
+  outputTokens        Int      @map("output_tokens")
+  cacheReadTokens     Int      @default(0) @map("cache_read_tokens")
+  cacheCreationTokens Int      @default(0) @map("cache_creation_tokens")
+  costUsd             Float    @map("cost_usd")
+  isRetry             Boolean  @default(false) @map("is_retry")
+  note                String?
+
+  @@index([createdAt])
+  @@index([endpoint])
+  @@index([candidateId])
+  @@map("advisor_usage_logs")
+}
+
 // ========================================
 // エントリー履歴
 // ========================================
