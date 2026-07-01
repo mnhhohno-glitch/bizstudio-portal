@@ -231,6 +231,8 @@ export default function EntryBoard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(initialCandidateName ? "全件" : "エントリー");
   const [counts, setCounts] = useState<Record<string, number>>({});
+  // T-120: タブ別の人数（DISTINCT candidateId）。タブバッジを「N人（M件）」で併記表示する。
+  const [peopleCounts, setPeopleCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0); // 全フィルタ適用後・現在タブの総件数（サーバー集計）
   const [totalPages, setTotalPages] = useState(1);
@@ -320,6 +322,7 @@ export default function EntryBoard() {
         setTotal(data.total || 0);
         setTotalPages(data.totalPages || 1);
         setCounts(data.counts || {});
+        setPeopleCounts(data.peopleCounts || {});
       }
     } catch { /* */ }
     finally { setLoading(false); }
@@ -396,6 +399,7 @@ export default function EntryBoard() {
       if (res.ok) {
         const data = await res.json();
         setCounts(data.counts || {});
+        setPeopleCounts(data.peopleCounts || {});
       }
     } catch { /* */ }
   }, [candidateName, companyName, caFilter, rcFilter, freeSearch, includeInactive, includeArchived, urlMissingOnly, dateFilters]);
@@ -944,7 +948,7 @@ export default function EntryBoard() {
             {tab.label}
             {counts[tab.key] != null && (
               <span className="ml-1 text-xs bg-gray-100 text-gray-900 rounded-full px-1.5 py-0.5">
-                {counts[tab.key]}
+                {peopleCounts[tab.key] ?? 0}人（{counts[tab.key]}件）
               </span>
             )}
           </button>

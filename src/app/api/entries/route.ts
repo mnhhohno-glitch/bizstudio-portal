@@ -97,6 +97,10 @@ export async function GET(req: NextRequest) {
   let entries: Prisma.JobEntryGetPayload<{ include: typeof include }>[];
   let total: number;
   const counts: Record<string, number> = {};
+  // T-120: タブ別の人数（COUNT DISTINCT candidateId）。件数(counts)と同じ where 条件で集計する。
+  // 「全件」は各タブ人数の合計ではなく、entryFlag 絞り込みなしの DISTINCT candidateId で別集計する
+  // （同一求職者が複数ステータスにまたがるため単純合算は誤り）。
+  const peopleCounts: Record<string, number> = {};
 
   const rcActive = rcName.length > 0;
   if (rcActive) {
@@ -109,6 +113,10 @@ export async function GET(req: NextRequest) {
     );
     flagValues.forEach((f) => { counts[f] = rcAll.filter((e) => e.entryFlag === f).length; });
     counts["全件"] = rcAll.length;
+    flagValues.forEach((f) => {
+      peopleCounts[f] = new Set(rcAll.filter((e) => e.entryFlag === f).map((e) => e.candidateId)).size;
+    });
+    peopleCounts["全件"] = new Set(rcAll.map((e) => e.candidateId)).size;
     const filtered = entryFlag ? rcAll.filter((e) => e.entryFlag === entryFlag) : rcAll;
     total = filtered.length;
     entries = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
@@ -118,11 +126,17 @@ export async function GET(req: NextRequest) {
       prisma.jobEntry.count({ where }),
       ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...countBase, entryFlag: f } })),
       prisma.jobEntry.count({ where: countBase }),
+      // T-120: 人数（DISTINCT candidateId）。groupBy は distinct count 非対応のため、
+      // (entryFlag, candidateId) の一意ペアを取得し、JS でタブ別・全件を数える。
+      prisma.jobEntry.groupBy({ by: ["entryFlag", "candidateId"], where: countBase }),
     ]);
     entries = countResults[0] as Prisma.JobEntryGetPayload<{ include: typeof include }>[];
     total = countResults[1] as number;
     flagValues.forEach((f, i) => { counts[f] = countResults[2 + i] as number; });
     counts["全件"] = countResults[2 + flagValues.length] as number;
+    const peoplePairs = countResults[3 + flagValues.length] as { entryFlag: string | null; candidateId: string }[];
+    flagValues.forEach((f) => { peopleCounts[f] = peoplePairs.filter((p) => p.entryFlag === f).length; });
+    peopleCounts["全件"] = new Set(peoplePairs.map((p) => p.candidateId)).size;
   }
 
   return NextResponse.json({
@@ -131,6 +145,7 @@ export async function GET(req: NextRequest) {
     page,
     totalPages: Math.ceil(total / limit),
     counts,
+    peopleCounts,
   });
 }
 

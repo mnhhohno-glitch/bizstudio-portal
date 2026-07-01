@@ -678,6 +678,24 @@ EntryBoard (1083 行)
 - `toISOString().slice(0,10)` は **禁止**（JST 9時間ずれで前日になる。詳細は `12-pitfalls.md` 参照）
 - `formatInterviewDateTime()` (EntryBoard L81): ダイアログ表示用の日時整形も同じ `sv-SE` + `Asia/Tokyo` パターン
 
+### EntryBoard: タブバッジ 件数表示（人数（件数）併記, T-120）
+
+タブバー各タブのバッジは **「N人（M件）」** 形式（例: 面接 `18人（34件）`）。件数と人数を同じ where 条件で連動集計する。
+
+- **件数（M件）**＝`JobEntry` レコード数。定義は従来どおり不変。
+- **人数（N人）**＝そのタブに含まれる求職者を重複排除した数（`COUNT(DISTINCT candidateId)`）。1人が複数エントリーを持っても1人。
+- **描画**: `EntryBoard.tsx` タブ `map` 内（タブラベル右の pill）。`{peopleCounts[tab.key] ?? 0}人（{counts[tab.key]}件）`。色・レイアウト（`bg-gray-100 text-gray-900 rounded-full`）は従来踏襲、数値のみ変更。右上「全 N 件」（`total`）は現状維持で人数併記しない。
+- **state / データ流路**: `counts: Record<string, number>` に加え `peopleCounts: Record<string, number>` を state 追加。`fetchEntries` / `refreshCounts`（タブ件数のみ再取得）の双方で `setPeopleCounts(data.peopleCounts || {})`。フィルタ（日付・検索・担当RC 等）は counts と同じ where で集計されるため人数も同絞り込みで連動する。
+
+#### peopleCounts の集計方式（`/api/entries` GET, `route.ts`）
+
+- **件数(counts)** の集計は変更なし。通常経路＝`prisma.jobEntry.count`（flag ごと＋`countBase` で全件）、担当RC 有効時＝`countBase` 全件取得後に JS で号機→実名突合してから `.filter().length`。
+- **人数(peopleCounts)** を `counts` と同一 where で追加集計:
+  - 通常経路: Prisma `groupBy` は distinct count 非対応のため、`prisma.jobEntry.groupBy({ by: ["entryFlag","candidateId"], where: countBase })` で `(entryFlag, candidateId)` 一意ペアを取得 → タブ別は `pairs.filter(p => p.entryFlag === f).length`、全件は `new Set(pairs.map(p => p.candidateId)).size`。
+  - 担当RC 経路: 取得済み `rcAll` から `new Set(...map(candidateId)).size` で算出。
+- **「全件」の人数は各タブ人数の合計ではない**。entryFlag 絞り込みなしの `COUNT(DISTINCT candidateId)` を別集計する（同一求職者が複数ステータスにまたがるため単純合算は過大になる）。実測: 全件 183人（各タブ人数合計 198 > DISTINCT 183）。
+- レスポンスに `peopleCounts` を追加（`counts` と同型 `Record<string, number>`）。
+
 ### EntryTable: 本人辞退時の対応フラグ表示フィルタ
 
 - `EntryTable.tsx` の `companyFlag`（企業対応）／`personFlag`（本人対応）dropdown は、`entryFlagDetail` が「本人辞退」系（`本人辞退` / `本人辞退_他社決` / `本人辞退_自社他`、`startsWith("本人辞退")` で判定）のとき、ラベルに「辞退」を含む選択肢のみ表示。それ以外のときは「辞退」を含む選択肢を非表示にする
