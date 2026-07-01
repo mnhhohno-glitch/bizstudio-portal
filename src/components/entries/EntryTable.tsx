@@ -303,15 +303,18 @@ function applySortAndGroup(entries: Entry[], sortField: string | null, sortDir: 
 
 /* ========== Cell Components ========== */
 
-function InlineDateCell({ value, entryId, field, onUpdate }: {
+function InlineDateCell({ value, entryId, field, onUpdate, notNull }: {
   value: string | null; entryId: string; field: string;
   onUpdate: (id: string, f: Record<string, unknown>) => Promise<void>;
+  notNull?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const cur = value ? value.slice(0, 10) : "";
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const v = e.target.value;
+    // NOT NULL 列（entryDate 等）は空値で保存を発火させない（元の値を維持）。サーバー側でも 400 で弾く。
+    if (notNull && !v) { setEditing(false); return; }
     if (v !== cur) onUpdate(entryId, { [field]: v ? `${v}T12:00:00.000Z` : null });
     setEditing(false);
   };
@@ -1014,7 +1017,7 @@ export default function EntryTable({
           </td>
         );
       case "entryDate":
-        return <td key={col.key} className="px-2 py-1.5 text-center text-[11px]" title={fmtDateFull(entry.entryDate)}>{fmtDate(entry.entryDate)}</td>;
+        return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.entryDate} entryId={entry.id} field="entryDate" onUpdate={onFieldUpdate} notNull /></td>;
       case "docSubmit":
         return <td key={col.key} className="px-1 py-0.5 text-center text-[11px]"><InlineDateCell value={entry.documentSubmitDate} entryId={entry.id} field="documentSubmitDate" onUpdate={onFieldUpdate} /></td>;
       case "docDates":

@@ -33,6 +33,11 @@ export async function PATCH(
   const { entryId } = await params;
   const body = await req.json();
 
+  // entryDate は NOT NULL 列。空値（null/空文字）での更新は 400 で弾き、DB は更新前の値を維持する。
+  if ("entryDate" in body && !body.entryDate) {
+    return NextResponse.json({ error: "エントリー日は必須です（空にできません）" }, { status: 400 });
+  }
+
   // Allow updating any field
   const allowedFields = [
     "companyName", "jobTitle", "externalJobNo", "jobDb", "jobType", "prefecture", "jobCategory",
