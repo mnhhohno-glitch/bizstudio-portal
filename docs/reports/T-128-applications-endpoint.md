@@ -80,7 +80,11 @@ GET /api/external/candidate-site/applications?candidateNumber=5999999
 - add 対象（パス明示・`git add -A` 不使用）:
   - `src/app/api/external/candidate-site/applications/route.ts`（新規）
   - `docs/reports/T-128-applications-endpoint.md`（本報告）
-- （コミットID・push・Railwayデプロイ結果は本文末尾に追記）
+- **コミットID: `1fc5365`**（`b14402f..1fc5365 master -> master`）
+- **push: 成功**（origin master）
+- **Railwayデプロイ: SUCCESS**（BUILDING→DEPLOYING→SUCCESS、約132s）
+- 本番到達性確認: `GET .../applications`（no-key / wrong-key）とも **401**（404ではない＝ルートがデプロイ済み・認可 fail-closed が有効）。
+- 機能検証（200・appliedAt実データ・ホワイトリスト・すり替え拒否）は同一の本番DBに対しローカル dev で全項目パス済み（本番はDB共有のため結果は同一）。
 
 ---
 
