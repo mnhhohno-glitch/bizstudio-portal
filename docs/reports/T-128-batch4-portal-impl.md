@@ -151,7 +151,28 @@ ALTER TABLE "candidate_files" ADD COLUMN IF NOT EXISTS "ca_comment" TEXT;
 
 ## 7. コミット・push・デプロイ
 
-（本節はコミット/push/デプロイ後に追記）
+- コミット: `970e035` `feat(candidate-site): T-128 batch4 favorite memo, CA comment, and CA-question task`
+- add はパス明示（`git add -A` 不使用）。ステージは以下10ファイルのみ（scratch/secret混入なし）:
+  - `prisma/schema.prisma`
+  - `prisma/migrations/20260703100000_t128_batch4_favorite_notes/migration.sql`（新規）
+  - `src/app/api/external/candidate-site/favorites/route.ts`
+  - `src/app/api/external/candidate-site/questions/route.ts`（新規）
+  - `src/app/api/external/candidate-site/questions/summarize/route.ts`（新規）
+  - `src/lib/candidate-site/question-notification.ts`（新規）
+  - `src/app/api/candidates/[candidateId]/files/[fileId]/route.ts`
+  - `src/app/api/candidates/[candidateId]/files/route.ts`
+  - `src/components/candidates/HistoryTab.tsx`
+  - `docs/reports/T-128-batch4-portal-impl.md`
+- push直前に `py scripts/wait_railway_idle.py` で idle 確認 → `git push origin master`（`cb34231..970e035`）。
+- **Railwayデプロイ: SUCCESS**（service=bizstudio-portal・BUILDING→DEPLOYING→SUCCESS・約204s）。
+- **本番到達性確認**（`https://bizstudio-portal-production.up.railway.app`・CANDIDATE_SITE_API_KEY 未設定のため全て fail-closed）:
+  | ルート | 応答 |
+  |---|---|
+  | `GET /api/external/candidate-site/favorites` | **401**（404ではない＝デプロイ済み） |
+  | `POST /api/external/candidate-site/questions/summarize` | **401** |
+  | `POST /api/external/candidate-site/questions` | **401** |
+  | dummy key の summarize | **401**（fail-closed） |
+  | 既存 `GET /preferences`（対照） | 401 |
 
 ---
 
