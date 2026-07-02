@@ -168,8 +168,8 @@ export async function POST(request: Request) {
   const jobTitle = str(body.jobTitle);
   const extractedText = str(body.extractedText);
   const jobUrl = str(body.jobUrl);
-  // 本人メモ（任意）。空文字・未指定は null（メモなしお気に入りとして登録成立）。
-  const candidateNote = str(body.note);
+  // 本人メモ（任意）。candidateNote / note 両方受け付ける。空文字・未指定は null。
+  const candidateNote = str(body.candidateNote ?? body.note);
 
   // ファイル名は from-job-platform と同形式（求人票_{会社名}[_{数値ID}].pdf）。会社名が無ければ求人IDで代替。
   const numericId = externalJobRef.match(/\d{10,}/)?.[0] ?? null;
@@ -231,8 +231,8 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "externalJobRef is required" }, { status: 400 });
   }
 
-  // 空文字・null はメモ削除（null 化）として扱う。未指定(body.note が無い)も null。
-  const candidateNote = str(body.note);
+  // candidateNote / note 両方受け付ける（GET が candidateNote を返すため、クライアントは candidateNote で送る）。
+  const candidateNote = str(body.candidateNote ?? body.note);
 
   const row = await prisma.candidateFile.findFirst({
     where: { candidateId: candidate.id, category: "BOOKMARK", externalJobRef, archivedAt: null },
