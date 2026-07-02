@@ -95,7 +95,10 @@
   - `src/components/candidates/CandidateHeader.tsx`（ボタン組込み）
   - `scripts/issue-site-tokens-bulk.ts`（新規）
   - `docs/reports/T-128-token-rollout.md`（本報告）
-- （コミットID・push・Railwayデプロイ結果は本文末尾に追記）
+- **コミットID: `4c1a4ba`**（`4cd4581..4c1a4ba master -> master`）
+- **push: 成功**（origin master）
+- **Railwayデプロイ: SUCCESS**（BUILDING→DEPLOYING→SUCCESS、約224s）
+- 本番到達性確認: `POST .../issue-site-token`（cookieなし）→ **403**（404ではない＝ルートがデプロイ済み・セッション認証が有効）。
 
 ---
 
