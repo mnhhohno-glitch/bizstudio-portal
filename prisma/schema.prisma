@@ -1414,6 +1414,9 @@ model CandidateFile {
   externalJobRef    String?               @map("external_job_ref") // job-platform 求人ID
   // T-128 T2: 追加元の区別。null/"ca" = CA が追加（既定・既存行は null=ca 扱い）/ "candidate" = 求職者本人が追加。
   origin            String?               @map("origin") // null|"ca" / "candidate"
+  // T-128 batch4: お気に入りメモ / CAアドバイザーコメント。既存 memo(jobUrl用途) とは別列。nullable 追加。
+  candidateNote     String?               @map("candidate_note") @db.Text // 求職者本人がお気に入りに残すメモ
+  caComment         String?               @map("ca_comment") @db.Text // CA が求人に付けるアドバイザーコメント（求職者サイト「担当CAのおすすめ」表示用）
   // 案Z 段階A: job-platform 由来は PDF 実体が無いため nullable 化（既存行は値あり・非破壊）。
   driveFileId       String?               @map("drive_file_id")
   driveViewUrl      String?               @map("drive_view_url")

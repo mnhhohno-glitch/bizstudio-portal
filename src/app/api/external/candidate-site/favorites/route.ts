@@ -7,6 +7,7 @@ import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-
 //
 // GET    /api/external/candidate-site/favorites?candidateNumber=... （または candidateId）: 一覧
 // POST   /api/external/candidate-site/favorites: 本人お気に入り追加（記録のみ・PDF/Drive/AI起動なし）
+// PATCH  /api/external/candidate-site/favorites: 本人お気に入りのメモ(candidateNote)更新（origin="candidate" のみ・candidateNote のみ）
 // DELETE /api/external/candidate-site/favorites: 本人お気に入り解除（origin="candidate" のみ）
 //
 // 認証: X-Auth-Key（CANDIDATE_SITE_API_KEY）。未設定は fail-closed（全401）。
@@ -43,6 +44,8 @@ type FavoriteDTO = {
   fileName: string;
   companyName: string | null;
   jobUrl: string | null;
+  candidateNote: string | null; // 求職者本人のメモ（本人が編集可）
+  caComment: string | null; // CAアドバイザーコメント（求職者からは読み取り専用）
   aiMatchRating: string | null;
   createdAt: string;
   applied: boolean;
@@ -75,6 +78,8 @@ export async function GET(request: Request) {
       origin: true,
       fileName: true,
       memo: true,
+      candidateNote: true,
+      caComment: true,
       aiMatchRating: true,
       createdAt: true,
     },
@@ -96,6 +101,8 @@ export async function GET(request: Request) {
     fileName: f.fileName,
     companyName: parseCompanyFromFileName(f.fileName),
     jobUrl: f.memo,
+    candidateNote: f.candidateNote,
+    caComment: f.caComment,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied: f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false,
@@ -141,7 +148,7 @@ export async function POST(request: Request) {
       externalJobRef,
       archivedAt: null,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
   });
   if (existing) {
     return NextResponse.json({
@@ -161,6 +168,8 @@ export async function POST(request: Request) {
   const jobTitle = str(body.jobTitle);
   const extractedText = str(body.extractedText);
   const jobUrl = str(body.jobUrl);
+  // 本人メモ（任意）。空文字・未指定は null（メモなしお気に入りとして登録成立）。
+  const candidateNote = str(body.note);
 
   // ファイル名は from-job-platform と同形式（求人票_{会社名}[_{数値ID}].pdf）。会社名が無ければ求人IDで代替。
   const numericId = externalJobRef.match(/\d{10,}/)?.[0] ?? null;
@@ -183,16 +192,71 @@ export async function POST(request: Request) {
       externalJobRef,
       origin: "candidate",
       memo: jobUrl,
+      candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
   });
 
   // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
   void jobTitle;
 
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
+}
+
+// ---- PATCH: 本人お気に入りのメモ(candidateNote)更新 ----
+// 求職者が変更できるのは「自分が追加したお気に入り(origin="candidate")」の「candidateNote のみ」。
+// caComment・origin・その他の列は本エンドポイントでは一切書き換えない（機械的に candidateNote 限定）。
+export async function PATCH(request: Request) {
+  if (!verifyCandidateSiteKey(request)) return unauthorized();
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const candidate = await resolveScopedCandidate({
+    candidateId: body.candidateId,
+    candidateNumber: body.candidateNumber,
+  });
+  if (!candidate) {
+    return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
+  }
+
+  const externalJobRef = str(body.externalJobRef);
+  if (!externalJobRef) {
+    return NextResponse.json({ error: "externalJobRef is required" }, { status: 400 });
+  }
+
+  // 空文字・null はメモ削除（null 化）として扱う。未指定(body.note が無い)も null。
+  const candidateNote = str(body.note);
+
+  const row = await prisma.candidateFile.findFirst({
+    where: { candidateId: candidate.id, category: "BOOKMARK", externalJobRef, archivedAt: null },
+    select: { id: true, origin: true },
+  });
+  if (!row) {
+    return NextResponse.json({ ok: false, updated: false, reason: "not-found" }, { status: 404 });
+  }
+  // CA追加（null/"ca"）は本人がメモ編集できない（本人追加のみ許可）。
+  if (row.origin !== "candidate") {
+    return NextResponse.json(
+      { ok: false, updated: false, reason: "ca-added-not-editable" },
+      { status: 403 }
+    );
+  }
+
+  // candidateNote のみ更新（caComment・origin 等は data に含めない＝機械的に変更不可）。
+  const updated = await prisma.candidateFile.update({
+    where: { id: row.id },
+    data: { candidateNote },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+  });
+
+  return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
 }
 
 // ---- DELETE: 本人お気に入り解除（origin="candidate" のみ） ----
@@ -245,7 +309,7 @@ export async function DELETE(request: Request) {
   return NextResponse.json({ ok: true, removed: true });
 }
 
-// 追加/重複時のレスポンス用 DTO 変換（applied は呼び出し側が持つ場合のみ true）。
+// 追加/重複/更新時のレスポンス用 DTO 変換（applied は呼び出し側が持つ場合のみ true）。
 function toDTO(
   f: {
     id: string;
@@ -254,6 +318,8 @@ function toDTO(
     origin: string | null;
     fileName: string;
     memo: string | null;
+    candidateNote: string | null;
+    caComment: string | null;
     aiMatchRating: string | null;
     createdAt: Date;
   },
@@ -267,6 +333,8 @@ function toDTO(
     fileName: f.fileName,
     companyName: parseCompanyFromFileName(f.fileName),
     jobUrl: f.memo,
+    candidateNote: f.candidateNote,
+    caComment: f.caComment,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied,

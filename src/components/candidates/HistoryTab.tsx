@@ -286,6 +286,7 @@ type BookmarkFile = {
   aiMatchRating: string | null;
   aiAnalysisComment: string | null;
   aiAnalyzedAt: string | null;
+  caComment: string | null; // T-128 batch4: CAアドバイザーコメント
   lastExportedAt: string | null;
   lastExportedTo: string | null;
   uploadedBy: { id: string; name: string };
@@ -708,6 +709,10 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [passRating, setPassRating] = useState<string>("");
   const [overallRating, setOverallRating] = useState<string>("");
   const [previewFile, setPreviewFile] = useState<BookmarkFile | null>(null);
+  // T-128 batch4: CAアドバイザーコメント編集
+  const [caCommentEdit, setCaCommentEdit] = useState<{ fileId: string; fileName: string } | null>(null);
+  const [caCommentText, setCaCommentText] = useState("");
+  const [caCommentSaving, setCaCommentSaving] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
@@ -1306,7 +1311,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             紹介日
             <DirArrows dir={keyOf("date")?.dir ?? null} /><OrderBadge n={degreeOf("date")} />
           </span>
-          <span className="w-[70px] shrink-0" />
+          <span className="w-[100px] shrink-0" />
         </div>
       )}
 
@@ -1374,7 +1379,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 })()}
                 <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
-                <span className="w-[70px] shrink-0 flex items-center gap-0.5 justify-end">
+                <span className="w-[100px] shrink-0 flex items-center gap-0.5 justify-end">
                   {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}
                   {file.driveFileId && (
                     <a
@@ -1386,6 +1391,17 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       ⬇
                     </a>
                   )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCaCommentEdit({ fileId: file.id, fileName: file.fileName });
+                      setCaCommentText(file.caComment ?? "");
+                    }}
+                    className={`text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors ${file.caComment ? "text-blue-500 hover:text-blue-700" : "text-gray-400 hover:text-blue-600"}`}
+                    title={file.caComment ? "CAコメントを編集（登録済み）" : "CAコメントを追加"}
+                  >
+                    {file.caComment ? "💬" : "🗨️"}
+                  </button>
                   <button
                     onClick={() => handleArchive(file)}
                     disabled={archivingId === file.id}
@@ -1743,6 +1759,61 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
           onCancel={() => setArchiveTarget(null)}
           busy={archivingId !== null || bulkArchiving}
         />
+      )}
+
+      {/* T-128 batch4: CAアドバイザーコメント編集モーダル */}
+      {caCommentEdit && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => !caCommentSaving && setCaCommentEdit(null)}>
+          <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[15px] font-bold text-[#374151]">💬 CAコメント</h2>
+              <button onClick={() => !caCommentSaving && setCaCommentEdit(null)} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
+            </div>
+            <p className="text-[12px] text-gray-500 mb-1 truncate" title={caCommentEdit.fileName}>{caCommentEdit.fileName}</p>
+            <p className="text-[11px] text-gray-400 mb-3">求職者サイトの「担当CAのおすすめ」に表示されます。空にして保存すると削除されます。</p>
+            <textarea
+              value={caCommentText}
+              onChange={(e) => setCaCommentText(e.target.value)}
+              rows={6}
+              placeholder="この求人をおすすめする理由やポイントを記入…"
+              className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setCaCommentEdit(null)}
+                disabled={caCommentSaving}
+                className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={async () => {
+                  setCaCommentSaving(true);
+                  try {
+                    const res = await fetch(`/api/candidates/${candidateId}/files/${caCommentEdit.fileId}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ caComment: caCommentText }),
+                    });
+                    if (!res.ok) throw new Error();
+                    const saved = caCommentText.trim() === "" ? null : caCommentText;
+                    setFiles((prev) => prev.map((f) => f.id === caCommentEdit.fileId ? { ...f, caComment: saved } : f));
+                    toast.success(saved ? "CAコメントを保存しました" : "CAコメントを削除しました");
+                    setCaCommentEdit(null);
+                  } catch {
+                    toast.error("保存に失敗しました");
+                  } finally {
+                    setCaCommentSaving(false);
+                  }
+                }}
+                disabled={caCommentSaving}
+                className="bg-[#2563EB] text-white rounded px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                {caCommentSaving ? "保存中..." : "💾 保存"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

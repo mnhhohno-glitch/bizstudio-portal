@@ -78,6 +78,8 @@ export async function GET(
       driveFolderId: true,
       folderId: true,
       memo: true,
+      candidateNote: true,
+      caComment: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,

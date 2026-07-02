@@ -120,6 +120,33 @@ export async function PATCH(
 
   const { candidateId, fileId } = await params;
   const body = await req.json();
+
+  // T-128 batch4: CAアドバイザーコメント(caComment)の更新。aiAnalysisComment とは別系統の軽量更新。
+  // 空文字・空白のみは null（コメント削除）。求職者サイトの「担当CAのおすすめ」に表示される想定。
+  if ("caComment" in body) {
+    const raw = (body as { caComment?: unknown }).caComment;
+    const value = typeof raw === "string" ? raw : "";
+    const caComment = value.trim() === "" ? null : value;
+
+    // 候補者スコープ確認（他候補者のファイルを更新させない）。
+    const target = await prisma.candidateFile.findFirst({
+      where: { id: fileId, candidateId },
+      select: { id: true },
+    });
+    if (!target) {
+      return withCors(
+        NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 }),
+        origin
+      );
+    }
+
+    const file = await prisma.candidateFile.update({
+      where: { id: target.id },
+      data: { caComment },
+    });
+    return withCors(NextResponse.json({ success: true, file }), origin);
+  }
+
   const { aiAnalysisComment } = body as { aiAnalysisComment?: string };
 
   if (typeof aiAnalysisComment !== "string") {
