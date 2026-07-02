@@ -532,6 +532,7 @@ model Candidate {
   mynaviProcessingLogs   MynaviRpaProcessingLog[]
   bsDocumentFolders      BSDocumentFolder[]
   savedJobs              CandidateSavedJob[]
+  jobApplications        CandidateJobApplication[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1411,6 +1412,8 @@ model CandidateFile {
   // 案Z 段階A: job-platform 求人ブックマーク用。既存PDF由来は null（"PDF"相当）。
   sourceType        String?               @map("source_type") // "PDF" / "job-platform"
   externalJobRef    String?               @map("external_job_ref") // job-platform 求人ID
+  // T-128 T2: 追加元の区別。null/"ca" = CA が追加（既定・既存行は null=ca 扱い）/ "candidate" = 求職者本人が追加。
+  origin            String?               @map("origin") // null|"ca" / "candidate"
   // 案Z 段階A: job-platform 由来は PDF 実体が無いため nullable 化（既存行は値あり・非破壊）。
   driveFileId       String?               @map("drive_file_id")
   driveViewUrl      String?               @map("drive_view_url")
@@ -1707,6 +1710,23 @@ model CandidateSavedJob {
   @@unique([candidateId, source, externalJobRef]) // 同一求職者×同一求人の重複保存防止
   @@index([candidateId])
   @@map("candidate_saved_jobs")
+}
+
+// T-128 T2: 求職者サイトからの応募受付レコード（軽量）。
+// エントリー管理への正式連携はフェーズ2のため、まず「記録＋担当CA通知」のみを担う。
+model CandidateJobApplication {
+  id             String    @id @default(cuid())
+  candidateId    String    @map("candidate_id")
+  candidate      Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  externalJobRef String    @map("external_job_ref") // job-platform 求人ID（source_job_id）
+  appliedAt      DateTime  @default(now()) @map("applied_at")
+  notifiedAt     DateTime? @map("notified_at") // 担当CAへの通知成功時刻。失敗時は null（応募記録は残す）
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([candidateId, externalJobRef]) // 同一求職者×同一求人の重複応募防止（二重通知防止）
+  @@index([candidateId])
+  @@map("candidate_job_applications")
 }
 
 model EntryFlagMaster {
