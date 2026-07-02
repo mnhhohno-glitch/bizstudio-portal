@@ -104,11 +104,11 @@ export async function POST(request: Request) {
   const description = [
     `${candidate.name} 様から担当CAへの質問がありました。`,
     "",
-    "■ 質問（AI要約）",
-    summary,
-    "",
     "■ 質問（原文）",
     question,
+    "",
+    "■ 要約",
+    summary,
   ].join("\n");
 
   const task = await prisma.task.create({
@@ -136,6 +136,7 @@ export async function POST(request: Request) {
       caName: employee?.name ?? null,
       caLineUserId: employee?.lineUserId ?? null,
       taskId: task.id,
+      question,
       summary,
     });
   } catch (e) {

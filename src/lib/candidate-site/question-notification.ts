@@ -13,6 +13,7 @@ type QuestionNotificationParams = {
   caName: string | null;
   caLineUserId: string | null; // Employee.lineUserId（応募通知と同一の宛先）
   taskId: string;
+  question: string;
   summary: string;
 };
 
@@ -37,7 +38,10 @@ export async function notifyCandidateQuestion(
     "■ 求職者",
     `${params.candidateName} 様（${params.candidateNumber}）`,
     "",
-    "■ 質問（AI要約）",
+    "■ 質問（原文）",
+    params.question,
+    "",
+    "■ 要約",
     params.summary,
     "",
     "■ 担当CA",
