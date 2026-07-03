@@ -16,19 +16,31 @@ export async function POST(request: Request) {
   const { candidateId, jobId, response, respondedAt } = body as {
     candidateId: string;
     jobId: number;
-    response: string;
+    response: string | null;
     respondedAt: string;
   };
 
-  if (!candidateId || !jobId || !response) {
+  // 構造的必須項目（候補者・求人の特定に不可欠）は fail-closed で 400 のまま。
+  if (!candidateId || !jobId) {
     return NextResponse.json(
       { error: "Missing required fields" },
       { status: 400 }
     );
   }
 
+  // T-128 Phase1: 「気になる/応募したい」を未回答へ戻すと mypage は response=null（キーあり・
+  // リテラル null）を送ってくる。これを「取り消し」として正当に受理し、該当の
+  // CandidateJobResponse を削除する。null/""/"none"/"NONE" を取り消しシグナルとして扱う。
+  const isClear =
+    response === null ||
+    response === undefined ||
+    response === "" ||
+    response === "none" ||
+    response === "NONE";
+
   const validResponses = ["WANT_TO_APPLY", "INTERESTED"];
-  if (!validResponses.includes(response)) {
+  // 取り消しでも既知の値でもない未知の値は従来どおり 400（fail-closed を緩めない）。
+  if (!isClear && !validResponses.includes(response as string)) {
     return NextResponse.json(
       { error: "Invalid response value" },
       { status: 400 }
@@ -67,6 +79,19 @@ export async function POST(request: Request) {
     );
   }
 
+  // 取り消し: 該当（候補者×求人）の回答レコードを削除。無ければ no-op（冪等）。
+  // 正常系（値あり）と同一の複合キーで特定する。タスクの再生成はしない（追加専用のまま）。
+  if (isClear) {
+    const deleted = await prisma.candidateJobResponse.deleteMany({
+      where: { candidateId: candidate.id, externalJobId: jobId },
+    });
+    return NextResponse.json({
+      success: true,
+      cleared: true,
+      deletedCount: deleted.count,
+    });
+  }
+
   await prisma.candidateJobResponse.upsert({
     where: {
       candidateId_externalJobId: {
@@ -77,11 +102,11 @@ export async function POST(request: Request) {
     create: {
       candidateId: candidate.id,
       externalJobId: jobId,
-      response,
+      response: response as string,
       respondedAt: respondedAt ? new Date(respondedAt) : new Date(),
     },
     update: {
-      response,
+      response: response as string,
       respondedAt: respondedAt ? new Date(respondedAt) : new Date(),
     },
   });

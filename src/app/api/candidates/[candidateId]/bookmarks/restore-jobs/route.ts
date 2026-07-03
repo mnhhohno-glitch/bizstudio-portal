@@ -77,6 +77,8 @@ export async function POST(
   const notExcluded: { fileName: string; status: string }[] = [];
   const restoreJobIds: number[] = [];
   const matchedFileIds: string[] = [];
+  // T-128 Phase2: 復帰した会社の正規化名（自動アーカイブしたブックマークの復帰用）。
+  const restoredCompanyNames = new Set<string>();
 
   for (const file of bookmarkFiles) {
     const normalized = normalizePortalFileName(file.fileName);
@@ -93,6 +95,9 @@ export async function POST(
     if (status === "EXCLUDED") {
       restoreJobIds.push(matched.id);
       matchedFileIds.push(file.id);
+      if (matched.company_name) {
+        restoredCompanyNames.add(normalizeKyuujinCompanyName(matched.company_name));
+      }
     } else {
       notExcluded.push({ fileName: file.fileName, status });
       matchedFileIds.push(file.id);
@@ -141,9 +146,39 @@ export async function POST(
     try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
   }
 
+  // T-128 Phase2: 復帰した会社について、対象外連動で自動アーカイブしたブックマークを復帰
+  // （archivedReason="job-excluded-sync" のみ対象・best-effort）。手動アーカイブには触れない。
+  let unarchived = 0;
+  if (restoredCompanyNames.size > 0) {
+    try {
+      const archived = await prisma.candidateFile.findMany({
+        where: {
+          candidateId,
+          category: "BOOKMARK",
+          archivedAt: { not: null },
+          archivedReason: "job-excluded-sync",
+        },
+        select: { id: true, fileName: true },
+      });
+      const toRestore = archived
+        .filter((f) => restoredCompanyNames.has(normalizePortalFileName(f.fileName)))
+        .map((f) => f.id);
+      if (toRestore.length > 0) {
+        await prisma.candidateFile.updateMany({
+          where: { id: { in: toRestore } },
+          data: { archivedAt: null, archivedReason: null, archivedById: null },
+        });
+        unarchived = toRestore.length;
+      }
+    } catch (e) {
+      console.error("[RestoreJobs] bookmark un-archive (best-effort) failed:", e);
+    }
+  }
+
   return NextResponse.json({
     success: true,
     restored: totalRestored,
+    unarchived,
     notMatched,
     notExcluded,
     errors,
