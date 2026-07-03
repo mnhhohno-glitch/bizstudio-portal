@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { ingestAndLink } from "@/lib/job-platform-ingest";
 import { google } from "googleapis";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse");
@@ -131,6 +132,17 @@ export async function POST(
 
           extracted++;
           console.log(`[ExtractText] Success: ${file.fileName} (${text.length} chars)`);
+
+          // T-131: PDF由来ブックマークを job-platform へ非同期投入（フルデータ化・非公開求人化）。
+          // fire-and-forget（await しない）＝アップ動線のレスポンスを一切遅らせない。
+          // 対象は PDF由来（sourceType=NULL）かつ未紐付け（externalJobRef 未設定）のみ。
+          // 失敗しても [t131-ingest] ログのみで既存フロー（kyuujinPDF出力・AI評価）は不変。
+          // 二重投入対策: externalJobRef 設定済みはスキップ＋ job-platform 側の内容ハッシュ重複回避（二重防御）。
+          if (file.sourceType === null && !file.externalJobRef) {
+            void ingestAndLink({ fileId: file.id, fileName: file.fileName, pdfBuffer }).catch((e) => {
+              console.error(`[t131-ingest] 予期せぬエラー fileId=${file.id}:`, e);
+            });
+          }
         } catch (error) {
           console.error(`[ExtractText] Failed for ${file.fileName}:`, error);
           failed++;
