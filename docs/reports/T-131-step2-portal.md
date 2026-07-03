@@ -123,5 +123,10 @@ step1 の投入APIは**プロセス内（tsx）テストのみ**で、Vercel ser
 
 ## 8. Git / デプロイ
 
-- コミット: **（追記）**
-- Railway: **（デプロイ完了ログを追記）**
+- コミット（portal / master）:
+  - DB（独立）: **`c421b6e`**（`platform_submitted_at` 列追加）
+  - 機能＋レポート: **`6cc0bf1`**
+- push前に `python scripts/wait_railway_idle.py`（本番idle・exit 0）を実施。
+- Railway 本番デプロイ完了: `bizstudio-portal-production.up.railway.app` が **HTTP 200（/login）/307（/）** で稼働、`origin/master` HEAD＝`6cc0bf1`。
+  ビルドの `prisma migrate deploy` は当該マイグレーション適用済みのため no-op。
+- 関連（job-platform / Vercel・step1 API の serverless 実行修正）: `ca9f702` / `6abafc4` / `23d9dab` を push・Vercel Ready・本番200実測（§5）。
