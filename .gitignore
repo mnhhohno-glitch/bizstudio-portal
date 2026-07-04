@@ -46,3 +46,6 @@ next-env.d.ts
 prisma/*.ts
 !prisma/seed.ts
 prisma/*.csv
+
+# T-131 step4 バックフィルの進捗ファイル（実行時生成・コミット対象外）
+verify/t131-backfill-progress.jsonl
