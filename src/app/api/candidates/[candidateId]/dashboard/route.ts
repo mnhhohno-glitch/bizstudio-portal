@@ -223,9 +223,10 @@ export async function GET(
   };
 
   // 選考段階の内訳: 選考継続中の社を「現ステージ」で排他分類（会社単位 distinct・最も進んだ段階で1社1分類）。
-  // 落ち・辞退・クローズ(SELECTION_ENDED_DETAILS)・無効・アーカイブ済みは除外（選考継続中社数と整合）。
+  // 落ち・辞退・クローズ(SELECTION_ENDED_DETAILS)・無効・アーカイブ済み・入社済は除外（選考継続中社数と整合）。
+  //   ※「入社済」は自動無効化を廃止したので isActive=true で残る。ここは業務上「選考継続中」ではないため明示的にスキップ。
   const stageRank = (e: (typeof entries)[number]): number => {
-    if (e.entryFlag === "内定" || e.entryFlag === "入社済") return 4; // 内定
+    if (e.entryFlag === "内定") return 4; // 内定
     if (e.entryFlag === "面接") return e.secondInterviewDate != null ? 3 : 2; // 二次 / 一次
     if (e.entryFlag === "書類選考") return 1; // 書類選考
     return 0;
@@ -234,6 +235,7 @@ export async function GET(
   for (const e of entries) {
     if (SELECTION_ENDED_DETAILS.includes(e.entryFlagDetail ?? "")) continue;
     if (!e.isActive || e.archivedAt) continue;
+    if (e.entryFlag === "入社済") continue; // 選考継続中ではないため除外
     const r = stageRank(e);
     if (r > 0) companyStage.set(e.companyName, Math.max(companyStage.get(e.companyName) ?? 0, r));
   }

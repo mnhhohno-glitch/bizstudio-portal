@@ -72,6 +72,9 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
     { key: "offerDeadline", label: "承諾期限", width: 85, sortKey: "offerDeadline" },
     { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
     { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
+    // 業務フロー: 承諾日 → 入社日入力 → 入社済フラグ切替。承諾日の直後で入社日を入力する。
+    // セルは入社済タブと同じ InlineDateCell（正午UTC固定・JST日付ズレなし）を流用。
+    { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
     { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
     { key: "cost", label: "費用", width: 130, sortKey: "cost" },

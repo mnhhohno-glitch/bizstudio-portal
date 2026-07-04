@@ -44,7 +44,9 @@ export const SELECTION_ENDED_DETAILS = [
 ];
 
 export const INACTIVE_TRIGGERS = {
-  personFlags: ["見送り通知送信済", "見送り通知済み", "入社済"],
+  // 「入社済」は業務上の成功終着点で、専用タブがある。以前は自動無効化していたが、
+  // 「無効も表示」ONにしないと入社済タブに現れない不具合の原因になっていたため、対象から除外した。
+  personFlags: ["見送り通知送信済", "見送り通知済み"],
   companyFlags: ["辞退報告済"],
   entryFlagDetails: [] as string[], // 本人辞退は企業対応「辞退報告済」で無効化（companyFlags で判定）。entryFlagDetail だけでは無効化しない。
 };
