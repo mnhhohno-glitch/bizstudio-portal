@@ -36,9 +36,25 @@ async function resolveSystemUserId(): Promise<string | null> {
   return admin?.id ?? null;
 }
 
+// T-131 step3a: externalJobRef が付いた行（＝job-platformに紐付いた求人。CA/本人が保存したjp求人と、
+// PDFアップから自動フルデータ化された紐付け済み求人の両方）を「jp形」に正規化して返す。
+//   - sourceJobId = externalJobRef（job-platformの媒体内ID。フル詳細/AI解説の取得キー）
+//   - sourceType = "job-platform"（PDF由来でも紐付け済みは job-platform 扱いに昇格）
+// これで既存jp行とT-131紐付け行のレスポンス形が一致し、求職者サイト側は区別できず自動でフルカード表示になる。
+// externalJobRef（内部列名）は互換のため当面併記する（消費側がsourceJobIdへ移行後に削れる）。
+function jpNormalize(
+  externalJobRef: string | null,
+  storedSourceType: string | null,
+): { sourceJobId: string | null; sourceType: string | null } {
+  if (externalJobRef) return { sourceJobId: externalJobRef, sourceType: "job-platform" };
+  return { sourceJobId: null, sourceType: storedSourceType };
+}
+
 type FavoriteDTO = {
   id: string;
   externalJobRef: string | null;
+  /** job-platform 媒体内ID（紐付け済み行のみ・= externalJobRef）。フル詳細/AI解説の取得キー。 */
+  sourceJobId: string | null;
   sourceType: string | null;
   origin: "ca" | "candidate";
   fileName: string;
@@ -93,10 +109,13 @@ export async function GET(request: Request) {
   });
   const appliedRefs = new Set(applications.map((a) => a.externalJobRef));
 
-  const favorites: FavoriteDTO[] = files.map((f) => ({
+  const favorites: FavoriteDTO[] = files.map((f) => {
+    const jp = jpNormalize(f.externalJobRef, f.sourceType);
+    return {
     id: f.id,
     externalJobRef: f.externalJobRef,
-    sourceType: f.sourceType,
+    sourceJobId: jp.sourceJobId,
+    sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca", // null/"ca" は CA 追加として正規化
     fileName: f.fileName,
     companyName: parseCompanyFromFileName(f.fileName),
@@ -106,7 +125,8 @@ export async function GET(request: Request) {
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied: f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false,
-  }));
+    };
+  });
 
   return NextResponse.json({
     ok: true,
@@ -325,10 +345,12 @@ function toDTO(
   },
   applied: boolean
 ): FavoriteDTO {
+  const jp = jpNormalize(f.externalJobRef, f.sourceType);
   return {
     id: f.id,
     externalJobRef: f.externalJobRef,
-    sourceType: f.sourceType,
+    sourceJobId: jp.sourceJobId,
+    sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca",
     fileName: f.fileName,
     companyName: parseCompanyFromFileName(f.fileName),
