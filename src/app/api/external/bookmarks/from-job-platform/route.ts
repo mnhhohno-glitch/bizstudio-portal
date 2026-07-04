@@ -80,6 +80,9 @@ type JobInput = {
   extractedText?: unknown;
   jobUrl?: unknown;
   fileNumericId?: unknown; // ファイル名用の数値ID（10桁以上推奨）。無ければ会社名のみ。
+  // T-128 Phase2-1: 元媒体の識別子（例: "hito_link"）。任意・後方互換（未送信でも従来どおり動作）。
+  //   受信時は CandidateFile.sourceMedia に生値のまま保存。マッピング（→ "HITO-Link" 等）は HistoryTab で解決。
+  sourceMedia?: unknown;
 };
 
 function str(v: unknown): string | null {
@@ -187,6 +190,8 @@ export async function POST(request: Request) {
     const fileName = buildFileName(companyName, numericId);
     const memo = str(j.jobUrl); // UI 段階Dで求人URLを表示する用（任意）
     const fileSize = Buffer.byteLength(extractedText, "utf8");
+    // T-128 Phase2-1: 元媒体（例: "hito_link"）。未送信は null（既存動作）。
+    const sourceMedia = str(j.sourceMedia);
 
     try {
       // 冪等: 同一求職者×同一求人（job-platform）の既存BOOKMARK行を探す。
@@ -212,6 +217,8 @@ export async function POST(request: Request) {
             fileName, fileSize, extractedText, memo,
             ...(existing.extractedAt ? {} : { extractedAt: new Date() }),
             ...(savedBy ? { uploadedByUserId: savedBy } : {}),
+            // T-128 Phase2-1: sourceMedia が来ていれば更新（未送信＝undefined は既存値維持）。
+            ...(sourceMedia ? { sourceMedia } : {}),
           },
         });
         updated++;
@@ -233,6 +240,8 @@ export async function POST(request: Request) {
             extractedAt: new Date(),
             sourceType: "job-platform",
             externalJobRef,
+            // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
+            sourceMedia,
             memo,
             uploadedByUserId: uploaderUserId,
           },

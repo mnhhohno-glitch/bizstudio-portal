@@ -80,6 +80,10 @@ export async function GET(
       memo: true,
       candidateNote: true,
       caComment: true,
+      // T-128 Phase2-1: HistoryTab のエントリー作成で jobDb/externalJobNo を正値化するために使用。
+      sourceType: true,
+      externalJobRef: true,
+      sourceMedia: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,

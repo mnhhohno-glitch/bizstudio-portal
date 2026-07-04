@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
+import { resolveJobDbFromBookmark, extractJobNoFromRef } from "@/lib/constants/source-media";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -2347,6 +2348,11 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   // Bookmark ratings for cross-referencing with jobs
   const [bookmarkRatings, setBookmarkRatings] = useState<Map<string, { wish: string; pass: string; overall: string }>>(new Map());
 
+  // T-128 Phase2-1: エントリー化時に jobDb/externalJobNo を正値化するためのブックマーク由来ソース情報。
+  //   key = 会社名の正規化キー（fetchBookmarkRatings と同じルールを使う。厳密1:1にならないケースはあるが
+  //   job-platform 経由は現状100% HITO-Link のため、同一会社複数求人は同じ jobDb になる）。
+  const [bookmarkSourceMap, setBookmarkSourceMap] = useState<Map<string, { sourceType: string | null; externalJobRef: string | null; sourceMedia: string | null }>>(new Map());
+
   // Derive entered external job ids for cross-referencing
   const enteredJobIds = new Set(entries.map((e) => e.externalJobId));
 
@@ -2369,9 +2375,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       if (!res.ok) return;
       const data = await res.json();
       const map = new Map<string, { wish: string; pass: string; overall: string }>();
+      // T-128 Phase2-1: sourceType/externalJobRef/sourceMedia も同じ正規化キーで別マップに保持。
+      const srcMap = new Map<string, { sourceType: string | null; externalJobRef: string | null; sourceMedia: string | null }>();
       for (const f of data.files || []) {
-        const axis = parse3AxisRatings(f.aiAnalysisComment);
-        if (!axis) continue;
         const key = normalize(
           (f.fileName as string)
             .replace(/\.pdf$/i, "")
@@ -2380,9 +2386,22 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
             .replace(/株式会社|有限会社|合同会社/g, "")
             .trim()
         );
-        if (key) map.set(key, axis);
+        const axis = parse3AxisRatings(f.aiAnalysisComment);
+        if (key && axis) map.set(key, axis);
+        // sourceType が来ている行だけソースマップに登録（job-platform 由来を優先し、上書きしない）。
+        if (key && f.sourceType) {
+          const prev = srcMap.get(key);
+          if (!prev || prev.sourceType !== "job-platform") {
+            srcMap.set(key, {
+              sourceType: (f.sourceType as string) ?? null,
+              externalJobRef: (f.externalJobRef as string) ?? null,
+              sourceMedia: (f.sourceMedia as string) ?? null,
+            });
+          }
+        }
       }
       setBookmarkRatings(map);
+      setBookmarkSourceMap(srcMap);
     } catch { /* silent */ }
   }, [candidateId]);
 
@@ -2393,6 +2412,19 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
     }
     return null;
   }, [bookmarkRatings]);
+
+  // T-128 Phase2-1: 会社名からブックマークの sourceType/externalJobRef/sourceMedia を引く。
+  //   fetchBookmarkRatings と同一の正規化ルール（法人格除去 + 部分一致）。job-platform 由来が優先。
+  const findBookmarkSource = useCallback((companyName: string) => {
+    const cn = normalize(companyName.replace(/株式会社|有限会社|合同会社/g, "").trim());
+    // 完全一致優先
+    const exact = bookmarkSourceMap.get(cn);
+    if (exact) return exact;
+    for (const [key, src] of bookmarkSourceMap) {
+      if (key.includes(cn) || cn.includes(key)) return src;
+    }
+    return null;
+  }, [bookmarkSourceMap]);
 
   const fetchJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -2487,22 +2519,33 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
     const selectedJobs = jobsData.jobs.filter((j) => selectedJobIds.has(j.id));
     const payload = {
-      entries: selectedJobs.map((j) => ({
-        externalJobId: j.id,
-        externalJobNo: j.job_id,
-        companyName: j.company_name,
-        jobTitle: j.job_title,
-        jobDb: j.job_db,
-        jobType: j.job_type,
-        jobCategory: j.job_category,
-        workLocation: j.work_location,
-        salary: j.salary,
-        overtime: j.overtime,
-        areaMatch: j.area_match,
-        transfer: j.transfer,
-        originalUrl: j.original_url,
-        introducedAt: j.created_at,
-      })),
+      entries: selectedJobs.map((j) => {
+        // T-128 Phase2-1: 元ブックマークが job-platform 由来なら jobDb/externalJobNo を正値化する。
+        //   kyuujinPDF は job_db='マイナビJOB'/job_id=内部連番 で返してくるが、
+        //   実体は HITO-Link 等（sourceMedia）+ 元求人番号（externalJobRef 末尾数字）が正。
+        const src = findBookmarkSource(j.company_name);
+        const overrideDb = src ? resolveJobDbFromBookmark(src.sourceType, src.sourceMedia) : null;
+        const overrideNo = src?.sourceType === "job-platform"
+          ? extractJobNoFromRef(src.externalJobRef)
+          : null;
+        return {
+          externalJobId: j.id,
+          externalJobNo: overrideNo ?? j.job_id,
+          companyName: j.company_name,
+          jobTitle: j.job_title,
+          jobDb: overrideDb ?? j.job_db,
+          // job-platform 由来なら jobType は媒体別選択肢に合わないため null にリセット（後で CA が選択）。
+          jobType: overrideDb ? null : j.job_type,
+          jobCategory: j.job_category,
+          workLocation: j.work_location,
+          salary: j.salary,
+          overtime: j.overtime,
+          areaMatch: j.area_match,
+          transfer: j.transfer,
+          originalUrl: j.original_url,
+          introducedAt: j.created_at,
+        };
+      }),
       entryDate,
     };
 

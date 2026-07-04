@@ -1412,6 +1412,9 @@ model CandidateFile {
   // 案Z 段階A: job-platform 求人ブックマーク用。既存PDF由来は null（"PDF"相当）。
   sourceType        String?               @map("source_type") // "PDF" / "job-platform"
   externalJobRef    String?               @map("external_job_ref") // job-platform 求人ID
+  // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
+  //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
+  sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
   // T-131: 手動アップPDFの job-platform 自動投入（フルデータ化）。投入試行時刻。
   //   externalJobRef が入れば紐付け完了。null のまま2h超過は滞留として拾い直し対象。
   platformSubmittedAt DateTime?           @map("platform_submitted_at")
