@@ -123,9 +123,10 @@ railway run npx tsx scripts/t131-backfill-all.ts
 - `scripts/t131-backfill-all.ts`（新規）
 - `docs/reports/T-131-step4-backfill.md`（本レポート）
 - `.gitignore`（`verify/t131-backfill-progress.jsonl` を追記＝実行時生成物をコミット対象外に）
-- コミット: **`<commit>`**（push直前に追記）
+- コミット: **`953ac03`**
 - 試走で登録済みの実バックフィル20件（実候補者分）は**残置**。scratch検証スクリプトは削除済み。
 
-## 5. Git / デプロイ（push後に追記）
+## 5. Git / デプロイ
+- コミット **`953ac03`**（scripts/t131-backfill-all.ts ＋ 本レポート ＋ .gitignore）。パス指定add（`git add -A` 不使用）。
 - push前ゲート `py scripts/wait_railway_idle.py` → 本番idle（exit 0）
-- Railway 本番（bizstudio-portal）: **<status>**（スクリプト追加のみ・アプリ挙動不変）
+- Railway 本番（bizstudio-portal）: **SUCCESS**（`origin/master` HEAD=`953ac03`）。スクリプト追加のみ・アプリ挙動不変・`prisma migrate deploy` は no-op。
