@@ -95,6 +95,24 @@ step2 の `t131-resubmit-stale.ts` を土台に、全期間・並列・レジュ
 
 ---
 
+## 2.5. 全量実行中に発覚した job-platform 側バグと対処（2026-07-04）
+
+全量 `--execute` を実行したところ、約3,300件処理時点で **約10.7%（489件）が同一エラー**で失敗した:
+
+```
+HTTP 422: jobs upsert失敗: unsupported Unicode escape sequence
+```
+
+- **原因**: 一部PDFの抽出テキストに NUL（U+0000）が混入し、job-platform の `jobs.raw_data`（JSONB）への upsert を PostgreSQL が拒否（`text`/`jsonb` は NUL 非対応）。**job-platform 側の系統的バグ**（portal スクリプトの問題ではない）。
+- **対処**: job-platform `src/lib/ingest/run-ingest.ts` に `deepStripPgUnsafe()` を追加し、upsert 直前に NUL/孤立サロゲートを全文字列から除去（commit **`4bfc49f`**・Vercel 反映済み・非退行）。詳細は job-platform `docs/reports/T-131-ingest-nul-fix.md`。
+- **本番実地検証**: 以前 NUL で失敗した実PDF（`株式会社Second Game_No326071.pdf`）を再投入 → `circus-hfaas3` で**登録成功**。修正がライブかつ実データで有効。
+- **バックフィルの復旧**: 失敗501件（489 NUL＋13 timeout=504）の進捗記録を `progress.jsonl` から除去（＝再対象化）し、`--execute` で**再開**。再開後の新規処理は**NULエラー再発0**。失敗行を除いた縮約前のjsonlは `verify/t131-backfill-progress-with-failures-20260704.jsonl.bak` に退避。
+- **失敗分の再試行手順（レジューム設計の実運用例）**: 「`progress.jsonl` から `"status":"failed"` 行を削除 → 同じ `--execute` を再実行」で、未紐付け（externalJobRef=NULL）の行だけが再処理される。二重登録は内容ハッシュ dedup が防ぐ。
+
+> この事象は step4 スクリプトのレジューム設計（失敗を記録しつつ全体を止めない／失敗行削除で再試行）が、実運用の系統的失敗に対して機能することの実証にもなった。
+
+---
+
 ## 3. 夜間の起動コマンドと朝の確認方法
 
 将幸さんの手元 portal リポジトリ（`railway` が bizstudio-portal/production にリンク済み）で実行。**本番envを注入してローカル実行**する方式（`progress.jsonl` が手元に残り、切断・PCスリープからの再開が確実）。
