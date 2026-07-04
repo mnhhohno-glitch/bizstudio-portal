@@ -133,5 +133,5 @@ job-platform 側のテスト求人（`own-07wl9u` 等）は T-131-company-name-f
 
 ## Git / デプロイ
 
-- コミット: **（本コミットID）**
-- Railway: **（デプロイ結果）**
+- コミット: **`1dbcde7`**
+- Railway: **SUCCESS**（BUILDING→DEPLOYING→SUCCESS、122秒）
