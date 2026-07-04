@@ -2,22 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useScoutRole } from "@/components/scout/ScoutRoleContext";
 
-const TABS = [
+// T-135 T-C: タブ再編。ダッシュボード｜配信枠管理｜集計 の3本。
+// 「集計」は by-sent/by-applied/by-media を統合した /scout/analytics。
+// 「過去データインポート」は管理者のみ末尾に追加。開封数入力はタブから撤去（ページは温存）。
+const BASE_TABS = [
   { href: "/scout", label: "ダッシュボード" },
-  { href: "/scout/by-sent", label: "配信日別集計" },
-  { href: "/scout/by-applied", label: "応募日別集計" },
-  { href: "/scout/by-media", label: "媒体別集計" },
   { href: "/scout/slots", label: "配信枠管理" },
-  { href: "/scout/open-count", label: "開封数入力" },
-  { href: "/scout/import-legacy", label: "過去データインポート" },
+  { href: "/scout/analytics", label: "集計" },
 ];
+
+const ADMIN_TABS = [{ href: "/scout/import-legacy", label: "過去データインポート" }];
 
 export default function ScoutNav() {
   const pathname = usePathname();
+  const { isAdmin } = useScoutRole();
+  const tabs = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+
   return (
     <nav className="mb-6 flex flex-wrap gap-1 border-b border-[#E5E7EB] pb-0">
-      {TABS.map((t) => {
+      {tabs.map((t) => {
+        // 完全一致（startsWith を使うと /scout が全パスに一致してしまうため）
         const active = pathname === t.href;
         return (
           <Link

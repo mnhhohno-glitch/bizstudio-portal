@@ -201,6 +201,7 @@ export default function ScoutSlotsPage() {
   const [fMedium, setFMedium] = useState("");
   const [fMachine, setFMachine] = useState("");
   const [fMedia, setFMedia] = useState("");
+  const [fHasApplications, setFHasApplications] = useState(false);
   const [sortSpecs, setSortSpecs] = useState<SortSpec[]>([
     { column: "deliveryDate", order: "desc" },
     { column: "hourSlot", order: "desc" },
@@ -230,6 +231,7 @@ export default function ScoutSlotsPage() {
       if (fMedium) params.set("deliveryCategoryMedium", fMedium);
       if (fMachine) params.set("machineId", fMachine);
       if (fMedia) params.set("mediaSource", fMedia);
+      if (fHasApplications) params.set("hasApplications", "true");
       const res = await fetch(`/api/scout/slots/list?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
@@ -238,7 +240,7 @@ export default function ScoutSlotsPage() {
     } finally {
       setListLoading(false);
     }
-  }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, sortSpecs]);
+  }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, fHasApplications, sortSpecs]);
 
   useEffect(() => {
     if (tab === "matrix") load();
@@ -571,6 +573,15 @@ export default function ScoutSlotsPage() {
                 <option key={m.id} value={m.mediaName}>{m.mediaName}</option>
               ))}
             </select>
+            <label className="flex items-center gap-1 text-[12px] text-[#6B7280]">
+              <input
+                type="checkbox"
+                checked={fHasApplications}
+                onChange={(e) => setFHasApplications(e.target.checked)}
+                className="h-[14px] w-[14px] accent-[#2563EB]"
+              />
+              応募あり
+            </label>
             <span className="ml-auto text-[11px] text-[#9CA3AF]">
               {listLoading ? "読み込み中..." : `${listRows.length}件`}
             </span>

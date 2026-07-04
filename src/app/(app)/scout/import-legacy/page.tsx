@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
+import { useScoutRole } from "@/components/scout/ScoutRoleContext";
 
 const TARGET_FIELDS = [
   { key: "scoutNumber", label: "スカウト番号 (SC######## or 数字)", required: true },
@@ -20,6 +21,7 @@ const TARGET_FIELDS = [
 ];
 
 export default function ImportLegacyPage() {
+  const { isAdmin } = useScoutRole();
   const [file, setFile] = useState<File | null>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({}); // csvCol -> dbField
@@ -73,6 +75,18 @@ export default function ImportLegacyPage() {
       setUploading(false);
     }
   };
+
+  // T-135 T-C: 管理者限定。直接 URL アクセスも弾く（API 側は既に 403）。
+  if (!isAdmin) {
+    return (
+      <div>
+        <ScoutNav />
+        <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-6 text-[13px] text-[#6B7280]">
+          この画面は管理者のみ利用できます。
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -158,6 +158,8 @@ export async function GET(req: NextRequest) {
   const deliveryCategoryMedium = searchParams.get("deliveryCategoryMedium");
   const machineId = searchParams.get("machineId");
   const mediaSource = searchParams.get("mediaSource");
+  // T-135 T-C: 応募あり（応募数>0）のみ絞り込み（DB側で絞る）
+  const hasApplications = searchParams.get("hasApplications") === "true";
   const sortSpecs = parseSortSpecs(searchParams);
 
   const where: Record<string, unknown> = {
@@ -167,6 +169,7 @@ export async function GET(req: NextRequest) {
   if (deliveryCategoryMedium) where.deliveryCategoryMedium = deliveryCategoryMedium;
   if (machineId) where.machineId = machineId;
   if (mediaSource) where.mediaSource = mediaSource;
+  if (hasApplications) where.linkedCandidates = { some: {} };
 
   try {
     const slots = await prisma.scoutDeliverySlot.findMany({

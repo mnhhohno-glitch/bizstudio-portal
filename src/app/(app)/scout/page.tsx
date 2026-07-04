@@ -92,11 +92,10 @@ export default function ScoutDashboardPage() {
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3 text-[13px]">
-            <Link href="/scout/by-sent" className="text-[#2563EB] hover:underline">→ 配信日別集計</Link>
-            <Link href="/scout/by-applied" className="text-[#2563EB] hover:underline">→ 応募日別集計</Link>
-            <Link href="/scout/by-media" className="text-[#2563EB] hover:underline">→ 媒体別集計</Link>
+            <Link href="/scout/analytics?view=sent" className="text-[#2563EB] hover:underline">→ 配信日別集計</Link>
+            <Link href="/scout/analytics?view=applied" className="text-[#2563EB] hover:underline">→ 応募日別集計</Link>
+            <Link href="/scout/analytics?view=media" className="text-[#2563EB] hover:underline">→ 媒体別集計</Link>
             <Link href="/scout/slots" className="text-[#2563EB] hover:underline">→ 配信枠管理</Link>
-            <Link href="/scout/open-count" className="text-[#2563EB] hover:underline">→ 開封数入力</Link>
           </div>
         </>
       )}
