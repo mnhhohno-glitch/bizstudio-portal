@@ -179,7 +179,9 @@ export async function extractDiagnosisPreferences(diagnosisText: string): Promis
     responseMimeType: "application/json",
     responseSchema: RESPONSE_SCHEMA as unknown as object,
     temperature: 0.1,
-    maxOutputTokens: 2048,
+    // gemini-3-flash-preview は thinking モデルで思考トークン(~1300)が maxOutputTokens を食う。
+    // 2048 だと職種配列が長い診断で出力が途中で切れ JSON 破損 → 6144 で余裕を持たせる。
+    maxOutputTokens: 6144,
   });
   const raw = parseJsonResponse<unknown>(text);
   const extraction = normalizeExtraction(raw);
