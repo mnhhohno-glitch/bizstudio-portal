@@ -7,8 +7,7 @@ export const SOURCE_MEDIA_TO_JOBDB: Record<string, string> = {
   hito_link: "HITO-Link",
   circus: "Circus",
   bee: "Bee",
-  // 将来用プレースホルダ: job-platform 側の実値が確定したら合わせる前提。
-  mynavi_job_sharing: "マイナビJOB",
+  mynavi_jobshare: "マイナビJOB",
 };
 
 /**

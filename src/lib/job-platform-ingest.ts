@@ -18,17 +18,16 @@ const INGEST_TIMEOUT_MS = 120_000;
 
 /**
  * ファイル名から媒体コードを推定する。
- * circus の求人票PDFはファイル名に「No」+ 5〜7桁の求人番号を含む（例: 株式会社エスプール_No319877.pdf）。
- * 判定不能は own（自社扱い）。
- *
- * 想定される誤判定:
- *  - circus以外のPDFでもファイル名に「No123456」相当が入っていれば circus と誤判定しうる。
- *  - circus PDFでもファイル名が改変され No番号を失っていれば own に落ちる。
- *  いずれも job-platform 側は media を「登録媒体の記録」として使うだけで抽出内容には影響しないため、
- *  誤判定の実害は「媒体ラベルの取り違え」に限定される（求人データ本体・非公開性は不変）。
+ * 判定順（先勝ち）:
+ *   1. circus: ファイル名に「No」+ 5〜7桁（例: 株式会社エスプール_No319877.pdf）
+ *   2. mynavi_jobshare: 先頭が4〜6桁数字＋アンダースコア（例: 33636_株式会社富士薬品_….pdf）
+ *   3. own: 上記いずれにも該当しない（自社扱い）
  */
-export function detectMediaFromFilename(fileName: string): "circus" | "own" {
-  return /No\d{5,7}/i.test(fileName ?? "") ? "circus" : "own";
+export function detectMediaFromFilename(fileName: string): "circus" | "mynavi_jobshare" | "own" {
+  const f = fileName ?? "";
+  if (/No\d{5,7}/i.test(f)) return "circus";
+  if (/^\d{4,6}_/.test(f)) return "mynavi_jobshare";
+  return "own";
 }
 
 export type IngestResult =
