@@ -30,7 +30,7 @@ export type MatchedSlot = {
 };
 
 /** YYYY-MM-DD (JST) -> Date (UTC 00:00) */
-function toJstDateOnly(date: Date): Date {
+export function toJstDateOnly(date: Date): Date {
   const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()));
 }
@@ -67,7 +67,7 @@ async function findMachineByRecruiterName(recruiterName: string) {
 }
 
 /** machineId × deliveryDate (UTC 00:00) のスロットから1件選ぶ */
-async function pickBestSlot(machineId: string, deliveryDate: Date): Promise<MatchedSlot | null> {
+export async function pickBestSlot(machineId: string, deliveryDate: Date): Promise<MatchedSlot | null> {
   const slots = await prisma.scoutDeliverySlot.findMany({
     where: { machineId, deliveryDate },
     select: {
@@ -106,16 +106,33 @@ async function pickBestSlot(machineId: string, deliveryDate: Date): Promise<Matc
 export async function findMatchingSlot(params: {
   recruiterName: string;
   applicationDate: Date;
+  /** T-135: 配信日（Excel照合値）。あれば応募日より優先して枠を探す。 */
+  scoutDeliveryDate?: Date | null;
 }): Promise<MatchedSlot | null> {
   const machine = await findMachineByRecruiterName(params.recruiterName);
   if (!machine) return null;
 
-  const dayJst = toJstDateOnly(params.applicationDate);
+  // T-135: 配信日ベース化。scoutDeliveryDate があればそれを起点に、無ければ従来どおり応募日。
+  const usedDeliveryDate = params.scoutDeliveryDate != null;
+  const anchorDate = params.scoutDeliveryDate ?? params.applicationDate;
+  const anchorKind = usedDeliveryDate ? "scoutDeliveryDate" : "applicationDate";
+
+  const dayJst = toJstDateOnly(anchorDate);
   const today = await pickBestSlot(machine.id, dayJst);
-  if (today) return today;
+  if (today) {
+    console.log(
+      `[scout/auto-link] findMatchingSlot matched by ${anchorKind}=${dayJst.toISOString().slice(0, 10)} (machine=${machine.id})`,
+    );
+    return today;
+  }
 
   const yesterdayJst = addDays(dayJst, -1);
   const yesterday = await pickBestSlot(machine.id, yesterdayJst);
+  if (yesterday) {
+    console.log(
+      `[scout/auto-link] findMatchingSlot matched by ${anchorKind}-1d=${yesterdayJst.toISOString().slice(0, 10)} (machine=${machine.id})`,
+    );
+  }
   return yesterday;
 }
 
@@ -123,6 +140,8 @@ export async function autoLinkCandidateToSlot(params: {
   candidateId: string;
   recruiterName: string | null;
   applicationDate: Date;
+  /** T-135: 配信日（Excel照合値）。あれば応募日より優先して枠を探す。 */
+  scoutDeliveryDate?: Date | null;
 }): Promise<{
   linked: boolean;
   slotId?: string;
@@ -139,7 +158,12 @@ export async function autoLinkCandidateToSlot(params: {
       return { linked: false, reason: "no_machine_master" };
     }
 
-    const dayJst = toJstDateOnly(params.applicationDate);
+    // T-135: 配信日ベース化。scoutDeliveryDate があればそれを起点に、無ければ従来どおり応募日。
+    const usedDeliveryDate = params.scoutDeliveryDate != null;
+    const anchorDate = params.scoutDeliveryDate ?? params.applicationDate;
+    const anchorKind = usedDeliveryDate ? "scoutDeliveryDate" : "applicationDate";
+
+    const dayJst = toJstDateOnly(anchorDate);
     let slot = await pickBestSlot(machine.id, dayJst);
     let usedYesterday = false;
     if (!slot) {
@@ -154,6 +178,10 @@ export async function autoLinkCandidateToSlot(params: {
         reason: usedYesterday ? "no_candidate_yesterday" : "no_candidate_today",
       };
     }
+
+    console.log(
+      `[scout/auto-link] autoLink candidate=${params.candidateId} by ${anchorKind}=${dayJst.toISOString().slice(0, 10)}${usedYesterday ? " (-1d)" : ""} -> slot=${slot.slotId}`,
+    );
 
     await prisma.candidate.update({
       where: { id: params.candidateId },

@@ -370,7 +370,8 @@ export async function POST(req: NextRequest) {
       const linkRes = await autoLinkCandidateToSlot({
         candidateId: candidate.id,
         recruiterName: recruiterName?.trim() ?? null,
-        // 抽出した応募日（無ければ createdAt）で紐付け。scoutDeliveryDate と同じ枠に揃える
+        // T-135: 配信日（Excel照合値）を優先。無ければ応募日（無ければ createdAt）にフォールバック
+        scoutDeliveryDate,
         applicationDate: effectiveApplicationDate,
       });
       scoutLinkResult = linkRes.reason;

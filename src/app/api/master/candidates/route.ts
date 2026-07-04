@@ -215,6 +215,8 @@ export async function POST(request: NextRequest) {
         await autoLinkCandidateToSlot({
           candidateId: candidate.id,
           recruiterName: recruiterName.trim(),
+          // T-135: 手入力の配信日があれば優先。無ければ応募日（無ければ createdAt）
+          scoutDeliveryDate: candidate.scoutDeliveryDate,
           applicationDate: candidate.applicationDate ?? candidate.createdAt,
         });
       } catch (e) {
