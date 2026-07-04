@@ -47,42 +47,41 @@ const COMMON_COLS: ColConfig[] = [
   { key: "jobDb", label: "求人DB", width: 200, sortKey: "jobDb" },
   { key: "entryFlags", label: "エントリーフラグ", width: 110, sortKey: "entryFlag" },
   { key: "statusFlags", label: "対応状況", width: 110, sortKey: "companyFlag" },
-  { key: "entryDate", label: "エントリー日", width: 60, sortKey: "entryDate" },
+  { key: "entryDate", label: "エントリー日", width: 75, sortKey: "entryDate" },
 ];
 
 const TAB_EXTRA: Record<string, ColConfig[]> = {
   "求人紹介": [],
   "エントリー": [
-    { key: "docSubmit", label: "書類提出日", width: 85, sortKey: "documentSubmitDate" },
+    { key: "docSubmit", label: "書類提出日", width: 95, sortKey: "documentSubmitDate" },
   ],
   "書類選考": [
-    { key: "docDates", label: "書類提出日", width: 100, sortKey: "documentSubmitDate" },
-    { key: "aptitudeDates", label: "適性検査", width: 100, sortKey: "aptitudeTestExists" },
+    { key: "docDates", label: "書類提出日", width: 115, sortKey: "documentSubmitDate" },
+    { key: "aptitudeDates", label: "適性検査", width: 115, sortKey: "aptitudeTestExists" },
   ],
   "面接": [
     // T-091 fix5: 面接対策はアイコン無しのため日付/時刻が収まる最小幅 75 へ圧縮。
-    { key: "interviewPrep", label: "面接対策", width: 75, sortKey: "interviewPrepDate" },
-    // T-091 fix2: 下段=アイコン+時刻の2段レイアウトで列幅内に収まるため 95px 維持（アイコン padding 含む最小幅）。
-    { key: "firstInterview", label: "一次面接", width: 95, sortKey: "firstInterviewDate" },
-    { key: "secondInterview", label: "二次面接", width: 95, sortKey: "secondInterviewDate" },
-    { key: "finalInterview", label: "最終面接", width: 95, sortKey: "finalInterviewDate" },
+    { key: "interviewPrep", label: "面接対策", width: 90, sortKey: "interviewPrepDate" },
+    { key: "firstInterview", label: "一次面接", width: 105, sortKey: "firstInterviewDate" },
+    { key: "secondInterview", label: "二次面接", width: 105, sortKey: "secondInterviewDate" },
+    { key: "finalInterview", label: "最終面接", width: 105, sortKey: "finalInterviewDate" },
   ],
   "内定": [
-    { key: "offerDate", label: "内定日", width: 85, sortKey: "offerDate" },
-    { key: "offerDeadline", label: "承諾期限", width: 85, sortKey: "offerDeadline" },
-    { key: "offerMeeting", label: "オファー面談", width: 95, sortKey: "offerMeetingDate" },
-    { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
+    { key: "offerDate", label: "内定日", width: 95, sortKey: "offerDate" },
+    { key: "offerDeadline", label: "承諾期限", width: 95, sortKey: "offerDeadline" },
+    { key: "offerMeeting", label: "オファー面談", width: 105, sortKey: "offerMeetingDate" },
+    { key: "acceptance", label: "承諾日", width: 95, sortKey: "acceptanceDate" },
     // 業務フロー: 承諾日 → 入社日入力 → 入社済フラグ切替。承諾日の直後で入社日を入力する。
     // セルは入社済タブと同じ InlineDateCell（正午UTC固定・JST日付ズレなし）を流用。
-    { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
+    { key: "joinDate", label: "入社日", width: 95, sortKey: "joinDate" },
     // T-088: 課金方式（年収％/固定）+確定金額。承諾レコードで入力可。実績表の決定売上＝この revenue を承諾日月で集計。
     { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
     { key: "cost", label: "費用", width: 130, sortKey: "cost" },
     { key: "grossProfit", label: "粗利", width: 90, sortKey: null },
   ],
   "入社済": [
-    { key: "acceptance", label: "承諾日", width: 85, sortKey: "acceptanceDate" },
-    { key: "joinDate", label: "入社日", width: 85, sortKey: "joinDate" },
+    { key: "acceptance", label: "承諾日", width: 95, sortKey: "acceptanceDate" },
+    { key: "joinDate", label: "入社日", width: 95, sortKey: "joinDate" },
     // T-088: 入社済タブでも入力可（同一 JobEntry・SSoT は revenue・二重計上なし）。
     { key: "revenue", label: "売上", width: 150, sortKey: "revenue" },
     { key: "cost", label: "費用", width: 130, sortKey: "cost" },
@@ -105,7 +104,7 @@ function getColumns(tab: string): ColConfig[] {
 
 function fmtDate(iso: string | null) {
   if (!iso) return "";
-  return new Date(iso).toISOString().slice(5, 10).replace("-", "/");
+  return new Date(iso).toISOString().slice(0, 10).replace(/-/g, "/");
 }
 
 function fmtDateFull(iso: string | null) {
@@ -113,8 +112,8 @@ function fmtDateFull(iso: string | null) {
   return new Date(iso).toISOString().slice(0, 10).replace(/-/g, "/");
 }
 
-// 本人対応が完了済み（通知送信済・辞退報告済・入社済）のみ無効化
-const COMPLETED_PERSON_FLAGS = ["見送り通知送信済", "見送り通知済み", "入社済"];
+// 本人対応が完了済み（通知送信済・辞退報告済）のみ無効化
+const COMPLETED_PERSON_FLAGS = ["見送り通知送信済", "見送り通知済み"];
 const COMPLETED_COMPANY_FLAGS = ["辞退報告済"];
 
 function isPersonActionCompleted(entry: Entry): boolean {
