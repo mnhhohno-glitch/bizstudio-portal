@@ -68,5 +68,7 @@ function jpNormalize(externalJobRef, storedSourceType) {
 - `src/app/api/external/candidate-site/favorites/route.ts`（`jpNormalize` 追加＋GET/`toDTO` に適用、`FavoriteDTO` に `sourceJobId` 追加）
 
 ## 5. Git / デプロイ
-- コミット: **（追記）**
-- Railway: **（SUCCESS を追記）**
+- コミット（master・パス指定add）: **`4f46e82`**（favorites route ＋ 本レポート）
+- push前ゲート: `py scripts/wait_railway_idle.py` → 本番idle（exit 0）
+- Railway 本番: BUILDING→DEPLOYING→**SUCCESS**（service=bizstudio-portal・81s）。`origin/master` HEAD＝`4f46e82`、`/login` HTTP200。
+- 本番 favorites GET 実測: 返却キーに `sourceJobId` 追加を確認、jp行10件すべて `sourceJobId` 付与・`sourceType="job-platform"`（改修がライブ反映）。
