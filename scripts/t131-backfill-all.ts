@@ -39,9 +39,14 @@ function argVal(name: string): string | undefined {
 }
 const WORKERS = Math.max(1, parseInt(argVal("--workers") ?? "4", 10) || 4);
 const LIMIT = argVal("--limit") ? Math.max(0, parseInt(argVal("--limit")!, 10) || 0) : Infinity;
+// 支援中(supportStatus=ACTIVE)の候補者に紐づく分のみに絞る（既存条件にANDで追加）。
+const ACTIVE_ONLY = argv.includes("--active-only");
 
 // ---- 定数 ----
-const COST_PER_ITEM_YEN = 0.59; // 1件あたり概算費用
+const COST_PER_ITEM_YEN = 0.59; // 1件あたり概算費用（旧・下限寄りの目安）
+// 実効単価レンジ（docs/reports/gemini-cost-reconcile-202607.md の実測較正）
+const COST_LOW_YEN = 1.2;
+const COST_HIGH_YEN = 2.0;
 const SECONDS_PER_ITEM = 41; // Gemini構造化の実測処理時間/件
 const MAX_ATTEMPTS = 3;
 const PROGRESS_PATH = path.join(process.cwd(), "verify", "t131-backfill-progress.jsonl");
@@ -147,6 +152,8 @@ async function fetchTargets(): Promise<Target[]> {
       archivedAt: null,
       extractedText: { not: null },
       driveFileId: { not: null },
+      // --active-only: 紐づく候補者が支援中(supportStatus=ACTIVE)の分だけに絞る（ANDで追加）。
+      ...(ACTIVE_ONLY ? { candidate: { supportStatus: "ACTIVE" } } : {}),
     },
     select: { id: true, candidateId: true, fileName: true, driveFileId: true },
     orderBy: { createdAt: "asc" },
@@ -171,10 +178,13 @@ async function main() {
   const estCostPending = (pending.length * COST_PER_ITEM_YEN).toFixed(0);
   const estHours = ((pending.length * SECONDS_PER_ITEM) / WORKERS / 3600).toFixed(1);
 
+  const pendingCands = new Set(pending.map((t) => t.candidateId));
+  log(`絞り込み: ${ACTIVE_ONLY ? "支援中(supportStatus=ACTIVE)の候補者に紐づく分のみ" : "なし（全候補者）"}`);
   log(`対象(全期間・未紐付け・抽出済・Drive実体あり): ${all.length}件 / 候補者 ${cands.size}名`);
   log(`進捗ファイル済み: ${handled.size}件（ok=${[...handled.values()].filter((s) => s === "ok").length} / failed=${[...handled.values()].filter((s) => s === "failed").length}）`);
-  log(`今回の未処理: ${pending.length}件`);
+  log(`今回の未処理: ${pending.length}件 / 対象候補者(ユニーク) ${pendingCands.size}名`);
   log(`概算費用: 全体¥${estCostAll} / 未処理分¥${estCostPending}（×¥${COST_PER_ITEM_YEN}/件）`);
+  log(`概算費用レンジ（未処理${pending.length}件×¥${COST_LOW_YEN}〜¥${COST_HIGH_YEN}）: ¥${(pending.length * COST_LOW_YEN).toFixed(0)}〜¥${(pending.length * COST_HIGH_YEN).toFixed(0)}`);
   log(`概算所要（未処理分・並列${WORKERS}）: 約${estHours}時間（${SECONDS_PER_ITEM}秒/件÷${WORKERS}）`);
 
   if (!EXECUTE) {
