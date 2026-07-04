@@ -10,6 +10,7 @@ import {
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
+import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -379,6 +380,19 @@ export async function POST(
       where: { id: sessionId },
       data: { updatedAt: new Date() },
     });
+
+    // T-132: 診断応答が来たら「完了直後」に別コールで希望条件を構造化保存する（後読み）。
+    // 診断の判定は content ヒューリスティック（検索条件（推奨）/職種キーワード）。
+    // fire-and-forget（await しない）。失敗はログのみで、チャット応答・診断体験に一切影響させない。
+    // ※ portal は Railway の常駐 Node のためレスポンス返却後も継続実行される（Vercel lambda と異なる）。
+    if (isDiagnosisContent(aiContent)) {
+      void runDiagnosisExtraction({
+        candidateId,
+        sessionId,
+        messageId: saved.id,
+        diagnosisText: aiContent,
+      }).catch((e) => console.error("[advisor-chat] diagnosis extraction failed:", e));
+    }
 
     return NextResponse.json({ message: saved });
   } catch (e: unknown) {

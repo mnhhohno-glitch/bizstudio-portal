@@ -1529,6 +1529,33 @@ model AdvisorUsageLog {
   @@map("advisor_usage_logs")
 }
 
+// T-132: タイプ診断（AIアドバイザーの自由文診断）から AI で構造化抽出した希望条件。
+// 診断散文（advisor_chat_messages.content）は seed に使えないため、後読みで構造化しここへ保存する。
+// 面談由来の希望条件（interview_details）が無い候補者の おすすめ③seed フォールバック源。
+// candidateId は FK を張らない（AdvisorUsageLog と同方針・テストユーザー混在/ログ隔離のため）。
+// 候補者1名につき最新の診断を1行保持（candidateId @unique・再診断で upsert 上書き）。
+model AdvisorTypeDiagnosis {
+  id                 String   @id @default(cuid())
+  candidateId        String   @unique @map("candidate_id")
+  diagnosisType      String?  @map("diagnosis_type") // 6タイプのいずれか（抽出できた場合のみ）
+  desiredJobTypes    String[] @map("desired_job_types") // 診断の職種キーワード（原文名称のまま）
+  desiredPrefectures String[] @map("desired_prefectures") // 都道府県名へ正規化済み
+  desiredSalaryMin   Int?     @map("desired_salary_min") // 万円。許容下限優先（無ければ月給×12）。理想額は入れない
+  desiredSalaryMax   Int?     @map("desired_salary_max") // 万円。許容/理想レンジ上限（あれば）
+  idealSalaryMin     Int?     @map("ideal_salary_min") // 理想額（別枠保管・seedのminには使わない）
+  idealSalaryMax     Int?     @map("ideal_salary_max")
+  sourceMessageId    String   @map("source_message_id") // 抽出元 advisor_chat_messages.id
+  sourceSessionId    String?  @map("source_session_id")
+  extractionModel    String?  @map("extraction_model") // 抽出に使ったモデルID
+  rawJson            Json?    @map("raw_json") // 抽出生JSON（監査用）
+  extractedAt        DateTime @default(now()) @map("extracted_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([sourceMessageId])
+  @@map("advisor_type_diagnosis")
+}
+
 // ========================================
 // エントリー履歴
 // ========================================

@@ -21,7 +21,8 @@ export type AdvisorEndpoint =
   | "advisor-chat"
   | "greeting"
   | "daily-report-assist"
-  | "daily-report-chat";
+  | "daily-report-chat"
+  | "diagnosis-extract"; // T-132: 診断散文→希望条件の構造化抽出（Gemini）
 
 type TokenBreakdown = {
   inputTokens: number;

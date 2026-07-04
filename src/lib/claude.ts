@@ -26,6 +26,9 @@ export const MODEL_PRICING_PER_MTOK: Record<string, ModelPricing> = {
   [CLAUDE_MODEL_ANALYSIS]: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }, // Opus 4.6
   [CLAUDE_MODEL_DEFAULT]: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, // Sonnet 4.6
   [CLAUDE_MODEL_LIGHT]: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }, // Haiku 4.5
+  // T-132: Gemini 診断抽出用（概算単価・Flash系の公表値ベース。preview のため目安）。
+  // cacheRead/cacheWrite は未使用（Gemini はここでは非キャッシュ運用）。
+  "gemini-3-flash-preview": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0 },
 };
 
 export { anthropic };

@@ -130,7 +130,39 @@ export async function GET(request: Request) {
         candidateNumber: candidate.candidateNumber,
         hasPreferences: true,
         preferences: prefs,
-        source: { interviewDate: iv.interviewDate.toISOString().slice(0, 10) },
+        // origin は監査用の追加フィールド（消費側は preferences/hasPreferences のみ参照＝無改修）。
+        source: { origin: "interview", interviewDate: iv.interviewDate.toISOString().slice(0, 10) },
+      });
+    }
+  }
+
+  // T-132: 面談由来の希望条件が無い場合のみ、タイプ診断の構造化抽出（advisor_type_diagnosis）を
+  // 同一形式で seed 供給する。レスポンスの shape は面談時と同一（preferences/hasPreferences）で、
+  // 消費側（mypage recommend）は出所を意識せず無改修で拾える。理想額（idealSalary*）は seed に出さない。
+  const diag = await prisma.advisorTypeDiagnosis.findUnique({
+    where: { candidateId: candidate.id },
+    select: {
+      desiredJobTypes: true,
+      desiredPrefectures: true,
+      desiredSalaryMin: true,
+      desiredSalaryMax: true,
+      extractedAt: true,
+    },
+  });
+  if (diag) {
+    const prefs: Preferences = {
+      desiredJobTypes: uniqNonEmpty(diag.desiredJobTypes),
+      desiredPrefectures: uniqNonEmpty(diag.desiredPrefectures),
+      desiredSalaryMin: diag.desiredSalaryMin ?? null,
+      desiredSalaryMax: diag.desiredSalaryMax ?? null,
+    };
+    if (hasAnyPreference(prefs)) {
+      return NextResponse.json({
+        ok: true,
+        candidateNumber: candidate.candidateNumber,
+        hasPreferences: true,
+        preferences: prefs,
+        source: { origin: "diagnosis", diagnosisDate: diag.extractedAt.toISOString().slice(0, 10) },
       });
     }
   }

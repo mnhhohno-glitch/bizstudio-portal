@@ -62,6 +62,26 @@ export async function generateWithGemini(params: GeminiGenerateParams): Promise<
   return generateWithGeminiInternal(buildRequestBody(params));
 }
 
+/** Gemini の usageMetadata（コスト記録用）。欠損時は 0 扱い。 */
+export interface GeminiUsage {
+  promptTokenCount: number;
+  candidatesTokenCount: number;
+  totalTokenCount: number;
+}
+
+/** 使用したモデルID（コスト記録のキーに使う）。 */
+export const GEMINI_MODEL_ID = GEMINI_MODEL;
+
+/**
+ * generateWithGemini と同じだがトークン usage も返す。コスト永続化が必要な呼び出し用。
+ * 既存の generateWithGemini は不変（呼び出し側に影響なし）。
+ */
+export async function generateWithGeminiDetailed(
+  params: GeminiGenerateParams,
+): Promise<{ text: string; usage: GeminiUsage }> {
+  return generateWithGeminiDetailedInternal(buildRequestBody(params));
+}
+
 /** PDF を添付して Gemini に送り、応答テキストを返す */
 export async function generateWithGeminiWithPdf(params: GeminiGenerateWithPdfParams): Promise<string> {
   return generateWithGeminiInternal(buildRequestBody(params, { pdfBase64: params.pdfBase64 }));
@@ -73,6 +93,13 @@ export async function generateWithGeminiWithImage(params: GeminiGenerateWithImag
 }
 
 async function generateWithGeminiInternal(requestBody: ReturnType<typeof buildRequestBody>): Promise<string> {
+  const { text } = await generateWithGeminiDetailedInternal(requestBody);
+  return text;
+}
+
+async function generateWithGeminiDetailedInternal(
+  requestBody: ReturnType<typeof buildRequestBody>,
+): Promise<{ text: string; usage: GeminiUsage }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "ここにあなたのAPIキー") {
     throw new Error("GEMINI_API_KEY is not configured");
@@ -96,6 +123,7 @@ async function generateWithGeminiInternal(requestBody: ReturnType<typeof buildRe
       finishReason?: string;
     }>;
     promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   };
 
   const candidates = data.candidates;
@@ -117,7 +145,14 @@ async function generateWithGeminiInternal(requestBody: ReturnType<typeof buildRe
     throw new Error("Empty response from Gemini");
   }
 
-  return text;
+  const um = data.usageMetadata ?? {};
+  const usage: GeminiUsage = {
+    promptTokenCount: um.promptTokenCount ?? 0,
+    candidatesTokenCount: um.candidatesTokenCount ?? 0,
+    totalTokenCount: um.totalTokenCount ?? 0,
+  };
+
+  return { text, usage };
 }
 
 /**
