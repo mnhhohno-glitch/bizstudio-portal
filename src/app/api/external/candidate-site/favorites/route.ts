@@ -55,6 +55,8 @@ type FavoriteDTO = {
   externalJobRef: string | null;
   /** job-platform 媒体内ID（紐付け済み行のみ・= externalJobRef）。フル詳細/AI解説の取得キー。 */
   sourceJobId: string | null;
+  /** kyuujinPDF の Job 内部ID（jobs.id・Int）。PDF由来求人を会社名照合せず直接引くための鍵。未紐付けは null。 */
+  kyuujinJobId: number | null;
   sourceType: string | null;
   origin: "ca" | "candidate";
   fileName: string;
@@ -90,6 +92,7 @@ export async function GET(request: Request) {
     select: {
       id: true,
       externalJobRef: true,
+      kyuujinJobId: true,
       sourceType: true,
       origin: true,
       fileName: true,
@@ -115,6 +118,7 @@ export async function GET(request: Request) {
     id: f.id,
     externalJobRef: f.externalJobRef,
     sourceJobId: jp.sourceJobId,
+    kyuujinJobId: f.kyuujinJobId,
     sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca", // null/"ca" は CA 追加として正規化
     fileName: f.fileName,
@@ -168,7 +172,7 @@ export async function POST(request: Request) {
       externalJobRef,
       archivedAt: null,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
   });
   if (existing) {
     return NextResponse.json({
@@ -216,7 +220,7 @@ export async function POST(request: Request) {
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
   });
 
   // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
@@ -273,7 +277,7 @@ export async function PATCH(request: Request) {
   const updated = await prisma.candidateFile.update({
     where: { id: row.id },
     data: { candidateNote },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
   });
 
   return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
@@ -334,6 +338,7 @@ function toDTO(
   f: {
     id: string;
     externalJobRef: string | null;
+    kyuujinJobId: number | null;
     sourceType: string | null;
     origin: string | null;
     fileName: string;
@@ -350,6 +355,7 @@ function toDTO(
     id: f.id,
     externalJobRef: f.externalJobRef,
     sourceJobId: jp.sourceJobId,
+    kyuujinJobId: f.kyuujinJobId,
     sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca",
     fileName: f.fileName,

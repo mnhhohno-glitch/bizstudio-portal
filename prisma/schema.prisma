@@ -1412,6 +1412,10 @@ model CandidateFile {
   // 案Z 段階A: job-platform 求人ブックマーク用。既存PDF由来は null（"PDF"相当）。
   sourceType        String?               @map("source_type") // "PDF" / "job-platform"
   externalJobRef    String?               @map("external_job_ref") // job-platform 求人ID
+  // 求人ID紐付け: kyuujinPDF の Job 内部ID（jobs.id・Int）。抽出完了通知(extraction-complete webhook)で
+  //   ファイル名突合して書き込む。mypage の「担当CAのおすすめ」が会社名照合を廃止しこのIDで直接引くための鍵。
+  //   externalJobRef（job-platform の UUID）とは別系統。null は未紐付け。
+  kyuujinJobId      Int?                  @map("kyuujin_job_id")
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
   sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
