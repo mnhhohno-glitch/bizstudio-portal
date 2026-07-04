@@ -182,9 +182,11 @@ export async function POST(
       }
 
       // Step 3: Upload to local storage (original filenames)
-      console.log("[SendToJobTool] Step 3 (Circus): Uploading to local storage...", { fileCount: downloadedFiles.length });
+      // processing_unit_id を付与して、kyuujinPDF側が「どの処理単位のPDFか」を判別できるようにする（T-132 followup3）。
+      // 印がないと circus 取込で抽出0件/誤対象化が起きる。unit は Step 1 で確定済み（アップロードより前）。
+      console.log("[SendToJobTool] Step 3 (Circus): Uploading to local storage...", { fileCount: downloadedFiles.length, processingUnitId });
       const uploadRes = await fetchWithTimeout(
-        `${KYUUJIN_PDF_TOOL_URL}/api/upload/projects/${projectId}/files/batch`,
+        `${KYUUJIN_PDF_TOOL_URL}/api/upload/projects/${projectId}/files/batch?processing_unit_id=${processingUnitId}`,
         { method: "POST", body: circusFormData },
         BATCH_UPLOAD_TIMEOUT_MS
       );
