@@ -154,3 +154,11 @@
 ## 判断サマリ
 
 タイプ診断の所在は特定済み（`advisor_chat_messages`・自由文）だが希望条件が構造化DB化されておらず、安定抽出にAI前工程が必須・対象母集団も2.3%(実質1名)。タスクの Phase 1 step 4 に従い**実装せず、前工程（診断の構造化保存）を提案して終了**。preferences 拡張自体は前工程完了後に「読み替え1本」の小差分で実装可能。
+
+---
+
+## Git / デプロイ
+
+- コミット: **`fe68d93`**（本レポートのみ・アプリコード無変更）
+- push前ゲート: `py scripts/wait_railway_idle.py` → 本番idle（exit 0）
+- Railway 本番（service=bizstudio-portal）: BUILDING→DEPLOYING→**SUCCESS**（`origin/master` HEAD=`fe68d93`）。docs のみのため実質no-opデプロイ。
