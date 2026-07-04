@@ -1346,3 +1346,17 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - 受信（`src/app/(app)/tasks/new/page.tsx`）: useEffect（`offerPrefillApplied` ref で1回）。カテゴリ「内定承諾報告」を name 一致で `setCategoryId`、候補者を `candidateId`（`id`/`candidateNo`）一致で選択、企業名/内定承諾日/入社日 → `resolvedCat.fields` のラベル一致で `setFieldValues[field.id]`、feeType/理論年収/手数料%/revenue → 課金方式 state（`naiteiFeeMode`/`naiteiTheoryIncome`/`naiteiFeeRate`/`naiteiFixedFee`）、`setStep(2)`。
 - 課金方式UI: `isNaitei` カスタムブロック内（雇用形態の下）。helper: module `computeReferralFee()`。「理論年収」「紹介手数料（税抜き）」は `getVisibleFields` の `hiddenLabels` に追加し generic 描画から除外（submit 時に `extraFieldValues` でラベル格納）。
 - テンプレ値プリセットの確立パターン（**ラベル一致→`setFieldValues[field.id]`**）: 既存 `prefill=entry`（page.tsx:379-390）/ `prefill=interview-decline`（451-463）と同方式。新導線も踏襲。
+
+## スカウト運用タブ構成（T-135 T-C, master ae3cec1, 2026-07-04）
+
+- **タブ定義**: `src/components/scout/ScoutNav.tsx`（client）。`BASE_TABS` = ダッシュボード(`/scout`)｜配信枠管理(`/scout/slots`)｜集計(`/scout/analytics`)。admin のみ末尾に 過去データインポート(`/scout/import-legacy`) を追加。アクティブ判定は `pathname === t.href`（完全一致・startsWith 不可）。各ページが `<ScoutNav />` を個別描画（共通レイアウトではない）。
+- **権限の配り方**: `src/app/(app)/scout/layout.tsx`（server, async）が `getSessionUser()` で `isAdmin` を判定し、`ScoutRoleProvider`（`src/components/scout/ScoutRoleContext.tsx`, client Context）で配下へ渡す。`useScoutRole()` で ScoutNav・import-legacy ページが fetch のちらつき無しで admin 判定。
+- **集計統合ページ**: `src/app/(app)/scout/analytics/page.tsx`（client）。
+  - トグル `view: sent|applied|media`（`?view=` で初期値）。期間(from/to)は**ページが保持し3ビュー共通**（トグル切替で保持）。
+  - 期間コントロール = 開始/終了ピッカー ＋ `◀｜当月｜▶`（`snapMonth(base, delta)` でカレンダー月スナップ。◀▶ は終了日の月基準、当月は `jstToday()` 基準。月末日数差は `new Date(y, m, 0)` で吸収。罠#17）。
+  - ビューは `_components/` に抽出（丸コピーせず再利用）: `DeliveryDateView`（旧 by-sent: dateMode=sent・軸切替・単位・subBuckets・StatsTable）／ `AppliedDateView`（旧 by-applied: dateMode=applied・単位）／ `MediaView`（旧 by-media: axis=media と axis=machine の2回並行フェッチ・2テーブル）。各ビューは props `{from,to}` を受け、groupBy/axis/modal を内部保持。ApplicantListModal は各ビュー内で使用。
+  - fetch は `useEffect` 内にインライン（`.then().finally()`＋`active` ガード）。`react-hooks/set-state-in-effect` を避けるため `load` useCallback は使わない（ダッシュボードと同方式）。
+  - **stats API は不変**（T-A のまま）。ビューは同一 URL・同一パラメータを叩くため統合前後で数値は同一。
+- **旧URL互換**: `by-sent`/`by-applied`/`by-media` の各 `page.tsx` は `redirect("/scout/analytics?view=...")`（server component）に置換。ロジックは `_components/` へ移設済み。
+- **配信枠管理の応募ありフィルタ**: `slots/list` API が `hasApplications=true` で `where.linkedCandidates = { some: {} }`（DB側絞り込み）。`slots/page.tsx` に「応募あり」チェックボックス（`fHasApplications`）。件数 `${listRows.length}件` は絞込後に連動。
+- **開封数入力/過去インポート**: open-count はタブから撤去（ページ `/scout/open-count` は温存＝直接URL可）。import-legacy はタブ admin 限定＋ページ先頭 `if (!isAdmin) return 権限メッセージ`（API は既存 403）。
