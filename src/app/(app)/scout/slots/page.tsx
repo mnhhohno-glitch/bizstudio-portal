@@ -6,26 +6,6 @@ import ScoutNav from "@/components/scout/ScoutNav";
 import ApplicantListModal from "@/components/scout/ApplicantListModal";
 import { TableVirtuoso, type TableComponents } from "react-virtuoso";
 
-type Slot = {
-  id: string;
-  scoutNumber: string;
-  deliveryDate: string;
-  hourSlot: number;
-  machineId: string | null;
-  isMachine: boolean;
-  isStaff: boolean;
-  deliveryCategoryLarge: string;
-  deliveryCategoryMedium: string | null;
-  deliveryCategorySmall: string | null;
-  mediaSource: string;
-  searchConditionName: string | null;
-  deliveryCount: number;
-  openCount: number;
-  isAggregationTarget: boolean;
-  memo: string | null;
-  machine: { id: string; recruiterName: string; machineLabel: string; machineNumber: number | null; isActive: boolean; isMachine: boolean } | null;
-};
-
 type ListRow = {
   id: string;
   scoutNumber: string;
@@ -117,7 +97,6 @@ type DuplicateForm = {
   deliveryCategorySmall: "検索条件指定" | "検索条件未指定";
 };
 
-type Tab = "list" | "matrix";
 type SortKey =
   | "deliveryCategoryLarge"
   | "machineId"
@@ -151,14 +130,8 @@ const slotsVirtuosoComponents: TableComponents<ListRow> = {
 };
 
 export default function ScoutSlotsPage() {
-  const [tab, setTab] = useState<Tab>("list");
-
-  // === マトリクスタブ用 state ===
+  // T-135 step6: マトリクス表示は撤去。「この日の枠を自動作成」用に date/creating のみ残す。
   const [date, setDate] = useState(today());
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<Partial<Slot>>({});
   const [creating, setCreating] = useState(false);
 
   const [staffMachines, setStaffMachines] = useState<Machine[]>([]);
@@ -179,7 +152,7 @@ export default function ScoutSlotsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [submittingCreate, setSubmittingCreate] = useState(false);
 
-  const [duplicateSource, setDuplicateSource] = useState<ListRow | Slot | null>(null);
+  const [duplicateSource, setDuplicateSource] = useState<ListRow | null>(null);
   const [duplicateForm, setDuplicateForm] = useState<DuplicateForm>({
     deliveryDate: today(),
     hourSlot: 14,
@@ -207,16 +180,6 @@ export default function ScoutSlotsPage() {
     { column: "hourSlot", order: "desc" },
   ]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/scout/slots?date=${date}`);
-    if (res.ok) {
-      const data = await res.json();
-      setSlots(data.slots || []);
-    }
-    setLoading(false);
-  }, [date]);
-
   const loadList = useCallback(async () => {
     setListLoading(true);
     try {
@@ -243,12 +206,8 @@ export default function ScoutSlotsPage() {
   }, [startDate, endDate, fLarge, fMedium, fMachine, fMedia, fHasApplications, sortSpecs]);
 
   useEffect(() => {
-    if (tab === "matrix") load();
-  }, [load, tab]);
-
-  useEffect(() => {
-    if (tab === "list") loadList();
-  }, [loadList, tab]);
+    loadList();
+  }, [loadList]);
 
   useEffect(() => {
     fetch("/api/scout/masters").then(async (res) => {
@@ -283,44 +242,19 @@ export default function ScoutSlotsPage() {
       }
       const data = await res.json();
       toast.success(`${data.message || "作成完了"} (${data.created || 0}件)`);
-      load();
+      // 作成後、対象日を含む期間で一覧を再取得できるよう期間を対象日に寄せて再読込
+      if (date < startDate || date > endDate) {
+        setStartDate(date);
+        setEndDate(date);
+      } else {
+        loadList();
+      }
     } finally {
       setCreating(false);
     }
   };
 
-  const startEdit = (slot: Slot) => {
-    setEditingId(slot.id);
-    setEditValues({
-      deliveryCount: slot.deliveryCount,
-      mediaSource: slot.mediaSource,
-      searchConditionName: slot.searchConditionName,
-      deliveryCategoryLarge: slot.deliveryCategoryLarge,
-      deliveryCategoryMedium: slot.deliveryCategoryMedium,
-      deliveryCategorySmall: slot.deliveryCategorySmall,
-      isAggregationTarget: slot.isAggregationTarget,
-      memo: slot.memo,
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!editingId) return;
-    const res = await fetch("/api/scout/slots", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: editingId, ...editValues }),
-    });
-    if (res.ok) {
-      toast.success("更新しました");
-      setEditingId(null);
-      setEditValues({});
-      load();
-    } else {
-      toast.error("更新に失敗しました");
-    }
-  };
-
-  const openDuplicateModal = (slot: Slot | ListRow) => {
+  const openDuplicateModal = (slot: ListRow) => {
     setDuplicateSource(slot);
     setDuplicateForm({
       deliveryDate: slot.deliveryDate.slice(0, 10),
@@ -356,8 +290,7 @@ export default function ScoutSlotsPage() {
       }
       toast.success(`複製しました（${data.slot?.scoutNumber || ""}）`);
       setDuplicateSource(null);
-      if (tab === "matrix") load();
-      else loadList();
+      loadList();
     } finally {
       setSubmittingDuplicate(false);
     }
@@ -390,12 +323,7 @@ export default function ScoutSlotsPage() {
       toast.success(`作成しました（${data.slot?.scoutNumber || ""}）`);
       setShowCreateModal(false);
       setCreateForm((prev) => ({ ...prev, deliveryCount: 0, searchConditionName: "" }));
-      if (tab === "matrix") {
-        if (createForm.deliveryDate === date) load();
-        else setDate(createForm.deliveryDate);
-      } else {
-        loadList();
-      }
+      loadList();
     } finally {
       setSubmittingCreate(false);
     }
@@ -429,37 +357,29 @@ export default function ScoutSlotsPage() {
     setSortSpecs([]);
   };
 
-  // === マトリクス用カラム計算 ===
-  type ColumnKey = string;
-  type ColumnInfo = { key: ColumnKey; machine: Machine; categoryMedium: string | null };
-  const columnsMap = new Map<ColumnKey, ColumnInfo>();
-  for (const s of slots) {
-    if (!s.machine) continue;
-    const key = `${s.machineId}|${s.deliveryCategoryMedium ?? "_"}`;
-    if (!columnsMap.has(key)) {
-      columnsMap.set(key, {
-        key,
-        machine: s.machine,
-        categoryMedium: s.deliveryCategoryMedium,
-      });
-    }
-  }
-  const columns = Array.from(columnsMap.values()).sort((a, b) => {
-    if (a.machine.isMachine !== b.machine.isMachine) {
-      return a.machine.isMachine ? -1 : 1;
-    }
-    const an = a.machine.machineNumber ?? 999;
-    const bn = b.machine.machineNumber ?? 999;
-    if (an !== bn) return an - bn;
-    return a.machine.recruiterName.localeCompare(b.machine.recruiterName);
-  });
-
   return (
     <div>
       <ScoutNav />
       <div className="flex items-center justify-between">
         <h1 className="text-[20px] font-bold text-[#374151]">配信枠管理</h1>
         <div className="flex items-center gap-2">
+          {/* T-135 step6: マトリクス表示を撤去し「この日の枠を自動作成」を一覧ヘッダに移設（機能温存） */}
+          <div className="flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="rounded-md border border-[#E5E7EB] px-2 py-1 text-[12px]"
+              title="自動作成する対象日"
+            />
+            <button
+              onClick={createDailySlots}
+              disabled={creating}
+              className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+            >
+              この日の枠を自動作成
+            </button>
+          </div>
           <button
             onClick={() => {
               setCreateForm((prev) => ({ ...prev, deliveryDate: today() }));
@@ -473,33 +393,8 @@ export default function ScoutSlotsPage() {
         </div>
       </div>
 
-      {/* タブ */}
-      <div className="mt-4 flex border-b border-[#E5E7EB]">
-        <button
-          onClick={() => setTab("list")}
-          className={`px-4 py-2 text-[13px] font-medium ${
-            tab === "list"
-              ? "border-b-2 border-[#2563EB] text-[#2563EB]"
-              : "text-[#6B7280] hover:text-[#374151]"
-          }`}
-        >
-          レコード一覧
-        </button>
-        <button
-          onClick={() => setTab("matrix")}
-          className={`px-4 py-2 text-[13px] font-medium ${
-            tab === "matrix"
-              ? "border-b-2 border-[#2563EB] text-[#2563EB]"
-              : "text-[#6B7280] hover:text-[#374151]"
-          }`}
-        >
-          マトリクス表示
-        </button>
-      </div>
-
-      {/* レコード一覧タブ */}
-      {tab === "list" && (
-        <div className="mt-4">
+      {/* レコード一覧 */}
+      <div className="mt-4">
           {/* フィルタ */}
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white p-3">
             <div className="flex items-center gap-1 text-[12px]">
@@ -810,198 +705,6 @@ export default function ScoutSlotsPage() {
             並び替え: ソート可能ヘッダクリックで「未ソート → 昇順 → 降順 → 解除」の順。複数列クリックで複合ソート。
           </p>
         </div>
-      )}
-
-      {/* マトリクス表示タブ */}
-      {tab === "matrix" && (
-        <>
-          <div className="mt-4 flex items-center gap-2">
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px]"
-            />
-            <button
-              onClick={createDailySlots}
-              disabled={creating}
-              className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
-            >
-              この日の枠を自動作成
-            </button>
-          </div>
-
-          {loading ? (
-            <p className="mt-6 text-[#9CA3AF]">読み込み中...</p>
-          ) : slots.length === 0 ? (
-            <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-6 text-center">
-              <p className="text-[#9CA3AF]">この日の配信枠はまだ作成されていません</p>
-              <p className="mt-2 text-[12px] text-[#9CA3AF]">
-                「この日の枠を自動作成」ボタン または Power Automate からの自動作成をお試しください
-              </p>
-            </div>
-          ) : (
-            <div className="mt-4 overflow-x-auto rounded-lg border border-[#E5E7EB] bg-white">
-              <table className="w-full text-[12px]">
-                <thead className="bg-[#F9FAFB] text-[#6B7280]">
-                  <tr>
-                    <th className="px-2 py-2 text-left font-medium border-r border-[#E5E7EB]">時刻</th>
-                    {columns.map((c) => (
-                      <th key={c.key} className="px-2 py-2 text-center font-medium border-r border-[#E5E7EB]">
-                        <div>{c.machine.machineLabel}</div>
-                        <div className="text-[10px] text-[#9CA3AF]">{c.machine.recruiterName}</div>
-                        {c.categoryMedium && (
-                          <div className="text-[10px] text-[#3B82F6]">{c.categoryMedium}</div>
-                        )}
-                        {!c.machine.isActive && <div className="text-[10px] text-[#DC2626]">停止中</div>}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {HOURS.map((hour) => (
-                    <tr key={hour} className="border-t border-[#F3F4F6]">
-                      <td className="px-2 py-2 font-medium text-[#374151] border-r border-[#E5E7EB]">
-                        {hour}:00
-                      </td>
-                      {columns.map((c) => {
-                        const slot = slots.find(
-                          (s) =>
-                            s.machineId === c.machine.id &&
-                            s.hourSlot === hour &&
-                            (s.deliveryCategoryMedium ?? "_") === (c.categoryMedium ?? "_"),
-                        );
-                        if (!slot) {
-                          return <td key={c.key} className="px-2 py-2 text-center text-[#9CA3AF] border-r border-[#E5E7EB]">-</td>;
-                        }
-                        const editing = editingId === slot.id;
-                        const isReadOnly = slot.isMachine;
-                        return (
-                          <td
-                            key={c.key}
-                            className={`px-2 py-1.5 border-r border-[#E5E7EB] text-center align-top ${
-                              slot.isAggregationTarget ? "" : "bg-[#FAFAFA]"
-                            }`}
-                          >
-                            {editing ? (
-                              <div className="space-y-1">
-                                <input
-                                  type="number"
-                                  value={editValues.deliveryCount ?? 0}
-                                  onChange={(e) =>
-                                    setEditValues({ ...editValues, deliveryCount: parseInt(e.target.value, 10) || 0 })
-                                  }
-                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[12px]"
-                                />
-                                <select
-                                  value={editValues.deliveryCategoryMedium || ""}
-                                  onChange={(e) =>
-                                    setEditValues({ ...editValues, deliveryCategoryMedium: e.target.value })
-                                  }
-                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                                >
-                                  <option value="">中項目</option>
-                                  <option value="個別配信">個別配信</option>
-                                  <option value="一斉配信">一斉配信</option>
-                                </select>
-                                <select
-                                  value={editValues.deliveryCategorySmall || ""}
-                                  onChange={(e) =>
-                                    setEditValues({ ...editValues, deliveryCategorySmall: e.target.value })
-                                  }
-                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                                >
-                                  <option value="">小項目</option>
-                                  <option value="検索条件指定">検索条件指定</option>
-                                  <option value="検索条件未指定">検索条件未指定</option>
-                                </select>
-                                <input
-                                  type="text"
-                                  placeholder="検索条件名"
-                                  value={editValues.searchConditionName || ""}
-                                  onChange={(e) =>
-                                    setEditValues({ ...editValues, searchConditionName: e.target.value })
-                                  }
-                                  className="w-full rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px]"
-                                />
-                                <label className="flex items-center gap-1 text-[10px] text-[#6B7280]">
-                                  <input
-                                    type="checkbox"
-                                    checked={editValues.isAggregationTarget ?? true}
-                                    onChange={(e) =>
-                                      setEditValues({ ...editValues, isAggregationTarget: e.target.checked })
-                                    }
-                                  />
-                                  集計対象
-                                </label>
-                                <div className="flex gap-1">
-                                  <button
-                                    onClick={saveEdit}
-                                    className="flex-1 rounded bg-[#2563EB] px-1 py-0.5 text-[11px] text-white"
-                                  >
-                                    保存
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setEditingId(null);
-                                      setEditValues({});
-                                    }}
-                                    className="flex-1 rounded border border-[#E5E7EB] px-1 py-0.5 text-[11px] text-[#6B7280]"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div>
-                                <div className={`font-medium ${slot.deliveryCount > 0 ? "text-[#374151]" : "text-[#9CA3AF]"}`}>
-                                  {slot.deliveryCount}
-                                </div>
-                                {slot.openCount > 0 && (
-                                  <div className="text-[10px] text-[#6B7280]">開封 {slot.openCount}</div>
-                                )}
-                                {slot.searchConditionName && (
-                                  <div className="text-[10px] text-[#6B7280] truncate" title={slot.searchConditionName}>
-                                    {slot.searchConditionName}
-                                  </div>
-                                )}
-                                <div className="text-[10px] text-[#9CA3AF] truncate" title={slot.scoutNumber}>
-                                  {slot.scoutNumber}
-                                </div>
-                                {!isReadOnly && (
-                                  <div className="mt-1 flex flex-wrap justify-center gap-1">
-                                    <button
-                                      onClick={() => startEdit(slot)}
-                                      className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
-                                    >
-                                      編集
-                                    </button>
-                                    <button
-                                      onClick={() => openDuplicateModal(slot)}
-                                      className="rounded border border-[#E5E7EB] px-1 text-[10px] text-[#6B7280] hover:bg-[#F9FAFB]"
-                                    >
-                                      複製
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <p className="mt-4 text-[12px] text-[#9CA3AF]">
-            グレーの背景セル: 集計対象外（停止中号機、または社員枠で未入力）<br />
-            RPA枠（1〜6号機）の配信数は OneDrive エクセル取り込みで自動更新されます。社員枠（藤本 夏海・大野 望）は手入力 / 新規作成 / 複製で管理します。
-          </p>
-        </>
-      )}
 
       {/* 新規作成モーダル */}
       {showCreateModal && (

@@ -2362,7 +2362,9 @@ model ScoutDeliverySlot {
 
   linkedCandidates Candidate[]
 
-  @@unique([deliveryDate, hourSlot, machineId, deliveryCategoryLarge, deliveryCategoryMedium], map: "scout_slot_unique_per_category")
+  // T-135 step6: FM全量入替により「1スカウトNO=1行」を許容するため複合ユニーク制約を撤廃。
+  // 同一 日付×時×担当×種別×手法 に複数行（配信イベント）が並ぶ。検索性能維持のため同キーを非ユニークindex化。
+  @@index([deliveryDate, hourSlot, machineId, deliveryCategoryLarge, deliveryCategoryMedium], map: "scout_slot_category_idx")
   @@index([deliveryDate])
   @@index([deliveryDate, hourSlot])
   @@index([machineId])
