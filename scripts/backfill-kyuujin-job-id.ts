@@ -1,8 +1,9 @@
 /**
  * 求人ID紐付け化 step4: 過去分バックフィル。
- * 支援中(supportStatus=ACTIVE)候補者のPDF由来ブックマーク(CandidateFile category="BOOKMARK",
- * sourceType=null, archivedAt=null, lastExportedAt≠null)のうち kyuujinJobId=null の行に、
+ * 支援中(supportStatus=ACTIVE)候補者の、kyuujinPDF送信済みブックマーク
+ * (CandidateFile category="BOOKMARK", archivedAt=null, lastExportedAt≠null)のうち kyuujinJobId=null の行に、
  * kyuujinPDF の Job 内部ID(jobs.id・Int)を「文字突合のみ」で後付けする。AI/Gemini呼び出しは一切なし。
+ * ※sourceType は条件に含めない（T-131 で sourceType が変わった行も対象。実際に送った行の絞りは lastExportedAt≠null）。
  *
  * 取得元: 既存API GET {KYUUJIN_PDF_TOOL_URL}/api/projects/by-job-seeker-id/{candidateNumber}/jobs
  *   （認証不要・読み取りのみ）。jobs[] の各要素: { id, job_id, job_db, company_name, ... }
@@ -252,7 +253,8 @@ async function main() {
   const rows = await prisma.candidateFile.findMany({
     where: {
       category: "BOOKMARK",
-      sourceType: null,
+      // sourceType 条件は外す（T-131 で sourceType が書き換わった行があっても、PDF由来ブックマークで
+      // kyuujinJobId が必要な事実は不変。実際に kyuujinPDF へ送った行に絞るのは lastExportedAt≠null が担う）。
       archivedAt: null,
       lastExportedAt: { not: null },
       kyuujinJobId: null,
@@ -262,11 +264,20 @@ async function main() {
       },
     },
     select: {
-      id: true, fileName: true, lastExportedAt: true, lastExportedTo: true,
-      candidate: { select: { candidateNumber: true, name: true } },
+      id: true, fileName: true, lastExportedAt: true, lastExportedTo: true, sourceType: true,
+      candidate: { select: { candidateNumber: true, name: true, supportStatus: true } },
     },
     orderBy: { lastExportedAt: "desc" },
   });
+
+  // 対象健全性チェック: sourceType 内訳 と ACTIVE 限定の崩れ確認
+  const bySourceType: Record<string, number> = {};
+  const nonActive: string[] = [];
+  for (const r of rows) {
+    const st = r.sourceType === null ? "null" : r.sourceType;
+    bySourceType[st] = (bySourceType[st] ?? 0) + 1;
+    if (r.candidate.supportStatus !== "ACTIVE") nonActive.push(`${r.candidate.candidateNumber}(${r.candidate.supportStatus})`);
+  }
 
   // 候補者ごとにグループ化（candidateNumber が null の行は対象外＝APIキー無し）
   const byCand = new Map<string, { name: string; bms: Bookmark[] }>();
@@ -280,6 +291,8 @@ async function main() {
   }
 
   console.log(`対象: ${rows.length}件 / 候補者 ${byCand.size}名${skippedNoNumber ? `（candidateNumber無しで除外 ${skippedNoNumber}件）` : ""}`);
+  console.log(`  sourceType内訳: ${JSON.stringify(bySourceType)}`);
+  console.log(`  ACTIVE限定チェック: ${nonActive.length === 0 ? "OK（全行ACTIVE）" : `⚠ 非ACTIVE混入 ${nonActive.length}件: ${[...new Set(nonActive)].slice(0, 5).join(", ")}`}`);
 
   const allMatches: Match[] = [];
   const allUnmatched: Unmatched[] = [];
