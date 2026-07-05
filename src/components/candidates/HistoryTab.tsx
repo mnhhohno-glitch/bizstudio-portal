@@ -291,6 +291,7 @@ type BookmarkFile = {
   aiAnalysisComment: string | null;
   aiAnalyzedAt: string | null;
   caComment: string | null; // T-128 batch4: CAアドバイザーコメント
+  candidateNote: string | null; // T-133 FU-1: 求職者本人が /site/ で書いたメモ（CA画面では表示のみ）
   lastExportedAt: string | null;
   lastExportedTo: string | null;
   uploadedBy: { id: string; name: string };
@@ -718,6 +719,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [caCommentEdit, setCaCommentEdit] = useState<{ fileId: string; fileName: string } | null>(null);
   const [caCommentText, setCaCommentText] = useState("");
   const [caCommentSaving, setCaCommentSaving] = useState(false);
+  // T-133 FU-1: 求職者メモの閲覧（読み取り専用。求職者が /site/ で編集するもの）
+  const [noteView, setNoteView] = useState<{ fileName: string; note: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
@@ -727,6 +730,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const overlayClosePreview = useOverlayClose(() => setPreviewFile(null));
   const overlayCloseAnalysis = useOverlayClose(() => { if (!editingComment) setSelectedAnalysis(null); });
   const overlayCloseCaComment = useOverlayClose(() => { if (!caCommentSaving) setCaCommentEdit(null); });
+  const overlayCloseNoteView = useOverlayClose(() => setNoteView(null));
 
   const findJobResponse = useCallback((fileName: string): string | null => {
     const key = normalize(stripCorpSuffixes(stripFileMetadata(fileName)));
@@ -1402,6 +1406,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       ⬇
                     </a>
                   )}
+                  {/* T-133 FU-1: 求職者本人のメモ（/site/ 由来）。CA画面では表示のみ。メモがある行だけアイコン表示。 */}
+                  {file.candidateNote && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNoteView({ fileName: file.fileName, note: file.candidateNote! });
+                      }}
+                      className="text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors text-amber-500 hover:text-amber-700"
+                      title={`求職者メモ: ${file.candidateNote}`}
+                    >
+                      📝
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1821,6 +1838,29 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 className="bg-[#2563EB] text-white rounded px-3 py-1 text-sm font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
               >
                 {caCommentSaving ? "保存中..." : "💾 保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* T-133 FU-1: 求職者メモ 閲覧モーダル（読み取り専用）。求職者サイトで本人が記入したメモ。 */}
+      {noteView && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseNoteView}>
+          <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[15px] font-bold text-[#374151]">📝 求職者メモ</h2>
+              <button onClick={() => setNoteView(null)} className="text-[#6B7280] hover:text-[#374151] text-xl leading-none">×</button>
+            </div>
+            <p className="text-[12px] text-gray-500 mb-1 truncate" title={noteView.fileName}>{noteView.fileName}</p>
+            <p className="text-[11px] text-gray-400 mb-3">求職者がマイページで記入したメモです（CA画面では閲覧のみ）。</p>
+            <div className="w-full text-sm text-gray-700 border border-gray-200 bg-gray-50 rounded p-3 whitespace-pre-wrap break-words">{noteView.note}</div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => setNoteView(null)}
+                className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1"
+              >
+                閉じる
               </button>
             </div>
           </div>

@@ -8,7 +8,7 @@ import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 //
 // GET    /api/external/candidate-site/favorites?candidateNumber=... （または candidateId）: 一覧
 // POST   /api/external/candidate-site/favorites: 本人お気に入り追加（記録のみ・PDF/Drive/AI起動なし）
-// PATCH  /api/external/candidate-site/favorites: 本人お気に入りのメモ(candidateNote)更新（origin="candidate" のみ・candidateNote のみ）
+// PATCH  /api/external/candidate-site/favorites: メモ(candidateNote)更新（本人/CA推薦/PDF行いずれも可・candidateNote のみ。fileId 優先、無ければ externalJobRef で特定）
 // DELETE /api/external/candidate-site/favorites: 本人お気に入り解除（origin="candidate" のみ）
 //
 // 認証: X-Auth-Key（CANDIDATE_SITE_API_KEY）。未設定は fail-closed（全401）。
@@ -263,9 +263,14 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
 }
 
-// ---- PATCH: 本人お気に入りのメモ(candidateNote)更新 ----
-// 求職者が変更できるのは「自分が追加したお気に入り(origin="candidate")」の「candidateNote のみ」。
-// caComment・origin・その他の列は本エンドポイントでは一切書き換えない（機械的に candidateNote 限定）。
+// ---- PATCH: お気に入りのメモ(candidateNote)更新 ----
+// T-133 FU-1: メモ解禁。本人追加(origin="candidate")に加え、CA推薦行(origin=null|"ca")・
+// PDF行(externalJobRef=null)にも candidateNote の書込を許可する。
+//   - 緩めるのは candidateNote のみ。caComment・origin・その他の列は本エンドポイントでは一切書き換えない
+//     （data に candidateNote しか含めないため、機械的に他フィールドは変更不可）。
+//   - 対象行の特定: fileId（CandidateFile.id）指定を優先。無ければ externalJobRef で特定（PDF行は
+//     externalJobRef=null のため fileId 指定が必須）。いずれも candidateId でスコープし本人の行のみに限定。
+//   - プレビューセッション（書込不可）からの書込拒否は mypage BFF 側の責務（本APIは共有鍵で BFF を信頼）。
 export async function PATCH(request: Request) {
   if (!verifyCandidateSiteKey(request)) return unauthorized();
 
@@ -284,27 +289,25 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
   }
 
+  // 対象行の特定キー: fileId 優先、無ければ externalJobRef。両方欠落は 400。
+  const fileId = str(body.fileId);
   const externalJobRef = str(body.externalJobRef);
-  if (!externalJobRef) {
-    return NextResponse.json({ error: "externalJobRef is required" }, { status: 400 });
+  if (!fileId && !externalJobRef) {
+    return NextResponse.json({ error: "fileId or externalJobRef is required" }, { status: 400 });
   }
 
   // candidateNote / note 両方受け付ける（GET が candidateNote を返すため、クライアントは candidateNote で送る）。
   const candidateNote = str(body.candidateNote ?? body.note);
 
+  // fileId 指定なら id で、無ければ externalJobRef で特定。いずれも candidateId でスコープ（本人の行のみ）。
   const row = await prisma.candidateFile.findFirst({
-    where: { candidateId: candidate.id, category: "BOOKMARK", externalJobRef, archivedAt: null },
-    select: { id: true, origin: true },
+    where: fileId
+      ? { id: fileId, candidateId: candidate.id, category: "BOOKMARK", archivedAt: null }
+      : { candidateId: candidate.id, category: "BOOKMARK", externalJobRef, archivedAt: null },
+    select: { id: true },
   });
   if (!row) {
     return NextResponse.json({ ok: false, updated: false, reason: "not-found" }, { status: 404 });
-  }
-  // CA追加（null/"ca"）は本人がメモ編集できない（本人追加のみ許可）。
-  if (row.origin !== "candidate") {
-    return NextResponse.json(
-      { ok: false, updated: false, reason: "ca-added-not-editable" },
-      { status: 403 }
-    );
   }
 
   // candidateNote のみ更新（caComment・origin 等は data に含めない＝機械的に変更不可）。
