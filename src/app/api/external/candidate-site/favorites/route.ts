@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
+import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 
 // T-128 T2: 求職者サイト向け お気に入り（ブックマーク）API。
 // 台帳は CandidateFile（category="BOOKMARK"）。origin で CA追加(null|"ca") と 本人追加("candidate") を区別。
@@ -50,6 +51,19 @@ function jpNormalize(
   return { sourceJobId: null, sourceType: storedSourceType };
 }
 
+// T-133 P2: 未送信の仕分け変更フラグ（差分送信の対象になるか）。
+// 対象 = INTERESTED/APPLY/PENDING かつ（未送信 or 送信後に変更）。response-submission API の差分抽出と同一解釈。
+function computeHasUnsubmittedChange(f: {
+  responseStatus: string | null;
+  responseStatusUpdatedAt: Date | null;
+  responseSubmittedAt: Date | null;
+}): boolean {
+  if (!f.responseStatus || !SUBMITTABLE_STATUSES.has(f.responseStatus as never)) return false;
+  if (!f.responseStatusUpdatedAt) return false;
+  if (!f.responseSubmittedAt) return true;
+  return f.responseStatusUpdatedAt.getTime() > f.responseSubmittedAt.getTime();
+}
+
 type FavoriteDTO = {
   id: string;
   externalJobRef: string | null;
@@ -57,6 +71,16 @@ type FavoriteDTO = {
   sourceJobId: string | null;
   /** kyuujinPDF の Job 内部ID（jobs.id・Int）。PDF由来求人を会社名照合せず直接引くための鍵。未紐付けは null。 */
   kyuujinJobId: number | null;
+  /** T-133 P2: 箱A内製の仕分けステータス（7値・箱B feedback_status と同一文字列）。null=未仕分け（UNANSWERED相当）。 */
+  responseStatus: string | null;
+  /** T-133 P2: CA手動の◎○△（aiMatchRating A-D とは別系統）。 */
+  caMatchLabel: string | null;
+  /** T-133 P2: 紹介日時（ISO）。null=未設定。 */
+  introducedAt: string | null;
+  /** T-133 P2: 現在の仕分けを最後にまとめ送信した日時（ISO）。null=未送信。 */
+  responseSubmittedAt: string | null;
+  /** T-133 P2: 未送信の仕分け変更があるか（INTERESTED/APPLY/PENDING かつ 送信後に変更 or 未送信）。 */
+  hasUnsubmittedChange: boolean;
   sourceType: string | null;
   origin: "ca" | "candidate";
   fileName: string;
@@ -100,6 +124,11 @@ export async function GET(request: Request) {
       candidateNote: true,
       caComment: true,
       aiMatchRating: true,
+      responseStatus: true,
+      responseStatusUpdatedAt: true,
+      responseSubmittedAt: true,
+      caMatchLabel: true,
+      introducedAt: true,
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
@@ -119,6 +148,11 @@ export async function GET(request: Request) {
     externalJobRef: f.externalJobRef,
     sourceJobId: jp.sourceJobId,
     kyuujinJobId: f.kyuujinJobId,
+    responseStatus: f.responseStatus,
+    caMatchLabel: f.caMatchLabel,
+    introducedAt: f.introducedAt ? f.introducedAt.toISOString() : null,
+    responseSubmittedAt: f.responseSubmittedAt ? f.responseSubmittedAt.toISOString() : null,
+    hasUnsubmittedChange: computeHasUnsubmittedChange(f),
     sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca", // null/"ca" は CA 追加として正規化
     fileName: f.fileName,
@@ -172,7 +206,7 @@ export async function POST(request: Request) {
       externalJobRef,
       archivedAt: null,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
   if (existing) {
     return NextResponse.json({
@@ -220,7 +254,7 @@ export async function POST(request: Request) {
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
@@ -277,7 +311,7 @@ export async function PATCH(request: Request) {
   const updated = await prisma.candidateFile.update({
     where: { id: row.id },
     data: { candidateNote },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
@@ -339,6 +373,11 @@ function toDTO(
     id: string;
     externalJobRef: string | null;
     kyuujinJobId: number | null;
+    responseStatus: string | null;
+    responseStatusUpdatedAt: Date | null;
+    responseSubmittedAt: Date | null;
+    caMatchLabel: string | null;
+    introducedAt: Date | null;
     sourceType: string | null;
     origin: string | null;
     fileName: string;
@@ -356,6 +395,11 @@ function toDTO(
     externalJobRef: f.externalJobRef,
     sourceJobId: jp.sourceJobId,
     kyuujinJobId: f.kyuujinJobId,
+    responseStatus: f.responseStatus,
+    caMatchLabel: f.caMatchLabel,
+    introducedAt: f.introducedAt ? f.introducedAt.toISOString() : null,
+    responseSubmittedAt: f.responseSubmittedAt ? f.responseSubmittedAt.toISOString() : null,
+    hasUnsubmittedChange: computeHasUnsubmittedChange(f),
     sourceType: jp.sourceType,
     origin: f.origin === "candidate" ? "candidate" : "ca",
     fileName: f.fileName,
