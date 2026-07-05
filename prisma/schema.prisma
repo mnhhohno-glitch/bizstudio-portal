@@ -533,6 +533,7 @@ model Candidate {
   bsDocumentFolders      BSDocumentFolder[]
   savedJobs              CandidateSavedJob[]
   jobApplications        CandidateJobApplication[]
+  responseSubmissions    CandidateResponseSubmission[] // T-133 P1: まとめ送信バッチ
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1416,6 +1417,19 @@ model CandidateFile {
   //   ファイル名突合して書き込む。mypage の「担当CAのおすすめ」が会社名照合を廃止しこのIDで直接引くための鍵。
   //   externalJobRef（job-platform の UUID）とは別系統。null は未紐付け。
   kyuujinJobId      Int?                  @map("kyuujin_job_id")
+  // T-133 P1: 箱A単一台帳化の受け皿。responseStatus は箱B(kyuujinPDF) feedback_status と同一文字列
+  //   (UNANSWERED/INTERESTED/APPLY/PENDING/EXCLUDED/IN_SELECTION/SELECTION_ENDED)。
+  //   String運用は sourceType/origin/supportStatus 等の既存慣例に倣う。全列 nullable・既存行はNULL（挙動不変）。
+  responseStatus          String?   @map("response_status")
+  responseStatusUpdatedAt DateTime? @map("response_status_updated_at") // 仕分け変更日時
+  // 現在の仕分けを最後にまとめ送信した日時。null=一度も送信なし（ever_submitted相当= NOT NULL）。
+  //   差分送信判定（is_submitted相当）: responseStatusUpdatedAt <= responseSubmittedAt なら送信済み。
+  responseSubmittedAt     DateTime? @map("response_submitted_at")
+  caMatchLabel            String?   @map("ca_match_label") // CA手動の◎○△。aiMatchRating(AI由来A-D)とは別系統・共存
+  introducedAt            DateTime? @map("introduced_at") // 紹介日時（createdAt=行作成時刻とは意味が異なる）
+  excludedBy              String?   @map("excluded_by") // "user" / "ca"（箱B excluded_by 相当）
+  excludedAt              DateTime? @map("excluded_at")
+  responseSubmissionItems CandidateResponseSubmissionItem[]
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
   sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
@@ -1449,12 +1463,45 @@ model CandidateFile {
   createdAt         DateTime              @default(now()) @map("created_at")
   updatedAt         DateTime              @updatedAt @map("updated_at")
 
+  @@unique([candidateId, kyuujinJobId]) // T-133 P1: 同一候補者×同一kyuujin Jobの重複行防止（NULLは重複扱いされない）
   @@index([candidateId, category, archivedAt])
   @@index([folderId])
   // T-071: 実績表の CA 別期間集計（uploadedByUserId = User.id × created_at/last_exported_at レンジ）用
   @@index([uploadedByUserId, createdAt])
   @@index([uploadedByUserId, lastExportedAt])
   @@map("candidate_files")
+}
+
+// T-133 P1: まとめ送信バッチ（箱B FeedbackSubmission 相当の受け皿）。1送信=複数求人の仕分けをまとめてCAへ通知。
+// 求人との対応は中間テーブル（既存慣例: スナップショットは列で持つ・JSONは監査blob用途に限定）。
+model CandidateResponseSubmission {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+  interestedCount Int       @default(0) @map("interested_count")
+  applyCount      Int       @default(0) @map("apply_count")
+  notifiedAt      DateTime? @map("notified_at") // CA通知成功時刻（失敗時null・送信記録は残す。CandidateJobApplicationと同慣例）
+  items           CandidateResponseSubmissionItem[]
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([candidateId, submittedAt])
+  @@map("candidate_response_submissions")
+}
+
+model CandidateResponseSubmissionItem {
+  id              String                      @id @default(cuid())
+  submissionId    String                      @map("submission_id")
+  submission      CandidateResponseSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  candidateFileId String                      @map("candidate_file_id")
+  candidateFile   CandidateFile               @relation(fields: [candidateFileId], references: [id], onDelete: Cascade)
+  responseStatus  String                      @map("response_status") // 送信時点の仕分けスナップショット
+  createdAt       DateTime                    @default(now()) @map("created_at")
+
+  @@index([submissionId])
+  @@index([candidateFileId])
+  @@map("candidate_response_submission_items")
 }
 
 // ========================================

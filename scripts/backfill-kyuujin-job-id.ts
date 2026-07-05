@@ -27,6 +27,7 @@
  *   npx tsx scripts/backfill-kyuujin-job-id.ts --candidate 5004402 # 1名限定 DRY-RUN
  *   npx tsx scripts/backfill-kyuujin-job-id.ts --execute          # 本実行（rollback CSV 保存後に UPDATE）
  *   npx tsx scripts/backfill-kyuujin-job-id.ts --execute --limit 50
+ *   npx tsx scripts/backfill-kyuujin-job-id.ts --all-candidates   # T-133 P1: ACTIVE限定を外し全候補者（終了者の控え照合用）
  */
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -48,6 +49,8 @@ function argVal(name: string): string | undefined {
 }
 const ONLY_CANDIDATE = argVal("--candidate"); // candidateNumber 指定で1名限定
 const LIMIT = argVal("--limit") ? Math.max(0, parseInt(argVal("--limit")!, 10) || 0) : Infinity;
+// T-133 P1: ACTIVE限定を外し全候補者を対象にする（終了者分も控え照合用に埋める）。既定挙動は従来どおりACTIVE限定。
+const ALL_CANDIDATES = argv.includes("--all-candidates");
 
 // job-introductions route と同じフォールバック（KYUUJIN_PDF_TOOL_URL 優先、無ければ既知の本番URL）。
 const KYUUJIN_BASE =
@@ -156,6 +159,7 @@ function matchCandidate(
   bookmarks: Bookmark[],
   jobs: KyuujinJob[],
   apiFailed: boolean,
+  usedJobIds: Set<number>, // T-133 P1: この候補者で既に割当済みの kyuujinJobId（アーカイブ行含む・実行を跨ぐ二重割当の恒久防止）
 ): { matches: Match[]; unmatched: Unmatched[] } {
   const matches: Match[] = [];
   const unmatched: Unmatched[] = [];
@@ -189,7 +193,9 @@ function matchCandidate(
     if (k) bmNorm.set(k, (bmNorm.get(k) ?? 0) + 1);
   }
 
-  const claimed = new Set<number>(); // このリクエストで割当済みの job.id（1対1）
+  // T-133 P1 設計ギャップ修正: claimed を既割当ID（クエリ対象外の埋め済み行・アーカイブ行を含む）で初期化。
+  //   従来は同一実行内の1対1しか保証せず、埋め済み双子行と同じIDをNULL側に再割当する事故が起きた（P0で11ペア発生）。
+  const claimed = new Set<number>(usedJobIds); // 割当済みの job.id（1対1・実行跨ぎ）
   // 最新エクスポート行を優先（step1 webhook と一致）
   const ordered = [...bookmarks].sort(
     (a, b) => (b.lastExportedAt?.getTime() ?? 0) - (a.lastExportedAt?.getTime() ?? 0),
@@ -246,6 +252,7 @@ function matchCandidate(
 async function main() {
   console.log(`=== 求人ID紐付け step4 バックフィル (mode=${MODE}) ===`);
   console.log(`kyuujin API base: ${KYUUJIN_BASE}`);
+  console.log(`候補者スコープ: ${ALL_CANDIDATES ? "全候補者（--all-candidates）" : "ACTIVE限定（既定）"}`);
   if (ONLY_CANDIDATE) console.log(`対象を candidateNumber=${ONLY_CANDIDATE} に限定`);
   if (LIMIT !== Infinity) console.log(`limit=${LIMIT}`);
 
@@ -259,7 +266,8 @@ async function main() {
       lastExportedAt: { not: null },
       kyuujinJobId: null,
       candidate: {
-        supportStatus: "ACTIVE",
+        // --all-candidates 指定時は supportStatus 条件なし（終了者分も控え照合用に埋める）。既定は従来どおりACTIVE限定。
+        ...(ALL_CANDIDATES ? {} : { supportStatus: "ACTIVE" }),
         ...(ONLY_CANDIDATE ? { candidateNumber: ONLY_CANDIDATE } : {}),
       },
     },
@@ -269,6 +277,21 @@ async function main() {
     },
     orderBy: { lastExportedAt: "desc" },
   });
+
+  // T-133 P1: 既割当 kyuujinJobId を候補者単位で事前ロード（アーカイブ行も含む＝一意制約と同一スコープ）。
+  //   claimed 集合の初期値として渡し、実行を跨いだ同一IDの二重割当を恒久防止する。
+  const filled = await prisma.candidateFile.findMany({
+    where: { category: "BOOKMARK", kyuujinJobId: { not: null } },
+    select: { kyuujinJobId: true, candidate: { select: { candidateNumber: true } } },
+  });
+  const usedByCand = new Map<string, Set<number>>();
+  for (const f of filled) {
+    const num = f.candidate.candidateNumber;
+    if (!num) continue;
+    const s = usedByCand.get(num) ?? new Set<number>();
+    s.add(f.kyuujinJobId!);
+    usedByCand.set(num, s);
+  }
 
   // 対象健全性チェック: sourceType 内訳 と ACTIVE 限定の崩れ確認
   const bySourceType: Record<string, number> = {};
@@ -292,7 +315,11 @@ async function main() {
 
   console.log(`対象: ${rows.length}件 / 候補者 ${byCand.size}名${skippedNoNumber ? `（candidateNumber無しで除外 ${skippedNoNumber}件）` : ""}`);
   console.log(`  sourceType内訳: ${JSON.stringify(bySourceType)}`);
-  console.log(`  ACTIVE限定チェック: ${nonActive.length === 0 ? "OK（全行ACTIVE）" : `⚠ 非ACTIVE混入 ${nonActive.length}件: ${[...new Set(nonActive)].slice(0, 5).join(", ")}`}`);
+  if (ALL_CANDIDATES) {
+    console.log(`  supportStatus内訳（--all-candidates時は非ACTIVE含有が正常）: 非ACTIVE ${nonActive.length}件`);
+  } else {
+    console.log(`  ACTIVE限定チェック: ${nonActive.length === 0 ? "OK（全行ACTIVE）" : `⚠ 非ACTIVE混入 ${nonActive.length}件: ${[...new Set(nonActive)].slice(0, 5).join(", ")}`}`);
+  }
 
   const allMatches: Match[] = [];
   const allUnmatched: Unmatched[] = [];
@@ -303,7 +330,7 @@ async function main() {
     if (allMatches.length >= LIMIT) break;
     const { jobs, ok, note } = await fetchJobs(num);
     if (!ok) apiErrors.push(`${num}(${g.name}): ${note}`);
-    const { matches, unmatched } = matchCandidate(num, g.name, g.bms, jobs, !ok);
+    const { matches, unmatched } = matchCandidate(num, g.name, g.bms, jobs, !ok, usedByCand.get(num) ?? new Set());
     allMatches.push(...matches);
     allUnmatched.push(...unmatched);
     processed++;
