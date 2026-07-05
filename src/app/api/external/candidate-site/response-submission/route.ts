@@ -139,7 +139,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // 5. 通知フック（P3 で実装・現状 no-op）
+  // 5. 通知（P3 実装済み: ①LINE WORKSマイページBot ②候補者確認メール。失敗は本体を失敗させない）
   const payload: SubmissionNotificationPayload = {
     candidateId: candidate.id,
     candidateNumber: candidate.candidateNumber,
@@ -148,8 +148,8 @@ export async function POST(request: Request) {
     interestedCount: interested.length,
     applyCount: apply.length,
     jobs: targets.map((t) => ({
-      companyName: null, // P3 で表示整形時に fileName から抽出 or kyuujin情報を利用
       fileName: t.fileName,
+      kyuujinJobId: t.kyuujinJobId,
       responseStatus: t.responseStatus!,
     })),
   };
