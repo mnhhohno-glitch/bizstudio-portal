@@ -202,7 +202,6 @@ export default function CandidateRegistrationModal({
       next.email = "正しいメールアドレスを入力してください";
     }
     if (!gender) next.gender = "性別を選択してください";
-    if (!employeeId) next.employeeId = "担当キャリアアドバイザーを選択してください";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -224,7 +223,7 @@ export default function CandidateRegistrationModal({
           address: address.trim() || undefined,
           gender,
           birthday: birthday || undefined,
-          employeeId,
+          employeeId: employeeId || undefined,
           recruiterName: recruiterName.trim() || undefined,
           applicationRoute: applicationRoute || undefined,
           mediaSource: mediaSource || undefined,
@@ -417,7 +416,7 @@ export default function CandidateRegistrationModal({
               {errors.candidateNumber && <p className="text-red-500 text-xs mt-0.5">{errors.candidateNumber}</p>}
             </div>
             <div>
-              <label className="text-[13px] font-medium text-[#374151]">担当CA <span className="text-red-500">*</span></label>
+              <label className="text-[13px] font-medium text-[#374151]">担当CA</label>
               <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={errors.employeeId ? errorInputClass : inputClass}>
                 <option value="">選択してください</option>
                 {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}

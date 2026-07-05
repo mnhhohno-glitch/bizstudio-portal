@@ -28,11 +28,6 @@ export default function CandidateForm({ employees }: Props) {
     e.preventDefault();
     setError("");
 
-    if (!employeeId) {
-      setError("担当キャリアアドバイザーを選択してください");
-      return;
-    }
-
     setLoading(true);
 
     try {
@@ -44,7 +39,7 @@ export default function CandidateForm({ employees }: Props) {
           name: candidateName.trim(),
           nameKana: nameKana.trim(),
           gender,
-          employeeId,
+          employeeId: employeeId || undefined,
         }),
       });
 
@@ -129,13 +124,12 @@ export default function CandidateForm({ employees }: Props) {
         </div>
         <div>
           <label className="text-[12px] text-[#374151]/80">
-            担当キャリアアドバイザー <span className="text-red-500">*</span>
+            担当キャリアアドバイザー
           </label>
           <select
             value={employeeId}
             onChange={(e) => setEmployeeId(e.target.value)}
             className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[14px] focus:border-[#2563EB] focus:outline-none"
-            required
           >
             <option value="">選択してください</option>
             {employees.map((emp) => (

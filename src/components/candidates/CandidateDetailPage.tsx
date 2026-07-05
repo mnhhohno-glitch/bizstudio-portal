@@ -308,7 +308,7 @@ function EditModal({
               </div>
               <div>
                 <label className="block text-[13px] font-medium text-[#374151] mb-1">
-                  担当CA <span className="text-red-500">*</span>
+                  担当CA
                 </label>
                 <select value={assignedEmployeeId} onChange={(e) => setAssignedEmployeeId(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none">
                   <option value="">選択してください</option>

@@ -82,7 +82,7 @@ const createSchema = z.object({
     message: "性別を選択してください",
   }),
   birthday: z.string().optional(),
-  employeeId: z.string().min(1, "担当キャリアアドバイザーを選択してください"),
+  employeeId: z.string().optional().or(z.literal("")),
   recruiterName: z.string().optional().or(z.literal("")),
   applicationRoute: z.string().optional().or(z.literal("")),
   mediaSource: z.string().optional().or(z.literal("")),
@@ -164,15 +164,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 担当キャリアアドバイザーの存在確認
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
-    });
-    if (!employee) {
-      return NextResponse.json(
-        { error: "指定された担当キャリアアドバイザーが見つかりません" },
-        { status: 400 }
-      );
+    // 担当キャリアアドバイザーの存在確認（指定時のみ）
+    if (employeeId) {
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+      });
+      if (!employee) {
+        return NextResponse.json(
+          { error: "指定された担当キャリアアドバイザーが見つかりません" },
+          { status: 400 }
+        );
+      }
     }
 
     // 氏名を整形して登録
@@ -203,7 +205,7 @@ export async function POST(request: NextRequest) {
         ...(desiredPrefecture2?.trim() ? { desiredPrefecture2: desiredPrefecture2.trim() } : {}),
         ...(desiredEmploymentType?.trim() ? { desiredEmploymentType: desiredEmploymentType.trim() } : {}),
         ...(typeof desiredSalaryMin === "number" ? { desiredSalaryMin } : {}),
-        employeeId,
+        ...(employeeId ? { employeeId } : {}),
       },
     });
 
