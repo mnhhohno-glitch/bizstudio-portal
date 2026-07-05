@@ -1,6 +1,10 @@
 /**
- * GET /api/scout/stats?axis={overall|media|machine|category}&from=YYYY-MM-DD&to=YYYY-MM-DD&groupBy={day|week|month}&dateMode={sent|applied}
+ * GET /api/scout/stats?axis={overall|media|machine|category}&from=YYYY-MM-DD&to=YYYY-MM-DD&groupBy={day|week|month|hour}&dateMode={sent|applied}
  *   集計データを返す
+ *
+ * groupBy=hour（T-135 T-B・後方互換の純追加）: 配信枠の hourSlot(8〜19) でバケット。
+ *   キーは "8"〜"19"。配信数/開封数は枠、応募数は紐付き枠の hourSlot に帰属（応募時刻ではなく
+ *   配信された時間帯＝配信日起算の思想と一貫）。day/week/month・dateMode の挙動は不変。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -51,7 +55,7 @@ export async function GET(req: NextRequest) {
     | "category";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
-  const groupBy = (searchParams.get("groupBy") || "day") as "day" | "week" | "month";
+  const groupBy = (searchParams.get("groupBy") || "day") as "day" | "week" | "month" | "hour";
   const dateMode = (searchParams.get("dateMode") || "sent") as "sent" | "applied";
 
   if (!fromStr || !toStr) {
@@ -99,8 +103,11 @@ export async function GET(req: NextRequest) {
       return map.get(key)!;
     };
 
-    // 配信数・開封数は常に「配信日（deliveryDate）」バケットへ（@db.Date, UTC getter で正しい）
-    const deliveryBucket = ensure(bucketKey(slot.deliveryDate, groupBy));
+    // 配信数・開封数は常に「配信日（deliveryDate）」バケットへ（@db.Date, UTC getter で正しい）。
+    // groupBy=hour のときは日付でなく枠の hourSlot（"8"〜"19"）でバケットする。
+    const deliveryBucket = ensure(
+      groupBy === "hour" ? String(slot.hourSlot) : bucketKey(slot.deliveryDate, groupBy),
+    );
     deliveryBucket.deliveryCount += slot.deliveryCount;
     deliveryBucket.openCount += slot.openCount;
 
@@ -111,21 +118,29 @@ export async function GET(req: NextRequest) {
       // T-135: dateMode=applied は候補者1人ずつ「応募日」バケットへ計上する。
       // applicationDate（date-only, 正午/深夜UTC保存）は現行の UTC getter（bucketKey）で正しい。
       // applicationDate が無い場合のみ createdAt（生タイムスタンプ）を JST 変換（罠#17）。
+      // groupBy=hour は応募も紐付き枠の hourSlot に帰属（応募時刻ではない）。
       for (const c of slot.linkedCandidates) {
-        const applyKey = c.applicationDate
-          ? bucketKey(c.applicationDate, groupBy)
-          : jstBucketKey(c.createdAt, groupBy);
+        const applyKey =
+          groupBy === "hour"
+            ? String(slot.hourSlot)
+            : c.applicationDate
+              ? bucketKey(c.applicationDate, groupBy)
+              : jstBucketKey(c.createdAt, groupBy);
         ensure(applyKey).applyCount += 1;
       }
     }
   }
 
-  const overall = Array.from(bucketMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+  // hour は数値順、それ以外は文字列順（"YYYY-MM-DD" 等は辞書順＝時系列順）
+  const sortBuckets = (arr: Bucket[]): Bucket[] =>
+    groupBy === "hour"
+      ? arr.sort((a, b) => Number(a.key) - Number(b.key))
+      : arr.sort((a, b) => a.key.localeCompare(b.key));
+
+  const overall = sortBuckets(Array.from(bucketMap.values()));
   const subBuckets: Record<string, Bucket[]> = {};
   for (const [subKey, map] of subBucketMap.entries()) {
-    subBuckets[subKey] = Array.from(map.values()).sort((a, b) =>
-      a.key.localeCompare(b.key),
-    );
+    subBuckets[subKey] = sortBuckets(Array.from(map.values()));
   }
 
   return NextResponse.json({
