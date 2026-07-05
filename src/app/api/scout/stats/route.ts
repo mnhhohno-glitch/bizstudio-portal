@@ -114,20 +114,71 @@ export async function GET(req: NextRequest) {
     if (dateMode === "sent") {
       // 従来どおり：応募数も配信日バケット（後方互換）
       deliveryBucket.applyCount += slot.linkedCandidates.length;
-    } else {
-      // T-135: dateMode=applied は候補者1人ずつ「応募日」バケットへ計上する。
-      // applicationDate（date-only, 正午/深夜UTC保存）は現行の UTC getter（bucketKey）で正しい。
-      // applicationDate が無い場合のみ createdAt（生タイムスタンプ）を JST 変換（罠#17）。
-      // groupBy=hour は応募も紐付き枠の hourSlot に帰属（応募時刻ではない）。
-      for (const c of slot.linkedCandidates) {
-        const applyKey =
-          groupBy === "hour"
-            ? String(slot.hourSlot)
-            : c.applicationDate
-              ? bucketKey(c.applicationDate, groupBy)
-              : jstBucketKey(c.createdAt, groupBy);
-        ensure(applyKey).applyCount += 1;
-      }
+    }
+    // dateMode === "applied" のときは下で候補者テーブルから直接集計する（配信枠の期間フィルタから独立）
+  }
+
+  if (dateMode === "applied") {
+    // T-135 step9: applied 期間フィルタは「応募日（applicationDate ?? createdAt+9h の JST 暦日）」ベースに変更。
+    // 従来は配信枠の deliveryDate 範囲でスロットを絞り込んでから linkedCandidates を集計していたため、
+    // 5月配信 → 6月応募のような月またぎ応募が期間から漏れていた（例: 2026-06-01 の応募11件のうち4件が漏れて7件と表示）。
+    // 集計対象は現行どおり「枠に紐付いた候補者かつ枠が isAggregationTarget=true」。
+    const fromMs = fromDate.getTime();
+    const toMs = toDate.getTime();
+    // applicationDate=null のフォールバック: JST 日付が [from,to] 内 ⇔ createdAt（UTC）が [from-9h, to+1日-9h)
+    const fallbackFrom = new Date(fromMs - 9 * 60 * 60 * 1000);
+    const fallbackToExclusive = new Date(toMs + 24 * 60 * 60 * 1000 - 9 * 60 * 60 * 1000);
+    const applied = await prisma.candidate.findMany({
+      where: {
+        scoutDeliverySlotId: { not: null },
+        scoutDeliverySlot: { is: { isAggregationTarget: true } },
+        OR: [
+          { applicationDate: { gte: fromDate, lte: toDate } },
+          {
+            applicationDate: null,
+            createdAt: { gte: fallbackFrom, lt: fallbackToExclusive },
+          },
+        ],
+      },
+      select: {
+        applicationDate: true,
+        createdAt: true,
+        scoutDeliverySlot: {
+          select: {
+            mediaSource: true,
+            hourSlot: true,
+            deliveryCategoryLarge: true,
+            machine: { select: { machineLabel: true } },
+          },
+        },
+      },
+    });
+
+    for (const c of applied) {
+      const slot = c.scoutDeliverySlot!;
+      let subKey = "ALL";
+      if (axis === "media") subKey = slot.mediaSource;
+      else if (axis === "machine") subKey = slot.machine?.machineLabel ?? "未割当";
+      else if (axis === "category") subKey = slot.deliveryCategoryLarge;
+
+      const map =
+        axis === "overall"
+          ? bucketMap
+          : (() => {
+              if (!subBucketMap.has(subKey)) subBucketMap.set(subKey, new Map());
+              return subBucketMap.get(subKey)!;
+            })();
+      const ensure = (key: string): Bucket => {
+        if (!map.has(key)) map.set(key, { key, deliveryCount: 0, openCount: 0, applyCount: 0 });
+        return map.get(key)!;
+      };
+      const applyKey =
+        groupBy === "hour"
+          ? String(slot.hourSlot)
+          : c.applicationDate
+            ? bucketKey(c.applicationDate, groupBy)
+            : jstBucketKey(c.createdAt, groupBy);
+      ensure(applyKey).applyCount += 1;
     }
   }
 

@@ -3,8 +3,9 @@
  *   ?slotId=...                          … 指定枠に紐づく応募者（配信枠管理の応募数と一致）
  *   ?date=YYYY-MM-DD[&media=..]          … 指定配信日の集計対象枠に紐づく応募者（配信日別集計 sent と一致）
  *   ?appliedDate=YYYY-MM-DD&from=..&to=..… 応募日別集計(applied)の指定応募日バケットの応募者と一致
- *                                          ※ stats の applied バケット基準（枠の先頭応募者 createdAt を
- *                                            UTC暦日で切る）に完全一致させる（罠#17 は集計に合わせ今回あえてUTC）
+ *                                          ※ T-135 step9: stats applied と同じ「候補者ごとの応募日
+ *                                            （applicationDate ?? createdAt+9h の JST 暦日）」でバケット判定。
+ *                                            期間フィルタも応募日ベースで、配信日フィルタから独立させる。
  *   ?from=..&to=..[&media=..][&machineLabel=..]
  *                                        … 期間内 集計対象枠の応募者（媒体別/アカウント別集計と一致）
  *
@@ -46,9 +47,14 @@ function jstYmd(d: Date): string {
   return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
-/** stats の bucketKey(day) と同一の UTC暦日文字列（応募日別 applied バケット一致用・あえて UTC） */
+/** stats の bucketKey(day) と同一の UTC暦日文字列（applicationDate は UTC midnight 保存のため getUTC* で JST 暦日） */
 function utcDay(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** stats の jstBucketKey(day) と同一（生タイムスタンプ createdAt を +9h → UTC getter で JST 暦日） */
+function jstDay(d: Date): string {
+  return utcDay(new Date(d.getTime() + 9 * 60 * 60 * 1000));
 }
 
 // モーダル表示に必要な Candidate フィールド（candidate findMany と slot.linkedCandidates で共用）
@@ -117,7 +123,7 @@ export async function GET(req: NextRequest) {
   const media = searchParams.get("media");
   const machineLabel = searchParams.get("machineLabel");
 
-  // ---- 応募日別 applied バケット（stats と完全一致・あえて UTC暦日基準）----
+  // ---- 応募日別 applied バケット（stats と完全一致・候補者ごとの応募日でバケット）----
   if (appliedDate) {
     if (!fromStr || !toStr) {
       return NextResponse.json({ error: "appliedDate には from/to が必要です" }, { status: 400 });
@@ -129,24 +135,41 @@ export async function GET(req: NextRequest) {
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
     }
-    // stats と同一: deliveryDate 範囲・isAggregationTarget の枠を取得し、linkedCandidates[0].createdAt の
-    // UTC暦日 == appliedDate の枠の応募者を全件返す（先頭応募者の日付で枠ごと寄せる stats 挙動を再現）。
-    const slots = await prisma.scoutDeliverySlot.findMany({
-      where: { deliveryDate: { gte: fromD, lte: toD }, isAggregationTarget: true },
+    // T-135 step9: stats API と同じロジック。候補者テーブルから直接、応募日=[from,to] の
+    // 枠付き応募者を取得し、各候補者の応募日暦日 == appliedDate だけを返す。
+    // applicationDate=null のフォールバック期間: createdAt+9h の JST 日付が [from,to] 内。
+    const fallbackFrom = new Date(fromD.getTime() - 9 * 60 * 60 * 1000);
+    const fallbackToExclusive = new Date(toD.getTime() + 24 * 60 * 60 * 1000 - 9 * 60 * 60 * 1000);
+    const applied = await prisma.candidate.findMany({
+      where: {
+        scoutDeliverySlotId: { not: null },
+        scoutDeliverySlot: { is: { isAggregationTarget: true } },
+        OR: [
+          { applicationDate: { gte: fromD, lte: toD } },
+          {
+            applicationDate: null,
+            createdAt: { gte: fallbackFrom, lt: fallbackToExclusive },
+          },
+        ],
+      },
       select: {
-        deliveryDate: true,
-        deliveryCategoryLarge: true,
-        deliveryCategoryMedium: true,
-        deliveryCategorySmall: true,
-        machine: { select: MACHINE_SELECT },
-        linkedCandidates: { select: CANDIDATE_SELECT },
+        ...CANDIDATE_SELECT,
+        scoutDeliverySlot: {
+          select: {
+            deliveryCategoryLarge: true,
+            deliveryCategoryMedium: true,
+            deliveryCategorySmall: true,
+            machine: { select: MACHINE_SELECT },
+          },
+        },
       },
     });
     const rows: ReturnType<typeof buildRow>[] = [];
-    for (const slot of slots) {
-      const dateForBucket = slot.linkedCandidates[0]?.createdAt ?? slot.deliveryDate;
-      if (utcDay(dateForBucket) !== appliedDate) continue;
-      for (const c of slot.linkedCandidates) rows.push(buildRow(c, slot));
+    for (const c of applied) {
+      const bucketDay = c.applicationDate ? utcDay(c.applicationDate) : jstDay(c.createdAt);
+      if (bucketDay !== appliedDate) continue;
+      const { scoutDeliverySlot, ...cand } = c;
+      rows.push(buildRow(cand, scoutDeliverySlot));
     }
     rows.sort((a, b) => (a.appliedDate ?? "").localeCompare(b.appliedDate ?? ""));
     return NextResponse.json({ candidates: rows, total: rows.length });
