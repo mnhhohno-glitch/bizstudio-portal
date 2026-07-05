@@ -368,3 +368,35 @@ UI の「⑤連絡手段」ドロップダウンは `contactMethod` カラムに
 - **変更後は必ず usage の `cache_read_input_tokens` / `cache_creation_input_tokens` を実測して、狙ったブロックが read されているか確認する**。トークン内訳を見ずに「キャッシュ済み」と判断しない（記録は AdvisorUsageLog / `[usage]` ログ）。
 
 **関連**: T-126（2026/7/2）。usage 永続化は `AdvisorUsageLog`（`src/lib/advisor-usage.ts` / `scripts/advisor-usage-report.ts`）。コスト監視は成功ファイル数ベースでなくこのログの cache_read/creation/costUsd で行う。
+
+## 40. SQL の `AT TIME ZONE` は `timestamp without time zone` カラムで逆方向変換になる
+
+**罠**: PostgreSQL の `col AT TIME ZONE 'Asia/Tokyo'` は、カラム型によって変換方向が逆になる。
+
+| カラム型 | `col AT TIME ZONE 'Asia/Tokyo'` の意味 | 結果 |
+|--|--|--|
+| **timestamptz** | UTC→JST 変換（+9h） | 正しい |
+| **timestamp**（portal の全 DateTime カラム） | 「この値は JST」として解釈→UTC 変換（**−9h**） | **逆方向** |
+
+portal の DB は **全カラムが `timestamp without time zone`**（Prisma `DateTime` のデフォルト）。`AT TIME ZONE 'Asia/Tokyo'` を使うと −9h されるため、真の JST より **18 時間**（9h×2）ズレた値が報告される。
+
+**症状**: 調査 SQL で「18 時間のタイムゾーンドリフトが存在する」「RPA が 6〜9 時間遅延でバッチ処理している」「4 名が未取込」という誤診断が発生（T-135 で 2 回発生）。
+
+**正しい UTC→JST 変換方法**:
+```sql
+-- 方法1（推奨・シンプル）
+col + INTERVAL '9 hours'
+
+-- 方法2（2段 AT TIME ZONE）
+(col AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Tokyo'
+```
+
+**JS コード側では問題なし**: stats API の `jstBucketKey()` は `new Date(date.getTime() + 9 * 3600000)` で正しく変換しており、AT TIME ZONE の罠とは無関係。
+
+**チェックリスト**:
+- 調査 SQL で `AT TIME ZONE` を使う前に、対象カラムの型を `information_schema.columns` で確認する
+- `timestamp without time zone` なら `+ INTERVAL '9 hours'` を使う
+- 既存コード（JS）では `+9h` パターンが確立済みなので、SQL 調査時のみ注意
+
+**関連ケース**:
+- T-135（2026/7/5-7/6）: この罠を 2 回踏み、「18 時間ズレ」「未取込 4 名」「9 桁会員 No」という 3 つの誤報告を生成。正しい変換で全て解消。詳細: `docs/survey_T-135_timezone_drift.md`

@@ -149,6 +149,30 @@
 - 調査: 日報AI退役モデル調査（2026-06-17）
 - 修正コミット: （本コミット）
 
+## カテゴリK: 集計フィルタ系
+
+### K-1. 応募日別（applied）期間フィルタで配信枠の deliveryDate を事前フィルタとして使うと月またぎ応募が脱落する
+
+**症状**: スカウト集計の `dateMode=applied`（応募日別）で、6月の応募数が実際の 125 件でなく 113 件と表示される。マイナビ管理画面上は 6/1 に 11 名応募しているが、stats API は 7 名しか返さない。
+
+**原因の構造**:
+- stats API が配信枠を `deliveryDate >= from AND deliveryDate <= to` でフィルタしてから、各枠の `linkedCandidates` を集計していた
+- 5月配信 → 6月応募（月またぎ）のケースで、配信枠が5月のためフィルタから除外され、応募者がカウントされない
+- 6/1 の 11 名のうち 4 名は 5月配信枠（5/13, 5/26, 5/30, 5/31）に紐付いており、6月クエリで脱落
+- `dateMode=sent` では正しい（配信日で切る設計のため）。`dateMode=applied` のみ影響
+
+**対処**:
+- `dateMode=applied` は配信枠フィルタを使わず、**候補者テーブルから直接** `applicationDate` or `createdAt` の JST 暦日で期間フィルタする
+- 集計対象条件（`scoutDeliverySlotId != null` かつ枠の `isAggregationTarget = true`）は WHERE で維持
+- candidates API の `appliedDate` 経路も同じロジックに統一
+
+**教訓**:
+- **「応募日でバケットを切る」と「応募日で期間フィルタする」は両方とも応募日ベースで行う**。バケットだけ応募日、フィルタは配信日という混在設計は月またぎを生む
+- 差分の構造: sent=111+2=113、applied=111+14=125（overlap=111、sent-only=2、applied-only=14 うち 13 件は 5月配信→6月応募）
+
+**関連ケース**:
+- T-135 step9（2026/7/6）: stats API + candidates API 修正。修正コミット: `1fb40ff`
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認
