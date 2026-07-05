@@ -115,7 +115,7 @@ type SlotRow = {
   scoutNumber: string;
   deliveryDate: Date;
   hourSlot: number;
-  machineId: string;
+  emp: string; // 社員NO（machineId は execute 直前に解決）
   isMachine: boolean;
   isStaff: boolean;
   deliveryCategoryLarge: string;
@@ -131,7 +131,7 @@ type SlotRow = {
 async function main() {
   console.log(`=== T-135 step6 Task3: 全消し→FM投入 (mode=${MODE}) ===\n`);
 
-  // ---- master 解決 ----
+  // ---- master 解決（dry-run は非致命・照合値はExcelから算出するため未追加でも続行） ----
   const masters = await prisma.scoutMachineMaster.findMany({
     select: { id: true, recruiterName: true, isMachine: true, machineNumber: true },
   });
@@ -146,7 +146,7 @@ async function main() {
   for (const [emp, name] of Object.entries(EMPLOYEE_TO_NAME)) {
     const hit = nameToMasters.get(name);
     if (!hit || hit.length === 0) {
-      resolveErrors.push(`${emp} → recruiterName="${name}" のマスタが見つからない（Task2 未実行?）`);
+      resolveErrors.push(`${emp} → recruiterName="${name}" のマスタ未追加`);
     } else if (hit.length > 1) {
       resolveErrors.push(`${emp} → recruiterName="${name}" のマスタが${hit.length}件（一意でない）`);
     } else {
@@ -154,14 +154,12 @@ async function main() {
     }
   }
   if (resolveErrors.length > 0) {
-    console.error("社員NO→master 解決に失敗:");
-    for (const e of resolveErrors) console.error("  ✗ " + e);
-    console.error("\n中止: Task2(add-scout-masters-t135.ts --execute) を先に実行してください。");
-    await prisma.$disconnect();
-    await pool.end();
-    process.exit(1);
+    console.log("⚠ 社員NO→master 未解決（Task2 execute で解消される想定）:");
+    for (const e of resolveErrors) console.log("  - " + e);
+    console.log("");
+  } else {
+    console.log("社員NO→master 解決 OK（13社員NO 全て一意解決）\n");
   }
-  console.log("社員NO→master 解決 OK（13社員NO 全て一意解決）\n");
 
   // ---- Excel パース ----
   const wb = XLSX.readFile(FM_PATH);
@@ -212,9 +210,8 @@ async function main() {
       badDate.push({ sc, dateRaw: r[I.date], emp });
       continue;
     }
-    // 社員NO 解決
-    const master = empToMaster[emp];
-    if (!master) {
+    // 社員NO は静的マッピング(EMPLOYEE_TO_NAME)で妥当性判定（machineId は execute 時に解決）
+    if (!(emp in EMPLOYEE_TO_NAME)) {
       unknownEmp.push({ sc, date: ymd, emp });
       continue;
     }
@@ -222,13 +219,14 @@ async function main() {
     if (scSeen.has(sc)) scDup++; else scSeen.add(sc);
 
     const large = catLarge(fmType);
+    const rowIsMachine = large === "RPA"; // RPA配信=機械 / 社員=人。machineId解決先のmaster.isMachineと一致（データ検証済）
     slotRows.push({
       scoutNumber: sc,
       deliveryDate: ymdToUtcMidnight(ymd),
       hourSlot: hour,
-      machineId: master.id,
-      isMachine: master.isMachine,
-      isStaff: !master.isMachine,
+      emp,
+      isMachine: rowIsMachine,
+      isStaff: !rowIsMachine,
       deliveryCategoryLarge: large,
       deliveryCategoryMedium: method,
       deliveryCategorySmall: null,
@@ -297,6 +295,15 @@ async function main() {
   // ================= EXECUTE =================
   console.log(`\n=== EXECUTE ===`);
 
+  // execute 時は master 全解決が必須（Task2 が先に完了していること）
+  if (resolveErrors.length > 0) {
+    console.error("中止: 社員NO→master が未解決。Task2(add-scout-masters-t135.ts --execute) を先に実行してください。");
+    for (const e of resolveErrors) console.error("  ✗ " + e);
+    await prisma.$disconnect();
+    await pool.end();
+    process.exit(1);
+  }
+
   // 1) ロールバックCSV（削除前・必須）
   const verifyDir = path.join(process.cwd(), "verify");
   if (!fs.existsSync(verifyDir)) fs.mkdirSync(verifyDir, { recursive: true });
@@ -342,15 +349,34 @@ async function main() {
   const del = await prisma.scoutDeliverySlot.deleteMany({});
   console.log(`削除: ${del.count}件`);
 
-  // 3) FM 投入（1000行チャンク）
+  // 3) FM 投入（1000行チャンク）。emp → machineId を解決して createMany 用に整形。
+  const insertData = slotRows.map((r) => {
+    const master = empToMaster[r.emp];
+    return {
+      scoutNumber: r.scoutNumber,
+      deliveryDate: r.deliveryDate,
+      hourSlot: r.hourSlot,
+      machineId: master.id,
+      isMachine: r.isMachine,
+      isStaff: r.isStaff,
+      deliveryCategoryLarge: r.deliveryCategoryLarge,
+      deliveryCategoryMedium: r.deliveryCategoryMedium,
+      deliveryCategorySmall: r.deliveryCategorySmall,
+      mediaSource: r.mediaSource,
+      searchConditionName: r.searchConditionName,
+      deliveryCount: r.deliveryCount,
+      openCount: r.openCount,
+      isAggregationTarget: r.isAggregationTarget,
+    };
+  });
   const CHUNK = 1000;
   let inserted = 0;
-  for (let i = 0; i < slotRows.length; i += CHUNK) {
-    const chunk = slotRows.slice(i, i + CHUNK);
+  for (let i = 0; i < insertData.length; i += CHUNK) {
+    const chunk = insertData.slice(i, i + CHUNK);
     const res = await prisma.scoutDeliverySlot.createMany({ data: chunk });
     inserted += res.count;
-    if ((i / CHUNK) % 10 === 0 || i + CHUNK >= slotRows.length) {
-      console.log(`  投入 ${inserted}/${slotRows.length}`);
+    if ((i / CHUNK) % 10 === 0 || i + CHUNK >= insertData.length) {
+      console.log(`  投入 ${inserted}/${insertData.length}`);
     }
   }
   console.log(`投入完了: ${inserted}件`);
