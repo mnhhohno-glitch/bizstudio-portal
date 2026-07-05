@@ -8,7 +8,7 @@
  *   - PDF由来ブックマーク（sourceType=NULL・category=BOOKMARK・archivedAt=NULL）
  *   - テキスト抽出済み（extractedText あり）＋ Drive実体あり（driveFileId あり）
  *   - 未紐付け（externalJobRef 未設定）
- *   - 「作成 または 直近投入試行(platformSubmittedAt) から 2時間以上経過」
+ *   - 「作成 または 直近投入試行(platformSubmittedAt) から 30分以上経過」
  *   - createdAt >= CUTOFF（本日以降のみ。遡及4,204件は対象外＝step4で別設計）
  *
  * 動作:
@@ -26,13 +26,14 @@ import { submitPdfToJobPlatform } from "@/lib/job-platform-ingest";
 
 const EXECUTE = process.argv.includes("--execute");
 const BATCH_CAP = 50;
-const STALE_MS = 2 * 60 * 60 * 1000; // 2時間
+// 正規のフル投入は41秒〜数分＋受け側タイムアウト60秒のため、30分で「変換中の作りたてを誤って拾う」余地は実質ゼロ（T-133 FU-9で2時間から短縮）
+const STALE_MS = 30 * 60 * 1000; // 30分
 // 遡及（本機能ローンチ前の4,204件）を対象外にする作成日時の下限。env で上書き可。
 const CUTOFF = new Date(process.env.T131_STALE_CUTOFF ?? "2026-07-04T00:00:00+09:00");
 
 async function main() {
   const now = Date.now();
-  const twoHoursAgo = new Date(now - STALE_MS);
+  const staleBefore = new Date(now - STALE_MS);
 
   const rows = await prisma.candidateFile.findMany({
     where: {
@@ -55,14 +56,14 @@ async function main() {
     orderBy: { createdAt: "asc" },
   });
 
-  // 「作成 または 直近試行から2時間以上経過」= max(createdAt, platformSubmittedAt) が2時間前より古い
+  // 「作成 または 直近試行から30分以上経過」= max(createdAt, platformSubmittedAt) が30分前より古い
   const stale = rows.filter((r) => {
     const lastTouch = r.platformSubmittedAt ?? r.createdAt;
-    return lastTouch <= twoHoursAgo;
+    return lastTouch <= staleBefore;
   });
 
   console.log(
-    `[t131-resubmit] CUTOFF=${CUTOFF.toISOString()} / 候補(未紐付け・抽出済) ${rows.length}件 / うち滞留(2h超) ${stale.length}件 / mode=${EXECUTE ? "EXECUTE" : "DRY-RUN"}`,
+    `[t131-resubmit] CUTOFF=${CUTOFF.toISOString()} / 候補(未紐付け・抽出済) ${rows.length}件 / うち滞留(30分超) ${stale.length}件 / mode=${EXECUTE ? "EXECUTE" : "DRY-RUN"}`,
   );
 
   const target = stale.slice(0, BATCH_CAP);
@@ -89,7 +90,7 @@ async function main() {
       } else {
         await prisma.candidateFile.update({
           where: { id: r.id },
-          data: { platformSubmittedAt: new Date() }, // 試行時刻を刻んで2h間は再試行しない
+          data: { platformSubmittedAt: new Date() }, // 試行時刻を刻んで30分間は再試行しない
         });
         console.error(`  [NG] ${tag}: ${res.error}`);
       }
