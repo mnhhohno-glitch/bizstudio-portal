@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { GOOGLE_FORM_CATEGORY_GROUPS } from "@/constants/google-form-categories";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 export type GoogleFormMeetingFile = {
   id: string;
@@ -316,6 +317,7 @@ export default function GoogleFormCreatorModal({
     if (step === "processing") return;
     onClose();
   };
+  const overlayClose = useOverlayClose(handleClose);
 
   const handleResetAll = () => {
     setStep("idle");
@@ -816,7 +818,7 @@ export default function GoogleFormCreatorModal({
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-      onClick={handleClose}
+      {...overlayClose}
     >
       <div
         className={`bg-white rounded-xl w-full mx-4 p-6 max-h-[92vh] overflow-y-auto shadow-xl ${

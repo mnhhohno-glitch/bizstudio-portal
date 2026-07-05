@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { normalizeDate } from "@/lib/date-utils";
 import SearchableMultiSelect, { type FlatItem } from "@/components/common/SearchableMultiSelect";
 import { TimeInput } from "@/components/ui/TimeInput";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import {
   RESIGN_REASON_LARGE_OPTIONS,
   getMediumOptions,
@@ -459,6 +460,7 @@ export default function InterviewForm({
   const [downloadingAttId, setDownloadingAttId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [expandedMemoId, setExpandedMemoId] = useState<string | null>(null);
+  const overlayCloseMemo = useOverlayClose(() => setExpandedMemoId(null));
   const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
   const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
 
@@ -1793,7 +1795,7 @@ export default function InterviewForm({
         const targetMemo = memos.find(m => m.id === expandedMemoId);
         if (!targetMemo) return null;
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} onClick={() => setExpandedMemoId(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }} {...overlayCloseMemo}>
             <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg shadow-xl" style={{ background: "var(--im-bg, #fff)" }} onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center p-4" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "var(--im-fg)" }}>{targetMemo.title || "メモ編集"}</span>

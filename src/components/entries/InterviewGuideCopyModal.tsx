@@ -4,6 +4,7 @@
 // 罠 #17: 日付・曜日・時刻はクライアント JST 基準。toISOString は禁止。
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { Entry } from "./EntryBoard";
 
 type Props = {
@@ -84,6 +85,7 @@ export default function InterviewGuideCopyModal({ selectedEntries, onClose }: Pr
   }, [selectedEntries]);
 
   const [editable, setEditable] = useState(text);
+  const overlayClose = useOverlayClose(onClose);
 
   // 選択企業が変わった場合に再初期化
   useEffect(() => { setEditable(text); }, [text]);
@@ -100,7 +102,7 @@ export default function InterviewGuideCopyModal({ selectedEntries, onClose }: Pr
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-lg p-5 max-w-xl w-full mx-4" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-bold text-gray-700 mb-3">面接案内コピー</h3>
         <p className="text-[12px] text-gray-500 mb-2">

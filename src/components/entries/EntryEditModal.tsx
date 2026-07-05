@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { JOB_TYPE_BY_ROUTE, getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { Entry } from "./EntryBoard";
 
 type Props = {
@@ -33,6 +34,7 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
   const [documentSubmitDate, setDocumentSubmitDate] = useState(toDateInput(entry.documentSubmitDate));
   const [memo, setMemo] = useState(entry.memo || "");
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const jobTypeOptions = getJobTypeOptionsForRoute(entry.entryRoute || jobDb);
 
@@ -79,7 +81,7 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...overlayClose}>
       <div className="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-800">エントリー編集</h2>

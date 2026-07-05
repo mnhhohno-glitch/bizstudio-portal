@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 const FIELD_TYPE_LABELS: Record<string, string> = {
   TEXT: "テキスト",
@@ -79,6 +80,11 @@ export default function TaskFieldsPage() {
 
   // Expanded field (to show options)
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
+
+  // T-136: overlay 誤クローズ防止（各モーダルのオーバーレイに spread する）
+  const overlayFieldModalClose = useOverlayClose(() => setFieldModalOpen(false));
+  const overlayOptionModalClose = useOverlayClose(() => setOptionModalOpen(false));
+  const overlayDeleteFieldConfirmClose = useOverlayClose(() => setDeleteFieldConfirm(null));
 
   const fetchFields = useCallback(async () => {
     setLoading(true);
@@ -347,7 +353,7 @@ export default function TaskFieldsPage() {
 
       {/* 項目 作成・編集モーダル */}
       {fieldModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setFieldModalOpen(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayFieldModalClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[520px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">
@@ -442,7 +448,7 @@ export default function TaskFieldsPage() {
 
       {/* 選択肢 作成・編集モーダル */}
       {optionModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setOptionModalOpen(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayOptionModalClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[480px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">
@@ -498,7 +504,7 @@ export default function TaskFieldsPage() {
 
       {/* 項目削除確認モーダル */}
       {deleteFieldConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDeleteFieldConfirm(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayDeleteFieldConfirmClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[400px] shadow-xl p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-[15px] font-bold text-[#374151] mb-2">削除の確認</h3>
             <p className="text-[13px] text-gray-600 mb-4">

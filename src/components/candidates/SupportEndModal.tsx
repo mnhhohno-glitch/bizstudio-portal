@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { SUPPORT_END_REASONS } from "@/lib/constants/support-end-reasons";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Props = {
   candidateId: string;
@@ -18,6 +19,7 @@ export default function SupportEndModal({ candidateId, initialComment, onClose, 
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const handleSummarize = async () => {
     if (!comment.trim()) return;
@@ -65,7 +67,7 @@ export default function SupportEndModal({ candidateId, initialComment, onClose, 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayClose}>
       <div className="bg-white rounded-xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="border-b px-5 py-3 flex items-center justify-between">
           <h2 className="text-[15px] font-bold text-[#374151]">支援終了理由の選択</h2>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import FileUploadModal from "./FileUploadModal";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type CandidateFile = {
   id: string;
@@ -92,6 +93,8 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [bulkDLing, setBulkDLing] = useState(false);
   const [showAttachModal, setShowAttachModal] = useState(false);
+  const overlayCloseShare = useOverlayClose(() => setShareResult(null));
+  const overlayCloseAttach = useOverlayClose(() => setShowAttachModal(false));
   const [taskSearch, setTaskSearch] = useState("");
   const [taskResults, setTaskResults] = useState<{ id: string; title: string }[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -1072,7 +1075,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
       {/* 共有URL発行結果モーダル */}
       {shareResult && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShareResult(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayCloseShare}>
           <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-[15px] font-bold text-[#374151]">🔗 共有URL発行完了</h2>
@@ -1121,7 +1124,7 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
 
       {/* タスクに添付モーダル */}
       {showAttachModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAttachModal(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayCloseAttach}>
           <div className="bg-white rounded-xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <div className="border-b px-5 py-3 flex items-center justify-between">
               <h3 className="text-[15px] font-bold text-[#374151]">📎 タスクに添付</h3>

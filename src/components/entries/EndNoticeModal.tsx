@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { Entry } from "./EntryBoard";
 
 const END_REASONS = [
@@ -38,6 +39,7 @@ export default function EndNoticeModal({ selectedEntries, onClose, onDone }: Pro
   const [copied, setCopied] = useState(false);
   const [updating, setUpdating] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayClose = useOverlayClose(onClose);
 
   const allReasonsSelected = selectedEntries.every((e) => reasons[e.id]?.code);
   const allOtherFilled = selectedEntries.every((e) => {
@@ -113,7 +115,7 @@ export default function EndNoticeModal({ selectedEntries, onClose, onDone }: Pro
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div
         className="bg-white rounded-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

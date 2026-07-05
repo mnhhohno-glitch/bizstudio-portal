@@ -8,6 +8,7 @@ import {
   ROUTE_RANK_MAP,
   buildEntryJobId,
 } from "@/lib/constants/job-types";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { Entry } from "./EntryBoard";
 
 type Props = {
@@ -43,6 +44,7 @@ export default function EntryRouteSwitchModal({ entry, onClose, onSaved }: Props
   const [prefCode, setPrefCode] = useState<number | null>(parsed.prefCode);
   const [jobDbUrl, setJobDbUrl] = useState(entry.jobDbUrl || "");
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(() => { if (!saving) onClose(); });
 
   const previewId = useMemo(
     () => buildEntryJobId(entryRoute, jobNumber, prefCode),
@@ -90,7 +92,7 @@ export default function EntryRouteSwitchModal({ entry, onClose, onSaved }: Props
   const labelCls = "block text-[13px] font-medium text-[#374151] mb-1";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { if (!saving) onClose(); }}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayClose}>
       <div className="bg-white rounded-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="border-b px-5 py-3">
           <h2 className="text-[15px] font-bold text-[#374151]">エントリー媒体切替</h2>

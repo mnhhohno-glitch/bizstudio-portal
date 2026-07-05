@@ -7,6 +7,7 @@ import { TimeInput } from "@/components/ui/TimeInput";
 import { getMissingFieldLabels } from "@/lib/interview-input-missing";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
 import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -176,6 +177,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
+  const modalOverlayClose = useOverlayClose(() => setModalOpen(false));
   const [modalCandidateSearch, setModalCandidateSearch] = useState("");
   const [modalCandidateResults, setModalCandidateResults] = useState<{ id: string; candidateNumber: string; name: string }[]>([]);
   const [modalSelectedCandidate, setModalSelectedCandidate] = useState<{ id: string; candidateNumber: string; name: string } | null>(null);
@@ -738,7 +740,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
 
       {/* New Interview Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModalOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" {...modalOverlayClose}>
           <div className="bg-white rounded-lg shadow-xl w-[480px] max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-[16px] font-semibold text-[#374151] mb-4">面談 新規登録</h2>
 

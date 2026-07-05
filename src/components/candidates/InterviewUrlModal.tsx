@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type UrlType = "interview" | "consultation";
 type InterviewMethod = "in-person" | "online" | "flexible";
@@ -33,6 +34,8 @@ export default function InterviewUrlModal({
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const autoTriggeredRef = useRef(false);
+  // T-136: handleClose は早期 return 後に定義されるため arrow で遅延参照
+  const overlayClose = useOverlayClose(() => handleClose());
 
   useEffect(() => {
     if (!isOpen) {
@@ -134,7 +137,7 @@ export default function InterviewUrlModal({
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={handleClose}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-[8px] w-full max-w-[520px] shadow-xl"

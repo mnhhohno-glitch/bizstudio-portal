@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { Entry, FlagData } from "./EntryBoard";
 import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { normalizeTimeInput } from "@/lib/timeFormat";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 const TIME_FIELDS = [
   "interviewPrepTime",
@@ -35,6 +36,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, string | boolean | null>>({});
+  const overlayClose = useOverlayClose(onClose);
 
   useEffect(() => {
     fetch(`/api/entries/${entryId}`)
@@ -134,7 +136,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
   const currentEntryFlag = (form.entryFlag as string) || "";
 
   if (loading) return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-xl p-6" onClick={(e) => e.stopPropagation()}>読み込み中...</div>
     </div>
   );
@@ -142,7 +144,7 @@ export default function EntryDetailModal({ entryId, flagData, onClose, onSaved, 
   if (!entry) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayClose}>
       <div className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b px-5 py-3 flex items-center justify-between z-10">
           <h2 className="text-[15px] font-bold text-[#374151]">エントリー詳細</h2>

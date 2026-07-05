@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import TimeComboBox from "./TimeComboBox";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 const TAG_OPTIONS = [
   { label: "CA業務", color: "#6B7280" },
@@ -64,6 +65,7 @@ export default function ScheduleEntryFormModal({
   const [note, setNote] = useState(editEntry?.note || "");
   const [selectedTag, setSelectedTag] = useState(matchTag || TAG_OPTIONS[0]);
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const handleSubmit = async () => {
     if (!title.trim()) return;
@@ -106,7 +108,7 @@ export default function ScheduleEntryFormModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[15px] font-bold text-[#374151]">{isEdit ? "予定を編集" : "予定を追加"}</h2>

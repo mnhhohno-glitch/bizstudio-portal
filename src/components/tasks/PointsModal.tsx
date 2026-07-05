@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Props = {
   value: string;
@@ -13,6 +14,7 @@ export default function PointsModal({ value, onChange, readOnly, onClose }: Prop
   const [tab, setTab] = useState<"preview" | "edit">(readOnly ? "preview" : "preview");
   const [draft, setDraft] = useState(value);
   const [aiOrganizing, setAiOrganizing] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const handleSave = () => {
     onChange?.(draft);
@@ -39,7 +41,7 @@ export default function PointsModal({ value, onChange, readOnly, onClose }: Prop
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-[8px] shadow-xl flex flex-col"

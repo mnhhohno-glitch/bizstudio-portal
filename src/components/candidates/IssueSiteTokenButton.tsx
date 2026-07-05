@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 // T-128 公開準備②: 求人サイトURL発行ボタン＋モーダル（自己完結）。
 // 面談後に CA が押すと kyuujinPDF で発行（冪等）し、siteUrl をモーダル表示＋ワンクリックコピー。
@@ -28,6 +29,7 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
   const [issued, setIssued] = useState<boolean | null>(null);
   const [noBirthday, setNoBirthday] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const overlayClose = useOverlayClose(() => setOpen(false));
 
   const handleClick = async () => {
     setOpen(true);
@@ -80,7 +82,7 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
       {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setOpen(false)}
+          {...overlayClose}
         >
           <div
             className="bg-white rounded-lg shadow-xl w-[520px] max-w-[92vw] p-5"

@@ -14,6 +14,7 @@ import EntryEditModal from "./EntryEditModal";
 import InterviewGuideCopyModal from "./InterviewGuideCopyModal";
 import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
 import { FilterShell, FilterTopRow, FilterGroup, FilterField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 export type Entry = {
   id: string;
@@ -184,10 +185,11 @@ function DateRangeModal({ label, initialFrom, initialTo, onApply, onClear, onClo
 }) {
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
+  const overlayClose = useOverlayClose(onClose);
   const inputCls = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none";
   const quick = (r: [string, string]) => { setFrom(r[0]); setTo(r[1]); };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...overlayClose}>
       <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-800">{label}で絞り込み</h2>
@@ -296,6 +298,10 @@ export default function EntryBoard() {
   // 内定+承諾になった瞬間に表示する「承諾報告タスク作成」確認ダイアログ対象
   const [offerAcceptEntry, setOfferAcceptEntry] = useState<Entry | null>(null);
   const [taskLoading, setTaskLoading] = useState(false);
+
+  // T-136: オーバーレイ誤クローズ防止
+  const urlModalOverlayClose = useOverlayClose(() => { if (!savingUrl) setUrlModalEntryId(null); });
+  const offerAcceptOverlayClose = useOverlayClose(() => setOfferAcceptEntry(null));
 
   const fetchEntries = useCallback(async () => {
     if (!sessionLoaded) return;
@@ -1240,7 +1246,7 @@ export default function EntryBoard() {
       {/* URL Edit Modal */}
       {urlModalEntryId && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-          onClick={() => { if (!savingUrl) setUrlModalEntryId(null); }}>
+          {...urlModalOverlayClose}>
           <div className="bg-white rounded-lg p-5 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-bold text-gray-700 mb-3">求人DBのURLを{urlInput ? "編集" : "登録"}</h3>
             <input
@@ -1368,7 +1374,7 @@ export default function EntryBoard() {
 
       {/* 内定+承諾: 承諾報告タスク作成 確認ダイアログ */}
       {offerAcceptEntry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setOfferAcceptEntry(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" {...offerAcceptOverlayClose}>
           <div className="bg-white rounded-lg shadow-xl p-6 w-[400px]" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold mb-3 text-[#374151]">承諾報告のタスクを作成しますか？</h3>
             <p className="text-sm text-gray-600 mb-5">

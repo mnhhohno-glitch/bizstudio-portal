@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { CANDIDATE_FILE_CATEGORIES } from "@/lib/constants/candidate-file-categories";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 const ALLOWED_TYPES = new Set([
   "application/pdf",
@@ -60,6 +61,7 @@ export default function FileUploadModal({
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const overlayClose = useOverlayClose(onClose);
 
   const validateAndAddFiles = (files: FileList | File[]) => {
     const newFiles: File[] = [];
@@ -178,7 +180,7 @@ export default function FileUploadModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-6 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5 shrink-0">
           <h2 className="text-[15px] font-bold text-[#374151]">ファイルをアップロード</h2>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import type { FlagData } from "./EntryBoard";
 import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Props = {
   selectedCount: number;
@@ -21,6 +22,7 @@ export default function BulkFlagChangeModal({ selectedCount, selectedIds, flagDa
   const [companyFlag, setCompanyFlag] = useState(NO_CHANGE);
   const [personFlag, setPersonFlag] = useState(NO_CHANGE);
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const entryFlagOptions = flagData.entryFlags.filter((f) => f !== "応募");
   const detailOptions = entryFlag !== NO_CHANGE ? (flagData.entryDetails[entryFlag] || []).filter((d) => !HIDDEN_ENTRY_DETAILS.includes(d)) : [];
@@ -66,7 +68,7 @@ export default function BulkFlagChangeModal({ selectedCount, selectedIds, flagDa
   const selectCls = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#2563EB]";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayClose}>
       <div className="bg-white rounded-xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <div className="border-b px-5 py-3 flex items-center justify-between">
           <h2 className="text-[15px] font-bold text-[#374151]">一括フラグ変更（{selectedCount}件）</h2>

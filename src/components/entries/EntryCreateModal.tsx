@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { FlagData } from "./EntryBoard";
 import { HIDDEN_ENTRY_DETAILS } from "@/lib/constants/entry-flag-rules";
 
@@ -34,6 +35,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
   const [entryFlagDetail, setEntryFlagDetail] = useState("検討中");
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   useEffect(() => {
     fetch("/api/candidates")
@@ -88,7 +90,7 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
   const labelCls = "block text-[13px] font-medium text-[#374151] mb-1";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayClose}>
       <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="border-b px-5 py-3 flex items-center justify-between">
           <h2 className="text-[15px] font-bold text-[#374151]">エントリー新規登録</h2>

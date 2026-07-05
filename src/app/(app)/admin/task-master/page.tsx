@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Group = {
   id: string;
@@ -62,6 +63,12 @@ export default function TaskMasterPage() {
 
   // Collapsed groups
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // T-136: overlay 誤クローズ防止（各モーダルのオーバーレイに spread する）
+  const overlayCategoryModalClose = useOverlayClose(() => { setModalOpen(false); setEditingId(null); });
+  const overlayGroupListModalClose = useOverlayClose(() => { setGroupModalOpen(false); setGroupEditId(null); cancelInlineEdit(); });
+  const overlayGroupCreateModalClose = useOverlayClose(() => setGroupModalOpen(false));
+  const overlayDeleteConfirmClose = useOverlayClose(() => setDeleteConfirm(null));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -416,7 +423,7 @@ export default function TaskMasterPage() {
 
       {/* カテゴリ作成・編集モーダル */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeModal}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayCategoryModalClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[480px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">
@@ -490,7 +497,7 @@ export default function TaskMasterPage() {
 
       {/* グループ管理モーダル */}
       {groupModalOpen && groupEditId === "__list__" && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setGroupModalOpen(false); setGroupEditId(null); cancelInlineEdit(); }}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayGroupListModalClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[520px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">グループ管理</h2>
@@ -579,7 +586,7 @@ export default function TaskMasterPage() {
 
       {/* グループ新規作成モーダル */}
       {groupModalOpen && groupEditId === null && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setGroupModalOpen(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayGroupCreateModalClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[400px] shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-6 py-4">
               <h2 className="text-[15px] font-bold text-[#374151]">グループを追加</h2>
@@ -626,7 +633,7 @@ export default function TaskMasterPage() {
 
       {/* 削除確認モーダル */}
       {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayDeleteConfirmClose}>
           <div className="bg-white rounded-[8px] w-full max-w-[400px] shadow-xl p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-[15px] font-bold text-[#374151] mb-2">削除の確認</h3>
             <p className="text-[13px] text-gray-600 mb-4">

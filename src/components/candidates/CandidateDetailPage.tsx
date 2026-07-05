@@ -19,6 +19,7 @@ import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { REGIONS } from "@/lib/constants/prefectures";
 import { EMPLOYMENT_TYPES } from "@/lib/constants/employment-types";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- Types ---------- */
 type Employee = { id: string; name: string };
@@ -220,6 +221,7 @@ function EditModal({
     candidate.desiredSalaryMin != null ? String(candidate.desiredSalaryMin) : ""
   );
   const [saving, setSaving] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   const calcAge = (bd: string) => {
     if (!bd) return "";
@@ -278,7 +280,7 @@ function EditModal({
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-[8px] w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-xl"
@@ -1691,6 +1693,8 @@ function CandidateDetailPageBody() {
   const [mypageCopied, setMypageCopied] = useState(false);
   const [googleFormModalOpen, setGoogleFormModalOpen] = useState(false);
   const [meetingFiles, setMeetingFiles] = useState<GoogleFormMeetingFile[]>([]);
+  const overlayCloseMypage = useOverlayClose(() => { setMypageModalOpen(false); setMypageCopied(false); });
+  const overlayCloseSchedule = useOverlayClose(() => setScheduleModalOpen(false));
 
   const handleOpenJobOutput = async () => {
     if (jobOutputLoading) return;
@@ -2012,7 +2016,7 @@ function CandidateDetailPageBody() {
 
       {/* 求人マイページモーダル */}
       {mypageModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setMypageModalOpen(false); setMypageCopied(false); }}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseMypage}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-[15px] font-bold text-[#374151]">📱 求人マイページ</h2>
@@ -2080,7 +2084,7 @@ function CandidateDetailPageBody() {
 
       {/* 日程調整URLモーダル */}
       {scheduleModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setScheduleModalOpen(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseSchedule}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-[15px] font-bold text-[#374151]">📅 日程調整URLを生成</h2>

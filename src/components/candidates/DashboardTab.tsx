@@ -7,6 +7,7 @@ import {
   PieChart, Pie, LineChart, Line, CartesianGrid,
 } from "recharts";
 import { CONTACT_PURPOSES } from "@/constants/contact-purpose";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- Types ---------- */
 type DashboardData = {
@@ -113,6 +114,7 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
   const [addingLog, setAddingLog] = useState(false);
   // T-111追補: 次回連絡予定・連絡記録をまとめるモーダル
   const [contactModalOpen, setContactModalOpen] = useState(false);
+  const overlayCloseContact = useOverlayClose(() => setContactModalOpen(false));
 
   const loadDashboard = useCallback(async () => {
     const res = await fetch(`/api/candidates/${candidateId}/dashboard`);
@@ -405,7 +407,7 @@ export default function DashboardTab({ candidateId }: { candidateId: string }) {
 
       {/* ===== T-111追補: 次回連絡予定・連絡記録 モーダル（上段カードの「設定」から開く） ===== */}
       {contactModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setContactModalOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" {...overlayCloseContact}>
           <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3">
               <h3 className="text-[14px] font-semibold text-[#374151]">次回連絡予定・連絡記録</h3>

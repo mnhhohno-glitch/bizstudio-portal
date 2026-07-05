@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 import PointsModal from "@/components/tasks/PointsModal";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- types ---------- */
 
@@ -256,6 +257,7 @@ export default function TaskNewPage() {
   const [pickerSelectedIds, setPickerSelectedIds] = useState<Set<string>>(new Set());
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerAttaching, setPickerAttaching] = useState(false);
+  const overlayCandidateFilePickerClose = useOverlayClose(() => setShowCandidateFilePicker(false));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // step 1 - accordion
@@ -2683,7 +2685,7 @@ export default function TaskNewPage() {
 
       {/* 求職者ファイル選択モーダル */}
       {showCandidateFilePicker && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowCandidateFilePicker(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlayCandidateFilePickerClose}>
           <div className="bg-white rounded-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="border-b px-5 py-3 flex items-center justify-between shrink-0">
               <h3 className="text-[15px] font-bold text-[#374151]">📁 求職者ファイルから選択</h3>

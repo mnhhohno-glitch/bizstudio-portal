@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 
@@ -76,6 +77,7 @@ export default function ApplicantListModal({
 }) {
   const [rows, setRows] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(false);
+  const overlayClose = useOverlayClose(onClose);
 
   useEffect(() => {
     if (!open || !query) return;
@@ -109,7 +111,7 @@ export default function ApplicantListModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" {...overlayClose}>
       <div
         className="flex max-h-[85vh] w-[min(1100px,95vw)] flex-col overflow-hidden rounded-lg bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Attachment = {
   id: string;
@@ -73,6 +74,7 @@ export default function TaskAttachments({ taskId, currentUserId, currentUserRole
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveCategory, setSaveCategory] = useState("MEETING");
   const [saving, setSaving] = useState(false);
+  const overlaySaveModalClose = useOverlayClose(() => setShowSaveModal(false));
 
   const fetchAttachments = useCallback(async () => {
     try {
@@ -247,7 +249,7 @@ export default function TaskAttachments({ taskId, currentUserId, currentUserRole
 
       {/* Save to candidate modal */}
       {showSaveModal && candidateId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSaveModal(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" {...overlaySaveModalClose}>
           <div className="bg-white rounded-xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <div className="border-b px-5 py-3 flex items-center justify-between">
               <h3 className="text-[15px] font-bold text-[#374151]">📁 求職者フォルダへ保存</h3>

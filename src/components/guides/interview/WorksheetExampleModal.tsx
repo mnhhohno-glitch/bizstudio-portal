@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { WorksheetExampleSet } from "@/lib/guides/interview/worksheet-examples";
 
 interface WorksheetExampleModalProps {
@@ -17,6 +18,10 @@ export default function WorksheetExampleModal({
   onSelect,
 }: WorksheetExampleModalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const overlayClose = useOverlayClose(() => {
+    setSelected(new Set());
+    onClose();
+  });
 
   if (!isOpen) return null;
 
@@ -47,7 +52,7 @@ export default function WorksheetExampleModal({
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-      onClick={handleClose}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col"

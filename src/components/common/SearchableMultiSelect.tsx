@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 export interface FlatItem {
   large: string;
@@ -60,6 +61,8 @@ export default function SearchableMultiSelect({
   const cancel = useCallback(() => {
     setIsOpen(false);
   }, []);
+
+  const overlayClose = useOverlayClose(cancel);
 
   const removeTag = useCallback(
     (item: FlatItem) => {
@@ -156,7 +159,7 @@ export default function SearchableMultiSelect({
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: "rgba(0,0,0,0.35)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) cancel(); }}
+          {...overlayClose}
         >
           <div
             className="flex flex-col rounded-lg shadow-xl w-full max-w-2xl mx-4"

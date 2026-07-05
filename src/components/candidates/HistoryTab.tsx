@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
 import { resolveJobDbFromBookmark, extractJobNoFromRef } from "@/lib/constants/source-media";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -121,11 +122,12 @@ function EntryDateModal({
   onCancel: () => void;
 }) {
   const [date, setDate] = useState(todayString());
+  const overlayClose = useOverlayClose(onCancel);
 
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-      onClick={onCancel}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-xl max-w-md w-full mx-4 p-6"
@@ -188,10 +190,11 @@ function DeleteConfirmModal({
   onCancel: () => void;
   deleting: boolean;
 }) {
+  const overlayClose = useOverlayClose(onCancel);
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
-      onClick={onCancel}
+      {...overlayClose}
     >
       <div
         className="bg-white rounded-xl max-w-md w-full mx-4 p-6"
@@ -323,8 +326,9 @@ function ArchiveModal({
 }) {
   const [reason, setReason] = useState<string>("");
   const [note, setNote] = useState<string>("");
+  const overlayClose = useOverlayClose(() => { if (!busy) onCancel(); });
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={busy ? undefined : onCancel}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[15px] font-bold text-[#374151]">紹介保留に移動</h2>
@@ -717,6 +721,12 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
+
+  // T-136: オーバーレイ誤クローズ防止（handleCloseSendModal は後方定義のため arrow で遅延参照）
+  const overlayCloseSend = useOverlayClose(() => handleCloseSendModal());
+  const overlayClosePreview = useOverlayClose(() => setPreviewFile(null));
+  const overlayCloseAnalysis = useOverlayClose(() => { if (!editingComment) setSelectedAnalysis(null); });
+  const overlayCloseCaComment = useOverlayClose(() => { if (!caCommentSaving) setCaCommentEdit(null); });
 
   const findJobResponse = useCallback((fileName: string): string | null => {
     const key = normalize(stripCorpSuffixes(stripFileMetadata(fileName)));
@@ -1420,7 +1430,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* Send to job tool modal */}
       {showSendModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleCloseSendModal}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseSend}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-[15px] font-bold text-[#374151]">📤 求人出力へ送信</h2>
@@ -1589,7 +1599,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* PDF Preview popup */}
       {previewFile && previewFile.driveViewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" {...overlayClosePreview}>
           <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
@@ -1625,7 +1635,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* Analysis comment modal */}
       {selectedAnalysis && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => { if (!editingComment) setSelectedAnalysis(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" {...overlayCloseAnalysis}>
           <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
@@ -1764,7 +1774,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* T-128 batch4: CAアドバイザーコメント編集モーダル */}
       {caCommentEdit && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => !caCommentSaving && setCaCommentEdit(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseCaComment}>
           <div className="bg-white rounded-xl max-w-lg w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-[15px] font-bold text-[#374151]">💬 CAコメント</h2>
@@ -1837,6 +1847,12 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+  // T-136: オーバーレイ誤クローズ防止
+  const overlayCloseRestore = useOverlayClose(() => setConfirmRestore(null));
+  const overlayCloseDelete = useOverlayClose(() => setConfirmDelete(null));
+  const overlayCloseBulkDelete = useOverlayClose(() => { if (!bulkDeleting) setShowBulkDeleteConfirm(false); });
+  const overlayClosePreview = useOverlayClose(() => setPreviewFile(null));
 
   const fetchFiles = useCallback(async () => {
     setLoading(true);
@@ -2211,7 +2227,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 
       {/* Restore confirm modal */}
       {confirmRestore && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setConfirmRestore(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseRestore}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-[15px] font-bold text-[#374151] mb-3">紹介保留から復元</h2>
             <p className="text-sm text-gray-600 mb-4"><span className="font-medium">{confirmRestore.fileName}</span> をブックマークに復元します。</p>
@@ -2231,7 +2247,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 
       {/* Permanent delete confirm modal */}
       {confirmDelete && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setConfirmDelete(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseDelete}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-[15px] font-bold text-red-600 mb-3">⚠️ 完全削除</h2>
             <div className="text-sm text-gray-700 mb-4 space-y-2">
@@ -2254,7 +2270,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 
       {/* Bulk delete confirm modal */}
       {showBulkDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={bulkDeleting ? undefined : () => setShowBulkDeleteConfirm(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseBulkDelete}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-[15px] font-bold text-red-600 mb-3">⚠️ 一括削除</h2>
             <div className="text-sm text-gray-700 mb-4 space-y-2">
@@ -2283,7 +2299,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 
       {/* PDF Preview popup */}
       {previewFile && previewFile.driveViewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPreviewFile(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" {...overlayClosePreview}>
           <div className="bg-white rounded-lg shadow-xl w-[90vw] max-w-4xl h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-3 border-b bg-gray-50 shrink-0">
               <span className="text-[13px] font-medium truncate">{previewFile.fileName}</span>

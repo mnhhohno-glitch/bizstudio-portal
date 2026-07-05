@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { REGIONS } from "@/lib/constants/prefectures";
 import { EMPLOYMENT_TYPES } from "@/lib/constants/employment-types";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 type Employee = {
   id: string;
@@ -109,6 +110,9 @@ export default function CandidateRegistrationModal({
       if (emp) setEmployeeId(emp.id);
     }
   }, [isOpen, currentEmployeeName, employees]);
+
+  // T-136: hooks はearly return より前に呼ぶ（handleClose は後方定義のため遅延参照）
+  const overlayClose = useOverlayClose(() => handleClose());
 
   if (!isOpen) return null;
 
@@ -361,7 +365,7 @@ export default function CandidateRegistrationModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={handleClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayClose}>
       <div className="bg-white rounded-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-[16px] font-bold text-[#374151]">求職者を新規登録</h2>
