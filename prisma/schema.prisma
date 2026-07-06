@@ -2543,3 +2543,27 @@ model PostalCodeMaster {
   @@index([postalCode])
   @@map("postal_code_masters")
 }
+
+// T-134 Phase A: 求職者サイト（/site/）の行動ログ。1テーブル方式・fire-and-forget受信・消失許容。
+// - eventType は文字列（LOGIN / SEARCH / JOB_VIEW / KININARU_ADD / KININARU_REMOVE / APPLY /
+//   PAGE_VIEW / RESPONSE_CHANGE ほか将来種別）。enum化しない＝将来種別追加でmigration不要。
+// - detail は Json?（PostgreSQL jsonb）。検索条件params・totalCount・page 等の可変メタを格納。
+// - candidateId は FK を張らない（AdvisorUsageLog と同方針: テストユーザー混在・ログ書込みが本体を落とさない）。
+// - 候補者本人向けの読み出しAPIは作らない（露出防止・T-134確定方針）。
+model CandidateActivityLog {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now()) @map("created_at")
+  candidateId String   @map("candidate_id")
+  eventType   String   @map("event_type")
+  searchId    String?  @map("search_id") // 検索→詳細→操作の連鎖ID
+  jobRef      String?  @map("job_ref") // externalJobRef（sourceJobId）
+  navSource   String?  @map("nav_source") // search / recommend / ca-recommend / mypage
+  detail      Json?    @db.JsonB // {params, totalCount, page} 等
+  pagePath    String?  @map("page_path")
+
+  @@index([createdAt])
+  @@index([candidateId, createdAt])
+  @@index([candidateId, eventType])
+  @@index([eventType, createdAt])
+  @@map("candidate_activity_logs")
+}
