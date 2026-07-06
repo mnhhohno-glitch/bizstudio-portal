@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 type Result = {
   id: string;
@@ -10,6 +11,7 @@ type Result = {
 };
 
 export default function CandidateQuickSearch() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +67,7 @@ export default function CandidateQuickSearch() {
     setOpen(false);
     setQuery("");
     setResults([]);
-    window.open(`/candidates/${id}`, "_blank", "noopener,noreferrer");
+    router.push(`/candidates/${id}`);
   };
 
   return (

@@ -3085,8 +3085,6 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
             )}
             <a
               href={`/entries${candidateName ? `?candidateName=${encodeURIComponent(candidateName)}` : ""}`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="shrink-0 ml-auto text-[12px] text-[#2563EB] hover:underline"
             >
               エントリー管理画面へ &rarr;

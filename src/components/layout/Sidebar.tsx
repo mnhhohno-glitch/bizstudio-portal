@@ -20,8 +20,6 @@ function NavItem({ href, label, icon }: Item) {
   return (
     <Link
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
       className={[
         "relative flex h-12 items-center gap-3 px-4 text-[14px] transition-colors",
         active ? "bg-[#EEF2FF] text-[#374151]" : "text-white/90 hover:bg-white/10",

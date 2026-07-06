@@ -151,8 +151,6 @@ export default function ApplicantListModal({
                       <td className="px-2 py-1.5">
                         <a
                           href={`/candidates/${c.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
                           className="text-[#2563EB] hover:underline"
                         >
                           {c.name}

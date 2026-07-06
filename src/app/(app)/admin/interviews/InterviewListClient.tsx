@@ -146,6 +146,9 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
   const [newTotal, setNewTotal] = useState(0);
   const [existingTotal, setExistingTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  // T-139: sessionStorage 復元完了フラグ。復元前に fetch が走ると
+  // デフォルト絞り込みで無駄な問合せが1回入るため、必ず復元後に fetch する。
+  const [restored, setRestored] = useState(false);
 
   // Pagination / sort
   const [page, setPage] = useState(1);
@@ -201,8 +204,54 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [search]);
 
+  // T-139: マウント時に sessionStorage から絞り込み・ページを復元する。
+  // 復元→setRestored(true) → fetchData 実行 の順序を守ることで、初回に
+  // 復元前のデフォルト値で1回、復元後にもう1回の二重 fetch を防ぐ。
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("interviewlist-filters");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (typeof s.rcName === "string") setRcName(s.rcName);
+        if (typeof s.caName === "string") setCaName(s.caName);
+        if (typeof s.dateFrom === "string") setDateFrom(s.dateFrom);
+        if (typeof s.dateTo === "string") setDateTo(s.dateTo);
+        if (typeof s.candidateName === "string") setCandidateName(s.candidateName);
+        if (typeof s.search === "string") { setSearch(s.search); setDebouncedSearch(s.search); }
+        if (typeof s.typeFilter === "string") setTypeFilter(s.typeFilter);
+        if (typeof s.toolFilter === "string") setToolFilter(s.toolFilter);
+        if (typeof s.mediaFilter === "string") setMediaFilter(s.mediaFilter);
+        if (typeof s.appDateFrom === "string") setAppDateFrom(s.appDateFrom);
+        if (typeof s.appDateTo === "string") setAppDateTo(s.appDateTo);
+        if (typeof s.delDateFrom === "string") setDelDateFrom(s.delDateFrom);
+        if (typeof s.delDateTo === "string") setDelDateTo(s.delDateTo);
+        if (typeof s.page === "number" && s.page > 0) setPage(s.page);
+        if (typeof s.sortBy === "string") setSortBy(s.sortBy);
+        if (s.sortOrder === "asc" || s.sortOrder === "desc") setSortOrder(s.sortOrder);
+      }
+    } catch { /* 破損データ → デフォルト初期値のまま */ }
+    setRestored(true);
+  }, []);
+
+  // T-139: 絞り込み・ページ番号を sessionStorage に保存（restored 後のみ）。
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      sessionStorage.setItem("interviewlist-filters", JSON.stringify({
+        rcName, caName, dateFrom, dateTo, candidateName, search,
+        typeFilter, toolFilter, mediaFilter,
+        appDateFrom, appDateTo, delDateFrom, delDateTo,
+        page, sortBy, sortOrder,
+      }));
+    } catch { /* quota/private-mode → 無視 */ }
+  }, [restored, rcName, caName, dateFrom, dateTo, candidateName, search,
+      typeFilter, toolFilter, mediaFilter,
+      appDateFrom, appDateTo, delDateFrom, delDateTo,
+      page, sortBy, sortOrder]);
+
   // Fetch data
   const fetchData = useCallback(async () => {
+    if (!restored) return; // 復元前は fetch しない
     setLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
@@ -237,7 +286,7 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
     } finally {
       setLoading(false);
     }
-  }, [page, sortBy, sortOrder, rcName, caName, dateFrom, dateTo, candidateName, debouncedSearch,
+  }, [restored, page, sortBy, sortOrder, rcName, caName, dateFrom, dateTo, candidateName, debouncedSearch,
       typeFilter, toolFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -613,8 +662,6 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   <td className="px-2 py-2 text-center whitespace-nowrap">
                     <Link
                       href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="text-[12px] text-[#2563EB] hover:underline mr-1"
                       title="詳細"
                     >✎</Link>
@@ -683,8 +730,6 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   <td className="px-2 py-2 overflow-hidden" title={`${r.candidate.name} (${r.candidate.candidateNumber})`}>
                     <Link
                       href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="text-[13px] text-[#2563EB] hover:underline block truncate"
                     >{r.candidate.name}</Link>
                     <div className="text-[11px] text-gray-400 truncate">{r.candidate.candidateNumber}</div>

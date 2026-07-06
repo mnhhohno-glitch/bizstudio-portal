@@ -803,8 +803,6 @@ export default function CandidateListClient({
                     <Td className="overflow-hidden">
                       <Link
                         href={`/candidates/${cand.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="block truncate text-[#2563EB] hover:underline cursor-pointer"
                         title={cand.name}
                       >

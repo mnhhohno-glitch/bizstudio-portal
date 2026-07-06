@@ -172,8 +172,6 @@ export default function RpaExecutionDetailPage() {
                           {log.candidate ? (
                             <Link
                               href={`/candidates/${log.candidate.id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
                               className="text-[#2563EB] hover:underline"
                             >
                               {log.candidate.candidateNumber}

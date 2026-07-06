@@ -1360,3 +1360,34 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - **旧URL互換**: `by-sent`/`by-applied`/`by-media` の各 `page.tsx` は `redirect("/scout/analytics?view=...")`（server component）に置換。ロジックは `_components/` へ移設済み。
 - **配信枠管理の応募ありフィルタ**: `slots/list` API が `hasApplications=true` で `where.linkedCandidates = { some: {} }`（DB側絞り込み）。`slots/page.tsx` に「応募あり」チェックボックス（`fHasApplications`）。件数 `${listRows.length}件` は絞込後に連動。
 - **開封数入力/過去インポート**: open-count はタブから撤去（ページ `/scout/open-count` は温存＝直接URL可）。import-legacy はタブ admin 限定＋ページ先頭 `if (!isAdmin) return 権限メッセージ`（API は既存 403）。
+
+## portal内リンクの同一タブ化＋一覧絞り込み維持（T-139, 2026-07-07）
+
+### 方針
+- **portal内の画面移動は同じタブ**、**別システム / ファイル / 外部サイト / タスク作成ウィザードは新規タブ**維持。
+- 分類基準: リンク先が portal 自身の画面パス（`/candidates/...`, `/entries`, `/tasks` 等）＝同一タブ。マイページ・kyuujinPDF・candidate-intake・SSO付き外部アプリ／Drive/PDF/Excel 等のファイル／マニュアル外部URL・求人URL等＝新規タブ。
+- **例外（新規タブ維持）**: `EntryBoard.tsx` L543/L795 と `InterviewForm.tsx` L1285 の `window.open("/tasks/new?...", "_blank")` はコメント記載どおり入力途中のフォーム内容保護のため意図的。**変更禁止**。
+
+### Sidebar.tsx（NavItem）
+- `src/components/layout/Sidebar.tsx` の `NavItem` から `target="_blank"` `rel="noopener noreferrer"` を撤去。**全 portal 内メニュー（サイドバー18項目）が同一タブ遷移**に切替わる。
+- `AppNavItem`（資料生成/求人検索/履歴書生成の SSO 経路）と `FinanceNavItem`（経理管理 SSO）は別関数。**新規タブのまま維持**（別システム）。
+
+### EntryBoard.tsx: sessionStorage による絞り込み維持
+- キー名: `entryboard-filters`
+- 保存対象: `activeTab / rcFilter / freeSearch / dateFilters / page`（他フィルタ candidateName/companyName/caFilter/includeInactive 等はURL指定またはログインユーザー由来のため対象外）
+- **復元タイミング**: マウント時の既存 useEffect の冒頭で `sessionStorage.getItem` → 各 state 反映。**`initialCandidateName`（`?candidateName=` からの導線）が指定されているときは復元をスキップ**（HistoryTab→エントリー管理の導線を優先）。
+- **保存タイミング**: 別 useEffect で `sessionLoaded` フラグ ON 以降、保存対象 state 変更のたびに `sessionStorage.setItem`。復元前の空 state で上書きしないよう `sessionLoaded` でガード。
+- 破損データ（JSON parse エラー・quota・private mode）は try-catch で無視しデフォルト初期値のまま動作。
+- `sessionLoaded` は T-118 以前から存在するフラグで、CA 初期値セット完了までの fetch 遅延に使われていた。T-139 で復元完了フラグを兼ねる形に流用。
+
+### InterviewListClient: sessionStorage による絞り込み維持
+- キー名: `interviewlist-filters`
+- 保存対象: `rcName / caName / dateFrom / dateTo / candidateName / search / typeFilter / toolFilter / mediaFilter / appDateFrom / appDateTo / delDateFrom / delDateTo / page / sortBy / sortOrder`
+- **`restored` フラグを新規追加**（EntryBoard の sessionLoaded 相当）。マウント時に sessionStorage 復元→`setRestored(true)` の順。`fetchData` は先頭で `if (!restored) return;` して二重 fetch を防ぐ（初回にデフォルト値で1回、復元後にもう1回、を回避）。
+- `useEffect(() => { fetchData(); }, [fetchData])` の依存に `restored` が入る形（fetchData の依存に `restored` を追加したため自動的に）。
+- 保存 useEffect は `restored` を依存に含めて ON 後のみ書き込み。
+- `search` 復元時は `debouncedSearch` にも同値を即時セット（debounce を待たずに fetch させる）。
+
+### タブを閉じると消える仕様
+- 両画面とも **localStorage ではなく sessionStorage** を使う。日をまたいだ古い絞り込みが残り続ける問題や、他タブに絞り込みが漏れる問題を避けるための設計判断（プロンプト指定）。
+

@@ -420,6 +420,23 @@ export default function EntryBoard() {
   }, []);
 
   useEffect(() => {
+    // T-139: sessionStorage から絞り込み・ページを復元。URLに candidateName が
+    // 指定された導線（HistoryTab→エントリー管理）では復元をスキップし、
+    // 遷移元の意図（該当求職者に絞り込む）を優先する。
+    if (!initialCandidateName) {
+      try {
+        const raw = sessionStorage.getItem("entryboard-filters");
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (typeof saved.activeTab === "string") setActiveTab(saved.activeTab);
+          if (typeof saved.rcFilter === "string") setRcFilter(saved.rcFilter);
+          if (typeof saved.freeSearch === "string") setFreeSearch(saved.freeSearch);
+          if (saved.dateFilters && typeof saved.dateFilters === "object") setDateFilters(saved.dateFilters);
+          if (typeof saved.page === "number" && saved.page > 0) setPage(saved.page);
+        }
+      } catch { /* 破損データ → デフォルト初期値のまま */ }
+    }
+
     fetch("/api/entry-flags")
       .then((r) => r.json())
       .then(setFlagData)
@@ -445,7 +462,18 @@ export default function EntryBoard() {
       // caFilter の初期値セットが反映された状態で fetchEntries を走らせる
       setSessionLoaded(true);
     });
-  }, []);
+  }, [initialCandidateName]);
+
+  // T-139: 絞り込み・ページ番号を sessionStorage に保存（sessionLoaded 後のみ）。
+  // タブを閉じると消える仕様（localStorage にしない）。
+  useEffect(() => {
+    if (!sessionLoaded) return;
+    try {
+      sessionStorage.setItem("entryboard-filters", JSON.stringify({
+        activeTab, rcFilter, freeSearch, dateFilters, page,
+      }));
+    } catch { /* quota/private-mode → 無視 */ }
+  }, [sessionLoaded, activeTab, rcFilter, freeSearch, dateFilters, page]);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);

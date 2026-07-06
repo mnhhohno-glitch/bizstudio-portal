@@ -490,8 +490,6 @@ export default function TasksPage() {
           </button>
           <Link
             href="/tasks/new"
-            target="_blank"
-            rel="noopener noreferrer"
             className="rounded-[8px] bg-[#2563EB] px-5 py-2.5 text-[14px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8]"
           >
             タスクを作成
