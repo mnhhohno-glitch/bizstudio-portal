@@ -19,6 +19,9 @@ import { todayJST } from "@/lib/attendance/timezone";
 const DAILY_LIMIT = 10;
 const MAX_QUESTION_LEN = 1000;
 const MAX_SUMMARY_LEN = 2000;
+const MAX_JOB_REF_LEN = 100;
+const MAX_JOB_TITLE_LEN = 200;
+const MAX_JOB_COMPANY_LEN = 200;
 const TITLE_PREFIX = "【マイページ質問】";
 
 function str(v: unknown): string | null {
@@ -68,6 +71,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `summary must be <= ${MAX_SUMMARY_LEN} characters` }, { status: 400 });
   }
 
+  // T-133 FU-11: 対象求人の特定情報（任意）。求人詳細/カードから質問した場合に mypage が付与する。
+  //   - jobRef: 求人No（externalJobRef = 求職者サイトの sourceJobId。例 "hl-ap-321833" / kyuujin PDF は数値ID）。
+  //     CandidateFile に保存される生の値で、CA が管理画面（求人紹介・ブックマーク）で照合できる一意キー。
+  //   - jobTitle / jobCompany: 表示用。件名は jobRef のみ・タイトル/社名はメモ側に全文。
+  //   3つとも無い（全体への質問）場合は従来形式（求人ブロックなし・件名も従来）。長すぎる値は安全側で切り詰め。
+  const jobRef = str(body.jobRef)?.slice(0, MAX_JOB_REF_LEN) ?? null;
+  const jobTitle = str(body.jobTitle)?.slice(0, MAX_JOB_TITLE_LEN) ?? null;
+  const jobCompany = str(body.companyName)?.slice(0, MAX_JOB_COMPANY_LEN) ?? null;
+
   // 上限ガード: 当日（JST 0:00 以降）の質問タスク作成数。候補者スコープ。
   const jstDayStart = todayJST().toDate();
   const todayCount = await prisma.task.count({
@@ -100,10 +112,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "System user not found" }, { status: 500 });
   }
 
-  const title = `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
+  // 件名: 求人紐付きなら求人No、なければ従来形式（全体への質問）。
+  const title = jobRef
+    ? `${TITLE_PREFIX}${candidate.name} - ${jobRef} への質問`
+    : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
+
+  // 詳細メモ: 求人紐付きなら冒頭に「■ 対象求人」ブロック（求人No／タイトル／社名）を追加。
+  //   求人No は CandidateFile.externalJobRef と同値＝管理画面（求人紹介タブ）で該当ブックマークを検索できる参照。
+  const targetJobBlock = jobRef
+    ? [
+        "■ 対象求人",
+        `${jobRef}${jobTitle ? `／${jobTitle}` : ""}${jobCompany ? `／${jobCompany}` : ""}`,
+        `（求人No ${jobRef} で求人紹介・ブックマークを検索できます）`,
+        "",
+      ]
+    : [];
   const description = [
     `${candidate.name} 様から担当CAへの質問がありました。`,
     "",
+    ...targetJobBlock,
     "■ 質問（原文）",
     question,
     "",
@@ -138,6 +165,9 @@ export async function POST(request: Request) {
       taskId: task.id,
       question,
       summary,
+      jobRef,
+      jobTitle,
+      jobCompany,
     });
   } catch (e) {
     console.error("[candidate-site/questions] LINE WORKS通知失敗（タスクは作成済み）:", e);

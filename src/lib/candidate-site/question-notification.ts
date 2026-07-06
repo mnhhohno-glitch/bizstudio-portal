@@ -15,6 +15,10 @@ type QuestionNotificationParams = {
   taskId: string;
   question: string;
   summary: string;
+  // T-133 FU-11: 対象求人（求人紐付き質問のみ。全体質問は null）。
+  jobRef?: string | null; // 求人No（externalJobRef）
+  jobTitle?: string | null;
+  jobCompany?: string | null;
 };
 
 /**
@@ -32,11 +36,21 @@ export async function notifyCandidateQuestion(
     return false;
   }
 
+  // T-133 FU-11: 対象求人（求人紐付き質問のみ）。求職者ブロックの直後に1ブロック挿入。
+  const targetJobLines = params.jobRef
+    ? [
+        "",
+        "■ 対象求人",
+        `${params.jobRef}${params.jobTitle ? `／${params.jobTitle}` : ""}${params.jobCompany ? `／${params.jobCompany}` : ""}`,
+      ]
+    : [];
+
   const baseLines = [
     "❓ 求職者から担当CAへの質問が届きました",
     "",
     "■ 求職者",
     `${params.candidateName} 様（${params.candidateNumber}）`,
+    ...targetJobLines,
     "",
     "■ 質問（原文）",
     params.question,
