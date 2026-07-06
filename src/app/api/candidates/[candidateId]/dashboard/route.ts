@@ -109,13 +109,13 @@ export async function GET(
   const [
     mypage,
     entries,
-    responses,
+    oldResponses,
     latestInterview,
     notesAgg,
     contactLogAgg,
     bookmarkAgg,
     bookmarkCount,
-    mypageBaseCount,
+    baseFiles,
     openTasks,
   ] = await Promise.all([
     fetchMypageStats(candidate.candidateNumber),
@@ -127,7 +127,8 @@ export async function GET(
         firstInterviewDate: true, secondInterviewDate: true, finalInterviewDate: true,
       },
     }),
-    prisma.candidateJobResponse.groupBy({ by: ["response"], where: { candidateId }, _count: { _all: true } }),
+    // 旧テーブル（過去回答）: job単位unionで新台帳に無い過去分のみ加算する（FU-10）。
+    prisma.candidateJobResponse.findMany({ where: { candidateId }, select: { externalJobId: true, response: true } }),
     prisma.interviewRecord.findFirst({
       where: { candidateId },
       orderBy: { interviewDate: "desc" },
@@ -140,23 +141,60 @@ export async function GET(
       _max: { lastExportedAt: true },
     }),
     prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } } }),
-    // マイページ反応の母数: マイページに出ている求人数（送信済 かつ 紹介保留=archived を除く）
-    prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null }, archivedAt: null } }),
+    // マイページ反応の母数＆新台帳の仕分け: マイページ掲載求人（送信済 かつ 紹介保留=archived を除く）
+    //   の kyuujinJobId と responseStatus。新 /site/ の仕分けはここ（CandidateFile.responseStatus）に入る。
+    prisma.candidateFile.findMany({
+      where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null }, archivedAt: null },
+      select: { kyuujinJobId: true, responseStatus: true },
+    }),
     prisma.task.findMany({
       where: { candidateId, status: { not: "COMPLETED" }, dueDate: { not: null } },
       select: { dueDate: true },
     }),
   ]);
 
-  /* ----- ①本人の動き ----- */
-  const interestedCount = responses.find((r) => r.response === "INTERESTED")?._count._all ?? 0;
-  const wantToApplyCount = responses.find((r) => r.response === "WANT_TO_APPLY")?._count._all ?? 0;
+  /* ----- ①本人の動き（マイページ反応・FU-10: 新台帳＋旧のジョブ単位union） -----
+   * job同一性 = kyuujinJobId（== 旧 externalJobId。両者とも applyJobResponseIntent 経由で同一ID空間）。
+   * 各jobの最終仕分けを解決:
+   *   - 新台帳 responseStatus が非null（"UNANSWERED"含む実データ）→ 新を採用（旧は加算しない＝二重防止/案①）
+   *   - 新台帳 responseStatus が null（非移行=新データ無し）→ 旧の過去回答で補完（過去分保全）
+   *   - 新台帳に無いjob（旧のみ＝portalにブックマーク行なし）→ 旧を採用（過去分保全）
+   * P5移行は旧→新台帳を複製したが CandidateJobResponse には書かないため、旧のみに残る過去回答を
+   * 拾わないと集計から消える。逆に "UNANSWERED"（移行済みの明示的未回答）は新優先で旧を復活させない。
+   * kyuujinJobId を持たない掲載行（job-platform等）は旧テーブルと衝突しないため個別計上。
+   */
+  const jobStatus = new Map<number, string | null>(); // kyuujin job id → 解決後ステータス
+  let fileOnlyInterested = 0, fileOnlyApply = 0, fileOnlyTotal = 0;
+  for (const f of baseFiles) {
+    if (f.kyuujinJobId == null) {
+      fileOnlyTotal++; // kyuujin未紐付けの掲載行（旧テーブルと衝突しない）
+      if (f.responseStatus === "INTERESTED") fileOnlyInterested++;
+      else if (f.responseStatus === "APPLY") fileOnlyApply++;
+    } else {
+      jobStatus.set(f.kyuujinJobId, f.responseStatus ?? null);
+    }
+  }
+  for (const r of oldResponses) {
+    const cur = jobStatus.get(r.externalJobId);
+    // 新台帳に実データ（非null）があるjobは新優先。null（新データ無し）or 未登場のみ旧で補完。
+    if (cur === undefined || cur === null) {
+      jobStatus.set(r.externalJobId, r.response === "WANT_TO_APPLY" ? "APPLY" : r.response);
+    }
+  }
+  let interestedCount = fileOnlyInterested;
+  let wantToApplyCount = fileOnlyApply;
+  for (const s of jobStatus.values()) {
+    if (s === "INTERESTED") interestedCount++;
+    else if (s === "APPLY") wantToApplyCount++;
+  }
+  // 母数は「掲載job ∪ 旧のみ回答job」（各jobを高々1回）。旧テーブルは回答のみ保持のため extra は全て回答。
+  const reactionTotal = fileOnlyTotal + jobStatus.size;
   // マイページ反応（母数ベース3分類）: 未回答 = 母数 − 気になる − 応募したい（負はクランプ）
   const mypageReaction = {
-    total: mypageBaseCount,
+    total: reactionTotal,
     interested: interestedCount,
     wantToApply: wantToApplyCount,
-    unanswered: Math.max(0, mypageBaseCount - interestedCount - wantToApplyCount),
+    unanswered: Math.max(0, reactionTotal - interestedCount - wantToApplyCount),
   };
 
   /* ----- ②こちらの対応 ----- */
