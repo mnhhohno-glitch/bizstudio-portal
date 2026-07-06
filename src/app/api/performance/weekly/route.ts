@@ -16,6 +16,7 @@ import { getSessionUser } from "@/lib/auth";
 import { computeWeeklyMatrix, computeInterviewRankBreakdown, applyAdditiveTotals, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { buildColumns, type Granularity } from "@/lib/performance/columns";
 import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/performance/businessDays";
+import { aggregateAllCaTargets } from "@/lib/performance/aggregateTargets";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -108,13 +109,14 @@ export async function GET(req: Request) {
   // 合計列の人数・件数（提案/エントリー/選考）を各週の合算に置換（DISTINCT 再集計をやめ縦横一致させる）。
   applyAdditiveTotals(totalMatrix, columnMatrices);
 
-  // 目標：全員モードは目標なし。個別のみ対象月の PerformanceTarget をまとめて取得。
+  // 目標：対象月の PerformanceTarget。全員モードは全CA合算。
   const neededMonths = Array.from(new Set([anchorMonth, ...columns.map((c) => c.yearMonth)]));
-  const targetRows = allCas ? [] : await prisma.performanceTarget.findMany({
-    where: { employeeId: resolvedEmployeeId, yearMonth: { in: neededMonths } },
-  });
-  const targetByMonth = new Map(targetRows.map((t) => [t.yearMonth, t]));
-  const targetExists = allCas ? false : (granularity === "month")
+  const targetByMonth = allCas
+    ? await aggregateAllCaTargets(neededMonths)
+    : new Map((await prisma.performanceTarget.findMany({
+        where: { employeeId: resolvedEmployeeId, yearMonth: { in: neededMonths } },
+      })).map((t) => [t.yearMonth, t] as const));
+  const targetExists = (granularity === "month")
     ? columns.some((c) => targetByMonth.has(c.yearMonth))
     : targetByMonth.has(anchorMonth);
 
