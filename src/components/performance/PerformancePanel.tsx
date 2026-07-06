@@ -81,6 +81,11 @@ const yenFmt = (v: number | null | undefined) => (v == null ? "—" : `¥${Math.
 const mdLabel = (d: string) => { const [, m, day] = d.split("-"); return `${parseInt(m)}/${parseInt(day)}`; };
 // 隣接段比・構成比のヘルパ（0 / null 安全）。直近6ヶ月と当月実績の合計列で共用。
 const ratio = (n: number, d: number): number | null => (d > 0 ? n / d : null);
+// 目標％用（分子・分母とも null 許容。0/未登録は null＝ハイフン表示）。実績％と同じ定義を目標値に当てる。
+const tRatio = (n: number | null | undefined, d: number | null | undefined): number | null =>
+  (n != null && d != null && d > 0 ? n / d : null);
+// 空欄セルのハイフン（表内の他の空表示「—」と同一文字で統一）。
+const DASH = "—";
 
 // 行定義：actual 抽出関数＋任意 targetKey＋フォーマッタ。
 // band＝薄青の帯色（提案/エントリーの人数行のみ）。isTotal＝合計行（上罫線＋太字）。
@@ -99,6 +104,9 @@ type Row = {
   targetKey?: TKey;
   fmt?: (v: number | null) => string;
   pct?: (m: WeeklyMatrix) => number | null;
+  // 目標％（合計列のみ）。実績％(pct)と同一の分子・分母定義を目標値(total.targets)に当てて算出。
+  // 未定義＝目標％なし（ハイフン）。全員選択時は合算済みの total.targets が渡るため合算目標に対する率になる。
+  targetPct?: (t: Record<TKey, number | null>) => number | null;
   // 合計セルのホバー補助（純粋新規など）。total の matrix を受けて title 文字列を返す。
   title?: (m: WeeklyMatrix) => string;
   // 実績=件数だが目標=人数の行（提案/エントリー合計）はインライン目標表示を抑止（達成率列は維持）。
@@ -112,19 +120,19 @@ type Row = {
 //   選考（書類通過/内定/決定）は**隣接段比**（÷前段）。決定売上・売上単価は%なし。
 //   週列・平均列・達成率列には表示しない（週別の率は「率の窓問題」で意味を持たないため）。
 const MONTHLY_ROWS: Row[] = [
-  { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst", pct: (m) => ratio(m.interview.first, m.interview.total) },
+  { label: "初回面談", actual: (m) => m.interview.first, targetKey: "interviewFirst", pct: (m) => ratio(m.interview.first, m.interview.total), targetPct: (t) => tRatio(t.interviewFirst, t.interviewTotal) },
   { label: "求人面談（2回目）", actual: (m) => m.interview.second, pct: (m) => ratio(m.interview.second, m.interview.total) },
-  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, targetKey: "interviewExisting", pct: (m) => ratio(m.interview.thirdPlus, m.interview.total) },
-  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, targetKey: "interviewTotal", pct: (m) => (m.interview.total > 0 ? 1 : null) },
+  { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, targetKey: "interviewExisting", pct: (m) => ratio(m.interview.thirdPlus, m.interview.total), targetPct: (t) => tRatio(t.interviewExisting, t.interviewTotal) },
+  { label: "合計面談", band: "orange", isTotal: true, actual: (m) => m.interview.total, targetKey: "interviewTotal", pct: (m) => (m.interview.total > 0 ? 1 : null), targetPct: (t) => (t.interviewTotal != null && t.interviewTotal > 0 ? 1 : null) },
   { label: "初回提案", actual: (m) => m.proposal.scoped.fresh.recs, uniq: (m) => m.proposal.scoped.fresh.uniq, pct: (m) => ratio(m.proposal.scoped.fresh.uniq, m.proposal.scoped.total.uniq) },
   { label: "既存提案", actual: (m) => m.proposal.scoped.existing.recs, uniq: (m) => m.proposal.scoped.existing.uniq, pct: (m) => ratio(m.proposal.scoped.existing.uniq, m.proposal.scoped.total.uniq) },
-  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.scoped.total.uniq, m.interview.total) },
+  { label: "合計提案", band: "orange", isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq", pct: (m) => ratio(m.proposal.scoped.total.uniq, m.interview.total), targetPct: (t) => tRatio(t.proposalUniq, t.interviewTotal) },
   { label: "新規エントリー", actual: (m) => m.entry.scoped.fresh.recs, uniq: (m) => m.entry.scoped.fresh.uniq, pct: (m) => ratio(m.entry.scoped.fresh.uniq, m.entry.scoped.total.uniq) },
   { label: "既存エントリー", actual: (m) => m.entry.scoped.existing.recs, uniq: (m) => m.entry.scoped.existing.uniq, pct: (m) => ratio(m.entry.scoped.existing.uniq, m.entry.scoped.total.uniq) },
-  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.scoped.total.recs, uniq: (m) => m.entry.scoped.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.scoped.total.uniq, m.proposal.scoped.total.uniq) },
-  { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.scoped.total.uniq) },
-  { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass) },
-  { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer) },
+  { label: "合計エントリー", band: "orange", isTotal: true, actual: (m) => m.entry.scoped.total.recs, uniq: (m) => m.entry.scoped.total.uniq, targetKey: "entryUniq", pct: (m) => ratio(m.entry.scoped.total.uniq, m.proposal.scoped.total.uniq), targetPct: (t) => tRatio(t.entryUniq, t.proposalUniq) },
+  { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.scoped.total.uniq), targetPct: (t) => tRatio(t.documentPass, t.entryUniq) },
+  { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass), targetPct: (t) => tRatio(t.offer, t.documentPass) },
+  { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer), targetPct: (t) => tRatio(t.acceptance, t.offer) },
   { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
   { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, targetKey: "unitPrice", fmt: yenFmt },
 ];
@@ -411,7 +419,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
               <div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div>
             </th>
           ))}
-          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>{hasPctInRows ? "目標｜実績｜%" : "目標｜実績"}</div></th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>{hasPctInRows ? "目標｜％｜実績｜％" : "目標｜実績"}</div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[70px]`}>平均<div className={`text-[10px] ${SUBHEAD_CLS}`}>/列</div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[80px]`}>達成率</th>
         </tr>
@@ -420,6 +428,7 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
         {rows.map((r) => {
           const hasTarget = !!r.targetKey;
           const isDual = !!r.uniq; // 件数｜人数の2軸行
+          const isMoney = r.fmt === yenFmt; // 金額行（決定粗利・粗利単価）は現状のまま（列分割・目標％の対象外）
           const totalActual = r.actual(total.matrix); // 2軸行では件数（総数）
           const totalUniq = r.uniq ? r.uniq(total.matrix) : null; // 2軸行の人数
           const totalTgt = hasTarget ? total.targets[r.targetKey!] : null; // 合計列の目標（月目標）
@@ -429,30 +438,51 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           // 帯色（提案/エントリーの人数行のみ）。合計行は上罫線＋太字。
           const rowBg = r.band === "orange" ? "bg-[#FFF4E6]" : r.band ? "bg-[#EFF6FF]" : "bg-white";
           const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";
+          const fmtTgt = (v: number) => (r.fmt ? r.fmt(v) : numFmt(v, 1)); // 目標値の書式（金額行は yen、他は小数1桁）
+          const totalActualStr = isDual ? fmtUT(totalUniq, totalActual, 0) : fmt(r, totalActual);
+          // 目標％／実績％（合計列のみ。同一定義で target/actual に当てる。null＝ハイフン）。
+          const tPctVal = r.targetPct ? r.targetPct(total.targets) : null;
+          const aPctVal = r.pct ? r.pct(total.matrix) : null;
           return (
             <tr key={r.label} className={`${rowBg} ${totalCls} hover:bg-[#E0EAFF]`}>
               <td className={`sticky left-0 ${rowBg} px-3 py-2 text-[#374151] ${r.indent ? "pl-7 text-[#9CA3AF] text-[12px]" : "font-medium"}`}>{r.label}</td>
               {columns.map((c) => {
                 const a = r.actual(c.matrix); // 2軸行では各週=件数
-                // 目標：週按分のある行(面談/提案/エントリー)のみ列の目標が入る。書類通過以降は route 側で null＝非表示。
+                // 目標：週按分のある行(面談/提案/エントリー)のみ列の目標が入る。書類通過以降は route 側で null＝ハイフン。
                 const tgt = hasTarget ? c.targets[r.targetKey!] : null;
+                const actualStr = isDual ? fmtUT(r.uniq!(c.matrix), a, 0) : fmt(r, a);
+                if (isMoney) {
+                  // 金額行は現状のまま（インライン「目標｜実績」）。
+                  return (
+                    <td key={c.index} className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
+                      {tgt != null && <span className="text-[#9CA3AF]">{fmtTgt(tgt)}｜</span>}
+                      <span className="text-[#374151] font-medium">{actualStr}</span>
+                    </td>
+                  );
+                }
+                // 目標・実績を独立した固定幅カラムに分けて左寄せ（全行で縦のラインが揃う。空欄はハイフン）。
                 return (
-                  <td key={c.index} className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
-                    {tgt != null && <span className="text-[#9CA3AF]">{r.fmt ? r.fmt(tgt) : numFmt(tgt, 1)}｜</span>}
-                    <span className="text-[#374151] font-medium">{isDual ? fmtUT(r.uniq!(c.matrix), a, 0) : fmt(r, a)}</span>
+                  <td key={c.index} className="px-3 py-2 tabular-nums whitespace-nowrap text-left">
+                    <span className="inline-block w-[46px] text-[#9CA3AF]">{tgt != null ? fmtTgt(tgt) : DASH}</span>
+                    <span className="inline-block text-[#374151] font-medium">{actualStr}</span>
                   </td>
                 );
               })}
-              <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
-                {totalTgt != null && <span className="text-[#9CA3AF]">{r.fmt ? r.fmt(totalTgt) : numFmt(totalTgt, 1)}｜</span>}
-                {isDual
-                  ? <span className="text-[#374151] font-semibold">{fmtUT(totalUniq, totalActual, 0)}</span>
-                  : <span className="text-[#374151] font-semibold">{fmt(r, totalActual)}</span>}
-                {/* T-071 ③ 当月実績の合計列にのみ転換率%（隣接段比 or 構成比、当月通算人数ベース）。 */}
-                {r.pct && (
-                  <span className="text-[11px] text-[#2563EB] ml-1">｜{pctFmt(r.pct(total.matrix))}</span>
-                )}
-              </td>
+              {isMoney ? (
+                // 金額行の合計は現状のまま。
+                <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
+                  {totalTgt != null && <span className="text-[#9CA3AF]">{fmtTgt(totalTgt)}｜</span>}
+                  <span className="text-[#374151] font-semibold">{totalActualStr}</span>
+                </td>
+              ) : (
+                // 合計列＝目標｜目標％｜実績｜実績％を独立した固定幅カラムで左寄せ（当月実績タブのみ％あり）。
+                <td className="px-3 py-2 tabular-nums whitespace-nowrap text-left">
+                  <span className="inline-block w-[52px] text-[#9CA3AF]">{totalTgt != null ? fmtTgt(totalTgt) : DASH}</span>
+                  {hasPctInRows && <span className="inline-block w-[54px] text-[11px] text-[#2563EB]">{pctFmt(tPctVal)}</span>}
+                  <span className={`inline-block text-[#374151] font-semibold ${hasPctInRows ? "w-[104px]" : ""}`}>{totalActualStr}</span>
+                  {hasPctInRows && <span className="inline-block text-[11px] text-[#2563EB]">{pctFmt(aPctVal)}</span>}
+                </td>
+              )}
               <td className="px-3 py-2 text-center tabular-nums text-[#6B7280] whitespace-nowrap">
                 {isDual
                   ? <span>{fmtUT(n > 0 && totalUniq != null ? totalUniq / n : null, n > 0 && totalActual != null ? totalActual / n : null, 1)}</span>
