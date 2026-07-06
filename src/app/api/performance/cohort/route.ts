@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { todayJstDateString } from "@/lib/dailyReport/jstDate";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { aggregateAllCaTargets } from "@/lib/performance/aggregateTargets";
 
 function shiftMonth(yearMonth: string, delta: number): string {
   const [y, m] = yearMonth.split("-").map((s) => parseInt(s, 10));
@@ -76,8 +77,9 @@ export async function GET(req: Request) {
       case "unitPrice": return t.unitPrice;
     }
   };
-  const targetRows = allCas ? [] : await prisma.performanceTarget.findMany({ where: { employeeId, yearMonth: { in: targetMonths } } });
-  const targetByMonth = new Map(targetRows.map((t) => [t.yearMonth, t]));
+  const targetByMonth = allCas
+    ? await aggregateAllCaTargets(targetMonths)
+    : new Map((await prisma.performanceTarget.findMany({ where: { employeeId, yearMonth: { in: targetMonths } } })).map((t) => [t.yearMonth, t] as const));
   const buildTargets = (ym: string): Record<TKey, number | null> => {
     const t = targetByMonth.get(ym);
     const o = {} as Record<TKey, number | null>;

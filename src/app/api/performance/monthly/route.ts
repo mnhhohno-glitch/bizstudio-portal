@@ -14,6 +14,7 @@ import { getSessionUser } from "@/lib/auth";
 import { computeWeeklyMatrix, applyAdditiveTotals, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { weeklyBusinessDays, monthBusinessDays, allocateToWeeks, type WeekBucket } from "@/lib/performance/businessDays";
 import { computeInterviewAttributes } from "@/lib/performance/attributes";
+import { aggregateAllCaTargets } from "@/lib/performance/aggregateTargets";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -106,10 +107,12 @@ export async function GET(req: Request) {
   // 合計列の人数・件数を各週の合算に置換（縦横一致）。
   applyAdditiveTotals(totalMatrix, columnMatrices);
 
-  // 目標（当月の PerformanceTarget。週按分は initial面談・提案・エントリーのみ）。
-  const targetRow = allCas ? null : await prisma.performanceTarget.findUnique({
-    where: { employeeId_yearMonth: { employeeId: resolvedEmployeeId, yearMonth } },
-  });
+  // 目標（当月の PerformanceTarget。週按分は initial面談・提案・エントリーのみ）。全員モードは全CA合算。
+  const targetRow = allCas
+    ? ((await aggregateAllCaTargets([yearMonth])).get(yearMonth) ?? null)
+    : await prisma.performanceTarget.findUnique({
+        where: { employeeId_yearMonth: { employeeId: resolvedEmployeeId, yearMonth } },
+      });
   const targetExists = !!targetRow;
   const monthBiz = monthBusinessDays(yearMonth);
 
