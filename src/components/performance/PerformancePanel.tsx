@@ -6,7 +6,7 @@
 // - 直近6ヶ月：GET /api/performance/cohort（コホート追跡の率）。
 // 既存の期間ボタン式は廃止。集計の数え方は API 側（変更なし）。
 
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import TargetModal from "./TargetModal";
 
 type Advisor = { id: string; name: string };
@@ -172,6 +172,43 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
 // ダークグレーのヘッダ用クラス。
 const HEAD_CLS = "bg-[#3C3C3C] text-white";
 const SUBHEAD_CLS = "text-[#D1D5DB]"; // 目標｜実績 等のサブ文字
+
+// 実績表マトリクスの数値サブカラム幅。ヘッダのラベル行と本体の数値行を同一幅・同一並びで描画し、
+// ラベルの真下に数字が来るよう揃える（ヘッダ・本体の両方が下の ValueCells を使うため片方だけ直しても崩れない）。
+// 幅は数字に合わせて詰める：目標「44.4／−」、実績「8（70）」の件数括弧、％「100.0%」が収まる最小幅。
+const COL_TGT = "w-[40px]"; // 目標（右寄せ）
+const COL_PCT = "w-[42px]"; // ％（右寄せ）
+const COL_ACT = "w-[72px]"; // 実績（左寄せ・件数括弧含む）
+type VCell = { key: string; w: string; cls?: string; align?: "left" | "right"; node: ReactNode };
+// 目標｜(％)｜実績｜(％) を固定幅・右詰めグループで並べる共通レイアウト。ヘッダ・本体で共用。
+function ValueCells({ items }: { items: VCell[] }) {
+  return (
+    <div className="flex items-baseline justify-end gap-x-1.5 whitespace-nowrap">
+      {items.map((it) => (
+        <span key={it.key} className={`${it.w} tabular-nums ${it.align === "left" ? "text-left" : "text-right"} ${it.cls ?? ""}`}>{it.node}</span>
+      ))}
+    </div>
+  );
+}
+// 週セル（目標・実績）の項目定義ビルダー。ヘッダはラベル文字列、本体は数値ノードを渡して同一構造にする。
+function twoCol(tgt: ReactNode, act: ReactNode, tgtCls: string, actCls: string): VCell[] {
+  return [
+    { key: "t", w: COL_TGT, align: "right", cls: tgtCls, node: tgt },
+    { key: "a", w: COL_ACT, align: "left", cls: actCls, node: act },
+  ];
+}
+// 合計セル（目標・目標％・実績・実績％／％なしタブは目標・実績）の項目定義ビルダー。
+function totalCol(withPct: boolean, tgt: ReactNode, tPct: ReactNode, act: ReactNode, aPct: ReactNode, tgtCls: string, actCls: string, pctCls: string): VCell[] {
+  const t: VCell = { key: "t", w: COL_TGT, align: "right", cls: tgtCls, node: tgt };
+  const a: VCell = { key: "a", w: COL_ACT, align: "left", cls: actCls, node: act };
+  if (!withPct) return [t, a];
+  return [
+    t,
+    { key: "tp", w: COL_PCT, align: "right", cls: pctCls, node: tPct },
+    a,
+    { key: "ap", w: COL_PCT, align: "right", cls: pctCls, node: aPct },
+  ];
+}
 
 export default function PerformancePanel() {
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
@@ -416,10 +453,10 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
             <th key={c.index} className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>
               {c.label}
               <div className={`text-[11px] ${SUBHEAD_CLS}`}>{c.subLabel ?? `${mdLabel(c.from)}〜${mdLabel(c.to)}`}</div>
-              <div className={`text-[10px] ${SUBHEAD_CLS}`}>目標｜実績</div>
+              <div className={`text-[10px] ${SUBHEAD_CLS} font-normal`}><ValueCells items={twoCol("目標", "実績", "", "")} /></div>
             </th>
           ))}
-          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS}`}>{hasPctInRows ? "目標｜％｜実績｜％" : "目標｜実績"}</div></th>
+          <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap`}>合計<div className={`text-[10px] ${SUBHEAD_CLS} font-normal`}><ValueCells items={totalCol(hasPctInRows, "目標", "％", "実績", "％", "", "", "")} /></div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[70px]`}>平均<div className={`text-[10px] ${SUBHEAD_CLS}`}>/列</div></th>
           <th className={`${HEAD_CLS} px-3 py-2.5 text-center font-medium whitespace-nowrap min-w-[80px]`}>達成率</th>
         </tr>
@@ -460,11 +497,10 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
                     </td>
                   );
                 }
-                // 目標・実績を独立した固定幅カラムに分けて左寄せ（全行で縦のラインが揃う。空欄はハイフン）。
+                // 目標・実績を共通の固定幅カラム（ヘッダと同一の ValueCells）で描画。空欄はハイフン。
                 return (
-                  <td key={c.index} className="px-3 py-2 tabular-nums whitespace-nowrap text-left">
-                    <span className="inline-block w-[46px] text-[#9CA3AF]">{tgt != null ? fmtTgt(tgt) : DASH}</span>
-                    <span className="inline-block text-[#374151] font-medium">{actualStr}</span>
+                  <td key={c.index} className="px-3 py-2">
+                    <ValueCells items={twoCol(tgt != null ? fmtTgt(tgt) : DASH, actualStr, "text-[#9CA3AF]", "text-[#374151] font-medium")} />
                   </td>
                 );
               })}
@@ -475,12 +511,9 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
                   <span className="text-[#374151] font-semibold">{totalActualStr}</span>
                 </td>
               ) : (
-                // 合計列＝目標｜目標％｜実績｜実績％を独立した固定幅カラムで左寄せ（当月実績タブのみ％あり）。
-                <td className="px-3 py-2 tabular-nums whitespace-nowrap text-left">
-                  <span className="inline-block w-[52px] text-[#9CA3AF]">{totalTgt != null ? fmtTgt(totalTgt) : DASH}</span>
-                  {hasPctInRows && <span className="inline-block w-[54px] text-[11px] text-[#2563EB]">{pctFmt(tPctVal)}</span>}
-                  <span className={`inline-block text-[#374151] font-semibold ${hasPctInRows ? "w-[104px]" : ""}`}>{totalActualStr}</span>
-                  {hasPctInRows && <span className="inline-block text-[11px] text-[#2563EB]">{pctFmt(aPctVal)}</span>}
+                // 合計列＝目標｜目標％｜実績｜実績％をヘッダと同一の ValueCells で描画（当月実績タブのみ％あり）。
+                <td className="px-3 py-2">
+                  <ValueCells items={totalCol(hasPctInRows, totalTgt != null ? fmtTgt(totalTgt) : DASH, pctFmt(tPctVal), totalActualStr, pctFmt(aPctVal), "text-[#9CA3AF]", "text-[#374151] font-semibold", "text-[11px] text-[#2563EB]")} />
                 </td>
               )}
               <td className="px-3 py-2 text-center tabular-nums text-[#6B7280] whitespace-nowrap">
