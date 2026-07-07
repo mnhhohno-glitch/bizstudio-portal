@@ -303,25 +303,44 @@ export default function EntryBoard() {
   const urlModalOverlayClose = useOverlayClose(() => { if (!savingUrl) setUrlModalEntryId(null); });
   const offerAcceptOverlayClose = useOverlayClose(() => setOfferAcceptEntry(null));
 
+  // T-139 fix: debounce text filters (300ms) to avoid per-keystroke / IME intermediate fetch
+  const [dCandidateName, setDCandidateName] = useState(initialCandidateName);
+  const [dCompanyName, setDCompanyName] = useState("");
+  const [dRcFilter, setDRcFilter] = useState("");
+  const [dFreeSearch, setDFreeSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => { setDCandidateName(candidateName); setDCompanyName(companyName); setDRcFilter(rcFilter); setDFreeSearch(freeSearch); }, 300);
+    return () => clearTimeout(t);
+  }, [candidateName, companyName, rcFilter, freeSearch]);
+
+  // T-139 fix: AbortController to prevent stale fetch responses from overwriting current state
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  const countsAbortRef = useRef<AbortController | null>(null);
+
   const fetchEntries = useCallback(async () => {
     if (!sessionLoaded) return;
+    fetchAbortRef.current?.abort();
+    countsAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     setLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", "50");
     if (activeTab !== "全件") params.set("entryFlag", activeTab);
-    if (candidateName) params.set("candidateName", candidateName);
-    if (companyName) params.set("companyName", companyName);
+    if (dCandidateName) params.set("candidateName", dCandidateName);
+    if (dCompanyName) params.set("companyName", dCompanyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
-    if (rcFilter) params.set("rcName", rcFilter);
-    if (freeSearch.trim()) params.set("freeSearch", freeSearch.trim());
+    if (dRcFilter) params.set("rcName", dRcFilter);
+    if (dFreeSearch.trim()) params.set("freeSearch", dFreeSearch.trim());
     if (includeInactive) params.set("includeInactive", "true");
     if (includeArchived) params.set("includeArchived", "true");
     if (urlMissingOnly) params.set("urlMissingOnly", "true");
     for (const [k, v] of Object.entries(dateFilters)) { if (v) params.set(k, v); }
 
     try {
-      const res = await fetch(`/api/entries?${params}`);
+      const res = await fetch(`/api/entries?${params}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries || []);
@@ -330,9 +349,11 @@ export default function EntryBoard() {
         setCounts(data.counts || {});
         setPeopleCounts(data.peopleCounts || {});
       }
-    } catch { /* */ }
-    finally { setLoading(false); }
-  }, [sessionLoaded, page, activeTab, candidateName, companyName, caFilter, rcFilter, freeSearch,
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    }
+    finally { if (!controller.signal.aborted) setLoading(false); }
+  }, [sessionLoaded, page, activeTab, dCandidateName, dCompanyName, caFilter, dRcFilter, dFreeSearch,
       includeInactive, includeArchived, urlMissingOnly, dateFilters]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
@@ -388,27 +409,33 @@ export default function EntryBoard() {
 
   // Refresh only tab counts (no loading state, no entry replacement)
   const refreshCounts = useCallback(async () => {
+    countsAbortRef.current?.abort();
+    const controller = new AbortController();
+    countsAbortRef.current = controller;
     const params = new URLSearchParams();
     params.set("page", "1");
     params.set("limit", "1");
-    if (candidateName) params.set("candidateName", candidateName);
-    if (companyName) params.set("companyName", companyName);
+    if (dCandidateName) params.set("candidateName", dCandidateName);
+    if (dCompanyName) params.set("companyName", dCompanyName);
     if (caFilter) params.set("careerAdvisorName", caFilter);
-    if (rcFilter) params.set("rcName", rcFilter);
-    if (freeSearch.trim()) params.set("freeSearch", freeSearch.trim());
+    if (dRcFilter) params.set("rcName", dRcFilter);
+    if (dFreeSearch.trim()) params.set("freeSearch", dFreeSearch.trim());
     if (includeInactive) params.set("includeInactive", "true");
     if (includeArchived) params.set("includeArchived", "true");
     if (urlMissingOnly) params.set("urlMissingOnly", "true");
     for (const [k, v] of Object.entries(dateFilters)) { if (v) params.set(k, v); }
     try {
-      const res = await fetch(`/api/entries?${params}`);
+      const res = await fetch(`/api/entries?${params}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (res.ok) {
         const data = await res.json();
         setCounts(data.counts || {});
         setPeopleCounts(data.peopleCounts || {});
       }
-    } catch { /* */ }
-  }, [candidateName, companyName, caFilter, rcFilter, freeSearch, includeInactive, includeArchived, urlMissingOnly, dateFilters]);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    }
+  }, [dCandidateName, dCompanyName, caFilter, dRcFilter, dFreeSearch, includeInactive, includeArchived, urlMissingOnly, dateFilters]);
 
   // T-066: Google カレンダー連携状態を取得（既存の /api/calendar/events を流用）
   useEffect(() => {
