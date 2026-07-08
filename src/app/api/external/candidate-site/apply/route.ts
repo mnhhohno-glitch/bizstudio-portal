@@ -78,6 +78,7 @@ export async function POST(request: Request) {
   let notified = false;
   try {
     notified = await notifyCandidateApplication({
+      candidateId: candidate.id,
       candidateName: candidate.name,
       candidateNumber: candidate.candidateNumber,
       caName: ca?.employee?.name ?? null,

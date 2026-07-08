@@ -6,6 +6,7 @@ import { sendBotMessage } from "@/lib/lineworks";
 // - 担当CAに lineUserId があれば <m userId="..."> でメンション。無ければ名前プレフィックスでフォールバック。
 
 type ApplyNotificationParams = {
+  candidateId: string;
   candidateName: string;
   candidateNumber: string;
   caName: string | null;
@@ -50,7 +51,7 @@ export async function notifyCandidateApplication(
     params.caName ?? "未設定",
   ];
   if (baseUrl) {
-    baseLines.push("", "🔗 求職者ページ", `${baseUrl}/candidates/`);
+    baseLines.push("", "🔗 求職者ページ", `${baseUrl}/candidates/${params.candidateId}`);
   }
 
   const header = "求職者サイトから応募がありました";
