@@ -41,8 +41,8 @@ export function resolveEntryIsActive(input: {
   // 手動で is_active を明示指定した場合は無条件で尊重する
   if (typeof input.explicitIsActive === "boolean") return input.explicitIsActive;
 
-  // ③ 求人紹介の自動失効（auto-expire が付与）は無効のまま維持
-  if (input.entryFlag === "求人紹介" && input.entryFlagDetail === "未応募") return false;
+  // ③ 求人紹介段階は応募前のため常に無効（自動失効・書類見送り等の異常組み合わせも含めて維持）
+  if (input.entryFlag === "求人紹介") return false;
 
   // ② 決着済みは無効のまま維持
   if (input.entryFlagDetail && CONCLUDED_ENTRY_FLAG_DETAILS.includes(input.entryFlagDetail)) return false;
