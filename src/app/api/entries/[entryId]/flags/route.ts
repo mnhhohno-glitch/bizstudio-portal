@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, INACTIVE_TRIGGERS, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { jstDateStringToDbDate, todayJstDateString } from "@/lib/dailyReport/jstDate";
 
@@ -43,16 +44,14 @@ export async function PATCH(
   const effectiveCompanyFlag = companyFlag !== undefined ? companyFlag : (await prisma.jobEntry.findUnique({ where: { id: entryId }, select: { companyFlag: true } }))?.companyFlag;
   const effectiveEntryFlagDetail = entryFlagDetail !== undefined ? entryFlagDetail : (await prisma.jobEntry.findUnique({ where: { id: entryId }, select: { entryFlagDetail: true } }))?.entryFlagDetail;
 
-  let isActive = true;
-  if (effectivePersonFlag && INACTIVE_TRIGGERS.personFlags.includes(effectivePersonFlag)) {
-    isActive = false;
-  }
-  if (effectiveCompanyFlag && INACTIVE_TRIGGERS.companyFlags.includes(effectiveCompanyFlag)) {
-    isActive = false;
-  }
-  if (effectiveEntryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(effectiveEntryFlagDetail)) {
-    isActive = false; // T-048: 本人辞退時に自動無効化
-  }
+  // T-140: is_active を resolveEntryIsActive に統一（決着判定＋双方向再計算）。
+  // 従来の一方通行判定を置き換え、「決着済みレコードのフラグを触ると有効に戻る」既存の穴も塞ぐ。
+  const isActive = resolveEntryIsActive({
+    entryFlag: effectiveEntryFlag || null,
+    entryFlagDetail: effectiveEntryFlagDetail,
+    companyFlag: effectiveCompanyFlag,
+    personFlag: effectivePersonFlag,
+  });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: Record<string, any> = { isActive };
