@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 
 export async function GET(
   _req: NextRequest,
@@ -116,6 +117,25 @@ export async function PATCH(
   }
 
   const transformedData = applyEntryFlagAutoTransitions(data);
+
+  // T-140: is_active を双方向で再計算する（sticky false の解消）。
+  // applyEntryFlagAutoTransitions は false 方向のみだったため、非トリガーな更新（面接日入力など）で
+  // 一度無効になったエントリーが永久に無効のまま取り残されていた。
+  // 更新後の最終フラグ = リクエスト値（transformedData に載る）?? 既存値 でマージして判定する。
+  // body に isActive が明示された場合は手動編集とみなし explicitIsActive で最優先尊重する。
+  const existingFlags = await prisma.jobEntry.findUnique({
+    where: { id: entryId },
+    select: { entryFlag: true, entryFlagDetail: true, companyFlag: true, personFlag: true },
+  });
+  const mergedFlag = <K extends "entryFlag" | "entryFlagDetail" | "companyFlag" | "personFlag">(k: K) =>
+    k in transformedData ? (transformedData[k] as string | null) : (existingFlags?.[k] ?? null);
+  transformedData.isActive = resolveEntryIsActive({
+    entryFlag: mergedFlag("entryFlag"),
+    entryFlagDetail: mergedFlag("entryFlagDetail"),
+    companyFlag: mergedFlag("companyFlag"),
+    personFlag: mergedFlag("personFlag"),
+    explicitIsActive: "isActive" in body && typeof body.isActive === "boolean" ? body.isActive : undefined,
+  });
 
   const entry = await prisma.jobEntry.update({
     where: { id: entryId },

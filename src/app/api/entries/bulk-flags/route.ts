@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { INACTIVE_TRIGGERS, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
+import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 export async function PATCH(req: NextRequest) {
@@ -33,38 +34,41 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "No flags to update" }, { status: 400 });
   }
 
-  // Determine isActive based on new flags
-  const effectivePersonFlag = data.personFlag;
-  const effectiveCompanyFlag = data.companyFlag;
-  const effectiveEntryFlagDetail = data.entryFlagDetail;
-
-  let shouldDeactivate = false;
-  if (effectivePersonFlag && INACTIVE_TRIGGERS.personFlags.includes(effectivePersonFlag)) {
-    shouldDeactivate = true;
-  }
-  if (effectiveCompanyFlag && INACTIVE_TRIGGERS.companyFlags.includes(effectiveCompanyFlag)) {
-    shouldDeactivate = true;
-  }
-  if (effectiveEntryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(effectiveEntryFlagDetail)) {
-    shouldDeactivate = true; // T-048: 本人辞退時に自動無効化
-  }
-
-  if (shouldDeactivate) {
-    data.isActive = false;
-  }
-
-  const transformedData = applyEntryFlagAutoTransitions(data);
-
+  // T-140: is_active はエントリーごとに「リクエスト値 ?? 既存値」でマージして双方向再計算する。
+  // updateMany では各エントリーの既存フラグ（今回更新しないフラグ）を参照できず、既存の
+  // 無効化要因を無視して誤って有効化してしまうため、per-entry の update に切り替える。
   const affectedEntries = await prisma.jobEntry.findMany({
     where: { id: { in: entryIds } },
-    select: { candidateId: true },
+    select: { id: true, candidateId: true, entryFlag: true, entryFlagDetail: true, companyFlag: true, personFlag: true },
   });
   const uniqueCandidateIds = [...new Set(affectedEntries.map((e) => e.candidateId))];
 
-  const result = await prisma.jobEntry.updateMany({
-    where: { id: { in: entryIds } },
-    data: transformedData,
+  let updatedCount = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const e of affectedEntries) {
+      // 更新後の最終フラグ = リクエスト値（data に載る）?? 既存値。入社済遷移も反映。
+      const merged = applyEntryFlagAutoTransitions({
+        entryFlag: "entryFlag" in data ? data.entryFlag : e.entryFlag,
+        entryFlagDetail: "entryFlagDetail" in data ? data.entryFlagDetail : e.entryFlagDetail,
+        companyFlag: "companyFlag" in data ? data.companyFlag : e.companyFlag,
+        personFlag: "personFlag" in data ? data.personFlag : e.personFlag,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const perData: Record<string, any> = { ...data };
+      // 入社済遷移で entryFlag/entryFlagDetail が書き換わった分だけ追加反映する。
+      if (merged.entryFlag !== e.entryFlag) perData.entryFlag = merged.entryFlag;
+      if (merged.entryFlagDetail !== e.entryFlagDetail) perData.entryFlagDetail = merged.entryFlagDetail;
+      perData.isActive = resolveEntryIsActive({
+        entryFlag: merged.entryFlag,
+        entryFlagDetail: merged.entryFlagDetail,
+        companyFlag: merged.companyFlag,
+        personFlag: merged.personFlag,
+      });
+      await tx.jobEntry.update({ where: { id: e.id }, data: perData });
+      updatedCount++;
+    }
   });
+  const result = { count: updatedCount };
 
   for (const candidateId of uniqueCandidateIds) {
     try {
