@@ -7,9 +7,8 @@ import { INACTIVE_TRIGGERS } from "@/lib/constants/entry-flag-rules";
  * 使われる定数（変更禁止ファイル）で、こちらは is_active 再計算の決着判定に使う。値を同期させる。
  * - 選考落ち / 本人辞退系 … 選考が終了して決着
  * - クローズ / 求人クローズ … 案件クローズで決着
- * ※「書類見送り」は決着に含めない。person_flag="見送り通知未送信" の間は「通知送信」という
- *   ToDo が残っており有効（一覧に出すべき）。通知送信済（見送り通知送信済）になると
- *   INACTIVE_TRIGGERS.personFlags 側で無効化される。
+ * ※「書類見送り」は entryFlagDetail 単独では決着に含めない。決着判定は personFlag 側
+ *   （CONCLUDED_PERSON_FLAGS）で行う。
  */
 export const CONCLUDED_ENTRY_FLAG_DETAILS = [
   "選考落ち",
@@ -18,6 +17,18 @@ export const CONCLUDED_ENTRY_FLAG_DETAILS = [
   "本人辞退_自社他",
   "クローズ",
   "求人クローズ",
+];
+
+/**
+ * T-141: 選考が終了している personFlag（見送り通知の送信有無に関わらず終了扱い）。
+ *
+ * T-140 では「見送り通知未送信 は通知送信という ToDo が残るので有効」と解釈して有効化したが、
+ * 実運用では見送りが決まった時点で決着であり、通知送信の有無は一覧の有効／無効を左右しない。
+ * この誤解釈により終了済み39件が CA の一覧に復活した（T-141 で切り戻し）。
+ * 送信済（見送り通知送信済 / 見送り通知済み）は INACTIVE_TRIGGERS.personFlags 側で無効化される。
+ */
+export const CONCLUDED_PERSON_FLAGS = [
+  "見送り通知未送信",
 ];
 
 /**
@@ -46,6 +57,7 @@ export function resolveEntryIsActive(input: {
 
   // ② 決着済みは無効のまま維持
   if (input.entryFlagDetail && CONCLUDED_ENTRY_FLAG_DETAILS.includes(input.entryFlagDetail)) return false;
+  if (input.personFlag && CONCLUDED_PERSON_FLAGS.includes(input.personFlag)) return false;
 
   // ① 無効化トリガー該当は無効
   if (input.personFlag && INACTIVE_TRIGGERS.personFlags.includes(input.personFlag)) return false;
