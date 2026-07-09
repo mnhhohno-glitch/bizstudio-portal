@@ -13,59 +13,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { computeWeeklyMatrix, computeInterviewRankBreakdown, applyAdditiveTotals, type WeeklyMatrix } from "@/lib/performance/weeklyMatrix";
+import { computeWeeklyMatrix, computeInterviewRankBreakdown, applyAdditiveTotals } from "@/lib/performance/weeklyMatrix";
 import { buildColumns, type Granularity } from "@/lib/performance/columns";
 import { allocateToWeeks, monthBusinessDays, type WeekBucket } from "@/lib/performance/businessDays";
 import { aggregateAllCaTargets } from "@/lib/performance/aggregateTargets";
+import { TKEYS, WEEK_ALLOCATED, targetValueOf, actualOf, rate, type TKey, type TargetRowLike } from "@/lib/performance/targetKeys";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "revenue" | "unitPrice";
-const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "revenue", "unitPrice"];
-// 週按分する対象（面談各行・紹介・エントリーのみ。書類通過以降・決定粗利・粗利単価は週按分しない＝週列では目標を出さない）。
-const WEEK_ALLOCATED: Record<TKey, boolean> = {
-  interviewTotal: true, interviewFirst: true, interviewExisting: true, proposalUniq: true, entryUniq: true,
-  documentPass: false, offer: false, acceptance: false, revenue: false, unitPrice: false,
-};
-
-// PerformanceTarget 行 → 段階の目標値。interviewTotal=初回+既存、revenue=目標粗利、unitPrice=単価。未設定は null。
-type TargetRowLike = {
-  interviewCount: number; existingInterviewCount: number | null; introductionCount: number; entryCount: number;
-  documentPassCount: number; offerCount: number; acceptanceCount: number; targetRevenue: number; unitPrice: number;
-};
-function targetValueOf(t: TargetRowLike, key: TKey): number | null {
-  switch (key) {
-    case "interviewTotal": return (t.interviewCount ?? 0) + (t.existingInterviewCount ?? 0);
-    case "interviewFirst": return t.interviewCount;
-    case "interviewExisting": return t.existingInterviewCount;
-    case "proposalUniq": return t.introductionCount;
-    case "entryUniq": return t.entryCount;
-    case "documentPass": return t.documentPassCount;
-    case "offer": return t.offerCount;
-    case "acceptance": return t.acceptanceCount;
-    case "revenue": return t.targetRevenue;
-    case "unitPrice": return t.unitPrice;
-  }
-}
-
-function actualOf(m: WeeklyMatrix, key: TKey): number {
-  switch (key) {
-    case "interviewTotal": return m.interview.total;
-    case "interviewFirst": return m.interview.first;
-    case "interviewExisting": return m.interview.thirdPlus;
-    case "proposalUniq": return m.proposal.total.uniq;
-    case "entryUniq": return m.entry.total.uniq;
-    case "documentPass": return m.selection.documentPass;
-    case "offer": return m.selection.offer;
-    case "acceptance": return m.selection.acceptance;
-    case "revenue": return m.selection.decidedRevenue ?? 0;
-    case "unitPrice": return m.selection.decidedUnitPrice ?? 0;
-  }
-}
-function rate(num: number, den: number | null): number | null {
-  if (den == null || den <= 0) return null;
-  return num / den;
-}
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
