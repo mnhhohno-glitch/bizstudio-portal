@@ -8,6 +8,7 @@ export type AggregatedTarget = {
   documentPassCount: number;
   offerCount: number;
   acceptanceCount: number;
+  targetRevenue: number;
   unitPrice: number;
 };
 
@@ -38,7 +39,7 @@ export async function aggregateAllCaTargets(
       agg = {
         interviewCount: 0, existingInterviewCount: 0, introductionCount: 0,
         entryCount: 0, documentPassCount: 0, offerCount: 0, acceptanceCount: 0,
-        unitPrice: 0,
+        targetRevenue: 0, unitPrice: 0,
       };
       aggByMonth.set(t.yearMonth, agg);
       revByMonth.set(t.yearMonth, 0);
@@ -55,6 +56,7 @@ export async function aggregateAllCaTargets(
 
   for (const [ym, agg] of aggByMonth) {
     const rev = revByMonth.get(ym) ?? 0;
+    agg.targetRevenue = rev; // 全CA合算の目標粗利（加算可能）
     agg.unitPrice = agg.acceptanceCount > 0 ? rev / agg.acceptanceCount : 0;
   }
 

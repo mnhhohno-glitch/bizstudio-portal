@@ -149,7 +149,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
 
   const handleSave = async () => {
     if (!complete) {
-      alert("売上・単価・各率をすべて入力してください（人数が確定しません）。");
+      alert("粗利・単価・各率をすべて入力してください（人数が確定しません）。");
       return;
     }
     setSaving(true);
@@ -298,17 +298,17 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
           </div>
 
           <div className="p-5">
-            {/* 売上・単価（逆算の起点） */}
+            {/* 粗利・単価（逆算の起点） */}
             <div className="flex flex-wrap items-center gap-4 mb-4">
               <div className="flex items-center gap-2">
-                <label className="text-[12px] text-[#6B7280] w-16">目標売上</label>
+                <label className="text-[12px] text-[#6B7280] w-16">目標粗利</label>
                 <input type="text" inputMode="numeric" value={commaInt(targetRevenue)}
                   onChange={(e) => setTargetRevenue(onlyDigits(e.target.value))}
                   className="w-40 border border-gray-300 rounded px-2 py-1.5 text-[13px] text-right tabular-nums" placeholder="例: 3,000,000" />
                 <span className="text-[11px] text-[#9CA3AF]">円</span>
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-[12px] text-[#6B7280] w-16">売上単価</label>
+                <label className="text-[12px] text-[#6B7280] w-16">粗利単価</label>
                 <input type="text" inputMode="numeric" value={commaInt(unitPrice)}
                   onChange={(e) => setUnitPrice(onlyDigits(e.target.value))}
                   className="w-40 border border-gray-300 rounded px-2 py-1.5 text-[13px] text-right tabular-nums" placeholder="例: 600,000" />
@@ -407,7 +407,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
             </div>
             <p className="mt-1.5 text-[10px] text-[#9CA3AF]">
               数値＝人数／率＝前段からの転換率（参考値は実績、目標は%手入力→人数を逆算）。**面談は紹介÷紹介率＝合計面談が逆算の母数**。初回面談＝合計面談×初回%（手入力）、既存面談＝残り（内訳・逆算非影響）。紹介件数＝紹介人数×1人あたり件数（手入力）。
-              週按分は合計面談・紹介（人数・件数）・エントリー（各週切り上げ・最終週で帳尻、合計＝月計）。**初回面談・既存面談は各週セルを手入力で調整可**（合計面談＝初回+既存で自動更新）。未調整の週は自動配分（合計面談の週按分×初回%）。1人あたり件数・紹介率は月固定値を各週表示。書類通過・内定・承諾は週按分しない（「—」）。売上単価（決定単価）は参考値＝実績の決定売上÷決定数（売上未記録期間は「—」）。
+              週按分は合計面談・紹介（人数・件数）・エントリー（各週切り上げ・最終週で帳尻、合計＝月計）。**初回面談・既存面談は各週セルを手入力で調整可**（合計面談＝初回+既存で自動更新）。未調整の週は自動配分（合計面談の週按分×初回%）。1人あたり件数・紹介率は月固定値を各週表示。書類通過・内定・承諾は週按分しない（「—」）。粗利単価（決定単価）は参考値＝実績の決定粗利÷決定数（粗利未記録期間は「—」）。
             </p>
 
             {/* 週按分の手動調整：超過エラー＋自動配分に戻す */}
@@ -424,7 +424,7 @@ export default function TargetModal({ isOpen, onClose, employeeId, employeeName,
               </button>
               <button onClick={onClose} className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-gray-50">閉じる</button>
               {savedMsg && <span className="text-[12px] text-green-600">{savedMsg}</span>}
-              {!complete && !ivOver && <span className="text-[10px] text-red-500 ml-auto">売上・単価・各率を入力すると人数が確定します。</span>}
+              {!complete && !ivOver && <span className="text-[10px] text-red-500 ml-auto">粗利・単価・各率を入力すると人数が確定します。</span>}
             </div>
           </div>
         </div>

@@ -19,7 +19,7 @@ type WeeklyMatrix = {
   entry: { fresh: CUP; existing: CUP; total: CUP; scoped: Scoped };
   selection: { documentPass: number; offer: number; acceptance: number; documentPassRecs: number; offerRecs: number; acceptanceRecs: number; decidedRevenue: number | null; decidedUnitPrice: number | null };
 };
-type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
+type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "revenue" | "unitPrice";
 type ColOut = { index: number; label: string; subLabel: string | null; from: string; to: string; businessDays: number; matrix: WeeklyMatrix; targets: Record<TKey, number | null> };
 type Granularity = "day" | "week" | "month";
 type WeeklyResp = {
@@ -133,7 +133,8 @@ const MONTHLY_ROWS: Row[] = [
   { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass", pct: (m) => ratio(m.selection.documentPass, m.entry.scoped.total.uniq), targetPct: (t) => tRatio(t.documentPass, t.entryUniq) },
   { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer", pct: (m) => ratio(m.selection.offer, m.selection.documentPass), targetPct: (t) => tRatio(t.offer, t.documentPass) },
   { label: "決定", band: "orange", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance", pct: (m) => ratio(m.selection.acceptance, m.selection.offer), targetPct: (t) => tRatio(t.acceptance, t.offer) },
-  { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+  // 決定粗利は月単位の目標（週按分しない）。週列の目標は route 側 WEEK_ALLOCATED.revenue=false で null。
+  { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, targetKey: "revenue", fmt: yenFmt },
   { label: "粗利単価", actual: (m) => m.selection.decidedUnitPrice, targetKey: "unitPrice", fmt: yenFmt },
 ];
 
@@ -164,7 +165,7 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "書類通過", actual: (m) => m.selection.documentPassRecs, uniq: (m) => m.selection.documentPass, targetKey: "documentPass" },
     { label: "内定", actual: (m) => m.selection.offerRecs, uniq: (m) => m.selection.offer, targetKey: "offer" },
     { label: "承諾", actual: (m) => m.selection.acceptanceRecs, uniq: (m) => m.selection.acceptance, targetKey: "acceptance" },
-    { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, fmt: yenFmt },
+    { label: "決定粗利", actual: (m) => m.selection.decidedRevenue, targetKey: "revenue", fmt: yenFmt },
     { label: "決定粗利単価", actual: (m) => m.selection.decidedUnitPrice, targetKey: "unitPrice", fmt: yenFmt },
   ],
 };
@@ -505,9 +506,9 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
                 );
               })}
               {isMoney ? (
-                // 金額行の合計は現状のまま。
+                // 金額行の合計は「目標｜実績」のインライン表示。目標未登録（null）・0 のときは実績のみ。
                 <td className="px-3 py-2 text-center tabular-nums whitespace-nowrap">
-                  {totalTgt != null && <span className="text-[#9CA3AF]">{fmtTgt(totalTgt)}｜</span>}
+                  {totalTgt != null && totalTgt > 0 && <span className="text-[#9CA3AF]">{fmtTgt(totalTgt)}｜</span>}
                   <span className="text-[#374151] font-semibold">{totalActualStr}</span>
                 </td>
               ) : (

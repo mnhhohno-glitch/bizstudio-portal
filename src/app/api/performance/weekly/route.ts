@@ -20,18 +20,18 @@ import { aggregateAllCaTargets } from "@/lib/performance/aggregateTargets";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "unitPrice";
-const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "unitPrice"];
-// 週按分する対象（面談各行・紹介・エントリーのみ。書類通過以降・粗利単価は週按分しない＝週列では目標を出さない）。
+type TKey = "interviewTotal" | "interviewFirst" | "interviewExisting" | "proposalUniq" | "entryUniq" | "documentPass" | "offer" | "acceptance" | "revenue" | "unitPrice";
+const TKEYS: TKey[] = ["interviewTotal", "interviewFirst", "interviewExisting", "proposalUniq", "entryUniq", "documentPass", "offer", "acceptance", "revenue", "unitPrice"];
+// 週按分する対象（面談各行・紹介・エントリーのみ。書類通過以降・決定粗利・粗利単価は週按分しない＝週列では目標を出さない）。
 const WEEK_ALLOCATED: Record<TKey, boolean> = {
   interviewTotal: true, interviewFirst: true, interviewExisting: true, proposalUniq: true, entryUniq: true,
-  documentPass: false, offer: false, acceptance: false, unitPrice: false,
+  documentPass: false, offer: false, acceptance: false, revenue: false, unitPrice: false,
 };
 
-// PerformanceTarget 行 → 段階の目標値。interviewTotal=初回+既存、unitPrice=単価。未設定は null。
+// PerformanceTarget 行 → 段階の目標値。interviewTotal=初回+既存、revenue=目標粗利、unitPrice=単価。未設定は null。
 type TargetRowLike = {
   interviewCount: number; existingInterviewCount: number | null; introductionCount: number; entryCount: number;
-  documentPassCount: number; offerCount: number; acceptanceCount: number; unitPrice: number;
+  documentPassCount: number; offerCount: number; acceptanceCount: number; targetRevenue: number; unitPrice: number;
 };
 function targetValueOf(t: TargetRowLike, key: TKey): number | null {
   switch (key) {
@@ -43,6 +43,7 @@ function targetValueOf(t: TargetRowLike, key: TKey): number | null {
     case "documentPass": return t.documentPassCount;
     case "offer": return t.offerCount;
     case "acceptance": return t.acceptanceCount;
+    case "revenue": return t.targetRevenue;
     case "unitPrice": return t.unitPrice;
   }
 }
@@ -57,6 +58,7 @@ function actualOf(m: WeeklyMatrix, key: TKey): number {
     case "documentPass": return m.selection.documentPass;
     case "offer": return m.selection.offer;
     case "acceptance": return m.selection.acceptance;
+    case "revenue": return m.selection.decidedRevenue ?? 0;
     case "unitPrice": return m.selection.decidedUnitPrice ?? 0;
   }
 }
