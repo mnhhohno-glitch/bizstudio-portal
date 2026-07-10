@@ -863,6 +863,10 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
 
     setUploading(false);
+    // 二重発火防止（FU-8）: この後の fetchFiles() で files が更新されると、未抽出キャッチアップ effect が
+    // :upload と併走して同じ求人を2回 extract→job-platform投入してしまう。先に extractTriggered を立てて
+    // キャッチアップを抑止し、アップロード分は下の :upload 経路のみで1回だけ抽出させる。
+    extractTriggered.current = true;
     fetchFiles();
 
     // Background text extraction for uploaded files

@@ -32,7 +32,8 @@ export function detectMediaFromFilename(fileName: string): "circus" | "mynavi_jo
 
 export type IngestResult =
   | { ok: true; sourceJobId: string; status: string; deduped: boolean }
-  | { ok: false; error: string };
+  // skipped=true: 送信前クレームに敗れた（他プロセスが既にクレーム済み＝二重発火の排他）。エラーではない。
+  | { ok: false; error: string; skipped?: boolean };
 
 /**
  * PDFを job-platform の内部投入APIへ送る（HTTPのみ・DB書込なし）。
@@ -92,18 +93,47 @@ export async function submitPdfToJobPlatform(args: {
 }
 
 /**
- * 投入 → 成功なら CandidateFile に externalJobRef / platformSubmittedAt を書き戻す。
+ * 投入 → 成功なら CandidateFile に externalJobRef を書き戻す。
  * fire-and-forget から呼ぶ想定（例外は内部で握り潰し、呼び出し側フローを壊さない）。
  *
- * platformSubmittedAt は「試行時刻」を記録する:
- *   - 成功: externalJobRef=sourceJobId ＋ platformSubmittedAt=now（紐付け完了）
- *   - 失敗: platformSubmittedAt=now のみ（externalJobRef は null のまま＝拾い直しの再試行間隔ゲート）
+ * FU-8恒久修正（投入前クレーム方式）:
+ *   `platformSubmittedAt` のセマンティクスは「投入クレーム時刻（=試行開始時刻）」。**HTTP送信の前に**
+ *   `platformSubmittedAt IS NULL` の行に対してのみ now を打ち（クレーム）、更新0件ならその行の投入を
+ *   スキップする（他プロセスが既にクレーム済み＝二重発火の排他）。これにより:
+ *     - 消失耐性: 送信前に痕跡（platformSubmittedAt）が残るため、送信中/直後のプロセス死でも
+ *       「platformSubmittedAt あり・externalJobRef なし」の状態が残り、拾い直しの対象になる（at-least-once化）。
+ *     - 二重発火の排他: 同一行への同時投入は先着1件だけがクレームでき、残りはスキップ。
+ *   成功時は externalJobRef=sourceJobId を書き戻す。失敗時はクレーム時刻をそのまま残す
+ *   （externalJobRef=null のまま＝拾い直しの30分ゲートがクレーム時刻基準で効く）。
+ *   ※既存データ（旧「試行後に打つ」方式で書かれた行）への遡及書き換えはしない。
  */
 export async function ingestAndLink(args: {
   fileId: string;
   fileName: string;
   pdfBuffer: Buffer;
 }): Promise<IngestResult> {
+  // --- 投入前クレーム（送信前に platformSubmittedAt を打つ） ---
+  const claimedAt = new Date();
+  let claimCount: number;
+  try {
+    const claim = await prisma.candidateFile.updateMany({
+      // platformSubmittedAt IS NULL（未クレーム）かつ externalJobRef IS NULL（未紐付け）の行だけをクレーム。
+      // externalJobRef ガードは防御的（呼び出し側も未紐付けのみ渡すが、既に紐付いた行の再送信を機械的に防ぐ）。
+      where: { id: args.fileId, platformSubmittedAt: null, externalJobRef: null },
+      data: { platformSubmittedAt: claimedAt },
+    });
+    claimCount = claim.count;
+  } catch (e) {
+    console.error(`[t131-ingest] クレーム更新に失敗 fileId=${args.fileId}:`, e);
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (claimCount === 0) {
+    // 他プロセスが既にクレーム済み（＝二重発火）。送信せずスキップ（job-platform に重複を作らない）。
+    console.log(`[t131-ingest] 既にクレーム済みのため投入をスキップ fileId=${args.fileId} file=${args.fileName}`);
+    return { ok: false, error: "already-claimed (skipped)", skipped: true };
+  }
+
+  // --- 送信（クレーム済みなので途中で死んでも痕跡が残る＝拾い直しで復旧） ---
   let result: IngestResult;
   try {
     result = await submitPdfToJobPlatform(args);
@@ -121,10 +151,7 @@ export async function ingestAndLink(args: {
         `[t131-ingest] 投入成功 fileId=${args.fileId} file=${args.fileName} → ${result.sourceJobId} (status=${result.status} deduped=${result.deduped})`,
       );
     } else {
-      await prisma.candidateFile.update({
-        where: { id: args.fileId },
-        data: { platformSubmittedAt: new Date() },
-      });
+      // 失敗: platformSubmittedAt はクレームで既に now。追加更新は不要（30分ゲートはクレーム時刻基準）。
       console.error(
         `[t131-ingest] 投入失敗 fileId=${args.fileId} file=${args.fileName}: ${result.error}`,
       );

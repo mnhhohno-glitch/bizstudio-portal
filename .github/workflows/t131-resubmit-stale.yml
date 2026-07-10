@@ -1,0 +1,81 @@
+# T-131 恒久修正-A: 手動アップPDFの job-platform 投入「滞留」拾い直しを定期自動実行する。
+# - 2時間毎（JST/UTC 問わず偶数時 00分）に schedule で本番へ dry_run=false&confirm=true で 1 回叩く。
+# - workflow_dispatch で手動疎通も可能（dry_run=true で書き換えなし確認）。
+# - 通知は付けない。実行件数・各件の成否は本 workflow の Actions 実行ログに残る（後から遡れる）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（コミットに値は載せない・auto-expire と同一シークレット）。
+# - default branch (master) に置かないと schedule が動かない。
+# - 対象0件時は API 側が何もせず即返す（正常終了）。滞留が batch(既定10) を超える分は次回実行で処理。
+
+name: T-131 resubmit-stale (2h)
+
+on:
+  schedule:
+    # 2時間毎（00:00, 02:00, ... UTC）。滞留は稀なため頻度は控えめ。
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら DB/HTTP を触らず件数のみ（疎通確認用）。本番自動実行（schedule）は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  resubmit-stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine dry_run flag
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 定時実行は必ず本番再投入
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+          else
+            # 手動実行：入力 dry_run を尊重。confirm は書き換える時だけ true
+            DRY="${{ github.event.inputs.dry_run }}"
+            echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+            if [ "$DRY" = "false" ]; then
+              echo "confirm=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "confirm=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Call resubmit-stale API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/bookmarks/resubmit-stale?dry_run=${{ steps.flag.outputs.dry }}&confirm=${{ steps.flag.outputs.confirm }}"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }} / dry_run=${{ steps.flag.outputs.dry }} confirm=${{ steps.flag.outputs.confirm }}"
+
+          # -w で HTTP コードを末尾追記、-o でレスポンス本文をファイルへ。処理は最大数分かかるため --max-time を長めに。
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 600 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::resubmit-stale returned HTTP $HTTP"
+            exit 1
+          fi
+
+          # サマリを Actions ログにも別途出す（後から遡りやすく）
+          if command -v jq >/dev/null 2>&1; then
+            echo "=== Summary ==="
+            jq -r '"mode=\(.mode) candidates=\(.candidates) stale=\(.stale) processed=\(.processed) ok=\(.ok) ng=\(.ng) skipped=\(.skipped) duration_ms=\(.durationMs)"' response.json || true
+          fi
