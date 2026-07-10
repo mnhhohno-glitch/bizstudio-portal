@@ -141,10 +141,14 @@ export async function createOrUpdateResponseTask(candidate: CandidateWithCA) {
   }
 }
 
-async function fetchJobMap(
+type KyuujinJobLite = { company: string; title: string };
+
+// kyuujinPDF の求職者担当求人（id → 会社名/求人名）を取得。company_name は末尾の
+// _14桁以上の連番（内部サフィックス）を除去して正規化。応答不能時は空 Map（呼び出し側でフォールバック）。
+async function fetchCandidateJobsMap(
   candidateNumber: string | null
-): Promise<Map<number, string>> {
-  const map = new Map<number, string>();
+): Promise<Map<number, KyuujinJobLite>> {
+  const map = new Map<number, KyuujinJobLite>();
   if (!candidateNumber) return map;
 
   const baseUrl = process.env.KYUUJIN_PDF_TOOL_URL;
@@ -170,14 +174,25 @@ async function fetchJobMap(
         job_title?: string;
       }[]) {
         const company = (job.company_name ?? "").replace(/_\d{14,}$/, "");
-        const jobTitle = job.job_title ?? "";
-        map.set(job.id, [company, jobTitle].filter(Boolean).join(" "));
+        map.set(job.id, { company, title: job.job_title ?? "" });
       }
     }
   } catch {
-    // kyuujin-pdf-tool が応答しない場合は求人IDをフォールバック表示
+    // kyuujin-pdf-tool が応答しない場合は空（呼び出し側で求人IDフォールバック）
   }
 
+  return map;
+}
+
+// タスク本文用の「会社名 求人名」ラベル Map。挙動不変（従来の fetchJobMap と同一出力）。
+async function fetchJobMap(
+  candidateNumber: string | null
+): Promise<Map<number, string>> {
+  const rich = await fetchCandidateJobsMap(candidateNumber);
+  const map = new Map<number, string>();
+  for (const [id, v] of rich) {
+    map.set(id, [v.company, v.title].filter(Boolean).join(" "));
+  }
   return map;
 }
 
@@ -276,5 +291,103 @@ async function notifyMypageResponse(
     await sendBotMessage(botId, channelId, lines.join("\n"));
   } catch (e) {
     console.error("LINE WORKS通知の送信に失敗:", e);
+  }
+}
+
+// 本人お気に入り／webhook 行の uploadedByUserId 用のシステムユーザー。
+// 実ユーザー（求職者）は存在しないため anonymous@local を使う（無ければ active admin フォールバック）。
+// favorites / from-job-platform ルートの同名ヘルパと同じ挙動。
+async function resolveSystemUserId(): Promise<string | null> {
+  const anon = await prisma.user.findUnique({
+    where: { email: "anonymous@local" },
+    select: { id: true },
+  });
+  if (anon) return anon.id;
+  const admin = await prisma.user.findFirst({
+    where: { role: "admin", status: "active" },
+    select: { id: true },
+  });
+  return admin?.id ?? null;
+}
+
+// webhook の応募意向（CandidateJobResponse.response）→ 箱A responseStatus への逆マッピング。
+const RESPONSE_TO_STATUS: Record<"WANT_TO_APPLY" | "INTERESTED", "APPLY" | "INTERESTED"> = {
+  WANT_TO_APPLY: "APPLY",
+  INTERESTED: "INTERESTED",
+};
+
+/**
+ * 旧マイページ（kyuujin candidate-response webhook）の回答でも台帳（CandidateFile BOOKMARK）を確保する。
+ *
+ * 背景: 旧webhookは CandidateJobResponse＋タスクは作るが CandidateFile を作らないため、
+ * CA管理画面「紹介履歴 > ブックマーク」に出ず、CAが手作業で引き当て直していた（本不具合の本体）。
+ * /site/（新サイト）経由は favorites POST で行が作られるのと同じ台帳行をここで確保する。
+ *
+ * - 冪等: 同一候補者×同一 kyuujinJobId の BOOKMARK 行が既にあれば何もしない
+ *   （@@unique([candidateId, kyuujinJobId]) はアーカイブ行も含むため archivedAt 問わず存在確認。
+ *    CAが意図的にアーカイブした行を復活させない）。
+ * - 会社名は kyuujin から best-effort 取得（失敗時は求人IDでフォールバック・行は作る）。
+ * - origin="candidate"（本人操作由来＝CA画面で「サイト経由」表示）。externalJobRef は取得不能なため null
+ *   （kyuujinJobId は保持するのでエントリー系橋渡し・CJR同期は成立。externalJobRef は後続バックフィル対象）。
+ * - responseStatus は回答に合わせる（WANT_TO_APPLY→APPLY / INTERESTED→INTERESTED）。旧マイページ由来は
+ *   送信済み扱い（responseStatusUpdatedAt = responseSubmittedAt = respondedAt）で偽の未送信差分を作らない。
+ * - 既存処理（CJR upsert・タスク生成）には一切手を加えない（追加のみ）。
+ */
+export async function ensureBookmarkForMypageResponse(params: {
+  candidateId: string;
+  candidateNumber: string | null;
+  kyuujinJobId: number;
+  response: "WANT_TO_APPLY" | "INTERESTED";
+  respondedAt: Date;
+}): Promise<"created" | "exists" | "skipped"> {
+  const { candidateId, candidateNumber, kyuujinJobId, response, respondedAt } = params;
+
+  // 一意制約に従い（アーカイブ含む全行）存在確認。既にあれば何もしない。
+  const existing = await prisma.candidateFile.findFirst({
+    where: { candidateId, category: "BOOKMARK", kyuujinJobId },
+    select: { id: true },
+  });
+  if (existing) return "exists";
+
+  const systemUserId = await resolveSystemUserId();
+  if (!systemUserId) {
+    console.warn("[ensureBookmarkForMypageResponse] システムユーザー未解決のためスキップ");
+    return "skipped";
+  }
+
+  // 会社名（fileName 用）を kyuujin から取得（best-effort）。取れなければ求人IDで代替。
+  const jobs = await fetchCandidateJobsMap(candidateNumber);
+  const company = jobs.get(kyuujinJobId)?.company?.trim() || null;
+  const safeCompany = (company ?? `求人${kyuujinJobId}`).replace(/[\\/:*?"<>|]/g, "").trim();
+  const fileName = `求人票_${safeCompany}.pdf`;
+
+  const responseStatus = RESPONSE_TO_STATUS[response];
+
+  try {
+    await prisma.candidateFile.create({
+      data: {
+        candidateId,
+        category: "BOOKMARK",
+        fileName,
+        fileSize: 0,
+        mimeType: "text/plain",
+        driveFileId: null,
+        driveViewUrl: null,
+        driveFolderId: null,
+        sourceType: null, // kyuujin PDF 由来の行（externalJobRef 無し）。既存の legacy ブックマーク慣例に一致
+        externalJobRef: null,
+        kyuujinJobId,
+        origin: "candidate",
+        responseStatus,
+        responseStatusUpdatedAt: respondedAt,
+        responseSubmittedAt: respondedAt, // 旧マイページ由来＝送信済み扱い（未送信差分を作らない）
+        uploadedByUserId: systemUserId,
+      },
+    });
+    return "created";
+  } catch (e) {
+    // 競合（同時受信での一意制約違反等）は既存扱い＝冪等
+    console.error("[ensureBookmarkForMypageResponse] BOOKMARK 作成に失敗（冪等スキップ）:", e);
+    return "skipped";
   }
 }

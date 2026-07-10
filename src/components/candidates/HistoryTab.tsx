@@ -294,6 +294,8 @@ type BookmarkFile = {
   candidateNote: string | null; // T-133 FU-1: 求職者本人が /site/ で書いたメモ（CA画面では表示のみ）
   lastExportedAt: string | null;
   lastExportedTo: string | null;
+  // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
+  origin?: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
   archivedAt?: string | null;
@@ -973,7 +975,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     getRank: (f, axis) => parse3AxisRatings(f.aiAnalysisComment)?.[axis] ?? null,
     getResponse: (f) => findJobResponse(f.fileName),
     getDate: (f) => f.createdAt,
-    getUploader: (f) => f.uploadedBy.name,
+    getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
   };
 
   // Filtered + sorted files（空キーでも確定タイブレーク 総合→会社名 が効く）
@@ -1392,7 +1394,14 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                     </>
                   );
                 })()}
-                <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
+                {file.origin === "candidate" ? (
+                  <span
+                    className="w-[72px] shrink-0 text-[11px] text-emerald-600 font-medium truncate"
+                    title="求職者がサイト（マイページ）から登録・応募した求人"
+                  >サイト経由</span>
+                ) : (
+                  <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
+                )}
                 <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
                 <span className="w-[100px] shrink-0 flex items-center gap-0.5 justify-end">
                   {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}

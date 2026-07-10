@@ -84,6 +84,8 @@ export async function GET(
       sourceType: true,
       externalJobRef: true,
       sourceMedia: true,
+      // 求職者本人のサイト操作由来（"candidate"）か CA追加（null|"ca"）かの区別。担当列の「サイト経由」表示に使う。
+      origin: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,

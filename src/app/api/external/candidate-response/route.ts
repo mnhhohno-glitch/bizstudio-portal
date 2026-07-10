@@ -4,6 +4,7 @@ import {
   CANDIDATE_CA_SELECT,
   applyJobResponseIntent,
   createOrUpdateResponseTask,
+  ensureBookmarkForMypageResponse,
 } from "@/lib/mypage-response-sync";
 
 // kyuujinPDF → portal のマイページ回答 webhook。
@@ -81,12 +82,28 @@ export async function POST(request: Request) {
     });
   }
 
+  const respondedAtDate = respondedAt ? new Date(respondedAt) : new Date();
+
   await applyJobResponseIntent(
     candidate.id,
     jobId,
     response as "WANT_TO_APPLY" | "INTERESTED",
-    respondedAt ? new Date(respondedAt) : new Date(),
+    respondedAtDate,
   );
+
+  // 追加（既存処理は不変）: 台帳（CandidateFile BOOKMARK）を確保し、CA画面のブックマークに出るようにする。
+  // 既存行があれば何もしない（冪等）。失敗しても回答同期・タスクは維持する。
+  try {
+    await ensureBookmarkForMypageResponse({
+      candidateId: candidate.id,
+      candidateNumber: candidate.candidateNumber,
+      kyuujinJobId: jobId,
+      response: response as "WANT_TO_APPLY" | "INTERESTED",
+      respondedAt: respondedAtDate,
+    });
+  } catch (e) {
+    console.error("ブックマーク台帳の確保に失敗:", e);
+  }
 
   try {
     await createOrUpdateResponseTask(candidate);
