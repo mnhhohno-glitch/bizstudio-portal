@@ -224,6 +224,11 @@ export default function AttendancePage() {
                     );
                   })}
                 </div>
+                {status === "INTERRUPTED" && (
+                  <p className="mt-2 text-[12px] text-amber-600">
+                    中断中です。2回目以降の中断をする場合は、先に「中断終了」を押してから「中断開始」を押してください。
+                  </p>
+                )}
                 <div className="mt-2">
                   <button
                     type="button"
