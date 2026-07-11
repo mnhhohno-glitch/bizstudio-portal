@@ -1,0 +1,56 @@
+# T-139 step3: 日程調整AIエージェント 夜間バッチの定期実行。
+# - 30分毎に /api/internal/schedule-agent/run を叩く。
+# - 稼働時間帯（Q5: 平日19:00〜翌9:00 + 土日祝終日）の判定は API 側で行うため、cron 式は単純な30分毎でよい。
+#   稼働時間外は API が {"skipped":true,"reason":"business hours"} を返して即終了する（無害）。
+# - workflow_dispatch で手動疎通も可能。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（コミットに値は載せない）。
+# - default branch (master) に置かないと schedule が動かない。
+
+name: T-139 schedule-agent
+
+on:
+  schedule:
+    # 30分毎（稼働時間ガードは API 側）
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  schedule-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call schedule-agent run API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/schedule-agent/run"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }}"
+
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::schedule-agent returned HTTP $HTTP"
+            exit 1
+          fi
+
+          # サマリを Actions ログにも別途出す（後から遡りやすく）
+          if command -v jq >/dev/null 2>&1; then
+            echo "=== Summary ==="
+            if jq -e '.skipped == true' response.json >/dev/null 2>&1; then
+              jq -r '"skipped: \(.reason)"' response.json || true
+            else
+              jq -r '"processed=\(.processed) reserved=\(.reserved) unavailable=\(.unavailable) failed=\(.failed)"' response.json || true
+            fi
+          fi

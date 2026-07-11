@@ -156,7 +156,10 @@ function addOneDay(dateStr: string): string {
 export async function createCalendarEvent(
   userId: string,
   date: string,
-  eventData: { summary: string; startTime: string; endTime: string; description?: string; allDay?: boolean }
+  eventData: { summary: string; startTime: string; endTime: string; description?: string; allDay?: boolean },
+  // T-139: 書き込み先カレンダーの明示指定（共有「仮予約」カレンダー用）。
+  // 省略時は従来どおり接続ユーザー自身のカレンダー（connection.calendarId）に書く＝既存呼び出しは挙動不変。
+  calendarIdOverride?: string
 ): Promise<string | null> {
   try {
     const auth = await getAuthenticatedCalendar(userId);
@@ -173,7 +176,7 @@ export async function createCalendarEvent(
         };
 
     const res = await auth.calendar.events.insert({
-      calendarId: auth.calendarId,
+      calendarId: calendarIdOverride || auth.calendarId,
       requestBody: {
         summary: eventData.summary,
         ...startEnd,
