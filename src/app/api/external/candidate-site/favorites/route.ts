@@ -90,6 +90,8 @@ type FavoriteDTO = {
   caComment: string | null; // CAアドバイザーコメント（求職者からは読み取り専用）
   /** T-133 FU-13a: CAによる求職者向け表示の上書き（13項目のキー→上書き文字列）。null=上書きなし。mypage BFF が元データにマージ。 */
   displayOverrides: Record<string, string> | null;
+  /** T-133 FU-14a: CAによる手動並び順。null=手動順なし（従来ソート）。小さいほど先頭。favorites は既にこの順で返る。 */
+  displayOrder: number | null;
   aiMatchRating: string | null;
   createdAt: string;
   applied: boolean;
@@ -126,6 +128,7 @@ export async function GET(request: Request) {
       candidateNote: true,
       caComment: true,
       displayOverrides: true,
+      displayOrder: true,
       aiMatchRating: true,
       responseStatus: true,
       responseStatusUpdatedAt: true,
@@ -134,7 +137,9 @@ export async function GET(request: Request) {
       introducedAt: true,
       createdAt: true,
     },
-    orderBy: { createdAt: "desc" },
+    // T-133 FU-14a: CA手動順を先頭側に、未設定(NULL)行は従来ソート(createdAt DESC)で後続。
+    // 全行 displayOrder=NULL なら第1キーが同値になり、従来の createdAt DESC と完全に同一の並びになる（後方互換）。
+    orderBy: [{ displayOrder: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
   });
 
   // 応募済み externalJobRef 一覧（画面の「応募済み」表示用）。候補者スコープ。
@@ -164,6 +169,7 @@ export async function GET(request: Request) {
     candidateNote: f.candidateNote,
     caComment: f.caComment,
     displayOverrides: (f.displayOverrides ?? null) as unknown as Record<string, string> | null,
+    displayOrder: f.displayOrder,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied: f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false,
@@ -210,7 +216,7 @@ export async function POST(request: Request) {
       externalJobRef,
       archivedAt: null,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
   if (existing) {
     return NextResponse.json({
@@ -258,7 +264,7 @@ export async function POST(request: Request) {
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
@@ -318,7 +324,7 @@ export async function PATCH(request: Request) {
   const updated = await prisma.candidateFile.update({
     where: { id: row.id },
     data: { candidateNote },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
@@ -392,6 +398,7 @@ function toDTO(
     candidateNote: string | null;
     caComment: string | null;
     displayOverrides: unknown;
+    displayOrder: number | null;
     aiMatchRating: string | null;
     createdAt: Date;
   },
@@ -416,6 +423,7 @@ function toDTO(
     candidateNote: f.candidateNote,
     caComment: f.caComment,
     displayOverrides: (f.displayOverrides ?? null) as Record<string, string> | null,
+    displayOrder: f.displayOrder,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied,

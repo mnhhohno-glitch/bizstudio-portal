@@ -1446,6 +1446,9 @@ model CandidateFile {
   //   salaryMonthly/bonus/jobDescription/requirements/holidays/overtime/benefits/transfer）、値=上書き文字列。
   //   表示時に mypage BFF が元データへマージ。NULL=上書きなし。caComment は上記 caComment 列で別管理（本JSONに入れない）。
   displayOverrides  Json?                 @map("display_overrides")
+  // T-133 FU-14a: CAによる手動並び順（候補者×求人行ごと。他の求職者には波及しない）。
+  //   NULL=手動順なし（従来ソートで後続）。小さいほど先頭。並び替えは PATCH /api/external/candidate-site/display-order。
+  displayOrder      Int?                  @map("display_order")
   // 案Z 段階A: job-platform 由来は PDF 実体が無いため nullable 化（既存行は値あり・非破壊）。
   driveFileId       String?               @map("drive_file_id")
   driveViewUrl      String?               @map("drive_view_url")
