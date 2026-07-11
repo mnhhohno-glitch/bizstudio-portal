@@ -1441,6 +1441,11 @@ model CandidateFile {
   // T-128 batch4: お気に入りメモ / CAアドバイザーコメント。既存 memo(jobUrl用途) とは別列。nullable 追加。
   candidateNote     String?               @map("candidate_note") @db.Text // 求職者本人がお気に入りに残すメモ
   caComment         String?               @map("ca_comment") @db.Text // CA が求人に付けるアドバイザーコメント（求職者サイト「担当CAのおすすめ」表示用）
+  // T-133 FU-13a: CAによる求職者向け表示の上書き。元求人データ（job-platform/kyuujin Job）は非破壊。
+  //   キー=表示項目名（旧EditJobModal準拠の13項目: companyName/jobTitle/workLocation/nearestStation/salary/
+  //   salaryMonthly/bonus/jobDescription/requirements/holidays/overtime/benefits/transfer）、値=上書き文字列。
+  //   表示時に mypage BFF が元データへマージ。NULL=上書きなし。caComment は上記 caComment 列で別管理（本JSONに入れない）。
+  displayOverrides  Json?                 @map("display_overrides")
   // 案Z 段階A: job-platform 由来は PDF 実体が無いため nullable 化（既存行は値あり・非破壊）。
   driveFileId       String?               @map("drive_file_id")
   driveViewUrl      String?               @map("drive_view_url")
