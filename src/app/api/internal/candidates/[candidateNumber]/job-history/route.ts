@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
-import { normalizeCompanyKey } from "@/lib/company-name-key";
+import { normalizeCompanyKey, parseCompanyFromBookmarkFileName } from "@/lib/company-name-key";
 
 // 求職者選択モード Phase 1a: 引き当て履歴の照合API。
 //
@@ -38,22 +38,18 @@ function toHistoryStatus(responseStatus: string | null): JobHistoryStatus {
   return "INTRODUCED";
 }
 
-// fileName（求人票_{会社名}_{10桁以上ID}.pdf / 求人票_{会社名}.pdf）から会社名をベストエフォート抽出。
-// favorites API と同一規則。形式が違う場合は null。
-function parseCompanyFromFileName(fileName: string): string | null {
-  const n = fileName.replace(/\.pdf$/i, "");
-  const m = n.match(/^求人票_(.+?)(?:_\d{10,})?$/);
-  return m ? m[1] : null;
-}
-
-/** 行の会社名: CAの表示上書き（FU-13a displayOverrides.companyName）を優先し、無ければ fileName から復元。 */
+/**
+ * 行の会社名: CAの表示上書き（FU-13a displayOverrides.companyName）を優先し、
+ * 無ければ fileName から復元（求人票_ / circus / マイナビ の3形式に対応）。
+ * ※ favorites API の会社名抽出は「求人票_」形式のみの簡易版で別実装（mypage の表示挙動を変えないため据置）。
+ */
 function resolveCompanyName(row: { fileName: string; displayOverrides: unknown }): string | null {
   const ov = row.displayOverrides;
   if (ov && typeof ov === "object" && !Array.isArray(ov)) {
     const c = (ov as Record<string, unknown>).companyName;
     if (typeof c === "string" && c.trim()) return c.trim();
   }
-  return parseCompanyFromFileName(row.fileName);
+  return parseCompanyFromBookmarkFileName(row.fileName);
 }
 
 export async function GET(

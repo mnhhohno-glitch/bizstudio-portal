@@ -89,3 +89,40 @@ export function normalizeCompanyKey(name: string): string {
   s = s.replace(/[^0-9A-Za-z぀-ゟ゠-ヿ々㐀-鿿]/g, "").replace(/・/g, "");
   return s.toLowerCase();
 }
+
+/**
+ * ブックマーク行の fileName から会社名をベストエフォート抽出する。
+ * 本番 CandidateFile(category="BOOKMARK") の実データ調査（6,080行・2026-07-11）に基づき、
+ * 実在する3系統のファイル名をすべて解釈する:
+ *
+ *   1. 求人票_ 形式（57.5%・job-platform/mypage 生成）
+ *        求人票_日本カノマックス株式会社_20260625202454723.pdf → 日本カノマックス株式会社
+ *   2. circus 形式（38.8%・CA手動アップ）
+ *        株式会社エコリング_No433961.pdf                      → 株式会社エコリング
+ *   3. マイナビ形式（1.7%・CA手動アップ。先頭が求人番号、以降 _会社名_求人タイトル）
+ *        31944_株式会社イフオンリー_東京／WEB広告の【デザイナー】.pdf → 株式会社イフオンリー
+ *
+ * 末尾の求人ID（_No123456 / _20260625… / ：131240）と求人タイトル部を落として会社名だけを残す。
+ * 取れない場合は null（同社フラグの母集団から外れるだけで、履歴行自体は返す）。
+ */
+export function parseCompanyFromBookmarkFileName(fileName: string): string | null {
+  let n = fileName.replace(/\.(pdf|txt|docx?|xlsx?)$/i, "").trim();
+
+  // 1. 「求人票_」プレフィクス
+  if (n.startsWith("求人票_")) n = n.slice("求人票_".length);
+  // 3. マイナビ: 先頭の求人番号（4〜6桁）
+  n = n.replace(/^\d{4,6}_/, "");
+  // 先頭アンダースコア（_Sansan株式会社_No217080.pdf 等・実データに11件）を落とす
+  n = n.replace(/^_+/, "");
+
+  // 求人ID・求人タイトル部を落とす（先に出現したもので切る）
+  n = n.split(/_No\d+/i)[0]; // circus の _No123456
+  n = n.split(/_\d{6,}/)[0]; // 求人票_ の日時ID（_20260625202454723）
+  n = n.split(/[：:]\d+/)[0]; // エイトビット株式会社：131240
+  n = n.split("_")[0]; // 残りの区切り（マイナビの求人タイトル等）
+
+  // 【西日本営業本部】のような付記は会社名の一部ではないため除去（job-platform 側の会社名にも付かない）
+  n = n.replace(/【[^】]*】/g, "").trim();
+
+  return n.length ? n : null;
+}
