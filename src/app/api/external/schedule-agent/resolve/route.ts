@@ -31,6 +31,8 @@ import {
   parseDesiredWindows,
 } from "@/lib/schedule-agent/parse-preferences";
 import { findAvailableSlot, type DesiredWindow, type Slot } from "@/lib/schedule-agent/match-slot";
+import { brokenUserIds, probeCalendarConnections } from "@/lib/schedule-agent/probe-connections";
+import { sendBrokenCalendarAlert } from "@/lib/schedule-agent/alert";
 import {
   createReservation,
   fetchReservedEvents,
@@ -207,8 +209,21 @@ export async function POST(request: Request) {
     return reservedResponse(candidateName, existing.slot, existing.method, true);
   }
 
-  // 枠探索
-  const outcome = await findAvailableSlot(windows, targets, reserved.events, now);
+  // 対象CAの連携状態プローブ。壊れているCAがあればメール通知（重複抑止付き）を副作用で発火。
+  //   - 通知は完全に副作用: 失敗しても resolve 応答は正常に返す（例外は内部で握りつぶす）。
+  //   - 壊れた CA は枠探索の対象から明示除外し、「空き」と誤判定されるのを防ぐ。
+  const probe = await probeCalendarConnections(targets);
+  const broken = brokenUserIds(probe);
+  if (broken.length > 0) {
+    try {
+      await sendBrokenCalendarAlert(broken);
+    } catch (e) {
+      console.error("[resolve] alert dispatch failed:", e);
+    }
+  }
+
+  // 枠探索（壊れたCAは除外）
+  const outcome = await findAvailableSlot(windows, targets, reserved.events, now, broken);
   if (outcome.kind === "today_only") return simpleResponse("today_only", candidateName, method);
   if (outcome.kind === "unavailable") return simpleResponse("unavailable", candidateName, method);
 

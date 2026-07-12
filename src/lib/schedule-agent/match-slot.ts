@@ -112,9 +112,15 @@ export async function findAvailableSlot(
   windows: DesiredWindow[],
   targetUserIds: string[],
   reservedEvents: ReservedEvent[],
-  now: Date
+  now: Date,
+  // T-139 step5: プローブで壊れ検知した userId を明示除外する。
+  //   refresh_failed は既存ヘルパで自動削除されるため resolveConnectedTargets でも除外されるが、
+  //   fetch_failed（認証OK・listのみ失敗）は接続レコードが残るため、ここで能動的に外さないと
+  //   getCalendarEvents が [] を返して「空き」と誤判定されてしまう。
+  excludeUserIds: string[] = []
 ): Promise<MatchOutcome> {
-  const connected = await resolveConnectedTargets(targetUserIds);
+  const excluded = new Set(excludeUserIds);
+  const connected = (await resolveConnectedTargets(targetUserIds)).filter((u) => !excluded.has(u));
   if (connected.length === 0) return { kind: "unavailable" };
 
   const { today, inRange } = classifyWindows(windows, now);

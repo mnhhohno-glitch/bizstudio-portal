@@ -2012,6 +2012,20 @@ model GoogleCalendarConnection {
   updatedAt    DateTime @updatedAt
 }
 
+// T-139 step5: 日程調整AIエージェントの「カレンダー連携切れ検知」通知の重複抑止ログ。
+//   夜間 30分毎に resolve が呼ばれても、同一CA×同一(JST)日付につき最大1通に絞る。
+//   userId は User.id・date は JST の "YYYY-MM-DD" 文字列（TZ曖昧さ回避）。既存テーブルは変更しない。
+model ScheduleAgentAlertLog {
+  id     String   @id @default(cuid())
+  userId String   @map("user_id")
+  date   String   @map("date")
+  sentAt DateTime @default(now()) @map("sent_at")
+
+  @@unique([userId, date])
+  @@index([date])
+  @@map("schedule_agent_alert_logs")
+}
+
 // ========================================
 // 面談履歴管理
 // ========================================
