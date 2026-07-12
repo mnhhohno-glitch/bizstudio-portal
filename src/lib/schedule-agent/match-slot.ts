@@ -1,179 +1,165 @@
-// T-139 step3: 日程調整AIエージェント 共通コア（空き枠マッチング）。
-// 夜間バッチ（/api/internal/schedule-agent/run）と外部受け口（/api/external/schedule-agent/resolve）の両方から呼ぶ。
+// T-139 step4: 空き枠探索（共通コア）。モードA・モードB の両方から呼ぶ。
 //
-// 枠ルール（将幸さん確定）:
-//   - Q1/Q3: 希望時間帯の「開始時刻から60分」を固定で取る（希望幅が60分より長くても短くても同じ）。
-//   - 開始は 9:00〜20:00 の範囲内。
-//   - 当日は不可（翌営業日以降）。土日祝は枠にしない（isBusinessDay）。
-//   - 翌営業日〜2週間（14日）以内。
-//   - Q2: 対象CAは env SCHEDULE_AGENT_TARGET_USER_IDS（カンマ区切り・ハードコードしない）。
-//         3名のうち誰か1人でも空いていれば「空き」。複数空いていれば env リストの先頭順で1名を採用。
+// 枠ルール:
+//   - 60分枠。開始は 9:00〜20:00（20:00開始が最終＝20:00〜21:00 まで可）。
+//   - 当日不可。翌営業日〜2週間以内のみ。土日祝は不可（isBusinessDay）。
+//   - 幅のある希望（17:00〜20:00）は幅の中の最も早い60分枠から順に試す（30分刻み）。
+//   - 幅が60分未満（17:00〜17:30）は開始時刻から後ろへ広げて60分にする（17:00〜18:00）。
 //
-// フェイルセーフ: getCalendarEvents は「カレンダー未接続」でも [] を返す（＝終日空きに見える）。
-//   未接続CAに誤って割り当てないよう、GoogleCalendarConnection がある userId だけを判定対象にする。
-// 既知の制限: getCalendarEvents は終日イベント（start.date のみ）を除外するため、終日の予定（有給等）は
-//   ブロック要因にならない。仮予約は「人が翌営業日に最終割り当てする仮置き」のため許容する。
-import { getCalendarEvents } from "@/lib/googleCalendar";
-import { isBusinessDay } from "@/lib/attendance/business-days";
+// 空き判定:
+//   - 対象CA（env）のうち **カレンダー連携が生きている** CA だけを見る。
+//     getCalendarEvents は未接続でも [] を返す（＝終日空きに見える）ため、接続レコードが無いCAは対象から除外する。
+//   - 誰か1人でも空いていればその枠はOK。**どのCAが空いていたかは選ばない・記録しない**（担当割当は翌朝人間が行う）。
+//
+// 同一枠の多重仮予約の上限:
+//   - 仮予約カレンダーはCA個人カレンダーに映らないため、空き判定だけだと同じ枠に別候補者の仮予約が無限に積める。
+//   - そこで「その枠に既にある仮予約イベント数 ≧ その枠で空いているCA人数」なら埋まり扱いにして次の枠を探す。
 import { prisma } from "@/lib/prisma";
+import { getCalendarEvents } from "@/lib/googleCalendar";
+import {
+  EARLIEST_START_MIN,
+  LATEST_START_MIN,
+  HORIZON_DAYS,
+  SLOT_MINUTES,
+  addDaysYmd,
+  isBusinessDayYmd,
+  jstYmd,
+  toHHMM,
+  toMin,
+} from "./jst";
 
-/** 1枠の長さ（分）。Q1/Q3: 希望の開始時刻から常にこの長さを取る。 */
-export const SLOT_MINUTES = 60;
-/** 開始時刻の許容範囲（分）。9:00〜20:00。 */
-export const EARLIEST_START_MIN = 9 * 60;
-export const LATEST_START_MIN = 20 * 60;
-/** 探索の地平線（日）。翌営業日〜この日数以内。 */
-export const HORIZON_DAYS = 14;
+/** 希望の時間帯（endTime は null 可＝開始のみ指定）。 */
+export type DesiredWindow = { date: string; startTime: string; endTime: string | null };
 
-/** 希望日時1件（date=YYYY-MM-DD(JST) / startTime,endTime="HH:MM"）。 */
-export type DesiredSlot = {
-  label: string; // "第1希望" 等（仮予約タイトルに載せる）
-  date: string;
-  startTime: string;
-  endTime: string;
-};
+/** 確保対象の60分枠。 */
+export type Slot = { date: string; startTime: string; endTime: string };
 
-/** 確保できた枠（担当候補CA付き）。 */
-export type MatchedSlot = {
-  date: string;
-  startTime: string;
-  endTime: string;
-  userId: string;
-  userName: string;
-  desired: DesiredSlot;
-};
+/** 仮予約カレンダーの既存イベント（枠の占有数カウント用）。 */
+export type ReservedEvent = { date: string; startMin: number; endMin: number; summary: string };
 
-export type MatchResult = { matched: MatchedSlot | null; reason?: string };
+export type MatchOutcome =
+  | { kind: "reserved"; slot: Slot }
+  | { kind: "today_only" }
+  | { kind: "unavailable" };
 
-export function toMin(hhmm: string): number {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!m) return NaN;
-  return Number(m[1]) * 60 + Number(m[2]);
+function overlaps(aS: number, aE: number, bS: number, bE: number): boolean {
+  return aS < bE && bS < aE;
 }
 
-export function toHHMM(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
+/** 希望の時間帯から候補60分枠を生成する（早い順）。 */
+export function slotsFromWindow(w: DesiredWindow): Slot[] {
+  const start = toMin(w.startTime);
+  if (Number.isNaN(start)) return [];
 
-/** JST の今日（YYYY-MM-DD）。Railway 本番は UTC のため必ず timeZone 指定で取る（Pitfall #17）。 */
-export function jstTodayYmd(now: Date = new Date()): string {
-  return now.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-}
+  const rawEnd = w.endTime ? toMin(w.endTime) : NaN;
+  // 終了未指定 or 幅60分未満 → 開始から後ろへ広げて60分にする
+  const winEnd =
+    Number.isNaN(rawEnd) || rawEnd - start < SLOT_MINUTES ? start + SLOT_MINUTES : rawEnd;
 
-/** YYYY-MM-DD に日数を加算（UTC 固定で計算＝ローカルTZに影響されない）。 */
-export function addDaysYmd(ymd: string, days: number): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())}`;
-}
-
-/** JST 暦日が営業日（平日かつ非祝日）か。business-days.ts の isBusinessDay を再利用。 */
-export function isBusinessDayYmd(ymd: string): boolean {
-  return isBusinessDay(new Date(`${ymd}T00:00:00+09:00`));
-}
-
-/** fromYmd の翌営業日。 */
-export function nextBusinessDayYmd(fromYmd: string): string {
-  let d = addDaysYmd(fromYmd, 1);
-  for (let i = 0; i < 30; i++) {
-    if (isBusinessDayYmd(d)) return d;
-    d = addDaysYmd(d, 1);
+  const slots: Slot[] = [];
+  for (let s = start; s + SLOT_MINUTES <= winEnd; s += 30) {
+    if (s < EARLIEST_START_MIN || s > LATEST_START_MIN) continue;
+    slots.push({ date: w.date, startTime: toHHMM(s), endTime: toHHMM(s + SLOT_MINUTES) });
   }
-  return d;
+  return slots;
 }
 
-/** Q2: 空き判定の対象CA（env・カンマ区切り・先頭順が採用優先順）。 */
-export function getTargetUserIds(): string[] {
-  return (process.env.SCHEDULE_AGENT_TARGET_USER_IDS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-/** 枠ルール適合判定（当日不可・翌営業日〜2週間・営業日・開始9:00〜20:00）。 */
-export function isSlotAllowed(d: DesiredSlot, now: Date = new Date()): boolean {
-  const today = jstTodayYmd(now);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) return false;
-  if (d.date <= today) return false; // 当日以前は不可
-  if (!isBusinessDayYmd(d.date)) return false; // 土日祝は不可
-  if (d.date > addDaysYmd(today, HORIZON_DAYS)) return false; // 2週間以内
-  const s = toMin(d.startTime);
-  if (Number.isNaN(s)) return false;
-  if (s < EARLIEST_START_MIN || s > LATEST_START_MIN) return false;
-  return true;
-}
-
-function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
-}
-
-/** userId → 表示名（Employee 名優先）。仮予約イベントに載せる担当候補CA名。 */
-async function resolveUserNames(userIds: string[]): Promise<Map<string, string>> {
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, name: true, employee: { select: { name: true } } },
-  });
-  return new Map(users.map((u) => [u.id, u.employee?.name ?? u.name]));
-}
-
-/** カレンダー接続済みの userId のみに絞る（未接続を「終日空き」と誤判定しないため）。 */
-async function filterConnected(userIds: string[]): Promise<string[]> {
+/** カレンダー連携が生きている対象CAだけに絞る（未接続を「空き」と誤判定しないため）。 */
+export async function resolveConnectedTargets(targetUserIds: string[]): Promise<string[]> {
+  if (targetUserIds.length === 0) return [];
   const conns = await prisma.googleCalendarConnection.findMany({
-    where: { userId: { in: userIds } },
+    where: { userId: { in: targetUserIds } },
     select: { userId: true },
   });
   const connected = new Set(conns.map((c) => c.userId));
-  return userIds.filter((id) => connected.has(id)); // env の順序を保つ＝採用優先順を維持
+  return targetUserIds.filter((id) => connected.has(id)); // env の順序を保つ
+}
+
+/** 希望を「当日 / 範囲内の将来 / 範囲外」に振り分ける。 */
+export function classifyWindows(
+  windows: DesiredWindow[],
+  now: Date
+): { today: DesiredWindow[]; inRange: DesiredWindow[]; outOfRange: DesiredWindow[] } {
+  const todayYmd = jstYmd(now);
+  const maxYmd = addDaysYmd(todayYmd, HORIZON_DAYS);
+
+  const res = {
+    today: [] as DesiredWindow[],
+    inRange: [] as DesiredWindow[],
+    outOfRange: [] as DesiredWindow[],
+  };
+  for (const w of windows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(w.date)) {
+      res.outOfRange.push(w);
+    } else if (w.date === todayYmd) {
+      res.today.push(w); // 当日は個別にスキップ（将来希望が取れればそれで reserved）
+    } else if (w.date < todayYmd || w.date > maxYmd || !isBusinessDayYmd(w.date)) {
+      res.outOfRange.push(w); // 過去・2週間超・土日祝
+    } else {
+      res.inRange.push(w);
+    }
+  }
+  return res;
 }
 
 /**
- * 希望候補を第1→第2→第3の順に試し、最初に確保できた枠を返す。
- * 各希望について対象CAを env 先頭順に見て、最初に空いていたCAを担当候補として採用する。
+ * 希望を順に試し、最初に確保できる枠を返す。
+ *   reserved    … 確保できる枠あり
+ *   today_only  … 範囲内の将来希望が1つも無く、当日希望のみだった
+ *   unavailable … 範囲内の将来希望を全部見て空き無し／全希望が範囲外／対象CA0名
  */
-export async function matchSlot(
-  desired: DesiredSlot[],
-  now: Date = new Date()
-): Promise<MatchResult> {
-  const targets = getTargetUserIds();
-  if (targets.length === 0) return { matched: null, reason: "no target CA configured" };
+export async function findAvailableSlot(
+  windows: DesiredWindow[],
+  targetUserIds: string[],
+  reservedEvents: ReservedEvent[],
+  now: Date
+): Promise<MatchOutcome> {
+  const connected = await resolveConnectedTargets(targetUserIds);
+  if (connected.length === 0) return { kind: "unavailable" };
 
-  const connected = await filterConnected(targets);
-  if (connected.length === 0) return { matched: null, reason: "no connected CA calendar" };
+  const { today, inRange } = classifyWindows(windows, now);
 
-  const names = await resolveUserNames(connected);
+  if (inRange.length === 0) {
+    // 将来の探索対象ゼロ。当日希望だけなら today_only、それ以外（範囲外のみ）は unavailable。
+    return today.length > 0 ? { kind: "today_only" } : { kind: "unavailable" };
+  }
 
-  for (const d of desired) {
-    if (!isSlotAllowed(d, now)) continue;
+  // (userId, date) → 予定 のキャッシュ（同じ日を何度も叩かない）
+  const cache = new Map<string, { start: number; end: number }[]>();
+  const eventsOf = async (userId: string, date: string) => {
+    const key = `${userId}|${date}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const evs = await getCalendarEvents(userId, date);
+    const parsed = evs
+      .map((e) => ({ start: toMin(e.start), end: toMin(e.end) }))
+      .filter((e) => !Number.isNaN(e.start) && !Number.isNaN(e.end));
+    cache.set(key, parsed);
+    return parsed;
+  };
 
-    const start = toMin(d.startTime);
-    const end = start + SLOT_MINUTES; // Q1/Q3: 開始時刻から60分固定
+  for (const w of inRange) {
+    for (const slot of slotsFromWindow(w)) {
+      const s = toMin(slot.startTime);
+      const e = toMin(slot.endTime);
 
-    for (const uid of connected) {
-      const events = await getCalendarEvents(uid, d.date);
-      const busy = events.some((e) => {
-        const es = toMin(e.start);
-        const ee = toMin(e.end);
-        if (Number.isNaN(es) || Number.isNaN(ee)) return false;
-        return overlaps(start, end, es, ee);
-      });
-      if (!busy) {
-        return {
-          matched: {
-            date: d.date,
-            startTime: toHHMM(start),
-            endTime: toHHMM(end),
-            userId: uid,
-            userName: names.get(uid) ?? uid,
-            desired: d,
-          },
-        };
+      // その枠で空いているCA人数（誰か1人でも空いていればOK・誰かは選ばない）
+      let freeCount = 0;
+      for (const uid of connected) {
+        const evs = await eventsOf(uid, slot.date);
+        if (!evs.some((ev) => overlaps(s, e, ev.start, ev.end))) freeCount++;
       }
+      if (freeCount === 0) continue;
+
+      // 多重仮予約の上限: 既にこの枠に入っている仮予約数 ≧ 空きCA人数 なら埋まり扱い
+      const reservedCount = reservedEvents.filter(
+        (r) => r.date === slot.date && overlaps(s, e, r.startMin, r.endMin)
+      ).length;
+      if (reservedCount >= freeCount) continue;
+
+      return { kind: "reserved", slot };
     }
   }
 
-  return { matched: null, reason: "no free slot" };
+  return { kind: "unavailable" };
 }

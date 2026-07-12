@@ -28,7 +28,12 @@ export async function getTokensFromCode(code: string) {
   return tokens;
 }
 
-export async function getCalendarEvents(userId: string, date: string) {
+export async function getCalendarEvents(
+  userId: string,
+  date: string,
+  // T-139: 読み取り先カレンダーの明示指定。省略時は従来どおり接続ユーザー自身のカレンダー（挙動不変）。
+  calendarIdOverride?: string
+) {
   const connection = await prisma.googleCalendarConnection.findUnique({
     where: { userId },
   });
@@ -68,7 +73,7 @@ export async function getCalendarEvents(userId: string, date: string) {
 
   try {
     const response = await calendar.events.list({
-      calendarId: connection.calendarId,
+      calendarId: calendarIdOverride || connection.calendarId,
       timeMin: startOfDay.toISOString(),
       timeMax: endOfDay.toISOString(),
       singleEvents: true,
@@ -86,6 +91,43 @@ export async function getCalendarEvents(userId: string, date: string) {
   } catch (error) {
     console.error("Google Calendar events fetch failed:", error);
     return [];
+  }
+}
+
+/**
+ * T-139: 指定カレンダーの [timeMin, timeMax) の予定を一括取得する（仮予約カレンダーの走査用）。
+ * 既存関数は一切変更せず新規追加。失敗時は null（呼び出し側が「読めなかった」と判別できるよう [] と区別する）。
+ */
+export async function listCalendarEventsRange(
+  userId: string,
+  timeMinISO: string,
+  timeMaxISO: string,
+  calendarIdOverride?: string
+): Promise<{ id: string; summary: string; startISO: string; endISO: string }[] | null> {
+  try {
+    const auth = await getAuthenticatedCalendar(userId);
+    if (!auth) return null;
+
+    const res = await auth.calendar.events.list({
+      calendarId: calendarIdOverride || auth.calendarId,
+      timeMin: timeMinISO,
+      timeMax: timeMaxISO,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 2500,
+    });
+
+    return (res.data.items || [])
+      .filter((e) => e.start?.dateTime && e.end?.dateTime)
+      .map((e) => ({
+        id: e.id || "",
+        summary: e.summary || "",
+        startISO: e.start!.dateTime!,
+        endISO: e.end!.dateTime!,
+      }));
+  } catch (error) {
+    console.error("[GCal] List events range failed:", error);
+    return null;
   }
 }
 

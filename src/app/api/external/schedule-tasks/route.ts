@@ -12,6 +12,7 @@ import {
   scheduleTaskInclude,
   serializeScheduleTask,
 } from "@/lib/schedule-tasks";
+import { extractCandidateName } from "@/lib/schedule-agent/parse-preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +81,30 @@ export async function GET(request: Request) {
     take: limit,
     include: scheduleTaskInclude,
   });
+
+  // T-139 step4: 任意 dedupeByName=true。タイトルから抽出した氏名が同一のタスクが複数あれば
+  // createdAt 最新の1件のみ返す（「同一氏名の重複は最新のみ処理対象」に対応）。
+  // 既定（未指定）は従来どおり全件返す＝レスポンス形状も含め後方互換。
+  if (sp.get("dedupeByName") === "true") {
+    const latestByName = new Map<string, (typeof tasks)[number]>();
+    const passthrough: typeof tasks = [];
+
+    for (const t of tasks) {
+      const name = extractCandidateName(t.title);
+      if (!name) {
+        passthrough.push(t); // 氏名を抽出できないものは重複判定の対象外（そのまま返す）
+        continue;
+      }
+      const prev = latestByName.get(name);
+      // tasks は createdAt 昇順。後勝ちで最新が残る。
+      if (!prev || t.createdAt >= prev.createdAt) latestByName.set(name, t);
+    }
+
+    const deduped = [...passthrough, ...latestByName.values()].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    );
+    return NextResponse.json({ tasks: deduped.map(serializeScheduleTask) });
+  }
 
   return NextResponse.json({ tasks: tasks.map(serializeScheduleTask) });
 }

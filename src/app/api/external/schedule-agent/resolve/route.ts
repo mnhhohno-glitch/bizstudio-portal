@@ -1,91 +1,107 @@
+// T-139 step4: POST /api/external/schedule-agent/resolve
+// 日程調整AIエージェント（RPA機）からの判定受け口。枠取り＋仮予約登録＋返信文面生成をportalが担う。
+//
+// 認証: x-api-secret = EXTERNAL_API_SECRET（isAuthorizedExternal を再利用）。
+//
+// 入力は2モード（判別は taskId の有無）:
+//   モードA: { taskId }                                  … URL申し込み分（既存タスク）
+//   モードB: { candidateName, messageBody, executedAt }  … マイナビ直接返信分
+//
+// 出力（両モード共通）:
+//   { result: "reserved"|"today_only"|"unavailable"|"no_reply",
+//     reservedAt, reservedAtLabel, method, replyText, alreadyReserved }
+//
+// 分業: portal は **タスクを読み取るだけ**。status 変更・コメント追加は一切しない（RPAが後で PATCH する）。
+// 対象外判定も portal はしない（RPA が判定済みの前提）。
+// 稼働時間帯の制御は RPA 側の責務（portal に時間帯制限は実装しない）。
+// 通知部品（LINE WORKS 等）は一切呼ばない・import もしない。
 import { NextResponse } from "next/server";
-import { isAuthorizedExternal, parseJstDefaultDate, toJstIso } from "@/lib/schedule-tasks";
-import { generateWithGemini, parseJsonResponse } from "@/lib/ai/gemini-client";
+import { prisma } from "@/lib/prisma";
+import { SCHEDULE_CATEGORY_NAME, isAuthorizedExternal, parseJstDefaultDate } from "@/lib/schedule-tasks";
+import { getReservationConfig, getTargetUserIds } from "@/lib/schedule-agent/config";
+import { jstIso, reservedLabel } from "@/lib/schedule-agent/jst";
 import {
-  matchSlot,
-  jstTodayYmd,
-  addDaysYmd,
-  nextBusinessDayYmd,
-  getTargetUserIds,
-  HORIZON_DAYS,
-  type DesiredSlot,
-} from "@/lib/schedule-agent/match-slot";
-import { createReservation, getReservationConfig, formatSlotJa } from "@/lib/schedule-agent/reserve";
+  extractFromMessage,
+  windowsFromCandidates,
+  windowsFromConditions,
+} from "@/lib/schedule-agent/extract-message";
+import {
+  extractCandidateName,
+  methodFromFormatField,
+  parseDesiredWindows,
+} from "@/lib/schedule-agent/parse-preferences";
+import { findAvailableSlot, type DesiredWindow, type Slot } from "@/lib/schedule-agent/match-slot";
+import {
+  createReservation,
+  fetchReservedEvents,
+  findExistingReservation,
+} from "@/lib/schedule-agent/reserve";
+import {
+  buildReservedReply,
+  buildTodayOnlyReply,
+  buildUnavailableReply,
+  type MeetingMethod,
+} from "@/lib/schedule-agent/reply-templates";
 
-// T-139 step3: 日程調整AIエージェント 外部判定受け口。
-//
-// POST /api/external/schedule-agent/resolve   （x-api-secret = EXTERNAL_API_SECRET）
-//   body: { candidateName, messageBody, executedAt }
-//
-// 処理:
-//   1. messageBody を Gemini に渡し日時候補を構造化抽出。**年は LLM に出力させない**（ハルシネーション回避）。
-//      responseSchema で { candidates: [{ month, day, startTime, endTime }] } を強制。
-//   2. 年はサーバー側で機械決定: executedAt の「翌営業日〜2週間以内」に収まる年を各候補に付与。
-//      12月→1月跨ぎは baseYear+1 を試すことで正しく解決する。
-//   3. 共通コア（match-slot）で対象CA群の空き枠を探索 → 仮予約書き込み。
-//   4. 確保できたら { status:"reserved", replyText, reservedAt }、
-//      確保不可・日時抽出不可なら { status:"unavailable" }（RPAは返信しない区分）。
+export const dynamic = "force-dynamic";
 
-/** 返信文面の暫定テンプレート。詳細未確定のため env で差し替え可能にする。 */
-const DEFAULT_REPLY_TEMPLATE =
-  "お世話になっております。ご希望の日程を確認し、{日時} で面談のお時間を仮確保いたしました。ご都合が合わない場合は、お手数ですがその旨ご返信ください。";
-
-function getReplyTemplate(): string {
-  const t = process.env.SCHEDULE_AGENT_REPLY_TEMPLATE?.trim();
-  return t && t.length > 0 ? t : DEFAULT_REPLY_TEMPLATE;
-}
-
-const SYSTEM_INSTRUCTION = [
-  "あなたは日本語の応募者メッセージから「面談の希望日時」を抽出する抽出器です。",
-  "メッセージ本文に書かれた希望日時の候補を、書かれている順に列挙してください。",
-  "重要: 年（year）は絶対に出力しないでください。月(month)・日(day)・開始時刻(startTime)・終了時刻(endTime) のみ出力します。",
-  "startTime / endTime は 24時間表記の HH:MM 形式（例: 09:00, 17:30）で出力してください。",
-  "「終日」「いつでも」など時間帯の指定が無い場合は startTime=09:00, endTime=18:00 としてください。",
-  "「午前」は 09:00〜12:00、「午後」は 13:00〜18:00 と解釈してください。",
-  "希望日時がまったく読み取れない場合は candidates を空配列にしてください。推測で捏造しないこと。",
-].join("\n");
-
-const RESPONSE_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    candidates: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          month: { type: "INTEGER" },
-          day: { type: "INTEGER" },
-          startTime: { type: "STRING" },
-          endTime: { type: "STRING" },
-        },
-        required: ["month", "day", "startTime", "endTime"],
-      },
-    },
-  },
-  required: ["candidates"],
+type ResolveResponse = {
+  result: "reserved" | "today_only" | "unavailable" | "no_reply";
+  reservedAt: string | null;
+  reservedAtLabel: string | null;
+  method: MeetingMethod | null;
+  replyText: string | null;
+  alreadyReserved: boolean;
 };
 
-type ExtractedCandidate = { month: number; day: number; startTime: string; endTime: string };
+/** 返信不要（文面なし）。解釈不能・日程外・env未設定時の安全終了。 */
+function noReply(): NextResponse {
+  const body: ResolveResponse = {
+    result: "no_reply",
+    reservedAt: null,
+    reservedAtLabel: null,
+    method: null,
+    replyText: null,
+    alreadyReserved: false,
+  };
+  return NextResponse.json(body);
+}
 
-/**
- * 年をサーバー側で機械決定する。
- * executedAt の年を基準に baseYear → baseYear+1 → baseYear-1 の順で試し、
- * 「翌営業日〜2週間以内」の窓に収まる年を採用する。窓外なら null（候補として捨てる）。
- * 12月→1月跨ぎ（例: 12/28 実行・1/5 希望）は baseYear+1 で解決される。
- */
-export function assignYear(
-  month: number,
-  day: number,
-  minYmd: string,
-  maxYmd: string,
-  baseYear: number
-): string | null {
-  const p = (n: number) => String(n).padStart(2, "0");
-  for (const y of [baseYear, baseYear + 1, baseYear - 1]) {
-    const ymd = `${y}-${p(month)}-${p(day)}`;
-    if (ymd >= minYmd && ymd <= maxYmd) return ymd;
-  }
-  return null;
+function reservedResponse(
+  candidateName: string,
+  slot: Slot,
+  method: MeetingMethod,
+  alreadyReserved: boolean
+): NextResponse {
+  const label = reservedLabel(slot.date, slot.startTime);
+  const body: ResolveResponse = {
+    result: "reserved",
+    reservedAt: jstIso(slot.date, slot.startTime),
+    reservedAtLabel: label,
+    method,
+    replyText: buildReservedReply(candidateName, method, label),
+    alreadyReserved,
+  };
+  return NextResponse.json(body);
+}
+
+function simpleResponse(
+  result: "today_only" | "unavailable",
+  candidateName: string,
+  method: MeetingMethod | null
+): NextResponse {
+  const body: ResolveResponse = {
+    result,
+    reservedAt: null,
+    reservedAtLabel: null,
+    method,
+    replyText:
+      result === "today_only"
+        ? buildTodayOnlyReply(candidateName)
+        : buildUnavailableReply(candidateName),
+    alreadyReserved: false,
+  };
+  return NextResponse.json(body);
 }
 
 export async function POST(request: Request) {
@@ -100,99 +116,111 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const candidateName = typeof body.candidateName === "string" ? body.candidateName.trim() : "";
-  const messageBody = typeof body.messageBody === "string" ? body.messageBody.trim() : "";
-  if (!candidateName || !messageBody) {
-    return NextResponse.json(
-      { error: "candidateName and messageBody are required" },
-      { status: 400 }
-    );
-  }
+  const taskId = typeof body.taskId === "string" && body.taskId.trim() ? body.taskId.trim() : null;
 
-  // 仮予約カレンダー未設定なら安全に終了（エラーにしない）
-  if (!getReservationConfig()) {
-    return NextResponse.json({ skipped: true, reason: "reservation calendar not configured" });
-  }
-  if (getTargetUserIds().length === 0) {
-    return NextResponse.json({ skipped: true, reason: "no target CA configured" });
-  }
+  // ---- 入力の正規化（モードA / モードB）----
+  let candidateName: string;
+  let method: MeetingMethod;
+  let windows: DesiredWindow[];
+  let now: Date;
+  let mode: "task" | "message";
 
-  // executedAt は JST 既定で解釈。未指定・不正なら現在時刻。
-  const executedAt =
-    parseJstDefaultDate(typeof body.executedAt === "string" ? body.executedAt : null) ?? new Date();
+  if (taskId) {
+    // ===== モードA: taskId 指定 =====
+    mode = "task";
+    now = new Date();
 
-  // 1. LLM で日時候補を抽出（年は出力させない）
-  let extracted: ExtractedCandidate[] = [];
-  try {
-    const raw = await generateWithGemini({
-      systemInstruction: SYSTEM_INSTRUCTION,
-      userPrompt: `以下の応募者メッセージから希望日時の候補を抽出してください。\n\n---\n${messageBody}\n---`,
-      responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
-      temperature: 0.1,
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        category: { select: { name: true } },
+        fieldValues: { include: { field: { select: { label: true } } } },
+      },
     });
-    const parsed = parseJsonResponse<{ candidates?: ExtractedCandidate[] }>(raw);
-    extracted = Array.isArray(parsed.candidates) ? parsed.candidates : [];
-  } catch (e) {
-    console.error("[schedule-agent/resolve] extraction failed:", e);
-    return NextResponse.json({ status: "unavailable", reason: "extraction failed" });
+
+    // 存在しない / カテゴリ「日程調整」以外 → 404（カテゴリ柵。step1 PATCH と同じ考え方）
+    if (!task || task.category?.name !== SCHEDULE_CATEGORY_NAME) {
+      return NextResponse.json({ error: "Schedule task not found" }, { status: 404 });
+    }
+
+    const name = extractCandidateName(task.title);
+    if (!name) return noReply(); // 氏名が取れない → 返信不要
+    candidateName = name;
+
+    const byLabel = new Map(task.fieldValues.map((fv) => [fv.field?.label ?? "", fv.value]));
+    method = methodFromFormatField(byLabel.get("面談形式")); // LLM推測はしない
+    windows = parseDesiredWindows(byLabel.get("希望日時"));
+    if (windows.length === 0) return noReply(); // 定型パース0件 → 返信不要
+  } else {
+    // ===== モードB: 氏名＋メッセージ本文 =====
+    mode = "message";
+
+    const name = typeof body.candidateName === "string" ? body.candidateName.trim() : "";
+    const messageBody = typeof body.messageBody === "string" ? body.messageBody.trim() : "";
+    if (!name || !messageBody) {
+      return NextResponse.json(
+        { error: "taskId, or candidateName and messageBody are required" },
+        { status: 400 }
+      );
+    }
+    candidateName = name;
+    now = parseJstDefaultDate(typeof body.executedAt === "string" ? body.executedAt : null) ?? new Date();
+
+    const ex = await extractFromMessage(messageBody);
+    if (!ex || !ex.isScheduleRelated) return noReply(); // 日程の話ではない／解釈不能
+
+    // 面談方法: 電話→A系 / オンライン・不明→B系（不明時のオンライン既定はモードBのみの規則）
+    method = ex.meetingMethod === "電話" ? "電話" : "オンライン";
+
+    const fromCandidates = windowsFromCandidates(ex, now);
+    const fromConditions = ex.conditions ? windowsFromConditions(ex.conditions, now) : [];
+
+    if (ex.candidates.length === 0 && fromConditions.length === 0) return noReply(); // 候補・条件とも空
+
+    // 具体候補があればそれを優先し、無ければ条件走査の結果を使う。
+    windows = fromCandidates.length > 0 ? fromCandidates : fromConditions;
+
+    // 具体候補があったが年解決の結果すべて捨てられた（＝どの候補も解決不能）場合も条件にフォールバック。
+    if (windows.length === 0 && fromConditions.length > 0) windows = fromConditions;
+
+    if (windows.length === 0) {
+      // 具体候補はあったが1つも日付として解決できなかった → 範囲外扱い（テンプレD）
+      return simpleResponse("unavailable", candidateName, method);
+    }
   }
 
-  if (extracted.length === 0) {
-    return NextResponse.json({ status: "unavailable", reason: "no date candidates" });
+  // ---- 以降は両モード共通 ----
+
+  // env 未設定なら枠取り・カレンダー登録を一切行わず「返信不要」で安全終了（誤送信防止・Q5）
+  if (!getReservationConfig()) return noReply();
+
+  const targets = getTargetUserIds();
+  if (targets.length === 0) return simpleResponse("unavailable", candidateName, method);
+
+  // 仮予約カレンダーを1回だけ走査（二重予約チェック＋枠占有カウントの両方に使う）
+  const reserved = await fetchReservedEvents(now);
+  if (!reserved) return noReply(); // カレンダーが読めない＝安全側（誤送信しない）
+
+  // 二重予約防止: 同一氏名の未来の仮予約が既にあれば、新規登録せず同じ文面を再生成
+  const existing = findExistingReservation(reserved.events, candidateName, now);
+  if (existing) {
+    return reservedResponse(candidateName, existing.slot, existing.method, true);
   }
 
-  // 2. 年をサーバー側で付与（翌営業日〜2週間の窓に収まる年）
-  const todayYmd = jstTodayYmd(executedAt);
-  const minYmd = nextBusinessDayYmd(todayYmd);
-  const maxYmd = addDaysYmd(todayYmd, HORIZON_DAYS);
-  const baseYear = Number(todayYmd.slice(0, 4));
+  // 枠探索
+  const outcome = await findAvailableSlot(windows, targets, reserved.events, now);
+  if (outcome.kind === "today_only") return simpleResponse("today_only", candidateName, method);
+  if (outcome.kind === "unavailable") return simpleResponse("unavailable", candidateName, method);
 
-  const desired: DesiredSlot[] = [];
-  extracted.forEach((c, i) => {
-    if (!Number.isInteger(c.month) || !Number.isInteger(c.day)) return;
-    if (c.month < 1 || c.month > 12 || c.day < 1 || c.day > 31) return;
-    const date = assignYear(c.month, c.day, minYmd, maxYmd, baseYear);
-    if (!date) return; // 窓外の候補は捨てる
-    desired.push({
-      label: `第${i + 1}希望`,
-      date,
-      startTime: c.startTime,
-      endTime: c.endTime,
-    });
-  });
-
-  if (desired.length === 0) {
-    return NextResponse.json({ status: "unavailable", reason: "no candidate within window" });
-  }
-
-  // 3. 空き枠マッチング
-  const { matched, reason } = await matchSlot(desired, executedAt);
-  if (!matched) {
-    return NextResponse.json({ status: "unavailable", reason: reason ?? "no free slot" });
-  }
-
-  // 4. 仮予約書き込み
-  const res = await createReservation({
+  // 仮予約登録
+  const eventId = await createReservation({
     candidateName,
-    slot: matched,
-    meetingFormat: typeof body.meetingFormat === "string" ? body.meetingFormat : null,
-    taskId: null,
+    slot: outcome.slot,
+    method,
+    mode,
+    taskId,
   });
-  if (!res.ok) {
-    return NextResponse.json({ status: "unavailable", reason: res.reason });
-  }
+  if (!eventId) return noReply(); // 書き込み失敗 → 誤送信しない（RPAは返信しない）
 
-  const when = formatSlotJa(matched);
-  const replyText = getReplyTemplate().replace(/\{日時\}/g, when);
-  const reservedAt = toJstIso(new Date(`${matched.date}T${matched.startTime}:00+09:00`));
-
-  return NextResponse.json({
-    status: "reserved",
-    replyText,
-    reservedAt,
-    reservedFor: matched.userName,
-    when,
-    eventId: res.eventId,
-  });
+  return reservedResponse(candidateName, outcome.slot, method, false);
 }
