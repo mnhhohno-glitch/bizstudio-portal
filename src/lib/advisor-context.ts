@@ -134,7 +134,13 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
             ? raw.substring(0, MEETING_TEXT_MAX_CHARS) + "\n...(以下省略)"
             : raw;
         } else {
-          parsedText = await parsePdfWithAI(base64);
+          // T-135: この OCR は候補者1名あたり最大4ファイル分走る。費用の帰属先を追えるよう
+          // candidateId と呼び出し元を記録する（アドバイザー系の隠れ Gemini コストの主因）。
+          parsedText = await parsePdfWithAI(base64, {
+            candidateId,
+            caller: "advisor-context",
+            category: file.category,
+          });
         }
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;

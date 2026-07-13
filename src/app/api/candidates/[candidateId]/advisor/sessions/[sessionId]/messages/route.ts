@@ -192,17 +192,19 @@ export async function POST(
   if (file?.base64) {
     try {
       const mt = file.mimeType || "";
+      // T-135: 添付OCRの費用を候補者・呼び出し元つきで帳簿へ（記録は file-parser 内で実施）
+      const logMeta = { candidateId, caller: "advisor-chat-attachment" };
       if (mt === "application/pdf") {
-        fileContext = await parsePdfWithAI(file.base64);
+        fileContext = await parsePdfWithAI(file.base64, logMeta);
       } else if (mt.startsWith("image/")) {
-        fileContext = await parseImageWithAI(file.base64, mt);
+        fileContext = await parseImageWithAI(file.base64, mt, logMeta);
       } else if (mt === "text/plain" || mt === "text/csv") {
         const fullText = parseTextFile(file.base64);
         fileContext = fullText.length > MAX_TEXT_FILE_CHARS
           ? fullText.substring(0, MAX_TEXT_FILE_CHARS) + `\n\n...（以下省略、全${fullText.length}文字）`
           : fullText;
       } else if (mt.includes("word") || mt.includes("document") || mt.includes("excel") || mt.includes("spreadsheet") || mt.includes("powerpoint") || mt.includes("presentation")) {
-        fileContext = await parseDocWithAI(file.base64, mt);
+        fileContext = await parseDocWithAI(file.base64, mt, logMeta);
       }
     } catch (e) {
       console.error("File parse error:", e);

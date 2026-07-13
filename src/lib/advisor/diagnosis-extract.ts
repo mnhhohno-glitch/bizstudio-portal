@@ -182,6 +182,8 @@ export async function extractDiagnosisPreferences(diagnosisText: string): Promis
     // gemini-3-flash-preview は thinking モデルで思考トークン(~1300)が maxOutputTokens を食う。
     // 2048 だと職種配列が長い診断で出力が途中で切れ JSON 破損 → 6144 で余裕を持たせる。
     maxOutputTokens: 6144,
+    // T-135: AI費用帳簿へ記録。この endpoint は既存の AdvisorUsageLog にも入る（既存レポート非回帰のため両方に残す）。
+    log: { endpoint: "diagnosis-extract" },
   });
   const raw = parseJsonResponse<unknown>(text);
   const extraction = normalizeExtraction(raw);

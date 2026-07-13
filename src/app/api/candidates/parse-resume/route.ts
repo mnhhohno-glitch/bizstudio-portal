@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { findMatchingSlot } from "@/lib/scout/auto-link";
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -116,6 +117,16 @@ export async function POST(request: Request) {
     }
 
     const data = await response.json();
+
+    // T-135: 費用記録（fire-and-forget）。空レスポンスで return する前に記録する。
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: "candidate-resume-parse",
+      model: "gemini-3-flash-preview",
+      usage: data?.usageMetadata,
+      meta: { caller: "candidate-register-modal", pdfBytes: fileBuffer.length },
+    });
+
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawText) {

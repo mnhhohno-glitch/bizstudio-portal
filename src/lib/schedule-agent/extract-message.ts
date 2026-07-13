@@ -100,6 +100,7 @@ export async function extractFromMessage(messageBody: string): Promise<Extractio
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.1,
+      log: { endpoint: "schedule-agent-extract" },
     });
     const parsed = parseJsonResponse<Partial<Extraction>>(raw);
     return {

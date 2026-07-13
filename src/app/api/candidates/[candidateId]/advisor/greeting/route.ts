@@ -62,7 +62,11 @@ YYYY年MM月DD日（曜日） HH:MM～
 - ${formatRule}`;
 }
 
-async function parseMeetingFile(file: { driveFileId: string; fileName: string; mimeType: string }): Promise<string> {
+async function parseMeetingFile(
+  file: { driveFileId: string; fileName: string; mimeType: string },
+  // T-135: 費用の帰属先（どの候補者の挨拶文生成で OCR したか）を帳簿に残す
+  logMeta?: Record<string, unknown>,
+): Promise<string> {
   const ext = file.fileName.split(".").pop()?.toLowerCase() || "";
   const { base64 } = await downloadFileFromDrive(file.driveFileId);
 
@@ -70,10 +74,10 @@ async function parseMeetingFile(file: { driveFileId: string; fileName: string; m
     return parseTextFile(base64);
   }
   if (ext === "pdf") {
-    return await parsePdfWithAI(base64);
+    return await parsePdfWithAI(base64, logMeta);
   }
   if (["docx", "doc", "xlsx", "xls", "pptx", "ppt"].includes(ext)) {
-    return await parseDocWithAI(base64, file.mimeType);
+    return await parseDocWithAI(base64, file.mimeType, logMeta);
   }
 
   return `（${ext}形式のファイルは読み取り非対応です）`;
@@ -144,7 +148,10 @@ export async function POST(
     for (const file of meetingFiles) {
       try {
         if (!file.driveFileId) continue; // PDF実体が無い行はスキップ
-        const parsed = await parseMeetingFile({ driveFileId: file.driveFileId, fileName: file.fileName, mimeType: file.mimeType });
+        const parsed = await parseMeetingFile(
+          { driveFileId: file.driveFileId, fileName: file.fileName, mimeType: file.mimeType },
+          { candidateId, caller: "advisor-greeting" },
+        );
         meetingFilesContent += `--- ファイル名: ${file.fileName} ---\n${parsed}\n\n`;
       } catch (e) {
         console.error(`Greeting meeting file parse error: ${file.fileName}`, e);

@@ -4,6 +4,8 @@
  * マイナビRPA（pdf-upload）でも同一の解析経路を共有する。
  */
 
+import { recordGeminiUsage } from "@/lib/ai-usage";
+
 const GEMINI_MODEL = "gemini-3-flash-preview";
 
 export type GeminiResumeResult = {
@@ -71,6 +73,8 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
  */
 export async function parseResumeWithGemini(
   pdfBuffer: Buffer,
+  /** T-135: 費用帳簿の付帯情報（呼び出し元・候補者など）。 */
+  logMeta?: Record<string, unknown>,
 ): Promise<GeminiResumeResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -111,6 +115,17 @@ export async function parseResumeWithGemini(
   }
 
   const data = await response.json();
+
+  // T-135: 費用記録（fire-and-forget）。空レスポンスで throw する前に記録する
+  // （空でも入力トークンは課金されるため、ここで漏らすと「見えない費用」になる）。
+  void recordGeminiUsage({
+    system: "portal",
+    endpoint: "resume-parse",
+    model: GEMINI_MODEL,
+    usage: data?.usageMetadata,
+    meta: { pdfBytes: pdfBuffer.length, ...logMeta },
+  });
+
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText || typeof rawText !== "string") {
     throw new Error("Gemini レスポンスが空です");

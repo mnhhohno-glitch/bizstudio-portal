@@ -1588,6 +1588,45 @@ model AdvisorUsageLog {
   @@map("advisor_usage_logs")
 }
 
+// T-135: 全システム共通の AI 費用帳簿。portal / kyuujin / job-platform の**全 AI 呼び出し**を1コール1行で記録する。
+//
+// AdvisorUsageLog（T-126）は portal のアドバイザー系 Anthropic 専用で、Gemini 呼び出しや他システムの分を
+// 一切持たない。月次コストの65%が kyuujin/portal 側の Gemini で発生しているのに記録が無く「何に・いくら」が
+// 特定できなかったため、システム横断の受け皿としてこれを新設した。AdvisorUsageLog は既存レポートが依存して
+// いるため残置し、Gemini 分は本テーブルに集約する（diagnosis-extract のみ両方に入る＝既存レポート非回帰）。
+//
+// 設計: 記録自体は AI を呼ばない（費用増ゼロ）。記録失敗は本処理を止めない（呼び出し側で fire-and-forget）。
+// candidateId 等は meta に入れる（FK を張らない＝ログ書込みが本体を落とさない・AdvisorUsageLog と同方針）。
+model AiUsageLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// 発生元システム: 'portal' / 'kyuujin' / 'job-platform'
+  system String
+  /// 処理の識別子（自由文字列）: 'resume-parse' / 'file-parse' / 'job-structuring' / 'advisor' 等
+  endpoint String
+  /// 実際に API へ投げたモデルID（'gemini-3-flash-preview' 等）。単価表のキー
+  model String
+
+  /// 非キャッシュ入力トークン（Gemini は promptTokenCount からキャッシュ分を引いた値）
+  inputTokens Int? @map("input_tokens")
+  /// 出力トークン
+  outputTokens Int? @map("output_tokens")
+  /// キャッシュヒットした入力トークン（Gemini cachedContentTokenCount / Claude cache_read_input_tokens）
+  cachedInputTokens Int? @map("cached_input_tokens")
+
+  /// 推定費用（円）。src/lib/ai-pricing.ts の単価表で算出。単価未登録モデルは null
+  estimatedCostJpy Decimal? @map("estimated_cost_jpy") @db.Decimal(12, 6)
+
+  /// 付帯情報（candidateNumber / 対象ID / 件数 / エラー種別 など任意）
+  meta Json?
+
+  @@index([createdAt])
+  @@index([system, createdAt])
+  @@index([system, endpoint, createdAt])
+  @@map("ai_usage_logs")
+}
+
 // T-132: タイプ診断（AIアドバイザーの自由文診断）から AI で構造化抽出した希望条件。
 // 診断散文（advisor_chat_messages.content）は seed に使えないため、後読みで構造化しここへ保存する。
 // 面談由来の希望条件（interview_details）が無い候補者の おすすめ③seed フォールバック源。

@@ -40,6 +40,7 @@ export async function GET() {
         responseMimeType: "application/json",
         maxOutputTokens: 100,
         temperature: 0.1,
+        log: { endpoint: "ai-health-ping" },
       });
       checks.geminiApiPingSuccess = true;
       checks.geminiApiResponsePreview = pingResponse.substring(0, 200);
