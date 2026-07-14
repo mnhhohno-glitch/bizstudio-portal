@@ -56,6 +56,7 @@ export default function ScheduleChatDrawer({
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [hasAiEntries, setHasAiEntries] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -183,6 +184,7 @@ export default function ScheduleChatDrawer({
   };
 
   const handleClose = () => {
+    if (isConfirming) return;
     if (hasAiEntries && !confirm("スケジュールが保存されていません。閉じてもよろしいですか？")) return;
     onClose();
   };
@@ -194,12 +196,21 @@ export default function ScheduleChatDrawer({
     }
   };
 
-  const handleConfirm = () => {
-    // Generate a summary from entries
-    const summary = currentEntries
-      .map((e) => `${e.startTime} ${e.title}`)
-      .join(" → ");
-    onSave(currentEntries, summary);
+  const handleConfirm = async () => {
+    // 二重押し防止：disabled と併せてハンドラ冒頭でもガードする（レンダー間の再入を防ぐ）。
+    if (isConfirming) return;
+    setIsConfirming(true);
+    try {
+      const summary = currentEntries
+        .map((e) => `${e.startTime} ${e.title}`)
+        .join(" → ");
+      // onSave の型は () => void だが、実際の呼び出し元は async 関数（PUT/POST /api/schedule）。
+      // Promise.resolve でラップすると sync/async 両対応で完了まで待てる。
+      await Promise.resolve(onSave(currentEntries, summary));
+    } finally {
+      // 成功・失敗どちらでも必ずロック解除。失敗時に「登録中…」で固まらないように。
+      setIsConfirming(false);
+    }
   };
 
   // Find the last message with entries for preview
@@ -332,14 +343,22 @@ export default function ScheduleChatDrawer({
           <div className="flex gap-2">
             <button
               onClick={handleConfirm}
-              disabled={currentEntries.length === 0 || isLoading}
-              className="flex-1 bg-[#16A34A] text-white rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-50"
+              disabled={currentEntries.length === 0 || isLoading || isConfirming}
+              className="flex-1 bg-[#16A34A] text-white rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-[#15803D] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              💾 このスケジュールで確定
+              {isConfirming ? (
+                <>
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                  登録中…
+                </>
+              ) : (
+                <>💾 このスケジュールで確定</>
+              )}
             </button>
             <button
               onClick={handleClose}
-              className="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50"
+              disabled={isConfirming}
+              className="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               キャンセル
             </button>
