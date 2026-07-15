@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
-import { resolveJobDbFromBookmark, extractJobNoFromRef } from "@/lib/constants/source-media";
+import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- Types ---------- */
@@ -296,6 +296,9 @@ type BookmarkFile = {
   lastExportedTo: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
   origin?: string | null;
+  // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
+  externalJobRef?: string | null;
+  sourceMedia?: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
   archivedAt?: string | null;
@@ -724,6 +727,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   // T-133 FU-1: 求職者メモの閲覧（読み取り専用。求職者が /site/ で編集するもの）
   const [noteView, setNoteView] = useState<{ fileName: string; note: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  // DBNO列: job-platform 求人詳細へ SSO 遷移中の externalJobRef（二重クリック防止＋⏳表示）
+  const [openingRef, setOpeningRef] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
@@ -742,6 +747,34 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
     return null;
   }, [jobResponseMap]);
+
+  // DBNO クリック: portal SSO（issue-app-token）で job-platform 求人詳細を新規タブで開く。
+  // Sidebar の「求人検索」遷移と同じ慣例（?auth_token= を付与）に、求人特定用の &id= を足す。
+  // job-platform middleware は auth_token を消費後、id を保持したままリダイレクトし詳細モーダルを開く。
+  const openJobPlatformDetail = async (externalJobRef: string) => {
+    if (openingRef) return; // 二重クリック防止
+    setOpeningRef(externalJobRef);
+    try {
+      const res = await fetch("/api/auth/issue-app-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_app: "job_platform" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        toast.error(err?.error || "求人ページを開けませんでした");
+        return;
+      }
+      const { token, target_url } = await res.json();
+      // target_url は末尾 /jobs（例: https://.../jobs）。auth_token + id を付与。
+      const url = `${target_url}?auth_token=${encodeURIComponent(token)}&id=${encodeURIComponent(externalJobRef)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.error("求人ページを開けませんでした");
+    } finally {
+      setOpeningRef(null);
+    }
+  };
 
   const triggerExtraction = (fileIds: string[], label = "") => {
     if (fileIds.length === 0) return;
@@ -1305,6 +1338,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       {files.length > 0 && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
           <span className="w-4 shrink-0" />
+          <span className="w-[80px] shrink-0">DB名</span>
+          <span className="w-[120px] shrink-0">DBNO</span>
           <span className="flex-1 min-w-0">会社名</span>
           <span onClick={() => activateBasis("wish")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("wish") ? "text-[#2563EB]" : ""}`}>
@@ -1356,6 +1391,30 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                   onChange={() => toggleSelect(file.id)}
                   className="w-4 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                 />
+                {(() => {
+                  // DB名: sourceMedia 優先 → externalJobRef 接頭辞判定。判定不能は「—」。
+                  const dbName = resolveBookmarkMedia(file.sourceMedia, file.externalJobRef);
+                  const ref = file.externalJobRef ?? null;
+                  return (
+                    <>
+                      <span className="w-[80px] shrink-0 text-[11px] text-gray-600 truncate" title={dbName ?? undefined}>
+                        {dbName ?? <span className="text-gray-300">—</span>}
+                      </span>
+                      <span className="w-[120px] shrink-0 text-[11px] truncate">
+                        {ref ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openJobPlatformDetail(ref); }}
+                            disabled={openingRef === ref}
+                            className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-full text-left disabled:opacity-50 disabled:cursor-wait"
+                            title={`${ref} — クリックで求人ページを開く`}
+                          >{openingRef === ref ? "⏳ " : ""}{ref}</button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </span>
+                    </>
+                  );
+                })()}
                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                   <span className="shrink-0 text-sm">{getFileIcon(file.mimeType)}</span>
                   <button
