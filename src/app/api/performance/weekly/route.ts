@@ -105,7 +105,9 @@ export async function GET(req: Request) {
       } else {
         const mBiz = monthBusinessDays(anchorMonth);
         const perDay = mBiz > 0 ? monthT / mBiz : null;
-        perColumnTargets[key] = columns.map((c) => (perDay == null ? null : c.businessDays > 0 ? perDay : 0));
+        // 7日連続表示。土日祝の目標は null（「—」表示）にし、営業日のみ perDay を割り当てる。
+        // 合計目標は営業日分の合計＝従来と同じ（土日祝の 0 を Σ しても不変だが、null 混在に備え nullish 加算にする）。
+        perColumnTargets[key] = columns.map((c) => (perDay == null ? null : c.businessDays > 0 ? perDay : null));
         totalTargets[key] = perDay == null ? null : perColumnTargets[key].reduce((s: number, v) => s + (v ?? 0), 0);
       }
     } else {
