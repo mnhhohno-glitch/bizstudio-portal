@@ -103,36 +103,9 @@ const OPUS_KEYWORDS = [
   /求人.{0,10}評価/, /求人.{0,10}分析/,
 ];
 
-// スキルプロンプト（フルスキル版）が必要な場合のキーワード
-const SKILL_KEYWORDS = [
-  /タイプ診断/, /志向性/, /6タイプ/,
-  /検索戦略/, /検索軸/, /求人.{0,10}検索/,
-  /マッチング/, /マッチ度/, /ABCD/,
-  /Will[\s-]*Can[\s-]*Must/i,
-  /逆転質問/,
-  /求人.{0,10}分析/, /求人.{0,10}評価/,
-  /フレームワーク/,
-  /タイプ.{0,5}更新/, /評価.{0,5}アップデート/,
-];
-
-function needsSkillPrompt(message: string, hasFile: boolean): boolean {
-  if (hasFile) return true;
-  return SKILL_KEYWORDS.some((p) => p.test(message));
-}
-
-const LIGHT_SYSTEM_PROMPT = `あなたはビズスタジオのキャリアアドバイザーAIアシスタントです。
-転職エージェントとして求職者の支援を行っています。
-
-以下の情報を踏まえてアドバイスしてください:
-- 求職者の経歴、希望条件、面談内容に基づいた具体的なアドバイス
-- 面接対策、書類添削、年収交渉などの転職支援全般
-- 業界・職種の知識を活かした的確な回答
-
-タイプ診断、検索戦略の策定、求人のマッチング評価など、専門的なフレームワークが必要な場合は「タイプ診断して」「検索戦略を考えて」等と指示してください。
-
-回答は簡潔に、求職者名を使って親しみやすく対応してください。
-
-`;
+// LIGHTモード（needsSkillPrompt / SKILL_KEYWORDS / LIGHT_SYSTEM_PROMPT によるキーワード分岐）は
+// 2026-07-17 に廃止。キーワード非マッチ時にスキルが完全脱落し、実績値・憧れ枠等の
+// スキル固有知識を答えられない構造問題があったため、常時フル版スキル注入に統一した。
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function selectModel(message: string, hasFile: boolean): string {
@@ -288,30 +261,23 @@ export async function POST(
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
-  const useSkill = needsSkillPrompt(content || "", !!file);
-  console.log(`[Advisor] Skill mode: ${useSkill ? "FULL" : "LIGHT"}`);
-  // キャッシュ最適化: FULL時は固定(PERSONA+skill)を独立ブロック化し cache_control 付与、
+  // LIGHTモード廃止: 常にフル版スキルを注入する。
+  // 旧実装はキーワード分岐（needsSkillPrompt）でFULL/LIGHTを切り替えていたが、キーワードに
+  // マッチしない質問（実績値・憧れ枠等のスキル固有知識を問うもの）でスキルが完全脱落する
+  // 構造問題があったため常時FULLに統一（2026-07-17 将幸さん決定）。
+  // キャッシュ最適化: 固定(PERSONA+skill)を独立ブロック化し cache_control 付与、
   // 可変(候補者context)を別ブロックに分離（候補者横断で skill がキャッシュ読みになる）。
-  // LIGHT時は system が小さくキャッシュ最小長未満のため単一ブロックのまま。
-  // テキスト内容は不変（連結を分割するだけ）。
-  const systemBlocks = useSkill
-    ? [
-        {
-          type: "text" as const,
-          text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull(),
-          cache_control: { type: "ephemeral" as const },
-        },
-        {
-          type: "text" as const,
-          text: CANDIDATE_DATA_HEADER + context,
-        },
-      ]
-    : [
-        {
-          type: "text" as const,
-          text: LIGHT_SYSTEM_PROMPT + context,
-        },
-      ];
+  const systemBlocks = [
+    {
+      type: "text" as const,
+      text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull(),
+      cache_control: { type: "ephemeral" as const },
+    },
+    {
+      type: "text" as const,
+      text: CANDIDATE_DATA_HEADER + context,
+    },
+  ];
 
   const usedModel = selectModel(content || "", !!file);
 
@@ -361,13 +327,13 @@ export async function POST(
     const data = await response.json();
     const u = data.usage ?? {};
     console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
-    // T-126: usage を永続化。FULL/LIGHT はスキルモードで判別（note）。
+    // T-126: usage を永続化。LIGHTモード廃止後は常に skill-full。
     await recordAdvisorUsage({
       endpoint: "advisor-chat",
       model: usedModel,
       usage: u,
       candidateId,
-      note: useSkill ? "skill-full" : "skill-light",
+      note: "skill-full",
     });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""
