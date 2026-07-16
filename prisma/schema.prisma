@@ -1449,6 +1449,10 @@ model CandidateFile {
   // T-133 FU-14a: CAによる手動並び順（候補者×求人行ごと。他の求職者には波及しない）。
   //   NULL=手動順なし（従来ソートで後続）。小さいほど先頭。並び替えは PATCH /api/external/candidate-site/display-order。
   displayOrder      Int?                  @map("display_order")
+  // ピックアップ: CAがマイページプレビューで「先頭固定」を付けた求人。上限3件／求職者（APIで判定）。
+  //   NULL=非ピックアップ / 非NULL=ピックアップ中（日時＝ONにした時刻。3件並ぶ順序の決定に使用）。
+  //   トグルは PATCH /api/external/candidate-site/pickup。favorites GET のレスポンスに含めて mypage が先頭固定に使う。
+  pickedUpAt        DateTime?             @map("picked_up_at")
   // 案Z 段階A: job-platform 由来は PDF 実体が無いため nullable 化（既存行は値あり・非破壊）。
   driveFileId       String?               @map("drive_file_id")
   driveViewUrl      String?               @map("drive_view_url")

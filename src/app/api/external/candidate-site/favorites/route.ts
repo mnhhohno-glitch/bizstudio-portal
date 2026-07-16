@@ -92,6 +92,8 @@ type FavoriteDTO = {
   displayOverrides: Record<string, string> | null;
   /** T-133 FU-14a: CAによる手動並び順。null=手動順なし（従来ソート）。小さいほど先頭。favorites は既にこの順で返る。 */
   displayOrder: number | null;
+  /** ピックアップ: CAが「先頭固定」を付けた日時（ISO）。null=非ピックアップ。上限3件／求職者は API 側で判定。 */
+  pickedUpAt: string | null;
   aiMatchRating: string | null;
   createdAt: string;
   applied: boolean;
@@ -129,6 +131,7 @@ export async function GET(request: Request) {
       caComment: true,
       displayOverrides: true,
       displayOrder: true,
+      pickedUpAt: true,
       aiMatchRating: true,
       responseStatus: true,
       responseStatusUpdatedAt: true,
@@ -170,6 +173,7 @@ export async function GET(request: Request) {
     caComment: f.caComment,
     displayOverrides: (f.displayOverrides ?? null) as unknown as Record<string, string> | null,
     displayOrder: f.displayOrder,
+    pickedUpAt: f.pickedUpAt ? f.pickedUpAt.toISOString() : null,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied: f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false,
@@ -216,7 +220,7 @@ export async function POST(request: Request) {
       externalJobRef,
       archivedAt: null,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
   if (existing) {
     return NextResponse.json({
@@ -264,7 +268,7 @@ export async function POST(request: Request) {
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
@@ -324,7 +328,7 @@ export async function PATCH(request: Request) {
   const updated = await prisma.candidateFile.update({
     where: { id: row.id },
     data: { candidateNote },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
 
   return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
@@ -399,6 +403,7 @@ function toDTO(
     caComment: string | null;
     displayOverrides: unknown;
     displayOrder: number | null;
+    pickedUpAt: Date | null;
     aiMatchRating: string | null;
     createdAt: Date;
   },
@@ -424,6 +429,7 @@ function toDTO(
     caComment: f.caComment,
     displayOverrides: (f.displayOverrides ?? null) as Record<string, string> | null,
     displayOrder: f.displayOrder,
+    pickedUpAt: f.pickedUpAt ? f.pickedUpAt.toISOString() : null,
     aiMatchRating: f.aiMatchRating,
     createdAt: f.createdAt.toISOString(),
     applied,
