@@ -10,7 +10,16 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 // 案内文テンプレ（後から調整できる定数）。{URL} を発行URLに置換して使う。
 const ANNOUNCEMENT_TEMPLATE =
-  "非公開求人サイトのご案内です。\nこちらのURLから、生年月日（8桁）でログインしてご覧いただけます。\n{URL}";
+  "■非公開求人＆マイページ\n" +
+  "{URL}\n" +
+  "パスワード：ご自身の西暦生年月日（例：19900101）\n" +
+  "\n" +
+  "【ご利用方法】\n" +
+  "・一般的な求人サイトと同じように、当社保有の非公開求人約8万件を検索できます。ぜひ検索してみてください。\n" +
+  "・「担当CAおすすめ」に、私が選定した求人を随時アップデートしています。\n" +
+  "・「気になる」「応募したい」を選んで送信するだけでOKです。\n" +
+  "・もっと知りたい求人は「詳しく知る」をご覧ください。\n" +
+  "・メモや質問もそのまま送れますので、気になることがあればお気軽にどうぞ。";
 
 function buildAnnouncement(url: string): string {
   return ANNOUNCEMENT_TEMPLATE.replace("{URL}", url);
@@ -85,7 +94,7 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
           {...overlayClose}
         >
           <div
-            className="bg-white rounded-lg shadow-xl w-[520px] max-w-[92vw] p-5"
+            className="bg-white rounded-lg shadow-xl w-[520px] max-w-[92vw] max-h-[90vh] overflow-y-auto p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
@@ -145,6 +154,13 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
                     >
                       URLをコピー
                     </button>
+                    <button
+                      onClick={() => window.open(siteUrl, "_blank", "noopener,noreferrer")}
+                      disabled={!siteUrl}
+                      className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-1.5 text-[12px] hover:bg-gray-50 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      URLを開く
+                    </button>
                   </div>
                 </div>
 
@@ -154,7 +170,7 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
                   <textarea
                     readOnly
                     value={buildAnnouncement(siteUrl)}
-                    rows={4}
+                    rows={11}
                     className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] text-gray-700 bg-gray-50 resize-none"
                     onFocus={(e) => e.currentTarget.select()}
                   />
