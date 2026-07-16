@@ -170,7 +170,7 @@ export default function IssueSiteTokenButton({ candidateId, hasBirthday }: Props
                   <textarea
                     readOnly
                     value={buildAnnouncement(siteUrl)}
-                    rows={11}
+                    rows={16}
                     className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] text-gray-700 bg-gray-50 resize-none"
                     onFocus={(e) => e.currentTarget.select()}
                   />
