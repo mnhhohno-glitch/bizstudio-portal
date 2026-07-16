@@ -7,7 +7,7 @@ import {
   parseDocWithAI,
   parseTextFile,
 } from "@/lib/file-parser";
-import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
+import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
@@ -298,7 +298,7 @@ export async function POST(
     ? [
         {
           type: "text" as const,
-          text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkill(),
+          text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull(),
           cache_control: { type: "ephemeral" as const },
         },
         {

@@ -10,7 +10,7 @@ import { getSessionUser } from "@/lib/auth";
 import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { getDailyReportSkill } from "@/lib/load-daily-report-skill";
-import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
+import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { computeJobSearchDay } from "@/lib/dailyReport/jobSearch";
 import { resolveDailyReportFormat, formatHasNumbers } from "@/lib/dailyReport/constants";
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   };
 
   // skill を system に注入（日報skill＋求人選定skill）。cache_control で再利用。
-  const skillText = `${getDailyReportSkill()}\n\n---\n\n# 付録: 求人選定の知見（job-matching-advisor）\n\n${getJobMatchingSkill()}`;
+  const skillText = `${getDailyReportSkill()}\n\n---\n\n# 付録: 求人選定の知見（job-matching-advisor）\n\n${getJobMatchingSkillFull()}`;
   const systemBlocks = [
     { type: "text" as const, text: skillText, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: `${ASSIST_INSTRUCTION}\n\n${buildAssistContext(ctx)}` },
