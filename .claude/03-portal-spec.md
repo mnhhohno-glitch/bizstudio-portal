@@ -586,29 +586,35 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
 - `resolve` は通知部品（LINE WORKS 等）を**一切呼ばない・importもしない**。
   → **step6（下記）で「仮予約が新規成立したときのみ」通知可の例外を追加**（承認済み）。
 
-### 仮予約成立時の後続処理（step6・master, 2026-07）
+### 仮予約成立時の後続処理（step6/step7・master, 2026-07）
 
 `resolve` が**新規に仮予約を作成できたとき**（`result=reserved` かつ `alreadyReserved=false`）に限り、
-`runPostReservation`（`src/lib/schedule-agent/post-reserve.ts`）で後続処理3点を発火する。
+`runPostReservation`（`src/lib/schedule-agent/post-reserve.ts`）で後続処理を発火する。
 成立は1候補者につき1回（`reserve.ts` の二重予約チェックで担保）なので夜間ポーリングでも連発しない。
 `alreadyReserved=true`（既存再返信）・`today_only`・`unavailable`・`no_reply` では**発火しない**。
 フローA（モードA・taskId由来）/フローB（モードB・メッセージ由来）の両方で発火する。
 
-- **(1) 面談管理登録**（`InterviewRecord`）: 担当CAは placeholder「仮予約」。
-  - `candidateId` が無い（モードB／モードAで未紐付け）→ **面談登録はスキップ**し (2)(3) は実行、
-    タスク本文にスキップ理由を明記（同姓同名の誤爆を避け無理に紐付けない）。
-  - 非破壊: `interviewCount=null`（実績表の初回/既存集計から除外）・`isLatest=false`
-    （候補者の最新面談判定を乱さない）・`status="draft"`。`interviewTool` は `電話`/`オンライン`。
+**現行の後続処理は「(2) LINE通知」「(3) 翌朝タスク」の2点**（仮予約カレンダー登録は resolve 本体）。
+面談管理登録（下記 (1)）は **step7 で既定無効**（手動運用）。
+
+- **(1) 面談管理登録**（`InterviewRecord`）: **step7 で既定 OFF（手動運用に統一）**。
+  実運用の日程調整タスクは candidateId=null が多く「入る時/入らない時」で中途半端になるため。
+  env `SCHEDULE_AGENT_INTERVIEW_REGISTER="true"`（大小問わず）のときだけ登録する（将来の再検討用にロジックは残置）。
+  既定（未設定/"false"）では呼ばれず、翌朝タスク本文に「面談管理への登録は手動で行ってください（AIは登録しません）」と明記する。
+  - 有効時（env true）の挙動: 担当CA=placeholder「仮予約」。`candidateId` が無ければスキップ。
+    非破壊（`interviewCount=null`＝実績集計から除外・`isLatest=false`・`status="draft"`・`interviewTool`=`電話`/`オンライン`）。
 - **(2) LINE通知**: 既存タスク通知と同じ Bot/チャンネル（`LINEWORKS_TASK_BOT_ID`/`LINEWORKS_TASK_CHANNEL_ID`）。
   求職者名・仮予約日時・面談方法・「AI自動仮予約」の旨を送る。env 未設定ならスキップ（失敗にしない）。
 - **(3) タスク作成**: カテゴリ **`その他`**（`日程調整` は RPA が再ポーリングし二重予約になり得るため使わない）。
   `status=NOT_STARTED`・assignee はマイナビ管理担当（`isMynaviAssignee=true` の慣例）。本文に
-  求職者名・仮予約日時・面談方法・由来（フローA/B）・元taskId・「担当CA確定後に付け替え」を記載。
+  求職者名・仮予約日時・面談方法・由来（フローA/B）・元taskId・「仮予約カレンダーから振り分け」＋
+  面談登録の状態（既定は「手動で登録」）を記載。
 
 **安全設計**: `runPostReservation` は**絶対に throw しない**（各処理を try/catch で隔離）。
-`resolve` 応答（reserved 文面・値・HTTPコード）は不変。(1) が失敗/スキップしても (2)(3) は実行し、
+`resolve` 応答（reserved 文面・値・HTTPコード）は不変。(2) が失敗しても (3) は実行し、
 特に (3) を最優先で成立させる。いずれか失敗時は `masayuki_oono@bizstudio.co.jp` へ**1通**メール
-（Resend・step5 の日次重複抑止は掛けない＝成立ごとの単発）。
+（Resend・step5 の日次重複抑止は掛けない＝成立ごとの単発）。面談登録が無効な間は失敗対象から外れる
+（対象は LINE送信失敗・タスク作成失敗のみ）。
 
 **ダミーCA「仮予約」**:
 - `User`（`status=disabled`＝ログイン不可・`isMynaviAssignee=false`・`lineworksId=null`・`role=member`）＋

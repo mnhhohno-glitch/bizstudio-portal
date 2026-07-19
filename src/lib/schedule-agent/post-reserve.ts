@@ -1,19 +1,23 @@
-// T-139 step6: 仮予約成立時（result=reserved かつ alreadyReserved=false）の後続処理。
+// T-139 step6/step7: 仮予約成立時（result=reserved かつ alreadyReserved=false）の後続処理。
 //
 // 発火条件は「resolve が **新規に** 仮予約を作成できたとき」だけ（alreadyReserved=false）。
 // 成立は1候補者につき1回（reserve.ts の二重予約チェックで担保）なので、夜間ポーリングでも連発しない。
 // これまで resolve は通知部品を一切呼ばない設計だったが、成立時に限り通知を許可する例外（承認済み）。
 //
-// 実行する3点（この順・失敗隔離）:
-//   (1) 面談管理への登録（InterviewRecord）… 担当CAは placeholder「仮予約」
+// 実行する後続処理（この順・失敗隔離）:
 //   (2) LINE WORKS 通知（既存タスク通知と同じ Bot/チャンネル）
 //   (3) 翌朝の担当CA確定用タスク（カテゴリ「その他」・マイナビ管理担当へ割当）
 //
+// step7（2026-07）: 面談管理への自動登録（(1) InterviewRecord）は **既定で無効**（手動運用に統一）。
+//   実運用の日程調整タスクは candidateId=null が多く、面談登録が「入る時/入らない時」で中途半端になるため。
+//   ロジックは残し、env `SCHEDULE_AGENT_INTERVIEW_REGISTER="true"` のときだけ登録する（将来の再検討用）。
+//   既定（未設定/"false"）では面談登録は呼ばれず、翌朝タスク本文は「面談管理は手動で登録」を明記する。
+//
 // 安全設計:
 //   - この関数は **絶対に throw しない**（各処理を try/catch で隔離）。resolve 本体の応答は不変。
-//   - (1) が失敗/スキップしても (2)(3) は実行する（特に (3) を最優先で成立させる）。
+//   - (2) が失敗しても (3) は実行する（特に (3) を最優先で成立させる）。
 //   - いずれかが失敗したら、大野さんへ 1 通のメール（Resend）にまとめて通知する
-//     （step5 の日次重複抑止は掛けない＝成立ごとの単発通知）。
+//     （step5 の日次重複抑止は掛けない＝成立ごとの単発通知）。面談登録が無効な間は失敗対象から外れる。
 import { prisma } from "@/lib/prisma";
 import { sendBotMessage } from "@/lib/lineworks";
 import { resolveSystemUserId } from "@/lib/schedule-tasks";
@@ -45,10 +49,19 @@ export type PostReservationInput = {
   taskId: string | null;
 };
 
-type StepResult = { ok: boolean; skipped?: boolean; detail: string };
+type StepResult = { ok: boolean; skipped?: boolean; disabled?: boolean; detail: string };
 
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * 面談管理への自動登録の on/off。既定 false（手動運用）。
+ * env `SCHEDULE_AGENT_INTERVIEW_REGISTER` が（大文字小文字問わず）"true" のときだけ true。
+ * 将来 A/B 判断が変わったとき、コードを書き直さず env だけで戻せるようにするためのフラグ。
+ */
+function isInterviewRegisterEnabled(): boolean {
+  return process.env.SCHEDULE_AGENT_INTERVIEW_REGISTER?.trim().toLowerCase() === "true";
 }
 
 /**
@@ -180,12 +193,17 @@ async function createFollowupTask(
     `由来: ${input.mode === "task" ? "URL申し込み（フローA）" : "マイナビ直接返信（フローB）"}`,
     `元taskId: ${input.taskId ?? "（なし）"}`,
     "",
-    "仮予約カレンダーと面談管理（担当: 仮予約）に登録済み。担当CA確定後に付け替えること。",
+    "仮予約カレンダーに登録済み。担当CAを確定し、仮予約カレンダーから振り分けてください。",
   ];
-  if (interviewResult.skipped) {
-    bodyLines.push("", `※ 面談管理への登録はスキップ: ${interviewResult.detail}`);
+  // 面談管理登録の状態に応じた注記（step7: 既定は disabled＝手動運用）。
+  if (interviewResult.disabled) {
+    bodyLines.push("", "※ 面談管理への登録は手動で行ってください（AIは登録しません）。");
+  } else if (interviewResult.skipped) {
+    bodyLines.push("", `※ 面談管理への登録はスキップ: ${interviewResult.detail}（手動で登録してください）`);
   } else if (!interviewResult.ok) {
     bodyLines.push("", `※ 面談管理への登録に失敗: ${interviewResult.detail}（手動で登録してください）`);
+  } else {
+    bodyLines.push("", "※ 面談管理（担当: 仮予約）に登録済み。担当CA確定後に付け替えること。");
   }
   const body = bodyLines.join("\n");
 
@@ -265,14 +283,19 @@ export async function runPostReservation(input: PostReservationInput): Promise<v
     const whenLabel = reservedLabel(input.slot.date, input.slot.startTime);
     const failures: string[] = [];
 
-    // (1) 面談管理登録
-    let interviewResult: StepResult = { ok: true, skipped: true, detail: "未実行" };
-    try {
-      interviewResult = await createInterviewRecord(input, whenLabel);
-    } catch (e) {
-      interviewResult = { ok: false, detail: msg(e) };
-      failures.push(`面談登録: ${msg(e)}`);
-      console.error("[post-reserve] interview create failed:", e);
+    // (1) 面談管理登録（step7: 既定で無効・env SCHEDULE_AGENT_INTERVIEW_REGISTER="true" のときだけ実行）。
+    //     無効時は createInterviewRecord を呼ばない＝面談登録失敗も発生しない（失敗メール対象から自動的に外れる）。
+    let interviewResult: StepResult;
+    if (isInterviewRegisterEnabled()) {
+      try {
+        interviewResult = await createInterviewRecord(input, whenLabel);
+      } catch (e) {
+        interviewResult = { ok: false, detail: msg(e) };
+        failures.push(`面談登録: ${msg(e)}`);
+        console.error("[post-reserve] interview create failed:", e);
+      }
+    } else {
+      interviewResult = { ok: true, disabled: true, detail: "面談自動登録は無効（手動運用）" };
     }
 
     // (2) LINE通知
