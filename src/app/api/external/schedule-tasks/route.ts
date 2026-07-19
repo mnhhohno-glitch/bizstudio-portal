@@ -6,6 +6,7 @@ import type { Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   SCHEDULE_CATEGORY_NAME,
+  SCHEDULE_EXEMPT_COMMENT_MARKER,
   VALID_TASK_STATUSES,
   isAuthorizedExternal,
   parseJstDefaultDate,
@@ -82,6 +83,20 @@ export async function GET(request: Request) {
     include: scheduleTaskInclude,
   });
 
+  // 対象外コメント判定: 取得タスクのコメントを一括クエリし、キーワードを含むタスクIDを集める。
+  const taskIds = tasks.map((t) => t.id);
+  const exemptTaskIds = new Set<string>();
+  if (taskIds.length > 0) {
+    const comments = await prisma.taskComment.findMany({
+      where: { taskId: { in: taskIds }, content: { contains: SCHEDULE_EXEMPT_COMMENT_MARKER } },
+      select: { taskId: true },
+    });
+    for (const c of comments) exemptTaskIds.add(c.taskId);
+  }
+
+  const serialize = (t: (typeof tasks)[number]) =>
+    serializeScheduleTask(t, { hasExemptComment: exemptTaskIds.has(t.id) });
+
   // T-139 step4: 任意 dedupeByName=true。タイトルから抽出した氏名が同一のタスクが複数あれば
   // createdAt 最新の1件のみ返す（「同一氏名の重複は最新のみ処理対象」に対応）。
   // 既定（未指定）は従来どおり全件返す＝レスポンス形状も含め後方互換。
@@ -103,8 +118,8 @@ export async function GET(request: Request) {
     const deduped = [...passthrough, ...latestByName.values()].sort(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
     );
-    return NextResponse.json({ tasks: deduped.map(serializeScheduleTask) });
+    return NextResponse.json({ tasks: deduped.map(serialize) });
   }
 
-  return NextResponse.json({ tasks: tasks.map(serializeScheduleTask) });
+  return NextResponse.json({ tasks: tasks.map(serialize) });
 }

@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import {
   AI_COMMENT_PREFIX,
   SCHEDULE_CATEGORY_NAME,
+  SCHEDULE_EXEMPT_COMMENT_MARKER,
   VALID_TASK_STATUSES,
   isAuthorizedExternal,
   resolveSystemUserId,
@@ -109,5 +110,8 @@ export async function PATCH(
   if (!updated) {
     return NextResponse.json({ error: "更新後のタスク取得に失敗しました" }, { status: 500 });
   }
-  return NextResponse.json(serializeScheduleTask(updated));
+  const hasExempt = await prisma.taskComment.count({
+    where: { taskId, content: { contains: SCHEDULE_EXEMPT_COMMENT_MARKER } },
+  });
+  return NextResponse.json(serializeScheduleTask(updated, { hasExemptComment: hasExempt > 0 }));
 }

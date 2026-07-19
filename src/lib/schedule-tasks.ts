@@ -15,6 +15,10 @@ export const VALID_TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] a
 /** AIが書いたコメントを人間の目で判別するための接頭辞。 */
 export const AI_COMMENT_PREFIX = "【日程調整AI】";
 
+/** 対象外コメント判定キーワード。コメント本文にこの文字列を含めばRPA再処理対象外。 */
+export const SCHEDULE_EXEMPT_COMMENT_MARKER =
+  process.env.SCHEDULE_EXEMPT_COMMENT_MARKER || "自動対応対象外";
+
 /** 外部API認証: x-api-secret を EXTERNAL_API_SECRET と照合（create-schedule-task と同一）。 */
 export function isAuthorizedExternal(request: Request): boolean {
   const secret = request.headers.get("x-api-secret");
@@ -76,10 +80,14 @@ export type SerializedScheduleTask = {
   fields: Record<string, string | null>;
   assignees: { id: string; name: string }[];
   candidateId: string | null;
+  hasExemptComment: boolean;
 };
 
 /** Task 行を RPA機向けJSON形状へ変換する。fields は生テキストを加工せず、無いキーは null。 */
-export function serializeScheduleTask(task: ScheduleTaskRow): SerializedScheduleTask {
+export function serializeScheduleTask(
+  task: ScheduleTaskRow,
+  opts?: { hasExemptComment?: boolean },
+): SerializedScheduleTask {
   const byLabel = new Map<string, string>();
   for (const fv of task.fieldValues) {
     if (fv.field?.label) byLabel.set(fv.field.label, fv.value);
@@ -96,5 +104,6 @@ export function serializeScheduleTask(task: ScheduleTaskRow): SerializedSchedule
     fields,
     assignees: task.assignees.map((a) => ({ id: a.employee.id, name: a.employee.name })),
     candidateId: task.candidateId ?? null,
+    hasExemptComment: opts?.hasExemptComment ?? false,
   };
 }
