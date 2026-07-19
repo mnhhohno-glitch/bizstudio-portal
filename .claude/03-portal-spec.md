@@ -584,3 +584,39 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
 - 対象外判定は **RPA が実施済み**の前提（portal は判定しない）。
 - 返信送信後の `COMPLETED` 化・コメント付与は **RPA が既存 PATCH `/api/external/schedule-tasks/[taskId]`** で行う。
 - `resolve` は通知部品（LINE WORKS 等）を**一切呼ばない・importもしない**。
+  → **step6（下記）で「仮予約が新規成立したときのみ」通知可の例外を追加**（承認済み）。
+
+### 仮予約成立時の後続処理（step6・master, 2026-07）
+
+`resolve` が**新規に仮予約を作成できたとき**（`result=reserved` かつ `alreadyReserved=false`）に限り、
+`runPostReservation`（`src/lib/schedule-agent/post-reserve.ts`）で後続処理3点を発火する。
+成立は1候補者につき1回（`reserve.ts` の二重予約チェックで担保）なので夜間ポーリングでも連発しない。
+`alreadyReserved=true`（既存再返信）・`today_only`・`unavailable`・`no_reply` では**発火しない**。
+フローA（モードA・taskId由来）/フローB（モードB・メッセージ由来）の両方で発火する。
+
+- **(1) 面談管理登録**（`InterviewRecord`）: 担当CAは placeholder「仮予約」。
+  - `candidateId` が無い（モードB／モードAで未紐付け）→ **面談登録はスキップ**し (2)(3) は実行、
+    タスク本文にスキップ理由を明記（同姓同名の誤爆を避け無理に紐付けない）。
+  - 非破壊: `interviewCount=null`（実績表の初回/既存集計から除外）・`isLatest=false`
+    （候補者の最新面談判定を乱さない）・`status="draft"`。`interviewTool` は `電話`/`オンライン`。
+- **(2) LINE通知**: 既存タスク通知と同じ Bot/チャンネル（`LINEWORKS_TASK_BOT_ID`/`LINEWORKS_TASK_CHANNEL_ID`）。
+  求職者名・仮予約日時・面談方法・「AI自動仮予約」の旨を送る。env 未設定ならスキップ（失敗にしない）。
+- **(3) タスク作成**: カテゴリ **`その他`**（`日程調整` は RPA が再ポーリングし二重予約になり得るため使わない）。
+  `status=NOT_STARTED`・assignee はマイナビ管理担当（`isMynaviAssignee=true` の慣例）。本文に
+  求職者名・仮予約日時・面談方法・由来（フローA/B）・元taskId・「担当CA確定後に付け替え」を記載。
+
+**安全設計**: `runPostReservation` は**絶対に throw しない**（各処理を try/catch で隔離）。
+`resolve` 応答（reserved 文面・値・HTTPコード）は不変。(1) が失敗/スキップしても (2)(3) は実行し、
+特に (3) を最優先で成立させる。いずれか失敗時は `masayuki_oono@bizstudio.co.jp` へ**1通**メール
+（Resend・step5 の日次重複抑止は掛けない＝成立ごとの単発）。
+
+**ダミーCA「仮予約」**:
+- `User`（`status=disabled`＝ログイン不可・`isMynaviAssignee=false`・`lineworksId=null`・`role=member`）＋
+  `Employee`（`status=active`＝面談担当ドロップダウンに出す・`userId`でUserにリンク・`jobCategory=null`＝
+  実績表CAセレクタ/集計から除外・`isExemptFromAttendance=true`＝未打刻アラート除外・`employeeNumber="9000"`）。
+- `InterviewRecord.interviewerUserId`/`createdByUserId` は名前に反して **Employee.id** を参照するため User+Employee 両方が必要。
+  env `SCHEDULE_PLACEHOLDER_CA_USER_ID` には **User.id** を設定し、コードが `employee.findFirst({where:{userId}})` で Employee.id へ解決する。
+- **他機能への波及**: `jobCategory=null`＋Userの各フラグにより実績表・マイナビ・LINE宛先・勤怠アラート・ログインからは除外される。
+  ただし `status="active"` の Employee 一覧（`/api/employees`・社員マスター・勤怠の従業員リスト・各画面の担当CAフィルタ）
+  には面談担当と同じ `status:"active"` 条件で**表示される**（面談担当に出すための必須条件と同一のため排除不可）。
+  実害は表示のみ（候補者の担当CAとして選ばれることはなく、実績・通知・打刻には現れない）。

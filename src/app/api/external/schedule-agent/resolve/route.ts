@@ -14,7 +14,10 @@
 // 分業: portal は **タスクを読み取るだけ**。status 変更・コメント追加は一切しない（RPAが後で PATCH する）。
 // 対象外判定も portal はしない（RPA が判定済みの前提）。
 // 稼働時間帯の制御は RPA 側の責務（portal に時間帯制限は実装しない）。
-// 通知部品（LINE WORKS 等）は一切呼ばない・import もしない。
+//
+// step6（2026-07）: 仮予約が **新規に成立したとき**（result=reserved かつ alreadyReserved=false）に限り、
+//   後続処理3点（面談登録・LINE通知・タスク作成）を runPostReservation で発火する。成立は1候補者1回のため
+//   夜間ポーリングでも連発しない。後続処理は失敗隔離済みで resolve 応答には一切影響しない（下記参照）。
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULE_CATEGORY_NAME, isAuthorizedExternal, parseJstDefaultDate } from "@/lib/schedule-tasks";
@@ -44,6 +47,7 @@ import {
   buildUnavailableReply,
   type MeetingMethod,
 } from "@/lib/schedule-agent/reply-templates";
+import { runPostReservation } from "@/lib/schedule-agent/post-reserve";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +130,8 @@ export async function POST(request: Request) {
   let windows: DesiredWindow[];
   let now: Date;
   let mode: "task" | "message";
+  // step6: 面談登録の紐付け用。モードAでタスクに紐付いていれば求職者ID。モードB/未紐付けは null。
+  let candidateId: string | null = null;
 
   if (taskId) {
     // ===== モードA: taskId 指定 =====
@@ -148,6 +154,7 @@ export async function POST(request: Request) {
     const name = extractCandidateName(task.title);
     if (!name) return noReply(); // 氏名が取れない → 返信不要
     candidateName = name;
+    candidateId = task.candidateId ?? null; // step6: 面談登録の紐付け材料（無ければ面談登録はスキップ）
 
     const byLabel = new Map(task.fieldValues.map((fv) => [fv.field?.label ?? "", fv.value]));
     method = methodFromFormatField(byLabel.get("面談形式")); // LLM推測はしない
@@ -236,6 +243,23 @@ export async function POST(request: Request) {
     taskId,
   });
   if (!eventId) return noReply(); // 書き込み失敗 → 誤送信しない（RPAは返信しない）
+
+  // step6: 新規仮予約成立時のみ後続処理（面談登録・LINE通知・タスク作成）を発火。
+  //   - alreadyReserved=true（既存再返信）ではここに来ない＝二重作成しない。
+  //   - runPostReservation は内部で失敗隔離し throw しない設計だが、防御的に try/catch で囲い、
+  //     後続処理の成否を resolve 応答（reserved 文面・HTTPコード）に一切影響させない。
+  try {
+    await runPostReservation({
+      candidateName,
+      candidateId,
+      slot: outcome.slot,
+      method,
+      mode,
+      taskId,
+    });
+  } catch (e) {
+    console.error("[resolve] post-reservation dispatch failed:", e);
+  }
 
   return reservedResponse(candidateName, outcome.slot, method, false);
 }
