@@ -53,19 +53,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. タスクタイトル生成
+    // 1.5 candidateId から PDF由来の正式氏名を解決（T-139）
+    //   フォーム手入力の氏名は入力ミス（例「平塚美月 美月」の重複入力）が起こり、RPAの
+    //   マイナビ検索を失敗させる。PDFから機械抽出した Candidate.name はマイナビ登録氏名と
+    //   完全一致するため、candidateId が渡された場合は Candidate.name をタイトル氏名に使う。
+    //   ★後方互換が絶対条件: candidateId 無し／Candidate 不在なら従来どおりフォーム氏名を使う。
+    //     無効な candidateId でも 400 にせず安全側（従来動作）へ倒す（フォーム送信全体の失敗回避）。
+    let effectiveName = candidateName;
+    let validatedCandidateId: string | null = null;
+    if (candidateId) {
+      const candidate = await prisma.candidate.findUnique({
+        where: { id: candidateId },
+        select: { id: true, name: true },
+      });
+      if (candidate) {
+        validatedCandidateId = candidate.id;
+        if (candidate.name?.trim()) {
+          effectiveName = candidate.name.trim();
+        }
+      }
+    }
+    const nameWasSwapped = effectiveName !== candidateName;
+
+    // 2. タスクタイトル生成（氏名部分に effectiveName を使う。命名パターンは不変）
     let taskTitle: string;
     switch (type) {
       case "mynavi_new":
         taskTitle = source
-          ? `【${source} 新規面談調整】新規応募者 ${candidateName}`
-          : `【新規面談調整】新規応募者 ${candidateName}`;
+          ? `【${source} 新規面談調整】新規応募者 ${effectiveName}`
+          : `【新規面談調整】新規応募者 ${effectiveName}`;
         break;
       case "consultation":
-        taskTitle = `【面談調整】${candidateName} - 担当:${advisorName ?? "未設定"}`;
+        taskTitle = `【面談調整】${effectiveName} - 担当:${advisorName ?? "未設定"}`;
         break;
       case "interview":
-        taskTitle = `【面接希望日】${candidateName} - 担当:${advisorName ?? "未設定"}`;
+        taskTitle = `【面接希望日】${effectiveName} - 担当:${advisorName ?? "未設定"}`;
         break;
       default:
         return NextResponse.json(
@@ -167,8 +189,13 @@ export async function POST(request: Request) {
       "希望日時": preferredDates,
       "面談形式": meetingFormat,
     };
-    if (notes) {
-      fieldMap["備考"] = notes;
+    // 備考: 既存の notes に加え、氏名を PDF由来に差し替えた場合はフォーム入力の元氏名を保全する
+    //   （照合ミス疑い時に人が元の手入力値を確認できるようにするため）。
+    const noteParts: string[] = [];
+    if (notes) noteParts.push(notes);
+    if (nameWasSwapped) noteParts.push(`フォーム入力氏名: ${candidateName}`);
+    if (noteParts.length > 0) {
+      fieldMap["備考"] = noteParts.join("\n\n");
     }
 
     const fieldValuesData = category.fields
@@ -186,7 +213,8 @@ export async function POST(request: Request) {
         title: taskTitle,
         status: "NOT_STARTED",
         categoryId: category.id,
-        candidateId: candidateId || null,
+        // 実在が確認できた candidateId のみ紐付け（無効値は FK エラーを避けて null）。
+        candidateId: validatedCandidateId,
         createdByUserId,
         completionType: "any",
         assignees: {
