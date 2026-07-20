@@ -33,6 +33,20 @@ const RESPONSE_BADGE: Record<string, { label: string; cls: string }> = {
   INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
 };
 
+// T-133 FU: CA画面の「本人回答」列用。求職者本人のマイページ回答 = CandidateFile.responseStatus。
+// 上の RESPONSE_BADGE（CandidateJobResponse 由来・会社名脇チップ）とは別テーブル・別系統。
+// キーは CandidateFile.responseStatus の正準値（src/lib/constants/response-status.ts）。
+// UNANSWERED / null / 不明値はこのマップに含めず、呼び出し側で「—」表示する。
+// 色は既存バッジ配色を流用（応募したい=赤・気になる=黄）。新色は作らない。
+const RESPONSE_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  APPLY: { label: "応募したい", cls: "bg-red-100 text-red-700" },
+  INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
+  PENDING: { label: "保留", cls: "bg-gray-100 text-gray-600" },
+  EXCLUDED: { label: "対象外", cls: "bg-gray-100 text-gray-400" },
+  IN_SELECTION: { label: "選考中", cls: "bg-blue-100 text-blue-700" },
+  SELECTION_ENDED: { label: "選考終了", cls: "bg-gray-100 text-gray-500" },
+};
+
 type JobsResponse = {
   jobs: Job[];
   total_jobs: number;
@@ -292,6 +306,8 @@ type BookmarkFile = {
   aiAnalyzedAt: string | null;
   caComment: string | null; // T-128 batch4: CAアドバイザーコメント
   candidateNote: string | null; // T-133 FU-1: 求職者本人が /site/ で書いたメモ（CA画面では表示のみ）
+  // T-133 FU: 求職者本人のマイページ回答（UNANSWERED/INTERESTED/APPLY/PENDING/EXCLUDED/IN_SELECTION/SELECTION_ENDED）。CA画面は表示のみ。
+  responseStatus?: string | null;
   lastExportedAt: string | null;
   lastExportedTo: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
@@ -1353,6 +1369,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("overall") ? "text-[#2563EB]" : ""}`}>
             総合<DirArrows dir={keyOf("overall")?.dir ?? null} /><OrderBadge n={degreeOf("overall")} />
           </span>
+          {/* T-133 FU: 本人回答（CandidateFile.responseStatus）。並び替えは付けない（既存sortはCandidateJobResponse由来で別系統・修正3で整理）。 */}
+          <span className="w-[72px] shrink-0" title="求職者本人がマイページで付けた回答（気になる/応募したい 等）">本人回答</span>
           <span
             onClick={() => activateBasis("uploader")}
             className={`w-[72px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("uploader") ? "text-[#2563EB]" : ""}`}
@@ -1455,6 +1473,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.pass)}</span>
                       <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
                     </>
+                  );
+                })()}
+                {(() => {
+                  // T-133 FU: 求職者本人のマイページ回答（responseStatus）。UNANSWERED/null/不明は「—」。内部値は出さず日本語表示。
+                  const b = file.responseStatus ? RESPONSE_STATUS_BADGE[file.responseStatus] : null;
+                  return (
+                    <span className="w-[72px] shrink-0 text-center">
+                      {b ? (
+                        <span className={`inline-flex items-center justify-center rounded px-1.5 py-0 text-[10px] font-medium ${b.cls}`}>{b.label}</span>
+                      ) : (
+                        <span className="text-[10px] text-gray-300">—</span>
+                      )}
+                    </span>
                   );
                 })()}
                 {file.origin === "candidate" ? (

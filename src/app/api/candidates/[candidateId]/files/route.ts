@@ -86,6 +86,8 @@ export async function GET(
       sourceMedia: true,
       // 求職者本人のサイト操作由来（"candidate"）か CA追加（null|"ca"）かの区別。担当列の「サイト経由」表示に使う。
       origin: true,
+      // T-133 FU: 求職者本人のマイページ回答。CA画面の「本人回答」列で表示（読むだけ・書き込みしない）。
+      responseStatus: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,
