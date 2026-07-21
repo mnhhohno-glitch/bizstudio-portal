@@ -6,6 +6,7 @@ import { SELECTION_ENDED_DETAILS, HIDDEN_ENTRY_DETAILS } from "@/lib/constants/e
 import { getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import { normalizeTimeInput } from "@/lib/timeFormat";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
+import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import type { Entry, FlagData } from "./EntryBoard";
 
 /* ========== Types ========== */
@@ -862,19 +863,31 @@ export default function EntryTable({
           </td>
         );
       }
-      case "company":
+      case "company": {
+        // T-140: サイト経由(route="site-apply")かつ externalJobRef ありの行は、
+        // 企業名クリックで portal SSO 経由 bizstudio-job-platform 求人詳細ページを開く。
+        // 通常の求人紹介経由行は従来通り originalUrl(kyuujin PDF プレビュー)を開く。
+        const isSiteApply = entry.route === "site-apply" && !!entry.externalJobRef;
+        const clickable = isSiteApply || !!entry.originalUrl;
+        const titleHint = isSiteApply
+          ? `${entry.companyName}\nクリックで自社求人サイト(bizstudio-job-platform)の求人詳細を開きます`
+          : entry.companyName;
         return (
-          <td key={col.key} className="px-2 py-1.5" title={entry.companyName}>
+          <td key={col.key} className="px-2 py-1.5" title={titleHint}>
             <div
               onClick={(e) => {
                 e.stopPropagation();
+                if (isSiteApply && entry.externalJobRef) {
+                  openJobPlatformDetail(entry.externalJobRef);
+                  return;
+                }
                 if (entry.originalUrl) {
                   const previewUrl = entry.originalUrl.replace(/\/view(\?|$)/, "/preview$1");
                   window.open(previewUrl, "_blank");
                 }
               }}
-              className={`whitespace-nowrap truncate max-w-[280px] ${entry.originalUrl ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
-              title={entry.companyName}
+              className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
+              title={titleHint}
               data-company-name={entry.companyName}
             >
               {entry.companyName}
@@ -882,6 +895,7 @@ export default function EntryTable({
             {entry.jobTitle && <div className="text-[10px] text-gray-400 truncate max-w-[280px]" title={entry.jobTitle} data-job-title={entry.jobTitle}>{entry.jobTitle}</div>}
           </td>
         );
+      }
       case "jobDb": {
         // エントリー媒体切替済み: entryRoute を優先表示、元の媒体は小さく表示
         const switched = !!entry.entryRoute;

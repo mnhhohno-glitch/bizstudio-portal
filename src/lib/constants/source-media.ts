@@ -32,16 +32,19 @@ export function resolveJobDbFromBookmark(
 }
 
 /**
- * externalJobRef の末尾の連続数字を求人番号として取り出す。
- *   hl-ap-320645 → 320645
- *   liginc-101323 → 101323
- *   ptw-000001 → 000001
- *   （末尾に数字が無い場合は externalJobRef 全体をそのまま返す）
+ * externalJobRef の末尾の連続数字を「実求人番号」として取り出す。
+ *   hl-ap-320645       → 320645（HITO-Link 実求人番号）
+ *   liginc-101323      → 101323
+ *   ptw-000001         → 000001
+ *   circus-kiwjza      → null（circus 系は job-platform 割当のランダムスラッグで実求人番号ではない）
+ *   own-xxxx           → null（末尾に数字がない場合）
+ *   （T-140: null 返しに修正。旧実装は末尾数字なし時に ref 全体を返し、externalJobNo に
+ *     "circus-kiwjza" のような無意味値が入っていた。表示・突合・DB照合で破綻するため null 化する）
  */
 export function extractJobNoFromRef(externalJobRef: string | null | undefined): string | null {
   if (!externalJobRef) return null;
   const m = externalJobRef.match(/(\d+)\s*$/);
-  return m ? m[1] : externalJobRef;
+  return m ? m[1] : null;
 }
 
 /**

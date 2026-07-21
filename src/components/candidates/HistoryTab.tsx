@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
 import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
+import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 /* ---------- Types ---------- */
@@ -765,28 +766,13 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   }, [jobResponseMap]);
 
   // DBNO クリック: portal SSO（issue-app-token）で job-platform 求人詳細を新規タブで開く。
-  // Sidebar の「求人検索」遷移と同じ慣例（?auth_token= を付与）に、求人特定用の &id= を足す。
-  // job-platform middleware は auth_token を消費後、id を保持したままリダイレクトし詳細モーダルを開く。
-  const openJobPlatformDetail = async (externalJobRef: string) => {
-    if (openingRef) return; // 二重クリック防止
+  // T-140: EntryTable と共有するため実処理は @/lib/openJobPlatformDetail に切り出し。
+  // ここでは二重クリック防止の in-flight ガード(openingRef)だけを持つ。
+  const handleOpenJobPlatformDetail = async (externalJobRef: string) => {
+    if (openingRef) return;
     setOpeningRef(externalJobRef);
     try {
-      const res = await fetch("/api/auth/issue-app-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_app: "job_platform" }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast.error(err?.error || "求人ページを開けませんでした");
-        return;
-      }
-      const { token, target_url } = await res.json();
-      // target_url は末尾 /jobs（例: https://.../jobs）。auth_token + id を付与。
-      const url = `${target_url}?auth_token=${encodeURIComponent(token)}&id=${encodeURIComponent(externalJobRef)}`;
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      toast.error("求人ページを開けませんでした");
+      await openJobPlatformDetail(externalJobRef);
     } finally {
       setOpeningRef(null);
     }
@@ -1494,7 +1480,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       <span className="w-[120px] shrink-0 text-[11px] truncate">
                         {ref ? (
                           <button
-                            onClick={(e) => { e.stopPropagation(); openJobPlatformDetail(ref); }}
+                            onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(ref); }}
                             disabled={openingRef === ref}
                             className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-full text-left disabled:opacity-50 disabled:cursor-wait"
                             title={`${ref} — クリックで求人ページを開く`}

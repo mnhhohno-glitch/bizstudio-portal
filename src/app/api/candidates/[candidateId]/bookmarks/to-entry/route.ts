@@ -92,6 +92,7 @@ export async function POST(
     entryFlag: string;
     entryFlagDetail: string;
     externalJobNo: string | null;
+    externalJobRef: string | null;
     jobDb: string | null;
     route: string;
     careerAdvisorId: string;
@@ -114,7 +115,7 @@ export async function POST(
     //   sourceMedia（webhook 由来・少数）→ externalJobRef 接頭辞（circus-/hl-ap-/own-/mynavi_...）の順で判定。
     //   両方で判定不能なときのみ resolveJobDbFromBookmark の job-platform 既定 "HITO-Link" にフォールバック。
     //   ※ 旧実装は resolveJobDbFromBookmark を先に評価しており、sourceMedia 未設定=job-platform 行が全件
-    //     "HITO-Link" に落ちてブックマーク側と食い違っていた（Circus 接頭辞が拾えない）ため順序反転。
+    //     "HITO-Link" に落ちてブックマーク側と食い違っていた（Circus 接頭辞が拾えない）ため順序反転（4093a10）。
     const jobDb =
       resolveBookmarkMedia(f.sourceMedia, f.externalJobRef) ??
       resolveJobDbFromBookmark(f.sourceType, f.sourceMedia);
@@ -127,7 +128,11 @@ export async function POST(
       introducedAt: now,
       entryFlag: "エントリー",
       entryFlagDetail: "検討中",
+      // T-140: extractJobNoFromRef は数字が取れない ref(circus-kiwjza 等)で null を返すよう修正済み。
+      // hl-ap-289566 → "289566"(実HITO-Link番号)、circus-kiwjza → null(実求人番号不明)。
       externalJobNo: extractJobNoFromRef(f.externalJobRef),
+      // T-140: 企業名クリック→自社求人サイト詳細を開く SSO キー(job-platform source_job_id)。
+      externalJobRef: f.externalJobRef ?? null,
       jobDb,
       route: "site-apply",
       careerAdvisorId: user.id,
