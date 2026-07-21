@@ -706,7 +706,7 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs, onArchivedChange }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -1146,14 +1146,32 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
   };
 
+  // サイト経由（origin="candidate" & driveFileId=null）判定。求人紹介タブには構造上出せないため、
+  // 求人紹介への移動対象から外し、専用の「エントリーへ登録」導線へ回す。
+  const isSiteApply = (f: BookmarkFile) => f.origin === "candidate" && !f.driveFileId;
+  const selectedSiteApplyIds = [...selectedIds].filter((id) => {
+    const f = files.find((x) => x.id === id);
+    return f ? isSiteApply(f) : false;
+  });
+
   const [movingToJobs, setMovingToJobs] = useState(false);
   const handleMoveToJobs = async () => {
     if (selectedIds.size === 0) return;
+    const selected = files.filter((f) => selectedIds.has(f.id));
+    // サイト経由は kyuujin に対応 job が無く求人紹介タブに出せない。求人紹介へは移動させず
+    //（＝ last_exported_at を立てず）、「エントリーへ登録」へ案内する。通常行のみ従来処理。
+    const siteApply = selected.filter(isSiteApply);
+    const movable = selected.filter((f) => !isSiteApply(f));
+
+    if (movable.length === 0) {
+      toast.info("サイト応募の求人は「エントリーへ登録」から進めてください");
+      return;
+    }
+
     setMovingToJobs(true);
     try {
-      const selected = files.filter((f) => selectedIds.has(f.id));
-      const exportedIds = selected.filter((f) => f.lastExportedAt).map((f) => f.id);
-      const notExportedIds = selected.filter((f) => !f.lastExportedAt).map((f) => f.id);
+      const exportedIds = movable.filter((f) => f.lastExportedAt).map((f) => f.id);
+      const notExportedIds = movable.filter((f) => !f.lastExportedAt).map((f) => f.id);
 
       let restoredCount = 0;
       let sentCount = 0;
@@ -1191,12 +1209,43 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       if (messages.length) parts.push(messages.join(" / "));
       toast.success(parts.length ? parts.join("、") + "しました" : "処理が完了しました");
 
+      if (siteApply.length > 0) {
+        toast.info(`サイト応募${siteApply.length}件は移動対象外です。「エントリーへ登録」から進めてください`);
+      }
+
       setSelectedIds(new Set());
       onSwitchToJobs?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
       setMovingToJobs(false);
+    }
+  };
+
+  // サイト経由レコードを求人紹介を経由せずエントリー(JobEntry)へ直接登録する。
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [registeringEntry, setRegisteringEntry] = useState(false);
+  const handleRegisterEntry = async (entryDate: string) => {
+    if (selectedSiteApplyIds.length === 0) return;
+    setRegisteringEntry(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/to-entry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: selectedSiteApplyIds, entryDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "エントリー登録に失敗しました");
+      const parts = [`${data.created ?? 0}件をエントリーに登録`];
+      if (data.skipped > 0) parts.push(`${data.skipped}件は登録済みのためスキップ`);
+      toast.success(parts.join("、") + "しました");
+      setShowEntryModal(false);
+      setSelectedIds(new Set());
+      onEntryCreated?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
+    } finally {
+      setRegisteringEntry(false);
     }
   };
 
@@ -1314,6 +1363,16 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 >
                   {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
                 </button>
+                {selectedSiteApplyIds.length > 0 && (
+                  <button
+                    onClick={() => setShowEntryModal(true)}
+                    disabled={registeringEntry}
+                    className="text-[12px] text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50"
+                    title="サイト応募（求職者本人がマイページで応募した求人）を求人紹介を経由せずエントリー管理へ直接登録します"
+                  >
+                    {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedSiteApplyIds.length}件）`}
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -1573,6 +1632,14 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       </div>
 
       {/* Send to job tool modal */}
+      {showEntryModal && (
+        <EntryDateModal
+          count={selectedSiteApplyIds.length}
+          onConfirm={handleRegisterEntry}
+          onCancel={() => setShowEntryModal(false)}
+        />
+      )}
+
       {showSendModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseSend}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
@@ -2991,7 +3058,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onEntryCreated={fetchEntries} />
       )}
 
       {/* ===== 紹介保留サブタブ ===== */}
