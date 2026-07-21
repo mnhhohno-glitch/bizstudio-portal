@@ -314,6 +314,8 @@ export async function POST(
   }
 
   // 1. Fetch bookmark files with extracted text (optionally filtered by date)
+  //    extractedText の無い行は評価対象外。サイト経由（origin="candidate"/driveFileId=null）は
+  //    PDF実体が無く抽出テキストも生成されないため、この条件で自動的に除外される（AI評価対象外）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const whereClause: any = {
     candidateId,

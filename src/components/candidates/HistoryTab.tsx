@@ -842,7 +842,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   // Auto-extract text for existing files without extraction (run once)
   useEffect(() => {
     if (extractTriggered.current || loading || files.length === 0) return;
-    const filesWithoutText = files.filter((f) => !f.extractedAt);
+    // PDF実体が無い行（サイト経由・driveFileId=null）はテキスト抽出できない＝AI評価対象外。無駄な抽出要求を避けて除外。
+    const filesWithoutText = files.filter((f) => !f.extractedAt && f.driveFileId);
     if (filesWithoutText.length > 0) {
       extractTriggered.current = true;
       triggerExtraction(filesWithoutText.map((f) => f.id), ":auto");
@@ -999,14 +1000,25 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds: Array.from(selectedIds) }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // 全件PDF未保管（422）等はサーバの理由をそのまま表示する。
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "一括ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。");
+        return;
+      }
+      const downloaded = parseInt(res.headers.get("X-Downloaded-Count") || "0", 10);
+      const skipped = parseInt(res.headers.get("X-Skipped-Count") || "0", 10);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bookmarks_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      a.download = downloaded === 1 ? `bookmark_${stamp}.pdf` : `bookmarks_${stamp}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      if (skipped > 0) {
+        toast.success(`${downloaded}件をダウンロードしました（${skipped}件はPDF未保管のためスキップ）`);
+      }
     } catch {
       toast.error("一括ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。");
     } finally {
@@ -1168,7 +1180,9 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "送信に失敗しました");
-        sentCount = data.uploadedCount ?? notExportedIds.length;
+        // uploadedCount=PDF送信分、linkedCount=サイト経由(PDF不要)分。両方を「移動」件数に含める。
+        sentCount = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
+        if (sentCount === 0) sentCount = notExportedIds.length;
       }
 
       const parts: string[] = [];
@@ -1457,6 +1471,16 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                   )}
                 </div>
                 {(() => {
+                  // サイト経由（PDF未保管）は AI評価対象外。空「—」だと「未分析」と紛らわしいので明示する。
+                  const isSiteNoPdf = file.origin === "candidate" && !file.driveFileId;
+                  if (isSiteNoPdf && !file.aiAnalysisComment) {
+                    return (
+                      <span
+                        className="w-[168px] shrink-0 text-center text-[10px] text-gray-400"
+                        title="PDF未保管のためAI評価対象外（サイト経由求人）"
+                      >AI評価対象外</span>
+                    );
+                  }
                   const axis = parse3AxisRatings(file.aiAnalysisComment);
                   const badge = (v: string | undefined) => {
                     if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;

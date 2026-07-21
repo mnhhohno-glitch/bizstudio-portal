@@ -67,6 +67,53 @@ export async function POST(
 
   const advisorName = candidate.employee?.name || "";
 
+  // ブックマーク取得 → PDF有無で分岐（AI評価順にソート）。
+  //   pdfFiles      : driveFileId ありの通常行（kyuujin へ PDF を新規アップロードして job を作る従来フロー）
+  //   linkOnlyFiles : サイト経由（origin="candidate" / driveFileId=null）。求職者がマイページで応募/気になるを
+  //                   押した求人＝kyuujin 側の求職者プロジェクトに既に job が存在する（candidateNumber で引ける）。
+  //                   PDF送信は不要で、エクスポート状態だけ成立させて「求人紹介へ移動」を通す。
+  //                   ※ CandidateFile.kyuujinJobId は未充填のことが多い（favorites/バックフィル由来）ため条件にしない。
+  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+  const bookmarkFiles = (
+    await prisma.candidateFile.findMany({
+      where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
+    })
+  ).sort((a, b) => {
+    const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
+    const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
+    if (ra !== rb) return ra - rb;
+    return a.fileName.localeCompare(b.fileName);
+  });
+
+  const pdfFiles = bookmarkFiles.filter((f) => f.driveFileId);
+  const linkOnlyFiles = bookmarkFiles.filter(
+    (f) => !f.driveFileId && f.origin === "candidate",
+  );
+  const exportLabel = dbType === "circus" ? "circus" : "hito-link";
+
+  // 全件がサイト経由（PDFなし）の場合: kyuujin へのプロジェクト作成・アップロード・抽出は一切不要。
+  // 既存 job と紐付いた状態のまま、エクスポート状態だけ立てて「求人紹介へ移動」を成立させる。
+  if (pdfFiles.length === 0) {
+    if (linkOnlyFiles.length === 0) {
+      return NextResponse.json(
+        { error: "送信できる求人がありません（選択した求人にPDFが無く、サイト経由求人でもありません）" },
+        { status: 422 },
+      );
+    }
+    await prisma.candidateFile.updateMany({
+      where: { id: { in: linkOnlyFiles.map((f) => f.id) } },
+      data: { lastExportedAt: new Date(), lastExportedTo: exportLabel },
+    });
+    try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
+    return NextResponse.json({
+      success: true,
+      uploadedCount: 0,
+      linkedCount: linkOnlyFiles.length,
+      failedCount: 0,
+      message: `${linkOnlyFiles.length}件を求人紹介に移動しました（サイト経由・PDF送信不要）`,
+    });
+  }
+
   try {
     // 1. Check existing project
     console.log("[SendToJobTool] Step 1: Checking existing project...", { candidateNumber: candidate.candidateNumber });
@@ -121,28 +168,17 @@ export async function POST(
     console.log("[SendToJobTool] Step 1 complete:", { projectId, processingUnitId });
 
     // 2. Download bookmark PDFs from Google Drive (parallel, batched)
-    console.log("[SendToJobTool] Step 2: Downloading PDFs from Google Drive...", { fileCount: fileIds.length });
-    // AI評価順（A→B→C→D→未評価）でソート
-    const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
-    const bookmarkFiles = (
-      await prisma.candidateFile.findMany({
-        where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
-      })
-    ).sort((a, b) => {
-      const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
-      const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
-      if (ra !== rb) return ra - rb;
-      return a.fileName.localeCompare(b.fileName);
-    });
+    //    対象は PDF実体を持つ pdfFiles のみ（サイト経由の linkOnlyFiles はアップロード不要）。
+    console.log("[SendToJobTool] Step 2: Downloading PDFs from Google Drive...", { fileCount: pdfFiles.length, linkOnly: linkOnlyFiles.length });
 
     const downloadedFiles: { fileName: string; buffer: Buffer; mimeType: string; aiMatchRating: string | null; aiAnalysisComment: string | null; driveFileId: string }[] = [];
     let failedCount = 0;
 
-    for (let i = 0; i < bookmarkFiles.length; i += DOWNLOAD_BATCH_SIZE) {
-      const batch = bookmarkFiles.slice(i, i + DOWNLOAD_BATCH_SIZE);
+    for (let i = 0; i < pdfFiles.length; i += DOWNLOAD_BATCH_SIZE) {
+      const batch = pdfFiles.slice(i, i + DOWNLOAD_BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async (file) => {
-          if (!file.driveFileId) throw new Error("no_drive_file"); // PDF実体が無い行は送信対象外
+          if (!file.driveFileId) throw new Error("no_drive_file"); // 念のためのガード（pdfFiles は driveFileId ありのみ）
           const { base64, mimeType } = await downloadFileFromDrive(file.driveFileId);
           return {
             fileName: file.fileName,
@@ -355,9 +391,13 @@ export async function POST(
       : `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}`;
 
     // 7. Mark exported files
-    const exportedFileIds = bookmarkFiles
-      .filter((bf) => downloadedFiles.some((df) => df.driveFileId === bf.driveFileId))
-      .map((bf) => bf.id);
+    //    PDF送信できた行 + 同一リクエストのサイト経由行（PDF不要・紐付けのみ）の両方を出力済にする。
+    const exportedFileIds = [
+      ...pdfFiles
+        .filter((bf) => downloadedFiles.some((df) => df.driveFileId === bf.driveFileId))
+        .map((bf) => bf.id),
+      ...linkOnlyFiles.map((f) => f.id),
+    ];
     if (exportedFileIds.length > 0) {
       await prisma.candidateFile.updateMany({
         where: { id: { in: exportedFileIds } },
@@ -369,15 +409,17 @@ export async function POST(
       try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
     }
 
+    const linkedNote = linkOnlyFiles.length > 0 ? `（うち${linkOnlyFiles.length}件はサイト経由・PDF不要）` : "";
     return NextResponse.json({
       success: true,
       projectId,
       processingUnitId,
       recordKey,
       uploadedCount: downloadedFiles.length,
+      linkedCount: linkOnlyFiles.length,
       failedCount,
       projectUrl: memoUrl,
-      message: `${downloadedFiles.length}件のPDFを送信しました。メモ一覧で引当てを確認してください`,
+      message: `${downloadedFiles.length}件のPDFを送信しました${linkedNote}。メモ一覧で引当てを確認してください`,
     });
   } catch (e) {
     console.error("Send to job tool error:", e);

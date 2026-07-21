@@ -30,18 +30,32 @@ export async function POST(
     return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
   }
 
-  // Single file: direct download without zipping
-  if (files.length === 1) {
-    if (!files[0].driveFileId) {
-      return NextResponse.json({ error: "ダウンロード可能なファイル実体がありません" }, { status: 404 });
-    }
+  // PDF実体を持つ行だけがDL可能。サイト経由（driveFileId=null）は無言でスキップせず件数を明示する。
+  const downloadable = files.filter((f) => f.driveFileId);
+  const skippedNoPdf = files.length - downloadable.length;
+
+  // 全件がPDF未保管 → 空ZIPを返さず、理由を明確に返す。
+  if (downloadable.length === 0) {
+    return NextResponse.json(
+      {
+        error: `ダウンロード可能なPDFがありません（選択${files.length}件はすべてPDF未保管）`,
+        skippedNoPdf,
+      },
+      { status: 422 },
+    );
+  }
+
+  // Single downloadable file: direct download without zipping
+  if (downloadable.length === 1) {
     try {
-      const { base64, mimeType } = await downloadFileFromDrive(files[0].driveFileId);
+      const { base64, mimeType } = await downloadFileFromDrive(downloadable[0].driveFileId!);
       const buffer = Buffer.from(base64, "base64");
       return new NextResponse(buffer, {
         headers: {
           "Content-Type": mimeType,
-          "Content-Disposition": `attachment; filename="${encodeURIComponent(files[0].fileName)}"`,
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(downloadable[0].fileName)}"`,
+          "X-Downloaded-Count": "1",
+          "X-Skipped-Count": String(skippedNoPdf),
         },
       });
     } catch {
@@ -92,10 +106,9 @@ export async function POST(
         controller.error(err);
       });
 
-      for (const file of files) {
+      for (const file of downloadable) {
         try {
-          if (!file.driveFileId) continue; // PDF実体が無い行はzipに含めない
-          const { base64 } = await downloadFileFromDrive(file.driveFileId);
+          const { base64 } = await downloadFileFromDrive(file.driveFileId!);
           const buffer = Buffer.from(base64, "base64");
           archive.append(buffer, { name: uniqueEntryName(file.fileName) });
         } catch (e) {
@@ -126,6 +139,8 @@ export async function POST(
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="bookmarks_${date}.zip"`,
+      "X-Downloaded-Count": String(downloadable.length),
+      "X-Skipped-Count": String(skippedNoPdf),
     },
   });
 }
