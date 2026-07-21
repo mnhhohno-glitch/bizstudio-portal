@@ -110,11 +110,14 @@ export async function POST(
       continue;
     }
     seen.add(companyName);
-    // jobDb: sourceType="job-platform" 由来の媒体解決を優先し、無ければ externalJobRef 接頭辞で補完。
-    //   （ブックマーク一覧の「DB名」列と同じ resolveBookmarkMedia でフォールバックし表示を一致させる）
+    // jobDb: ブックマーク一覧「DB名」列と完全一致させるため resolveBookmarkMedia を優先。
+    //   sourceMedia（webhook 由来・少数）→ externalJobRef 接頭辞（circus-/hl-ap-/own-/mynavi_...）の順で判定。
+    //   両方で判定不能なときのみ resolveJobDbFromBookmark の job-platform 既定 "HITO-Link" にフォールバック。
+    //   ※ 旧実装は resolveJobDbFromBookmark を先に評価しており、sourceMedia 未設定=job-platform 行が全件
+    //     "HITO-Link" に落ちてブックマーク側と食い違っていた（Circus 接頭辞が拾えない）ため順序反転。
     const jobDb =
-      resolveJobDbFromBookmark(f.sourceType, f.sourceMedia) ??
-      resolveBookmarkMedia(f.sourceMedia, f.externalJobRef);
+      resolveBookmarkMedia(f.sourceMedia, f.externalJobRef) ??
+      resolveJobDbFromBookmark(f.sourceType, f.sourceMedia);
     rows.push({
       candidateId,
       companyName,
