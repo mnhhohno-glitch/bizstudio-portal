@@ -4,12 +4,20 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { EquipmentData } from "./detail-types";
 import { patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, DateInput, SaveBar, BlockTitle } from "./detail-ui";
+import {
+  FormField,
+  TextInput,
+  DateInput,
+  BlockTitle,
+  useSectionAutoSave,
+  AutoSaveIndicator,
+} from "./detail-ui";
 
-// T-096 タブ5: 貸与物。パスワード類5項目はマスク表示:
+// T-096 タブ5: 貸与物（自動保存化）。パスワード類5項目はマスク表示:
 // - 初期表示は値の有無のみ（値あり=●●●●●●＋小さい「表示」、値なし=「未設定」）
 // - 「表示」クリック時のみ /secrets API で復号値を取得（初期 props には復号値を含めない）
-// - 変更は平文入力 → 保存 API がサーバ側で暗号化
+// - 変更は平文入力 → onBlur で自動保存し、成功時に平文入力をクリアして再取得する
+//   （既存 API の暗号化保存フローは不変）
 
 type SecretField =
   | "pcInitialPassword"
@@ -23,19 +31,18 @@ function PasswordField({
   field,
   label,
   hasValue,
-  newValue,
-  onChangeNew,
 }: {
   employeeId: string;
   field: SecretField;
   label: string;
   hasValue: boolean;
-  newValue: string;
-  onChangeNew: (v: string) => void;
 }) {
+  const router = useRouter();
   const [revealed, setRevealed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newValue, setNewValue] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   const toggleReveal = async () => {
     if (revealed !== null) {
@@ -62,9 +69,30 @@ function PasswordField({
     }
   };
 
+  // onBlur で自動保存。空欄は「変更なし」なので送信しない（既存 API 仕様: 空文字は無視・null は明示クリア）。
+  const handleBlur = async () => {
+    if (newValue.length === 0) return;
+    setStatus("saving");
+    setError(null);
+    try {
+      await patchEmployeeSection(employeeId, "equipment", { [field]: newValue });
+      setNewValue("");
+      setStatus("saved");
+      router.refresh(); // hasXxxPassword 表示を最新化
+      setTimeout(() => setStatus((s) => (s === "saved" ? "idle" : s)), 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setStatus("idle");
+    }
+  };
+
   return (
     <div>
-      <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+      <div className="flex items-center justify-between">
+        <label className="block text-[10px] text-gray-400 mb-1">{label}</label>
+        {status === "saving" && <span className="text-[10px] text-gray-400">保存中...</span>}
+        {status === "saved" && <span className="text-[10px] text-green-600">✓ 保存しました</span>}
+      </div>
       {/* 現在値: 値あり=●●●●●●＋「表示」、値なし=未設定 */}
       <div className="flex items-center gap-2 border-b border-gray-300 py-1 min-h-[26px]">
         {hasValue ? (
@@ -86,12 +114,13 @@ function PasswordField({
         )}
       </div>
       {error && <div className="mt-1 text-[11px] text-red-600">{error}</div>}
-      {/* 変更入力 */}
+      {/* 変更入力 — フォーカス外れで自動保存 */}
       <input
         type="text"
         value={newValue}
-        onChange={(e) => onChangeNew(e.target.value)}
-        placeholder={hasValue ? "変更する場合のみ入力" : "設定する場合は入力"}
+        onChange={(e) => setNewValue(e.target.value)}
+        onBlur={handleBlur}
+        placeholder={hasValue ? "変更する場合のみ入力（フォーカス外れで保存）" : "設定する場合は入力（フォーカス外れで保存）"}
         className="mt-1 w-full border-0 border-b border-gray-300 rounded-none px-0 py-1 text-[13px] bg-transparent focus:ring-0 focus:border-blue-600 focus:outline-none"
       />
     </div>
@@ -105,7 +134,6 @@ export default function EquipmentTab({
   employeeId: string;
   equipment: EquipmentData | null;
 }) {
-  const router = useRouter();
   const initial = {
     pcLentDate: equipment?.pcLentDate ?? "",
     pcNumber: equipment?.pcNumber ?? "",
@@ -117,89 +145,45 @@ export default function EquipmentTab({
     googleAccount: equipment?.googleAccount ?? "",
     mobileManagementNo: equipment?.mobileManagementNo ?? "",
   };
-  const emptySecrets: Record<SecretField, string> = {
-    pcInitialPassword: "",
-    lineworksPassword: "",
-    appleIdPassword: "",
-    googlePassword: "",
-    office365Password: "",
-  };
   const [form, setForm] = useState(initial);
-  const [secrets, setSecrets] = useState<Record<SecretField, string>>(emptySecrets);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const autoSave = useSectionAutoSave(employeeId, "equipment", initial);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
-    setSaved(false);
   };
-  const setSecret = (key: SecretField) => (v: string) => {
-    setSecrets((s) => ({ ...s, [key]: v }));
-    setSaved(false);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      // 空のパスワード入力は送らない（=変更しない）。入力された項目のみ平文で送信し、
-      // サーバ側で暗号化して保存される。
-      const secretPayload: Record<string, string> = {};
-      for (const [k, v] of Object.entries(secrets)) {
-        if (v.length > 0) secretPayload[k] = v;
-      }
-      await patchEmployeeSection(employeeId, "equipment", { ...form, ...secretPayload });
-      setSecrets(emptySecrets);
-      setSaved(true);
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setForm(initial);
-    setSecrets(emptySecrets);
-    setSaved(false);
-    setError(null);
-    router.refresh();
-  };
+  const blurSave = (field: keyof typeof form) => () =>
+    autoSave.save(field as string, form[field]);
 
   return (
     <div className="px-5 py-5">
-      <BlockTitle>PC</BlockTitle>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <BlockTitle>PC</BlockTitle>
+        <AutoSaveIndicator status={autoSave.status} error={autoSave.error} />
+      </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="PC貸与日">
-          <DateInput value={form.pcLentDate} onChange={set("pcLentDate")} />
+          <DateInput value={form.pcLentDate} onChange={set("pcLentDate")} onBlur={blurSave("pcLentDate")} />
         </FormField>
         <FormField label="PC番号">
-          <TextInput value={form.pcNumber} onChange={set("pcNumber")} />
+          <TextInput value={form.pcNumber} onChange={set("pcNumber")} onBlur={blurSave("pcNumber")} />
         </FormField>
         <FormField label="PC機種">
-          <TextInput value={form.pcType} onChange={set("pcType")} />
+          <TextInput value={form.pcType} onChange={set("pcType")} onBlur={blurSave("pcType")} />
         </FormField>
         <FormField label="端末番号">
-          <TextInput value={form.deviceNumber} onChange={set("deviceNumber")} />
+          <TextInput value={form.deviceNumber} onChange={set("deviceNumber")} onBlur={blurSave("deviceNumber")} />
         </FormField>
         <PasswordField
           employeeId={employeeId}
           field="pcInitialPassword"
           label="PC初期パスワード"
           hasValue={equipment?.hasPcInitialPassword ?? false}
-          newValue={secrets.pcInitialPassword}
-          onChangeNew={setSecret("pcInitialPassword")}
         />
         <PasswordField
           employeeId={employeeId}
           field="lineworksPassword"
           label="LINE WORKS パスワード"
           hasValue={equipment?.hasLineworksPassword ?? false}
-          newValue={secrets.lineworksPassword}
-          onChangeNew={setSecret("lineworksPassword")}
         />
       </div>
 
@@ -207,48 +191,40 @@ export default function EquipmentTab({
         <BlockTitle>携帯</BlockTitle>
         <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="携帯番号">
-            <TextInput value={form.mobileNumber} onChange={set("mobileNumber")} />
+            <TextInput value={form.mobileNumber} onChange={set("mobileNumber")} onBlur={blurSave("mobileNumber")} />
           </FormField>
           <FormField label="携帯製造番号">
-            <TextInput value={form.mobileSerialNumber} onChange={set("mobileSerialNumber")} />
+            <TextInput value={form.mobileSerialNumber} onChange={set("mobileSerialNumber")} onBlur={blurSave("mobileSerialNumber")} />
           </FormField>
           <FormField label="管理No">
-            <TextInput value={form.mobileManagementNo} onChange={set("mobileManagementNo")} />
+            <TextInput value={form.mobileManagementNo} onChange={set("mobileManagementNo")} onBlur={blurSave("mobileManagementNo")} />
           </FormField>
           <FormField label="Apple ID">
-            <TextInput value={form.appleId} onChange={set("appleId")} />
+            <TextInput value={form.appleId} onChange={set("appleId")} onBlur={blurSave("appleId")} />
           </FormField>
           <PasswordField
             employeeId={employeeId}
             field="appleIdPassword"
             label="Apple ID パスワード"
             hasValue={equipment?.hasAppleIdPassword ?? false}
-            newValue={secrets.appleIdPassword}
-            onChangeNew={setSecret("appleIdPassword")}
           />
           <FormField label="Google アカウント">
-            <TextInput value={form.googleAccount} onChange={set("googleAccount")} />
+            <TextInput value={form.googleAccount} onChange={set("googleAccount")} onBlur={blurSave("googleAccount")} />
           </FormField>
           <PasswordField
             employeeId={employeeId}
             field="googlePassword"
             label="Google パスワード"
             hasValue={equipment?.hasGooglePassword ?? false}
-            newValue={secrets.googlePassword}
-            onChangeNew={setSecret("googlePassword")}
           />
           <PasswordField
             employeeId={employeeId}
             field="office365Password"
             label="Office365 パスワード"
             hasValue={equipment?.hasOffice365Password ?? false}
-            newValue={secrets.office365Password}
-            onChangeNew={setSecret("office365Password")}
           />
         </div>
       </div>
-
-      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
     </div>
   );
 }

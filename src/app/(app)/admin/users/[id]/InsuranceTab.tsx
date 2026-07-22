@@ -3,15 +3,26 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { InsuranceData, DependentData } from "./detail-types";
-import { patchEmployeeSection } from "./detail-types";
-import { FormField, TextInput, DateInput, NumberInput, TextArea, SaveBar, BlockTitle, ResumeAiButton } from "./detail-ui";
+import {
+  FormField,
+  TextInput,
+  DateInput,
+  NumberInput,
+  TextArea,
+  BlockTitle,
+  ResumeAiButton,
+  useSectionAutoSave,
+  useAutoSave,
+  AutoSaveIndicator,
+  RelationSelect,
+} from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
 
 // T-098: 社会保険タブで AI から仮入力するのは番号類のみ。
 const INSURANCE_AI_KEYS = ["pensionNumber", "employmentInsuranceNumber"] as const;
 
-// T-096 タブ3: 社会保険（雇用保険・社会保険・扶養の3ブロック）＋扶養家族 1:N
+// T-096 タブ3: 社会保険（自動保存化）＋扶養家族 1:N（各行を自動保存）
 
 export default function InsuranceTab({
   employeeId,
@@ -24,7 +35,6 @@ export default function InsuranceTab({
   dependents: DependentData[];
   aiFillData?: Record<string, unknown> | null;
 }) {
-  const router = useRouter();
   const initial = {
     employmentInsuranceStatus: insurance?.employmentInsuranceStatus ?? "",
     employmentInsuranceAcquiredDate: insurance?.employmentInsuranceAcquiredDate ?? "",
@@ -41,47 +51,25 @@ export default function InsuranceTab({
     dependentLostDate: insurance?.dependentLostDate ?? "",
   };
   const [form, setForm] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const autoSave = useSectionAutoSave(employeeId, "insurance", initial);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
-    setSaved(false);
   };
+  const blurSave = (field: keyof typeof form) => () =>
+    autoSave.save(field as string, form[field]);
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）— 番号類だけ反映
   const ai = useResumeAiFill(employeeId, setForm, INSURANCE_AI_KEYS);
   // T-098 追補: 全画面D&Dの解析結果配布（番号類の空欄のみマージ）
   const dropFill = useAiFillData(aiFillData, setForm, INSURANCE_AI_KEYS);
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await patchEmployeeSection(employeeId, "insurance", form);
-      setSaved(true);
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setForm(initial);
-    setSaved(false);
-    setError(null);
-    router.refresh();
-  };
-
   return (
     <div className="px-5 py-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <BlockTitle>雇用保険</BlockTitle>
         <div className="flex items-center gap-3">
+          <AutoSaveIndicator status={autoSave.status} error={autoSave.error} />
           {dropFill.filledCount != null && (
             <span className="text-[11px] text-green-600">{filledMessage(dropFill.filledCount)}</span>
           )}
@@ -90,22 +78,22 @@ export default function InsuranceTab({
       </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="加入状況">
-          <TextInput value={form.employmentInsuranceStatus} onChange={set("employmentInsuranceStatus")} placeholder="例: 加入" />
+          <TextInput value={form.employmentInsuranceStatus} onChange={set("employmentInsuranceStatus")} onBlur={blurSave("employmentInsuranceStatus")} placeholder="例: 加入" />
         </FormField>
         <FormField label="資格取得日">
-          <DateInput value={form.employmentInsuranceAcquiredDate} onChange={set("employmentInsuranceAcquiredDate")} />
+          <DateInput value={form.employmentInsuranceAcquiredDate} onChange={set("employmentInsuranceAcquiredDate")} onBlur={blurSave("employmentInsuranceAcquiredDate")} />
         </FormField>
         <FormField label="資格喪失日">
-          <DateInput value={form.employmentInsuranceLostDate} onChange={set("employmentInsuranceLostDate")} />
+          <DateInput value={form.employmentInsuranceLostDate} onChange={set("employmentInsuranceLostDate")} onBlur={blurSave("employmentInsuranceLostDate")} />
         </FormField>
         <FormField label="管轄">
-          <TextInput value={form.employmentInsuranceArea} onChange={set("employmentInsuranceArea")} />
+          <TextInput value={form.employmentInsuranceArea} onChange={set("employmentInsuranceArea")} onBlur={blurSave("employmentInsuranceArea")} />
         </FormField>
         <FormField label="被保険者番号">
-          <TextInput value={form.employmentInsuranceNumber} onChange={set("employmentInsuranceNumber")} />
+          <TextInput value={form.employmentInsuranceNumber} onChange={set("employmentInsuranceNumber")} onBlur={blurSave("employmentInsuranceNumber")} />
         </FormField>
         <FormField label="離職票依頼日">
-          <DateInput value={form.separationNoticeRequestDate} onChange={set("separationNoticeRequestDate")} />
+          <DateInput value={form.separationNoticeRequestDate} onChange={set("separationNoticeRequestDate")} onBlur={blurSave("separationNoticeRequestDate")} />
         </FormField>
       </div>
 
@@ -113,20 +101,20 @@ export default function InsuranceTab({
         <BlockTitle>社会保険</BlockTitle>
         <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="加入状況">
-            <TextInput value={form.socialInsuranceStatus} onChange={set("socialInsuranceStatus")} placeholder="例: 加入" />
+            <TextInput value={form.socialInsuranceStatus} onChange={set("socialInsuranceStatus")} onBlur={blurSave("socialInsuranceStatus")} placeholder="例: 加入" />
           </FormField>
           <FormField label="資格取得日">
-            <DateInput value={form.socialInsuranceAcquiredDate} onChange={set("socialInsuranceAcquiredDate")} />
+            <DateInput value={form.socialInsuranceAcquiredDate} onChange={set("socialInsuranceAcquiredDate")} onBlur={blurSave("socialInsuranceAcquiredDate")} />
           </FormField>
           <FormField label="資格喪失日">
-            <DateInput value={form.socialInsuranceLostDate} onChange={set("socialInsuranceLostDate")} />
+            <DateInput value={form.socialInsuranceLostDate} onChange={set("socialInsuranceLostDate")} onBlur={blurSave("socialInsuranceLostDate")} />
           </FormField>
           <FormField label="基礎年金番号">
-            <TextInput value={form.pensionNumber} onChange={set("pensionNumber")} />
+            <TextInput value={form.pensionNumber} onChange={set("pensionNumber")} onBlur={blurSave("pensionNumber")} />
           </FormField>
           <div className="col-span-4">
             <FormField label="備考">
-              <TextArea value={form.socialInsuranceNote} onChange={set("socialInsuranceNote")} />
+              <TextArea value={form.socialInsuranceNote} onChange={set("socialInsuranceNote")} onBlur={blurSave("socialInsuranceNote")} />
             </FormField>
           </div>
         </div>
@@ -136,15 +124,13 @@ export default function InsuranceTab({
         <BlockTitle>扶養</BlockTitle>
         <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="扶養取得日">
-            <DateInput value={form.dependentAcquiredDate} onChange={set("dependentAcquiredDate")} />
+            <DateInput value={form.dependentAcquiredDate} onChange={set("dependentAcquiredDate")} onBlur={blurSave("dependentAcquiredDate")} />
           </FormField>
           <FormField label="扶養喪失日">
-            <DateInput value={form.dependentLostDate} onChange={set("dependentLostDate")} />
+            <DateInput value={form.dependentLostDate} onChange={set("dependentLostDate")} onBlur={blurSave("dependentLostDate")} />
           </FormField>
         </div>
       </div>
-
-      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
 
       <DependentsSection employeeId={employeeId} dependents={dependents} />
     </div>
@@ -152,6 +138,7 @@ export default function InsuranceTab({
 }
 
 // ---- 扶養家族（1:N）----
+// 各行を自動保存化。行の新規追加・削除は既存のボタン操作のまま。続柄は RelationSelect。
 
 function DependentsSection({
   employeeId,
@@ -236,43 +223,36 @@ function DependentRow({
     annualIncome: dependent.annualIncome != null ? String(dependent.annualIncome) : "",
   };
   const [form, setForm] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // 扶養家族の自動保存: PATCH /api/admin/employees/[employeeId]/dependents に id + 変更フィールドを投げる。
+  const autoSave = useAutoSave(async (field, value) => {
+    const res = await fetch(`/api/admin/employees/${employeeId}/dependents`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: dependent.id, [field]: value }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `エラー ${res.status}`);
+    }
+  }, initial);
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
-    setSaved(false);
   };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await fetch(`/api/admin/employees/${employeeId}/dependents`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: dependent.id, ...form }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error || `エラー ${res.status}`);
-        return;
-      }
-      setSaved(true);
-      router.refresh();
-    } catch {
-      setError("通信エラーが発生しました");
-    } finally {
-      setSaving(false);
-    }
+  const blurSave = (field: keyof typeof form) => () =>
+    autoSave.save(field as string, form[field]);
+  const selectSave = (field: keyof typeof form) => (v: string) => {
+    setForm((f) => ({ ...f, [field]: v }));
+    autoSave.save(field as string, v);
   };
 
   const handleDelete = async () => {
     if (!confirm(`扶養家族${form.name ? `「${form.name}」` : ""}を削除しますか？`)) return;
-    setSaving(true);
-    setError(null);
+    setDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/admin/employees/${employeeId}/dependents`, {
         method: "DELETE",
@@ -281,14 +261,14 @@ function DependentRow({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setError(j.error || `エラー ${res.status}`);
+        setDeleteError(j.error || `エラー ${res.status}`);
         return;
       }
       router.refresh();
     } catch {
-      setError("通信エラーが発生しました");
+      setDeleteError("通信エラーが発生しました");
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   };
 
@@ -297,44 +277,36 @@ function DependentRow({
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs text-gray-400">扶養家族 {index + 1}</span>
         <div className="flex items-center gap-2">
-          {saved && <span className="text-xs text-green-600">保存しました</span>}
-          {error && <span className="text-xs text-red-600">{error}</span>}
+          <AutoSaveIndicator status={autoSave.status} error={autoSave.error} />
+          {deleteError && <span className="text-xs text-red-600">{deleteError}</span>}
           <button
             type="button"
-            disabled={saving}
-            onClick={handleSave}
-            className="rounded bg-blue-700 px-3 py-1 text-xs font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            保存
-          </button>
-          <button
-            type="button"
-            disabled={saving}
+            disabled={deleting}
             onClick={handleDelete}
             className="rounded border border-gray-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
           >
-            削除
+            {deleting ? "削除中..." : "削除"}
           </button>
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-6 gap-x-6 gap-y-3">
         <FormField label="氏名">
-          <TextInput value={form.name} onChange={set("name")} />
+          <TextInput value={form.name} onChange={set("name")} onBlur={blurSave("name")} />
         </FormField>
         <FormField label="カナ">
-          <TextInput value={form.kana} onChange={set("kana")} />
+          <TextInput value={form.kana} onChange={set("kana")} onBlur={blurSave("kana")} />
         </FormField>
         <FormField label="性別">
-          <TextInput value={form.gender} onChange={set("gender")} placeholder="男 / 女" />
+          <TextInput value={form.gender} onChange={set("gender")} onBlur={blurSave("gender")} placeholder="男 / 女" />
         </FormField>
         <FormField label="続柄">
-          <TextInput value={form.relation} onChange={set("relation")} placeholder="例: 長女" />
+          <RelationSelect value={form.relation} onChange={selectSave("relation")} />
         </FormField>
         <FormField label="生年月日">
-          <DateInput value={form.birthday} onChange={set("birthday")} />
+          <DateInput value={form.birthday} onChange={set("birthday")} onBlur={blurSave("birthday")} />
         </FormField>
         <FormField label="年収（円）">
-          <NumberInput value={form.annualIncome} onChange={set("annualIncome")} />
+          <NumberInput value={form.annualIncome} onChange={set("annualIncome")} onBlur={blurSave("annualIncome")} />
         </FormField>
       </div>
     </div>

@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAutoSave, AutoSaveIndicator } from "./detail-ui";
 
-// T-096 追補3 Task 5: ヘッダー直下のアカウント設定行。
-// 一覧編集モーダルで編集できる項目のうち詳細画面に無いものをここで編集可能にする。
-// 保存先は既存API: PATCH /api/admin/users/[id]（email/role/lineworksId/jobCategory）と
-// PATCH /api/admin/users/[id]/mynavi-assignee（マイナビ担当トグル）。新APIは作らない。
+// T-096 追補3 Task 5: ヘッダー直下のアカウント設定行（自動保存化）。
+// 保存先は既存API:
+//  - PATCH /api/admin/users/[id]（email/role/lineworksId/jobCategory）
+//  - PATCH /api/admin/users/[id]/mynavi-assignee（マイナビ担当トグル）
+// テキスト/セレクトは onBlur/onChange で個別 PATCH、トグルは onChange で即 PATCH。
 
 type JobCategory = "" | "CA" | "MARKETING" | "OFFICE_AND_MGMT";
 
@@ -48,59 +50,56 @@ export default function AccountSettingsBar({
     isMynaviAssignee,
   };
   const [form, setForm] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // アカウント基本項目の自動保存: PATCH /api/admin/users/[id]。
+  // 職種は Employee リンク時のみ送る（未リンクは API が 400 を返す）。
+  const accountAutoSave = useAutoSave(async (field, value) => {
+    if (field === "jobCategory" && !hasEmployee) return; // 未リンク時は送らない
+    const payload: Record<string, unknown> =
+      field === "jobCategory"
+        ? { jobCategory: value === "" ? null : value }
+        : field === "lineworksId"
+        ? { lineworksId: (value as string) || null }
+        : { [field]: value };
+    const res = await fetch(`/api/admin/users/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `エラー ${res.status}`);
+    }
+    router.refresh();
+  }, {
+    email: initial.email,
+    role: initial.role,
+    jobCategory: initial.jobCategory,
+    lineworksId: initial.lineworksId,
+  });
+
+  // マイナビ担当のトグルは別 API（/mynavi-assignee）。
+  const mynaviAutoSave = useAutoSave(async (_field, value) => {
+    const res = await fetch(`/api/admin/users/${userId}/mynavi-assignee`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isMynaviAssignee: Boolean(value) }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `マイナビ担当の更新に失敗 ${res.status}`);
+    }
+    router.refresh();
+  }, { isMynaviAssignee: initial.isMynaviAssignee });
 
   const set = <K extends keyof typeof form>(key: K, v: (typeof form)[K]) => {
     setForm((f) => ({ ...f, [key]: v }));
-    setSaved(false);
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      // 1) アカウント基本項目（職種は Employee リンク時のみ送る: 未リンクは API が 400 を返す）
-      const body: Record<string, unknown> = {
-        email: form.email,
-        role: form.role,
-        lineworksId: form.lineworksId || null,
-      };
-      if (hasEmployee) {
-        body.jobCategory = form.jobCategory === "" ? null : form.jobCategory;
-      }
-      const res = await fetch(`/api/admin/users/${userId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || `エラー ${res.status}`);
-      }
-
-      // 2) マイナビ担当（変更時のみ既存トグルAPIを呼ぶ）
-      if (form.isMynaviAssignee !== initial.isMynaviAssignee) {
-        const r2 = await fetch(`/api/admin/users/${userId}/mynavi-assignee`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isMynaviAssignee: form.isMynaviAssignee }),
-        });
-        if (!r2.ok) {
-          const j = await r2.json().catch(() => ({}));
-          throw new Error(j.error || `マイナビ担当の更新に失敗 ${r2.status}`);
-        }
-      }
-
-      setSaved(true);
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
+  const toggleMynavi = () => {
+    const next = !form.isMynaviAssignee;
+    set("isMynaviAssignee", next);
+    mynaviAutoSave.save("isMynaviAssignee", next);
   };
 
   return (
@@ -112,6 +111,7 @@ export default function AccountSettingsBar({
               type="email"
               value={form.email}
               onChange={(e) => set("email", e.target.value)}
+              onBlur={() => accountAutoSave.save("email", form.email)}
               className={UNDERLINE}
             />
           </Field>
@@ -120,7 +120,11 @@ export default function AccountSettingsBar({
           <Field label="権限">
             <select
               value={form.role}
-              onChange={(e) => set("role", e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                set("role", v);
+                accountAutoSave.save("role", v);
+              }}
               className={UNDERLINE}
             >
               <option value="member">member</option>
@@ -132,7 +136,11 @@ export default function AccountSettingsBar({
           <Field label="職種">
             <select
               value={form.jobCategory}
-              onChange={(e) => set("jobCategory", e.target.value as JobCategory)}
+              onChange={(e) => {
+                const v = e.target.value as JobCategory;
+                set("jobCategory", v);
+                accountAutoSave.save("jobCategory", v);
+              }}
               disabled={!hasEmployee}
               className={UNDERLINE}
             >
@@ -152,6 +160,7 @@ export default function AccountSettingsBar({
               type="text"
               value={form.lineworksId}
               onChange={(e) => set("lineworksId", e.target.value)}
+              onBlur={() => accountAutoSave.save("lineworksId", form.lineworksId)}
               placeholder="例: username@bizstudio.co.jp"
               className={UNDERLINE}
             />
@@ -161,7 +170,7 @@ export default function AccountSettingsBar({
           <label className="block text-[10px] text-gray-400 mb-1">マイナビ担当</label>
           <button
             type="button"
-            onClick={() => set("isMynaviAssignee", !form.isMynaviAssignee)}
+            onClick={toggleMynavi}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
               form.isMynaviAssignee ? "bg-[#2563EB]" : "bg-[#D1D5DB]"
             }`}
@@ -176,16 +185,8 @@ export default function AccountSettingsBar({
         </div>
 
         <div className="ml-auto flex items-center gap-3 pb-0.5">
-          {saved && <span className="text-[12px] text-green-600">保存しました</span>}
-          {error && <span className="text-[12px] text-red-600">{error}</span>}
-          <button
-            type="button"
-            disabled={saving}
-            onClick={handleSave}
-            className="rounded bg-blue-700 px-3.5 py-1 text-[12px] font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            {saving ? "保存中..." : "保存"}
-          </button>
+          <AutoSaveIndicator status={accountAutoSave.status} error={accountAutoSave.error} />
+          <AutoSaveIndicator status={mynaviAutoSave.status} error={mynaviAutoSave.error} />
         </div>
       </div>
     </div>

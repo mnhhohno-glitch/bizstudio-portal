@@ -1,7 +1,16 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
+import { patchEmployeeSection } from "./detail-types";
+
 // T-096 タブ共通 UI（FileMaker 参考デザイン）。
 // 入力欄は下線スタイルに統一。textarea のみ枠ありを維持。
+//
+// T-096 追補（自動保存化）:
+//  - テキスト・日付・数値・textarea は onBlur で保存、select は onChange で即保存する。
+//  - 保存は既存 API（PATCH /api/admin/employees/[employeeId]{section,data}）にフィールド単位で
+//    部分更新を投げる（buildXxxData がホワイトリスト方式で「送られたキーだけ」を書き換えるため安全）。
+//  - 保存ボタン・キャンセルボタンは撤去し、AutoSaveIndicator で控えめに状態表示する。
 
 // 下線スタイル: 枠なし・下線のみ・透明背景・フォーカス時に青下線。
 const UNDERLINE_INPUT_CLASS =
@@ -42,12 +51,21 @@ export function TextInput({
   );
 }
 
-export function DateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function DateInput({
+  value,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onBlur?: () => void;
+}) {
   return (
     <input
       type="date"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       className={UNDERLINE_INPUT_CLASS}
     />
   );
@@ -57,16 +75,19 @@ export function NumberInput({
   value,
   onChange,
   placeholder,
+  onBlur,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  onBlur?: () => void;
 }) {
   return (
     <input
       type="number"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       placeholder={placeholder}
       className={UNDERLINE_INPUT_CLASS}
     />
@@ -97,15 +118,18 @@ export function TextArea({
   value,
   onChange,
   rows = 3,
+  onBlur,
 }: {
   value: string;
   onChange: (v: string) => void;
   rows?: number;
+  onBlur?: () => void;
 }) {
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       rows={rows}
       className={TEXTAREA_CLASS}
     />
@@ -121,50 +145,230 @@ export function ReadOnlyField({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** 保存／キャンセルを並べる共通フッタ。border-t の上で右寄せ。 */
-export function SaveBar({
-  saving,
-  error,
-  saved,
-  onSave,
-  onCancel,
-}: {
-  saving: boolean;
-  error: string | null;
-  saved: boolean;
-  onSave: () => void;
-  onCancel?: () => void;
-}) {
-  return (
-    <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-end gap-3">
-      {saved && <span className="text-[12px] text-green-600">保存しました</span>}
-      {error && <span className="text-[12px] text-red-600">{error}</span>}
-      {onCancel && (
-        <button
-          type="button"
-          disabled={saving}
-          onClick={onCancel}
-          className="rounded border border-gray-300 px-4 py-1.5 text-[12px] text-slate-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          キャンセル
-        </button>
-      )}
-      <button
-        type="button"
-        disabled={saving}
-        onClick={onSave}
-        className="rounded bg-blue-700 px-4 py-1.5 text-[12px] font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-      >
-        {saving ? "保存中..." : "保存"}
-      </button>
-    </div>
-  );
-}
-
 /** タブ内のブロック見出し。 */
 export function BlockTitle({ children }: { children: React.ReactNode }) {
   return (
     <h4 className="text-[11px] font-medium text-gray-400 mb-2.5">{children}</h4>
+  );
+}
+
+// ---- 自動保存 ----
+
+export type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
+
+export type EmployeeSection = "basic" | "bank" | "insurance" | "salary" | "equipment";
+
+/**
+ * フィールド単位の保存を汎用の save 関数で行う自動保存フック。
+ * - `saveFn(field, value)` は「そのフィールドをサーバへ書き込む」実装。空欄→クリアもサーバ側で処理される。
+ * - 直前保存値と一致していれば no-op（同値多重発火のガード）。
+ * - 保存はキュー化され、同一フィールドの多重リクエストは順次実行される。
+ * - 保存成功時は 1.5s だけ「保存しました」を表示して idle に戻る。
+ */
+export function useAutoSave(
+  saveFn: (field: string, value: unknown) => Promise<void>,
+  initial: Record<string, unknown>,
+): {
+  save: (field: string, value: unknown) => void;
+  status: AutoSaveStatus;
+  error: string | null;
+} {
+  const [status, setStatus] = useState<AutoSaveStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const savedRef = useRef<Record<string, unknown>>({ ...initial });
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
+
+  const save = useCallback(
+    (field: string, value: unknown) => {
+      if (savedRef.current[field] === value) return;
+      queueRef.current = queueRef.current.then(async () => {
+        if (savedRef.current[field] === value) return;
+        setStatus("saving");
+        setError(null);
+        try {
+          await saveFn(field, value);
+          savedRef.current[field] = value;
+          setStatus("saved");
+          if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+          savedTimerRef.current = setTimeout(() => {
+            setStatus((s) => (s === "saved" ? "idle" : s));
+          }, 1500);
+        } catch (e) {
+          setStatus("error");
+          setError(e instanceof Error ? e.message : "保存に失敗しました");
+        }
+      });
+    },
+    [saveFn],
+  );
+
+  return { save, status, error };
+}
+
+/**
+ * 社員詳細の section 単位（basic/bank/insurance/salary/equipment）に投げる自動保存フック。
+ * 既存の PATCH /api/admin/employees/[employeeId] にフィールド単位の部分更新を投げる。
+ */
+export function useSectionAutoSave(
+  employeeId: string,
+  section: EmployeeSection,
+  initial: Record<string, unknown>,
+) {
+  const saveFn = useCallback(
+    (field: string, value: unknown) => patchEmployeeSection(employeeId, section, { [field]: value }),
+    [employeeId, section],
+  );
+  return useAutoSave(saveFn, initial);
+}
+
+/** 保存状態を控えめに表示する小型インジケータ（旧「保存」ボタン位置に置く）。 */
+export function AutoSaveIndicator({
+  status,
+  error,
+}: {
+  status: AutoSaveStatus;
+  error: string | null;
+}) {
+  if (status === "saving") {
+    return <span className="text-[11px] text-gray-400">保存中...</span>;
+  }
+  if (status === "saved") {
+    return <span className="text-[11px] text-green-600">✓ 保存しました</span>;
+  }
+  if (status === "error" && error) {
+    return <span className="text-[11px] text-red-600">{error}</span>;
+  }
+  return null;
+}
+
+// ---- 続柄セレクト ----
+
+/** 緊急連絡先・扶養家族の続柄で使う固定選択肢（この順で固定）。 */
+export const RELATION_OPTIONS = [
+  "配偶者",
+  "父",
+  "母",
+  "子",
+  "兄",
+  "姉",
+  "弟",
+  "妹",
+  "祖父",
+  "祖母",
+  "叔父",
+  "叔母",
+  "その他",
+] as const;
+
+const RELATION_SET = new Set<string>(RELATION_OPTIONS);
+
+/**
+ * 続柄セレクト。
+ * - 現在値が固定リスト外なら「◯◯（現在値）」を最上位オプションとして残す（既存値を勝手に消さない）。
+ * - 未設定用の空値も選べる。
+ */
+export function RelationSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const currentIsCustom = value.length > 0 && !RELATION_SET.has(value);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={UNDERLINE_INPUT_CLASS}
+    >
+      <option value="">未設定</option>
+      {currentIsCustom && <option value={value}>{value}（現在値）</option>}
+      {RELATION_OPTIONS.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// ---- 郵便番号 → 住所 表示ボタン ----
+
+/**
+ * 「住所表示」ボタン。
+ * - クリック時のみ /api/masters/postal-code で検索し、住所フィールドを上書きする。
+ * - 郵便番号未入力・0件は住所を変更せず、控えめなメッセージだけ出す。
+ * - 複数件ある場合は候補を返すので、呼び出し側でドロップダウン表示を行う。
+ * - 反映後の再検索は起きない（旧: onFocus/onChange/onBlur 発火の自動検索を撤去した）。
+ */
+export function AddressLookupButton({
+  postalCode,
+  onResolved,
+}: {
+  postalCode: string;
+  onResolved: (result: { address?: string; candidates?: string[]; message?: string }) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    const code = postalCode.replace(/\D/g, "");
+    if (code.length < 7) {
+      setMessage("郵便番号は7桁で入力してください");
+      onResolved({ message: "郵便番号は7桁で入力してください" });
+      return;
+    }
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/masters/postal-code/${code}`);
+      if (!res.ok) {
+        const msg = "住所が見つかりませんでした";
+        setMessage(msg);
+        onResolved({ message: msg });
+        return;
+      }
+      const j = await res.json();
+      const matches: string[] = (j?.matches ?? []).map(
+        (m: { address: string }) => m.address,
+      );
+      if (matches.length === 1) {
+        onResolved({ address: matches[0] });
+      } else if (matches.length > 1) {
+        onResolved({ candidates: matches });
+      } else {
+        const msg = "住所が見つかりませんでした";
+        setMessage(msg);
+        onResolved({ message: msg });
+      }
+    } catch {
+      const msg = "住所検索に失敗しました";
+      setMessage(msg);
+      onResolved({ message: msg });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        className="rounded border border-gray-300 bg-white px-2.5 py-1 text-[11px] text-slate-700 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+      >
+        {loading ? "検索中..." : "住所表示"}
+      </button>
+      {message && <span className="text-[11px] text-gray-500">{message}</span>}
+    </div>
   );
 }
 

@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LeaveRequestItem } from "./detail-types";
-import { BlockTitle } from "./detail-ui";
+import { BlockTitle, useAutoSave, AutoSaveIndicator } from "./detail-ui";
 
-// T-096 タブ6: 有休。既存勤怠と統合（新規有休モデルなし）:
+// T-096 タブ6: 有休（自動保存化）。既存勤怠と統合（新規有休モデルなし）:
 // - 残日数 = Employee.paidLeave。編集は既存 PATCH /api/attendance/admin/employees を呼ぶ
-//   （approval.ts の decrement 整合を壊さない・サーバロジックは既存のまま）
+//   （approval.ts の decrement 整合を壊さない・サーバロジックは既存のまま）。
+// - トリガーだけを保存ボタン → onBlur 自動保存に変更。
 // - 消化サマリ・履歴 = 既存 LeaveRequest の閲覧のみ。このタブから申請・承認はしない
 
 function typeLabel(lr: LeaveRequestItem): string {
@@ -33,48 +34,36 @@ export default function LeaveTab({
 }) {
   const router = useRouter();
   const [paidLeaveInput, setPaidLeaveInput] = useState(String(paidLeave));
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const autoSave = useAutoSave(async (_field, value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("0 以上の数値を入力してください");
+    }
+    const res = await fetch("/api/attendance/admin/employees", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ employeeId, paidLeave: n }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `エラー ${res.status}`);
+    }
+    router.refresh();
+  }, { paidLeave: String(paidLeave) });
 
   const approved = leaveRequests.filter((lr) => lr.status === "APPROVED");
   const fullDays = approved.filter((lr) => lr.leaveType === "PAID_FULL").length;
   const halfCount = approved.filter((lr) => lr.leaveType === "PAID_HALF").length;
   const otherCount = approved.filter((lr) => lr.leaveType === "OTHER").length;
 
-  const handleSave = async () => {
-    const n = Number(paidLeaveInput);
-    if (!Number.isFinite(n) || n < 0) {
-      setError("0 以上の数値を入力してください");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await fetch("/api/attendance/admin/employees", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId, paidLeave: n }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error || `エラー ${res.status}`);
-        return;
-      }
-      setSaved(true);
-      router.refresh();
-    } catch {
-      setError("通信エラーが発生しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="px-5 py-5">
       {/* 有給残日数 */}
-      <BlockTitle>有給残日数</BlockTitle>
+      <div className="flex items-center justify-between mb-2.5">
+        <BlockTitle>有給残日数</BlockTitle>
+        <AutoSaveIndicator status={autoSave.status} error={autoSave.error} />
+      </div>
       <div className="flex items-end gap-3 max-w-md">
         <div className="flex-1">
           <label className="block text-[10px] text-gray-400 mb-1">残日数（日）</label>
@@ -83,25 +72,11 @@ export default function LeaveTab({
             step="0.5"
             min="0"
             value={paidLeaveInput}
-            onChange={(e) => {
-              setPaidLeaveInput(e.target.value);
-              setSaved(false);
-            }}
+            onChange={(e) => setPaidLeaveInput(e.target.value)}
+            onBlur={() => autoSave.save("paidLeave", paidLeaveInput)}
             className="w-full border-0 border-b border-gray-300 rounded-none px-0 py-1.5 text-sm bg-transparent focus:ring-0 focus:border-blue-600 focus:outline-none"
           />
         </div>
-      </div>
-      <div className="mt-4 pt-3 border-t border-gray-200 flex items-center justify-end gap-3">
-        {saved && <span className="text-xs text-green-600">保存しました</span>}
-        {error && <span className="text-xs text-red-600">{error}</span>}
-        <button
-          type="button"
-          disabled={saving}
-          onClick={handleSave}
-          className="rounded bg-blue-700 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-        >
-          {saving ? "保存中..." : "保存"}
-        </button>
       </div>
       <p className="mt-3 text-xs text-gray-400">
         ※ 勤怠管理（/attendance/admin/employees）と同じデータです。承認済みの有給申請で自動減算されます。
