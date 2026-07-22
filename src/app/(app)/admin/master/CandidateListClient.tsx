@@ -592,7 +592,10 @@ export default function CandidateListClient({
             <DateRangeField label="配信日" from={delDateFrom} to={delDateTo}
               onFrom={(v) => { setDelDateFrom(v); setCurrentPage(1); }} onTo={(v) => { setDelDateTo(v); setCurrentPage(1); }} />
           </FilterGroup>
+        </FilterTopRow>
 
+        {/* 2段目: 検索（左端） + 区分 */}
+        <FilterTopRow>
           {/* 検索 */}
           <FilterGroup label="検索">
             <FilterField label="フリー検索">
@@ -624,62 +627,62 @@ export default function CandidateListClient({
               }} />
             )}
           </FilterGroup>
-        </FilterTopRow>
 
-        {/* 区分（全幅） */}
-        <FilterGroup label="区分" fullWidth>
-          <FilterField label="経路">
-            <select
-              value={routeFilter}
-              onChange={(e) => { setRouteFilter(e.target.value); setCurrentPage(1); }}
-              className={`w-32 ${FILTER_INPUT_CLS}`}
-            >
-              <option value="ALL">ALL</option>
-              <option value="スカウト">スカウト</option>
-              <option value="応募">応募</option>
-            </select>
-          </FilterField>
-          <FilterField label="媒体">
-            <select
-              value={mediaFilter}
-              onChange={(e) => { setMediaFilter(e.target.value); setCurrentPage(1); }}
-              className={`w-40 ${FILTER_INPUT_CLS}`}
-            >
-              <option value="ALL">ALL</option>
-              <option value="マイナビ転職">マイナビ転職</option>
-              <option value="マイナビエージェント">マイナビエージェント</option>
-              <option value="indeed">indeed</option>
-              <option value="日経HR">日経HR</option>
-              <option value="自社HP">自社HP</option>
-              <option value="dodaMaps">dodaMaps</option>
-            </select>
-          </FilterField>
-          <FilterField label="性別">
-            <select
-              value={genderFilter}
-              onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
-              className={`w-32 ${FILTER_INPUT_CLS}`}
-            >
-              <option value="ALL">ALL</option>
-              <option value="male">男性</option>
-              <option value="female">女性</option>
-            </select>
-          </FilterField>
-          {supportTab === "ENDED" && (
-            <FilterField label="終了理由">
+          {/* 区分 */}
+          <FilterGroup label="区分">
+            <FilterField label="経路">
               <select
-                value={endReasonFilter}
-                onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
+                value={routeFilter}
+                onChange={(e) => { setRouteFilter(e.target.value); setCurrentPage(1); }}
+                className={`w-32 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="ALL">ALL</option>
+                <option value="スカウト">スカウト</option>
+                <option value="応募">応募</option>
+              </select>
+            </FilterField>
+            <FilterField label="媒体">
+              <select
+                value={mediaFilter}
+                onChange={(e) => { setMediaFilter(e.target.value); setCurrentPage(1); }}
                 className={`w-40 ${FILTER_INPUT_CLS}`}
               >
                 <option value="ALL">ALL</option>
-                {SUPPORT_END_REASONS.map((r) => (
-                  <option key={r.code} value={r.code}>{r.label}</option>
-                ))}
+                <option value="マイナビ転職">マイナビ転職</option>
+                <option value="マイナビエージェント">マイナビエージェント</option>
+                <option value="indeed">indeed</option>
+                <option value="日経HR">日経HR</option>
+                <option value="自社HP">自社HP</option>
+                <option value="dodaMaps">dodaMaps</option>
               </select>
             </FilterField>
-          )}
-        </FilterGroup>
+            <FilterField label="性別">
+              <select
+                value={genderFilter}
+                onChange={(e) => { setGenderFilter(e.target.value); setCurrentPage(1); }}
+                className={`w-32 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="ALL">ALL</option>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+              </select>
+            </FilterField>
+            {supportTab === "ENDED" && (
+              <FilterField label="終了理由">
+                <select
+                  value={endReasonFilter}
+                  onChange={(e) => { setEndReasonFilter(e.target.value); setCurrentPage(1); }}
+                  className={`w-40 ${FILTER_INPUT_CLS}`}
+                >
+                  <option value="ALL">ALL</option>
+                  {SUPPORT_END_REASONS.map((r) => (
+                    <option key={r.code} value={r.code}>{r.label}</option>
+                  ))}
+                </select>
+              </FilterField>
+            )}
+          </FilterGroup>
+        </FilterTopRow>
       </FilterShell>
 
       {/* 選択中ツールバー */}
