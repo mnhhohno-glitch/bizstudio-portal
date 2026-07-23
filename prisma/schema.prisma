@@ -1618,8 +1618,12 @@ model AiUsageLog {
   outputTokens Int? @map("output_tokens")
   /// キャッシュヒットした入力トークン（Gemini cachedContentTokenCount / Claude cache_read_input_tokens）
   cachedInputTokens Int? @map("cached_input_tokens")
+  /// 「思考」トークン（Gemini thoughtsTokenCount。出力と同単価で課金される）。
+  /// 2026-07-24 追加。以前のレコードは記録経路が無く NULL（＝バックフィル不可）。
+  thinkingTokens Int? @map("thinking_tokens")
 
   /// 推定費用（円）。src/lib/ai-pricing.ts の単価表で算出。単価未登録モデルは null
+  /// 2026-07-24 以降のレコードは thinking_tokens を出力単価で加算した合計になる。
   estimatedCostJpy Decimal? @map("estimated_cost_jpy") @db.Decimal(12, 6)
 
   /// 付帯情報（candidateNumber / 対象ID / 件数 / エラー種別 など任意）

@@ -26,6 +26,11 @@ export type RecordAiUsageParams = {
   outputTokens?: number | null;
   /** キャッシュヒット分（Gemini cachedContentTokenCount / Claude cache_read_input_tokens） */
   cachedInputTokens?: number | null;
+  /**
+   * 「思考」トークン（Gemini thoughtsTokenCount）。出力と同単価で課金される。
+   * 送られない呼び出し元との後方互換を維持するため、未指定/null 時は 0 として扱う。
+   */
+  thinkingTokens?: number | null;
   /** 任意の付帯情報（candidateId・件数・エラー種別など） */
   meta?: Record<string, unknown> | null;
 };
@@ -39,11 +44,13 @@ export async function recordAiUsage(params: RecordAiUsageParams): Promise<boolea
     const inputTokens = normalizeCount(params.inputTokens);
     const outputTokens = normalizeCount(params.outputTokens);
     const cachedInputTokens = normalizeCount(params.cachedInputTokens);
+    const thinkingTokens = normalizeCount(params.thinkingTokens);
 
     const costJpy = estimateCostJpy(params.model, {
       inputTokens,
       outputTokens,
       cachedInputTokens,
+      thinkingTokens,
     });
 
     await prisma.aiUsageLog.create({
@@ -54,6 +61,7 @@ export async function recordAiUsage(params: RecordAiUsageParams): Promise<boolea
         inputTokens,
         outputTokens,
         cachedInputTokens,
+        thinkingTokens,
         // 単価表に無いモデルは null（未算出）で残す。後から単価を足して再計算できる。
         estimatedCostJpy: costJpy === null ? null : new Prisma.Decimal(costJpy.toFixed(6)),
         meta: (params.meta ?? undefined) as Prisma.InputJsonValue | undefined,
@@ -83,6 +91,12 @@ export type GeminiUsageMetadata = {
   candidatesTokenCount?: number;
   cachedContentTokenCount?: number;
   totalTokenCount?: number;
+  /**
+   * Gemini 2.5 系の「思考」トークン。SDK/REST の usageMetadata に含まれる。
+   * 出力と同単価で課金される（Gemini 公式: "Output price (including thinking tokens)"）。
+   * 旧SDKや thinking 非対応モデルでは欠損（undefined）＝ 0 として扱う。
+   */
+  thoughtsTokenCount?: number;
 };
 
 /**
@@ -90,6 +104,7 @@ export type GeminiUsageMetadata = {
  *
  * 重要: Gemini の promptTokenCount は**キャッシュヒット分を含んだ総入力**。単価が違うので、
  * ここで cachedContentTokenCount を差し引いて「非キャッシュ入力」に正規化してから渡す。
+ * thoughtsTokenCount（思考）は別列として保存し、費用は output 単価で加算される。
  */
 export async function recordGeminiUsage(args: {
   system: AiSystem;
@@ -108,6 +123,7 @@ export async function recordGeminiUsage(args: {
     inputTokens: Math.max(0, prompt - cached),
     outputTokens: um.candidatesTokenCount ?? 0,
     cachedInputTokens: cached,
+    thinkingTokens: um.thoughtsTokenCount ?? 0,
     meta: args.meta,
   });
 }

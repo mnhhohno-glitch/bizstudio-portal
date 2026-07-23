@@ -18,6 +18,9 @@ import { isKnownModel } from "@/lib/ai-pricing";
 //     "inputTokens": 12345,                // 任意: 非キャッシュ入力トークン
 //     "outputTokens": 678,                 // 任意
 //     "cachedInputTokens": 0,              // 任意: キャッシュヒット分
+//     "thinkingTokens": 0,                 // 任意: 「思考」トークン（Gemini thoughtsTokenCount）。
+//                                          //       送信されなくても従来どおり記録される（後方互換）。
+//                                          //       出力と同単価で estimatedCostJpy に加算される。
 //     "meta": { "jobId": 123 }             // 任意: 付帯情報（何でも可）
 //   }
 //
@@ -81,6 +84,8 @@ export async function POST(request: NextRequest) {
     inputTokens: parseCount(body.inputTokens),
     outputTokens: parseCount(body.outputTokens),
     cachedInputTokens: parseCount(body.cachedInputTokens),
+    // 後方互換: thinkingTokens を送ってこない呼び出し元は null（従来動作と同じ）。
+    thinkingTokens: parseCount(body.thinkingTokens),
     meta,
   });
 

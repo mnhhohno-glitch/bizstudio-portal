@@ -48,6 +48,14 @@ export type AiTokenCounts = {
   inputTokens?: number | null;
   outputTokens?: number | null;
   cachedInputTokens?: number | null;
+  /**
+   * 「思考」トークン（Gemini thoughtsTokenCount）。Gemini 2.5 系は公式単価表で
+   * "Output price (including thinking tokens)" と明記されており、出力と同単価で課金される
+   * （2026-07-23 https://ai.google.dev/gemini-api/docs/pricing にて確認）。
+   * したがって estimateCostJpy では output 単価を掛けて加算する。
+   * Claude 側は現状 thinking tokens を分離取得していないため、この経路では 0/未指定を想定。
+   */
+  thinkingTokens?: number | null;
 };
 
 /**
@@ -56,6 +64,8 @@ export type AiTokenCounts = {
  * inputTokens は「キャッシュヒット分を含まない純粋な入力」として扱う。Gemini の usageMetadata は
  * promptTokenCount にキャッシュ分も含むため、呼び出し側で cachedContentTokenCount を差し引いて渡すこと
  * （recordAiUsage 側で吸収している）。
+ *
+ * thinkingTokens は output と同単価で加算する（上記参照）。
  */
 export function estimateCostJpy(model: string, tokens: AiTokenCounts): number | null {
   const p = AI_MODEL_PRICING[model];
@@ -64,11 +74,14 @@ export function estimateCostJpy(model: string, tokens: AiTokenCounts): number | 
   const input = tokens.inputTokens ?? 0;
   const output = tokens.outputTokens ?? 0;
   const cached = tokens.cachedInputTokens ?? 0;
+  const thinking = tokens.thinkingTokens ?? 0;
 
   const usd =
     (input / 1_000_000) * p.input +
     (output / 1_000_000) * p.output +
-    (cached / 1_000_000) * p.cachedInput;
+    (cached / 1_000_000) * p.cachedInput +
+    // thinking は output 単価（Gemini 公式・上記コメント参照）
+    (thinking / 1_000_000) * p.output;
 
   return usd * USD_TO_JPY;
 }
