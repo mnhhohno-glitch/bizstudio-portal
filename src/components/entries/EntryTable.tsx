@@ -184,11 +184,21 @@ function filterFlagOptions(
   currentValue: string | null | undefined
 ): string[] {
   const wd = isWithdrawalDetail(entryFlagDetail);
-  return allOptions.filter((opt) => {
+  const result = allOptions.filter((opt) => {
     if (!opt) return true;
     if (opt === currentValue) return true;
     return wd ? isWithdrawalOption(opt) : !isWithdrawalOption(opt);
   });
+  // DB の currentValue が entryFlag 段階の PERSON/COMPANY_FLAG_RULES に存在しない場合
+  // （例: 書類選考で "見送り通知送信済" をセット後 entryFlag をエントリーに差し戻し、
+  //  エントリー段階の option は ["辞退受付済","見送り通知済み"] のみで
+  //  "見送り通知送信済" が消える）に、<select value=X> にマッチする <option> が無く
+  // プレースホルダーが表示され「空に見えるのに resolveEntryIsActive は false」となる
+  // 罠を防ぐため、現在値は必ず末尾に残す。value は元の文字列のままなので保存値は壊れない。
+  if (currentValue && !result.includes(currentValue)) {
+    result.push(currentValue);
+  }
+  return result;
 }
 
 // entryFlagDetail の値に応じて企業対応／本人対応の選択肢を絞る。
