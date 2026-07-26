@@ -96,6 +96,9 @@ const TAB_EXTRA: Record<string, ColConfig[]> = {
 //             MEMO_GUTTER=16 は維持（fix4 の border 密着回避を崩さない）。
 const MEMO_COL: ColConfig = { key: "memo", label: "メモ", width: 60, sortKey: null };
 const MEMO_GUTTER = 16; // メモ列右の余白（テーブル右端のクリッピング防止）
+// 先頭チェックボックス列の幅。colgroup / minWidth 計算 / 左固定列の left オフセットで共有する
+// （左固定の位置を別値でハードコードしないための単一の出所）。
+const CHECKBOX_COL_WIDTH = 36;
 
 function getColumns(tab: string): ColConfig[] {
   return [...COMMON_COLS, ...(TAB_EXTRA[tab] || []), MEMO_COL];
@@ -129,6 +132,18 @@ function getRowClass(entry: Entry) {
   // 2. 選考終了行: グレーのみ
   if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-100 text-gray-500";
   // 1. 通常行
+  return "bg-white";
+}
+
+/**
+ * 左固定列（チェックボックス・求職者名）に敷く不透明な背景色。
+ * 固定列は横スクロール時に他セルの上へ重なるため、背景が透けると下の文字が透ける。
+ * getRowClass / archived の背景判定と同じ結果を返す（半透明の hover 色は使わない）。
+ */
+function getStickyCellBg(entry: Entry): string {
+  if (entry.archivedAt) return "bg-gray-100";
+  if (isPersonActionCompleted(entry)) return "bg-gray-100";
+  if (SELECTION_ENDED_DETAILS.includes(entry.entryFlagDetail || "")) return "bg-gray-100";
   return "bg-white";
 }
 
@@ -829,7 +844,53 @@ export default function EntryTable({
   const entryFlagOptions = flagData?.entryFlags.filter((f) => f !== "応募") || [];
   const allIds = entries.map((e) => e.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
-  const minWidth = 36 + cols.reduce((sum, c) => sum + c.width, 0) + MEMO_GUTTER;
+  const minWidth = CHECKBOX_COL_WIDTH + cols.reduce((sum, c) => sum + c.width, 0) + MEMO_GUTTER;
+
+  // ---- 表の枠を画面内に収める ----
+  // 枠の高さを「枠の画面上の位置から画面下端まで」で動的に算出し、枠の中だけをスクロールさせる。
+  // これで横スクロールのつまみが常に画面下のほうに見え、ページ全体は横に動かない。
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const recalcHeight = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    // 下端に 16px の余白を残す。極端に小さくならないよう下限を設ける。
+    setMaxHeight(Math.max(240, window.innerHeight - top - 16));
+  }, []);
+
+  // resize / ResizeObserver は requestAnimationFrame で間引く。
+  const scheduleRecalc = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      recalcHeight();
+    });
+  }, [recalcHeight]);
+
+  useEffect(() => {
+    recalcHeight();
+    window.addEventListener("resize", scheduleRecalc);
+    // 枠自身とページ本体の高さ変化（タブ切替・フィルタ開閉で枠の top が動く）を監視する。
+    const ro = new ResizeObserver(scheduleRecalc);
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    ro.observe(document.body);
+    return () => {
+      window.removeEventListener("resize", scheduleRecalc);
+      ro.disconnect();
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [recalcHeight, scheduleRecalc]);
+
+  // タブ切替・表示行の変化でも枠の位置が変わるため再計算する。
+  useEffect(() => {
+    scheduleRecalc();
+  }, [entries, activeTab, scheduleRecalc]);
 
   function renderCell(entry: Entry, col: ColConfig) {
     const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
@@ -846,7 +907,11 @@ export default function EntryTable({
     switch (col.key) {
       case "candidate":
         return (
-          <td key={col.key} className="px-2 py-1.5 whitespace-nowrap">
+          <td
+            key={col.key}
+            className={`px-2 py-1.5 whitespace-nowrap sticky z-10 border-r border-gray-300 ${getStickyCellBg(entry)}`}
+            style={{ left: CHECKBOX_COL_WIDTH }}
+          >
             <div className="flex items-center gap-1.5">
               <Link href={`/candidates/${entry.candidateId}`} className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
                 {entry.candidate.name}
@@ -1144,22 +1209,28 @@ export default function EntryTable({
   }
 
   return (
-    <div className="overflow-x-auto border border-gray-200 rounded-lg">
+    <div
+      ref={wrapRef}
+      className="overflow-auto border border-gray-200 rounded-lg"
+      style={{ maxHeight: maxHeight ?? undefined }}
+    >
       <table className="text-[12px] border-collapse" style={{ minWidth }}>
         <colgroup>
-          <col style={{ width: 36, minWidth: 36 }} />
+          <col style={{ width: CHECKBOX_COL_WIDTH, minWidth: CHECKBOX_COL_WIDTH }} />
           {cols.map((c, i) => <col key={i} style={{ width: c.width, minWidth: c.width }} />)}
         </colgroup>
         <thead>
           <tr className="bg-[#1E3A8A] text-white">
-            <th className="px-1 py-1.5 text-center">
+            {/* 見出し行の左上（上固定 かつ 左固定）は最前面に置く */}
+            <th className="px-1 py-1.5 text-center sticky top-0 left-0 z-30 bg-[#1E3A8A]">
               <input type="checkbox" checked={allSelected}
                 onChange={() => allSelected ? onDeselectAll() : onSelectAll(allIds)}
                 className="w-3.5 h-3.5 rounded border-white/50 text-[#2563EB]" />
             </th>
             {cols.map((c) => (
               <th key={c.key}
-                className={`px-2 py-1 text-left whitespace-nowrap text-[11px] font-semibold ${c.sortKey ? "cursor-pointer select-none hover:bg-[#1E3A8A]/80" : ""}`}
+                className={`px-2 py-1 text-left whitespace-nowrap text-[11px] font-semibold sticky top-0 bg-[#1E3A8A] ${c.key === "candidate" ? "z-30 border-r border-gray-300" : "z-20"} ${c.sortKey ? "cursor-pointer select-none hover:bg-[#1E3A8A]/80" : ""}`}
+                style={c.key === "candidate" ? { left: CHECKBOX_COL_WIDTH } : undefined}
                 onClick={() => c.sortKey && onSort(c.sortKey)}>
                 {c.key === "entryFlags" ? (
                   <div>
@@ -1196,7 +1267,10 @@ export default function EntryTable({
               : getRowClass(entry);
             return (
               <tr key={entry.id} className={`${rowClass} border-b border-gray-200 hover:bg-blue-50/30`}>
-                <td className="px-1 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                <td
+                  className={`px-1 py-1.5 text-center sticky left-0 z-10 ${getStickyCellBg(entry)}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {archived ? (
                     <div className="flex items-center justify-center gap-1">
                       <button
