@@ -831,88 +831,6 @@ export default function EntryTable({
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
   const minWidth = 36 + cols.reduce((sum, c) => sum + c.width, 0) + MEMO_GUTTER;
 
-  // ---- 画面下に常時固定する横スクロールバー ----
-  // 表が縦に長くても、画面最下部のつまみで横移動できるようにする。表の中身・列幅は変えない。
-  const scrollRef = useRef<HTMLDivElement>(null); // 既存の overflow-x-auto 枠
-  const barRef = useRef<HTMLDivElement>(null); // 画面下の固定バー（overflow-x-auto）
-  const syncingRef = useRef(false); // 双方向同期の相互発火を止めるフラグ
-  const overflowRef = useRef(false); // 表が横にはみ出しているか
-  const inViewRef = useRef(false); // 表枠が画面内に見えているか
-  const [barWidth, setBarWidth] = useState(0); // 固定バー内の空divの幅（＝表の実幅）
-  const [showBar, setShowBar] = useState(false); // 固定バーを描画するか
-
-  const updateShowBar = useCallback(() => {
-    // はみ出している かつ 画面内に見えている ときだけ表示する。
-    setShowBar(overflowRef.current && inViewRef.current);
-  }, []);
-
-  const recomputeBar = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const sw = el.scrollWidth;
-    overflowRef.current = sw > el.clientWidth;
-    setBarWidth(sw);
-    updateShowBar();
-  }, [updateShowBar]);
-
-  // 表の実幅を ResizeObserver で追従（タブ切替で列数が変わるため固定値にしない）、
-  // 表枠の可視状態を IntersectionObserver で監視（画面外・他画面ではバーを出さない）。
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    recomputeBar();
-    const ro = new ResizeObserver(() => recomputeBar());
-    ro.observe(el);
-    const tableEl = el.querySelector("table");
-    if (tableEl) ro.observe(tableEl);
-    const io = new IntersectionObserver((obsEntries) => {
-      inViewRef.current = obsEntries[0]?.isIntersecting ?? false;
-      updateShowBar();
-    });
-    io.observe(el);
-    return () => {
-      ro.disconnect();
-      io.disconnect();
-    };
-  }, [recomputeBar, updateShowBar]);
-
-  // 表示行データ・タブが変わった時にも実幅を再計算する。
-  useEffect(() => {
-    recomputeBar();
-  }, [entries, activeTab, recomputeBar]);
-
-  // 下バー ⇔ 表本体 の双方向スクロール同期。
-  // 相互発火の無限ループは syncingRef（次フレームで解除）でガードする。
-  // showBar が変わりバーが再マウントされたら付け直すため deps に showBar を入れる。
-  useEffect(() => {
-    const el = scrollRef.current;
-    const bar = barRef.current;
-    if (!el || !bar) return;
-    bar.scrollLeft = el.scrollLeft; // 初期位置を合わせる
-    const onTableScroll = () => {
-      if (syncingRef.current) return;
-      syncingRef.current = true;
-      if (barRef.current) barRef.current.scrollLeft = el.scrollLeft;
-      requestAnimationFrame(() => {
-        syncingRef.current = false;
-      });
-    };
-    const onBarScroll = () => {
-      if (syncingRef.current) return;
-      syncingRef.current = true;
-      if (scrollRef.current) scrollRef.current.scrollLeft = bar.scrollLeft;
-      requestAnimationFrame(() => {
-        syncingRef.current = false;
-      });
-    };
-    el.addEventListener("scroll", onTableScroll, { passive: true });
-    bar.addEventListener("scroll", onBarScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onTableScroll);
-      bar.removeEventListener("scroll", onBarScroll);
-    };
-  }, [showBar]);
-
   function renderCell(entry: Entry, col: ColConfig) {
     const rawCompanyOptions = flagData?.companyFlags[entry.entryFlag || ""] || [];
     const rawPersonOptions = flagData?.personFlags[entry.entryFlag || ""] || [];
@@ -1226,8 +1144,7 @@ export default function EntryTable({
   }
 
   return (
-    <>
-    <div ref={scrollRef} className="overflow-x-auto border border-gray-200 rounded-lg">
+    <div className="overflow-x-auto border border-gray-200 rounded-lg">
       <table className="text-[12px] border-collapse" style={{ minWidth }}>
         <colgroup>
           <col style={{ width: 36, minWidth: 36 }} />
@@ -1312,14 +1229,5 @@ export default function EntryTable({
         </tbody>
       </table>
     </div>
-    {showBar && (
-      <div
-        ref={barRef}
-        className="fixed left-0 right-0 bottom-0 z-40 overflow-x-auto bg-white/95 border-t border-gray-200"
-      >
-        <div style={{ width: barWidth, height: 14 }} />
-      </div>
-    )}
-    </>
   );
 }
