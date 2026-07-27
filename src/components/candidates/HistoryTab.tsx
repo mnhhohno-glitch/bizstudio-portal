@@ -478,17 +478,49 @@ const BASIS_LABEL: Record<SortBasis, string> = {
   date: "紹介日",
 };
 
-// 応募したい/気になる ステータスを基準に応じた優先順位の数値へ。その他(null)は常に末尾(2)。
-function responseRank(resp: string | null, basis: "want" | "interest"): number {
-  if (basis === "want") {
-    if (resp === "WANT_TO_APPLY") return 0;
-    if (resp === "INTERESTED") return 1;
-    return 2;
+// 修正2: 並び替えの判定値を「本人回答優先」にするための正規化。
+// 2つの記録系統は同じ意味の値でも綴りが違うため、必ず同じ内部意向へ正規化してから比較する。
+//   本人回答 CandidateFile.responseStatus : APPLY / INTERESTED / PENDING / EXCLUDED / UNANSWERED
+//                                           （＋CA駆動の IN_SELECTION / SELECTION_ENDED）
+//   従来値   CandidateJobResponse.response : WANT_TO_APPLY / INTERESTED
+// ★「応募したい」が APPLY と WANT_TO_APPLY で綴り違い。大文字小文字・前後空白も吸収する。
+type ResponseIntent = "APPLY" | "INTERESTED" | "PENDING" | "EXCLUDED";
+function normalizeResponseIntent(resp: string | null | undefined): ResponseIntent | null {
+  if (!resp) return null;
+  switch (resp.trim().toUpperCase()) {
+    case "APPLY":
+    case "WANT_TO_APPLY":
+      return "APPLY";
+    case "INTERESTED":
+      return "INTERESTED";
+    case "PENDING":
+      return "PENDING";
+    case "EXCLUDED":
+      return "EXCLUDED";
+    default:
+      // UNANSWERED / IN_SELECTION / SELECTION_ENDED / 不明値は「回答なし」＝常に末尾。
+      return null;
   }
-  // interest
-  if (resp === "INTERESTED") return 0;
-  if (resp === "WANT_TO_APPLY") return 1;
-  return 2;
+}
+
+// 本人回答（CandidateFile.responseStatus）を優先し、無ければ従来値（CandidateJobResponse 由来）へフォールバック。
+// 従来値は廃止しない（旧マイページ経由の過去分は従来値にしか記録が無く、落とすと並びが壊れるため）。
+// IN_SELECTION / SELECTION_ENDED は CA 駆動で本人の意向ではないため「回答なし」扱いになり、従来値へ落ちる。
+function resolveResponseForSort(
+  own: string | null | undefined,
+  legacy: string | null | undefined,
+): ResponseIntent | null {
+  return normalizeResponseIntent(own) ?? normalizeResponseIntent(legacy);
+}
+
+// 正規化済み意向 → 基準に応じた優先順位の数値。回答なしは基準に関わらず常に末尾。
+// 順位: 応募したい ＞ 気になる ＞ 保留 ＞ 対象外 ＞ 未回答（「気になる順」では上位2つが入れ替わる）。
+const WANT_ORDER: ResponseIntent[] = ["APPLY", "INTERESTED", "PENDING", "EXCLUDED"];
+const INTEREST_ORDER: ResponseIntent[] = ["INTERESTED", "APPLY", "PENDING", "EXCLUDED"];
+function responseRank(resp: string | null, basis: "want" | "interest"): number {
+  const intent = normalizeResponseIntent(resp);
+  if (!intent) return WANT_ORDER.length; // 回答なしは常に末尾
+  return (basis === "want" ? WANT_ORDER : INTEREST_ORDER).indexOf(intent);
 }
 
 // 基準ごとの値取得を accessor で受け取り、BM/Jobs 両方で同一ロジックを共有する。
@@ -1024,7 +1056,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const bookmarkAccessors: SortAccessors<BookmarkFile> = {
     getCompanyName: (f) => f.fileName,
     getRank: (f, axis) => parse3AxisRatings(f.aiAnalysisComment)?.[axis] ?? null,
-    getResponse: (f) => findJobResponse(f.fileName),
+    // 修正2: 本人回答（responseStatus・「本人回答」列と同じ値）を優先し、無ければ従来値へフォールバック。
+    getResponse: (f) => resolveResponseForSort(f.responseStatus, findJobResponse(f.fileName)),
     getDate: (f) => f.createdAt,
     getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
   };
@@ -2584,6 +2617,10 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   // Bookmark ratings for cross-referencing with jobs
   const [bookmarkRatings, setBookmarkRatings] = useState<Map<string, { wish: string; pass: string; overall: string }>>(new Map());
 
+  // 修正2: 求人紹介一覧の並び替えでも本人回答を優先するため、ブックマーク側の responseStatus を
+  // 会社名キー（bookmarkRatings と同一の正規化）で引けるようにする。取得は fetchBookmarkRatings に相乗り（追加リクエストなし）。
+  const [bookmarkResponses, setBookmarkResponses] = useState<Map<string, string>>(new Map());
+
   // T-128 Phase2-1: エントリー化時に jobDb/externalJobNo を正値化するためのブックマーク由来ソース情報。
   //   key = 会社名の正規化キー（fetchBookmarkRatings と同じルールを使う。厳密1:1にならないケースはあるが
   //   job-platform 経由は現状100% HITO-Link のため、同一会社複数求人は同じ jobDb になる）。
@@ -2613,6 +2650,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       const map = new Map<string, { wish: string; pass: string; overall: string }>();
       // T-128 Phase2-1: sourceType/externalJobRef/sourceMedia も同じ正規化キーで別マップに保持。
       const srcMap = new Map<string, { sourceType: string | null; externalJobRef: string | null; sourceMedia: string | null }>();
+      // 修正2: 本人回答（responseStatus）の会社名別マップ。意向として意味のある値だけ入れる
+      //（UNANSWERED 等で実回答を上書きしない＝未登録なら従来値へフォールバックできる）。
+      const respMap = new Map<string, string>();
       for (const f of data.files || []) {
         const key = normalize(
           (f.fileName as string)
@@ -2624,6 +2664,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         );
         const axis = parse3AxisRatings(f.aiAnalysisComment);
         if (key && axis) map.set(key, axis);
+        if (key && normalizeResponseIntent(f.responseStatus as string | null)) {
+          respMap.set(key, f.responseStatus as string);
+        }
         // sourceType が来ている行だけソースマップに登録（job-platform 由来を優先し、上書きしない）。
         if (key && f.sourceType) {
           const prev = srcMap.get(key);
@@ -2637,6 +2680,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         }
       }
       setBookmarkRatings(map);
+      setBookmarkResponses(respMap);
       setBookmarkSourceMap(srcMap);
     } catch { /* silent */ }
   }, [candidateId]);
@@ -2648,6 +2692,16 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
     }
     return null;
   }, [bookmarkRatings]);
+
+  // 修正2: 会社名からブックマーク側の本人回答（responseStatus）を引く。照合規則は findBookmarkRating と同一。
+  const findBookmarkResponse = useCallback((companyName: string): string | null => {
+    const cn = normalize(companyName.replace(/株式会社|有限会社|合同会社/g, "").trim());
+    if (!cn) return null;
+    for (const [key, resp] of bookmarkResponses) {
+      if (key.includes(cn) || cn.includes(key)) return resp;
+    }
+    return null;
+  }, [bookmarkResponses]);
 
   // T-128 Phase2-1: 会社名からブックマークの sourceType/externalJobRef/sourceMedia を引く。
   //   fetchBookmarkRatings と同一の正規化ルール（法人格除去 + 部分一致）。job-platform 由来が優先。
@@ -2964,7 +3018,8 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   const jobAccessors: SortAccessors<Job> = {
     getCompanyName: (j) => j.company_name,
     getRank: (j, axis) => findBookmarkRating(j.company_name)?.[axis] ?? null,
-    getResponse: (j) => j.candidate_response,
+    // 修正2: ブックマーク側の本人回答を優先し、無ければ従来値（行の candidate_response）へフォールバック。
+    getResponse: (j) => resolveResponseForSort(findBookmarkResponse(j.company_name), j.candidate_response),
     getDate: (j) => j.created_at,
   };
 
