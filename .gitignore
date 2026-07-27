@@ -49,3 +49,6 @@ prisma/*.csv
 
 # T-131 step4 バックフィルの進捗ファイル（実行時生成・コミット対象外）
 verify/t131-backfill-progress.jsonl
+
+# 集計スクリプトの出力（実行時生成・コミット対象外）
+scripts/output/
