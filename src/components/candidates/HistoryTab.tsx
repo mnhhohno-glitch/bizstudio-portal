@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
-import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
+import { stripFileMetadata, stripCorpSuffixes, extractCompanyNameCandidates } from "@/lib/normalize-filename";
 import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
 import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -456,7 +456,7 @@ function jstDateKey(v: string | number | Date | null | undefined): string {
 
 // ---- 2段（1次/2次）クロスソートモデル ----
 // 並び替えキーは最大2つ（1次・2次）。各キーは基準 + 方向。
-type SortBasis = "company_name" | "want" | "interest" | "wish" | "pass" | "overall" | "uploader" | "date";
+type SortBasis = "company_name" | "want" | "interest" | "wish" | "pass" | "overall" | "response" | "uploader" | "date";
 type SortDir = "asc" | "desc";
 type SortKey = { basis: SortBasis; dir: SortDir };
 
@@ -477,6 +477,7 @@ const BASIS_LABEL: Record<SortBasis, string> = {
   wish: "希望",
   pass: "通過",
   overall: "総合",
+  response: "本人回答",
   uploader: "担当",
   date: "紹介日",
 };
@@ -520,9 +521,11 @@ function resolveResponseForSort(
 // 順位: 応募したい ＞ 気になる ＞ 保留 ＞ 対象外 ＞ 未回答（「気になる順」では上位2つが入れ替わる）。
 const WANT_ORDER: ResponseIntent[] = ["APPLY", "INTERESTED", "PENDING", "EXCLUDED"];
 const INTEREST_ORDER: ResponseIntent[] = ["INTERESTED", "APPLY", "PENDING", "EXCLUDED"];
+/** 回答なしの順位値。方向トグル付きの response 基準で「常に末尾」を判定するのに使う。 */
+const RESPONSE_RANK_NONE = WANT_ORDER.length;
 function responseRank(resp: string | null, basis: "want" | "interest"): number {
   const intent = normalizeResponseIntent(resp);
-  if (!intent) return WANT_ORDER.length; // 回答なしは常に末尾
+  if (!intent) return RESPONSE_RANK_NONE; // 回答なしは常に末尾
   return (basis === "want" ? WANT_ORDER : INTEREST_ORDER).indexOf(intent);
 }
 
@@ -554,6 +557,19 @@ function compareByBasis<T>(a: T, b: T, key: SortKey, acc: SortAccessors<T>): num
     case "overall": {
       const k = key.basis as "wish" | "pass" | "overall";
       return compareRank(acc.getRank(a, k), acc.getRank(b, k), dir);
+    }
+    case "response": {
+      // 本人回答列のソート。順序定義は「応募したい順」ボタンと同じ responseRank(want) を流用する
+      //（応募したい > 気になる > 保留 > 対象外）。担当/紹介日と同じく方向トグルを持つが、
+      // 未回答は他列の欠損と同様に方向に関わらず常に末尾へ寄せる。
+      const ra = responseRank(acc.getResponse(a), "want");
+      const rb = responseRank(acc.getResponse(b), "want");
+      const aMissing = ra === RESPONSE_RANK_NONE;
+      const bMissing = rb === RESPONSE_RANK_NONE;
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      return (ra - rb) * dir;
     }
     case "uploader": {
       const ua = acc.getUploader?.(a) ?? "";
@@ -692,10 +708,10 @@ function RatingBreakdown({ summary, filtering, totalAll, onClearFilter }: {
     return (
       <span key={k} className="inline-flex items-center gap-1 shrink-0" title={`総合${k}: ${n}件 (${pct(n)}%)`}>
         {s
-          ? <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[10px] font-bold border ${s}`}>{k}</span>
-          : <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[10px] font-bold border bg-gray-100 text-gray-500 border-gray-300">—</span>}
-        <span className="text-[11px] tabular-nums text-gray-700">{n}</span>
-        <span className="text-[10px] tabular-nums text-gray-400">{pct(n)}%</span>
+          ? <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[12px] font-bold border ${s}`}>{k}</span>
+          : <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[12px] font-bold border bg-gray-100 text-gray-500 border-gray-300">—</span>}
+        <span className="text-[12px] tabular-nums text-gray-700">{n}</span>
+        <span className="text-[12px] tabular-nums text-gray-400">{pct(n)}%</span>
       </span>
     );
   };
@@ -704,7 +720,7 @@ function RatingBreakdown({ summary, filtering, totalAll, onClearFilter }: {
     const parts = ORDER.filter((k) => (map[k] ?? 0) > 0).map((k) => `${k === "未評価" ? "—" : k}${map[k]}`);
     if (parts.length === 0) return null;
     return (
-      <span className="text-[10px] text-gray-400 whitespace-nowrap">
+      <span className="text-[12px] text-gray-400 whitespace-nowrap">
         {label} {parts.join(" / ")}
       </span>
     );
@@ -713,7 +729,7 @@ function RatingBreakdown({ summary, filtering, totalAll, onClearFilter }: {
   return (
     <div className="flex flex-col items-end gap-1 max-w-full">
       <div className="flex items-center gap-2 flex-wrap justify-end">
-        <span className="text-[11px] text-gray-500 shrink-0">
+        <span className="text-[12px] text-gray-500 shrink-0">
           評価内訳
           <span className="ml-1 text-gray-700 font-medium tabular-nums">{summary.total}件</span>
         </span>
@@ -723,12 +739,12 @@ function RatingBreakdown({ summary, filtering, totalAll, onClearFilter }: {
         {subLine("希望", summary.wish)}
         {subLine("通過", summary.pass)}
         {summary.excluded > 0 && (
-          <span className="text-[10px] text-gray-400 whitespace-nowrap" title="サイト経由でPDF未保管のため母数から除外">
+          <span className="text-[12px] text-gray-400 whitespace-nowrap" title="サイト経由でPDF未保管のため母数から除外">
             AI評価対象外 {summary.excluded}件
           </span>
         )}
         {filtering && (
-          <span className="text-[10px] text-amber-600 whitespace-nowrap">
+          <span className="text-[12px] text-amber-600 whitespace-nowrap">
             絞り込み中（{summary.total + summary.excluded}件 / 全{totalAll}件）
             <button onClick={onClearFilter} className="ml-1 underline hover:text-amber-700">解除</button>
           </span>
@@ -750,7 +766,7 @@ function SortChipBar({ sortKeys, cycleKeyDir, removeKey }: {
       {sortKeys.map((k, i) => (
         <span
           key={k.basis}
-          className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[11px] text-[#2563EB]"
+          className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[12px] text-[#2563EB]"
         >
           <span className="font-semibold">{i === 0 ? "1次" : "2次"}</span>
           <span>{BASIS_LABEL[k.basis]}</span>
@@ -1491,6 +1507,28 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                     {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedSiteApplyIds.length}件）`}
                   </button>
                 )}
+                {/* 社名コピー: エントリー管理（EntryBoard.tsx「社名をコピー」）と同一挙動。
+                    区切りは改行、成功時 toast、失敗時は alert(names) にフォールバック。
+                    BM側は会社名列がファイル名なので、抽出は T-146 の extractCompanyNameCandidates を再利用する
+                    （先頭候補＝会社名コア。新規に正規表現は書き起こさない）。 */}
+                <button
+                  onClick={async () => {
+                    const names = filteredFiles
+                      .filter((f) => selectedIds.has(f.id))
+                      .map((f) => extractCompanyNameCandidates(f.fileName)[0] ?? stripFileMetadata(f.fileName))
+                      .join("\n");
+                    try {
+                      await navigator.clipboard.writeText(names);
+                      toast.success(`${selectedIds.size}件の社名をコピーしました`);
+                    } catch {
+                      alert(names);
+                    }
+                  }}
+                  className="text-[12px] text-gray-600 hover:text-gray-800 font-medium"
+                  title="選択した行の会社名を改行区切りでコピーします"
+                >
+                  📋 社名コピー（{selectedIds.size}件）
+                </button>
               </>
             )}
           </div>
@@ -1553,7 +1591,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* Table header */}
       {files.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[12px] font-medium text-gray-500 select-none">
           <span className="w-4 shrink-0" />
           <span className="w-[80px] shrink-0">DB名</span>
           <span className="w-[120px] shrink-0">DBNO</span>
@@ -1570,8 +1608,17 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("overall") ? "text-[#2563EB]" : ""}`}>
             総合<DirArrows dir={keyOf("overall")?.dir ?? null} /><OrderBadge n={degreeOf("overall")} />
           </span>
-          {/* T-133 FU: 本人回答（CandidateFile.responseStatus）。並び替えは付けない（既存sortはCandidateJobResponse由来で別系統・修正3で整理）。 */}
-          <span className="w-[72px] shrink-0" title="求職者本人がマイページで付けた回答（気になる/応募したい 等）">本人回答</span>
+          {/* T-133 FU: 本人回答（CandidateFile.responseStatus）。
+              並び替えは担当/紹介日と同じ2段クロスソート機構に response 基準として組み込む。
+              順序定義は「応募したい順」ボタンと同じ responseRank(want) を流用（compareByBasis 参照）。 */}
+          <span
+            onClick={() => activateBasis("response")}
+            className={`w-[72px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("response") ? "text-[#2563EB]" : ""}`}
+            title="求職者本人がマイページで付けた回答（気になる/応募したい 等）"
+          >
+            本人回答
+            <DirArrows dir={keyOf("response")?.dir ?? null} /><OrderBadge n={degreeOf("response")} />
+          </span>
           <span
             onClick={() => activateBasis("uploader")}
             className={`w-[72px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("uploader") ? "text-[#2563EB]" : ""}`}
