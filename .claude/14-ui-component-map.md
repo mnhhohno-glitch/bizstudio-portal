@@ -302,40 +302,85 @@ type InterviewRecord = {
 
 ### 基本情報
 - パス: `src/components/candidates/HistoryTab.tsx`
-- 行数: 2700+ 行（頻出修正対象）
+- 行数: **3599 行**（頻出修正対象。最終確認 2026-07-29 / T-146 P2-6 時点）
 - 用途: 紹介履歴タブ全体（ブックマーク / 求人紹介 / エントリー / 紹介保留の 4 サブタブ）
 - 親: `CandidateDetailPage.tsx` → `activeTab === "history"`
+
+> ⚠️ 行番号は改修のたびにズレる。**関数名で grep するのが確実**（`^function BookmarkSection` 等）。以下は 2026-07-29 時点の実測値。
 
 ### 全体レイアウト
 
 ```
 HistoryTab
   ├─ タブバー: bookmark / jobs / entries / archived
-  ├─ bookmark タブ → BookmarkSection（行 408〜、インライン関数コンポーネント）
+  ├─ bookmark タブ → BookmarkSection（L813〜、インライン関数コンポーネント）
+  │   │   props: candidateId, jobResponseMap, onCountChange, onSwitchToJobs,
+  │   │          onArchivedChange, onEntryCreated
   │   ├─ ファイルアップロード D&D 領域
-  │   ├─ ツールバー（検索 / 日付フィルタ / ソート / AI 分析 / 送信ボタン）
-  │   ├─ ヘッダー行（チェック / ファイル名 / 希望 / 通過 / 総合 / 担当 / 日時）
-  │   ├─ ファイル一覧（filteredFiles.map、行 ~1005）
-  │   │   └─ 各行: チェック + ファイル名 + 3 軸バッジ + 担当 + 日時 + DL/ 保留ボタン
-  │   ├─ 紹介保留セクション（アコーディオン、行 ~1400）
-  │   ├─ 送信モーダル（求人出力ツール送信、行 ~1085）
-  │   ├─ PDF プレビューポップアップ（行 ~1253）
-  │   ├─ AI 分析コメントモーダル（行 ~1289、T-055 で 3 軸セレクト追加）
+  │   ├─ ツールバー（検索 / 日付フィルタ / ソート）
+  │   │   ※「AI分析」ボタンはここには無い。analyze-batch の呼び出しは
+  │   │     AdvisorFloatingPanel.tsx（L238 / L339）のみ
+  │   ├─ 並び替え行 ＋ 評価内訳パネル（T-146 P2-6）
+  │   │   ├─ 左: SortBasisButtons / SortChipBar
+  │   │   └─ 右: RatingBreakdown（L678 で定義）
+  │   │        総数 + 総合 A/B+/B/C/D/未評価 の件数と整数% + 希望/通過の補助表示
+  │   │        母数＝filteredFiles（絞り込み後）から「AI評価対象外」を除いたもの
+  │   ├─ ヘッダー行（チェック / DB名 / DBNO / 会社名 / 希望 / 通過 / 総合 /
+  │   │              本人回答 / 担当 / 紹介日 / 操作）
+  │   ├─ ファイル一覧（filteredFiles.map）
+  │   │   └─ 各行: チェック + DB名/DBNO + ファイル名 + 3 軸バッジ + 本人回答
+  │   │            + 担当 + 日時 + DL/CAコメント/保留ボタン
+  │   │        ※ サイト経由（origin="candidate" かつ driveFileId=null かつ
+  │   │          aiAnalysisComment 無し）は 3 軸バッジではなく
+  │   │          「AI評価対象外」の 1 スパン（w-168px）を描画
+  │   ├─ 送信モーダル（求人出力ツール送信）
+  │   ├─ PDF プレビューポップアップ
+  │   ├─ AI 分析コメントモーダル（T-055 で 3 軸セレクト追加）
   │   │   ├─ ヘッダー: aiMatchRating バッジ + ファイル名
-  │   │   ├─ 3 軸セレクト UI（希望 / 通過 / 総合、A/B/C/D ドロップダウン）
+  │   │   ├─ 3 軸セレクト UI（希望 / 通過 = A/B/C/D、**総合のみ A/B+/B/C/D**）
   │   │   ├─ 本文: 表示モード / 編集モード（textarea）
   │   │   └─ フッター: 編集 / コピー / 保存 / キャンセル
-  │   └─ アーカイブモーダル（行 ~288、別関数 ArchiveModal）
+  │   ├─ CAコメント編集モーダル
+  │   └─ 求職者メモ閲覧モーダル
+  ├─ ArchiveModal（L338 で定義・BookmarkSection から呼び出し）
   ├─ jobs タブ → 求人紹介一覧（kyuujinPDF 連携）
   ├─ entries タブ → エントリー一覧
-  └─ archived タブ → ArchivedBookmarkSection（紹介保留、L1471〜1782）
+  └─ archived タブ → ArchivedBookmarkSection（紹介保留、L2198〜）
+      ※ 独立した state / fetch。BookmarkSection の files には含まれない
+        （fetch が archived 未指定 → API 既定で archivedAt: null）
 ```
+
+### 主要シンボルの位置（2026-07-29 実測）
+
+| シンボル | 行 | 役割 |
+|---|---|---|
+| `ArchiveModal` | 338 | 紹介保留モーダル |
+| `RATING_STYLES` / `RATING_LABELS` | 406 / 412 | バッジ配色・ラベル（**B+ を含む**） |
+| `parse3AxisRatings` | 419 | 3 軸マーカーの抽出（`@/lib/ai-rating` の `extractAxis` を使用） |
+| `resolveResponseForSort` | 512 | 本人回答優先ソートの値解決 |
+| `RatingBreakdown` | 678 | 評価内訳パネル（T-146 P2-6） |
+| `BookmarkSection` | 813 | ブックマークサブタブ本体 |
+| `updateRatingMarker` | 951 | 3 軸セレクト変更時に本文のマーカー行を書き換え |
+| `handleBulkDownload` | 1083 | 一括DL |
+| `bookmarkAccessors` | 1127 | ソート用アクセサ |
+| `filteredFiles` | 1137 | 検索・日付で絞り込み＋ソート |
+| `ratingSummary` | 1154 | 評価内訳の集計（filteredFiles ベース） |
+| `toggleAll` | 1177 | 全選択 |
+| `handleMoveToJobs` | 1276 | 求人紹介へ移動 |
+| `handleRegisterEntry` | 1346 | エントリーへ直接登録 |
+| `ArchivedBookmarkSection` | 2198 | 紹介保留サブタブ |
+| `fetchBookmarkRatings` | 2732 | HistoryTab 本体側の評価取得 |
 
 ### 評価データフロー（★重要★）
 
+**★大前提★ 評価は DB の enum ではない。** `aiMatchRating` は `String?`（Prisma スキーマ上ただの文字列）で、
+**実体は `aiAnalysisComment` の本文テキストにある `■ 総合: X` というマーカー行**。`aiMatchRating` は
+そこから正規表現で抽出したミラー列にすぎない。したがって**ランクを増やす／読み方を変える改修は
+スキーマ変更ではなく「正規表現の改修」になる**（T-146 がまさにこれ）。
+
 ```
 AI 分析実行 (analyze-batch)
-  └→ DB 保存: aiMatchRating(総合 A/B/C/D) + aiAnalysisComment(テキスト全文、3 軸マーカー含む)
+  └→ DB 保存: aiMatchRating(総合 A/B+/B/C/D) + aiAnalysisComment(テキスト全文、3 軸マーカー含む)
 
 一覧バッジ表示
   ├─ 希望: parse3AxisRatings(aiAnalysisComment).wish    (テキストパース)
@@ -347,6 +392,22 @@ AI 分析実行 (analyze-batch)
       ├─ aiAnalysisComment 更新（テキスト本文）
       └─ aiMatchRating 同時更新（テキストから "■ 総合: X" を正規表現抽出）
 ```
+
+### `src/lib/ai-rating.ts`（T-146 P2-2 で新設・★評価まわりの単一の出所★）
+
+評価ランクの正規表現・並び順・ラベル変換が **6ファイルに散在してコピーされていた**ため集約した。
+評価まわりを触るときは**まずこのファイルを見る**こと。
+
+| エクスポート | 用途 | 注意 |
+|---|---|---|
+| `RATING_VALUE` | 評価値 1 個にマッチする正規表現フラグメント `(?:B\+\|[ABCD])` | **読み取り用**。`B\+` を先に試す交替。`[ABCD]\+?` と書くと `A+`/`C+` や幅表記まで拾うので不可 |
+| `RATING_VALUE_WITH_RANGE` | 上記 ＋ 幅表記（`B〜C`）の末尾まで | **除去専用**。読み取りに使うと幅表記の解釈が変わるので使わない |
+| `RANK_ORDER` | `{ A:0, "B+":1, B:2, C:3, D:4 }` | 未定義キーは `RANK_UNRANKED`(=5) で末尾送り |
+| `extractAxis` | 3 軸マーカーから値を取り出す | 総合のみ `B+` を取りうる。希望・通過は A/B/C/D |
+| `toMatchLabel` | kyuujinPDF へ送る ◎/○/△ ラベル | **旧来 3 ファイルに同一コピーがあった**。`default: ""` に落ちると例外もログも出ず match_label が静かに消える |
+
+**幅表記（`■ 総合：B〜C`）の既存データが本番に 169 件残っている**（2026-07-17〜27 に生成・再判定しない方針）。
+読み取りは従来どおり先頭 1 文字（`B〜C` → `B`）。**`B+` と誤読させないこと**が改修時の最重要制約。
 
 ### 主要 state（BookmarkSection 内）
 
@@ -1091,7 +1152,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - **確定→提出制限**：「確定」で `commentConfirmedAt` セット。**確定済みでないと「提出」は disabled**（本文編集で未確定に戻る＝サーバが reportBody 編集時に commentConfirmedAt を NULL 化、提出も未確定なら 400）。
 - **自動保存＋提出（T-069②）**：`reportBody` は**自動保存**（2.5秒 debounce＋日付移動/離脱前 keepalive、`dirtyRef`）。下書き保存ボタンなし。**右上に「提出」**（`status=SUBMITTED`・`submittedAt`、確定済みのみ）。**提出時のみ LINE WORKS 通知**（本文は `reportBody` を【コメント】ブロックで載せる）。POST の update は body 提供フィールドのみ反映（旧 comment/aiBody を潰さない）。
 - **下段は2列**（コメント欄を外した分）：当日実績（`300px`・やや広く）｜グラフ（`1fr`・広く）。
-- **求人検索グラフ（行動量＋精度）**：面談系縦棒の隣に **BM数(求人紹介数=createdAt当日)・出力数(提案数=lastExportedAt当日)** の縦棒（棒上に数値＝inline plugin `barValue` afterDatasetsDraw）。**選定率**を見出しに大きく表示（`(A+B+C)÷合計BM`、D・未評価除外）。**求人ABCD ドーナツ**＝当日BM の `aiMatchRating` 構成比（A/B/C/D/未評価）。母数は**紹介保留含む（archivedAt 条件なし）**。`/api/daily-report?date=` の `jobSearch{bmCount,exportCount,ratings,selectionRate}`（`computeJobSearchDay`・`uploadedByUserId`軸）。⚠️ 既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別集計（archivedAt=null だとDの77%が保留に逃げ選定率100%固定になるため、グラフ用は archivedAt 条件なし）。
+- **求人検索グラフ（行動量＋精度）**：面談系縦棒の隣に **BM数(求人紹介数=createdAt当日)・出力数(提案数=lastExportedAt当日)** の縦棒（棒上に数値＝inline plugin `barValue` afterDatasetsDraw）。**選定率**を見出しに大きく表示（**`出力数÷(BM数+紹介保留数)`**＝T-092 で変更。`aiMatchRating` は参照しない。旧定義 `(A+B+C)÷合計BM` は廃止済み）。**求人評価ドーナツ**＝当日BM の `aiMatchRating` 構成比（**T-146 以降 A/B+/B/C/D/未評価** の5段階＋未評価。`RATING_ORDER`/`RATING_COLORS` L104-105。件数0のランクは `buildPie` が除外するため凡例に出ない）。母数は**紹介保留含む（archivedAt 条件なし）**。`/api/daily-report?date=` の `jobSearch{bmCount,exportCount,ratings,selectionRate}`（`computeJobSearchDay`・`uploadedByUserId`軸）。⚠️ 既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別集計（archivedAt=null だとDの77%が保留に逃げ選定率100%固定になるため、グラフ用は archivedAt 条件なし）。
 - 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
 - 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
