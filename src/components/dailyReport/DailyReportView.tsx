@@ -937,12 +937,12 @@ function DailyCharts({ matrix, attributes, jobSearch, stageDetails }: { matrix: 
       <div>
         <div className="text-[12px] font-medium text-[#374151] mb-2">当日の精度・属性</div>
         <div className="flex flex-wrap gap-3">
-          {pie(`求人ABCD（選定率${selPct}）`, ratingRef, !!jobSearch && jobSearch.bmCount > 0)}
+          {pie(`求人評価（選定率${selPct}）`, ratingRef, !!jobSearch && jobSearch.bmCount > 0)}
           {pie("ランク", rankRef, n > 0)}
           {pie("男女比", genderRef, n > 0)}
           {pie("年代", ageRef, n > 0)}
         </div>
-        <div className="mt-1 text-[10px] text-[#9CA3AF]">求人ABCD＝当日BM（紹介保留含む）の aiMatchRating 構成比。選定率＝出力数÷(BM数+紹介保留数)＝当日の全BOOKMARKのうち出力できた割合。ランク/男女比/年代＝当日の初回面談者{n}人。</div>
+        <div className="mt-1 text-[10px] text-[#9CA3AF]">求人評価＝当日BM（紹介保留含む）の aiMatchRating 構成比（A/B+/B/C/D）。選定率＝出力数÷(BM数+紹介保留数)＝当日の全BOOKMARKのうち出力できた割合。ランク/男女比/年代＝当日の初回面談者{n}人。</div>
       </div>
     </div>
   );
