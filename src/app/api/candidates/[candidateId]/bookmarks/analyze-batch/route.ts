@@ -6,6 +6,7 @@ import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
+import { extractCompanyNameCandidates } from "@/lib/normalize-filename";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -249,6 +250,16 @@ function extractSearchNames(fileName: string): string[] {
       expanded.push(normalized);
     }
   }
+
+  // T-146 追加調査: ファイル名に会社名以外の文字（括弧書き・部署名・キャッチコピー・
+  // 記号）が混ざると、上のどの候補にも不純物が残り 【会社名】 と照合できずに
+  // 評価の保存ごとスキップされる（本番で 105 件・求職者 52 名）。
+  // ★必ず末尾に追加する★ — 候補は先頭から順に試され最初の一致で確定するため、
+  // 末尾に足す限り現在成功している照合の挙動は変わらない。
+  for (const core of extractCompanyNameCandidates(fileName)) {
+    if (!expanded.includes(core)) expanded.push(core);
+  }
+
   return expanded;
 }
 
