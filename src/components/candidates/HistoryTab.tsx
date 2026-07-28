@@ -670,6 +670,74 @@ function SortBasisButtons({ degreeOf, activateBasis }: {
 }
 
 // 「並び替え：」1次/2次チップバー（基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。BM・Jobs 共用。
+/**
+ * T-146 P2-6: 引き当ての評価内訳（ブックマークタブ）。
+ * 「選定率」は日報側に別定義の同名指標があるため、この語は使わない。
+ * 母数は絞り込み後の表示中の件数（AI評価対象外を除く）＝一覧に見えている行と一致させる。
+ */
+function RatingBreakdown({ summary, filtering, totalAll, onClearFilter }: {
+  summary: { total: number; excluded: number; overall: Record<string, number>; wish: Record<string, number>; pass: Record<string, number> };
+  filtering: boolean;
+  totalAll: number;
+  onClearFilter: () => void;
+}) {
+  if (summary.total === 0) return null;
+  const ORDER = ["A", "B+", "B", "C", "D", "未評価"];
+  const pct = (n: number) => Math.round((n / summary.total) * 100);
+
+  const mainChip = (k: string) => {
+    const n = summary.overall[k] ?? 0;
+    if (n === 0) return null; // 件数0の段は出さない（横幅の節約）
+    const s = RATING_STYLES[k];
+    return (
+      <span key={k} className="inline-flex items-center gap-1 shrink-0" title={`総合${k}: ${n}件 (${pct(n)}%)`}>
+        {s
+          ? <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[10px] font-bold border ${s}`}>{k}</span>
+          : <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded text-[10px] font-bold border bg-gray-100 text-gray-500 border-gray-300">—</span>}
+        <span className="text-[11px] tabular-nums text-gray-700">{n}</span>
+        <span className="text-[10px] tabular-nums text-gray-400">{pct(n)}%</span>
+      </span>
+    );
+  };
+
+  const subLine = (label: string, map: Record<string, number>) => {
+    const parts = ORDER.filter((k) => (map[k] ?? 0) > 0).map((k) => `${k === "未評価" ? "—" : k}${map[k]}`);
+    if (parts.length === 0) return null;
+    return (
+      <span className="text-[10px] text-gray-400 whitespace-nowrap">
+        {label} {parts.join(" / ")}
+      </span>
+    );
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-1 max-w-full">
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        <span className="text-[11px] text-gray-500 shrink-0">
+          評価内訳
+          <span className="ml-1 text-gray-700 font-medium tabular-nums">{summary.total}件</span>
+        </span>
+        {ORDER.map(mainChip)}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap justify-end">
+        {subLine("希望", summary.wish)}
+        {subLine("通過", summary.pass)}
+        {summary.excluded > 0 && (
+          <span className="text-[10px] text-gray-400 whitespace-nowrap" title="サイト経由でPDF未保管のため母数から除外">
+            AI評価対象外 {summary.excluded}件
+          </span>
+        )}
+        {filtering && (
+          <span className="text-[10px] text-amber-600 whitespace-nowrap">
+            絞り込み中（{summary.total + summary.excluded}件 / 全{totalAll}件）
+            <button onClick={onClearFilter} className="ml-1 underline hover:text-amber-700">解除</button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SortChipBar({ sortKeys, cycleKeyDir, removeKey }: {
   sortKeys: SortKey[];
   cycleKeyDir: (b: SortBasis) => void;
@@ -1078,6 +1146,34 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     return [...result].sort(makeCompositeComparator(sortKeys, bookmarkAccessors));
   })();
 
+  // T-146 P2-6: 評価内訳（絞り込み後の表示中の件数を集計）。
+  //   ※「選定率」とは呼ばない。日報側に同名で別定義の指標（出力数÷(BM数+紹介保留数)）があり、
+  //     同じ語で違う数字が2箇所に出ると必ず混乱するため。
+  //   母数からは「AI評価対象外」（サイト経由でPDF未保管）を除く。一覧で対象外と明示している行を
+  //   分母に入れると内訳が不当に薄まるため。バッジと同じ値解決（総合のみ aiMatchRating フォールバック）。
+  const ratingSummary = (() => {
+    const evaluable = filteredFiles.filter(
+      (f) => !(f.origin === "candidate" && !f.driveFileId && !f.aiAnalysisComment)
+    );
+    const tally = (axis: "wish" | "pass" | "overall") => {
+      const m: Record<string, number> = {};
+      for (const f of evaluable) {
+        const parsed = parse3AxisRatings(f.aiAnalysisComment);
+        const raw = axis === "overall" ? parsed?.overall || f.aiMatchRating || "" : parsed?.[axis] ?? "";
+        const key = raw && raw !== "—" && RANK_ORDER[raw] !== undefined ? raw : "未評価";
+        m[key] = (m[key] ?? 0) + 1;
+      }
+      return m;
+    };
+    return {
+      total: evaluable.length,
+      excluded: filteredFiles.length - evaluable.length,
+      overall: tally("overall"),
+      wish: tally("wish"),
+      pass: tally("pass"),
+    };
+  })();
+
   const toggleAll = () => {
     const ids = filteredFiles.map((f) => f.id);
     if (ids.every((id) => selectedIds.has(id))) {
@@ -1431,9 +1527,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
         {/* Sort: 会社名軸の基準ボタン + 1次/2次チップバー（2段クロスソート, BM/Jobs 共用） */}
         {files.length > 0 && (
-          <div className="flex flex-col gap-1.5 mt-2">
-            <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
-            <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
+          <div className="flex items-start justify-between gap-3 mt-2">
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
+              <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
+            </div>
+            <div className="shrink-0 max-w-[55%]">
+              <RatingBreakdown
+                summary={ratingSummary}
+                filtering={Boolean(searchQuery || filterDate)}
+                totalAll={files.length}
+                onClearFilter={() => { setSearchQuery(""); setFilterDate(""); }}
+              />
+            </div>
           </div>
         )}
       </div>
