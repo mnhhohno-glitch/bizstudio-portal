@@ -12,12 +12,14 @@
  *   （1セクションで全部記載）
  */
 
-import { RATING_VALUE } from "./ai-rating";
+import { RATING_VALUE_WITH_RANGE } from "./ai-rating";
 
 const CANDIDATE_HEADER_RE = /◆\s*おすすめポイント（本人向け）\s*/;
 const CA_HEADER_RE = /◆\s*選考分析（CA向け）\s*/;
-// B+ を先に試す交替。`[ABCD]\+?` にすると幅表記や A+/C+ まで拾うため不可（T-146）。
-const RATING_LINE_RE = new RegExp(`■\\s*(本人希望|通過率|総合)[：:]\\s*${RATING_VALUE}\\s*`, "g");
+// 除去は幅表記（「■ 総合：B〜C」）の末尾まで飲み込む。RATING_VALUE だけだと
+// 「B」までしか消えず「〜C」が本人向け本文の冒頭に残る（T-146）。
+// 読み取り側は従来どおり RATING_VALUE（先頭1文字）で、評価の解釈は変えない。
+const RATING_LINE_RE = new RegExp(`■\\s*(本人希望|通過率|総合)[：:]\\s*${RATING_VALUE_WITH_RANGE}\\s*`, "g");
 
 function stripMarkdown(s: string): string {
   return s
