@@ -7,6 +7,7 @@ import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
 import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
 import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
+import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -404,26 +405,28 @@ function ArchiveModal({
 
 const RATING_STYLES: Record<string, string> = {
   A: "bg-green-100 text-green-800 border-green-300",
+  "B+": "bg-cyan-100 text-cyan-800 border-cyan-300",
   B: "bg-blue-100 text-blue-800 border-blue-300",
   C: "bg-yellow-100 text-yellow-800 border-yellow-300",
   D: "bg-red-100 text-red-800 border-red-300",
 };
 const RATING_LABELS: Record<string, string> = {
-  A: "A 非常に良い", B: "B 良い", C: "C 要検討", D: "D 合わない",
+  A: "A 非常に良い", "B+": "B+ 良い（上位）", B: "B 良い", C: "C 要検討", D: "D 合わない",
 };
 
+// 総合のみ B+ を取りうる（希望・通過は A/B/C/D）。ただし読み取りは3軸とも同じ
+// パターンを使う。幅表記「B〜C」は B+ にマッチせず従来どおり先頭1文字 "B" を返す。
 function parse3AxisRatings(comment: string | null): { wish: string; pass: string; overall: string } | null {
   if (!comment) return null;
-  const w = comment.match(/■\s*本人希望[：:]\s*([ABCD])/);
-  const p = comment.match(/■\s*通過率[：:]\s*([ABCD])/);
-  const o = comment.match(/■\s*総合[：:]\s*([ABCD])/);
+  const w = extractAxis(comment, "本人希望");
+  const p = extractAxis(comment, "通過率");
+  const o = extractAxis(comment, "総合");
   if (!w && !p && !o) return null;
-  return { wish: w?.[1] || "—", pass: p?.[1] || "—", overall: o?.[1] || "—" };
+  return { wish: w || "—", pass: p || "—", overall: o || "—" };
 }
 
 /* ---------- Bookmark sort helpers (pure functions) ---------- */
 // A=最良 … D=最低。空欄/null/「—」は方向に関わらず常に末尾に寄せるため Infinity 扱い。
-const RANK_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
 function rankValue(r: string | null | undefined): number {
   if (!r) return Number.POSITIVE_INFINITY;
   const v = RANK_ORDER[r];
@@ -883,16 +886,16 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     const baseText = editingComment ? editedCommentText : (selectedAnalysis?.comment || "");
     setRating(newValue);
 
-    const markerLineRe = new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*$`, "m");
+    const markerLineRe = new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*${RATING_VALUE}?\\s*$`, "m");
     let newText: string;
     if (newValue === "") {
       newText = markerLineRe.test(baseText)
-        ? baseText.replace(new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*\\n?`, "m"), "")
+        ? baseText.replace(new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*${RATING_VALUE}?\\s*\\n?`, "m"), "")
         : baseText;
     } else if (markerLineRe.test(baseText)) {
       newText = baseText.replace(markerLineRe, `■ ${label}: ${newValue}`);
     } else {
-      const otherMarkerRe = /^[ \t]*■\s*(?:本人希望|通過率|総合)[：:]\s*[ABCD]?\s*$/m;
+      const otherMarkerRe = new RegExp(`^[ \\t]*■\\s*(?:本人希望|通過率|総合)[：:]\\s*${RATING_VALUE}?\\s*$`, "m");
       const m = baseText.match(otherMarkerRe);
       if (m && m.index !== undefined) {
         const insertPos = m.index + m[0].length;
@@ -1896,6 +1899,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       >
                         <option value="">—</option>
                         <option value="A">A</option>
+                        {/* B+ は総合のみ。本人希望・通過率は A/B/C/D の4段階（T-146） */}
+                        {axis === "overall" && <option value="B+">B+</option>}
                         <option value="B">B</option>
                         <option value="C">C</option>
                         <option value="D">D</option>
@@ -2242,7 +2247,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
     }
   };
 
-  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+  const ratingOrder = RANK_ORDER;
   const filteredFiles = (() => {
     let result = files.filter((f) => {
       if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -2256,8 +2261,8 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
           const axisA = parse3AxisRatings(a.aiAnalysisComment);
           const axisB = parse3AxisRatings(b.aiAnalysisComment);
           const key = sortField;
-          const va = axisA ? (ratingOrder[axisA[key]] ?? 4) : 4;
-          const vb = axisB ? (ratingOrder[axisB[key]] ?? 4) : 4;
+          const va = axisA ? (ratingOrder[axisA[key]] ?? RANK_UNRANKED) : RANK_UNRANKED;
+          const vb = axisB ? (ratingOrder[axisB[key]] ?? RANK_UNRANKED) : RANK_UNRANKED;
           return (va - vb) * dir;
         }
         if (sortField === "archivedBy") {
