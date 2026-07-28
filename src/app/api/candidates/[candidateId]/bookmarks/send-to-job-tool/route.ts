@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { RANK_ORDER, RANK_UNRANKED, toMatchLabel } from "@/lib/ai-rating";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -17,15 +18,7 @@ function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = AP
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
-function toMatchLabel(rating: string | null): string {
-  switch (rating) {
-    case "A": return "◎ 非常にマッチ";
-    case "B": return "○ マッチ";
-    case "C":
-    case "D": return "△ チャレンジ求人";
-    default: return "";
-  }
-}
+// T-146 P2-2: 3ファイルに同一コピーがあったため @/lib/ai-rating に集約（B+ 対応）
 
 export async function POST(
   req: Request,
@@ -73,14 +66,14 @@ export async function POST(
   //                   押した求人＝kyuujin 側の求職者プロジェクトに既に job が存在する（candidateNumber で引ける）。
   //                   PDF送信は不要で、エクスポート状態だけ成立させて「求人紹介へ移動」を通す。
   //                   ※ CandidateFile.kyuujinJobId は未充填のことが多い（favorites/バックフィル由来）ため条件にしない。
-  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+  const ratingOrder = RANK_ORDER;
   const bookmarkFiles = (
     await prisma.candidateFile.findMany({
       where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
     })
   ).sort((a, b) => {
-    const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? 4) : 4;
-    const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? 4) : 4;
+    const ra = a.aiMatchRating ? (ratingOrder[a.aiMatchRating] ?? RANK_UNRANKED) : RANK_UNRANKED;
+    const rb = b.aiMatchRating ? (ratingOrder[b.aiMatchRating] ?? RANK_UNRANKED) : RANK_UNRANKED;
     if (ra !== rb) return ra - rb;
     return a.fileName.localeCompare(b.fileName);
   });

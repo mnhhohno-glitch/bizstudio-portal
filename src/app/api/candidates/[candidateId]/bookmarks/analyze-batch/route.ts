@@ -5,15 +5,16 @@ import { getCandidateContext } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
+import { RATING_VALUE } from "@/lib/ai-rating";
 
 export const maxDuration = 300; // 5 minutes
 
 function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   if (!comment) return false;
   const c = comment.replace(/\*\*/g, "");
-  const hasDesire = /■\s*本人希望[：:]\s*[ABCD]/.test(c);
-  const hasPass = /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c);
-  const hasOverall = /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c);
+  const hasDesire = new RegExp(`■\\s*本人希望[：:]\\s*${RATING_VALUE}`).test(c);
+  const hasPass = new RegExp(`(?:■\\s*)?通過率[：:]\\s*${RATING_VALUE}`).test(c);
+  const hasOverall = new RegExp(`(?:■\\s*)?総合[：:]\\s*${RATING_VALUE}`).test(c);
   return hasDesire && hasPass && hasOverall;
 }
 
@@ -33,7 +34,7 @@ function compressBatchResultForSummary(content: string): string {
       continue;
     }
     // 3軸マーカー行（本人希望 / 通過率 / 総合）
-    if (/^■?\s*(?:本人希望|通過率|総合)\s*[：:]\s*[ABCD]/.test(noBold)) {
+    if (new RegExp(`^■?\\s*(?:本人希望|通過率|総合)\\s*[：:]\\s*${RATING_VALUE}`).test(noBold)) {
       kept.push(t);
       continue;
     }
@@ -63,7 +64,7 @@ function extractRatingsAndComments(
 
     for (const line of summarySection.split("\n")) {
       const trimmed = line.trim();
-      if (/^[ABCD]$/.test(trimmed)) { currentRating = trimmed; continue; }
+      if (new RegExp(`^${RATING_VALUE}$`).test(trimmed)) { currentRating = trimmed; continue; }
       if (trimmed === "該当なし" || trimmed === "") continue;
       if (trimmed.startsWith("*")) {
         const cn = trimmed.replace(/^\*\s*/, "").trim();
@@ -165,7 +166,8 @@ function extractRatingsAndComments(
         if (existing) {
           existing.comment = comment;
         } else {
-          const ratingMatch = comment.match(/■\s*総合[：:]\s*([ABCD])/) || comment.match(/総合[：:]\s*([ABCD])/);
+          const ratingMatch = comment.match(new RegExp(`■\\s*総合[：:]\\s*(${RATING_VALUE})`))
+            || comment.match(new RegExp(`総合[：:]\\s*(${RATING_VALUE})`));
           results.set(file.id, { rating: ratingMatch ? ratingMatch[1] : "", comment });
         }
         break;
@@ -179,7 +181,12 @@ function extractRatingsAndComments(
         const idx = normalizedText.indexOf(name);
         if (idx === -1) continue;
         const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
-        const patterns = [/■\s*総合[：:]\s*([ABCD])/, /総合[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
+        const patterns = [
+          new RegExp(`■\\s*総合[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`総合[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`評価[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`【(${RATING_VALUE})】`),
+        ];
         for (const p of patterns) {
           const m = area.match(p);
           if (m) { entry.rating = m[1]; break; }

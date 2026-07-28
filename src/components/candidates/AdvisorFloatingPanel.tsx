@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { RATING_VALUE } from "@/lib/ai-rating";
 
 type Message = {
   id: string;
@@ -65,9 +66,9 @@ export default function AdvisorFloatingPanel({
     if (!comment) return false;
     const c = comment.replace(/\*\*/g, "");
     return (
-      /■\s*本人希望[：:]\s*[ABCD]/.test(c) &&
-      /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c) &&
-      /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c)
+      new RegExp(`■\\s*本人希望[：:]\\s*${RATING_VALUE}`).test(c) &&
+      new RegExp(`(?:■\\s*)?通過率[：:]\\s*${RATING_VALUE}`).test(c) &&
+      new RegExp(`(?:■\\s*)?総合[：:]\\s*${RATING_VALUE}`).test(c)
     );
   };
 

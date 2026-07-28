@@ -12,9 +12,12 @@
  *   （1セクションで全部記載）
  */
 
+import { RATING_VALUE } from "./ai-rating";
+
 const CANDIDATE_HEADER_RE = /◆\s*おすすめポイント（本人向け）\s*/;
 const CA_HEADER_RE = /◆\s*選考分析（CA向け）\s*/;
-const RATING_LINE_RE = /■\s*(本人希望|通過率|総合)[：:]\s*[ABCD]\s*/g;
+// B+ を先に試す交替。`[ABCD]\+?` にすると幅表記や A+/C+ まで拾うため不可（T-146）。
+const RATING_LINE_RE = new RegExp(`■\\s*(本人希望|通過率|総合)[：:]\\s*${RATING_VALUE}\\s*`, "g");
 
 function stripMarkdown(s: string): string {
   return s
