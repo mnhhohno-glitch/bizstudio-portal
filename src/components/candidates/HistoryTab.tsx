@@ -403,16 +403,119 @@ function ArchiveModal({
   );
 }
 
-const RATING_STYLES: Record<string, string> = {
-  A: "bg-green-100 text-green-800 border-green-300",
-  "B+": "bg-cyan-100 text-cyan-800 border-cyan-300",
-  B: "bg-blue-100 text-blue-800 border-blue-300",
-  C: "bg-yellow-100 text-yellow-800 border-yellow-300",
-  D: "bg-red-100 text-red-800 border-red-300",
+/**
+ * ランクの配色は**ここが単一の出所**。バッジ（className）とドーナツグラフ（SVG の stroke）で共有する。
+ * stroke はバッジ枠線と同じ Tailwind トークン（-300）を指すので、円とバッジの色が完全に一致し、
+ * グラフ用に別の色を定義する必要がない（hex を書き起こさない）。
+ */
+const RATING_PALETTE: Record<string, { badge: string; stroke: string }> = {
+  A: { badge: "bg-green-100 text-green-800 border-green-300", stroke: "stroke-green-300" },
+  "B+": { badge: "bg-cyan-100 text-cyan-800 border-cyan-300", stroke: "stroke-cyan-300" },
+  B: { badge: "bg-blue-100 text-blue-800 border-blue-300", stroke: "stroke-blue-300" },
+  C: { badge: "bg-yellow-100 text-yellow-800 border-yellow-300", stroke: "stroke-yellow-300" },
+  D: { badge: "bg-red-100 text-red-800 border-red-300", stroke: "stroke-red-300" },
+  未評価: { badge: "bg-gray-100 text-gray-500 border-gray-300", stroke: "stroke-gray-300" },
 };
+const RATING_STYLES: Record<string, string> = Object.fromEntries(
+  Object.entries(RATING_PALETTE).map(([k, v]) => [k, v.badge]),
+);
+
+/** 評価内訳・ドーナツで共通のランク列。未評価は実データに1件でもあるときだけ末尾に足す。 */
+const RATING_RANKS = ["A", "B+", "B", "C", "D"];
+function ratingCols(maps: Record<string, number>[]): string[] {
+  const hasUnrated = maps.some((m) => (m["未評価"] ?? 0) > 0);
+  return hasUnrated ? [...RATING_RANKS, "未評価"] : RATING_RANKS;
+}
 const RATING_LABELS: Record<string, string> = {
   A: "A 非常に良い", "B+": "B+ 良い（上位）", B: "B 良い", C: "C 要検討", D: "D 合わない",
 };
+
+/**
+ * ランク別内訳のドーナツグラフ（外部ライブラリ不使用・SVG の stroke-dasharray のみ）。
+ *
+ * 半径を r = 15.9155 にすると円周 2πr = 100 になるため、dasharray/dashoffset に
+ * 「％の値そのもの」を渡せる（比率計算が1回で済み、丸め誤差で隙間が出ない）。
+ * グループを -90度回転して 12時方向から時計回りに描く。
+ *
+ * エッジケース:
+ *   - 総数0件: セグメントを1つも描かず、薄いグレーの空円だけを出す（NaN を作らない）。
+ *   - 1ランク100%: dasharray が "100 0" になり途切れず1色で閉じる。
+ *   - 件数3桁以上: 中心の数字のフォントを桁数に応じて落とし、円からはみ出させない。
+ */
+function RatingDonut({ label, map, cols, size = 88 }: {
+  label: string;
+  map: Record<string, number>;
+  cols: string[];
+  size?: number;
+}) {
+  const total = cols.reduce((sum, k) => sum + (map[k] ?? 0), 0);
+  // 累積%を進めながらセグメントを積む。total=0 のときは segments が空配列になる。
+  let acc = 0;
+  const segments = total === 0 ? [] : cols.flatMap((k) => {
+    const n = map[k] ?? 0;
+    if (n === 0) return [];
+    const portion = (n / total) * 100;
+    const seg = { k, n, portion, offset: acc };
+    acc += portion;
+    return [seg];
+  });
+  const digits = String(total).length;
+  const numCls = digits >= 4 ? "text-[12px]" : digits === 3 ? "text-[14px]" : "text-[17px]";
+
+  return (
+    <div className="flex flex-col items-center gap-0.5 shrink-0">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90" role="img" aria-label={`${label}の内訳`}>
+          {/* 土台のリング。0件のときはこれだけが見える。 */}
+          <circle
+            cx="18" cy="18" r="15.9155" fill="none"
+            className="stroke-gray-100" strokeWidth="4"
+          />
+          {segments.map((s) => (
+            <circle
+              key={s.k}
+              cx="18" cy="18" r="15.9155" fill="none"
+              className={RATING_PALETTE[s.k]?.stroke ?? "stroke-gray-300"}
+              strokeWidth="4"
+              strokeDasharray={`${s.portion} ${100 - s.portion}`}
+              strokeDashoffset={-s.offset}
+            >
+              <title>{`${label} ${s.k === "未評価" ? "—" : s.k}: ${s.n}件 (${Math.round(s.portion)}%)`}</title>
+            </circle>
+          ))}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center leading-none pointer-events-none">
+          <span className={`${numCls} font-bold tabular-nums text-gray-700`}>{total}</span>
+          <span className="text-[9px] text-gray-400 mt-0.5">件</span>
+        </div>
+      </div>
+      <span className="text-[12px] text-gray-500">{label}</span>
+    </div>
+  );
+}
+
+/** 総合/希望/通過 の3つのドーナツ＋共通凡例。気になる/応募したいは0件が多く円が描けないため対象外。 */
+function RatingDonuts({ summary, cols }: {
+  summary: { overall: Record<string, number>; wish: Record<string, number>; pass: Record<string, number> };
+  cols: string[];
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-end gap-3 min-w-0">
+      <RatingDonut label="総合" map={summary.overall} cols={cols} />
+      <RatingDonut label="希望" map={summary.wish} cols={cols} />
+      <RatingDonut label="通過" map={summary.pass} cols={cols} />
+      {/* 凡例は3円で共通。円ごとには出さない。 */}
+      <div className="flex flex-col gap-0.5 shrink-0 pt-1">
+        {cols.map((k) => (
+          <span key={k} className="flex items-center gap-1 text-[11px] text-gray-500 whitespace-nowrap">
+            <span className={`inline-block w-2.5 h-2.5 rounded-sm border ${RATING_PALETTE[k]?.badge ?? "bg-gray-100 border-gray-300"}`} />
+            {k === "未評価" ? "—" : k}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // 総合のみ B+ を取りうる（希望・通過は A/B/C/D）。ただし読み取りは3軸とも同じ
 // パターンを使う。幅表記「B〜C」は B+ にマッチせず従来どおり先頭1文字 "B" を返す。
@@ -712,17 +815,14 @@ function RatingBreakdown({ summary, filtering, totalAll, archivedCount, onClearF
   const pct = (n: number) => Math.round((n / summary.total) * 100);
 
   // ランク列。A/B+/B/C/D は0件でも常に出す（「そのランクが無い」ことを読み取れるようにする）。
-  const RANKS = ["A", "B+", "B", "C", "D"];
+  // 列の決定はドーナツグラフと共通の ratingCols() に委譲する（両者で列が食い違わないようにするため）。
   const DETAIL_MAPS: { label: string; map: Record<string, number> }[] = [
     { label: "希望", map: summary.wish },
     { label: "通過", map: summary.pass },
     { label: "気になる", map: summary.interested },
     { label: "応募したい", map: summary.applied },
   ];
-  // 「未評価（—）」列は実データに1件でもあるときだけ D の右に足す（無ければ列自体を作らない）。
-  const hasUnrated =
-    (summary.overall["未評価"] ?? 0) > 0 || DETAIL_MAPS.some((d) => (d.map["未評価"] ?? 0) > 0);
-  const COLS = hasUnrated ? [...RANKS, "未評価"] : RANKS;
+  const COLS = ratingCols([summary.overall, ...DETAIL_MAPS.map((d) => d.map)]);
 
   // ★1行目のバッジ行と詳細行はこの1つの grid の直接の子として並べ、同じ列トラックを共有する。
   //   これによりランク列の幅はバッジの幅で決まり、その真下に数値が中央揃えで並ぶ。
@@ -1647,6 +1747,22 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
               <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
               <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
             </div>
+            {/* 表示順/並び替えの行と評価内訳ブロックの間。狭いときは折り返して縮み、
+                評価内訳ブロック（shrink-0）を潰さない。詳細の開閉とは連動せず常時表示。 */}
+            {ratingSummary.total > 0 && (
+              <div className="min-w-0 shrink">
+                <RatingDonuts
+                  summary={ratingSummary}
+                  cols={ratingCols([
+                    ratingSummary.overall,
+                    ratingSummary.wish,
+                    ratingSummary.pass,
+                    ratingSummary.interested,
+                    ratingSummary.applied,
+                  ])}
+                />
+              </div>
+            )}
             {/* 右端の位置は固定し、中身が増えたら左へ伸びる。幅は固定値にせず w-fit（RatingBreakdown 側）で中身なり。 */}
             <div className="shrink-0">
               <RatingBreakdown
