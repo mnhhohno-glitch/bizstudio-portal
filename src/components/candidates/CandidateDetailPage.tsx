@@ -138,7 +138,7 @@ type SubTabKey = (typeof SUB_TABS)[number]["key"];
 const HISTORY_SUB_TABS = ["bookmark", "jobs", "entries", "archived"] as const;
 type HistorySubTab = (typeof HISTORY_SUB_TABS)[number];
 
-const ROUTE_OPTIONS = ["スカウト", "応募"];
+const ROUTE_OPTIONS = ["スカウト", "応募", "求職者紹介"];
 const MEDIA_OPTIONS = [
   "マイナビ転職",
   "indeed",

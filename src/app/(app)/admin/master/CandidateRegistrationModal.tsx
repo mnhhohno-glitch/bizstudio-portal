@@ -36,7 +36,7 @@ function calculateAge(birthdayStr: string): string {
   return age >= 0 ? `${age}歳` : "";
 }
 
-const ROUTE_OPTIONS = ["スカウト", "応募"];
+const ROUTE_OPTIONS = ["スカウト", "応募", "求職者紹介"];
 const MEDIA_OPTIONS = [
   "マイナビ転職",
   "indeed",

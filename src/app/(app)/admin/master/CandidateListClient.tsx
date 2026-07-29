@@ -639,6 +639,7 @@ export default function CandidateListClient({
                 <option value="ALL">ALL</option>
                 <option value="スカウト">スカウト</option>
                 <option value="応募">応募</option>
+                <option value="求職者紹介">求職者紹介</option>
               </select>
             </FilterField>
             <FilterField label="媒体">
