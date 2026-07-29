@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes, extractCompanyNameCandidates } from "@/lib/normalize-filename";
@@ -709,79 +709,98 @@ function RatingBreakdown({ summary, filtering, totalAll, archivedCount, onClearF
 
   if (summary.total === 0) return null;
 
-  // 1行目のバッジ。A/B/C/D は0件でも常に出す（「Dが無い」ことを読み取れるようにする）。
-  // B+ は T-146 で追加された段階で件数が少ないため、0件のときだけ省いて横幅を節約する。
-  const MAIN_ORDER = ["A", "B+", "B", "C", "D"];
-  // 詳細表の列。未評価は最右に「—」として置く。
-  const COLS = ["A", "B+", "B", "C", "D", "未評価"];
   const pct = (n: number) => Math.round((n / summary.total) * 100);
 
-  const mainChip = (k: string) => {
-    const n = summary.overall[k] ?? 0;
-    if (k === "B+" && n === 0) return null; // B+ のみ0件で省略
-    const s = RATING_STYLES[k];
-    return (
-      <span key={k} className="inline-flex items-center gap-1 shrink-0" title={`総合${k}: ${n}件 (${pct(n)}%)`}>
-        <span className={`inline-flex items-center justify-center min-w-[24px] h-[22px] px-1.5 rounded text-[14px] font-bold border ${s ?? "bg-gray-100 text-gray-500 border-gray-300"}`}>{k}</span>
-        <span className="text-[14px] tabular-nums text-gray-700">{n}</span>
-        <span className="text-[12px] tabular-nums text-gray-400">{pct(n)}%</span>
-      </span>
-    );
-  };
+  // ランク列。A/B+/B/C/D は0件でも常に出す（「そのランクが無い」ことを読み取れるようにする）。
+  const RANKS = ["A", "B+", "B", "C", "D"];
+  const DETAIL_MAPS: { label: string; map: Record<string, number> }[] = [
+    { label: "希望", map: summary.wish },
+    { label: "通過", map: summary.pass },
+    { label: "気になる", map: summary.interested },
+    { label: "応募したい", map: summary.applied },
+  ];
+  // 「未評価（—）」列は実データに1件でもあるときだけ D の右に足す（無ければ列自体を作らない）。
+  const hasUnrated =
+    (summary.overall["未評価"] ?? 0) > 0 || DETAIL_MAPS.some((d) => (d.map["未評価"] ?? 0) > 0);
+  const COLS = hasUnrated ? [...RANKS, "未評価"] : RANKS;
 
-  // 詳細表の1行。ラベルは左揃え・数値は右揃えで桁を揃える（％は入れない）。
-  const detailRow = (label: string, map: Record<string, number>) => (
-    <tr key={label}>
-      <td className="pr-3 text-left text-gray-500 whitespace-nowrap">{label}</td>
-      {COLS.map((k) => (
-        <td key={k} className="pl-2 text-right tabular-nums text-gray-700">{map[k] ?? 0}</td>
-      ))}
-    </tr>
-  );
+  // ★1行目のバッジ行と詳細行はこの1つの grid の直接の子として並べ、同じ列トラックを共有する。
+  //   これによりランク列の幅はバッジの幅で決まり、その真下に数値が中央揃えで並ぶ。
+  //   列構成: [ラベル] + ランク数ぶんの auto + [詳細ボタン]
+  const gridTemplateColumns = `auto repeat(${COLS.length}, auto) auto`;
 
   return (
     <div className="w-fit whitespace-nowrap border-l border-gray-200 pl-3">
-      {/* 1行目: 折り返し禁止（whitespace-nowrap＋flex-nowrap）。幅は w-fit で中身なりに伸ばす。 */}
-      <div className="flex flex-nowrap items-center gap-2 justify-end">
-        <span className="text-[14px] text-gray-500 shrink-0">
+      <div
+        className="grid items-center gap-x-3 gap-y-1 justify-end"
+        style={{ gridTemplateColumns }}
+      >
+        {/* ---- 1行目: ラベル / ランクごとのバッジ / 詳細ボタン ---- */}
+        <span className="text-[14px] text-gray-500 justify-self-start">
           評価内訳
           <span className="ml-1 text-gray-700 font-medium tabular-nums">{summary.total}件</span>
         </span>
-        {MAIN_ORDER.map(mainChip)}
+        {COLS.map((k) => {
+          const n = summary.overall[k] ?? 0;
+          const s = RATING_STYLES[k];
+          return (
+            <span
+              key={`chip-${k}`}
+              className="inline-flex items-center gap-1 justify-self-center"
+              title={`総合${k === "未評価" ? "評価なし" : k}: ${n}件 (${pct(n)}%)`}
+            >
+              <span className={`inline-flex items-center justify-center min-w-[24px] h-[22px] px-1.5 rounded text-[14px] font-bold border ${s ?? "bg-gray-100 text-gray-500 border-gray-300"}`}>
+                {k === "未評価" ? "—" : k}
+              </span>
+              <span className="text-[14px] tabular-nums text-gray-700">{n}</span>
+              <span className="text-[12px] tabular-nums text-gray-400">{pct(n)}%</span>
+            </span>
+          );
+        })}
         <button
           onClick={() => setDetailOpen((v) => !v)}
-          className="shrink-0 text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+          className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium justify-self-end"
           title="希望/通過/本人回答のランク別内訳を開閉"
         >
           詳細 {detailOpen ? "▲" : "▼"}
         </button>
-      </div>
 
-      {detailOpen && (
-        <div className="mt-1.5 text-[13px]">
-          <table className="ml-auto border-separate border-spacing-0">
-            <thead>
-              <tr>
-                <th className="pr-3" />
+        {/* ---- 詳細: 同じ grid に続けて流し込む（列位置が1行目と一致する） ---- */}
+        {detailOpen && (
+          <>
+            {/* ヘッダ行。バッジと二重に見えるため薄い色にとどめる。 */}
+            <span />
+            {COLS.map((k) => (
+              <span key={`head-${k}`} className="text-[13px] font-medium text-gray-400 justify-self-center">
+                {k === "未評価" ? "—" : k}
+              </span>
+            ))}
+            <span />
+
+            {DETAIL_MAPS.map(({ label, map }) => (
+              <Fragment key={`row-${label}`}>
+                <span className="text-[13px] text-gray-500 justify-self-start">{label}</span>
                 {COLS.map((k) => (
-                  <th key={k} className="pl-2 text-right font-medium text-gray-400">{k === "未評価" ? "—" : k}</th>
+                  <span key={`${label}-${k}`} className="text-[13px] tabular-nums text-gray-700 justify-self-center">
+                    {map[k] ?? 0}
+                  </span>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {detailRow("希望", summary.wish)}
-              {detailRow("通過", summary.pass)}
-              {detailRow("気になる", summary.interested)}
-              {detailRow("応募したい", summary.applied)}
-            </tbody>
-          </table>
-          <div className="mt-1.5 pt-1.5 border-t border-gray-200 text-right text-gray-400">
-            <span title="サイト経由でPDF未保管のため母数から除外">AI評価対象外 {summary.excluded}件</span>
-            <span className="mx-1.5 text-gray-300">｜</span>
-            <span title="紹介保留に移動した件数（この一覧の母数には含まれない）">紹介保留 {archivedCount}件</span>
-          </div>
-        </div>
-      )}
+                <span />
+              </Fragment>
+            ))}
+
+            {/* 区切り線を挟んだ最下段。全列ぶち抜きで右寄せ。 */}
+            <span
+              className="mt-1.5 pt-1.5 border-t border-gray-200 text-[13px] text-gray-400 text-right"
+              style={{ gridColumn: "1 / -1" }}
+            >
+              <span title="サイト経由でPDF未保管のため母数から除外">AI評価対象外 {summary.excluded}件</span>
+              <span className="mx-1.5 text-gray-300">｜</span>
+              <span title="紹介保留に移動した件数（この一覧の母数には含まれない）">紹介保留 {archivedCount}件</span>
+            </span>
+          </>
+        )}
+      </div>
 
       {/* 絞り込み中は「表示中の数字が全体ではない」ことの注意書きなので、
           詳細の開閉に関わらず常に出す（アコーディオン内に隠すと部分集計を全体と誤読する）。 */}
