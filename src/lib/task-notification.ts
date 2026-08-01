@@ -279,3 +279,101 @@ export async function notifyTaskComment(params: TaskCommentParams): Promise<void
 
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
+
+type AiTaskCreatedParams = {
+  taskId: string;
+  title: string;
+  categoryLabel: string;
+  candidateName: string;
+  assigneeName: string | null;
+  assigneeLineworksId: string | null;
+  dueDate: Date | null;
+  /** カード上で「タスクを作成」を押した CA。 */
+  actorName: string;
+};
+
+/**
+ * T-150: AIアドバイザーの会話から起票されたタスクの作成通知。
+ *
+ * 既存 notifyTaskCreated を使わず専用関数にしている理由:
+ *  - notifyTaskCreated 側の担当者引き当ては「ユーザー名の文字列一致」（tasks/route.ts の
+ *    where: { name: { in: assigneeNames } }）で、同名ユーザーがいると誤爆する。
+ *    T-150 は担当CAが確定しているので employee.user.lineworksId を直接受け取る。
+ *  - 「作成者」が AI なのか操作CAなのか曖昧になるため、文面を専用に書く。
+ * 先例: mypage-response-sync.ts の notifyMypageResponse（自動生成タスク専用の通知）。
+ *
+ * メンション不可時は notifyTaskCreated と同じ3段フォールバックを踏襲する
+ * （実測で active 9名中2名が lineworksId 未設定）。
+ */
+export async function notifyAiTaskCreated(params: AiTaskCreatedParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return;
+  }
+
+  const dueDateStr = params.dueDate
+    ? new Date(params.dueDate).toLocaleDateString("ja-JP", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+    : "未設定";
+
+  const baseLines = [
+    "🤖 AIアドバイザーの会話からタスクが作成されました",
+    "",
+    "■ タスク",
+    params.title,
+    "",
+    "■ 種別",
+    params.categoryLabel,
+    "",
+    "■ 求職者",
+    `${params.candidateName} 様`,
+    "",
+    "■ 担当者",
+    params.assigneeName ?? "未設定",
+    "",
+    "■ 期限",
+    dueDateStr,
+    "",
+    "■ 作成操作",
+    `${params.actorName}（確認のうえ作成）`,
+    "",
+    "🔗 詳細はこちら",
+    `${baseUrl}/tasks/${params.taskId}`,
+  ];
+
+  const header = "AIアドバイザーの会話から新しいタスクが作成されました";
+
+  // 1) lineworksId があればメンション付き
+  if (params.assigneeLineworksId) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [`<m userId="${params.assigneeLineworksId}">`, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return;
+    } catch (e) {
+      console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名があれば名前プレフィックス付きでメンションなし
+  if (params.assigneeName) {
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${params.assigneeName}さん ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}

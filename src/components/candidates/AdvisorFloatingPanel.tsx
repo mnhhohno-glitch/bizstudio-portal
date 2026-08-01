@@ -5,13 +5,42 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { RATING_VALUE } from "@/lib/ai-rating";
 
+// T-150: AI応答から検出したタスク候補。dueDate はサーバーが JST で確定済みの "YYYY-MM-DD"。
+type SuggestedTask = {
+  kind: "JOB_SEARCH_SEND" | "FORM_SURVEY";
+  due: string;
+  dueDate: string;
+};
+
 type Message = {
   id: string;
   role: string;
   content: string;
   createdAt: string;
   isLoading?: boolean;
+  suggestedTasks?: SuggestedTask[] | null;
+  suggestedTasksDismissedAt?: string | null;
 };
+
+const SUGGESTED_TASK_LABEL: Record<SuggestedTask["kind"], string> = {
+  JOB_SEARCH_SEND: "求人検索・送付",
+  FORM_SURVEY: "アンケート送付・回答確認",
+};
+
+/**
+ * "YYYY-MM-DD" を「2026年8月7日(金)」形式にする。
+ * ★年を必ず含めること。AIが年を間違えた場合にCAが気づける最後の防壁のため、省略表記にしない。
+ * 曜日は Date.UTC 固定で算出（ブラウザTZに依存させない）。
+ */
+function formatDueDateWithYear(ymd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const [, y, mo, d] = m;
+  const dow = ["日", "月", "火", "水", "木", "金", "土"][
+    new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d))).getUTCDay()
+  ];
+  return `${Number(y)}年${Number(mo)}月${Number(d)}日(${dow})`;
+}
 
 function formatTime(iso: string) {
   const d = new Date(iso);
@@ -58,6 +87,52 @@ export default function AdvisorFloatingPanel({
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
+
+  // T-150: 確認カードの状態。期日の編集値（messageId+kind 単位）と通信中フラグ。
+  const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
+  const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
+  const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
+
+  const suggestedTaskKey = (messageId: string, kind: string) => `${messageId}:${kind}`;
+
+  // T-150: カードの「タスクを作成」/「今回は不要」。成功後は fetchMessages で取り直す
+  // （DB 側で suggestedTasksDismissedAt がセットされるためカードが消える）。
+  const handleSuggestedTask = async (
+    messageId: string,
+    task: SuggestedTask,
+    action: "create" | "dismiss",
+  ) => {
+    if (!activeSessionId) return;
+    const key = suggestedTaskKey(messageId, task.kind);
+    if (taskCardBusy[key]) return;
+    setTaskCardBusy((p) => ({ ...p, [key]: true }));
+    setTaskCardError((p) => ({ ...p, [key]: "" }));
+    try {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages/${messageId}/suggested-tasks`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            action === "create"
+              ? { action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }
+              : { action },
+          ),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
+      if (action === "create") {
+        toast.success(data.created ? "タスクを作成しました" : "既存タスクの期日を更新しました");
+      }
+      await fetchMessages(activeSessionId);
+    } catch (e) {
+      // 失敗時はカードを残す（起票機会を失わせない）。
+      setTaskCardError((p) => ({ ...p, [key]: e instanceof Error ? e.message : "処理に失敗しました" }));
+    } finally {
+      setTaskCardBusy((p) => ({ ...p, [key]: false }));
+    }
+  };
 
   // T-126 Phase2: サーバ側 analyze-batch の hasValidThreeAxisMarkers と判定を厳密に一致させる。
   //   （** を除去 / 通過率・総合の ■ は任意）。ここが厳しすぎるとサーバが valid とみなす求人まで
@@ -764,6 +839,68 @@ export default function AdvisorFloatingPanel({
                       <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
                         {!msg.isLoading && formatTime(msg.createdAt)}
                       </p>
+
+                      {/* T-150: タスク候補の確認カード。AI応答の直下に出す。
+                          破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。
+                          期日は必ず年込みで表示する（AIの年ズレをCAが見つける最後の防壁）。 */}
+                      {msg.role === "assistant" &&
+                        !msg.isLoading &&
+                        !msg.suggestedTasksDismissedAt &&
+                        Array.isArray(msg.suggestedTasks) &&
+                        msg.suggestedTasks.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {msg.suggestedTasks.map((task) => {
+                              const key = suggestedTaskKey(msg.id, task.kind);
+                              const busy = !!taskCardBusy[key];
+                              const err = taskCardError[key];
+                              const due = taskDueEdits[key] ?? task.dueDate;
+                              return (
+                                <div
+                                  key={key}
+                                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[13px]"
+                                >
+                                  <div className="flex items-center gap-1.5 font-semibold text-amber-900">
+                                    <span>📌</span>
+                                    <span>タスク候補: {SUGGESTED_TASK_LABEL[task.kind]}</span>
+                                  </div>
+                                  <div className="mt-1 text-gray-700">対象: {candidateName} さん</div>
+                                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                    <span className="text-gray-700">期日</span>
+                                    <span className="font-semibold text-gray-900">
+                                      {formatDueDateWithYear(due)}
+                                    </span>
+                                    <input
+                                      type="date"
+                                      value={due}
+                                      disabled={busy}
+                                      onChange={(e) =>
+                                        setTaskDueEdits((p) => ({ ...p, [key]: e.target.value }))
+                                      }
+                                      className="rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-[#2563EB] focus:outline-none disabled:opacity-50"
+                                    />
+                                  </div>
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <button
+                                      onClick={() => handleSuggestedTask(msg.id, task, "create")}
+                                      disabled={busy}
+                                      className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {busy ? "処理中..." : "タスクを作成"}
+                                    </button>
+                                    <button
+                                      onClick={() => handleSuggestedTask(msg.id, task, "dismiss")}
+                                      disabled={busy}
+                                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[12px] text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      今回は不要
+                                    </button>
+                                  </div>
+                                  {err && <div className="mt-1.5 text-[12px] text-red-600">{err}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                     </div>
                   </div>
                 );
