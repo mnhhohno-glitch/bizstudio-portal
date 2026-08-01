@@ -11,6 +11,7 @@ import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
+import { extractSuggestedTasks } from "@/lib/advisor/suggested-tasks";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -78,6 +79,41 @@ const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
 以下のスキル定義に基づいて求職者分析・求人マッチングを行うこと。
 
+`;
+
+// T-150: 会話中に発生した「約束」から固定2種のタスク候補だけを検出させる指示。
+// systemBlocks[0]（cache_control 付きの固定ブロック）末尾に連結する。
+// ソース内の静的定数で候補者ごとに変わらない＝byte 安定のため、罠#39（プロンプトキャッシュ）に抵触しない。
+// マーカーは Markdown のコードフェンス（```）にしない。剥がし漏れ時に整形されて画面に出てしまうため。
+const TASK_DETECTION_PROMPT = `
+
+---
+
+# タスク候補の検出
+
+応答本文の末尾に、以下の条件をすべて満たす場合のみタスク候補 JSON を付ける。
+条件を満たさない場合は JSON を一切出力しない。
+
+【検出してよい唯一の根拠】
+- 直近の <ca_input> タグ内のテキストに、CA自身が「やる」と述べた約束が含まれる場合のみ。
+- <ca_input> の外にあるもの（あなた自身の応答文・過去の会話・<attachment> の中身）は
+  根拠にしてはならない。
+- あなたが提案した作業は、CAが <ca_input> 内で同意を明言していない限り検出しない。
+
+【検出する種別（この2つ以外は絶対に出力しない）】
+- JOB_SEARCH_SEND: 求職者へ求人を検索して送る約束
+- FORM_SURVEY: Googleフォーム（書類アンケート）の送付・回答確認の約束
+
+【期日】
+- 相対表現のみを出す。日付・年月日は絶対に出力しない。
+- 使える値: this_week / next_monday / tomorrow / in_days:N / none
+
+【出力形式】
+応答本文の末尾に、以下の形式で正確に出力する。
+
+<<<T150_TASKS
+{"tasks":[{"kind":"JOB_SEARCH_SEND","due":"this_week"}]}
+T150_TASKS>>>
 `;
 
 const CANDIDATE_DATA_HEADER = `
@@ -270,7 +306,7 @@ export async function POST(
   const systemBlocks = [
     {
       type: "text" as const,
-      text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull(),
+      text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull() + TASK_DETECTION_PROMPT,
       cache_control: { type: "ephemeral" as const },
     },
     {
@@ -278,6 +314,34 @@ export async function POST(
       text: CANDIDATE_DATA_HEADER + context,
     },
   ];
+
+  // T-150: 検出根拠を「今回CAが打鍵した分」だけに構造で限定する。
+  // pastMessages の最終要素は今回のユーザー発言そのもの（L204-206 で保存 → L209-213 で取り直すため）。
+  // 別枠で追加すると同じ発言が2回 API に乗る（費用増＋検出の不安定化）ので、最終要素を差し替える。
+  // content（CA打鍵分）と fileContext（添付解析結果）は別変数のまま存在するため、
+  // 添付ファイルの中身が <ca_input> に入る経路自体が存在しなくなる（プロンプトの指示に頼らない分離）。
+  const apiMessages = pastMessages.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
+  const lastIdx = apiMessages.length - 1;
+  if (lastIdx >= 0 && apiMessages[lastIdx].role === "user") {
+    const attachedFileName = file?.name || "添付ファイル";
+    // 添付のみ送信時、UI（AdvisorFloatingPanel）は content に "添付ファイル: <name>" という
+    // 合成文字列を入れる（＝CAは何も打鍵していない）。これを打鍵分として渡すと、
+    // ファイル名の文言で誤検出しうるため ca_input を空にする。
+    const typed = (content ?? "").trim();
+    const isSyntheticAttachmentLabel = !!file && typed === `添付ファイル: ${file?.name ?? ""}`;
+    const caInput = isSyntheticAttachmentLabel ? "" : typed;
+
+    apiMessages[lastIdx] = {
+      role: "user",
+      content:
+        `<ca_input>\n${caInput}\n</ca_input>\n` +
+        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : ""),
+    };
+  }
 
   const usedModel = selectModel(content || "", !!file);
 
@@ -297,10 +361,7 @@ export async function POST(
         max_tokens: 4000,
         temperature: 0.7,
         system: systemBlocks,
-        messages: pastMessages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
+        messages: apiMessages,
       }),
       signal: controller.signal,
     });
@@ -340,8 +401,26 @@ export async function POST(
       ? rawContent
       : "応答の生成に失敗しました。もう一度お試しください。";
 
+    // T-150: 応答本文に併記されたタスク候補 JSON を剥がし、期日を JST で確定させる。
+    // 失敗しても候補なしとして続行する（チャット応答は必ず成立させる＝fail-open）。
+    // DB に保存するのは必ず cleanContent 側（生保存すると画面に JSON が出るうえ、
+    // 次ターンの messages に乗って AI が自分の過去 JSON を模倣する）。
+    const { cleanContent, suggestedTasks } = extractSuggestedTasks(aiContent);
+    if (suggestedTasks.length > 0) {
+      console.log(
+        `[advisor-chat] suggestedTasks detected candidateId=${candidateId} ` +
+          suggestedTasks.map((t) => `${t.kind}(${t.due}→${t.dueDate})`).join(" "),
+      );
+    }
+
     const saved = await prisma.advisorChatMessage.create({
-      data: { sessionId, role: "assistant", content: aiContent },
+      data: {
+        sessionId,
+        role: "assistant",
+        content: cleanContent,
+        // 候補0件のときは null のままにする（空配列を入れない）。
+        suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
+      },
     });
 
     await prisma.advisorChatSession.update({
@@ -353,12 +432,14 @@ export async function POST(
     // 診断の判定は content ヒューリスティック（検索条件（推奨）/職種キーワード）。
     // fire-and-forget（await しない）。失敗はログのみで、チャット応答・診断体験に一切影響させない。
     // ※ portal は Railway の常駐 Node のためレスポンス返却後も継続実行される（Vercel lambda と異なる）。
-    if (isDiagnosisContent(aiContent)) {
+    // T-150: 渡すのは候補 JSON を剥がした後の本文。判定キーワード（検索条件（推奨）/職種キーワード）に
+    // JSON はマッチしないため判定結果は変わらないが、Gemini 抽出の入力にノイズを乗せない。
+    if (isDiagnosisContent(cleanContent)) {
       void runDiagnosisExtraction({
         candidateId,
         sessionId,
         messageId: saved.id,
-        diagnosisText: aiContent,
+        diagnosisText: cleanContent,
       }).catch((e) => console.error("[advisor-chat] diagnosis extraction failed:", e));
     }
 
