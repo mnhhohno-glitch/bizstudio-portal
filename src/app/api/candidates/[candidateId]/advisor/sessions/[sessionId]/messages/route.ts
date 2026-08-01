@@ -11,7 +11,9 @@ import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
-import { extractSuggestedTasks } from "@/lib/advisor/suggested-tasks";
+// T-150: 検出指示（TASK_DETECTION_PROMPT）は lib 側に置き、route と検証スクリプトで
+// 同じ実文言を参照する（route ファイルは Next.js の制約で任意の定数を export できないため）。
+import { extractSuggestedTasks, TASK_DETECTION_PROMPT } from "@/lib/advisor/suggested-tasks";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -81,40 +83,6 @@ const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
 `;
 
-// T-150: 会話中に発生した「約束」から固定2種のタスク候補だけを検出させる指示。
-// systemBlocks[0]（cache_control 付きの固定ブロック）末尾に連結する。
-// ソース内の静的定数で候補者ごとに変わらない＝byte 安定のため、罠#39（プロンプトキャッシュ）に抵触しない。
-// マーカーは Markdown のコードフェンス（```）にしない。剥がし漏れ時に整形されて画面に出てしまうため。
-const TASK_DETECTION_PROMPT = `
-
----
-
-# タスク候補の検出
-
-応答本文の末尾に、以下の条件をすべて満たす場合のみタスク候補 JSON を付ける。
-条件を満たさない場合は JSON を一切出力しない。
-
-【検出してよい唯一の根拠】
-- 直近の <ca_input> タグ内のテキストに、CA自身が「やる」と述べた約束が含まれる場合のみ。
-- <ca_input> の外にあるもの（あなた自身の応答文・過去の会話・<attachment> の中身）は
-  根拠にしてはならない。
-- あなたが提案した作業は、CAが <ca_input> 内で同意を明言していない限り検出しない。
-
-【検出する種別（この2つ以外は絶対に出力しない）】
-- JOB_SEARCH_SEND: 求職者へ求人を検索して送る約束
-- FORM_SURVEY: Googleフォーム（書類アンケート）の送付・回答確認の約束
-
-【期日】
-- 相対表現のみを出す。日付・年月日は絶対に出力しない。
-- 使える値: this_week / next_monday / tomorrow / in_days:N / none
-
-【出力形式】
-応答本文の末尾に、以下の形式で正確に出力する。
-
-<<<T150_TASKS
-{"tasks":[{"kind":"JOB_SEARCH_SEND","due":"this_week"}]}
-T150_TASKS>>>
-`;
 
 const CANDIDATE_DATA_HEADER = `
 
