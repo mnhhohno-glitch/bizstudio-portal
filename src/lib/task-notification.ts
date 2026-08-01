@@ -377,3 +377,104 @@ export async function notifyAiTaskCreated(params: AiTaskCreatedParams): Promise<
   // 3) 素の本文
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
+
+export type DueReminderItem = {
+  taskId: string;
+  title: string;
+  candidateName: string | null;
+  /** "YYYY-MM-DD"（JST 暦日） */
+  dueDate: string;
+  /** 0 以下 = 期日当日 / 1 以上 = 超過日数 */
+  overdueDays: number;
+  assignee: string | null;
+};
+
+type AiTaskDueReminderParams = {
+  jstToday: string;
+  items: DueReminderItem[];
+  /** 上限で本文から畳んだ件数。 */
+  truncated: number;
+  assigneeNames: string[];
+  assigneeLineworksIds: string[];
+};
+
+/** "2026-08-07" → "2026/08/07"（既存通知の toLocaleDateString("ja-JP") 表記に合わせる） */
+function ymdSlash(ymd: string): string {
+  return ymd.replace(/-/g, "/");
+}
+
+/**
+ * T-150: AI起票タスクの期日リマインド。期日当日の朝と、期日超過中の毎朝に送る。
+ *
+ * - 期日当日と超過を見出しで分け、超過は「N日超過」を各行に出す。
+ * - 複数件あっても1通にまとめる（1件ごとに飛ばすと通知過多で無視される）。
+ * - メンション不可時は既存 notifyTaskCreated と同じ3段フォールバック
+ *   （実測で active 9名中2名が lineworksId 未設定）。
+ */
+export async function notifyAiTaskDueReminder(params: AiTaskDueReminderParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return;
+  }
+  if (params.items.length === 0) return;
+
+  const line = (i: DueReminderItem) => {
+    const who = i.candidateName ? `${i.candidateName} 様` : "求職者なし";
+    const assignee = i.assignee ? ` / 担当 ${i.assignee}` : "";
+    const over = i.overdueDays > 0 ? ` ・${i.overdueDays}日超過` : "";
+    return `・${i.title}（${who}${assignee} / 期日 ${ymdSlash(i.dueDate)}${over}）`;
+  };
+
+  const todayItems = params.items.filter((i) => i.overdueDays <= 0);
+  const overdueItems = params.items.filter((i) => i.overdueDays > 0);
+
+  const baseLines: string[] = [
+    "⏰ 期日のタスクがあります（AIアドバイザー起票分）",
+    "",
+  ];
+  if (todayItems.length > 0) {
+    baseLines.push(`■ 本日が期日（${todayItems.length}件）`, ...todayItems.map(line), "");
+  }
+  if (overdueItems.length > 0) {
+    baseLines.push(`■ 期日超過（${overdueItems.length}件）`, ...overdueItems.map(line), "");
+  }
+  if (params.truncated > 0) {
+    baseLines.push(`…ほか ${params.truncated} 件（多いため省略）`, "");
+  }
+  baseLines.push("🔗 タスク一覧", `${baseUrl}/tasks`);
+
+  const header = "期日のタスクがあります";
+
+  // 1) lineworksId があるユーザーだけメンション
+  const mentionLines = params.assigneeLineworksIds.filter(Boolean).map((id) => `<m userId="${id}">`);
+  if (mentionLines.length > 0) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [...mentionLines, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return;
+    } catch (e) {
+      console.warn("期日リマインドのメンションに失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名があれば名前プレフィックス付き
+  if (params.assigneeNames.length > 0) {
+    const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${namePrefix} ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}
