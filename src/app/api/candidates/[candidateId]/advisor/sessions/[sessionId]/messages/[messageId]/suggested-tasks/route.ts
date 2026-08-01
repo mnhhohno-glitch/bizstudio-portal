@@ -39,6 +39,15 @@ const KIND_CONFIG: Record<
 /** "YYYY-MM-DD" のみ受け付ける。時刻付き・不正形式は拒否する。 */
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * カテゴリの必須テンプレートフィールドに入れる既定値。
+ * AI は職種等を出力しないため、必須フィールドが空のままだと詳細画面で空欄になる。
+ * 「AI が起票したので未入力」であることが CA に伝わる固定文字を入れておく。
+ * ラベル名（「職種」等）はハードコードせず is_required で動的に拾う（将来フィールドが増えても効くように）。
+ * 先例: src/lib/schedule-agent/post-reserve.ts が「その他」カテゴリの必須フィールドに本文を格納している。
+ */
+const REQUIRED_FIELD_PLACEHOLDER = "AIアドバイザー起票";
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ candidateId: string; sessionId: string; messageId: string }> },
@@ -131,6 +140,14 @@ export async function PATCH(
       : await prisma.employee.findFirst({ where: { userId: actor.id }, select: { id: true } });
     const employeeId = assigneeEmployeeId ?? fallbackEmployee?.id ?? null;
 
+    // 必須テンプレートフィールドを既定値で埋める（新規作成時のみ）。
+    // 既存タスクの期日更新時は触らない＝CAが後から入力した値を上書きしない。
+    // 必須フィールドが0件のカテゴリ（例: アンケート対応）では空配列になり、何も作らない。
+    const requiredFields = await prisma.taskTemplateField.findMany({
+      where: { categoryId: config.categoryId, isRequired: true },
+      select: { id: true },
+    });
+
     try {
       const task = await prisma.task.create({
         data: {
@@ -146,6 +163,16 @@ export async function PATCH(
           source: "AI_ADVISOR",
           sourceKind: kind,
           ...(employeeId ? { assignees: { create: [{ employeeId }] } } : {}),
+          ...(requiredFields.length > 0
+            ? {
+                fieldValues: {
+                  create: requiredFields.map((f) => ({
+                    fieldId: f.id,
+                    value: REQUIRED_FIELD_PLACEHOLDER,
+                  })),
+                },
+              }
+            : {}),
         },
         select: { id: true },
       });
