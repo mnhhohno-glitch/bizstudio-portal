@@ -129,15 +129,72 @@ function formatGender(gender: string | null) {
   }
 }
 
+// 一覧（filtered）とタブ件数（tabCounts）で共通に使う絞り込み。
+// タブ条件（supportStatus）と終了理由はここに含めない。
+//   終了理由は ENDED 以外のステータスでは常に null なので、ここに入れると他タブの件数が全て 0 になる。
+//   終了理由は ENDED タブの一覧にのみ適用する（filtered 側で処理）。
+// 罠#17: 登録日・応募日・配信日はいずれも jstDateStr() で JST の暦日文字列に揃えてから比較する。
+type NonTabFilters = {
+  search: string;
+  caId: string;
+  dateFrom: string;
+  dateTo: string;
+  gender: string;
+  route: string;
+  media: string;
+  appDateFrom: string;
+  appDateTo: string;
+  delDateFrom: string;
+  delDateTo: string;
+};
+
+function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRow[] {
+  const q = f.search.trim().toLowerCase();
+  return rows.filter((c) => {
+    if (q) {
+      const hit =
+        c.candidateNumber.toLowerCase().includes(q) ||
+        c.name.toLowerCase().includes(q) ||
+        (!!c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
+        (!!c.employee?.name && c.employee.name.toLowerCase().includes(q));
+      if (!hit) return false;
+    }
+    if (f.caId !== "ALL" && c.employee?.id !== f.caId) return false;
+    if (f.gender !== "ALL" && c.gender !== f.gender) return false;
+    if (f.route !== "ALL" && (c.applicationRoute || "") !== f.route) return false;
+    if (f.media !== "ALL" && (c.mediaSource || "") !== f.media) return false;
+    // 登録日（旧実装は From が UTC・To がローカル解釈で非対称だった＝罠#17）
+    if (f.dateFrom || f.dateTo) {
+      const d = jstDateStr(c.createdAt);
+      if (!d) return false;
+      if (f.dateFrom && d < f.dateFrom) return false;
+      if (f.dateTo && d > f.dateTo) return false;
+    }
+    // 応募日
+    if (f.appDateFrom || f.appDateTo) {
+      const d = jstDateStr(c.applicationDate);
+      if (!d) return false;
+      if (f.appDateFrom && d < f.appDateFrom) return false;
+      if (f.appDateTo && d > f.appDateTo) return false;
+    }
+    // 配信日
+    if (f.delDateFrom || f.delDateTo) {
+      const d = jstDateStr(c.scoutDeliveryDate);
+      if (!d) return false;
+      if (f.delDateFrom && d < f.delDateFrom) return false;
+      if (f.delDateTo && d > f.delDateTo) return false;
+    }
+    return true;
+  });
+}
+
 export default function CandidateListClient({
   initialCandidates,
-  initialTotalCount,
   employees,
   currentEmployeeId,
   isAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
-  const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -181,96 +238,47 @@ export default function CandidateListClient({
     };
   }, [search]);
 
-  const filtered = useMemo(() => {
-    let result = candidates;
-    if (supportTab === "ALL") {
-      result = result.filter((c) => c.supportStatus !== "ARCHIVED");
-    } else {
-      result = result.filter((c) => c.supportStatus === supportTab);
-    }
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.trim().toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.candidateNumber.toLowerCase().includes(q) ||
-          c.name.toLowerCase().includes(q) ||
-          (c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
-          (c.employee?.name && c.employee.name.toLowerCase().includes(q))
-      );
-    }
-    if (caFilter !== "ALL") {
-      result = result.filter((c) => c.employee?.id === caFilter);
-    }
-    if (dateFrom) {
-      const from = new Date(dateFrom);
-      result = result.filter((c) => new Date(c.createdAt) >= from);
-    }
-    if (dateTo) {
-      const to = new Date(dateTo + "T23:59:59");
-      result = result.filter((c) => new Date(c.createdAt) <= to);
-    }
-    if (genderFilter !== "ALL") {
-      result = result.filter((c) => c.gender === genderFilter);
-    }
-    if (endReasonFilter !== "ALL") {
-      result = result.filter((c) => c.supportEndReason === endReasonFilter);
-    }
-    if (routeFilter !== "ALL") {
-      result = result.filter((c) => (c.applicationRoute || "") === routeFilter);
-    }
-    if (mediaFilter !== "ALL") {
-      result = result.filter((c) => (c.mediaSource || "") === mediaFilter);
-    }
-    // T-101: 応募日 / 配信日 範囲フィルター（JST日付文字列で境界比較）
-    if (appDateFrom) {
-      result = result.filter((c) => { const d = jstDateStr(c.applicationDate); return !!d && d >= appDateFrom; });
-    }
-    if (appDateTo) {
-      result = result.filter((c) => { const d = jstDateStr(c.applicationDate); return !!d && d <= appDateTo; });
-    }
-    if (delDateFrom) {
-      result = result.filter((c) => { const d = jstDateStr(c.scoutDeliveryDate); return !!d && d >= delDateFrom; });
-    }
-    if (delDateTo) {
-      result = result.filter((c) => { const d = jstDateStr(c.scoutDeliveryDate); return !!d && d <= delDateTo; });
-    }
-    return result;
-  }, [candidates, debouncedSearch, supportTab, caFilter, dateFrom, dateTo, genderFilter, endReasonFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]);
+  // 絞り込みは1回だけ実行し、タブ件数・一覧の両方をこの結果から導出する。
+  // 旧実装は filtered と tabCounts で別々にフィルタを書いており、後から追加された
+  // 経路・媒体・応募日・配信日が tabCounts 側に反映されていなかった（＝件数が絞り込みに連動しない原因）。
+  const baseRows = useMemo(
+    () =>
+      applyNonTabFilters(candidates, {
+        search: debouncedSearch,
+        caId: caFilter,
+        dateFrom,
+        dateTo,
+        gender: genderFilter,
+        route: routeFilter,
+        media: mediaFilter,
+        appDateFrom,
+        appDateTo,
+        delDateFrom,
+        delDateTo,
+      }),
+    [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]
+  );
 
   const tabCounts = useMemo(() => {
-    // Apply all filters except supportTab so counts reflect current filter state
-    let base = candidates;
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.trim().toLowerCase();
-      base = base.filter(
-        (c) =>
-          c.candidateNumber.toLowerCase().includes(q) ||
-          c.name.toLowerCase().includes(q) ||
-          (c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
-          (c.employee?.name && c.employee.name.toLowerCase().includes(q))
-      );
-    }
-    if (caFilter !== "ALL") {
-      base = base.filter((c) => c.employee?.id === caFilter);
-    }
-    if (dateFrom) {
-      const from = new Date(dateFrom);
-      base = base.filter((c) => new Date(c.createdAt) >= from);
-    }
-    if (dateTo) {
-      const to = new Date(dateTo + "T23:59:59");
-      base = base.filter((c) => new Date(c.createdAt) <= to);
-    }
-    if (genderFilter !== "ALL") {
-      base = base.filter((c) => c.gender === genderFilter);
-    }
     const counts: Record<string, number> = { ALL: 0, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0, ARCHIVED: 0 };
-    for (const c of base) {
+    for (const c of baseRows) {
       counts[c.supportStatus] = (counts[c.supportStatus] || 0) + 1;
       if (c.supportStatus !== "ARCHIVED") counts.ALL += 1;
     }
     return counts;
-  }, [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter]);
+  }, [baseRows]);
+
+  const filtered = useMemo(() => {
+    let result =
+      supportTab === "ALL"
+        ? baseRows.filter((c) => c.supportStatus !== "ARCHIVED")
+        : baseRows.filter((c) => c.supportStatus === supportTab);
+    // 終了理由は ENDED タブの一覧にのみ適用（タブ件数には効かせない）
+    if (supportTab === "ENDED" && endReasonFilter !== "ALL") {
+      result = result.filter((c) => c.supportEndReason === endReasonFilter);
+    }
+    return result;
+  }, [baseRows, supportTab, endReasonFilter]);
 
   const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
     if (newStatus === "ENDED") {
@@ -309,7 +317,6 @@ export default function CandidateListClient({
       if (res.ok) {
         const data = await res.json();
         setCandidates(data.candidates);
-        setTotalCount(data.total);
       }
     } catch {
       // silent
@@ -520,7 +527,7 @@ export default function CandidateListClient({
     }
   };
 
-  const displayTotal = debouncedSearch.trim() ? totalFiltered : totalCount;
+  // 下部ページャの「全 N 件中」は常に現在タブの絞り込み後件数（＝実際に一覧に出る件数）
   const displayStart = totalFiltered > 0 ? skip + 1 : 0;
   const displayEnd = Math.min(skip + PAGE_SIZE, totalFiltered);
 
@@ -545,23 +552,30 @@ export default function CandidateListClient({
       </div>
 
       {/* 支援ステータスタブ */}
-      <div className="mt-4 flex border-b border-gray-200">
-        {SUPPORT_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              supportTab === tab.key
-                ? "text-[#2563EB] border-[#2563EB]"
-                : "text-gray-500 hover:text-gray-700 border-transparent"
-            }`}
-          >
-            {tab.label}
-            <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
-              {tabCounts[tab.key] || 0}
-            </span>
-          </button>
-        ))}
+      <div className="mt-4 flex items-center justify-between border-b border-gray-200">
+        <div className="flex">
+          {SUPPORT_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                supportTab === tab.key
+                  ? "text-[#2563EB] border-[#2563EB]"
+                  : "text-gray-500 hover:text-gray-700 border-transparent"
+              }`}
+            >
+              {tab.label}
+              <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
+                {tabCounts[tab.key] || 0}
+              </span>
+            </button>
+          ))}
+        </div>
+        {/* 母数はフィルタ前の全取得件数（タブによらず一定）／分子は絞り込み後のアーカイブ除く総件数 */}
+        <div className="pr-1 text-sm text-gray-900">
+          全 <span className="font-semibold">{candidates.length.toLocaleString()}</span> 件中{" "}
+          <span className="font-semibold">{tabCounts.ALL.toLocaleString()}</span> 件
+        </div>
       </div>
 
       {/* フィルタ（T-105: 上段 担当者/期間/検索 ＋ 下段 区分 の2段） */}
@@ -909,12 +923,7 @@ export default function CandidateListClient({
           {/* ページネーション */}
           <div className="mt-4 flex items-center justify-between border-t border-[#E5E7EB] pt-4">
             <div className="text-[13px] text-[#374151]/70">
-              {debouncedSearch.trim() && (
-                <span className="mr-2 text-[#2563EB]">
-                  検索結果: {totalFiltered}件 /
-                </span>
-              )}
-              全 {displayTotal.toLocaleString()} 件中{" "}
+              全 {totalFiltered.toLocaleString()} 件中{" "}
               {totalFiltered > 0
                 ? `${displayStart}〜${displayEnd} 件を表示`
                 : "0 件"}
