@@ -13,7 +13,12 @@ import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
 // T-150: 検出指示（TASK_DETECTION_PROMPT）は lib 側に置き、route と検証スクリプトで
 // 同じ実文言を参照する（route ファイルは Next.js の制約で任意の定数を export できないため）。
-import { extractSuggestedTasks, TASK_DETECTION_PROMPT } from "@/lib/advisor/suggested-tasks";
+import {
+  extractSuggestedTasks,
+  pendingKindsFromMessages,
+  dropAlreadyPendingKinds,
+  TASK_DETECTION_PROMPT,
+} from "@/lib/advisor/suggested-tasks";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -373,7 +378,20 @@ export async function POST(
     // 失敗しても候補なしとして続行する（チャット応答は必ず成立させる＝fail-open）。
     // DB に保存するのは必ず cleanContent 側（生保存すると画面に JSON が出るうえ、
     // 次ターンの messages に乗って AI が自分の過去 JSON を模倣する）。
-    const { cleanContent, suggestedTasks } = extractSuggestedTasks(aiContent);
+    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(aiContent);
+
+    // 同一セッションで未処理の候補が既にある種別は落とす。
+    // 検出根拠を今回の <ca_input> に限定しても、AI は履歴に残る過去ターンの約束を拾って
+    // 毎ターン同じ候補を出す（staging 実測）。カードが毎ターン再出現するのを決定的に抑止する。
+    // allMessages（L209-212 で取得済み）は今回より前の全メッセージを全カラム含むので追加クエリ不要。
+    const pendingKinds = pendingKindsFromMessages(allMessages);
+    const suggestedTasks = dropAlreadyPendingKinds(detectedTasks, pendingKinds);
+    if (detectedTasks.length > suggestedTasks.length) {
+      console.log(
+        `[advisor-chat] suggestedTasks suppressed (already pending in session): ` +
+          detectedTasks.filter((t) => !suggestedTasks.includes(t)).map((t) => t.kind).join(","),
+      );
+    }
     if (suggestedTasks.length > 0) {
       console.log(
         `[advisor-chat] suggestedTasks detected candidateId=${candidateId} ` +

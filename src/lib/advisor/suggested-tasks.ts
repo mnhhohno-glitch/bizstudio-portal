@@ -141,6 +141,40 @@ export function normalizeSuggestedTasks(raw: unknown): SuggestedTask[] {
 }
 
 /**
+ * 同一セッション内で「まだ CA が処理していない候補」の種別を集める。
+ *
+ * 背景（staging 実測）: 検出根拠を今回の <ca_input> に限定しても、AI は履歴に残る過去ターンの
+ * 約束を拾って毎ターン同じ候補を出し続ける。確定仕様が懸念した「毎ターン同じカードが再出現して
+ * CA が繰り返し消す羽目になる」状態そのもののため、サーバー側で決定的に抑止する。
+ *
+ * 破棄済み（dismissedAt あり）は対象外にする＝CA が処理を終えた後に新しい約束が出たら再提示できる。
+ * 「古い約束が残り続けて新しい約束を止める」ことがないようにするための線引き。
+ */
+export function pendingKindsFromMessages(
+  messages: { suggestedTasks?: unknown; suggestedTasksDismissedAt?: Date | null }[],
+): Set<SuggestedTaskKind> {
+  const pending = new Set<SuggestedTaskKind>();
+  for (const m of messages) {
+    if (m.suggestedTasksDismissedAt) continue; // CA が処理済み → 新しい約束は再提示してよい
+    const list = Array.isArray(m.suggestedTasks) ? m.suggestedTasks : null;
+    if (!list) continue;
+    for (const t of list) {
+      const kind = t && typeof t === "object" ? (t as { kind?: unknown }).kind : null;
+      if (isKind(kind)) pending.add(kind);
+    }
+  }
+  return pending;
+}
+
+/** 未処理の候補が既にある種別を落とす（重複カードの抑止）。 */
+export function dropAlreadyPendingKinds(
+  tasks: SuggestedTask[],
+  pending: Set<SuggestedTaskKind>,
+): SuggestedTask[] {
+  return tasks.filter((t) => !pending.has(t.kind));
+}
+
+/**
  * AI 応答本文から候補 JSON ブロックを剥がし、本文と正規化済み候補を返す。
  * 例外は投げない（parse 失敗時は候補なし・本文はブロックだけ除去して返す）。
  *

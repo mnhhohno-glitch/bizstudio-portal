@@ -10,7 +10,13 @@
  * ★必ず TZ=UTC で実行すること（本番 Railway は UTC 稼働。罠#17）。
  */
 
-import { extractSuggestedTasks, normalizeSuggestedTasks, resolveDueDate } from "@/lib/advisor/suggested-tasks";
+import {
+  extractSuggestedTasks,
+  normalizeSuggestedTasks,
+  resolveDueDate,
+  pendingKindsFromMessages,
+  dropAlreadyPendingKinds,
+} from "@/lib/advisor/suggested-tasks";
 import { jstYmd, addDaysYmd, thisWeekFridayYmd, nextMondayYmd, addBusinessDaysYmd } from "@/lib/schedule-agent/jst";
 
 let passed = 0;
@@ -117,6 +123,51 @@ console.log("\n[6] 年ズレ防止（AI が日付を出しても採用しない�
   });
   eq("AI 由来の日付は無視され、サーバー計算値になる", r[0].dueDate, addBusinessDaysYmd(today, 3));
   eq("年は必ず今年以降", r[0].dueDate.slice(0, 4) >= today.slice(0, 4), true);
+}
+
+console.log("\n[7] 同一セッションの重複抑止（毎ターン同じカードを出さない）");
+{
+  const msgs = [
+    { suggestedTasks: [{ kind: "JOB_SEARCH_SEND", due: "this_week", dueDate: "2026-08-07" }], suggestedTasksDismissedAt: null },
+    { suggestedTasks: null, suggestedTasksDismissedAt: null },
+  ];
+  const pending = pendingKindsFromMessages(msgs);
+  eq("未処理の種別が拾える", [...pending], ["JOB_SEARCH_SEND"]);
+  eq(
+    "同じ種別は落とす",
+    dropAlreadyPendingKinds(
+      [{ kind: "JOB_SEARCH_SEND", due: "this_week", dueDate: "2026-08-07" }],
+      pending,
+    ),
+    [],
+  );
+  eq(
+    "別種別は残す",
+    dropAlreadyPendingKinds(
+      [{ kind: "FORM_SURVEY", due: "tomorrow", dueDate: "2026-08-03" }],
+      pending,
+    ).map((t) => t.kind),
+    ["FORM_SURVEY"],
+  );
+}
+{
+  // 破棄済みは対象外 → CA が処理を終えた後の新しい約束は再提示できる
+  const msgs = [
+    {
+      suggestedTasks: [{ kind: "JOB_SEARCH_SEND", due: "this_week", dueDate: "2026-08-07" }],
+      suggestedTasksDismissedAt: new Date("2026-08-01T00:00:00Z"),
+    },
+  ];
+  const pending = pendingKindsFromMessages(msgs);
+  eq("破棄済みは pending に含めない", [...pending], []);
+  eq(
+    "破棄後は同じ種別を再提示できる",
+    dropAlreadyPendingKinds(
+      [{ kind: "JOB_SEARCH_SEND", due: "next_monday", dueDate: "2026-08-10" }],
+      pending,
+    ).length,
+    1,
+  );
 }
 
 console.log(`\n===== 結果: ${passed} passed / ${failed} failed （計 ${passed + failed} 件） =====\n`);
