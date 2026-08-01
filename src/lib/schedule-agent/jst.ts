@@ -71,6 +71,58 @@ export function nextBusinessDayYmd(fromYmd: string): string {
   return d;
 }
 
+// ============================================================
+// T-150: AIアドバイザー会話からのタスク自動起票で使う期日計算。
+// AI には相対表現（今週中 / 週明け / 明日 / N日後）だけを出させ、
+// 実際の日付はここでサーバー側（JST）で決める（LLM に年を出させると年ズレするため）。
+// T-139 の resolveYearNearestFuture と同じ設計方針。
+//
+// 罠#17: Railway 本番は UTC 稼働。`new Date().getDay()` は UTC 曜日を返すため、
+// JST 月曜 0:00〜8:59 が日曜扱いになり「今週の金曜」が1週間ずれる。
+// 曜日は必ず JST 暦日文字列から Date.UTC 経由で求めること。
+// ============================================================
+
+/** JST暦日の曜日（0=日 .. 6=土）。サーバーTZに依存しない。 */
+function dowOfYmd(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * ymd を含む週の金曜（「今週中」の変換先）。
+ * 月〜金 → その週の金曜（金曜当日ならその日）／土・日 → 翌週の金曜。
+ * 土日を翌週送りにするのは、過去日を期日にして即日「期日超過」通知が飛ぶのを防ぐため。
+ */
+export function thisWeekFridayYmd(ymd: string): string {
+  const dow = dowOfYmd(ymd);
+  if (dow === 6) return addDaysYmd(ymd, 6); // 土 → 6日後の金曜
+  if (dow === 0) return addDaysYmd(ymd, 5); // 日 → 5日後の金曜
+  return addDaysYmd(ymd, 5 - dow); // 月(1)〜金(5)
+}
+
+/** ymd の次の月曜（「週明け」の変換先）。月曜に呼ぶと翌週月曜。 */
+export function nextMondayYmd(ymd: string): string {
+  const dow = dowOfYmd(ymd);
+  return addDaysYmd(ymd, dow === 0 ? 1 : 8 - dow);
+}
+
+/** fromYmd から N 営業日後（当日は数えない。土日祝を除外）。 */
+export function addBusinessDaysYmd(fromYmd: string, n: number): string {
+  let d = fromYmd;
+  let added = 0;
+  while (added < n) {
+    d = addDaysYmd(d, 1);
+    if (isBusinessDayYmd(d)) added++;
+  }
+  return d;
+}
+
+/** 計算結果が今日より前なら今日に切り上げる（過去日を期日にしないガード）。 */
+export function clampNotPastYmd(ymd: string): string {
+  const today = jstYmd();
+  return ymd < today ? today : ymd;
+}
+
 /** "2026-07-15" + "19:00" → "2026-07-15T19:00:00+09:00" */
 export function jstIso(ymd: string, hhmm: string): string {
   return `${ymd}T${hhmm}:00+09:00`;

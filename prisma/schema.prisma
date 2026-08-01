@@ -819,6 +819,12 @@ model Task {
   notificationPending Boolean @default(false) @map("notification_pending")
   manualSortOrder     Int?    @map("manual_sort_order")
 
+  // T-150: 起票元の識別。AI起票時のみ source="AI_ADVISOR" を入れ、手動・既存タスクは null のまま。
+  // 種別はタイトル前方一致ではなく sourceKind カラムで表す（タイトル一致で探すと CA の手動タスクを
+  // 掴んで上書きする事故が起きる。createOrUpdateResponseTask に前例あり＝罠#30 と同型）。
+  source     String? @map("source") // null | "AI_ADVISOR"
+  sourceKind String? @map("source_kind") // null | "JOB_SEARCH_SEND" | "FORM_SURVEY"
+
   assignees        TaskAssignee[]
   assigneeStatuses TaskAssigneeStatus[]
   fieldValues      TaskFieldValue[]
@@ -1562,6 +1568,12 @@ model AdvisorChatMessage {
   role      String
   content   String             @db.Text
   createdAt DateTime           @default(now()) @map("created_at")
+
+  // T-150: この AI 応答から検出したタスク候補（種別・相対表現・計算済み期日）と、その破棄時刻。
+  // 候補をメッセージに紐づけて持つことで、ページ再読込でも確認カードが復元でき、
+  // 「今回は不要」で破棄した候補を同一セッション内で再提示しないことも同じ仕組みで満たせる。
+  suggestedTasks            Json?     @map("suggested_tasks")
+  suggestedTasksDismissedAt DateTime? @map("suggested_tasks_dismissed_at")
 
   @@map("advisor_chat_messages")
 }
