@@ -67,6 +67,50 @@ export default function AdvisorFloatingPanel({
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
 
+  // T-155: 未読の面談ログ（MEETING txt・advisorIngestedAt=null）件数と取り込み中フラグ。
+  const [unreadLogCount, setUnreadLogCount] = useState(0);
+  const [isIngesting, setIsIngesting] = useState(false);
+
+  const fetchUnreadLogCount = async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=MEETING`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const files: { fileName: string; mimeType: string; advisorIngestedAt?: string | null }[] =
+        data.files || [];
+      setUnreadLogCount(
+        files.filter(
+          (f) =>
+            !f.advisorIngestedAt &&
+            (f.mimeType?.startsWith("text/") || f.fileName.toLowerCase().endsWith(".txt")),
+        ).length,
+      );
+    } catch {
+      // 件数表示のみの機能なので黙って諦める（ボタンは0件扱い＝非活性になるだけ）
+    }
+  };
+
+  // T-155: 未読ログの取り込み。完了時に件数を取り直す（成功すればサーバー側で全件既読になり0になる）。
+  const handleIngestLogs = async () => {
+    if (isIngesting || unreadLogCount === 0) return;
+    setIsIngesting(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/advisor/ingest-logs`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "取り込みに失敗しました");
+      if (data.ingested === 0) {
+        toast.info("未読の面談ログはありません");
+      } else {
+        toast.success(`${data.ingested}件の面談ログを読み込みました。以降の会話に反映されます`);
+      }
+      await fetchUnreadLogCount();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "取り込みに失敗しました");
+    } finally {
+      setIsIngesting(false);
+    }
+  };
+
   // T-150: 確認カードの状態。期日の編集値（messageId+kind 単位）と通信中フラグ。
   const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
   const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
@@ -185,6 +229,7 @@ export default function AdvisorFloatingPanel({
       }
     };
     initSession();
+    fetchUnreadLogCount(); // T-155: パネル表示時に未読ログ件数を取得
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateId]);
 
@@ -697,6 +742,24 @@ export default function AdvisorFloatingPanel({
                 </span>
               ) : (
                 "🔍 タイプ診断"
+              )}
+            </button>
+            {/* T-155: 未読の面談ログをまとめて取り込む。0件時は非活性＋文言で理由が分かる形にする */}
+            <button
+              onClick={handleIngestLogs}
+              disabled={unreadLogCount === 0 || isIngesting || isSending || isAnalyzing || isGeneratingGreeting}
+              title={unreadLogCount === 0 ? "未読の面談ログはありません" : `未読の面談ログ ${unreadLogCount}件を読み込みます`}
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isIngesting ? (
+                <span className="flex items-center gap-1">
+                  <span className="animate-spin text-sm">⏳</span>
+                  読み込み中...
+                </span>
+              ) : unreadLogCount > 0 ? (
+                `📥 未読ログを読み込む（${unreadLogCount}件）`
+              ) : (
+                "📥 未読ログなし"
               )}
             </button>
             <div className="ml-auto flex items-center gap-2">

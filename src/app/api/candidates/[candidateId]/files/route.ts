@@ -90,6 +90,8 @@ export async function GET(
       responseStatus: true,
       // T-152: 面談ログの「どの面談のものか」。面談画面の専用アップロード欄の添付済み表示に使う。
       interviewId: true,
+      // T-155: AIアドバイザーが取り込み済みか（NULL=未読）。未読件数の表示に使う。
+      advisorIngestedAt: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,

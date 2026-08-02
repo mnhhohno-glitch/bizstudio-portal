@@ -498,6 +498,12 @@ model Candidate {
   nextContactPurpose String?   @map("next_contact_purpose")
   nextContactNote    String?   @map("next_contact_note") @db.Text
 
+  // T-155: 面談ログ取り込みの累積ダイジェスト（AIアドバイザーの context 専用・CA向け）。
+  //   取り込みのたびに「既存ダイジェスト + 未読ログ」を統合して1本に上書きする（追記ではない）。
+  //   ★GuideEntry.data には置かない（token 経由で求職者側に露出する構造のため）。
+  advisorLogDigest          String?   @map("advisor_log_digest") @db.Text
+  advisorLogDigestUpdatedAt DateTime? @map("advisor_log_digest_updated_at")
+
   // 希望条件（T-064: AI 自動取込 + CA 編集可）
   desiredJobType1       String? @map("desired_job_type_1")
   desiredJobType2       String? @map("desired_job_type_2")
@@ -1418,6 +1424,10 @@ model CandidateFile {
   //   フォールバックする。面談が削除されてもファイルは残す（SetNull）。
   interviewId       String?               @map("interview_id")
   interview         InterviewRecord?      @relation("InterviewMeetingFiles", fields: [interviewId], references: [id], onDelete: SetNull)
+  // T-155: AIアドバイザーの「未読ログ取り込み」がこのファイルを読み込んだ日時。NULL=未読。
+  //   タイムスタンプが既読フラグを兼ねる。対象は MEETING の txt のみ（interview_id の有無は不問）。
+  //   fail-closed: ダイジェスト生成・保存が成功した後にのみ立てる（失敗時は未読のまま再試行可能）。
+  advisorIngestedAt DateTime?             @map("advisor_ingested_at")
   category          CandidateFileCategory
   fileName          String                @map("file_name")
   fileSize          Int                   @map("file_size")
