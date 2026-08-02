@@ -22,6 +22,7 @@ type UploadState = {
 type SendResult = {
   url: string;
   password: string;
+  passwordInEmail: boolean;
   expiresAt: string;
   recipientEmail: string;
   files: { fileName: string; fileSize: number }[];
@@ -74,7 +75,8 @@ export default function NewTransferPage() {
   const [recipientEmail, setRecipientEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
-  const [expiresDays, setExpiresDays] = useState(7);
+  const [expiresDays, setExpiresDays] = useState(3);
+  const [passwordInEmail, setPasswordInEmail] = useState(true);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,6 +149,7 @@ export default function NewTransferPage() {
           subject: subject.trim() || undefined,
           message: message.trim() || undefined,
           expiresDays,
+          passwordInEmail,
           files: uploaded,
         }),
       });
@@ -202,24 +205,49 @@ export default function NewTransferPage() {
             </div>
           </div>
 
-          <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">パスワード</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 rounded bg-gray-50 px-3 py-2 text-lg font-mono tracking-widest text-gray-800">
-                {result.password}
-              </code>
-              <button
-                onClick={() => copyText(result.password, "パスワード")}
-                className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
-              >
-                コピー
-              </button>
+          {result.passwordInEmail ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">パスワード</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-gray-50 px-3 py-2 text-lg font-mono tracking-widest text-gray-800">
+                  {result.password}
+                </code>
+                <button
+                  onClick={() => copyText(result.password, "パスワード")}
+                  className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  コピー
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-red-500">
+                ⚠ パスワードはこの画面でのみ表示されます。この画面を閉じると再表示できません
+                （メールにも記載済みです）。
+              </p>
             </div>
-            <p className="mt-2 text-xs text-red-500">
-              ⚠ パスワードはこの画面でのみ表示されます。この画面を閉じると再表示できません
-              （メールにも記載済みです）。
-            </p>
-          </div>
+          ) : (
+            <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm font-semibold text-amber-800 mb-2">
+                パスワード（メールには記載されていません）
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-white px-4 py-3 text-3xl font-mono tracking-widest text-gray-900">
+                  {result.password}
+                </code>
+                <button
+                  onClick={() => copyText(result.password, "パスワード")}
+                  className="shrink-0 rounded-lg bg-amber-500 px-4 py-3 text-sm font-medium text-white hover:bg-amber-600"
+                >
+                  コピー
+                </button>
+              </div>
+              <p className="mt-3 text-sm font-semibold text-red-600">
+                ⚠ この画面を閉じるとパスワードは二度と表示できません。
+              </p>
+              <p className="mt-1 text-xs text-amber-800">
+                SMS・電話など、メール以外の方法で受信者へお伝えください。
+              </p>
+            </div>
+          )}
 
           <div className="text-xs text-gray-500">
             <p>有効期限: {formatJst(result.expiresAt)} まで（日本時間）</p>
@@ -345,6 +373,45 @@ export default function NewTransferPage() {
           />
         </div>
 
+        {/* パスワード送付方式 */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">パスワードの伝え方</label>
+          <div className="space-y-2">
+            <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="radio"
+                name="passwordInEmail"
+                checked={passwordInEmail}
+                onChange={() => setPasswordInEmail(true)}
+                disabled={sending}
+                className="mt-0.5"
+              />
+              <span>
+                パスワードをメールに記載する（既定）
+                <span className="block text-xs text-gray-400">
+                  URLと同じメールにパスワードも記載されます
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="radio"
+                name="passwordInEmail"
+                checked={!passwordInEmail}
+                onChange={() => setPasswordInEmail(false)}
+                disabled={sending}
+                className="mt-0.5"
+              />
+              <span>
+                メールに記載しない
+                <span className="block text-xs text-gray-400">
+                  送信完了画面にパスワードが表示されるので、SMS・電話など別の方法で伝えます
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+
         {/* 有効期限 */}
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">有効期限</label>
@@ -356,7 +423,7 @@ export default function NewTransferPage() {
           >
             {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
               <option key={d} value={d}>
-                {d}日{d === 7 ? "（推奨）" : ""}
+                {d}日{d === 3 ? "（推奨）" : ""}
               </option>
             ))}
           </select>
@@ -374,7 +441,9 @@ export default function NewTransferPage() {
             {sending ? "アップロード・送信中..." : "パスワードを発行してメール送信"}
           </button>
           <p className="mt-2 text-center text-xs text-gray-400">
-            パスワードは自動生成され、URLとあわせて宛先へメールで届きます
+            {passwordInEmail
+              ? "パスワードは自動生成され、URLとあわせて宛先へメールで届きます"
+              : "パスワードは自動生成され、送信完了画面に表示されます（メールには記載されません）"}
           </p>
         </div>
       </div>

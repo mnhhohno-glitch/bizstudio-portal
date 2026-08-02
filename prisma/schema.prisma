@@ -2725,6 +2725,7 @@ model SecureTransfer {
   expiresAt      DateTime  @map("expires_at") // インスタントで保持。判定は new Date() > expiresAt（TZ非依存）
   revokedAt      DateTime? @map("revoked_at") // 送信者の手動無効化 or パスワード10回失敗の自動無効化
   failedAttempts Int       @default(0) @map("failed_attempts") // パスワード照合失敗回数。10で自動無効化
+  passwordInEmail Boolean  @default(true) @map("password_in_email") // false = パスワードをメールに載せず送信者が別途伝える
   candidateId    String?   @map("candidate_id") // 第1弾は常に null
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")

@@ -16,14 +16,18 @@ export function buildTransferUrl(token: string): string {
 /** 受信者向け: ファイル送付案内（URL・パスワード・期限・ファイル名一覧・送信者名）。 */
 export function buildTransferNoticeBody(params: {
   senderName: string;
+  senderEmail: string;
   url: string;
   password: string;
+  passwordInEmail: boolean; // false = パスワードは本文に載せず「別途お伝えします」と記載
   expiresAt: Date;
   fileNames: string[];
   subject?: string | null;
   message?: string | null;
 }): string {
   const lines: string[] = [];
+  lines.push("ご担当者様");
+  lines.push("");
   lines.push("株式会社ビズスタジオよりファイルをお送りいたします。");
   lines.push("下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。");
   lines.push("");
@@ -36,7 +40,14 @@ export function buildTransferNoticeBody(params: {
   lines.push(params.url);
   lines.push("");
   lines.push("■パスワード");
-  lines.push(params.password);
+  if (params.passwordInEmail) {
+    // パスワードの行は前後に空行を置き、コピーしやすくする（確定仕様）
+    lines.push("");
+    lines.push(params.password);
+    lines.push("");
+  } else {
+    lines.push("パスワードは送信者より別途お伝えします。");
+  }
   lines.push("");
   lines.push("■有効期限");
   lines.push(`${formatJstDateTime(params.expiresAt)} まで（日本時間）`);
@@ -55,14 +66,17 @@ export function buildTransferNoticeBody(params: {
   lines.push("");
   lines.push("──");
   lines.push(`株式会社ビズスタジオ ${params.senderName}`);
+  lines.push(params.senderEmail);
   return lines.join("\n");
 }
 
 export async function sendTransferNoticeEmail(params: {
   to: string;
   senderName: string;
+  senderEmail: string;
   url: string;
   password: string;
+  passwordInEmail: boolean;
   expiresAt: Date;
   fileNames: string[];
   subject?: string | null;
@@ -72,6 +86,7 @@ export async function sendTransferNoticeEmail(params: {
     to: params.to,
     subject: "【株式会社ビズスタジオ】ファイル送付のご案内",
     text: buildTransferNoticeBody(params),
+    replyTo: params.senderEmail, // 受信者が返信すると送信者本人に届く
   });
 }
 
