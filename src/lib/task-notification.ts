@@ -290,10 +290,16 @@ type AiTaskCreatedParams = {
   dueDate: Date | null;
   /** カード上で「タスクを作成」を押した CA。 */
   actorName: string;
+  /**
+   * T-151: 起票の経路（例: "AIアドバイザーの会話" / "面談ログの解析"）。
+   * 見出しは経路非依存にし、経路はこの1行で伝える。未指定なら経路行を出さない。
+   */
+  originLabel?: string;
 };
 
 /**
- * T-150: AIアドバイザーの会話から起票されたタスクの作成通知。
+ * T-150: AI が検出した約束から起票されたタスクの作成通知。
+ * T-151 で面談ログ経路が加わったため、見出しは経路非依存にし、経路は originLabel の1行で伝える。
  *
  * 既存 notifyTaskCreated を使わず専用関数にしている理由:
  *  - notifyTaskCreated 側の担当者引き当ては「ユーザー名の文字列一致」（tasks/route.ts の
@@ -324,8 +330,9 @@ export async function notifyAiTaskCreated(params: AiTaskCreatedParams): Promise<
     : "未設定";
 
   const baseLines = [
-    "🤖 AIアドバイザーの会話からタスクが作成されました",
+    "🤖 AIが検出した約束からタスクが作成されました",
     "",
+    ...(params.originLabel ? ["■ 検出元", params.originLabel, ""] : []),
     "■ タスク",
     params.title,
     "",
@@ -348,7 +355,7 @@ export async function notifyAiTaskCreated(params: AiTaskCreatedParams): Promise<
     `${baseUrl}/tasks/${params.taskId}`,
   ];
 
-  const header = "AIアドバイザーの会話から新しいタスクが作成されました";
+  const header = "AIが検出した約束から新しいタスクが作成されました";
 
   // 1) lineworksId があればメンション付き
   if (params.assigneeLineworksId) {
@@ -433,7 +440,7 @@ export async function notifyAiTaskDueReminder(params: AiTaskDueReminderParams): 
   const overdueItems = params.items.filter((i) => i.overdueDays > 0);
 
   const baseLines: string[] = [
-    "⏰ 期日のタスクがあります（AIアドバイザー起票分）",
+    "⏰ 期日のタスクがあります（AI起票分）",
     "",
   ];
   if (todayItems.length > 0) {

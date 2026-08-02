@@ -50,14 +50,23 @@ export const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
  * ラベル名（「職種」等）はハードコードせず is_required で動的に拾う（将来フィールドが増えても効くように）。
  * 先例: src/lib/schedule-agent/post-reserve.ts が「その他」カテゴリの必須フィールドに本文を格納している。
  */
-const REQUIRED_FIELD_PLACEHOLDER = "AIアドバイザー起票";
+// T-151 Phase 2-7: 経路非依存の文言にする。アドバイザー経路だけだった頃の
+// 「AIアドバイザー起票」は面談経路では事実と異なるため。
+// 本番の AI起票タスクは実績0件のため、文言変更で既存レコードとの混在は発生しない（2026-08-02 実測）。
+const REQUIRED_FIELD_PLACEHOLDER = "AI起票";
 
-/** 起票元の経路。description の書き分けにのみ使う（source カラムには入れない）。 */
+/** 起票元の経路。description と通知の「検出元」行の書き分けに使う（source カラムには入れない）。 */
 export type AiTaskOrigin = "advisor" | "interview";
 
 const ORIGIN_DESCRIPTION: Record<AiTaskOrigin, string> = {
   advisor: "AIアドバイザーとの会話から自動起票（内容はCAが確認済み）",
   interview: "面談ログの解析から自動起票（内容はCAが確認済み）",
+};
+
+/** LINE WORKS 通知の「検出元」行に出すラベル。 */
+const ORIGIN_LABEL: Record<AiTaskOrigin, string> = {
+  advisor: "AIアドバイザーの会話",
+  interview: "面談ログの解析",
 };
 
 export type CreateAiTaskParams = {
@@ -219,6 +228,7 @@ export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAi
         assigneeLineworksId: candidate.employee?.user?.lineworksId ?? null,
         dueDate,
         actorName: actor.name ?? "不明",
+        originLabel: ORIGIN_LABEL[origin],
       });
     } catch (e) {
       console.error("[ai-task-create] LINE WORKS 通知に失敗（タスク作成は成功）:", e);
