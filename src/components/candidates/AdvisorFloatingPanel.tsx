@@ -697,11 +697,13 @@ export default function AdvisorFloatingPanel({
           </div>
 
           {/* Action buttons */}
-          <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 shrink-0 flex-wrap">
+          {/* T-155 追補: ボタンが1つ増えて折り返していたため、左3ボタンは gap と左右padding を詰め、
+              ボタン内で改行しないよう whitespace-nowrap を付ける（右の全件分析グループは変更しない）。 */}
+          <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2 shrink-0 flex-wrap">
             <button
               onClick={() => setShowGreetingOptions(!showGreetingOptions)}
               disabled={!activeSessionId || isGeneratingGreeting || isAnalyzing}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ✉ 挨拶文生成
             </button>
@@ -733,7 +735,7 @@ export default function AdvisorFloatingPanel({
             <button
               onClick={handleTypeDiagnosis}
               disabled={!activeSessionId || isDiagnosing || isSending || isAnalyzing || isGeneratingGreeting}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isDiagnosing ? (
                 <span className="flex items-center gap-1">
@@ -749,7 +751,7 @@ export default function AdvisorFloatingPanel({
               onClick={handleIngestLogs}
               disabled={unreadLogCount === 0 || isIngesting || isSending || isAnalyzing || isGeneratingGreeting}
               title={unreadLogCount === 0 ? "未読の面談ログはありません" : `未読の面談ログ ${unreadLogCount}件を読み込みます`}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isIngesting ? (
                 <span className="flex items-center gap-1">
@@ -757,7 +759,7 @@ export default function AdvisorFloatingPanel({
                   読み込み中...
                 </span>
               ) : unreadLogCount > 0 ? (
-                `📥 未読ログを読み込む（${unreadLogCount}件）`
+                `📥 未読ログ取込（${unreadLogCount}件）`
               ) : (
                 "📥 未読ログなし"
               )}
