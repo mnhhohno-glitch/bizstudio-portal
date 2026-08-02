@@ -2141,6 +2141,13 @@ model InterviewRecord {
   // 新規作成（portal 上の面談）では常に null。取り込みレコードのみ値を持つ。
   legacyFmInterviewNo String? @map("legacy_fm_interview_no")
 
+  // T-151: 面談ログ解析から検出したタスク候補（種別・相対表現・計算済み期日）と、その破棄時刻。
+  // AdvisorChatMessage の同名2カラム（T-150）と同型・同用途。候補を面談レコードに紐づけて持つことで、
+  // ページ再読込・タブ切替でも確認カードが復元でき、「今回は不要」で破棄した候補を
+  // 再提示しないことも同じ仕組みで満たせる。
+  suggestedTasks            Json?     @map("suggested_tasks")
+  suggestedTasksDismissedAt DateTime? @map("suggested_tasks_dismissed_at")
+
   detail        InterviewDetail?
   rating        InterviewRating?
   memos         InterviewMemo[]
