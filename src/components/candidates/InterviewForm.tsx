@@ -1087,6 +1087,12 @@ export default function InterviewForm({
 
   /* ---- Computed ---- */
   const hasPdf = attachments.some((a) => a.mimeType === "application/pdf" || a.fileName.toLowerCase().endsWith(".pdf"));
+  // T-153: 面談ログ(txt)が無い状態での解析は upstream が必ず 400 を返す（＝502）。
+  // PDF単独の面談詳細は業務上不要なので、押させずに手前で止める。
+  // 判定条件は analyze-with-intake/route.ts の isTxt（MIME と拡張子の OR）と揃えること。
+  const hasInterviewLog = attachments.some(
+    (a) => a.mimeType.startsWith("text/") || a.fileName.toLowerCase().endsWith(".txt"),
+  );
   const d = detail;
   const r = rating;
 
@@ -1836,8 +1842,17 @@ export default function InterviewForm({
                 <div>
                   <SectionHd
                     title="添付ファイル一覧"
-                    right={attachments.length > 0 ? <BtnMini variant="ai" onClick={handleIntakeAnalyze} disabled={intakeAnalyzing}>{intakeAnalyzing ? "解析中..." : "✨ ログを解析して各カラムへ自動入力"}</BtnMini> : undefined}
+                    right={hasInterviewLog ? <BtnMini variant="ai" onClick={handleIntakeAnalyze} disabled={intakeAnalyzing}>{intakeAnalyzing ? "解析中..." : "✨ ログを解析して各カラムへ自動入力"}</BtnMini> : undefined}
                   />
+
+                  {/* T-153: 面談ログ(txt)が無いと解析できないことを、添付が無い時点で見える形で伝える。
+                      履歴書PDFだけで解析しても中途半端な面談詳細になるため、押させない仕様。 */}
+                  {!hasInterviewLog && (
+                    <p style={{ fontSize: 11, color: "var(--im-fg3)", margin: "0 0 6px" }}>
+                      面談ログ（.txt）を添付すると解析できます
+                      {hasPdf ? "（履歴書PDFだけでは解析できません）" : ""}
+                    </p>
+                  )}
 
                   {/* T-151: タスク候補の確認カード。解析ボタンの直下に出す。
                       破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。 */}

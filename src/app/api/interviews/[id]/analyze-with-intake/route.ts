@@ -18,6 +18,13 @@ export const maxDuration = 300;
 // InterviewAttachment(Supabase) → CandidateFile(category=MEETING, Google Drive) に変更。
 // ファイル取得は candidateId 経由で Drive から実体ダウンロードする。
 
+// T-153: 面談ログ(txt)が無い状態での解析は「エラーで止まるのが正しい挙動」と決定した（業務判断）。
+// 面談詳細は「面談ログ + 職務経歴書」がセットで初めて完成するもので、PDF単独の中途半端な
+// 面談詳細はむしろ害になる。加えて PDF単独解析は Gemini トークンを無駄に消費する。
+// よって upstream へは従来どおり空白1文字を送り（＝ upstream が 400 で弾く）、
+// UI 側で「txt が無ければ解析ボタンを押せない」ようにして手前で止める。
+// 詳細: docs/survey_T-152_T-153_analyze_with_intake.md
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -47,7 +54,6 @@ export async function POST(
         candidate: { select: { id: true, candidateNumber: true } },
       },
     });
-    // T-151: 破棄済みの面談では候補を出し直さない（CA が「今回は不要」と判断済みのため）。
     if (!record) {
       return NextResponse.json({ error: "面談レコードが見つかりません" }, { status: 404 });
     }
@@ -135,9 +141,16 @@ export async function POST(
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Unknown error" }));
-      console.error("[analyze-with-intake] Upstream error:", JSON.stringify(err));
+      // T-153: 内部エラー本文はサーバーログにだけ残す。
+      // 画面には英語の upstream メッセージをそのまま出さない（CAが対処できないため）。
+      console.error(
+        `[analyze-with-intake] Upstream error: status=${res.status} body=${JSON.stringify(err)}`,
+      );
       return NextResponse.json(
-        { error: `解析サービスエラー (${res.status}): ${err.error || res.statusText}` },
+        {
+          error:
+            "解析に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。",
+        },
         { status: 502 },
       );
     }
@@ -199,6 +212,7 @@ export async function POST(
     try {
       if (!interviewLog.trim()) {
         console.log("[analyze-with-intake] T-151: txt が無いため候補検出をスキップ");
+        // T-151: 破棄済みの面談では候補を出し直さない（CA が「今回は不要」と判断済みのため）。
       } else if (record.suggestedTasksDismissedAt) {
         console.log("[analyze-with-intake] T-151: 破棄済みのため候補検出をスキップ");
       } else {
