@@ -126,6 +126,7 @@ model User {
   appTokens       AppToken[]
   appSessions     AppSession[]
   announcements   Announcement[]
+  announcementAttachments AnnouncementAttachment[] @relation("AnnouncementAttachmentsCreated")
   documents       Document[]       @relation("UserDocuments")
   manuals         Manual[]         @relation("UserManuals")
   candidateNotes  CandidateNote[]  @relation("UserCandidateNotes")
@@ -698,10 +699,32 @@ model Announcement {
   publishedAt  DateTime?            @map("published_at")
   authorUserId String               @map("author_user_id")
   author       User                 @relation(fields: [authorUserId], references: [id])
+  attachments  AnnouncementAttachment[]
   createdAt    DateTime             @default(now()) @map("created_at")
   updatedAt    DateTime             @updatedAt @map("updated_at")
 
   @@map("announcements")
+}
+
+// T-156: お知らせの添付資料（操作ガイドPDF等）。
+//   実体は Google Drive に置くが、公開権限（anyone reader）は付与しない。
+//   閲覧は必ず /api/announcements/[id]/attachments/[attachmentId]/view の
+//   セッション認証付きストリーミング経由（driveViewUrl はクライアントに渡さない設計のため保持しない）。
+model AnnouncementAttachment {
+  id              String       @id @default(cuid())
+  announcementId  String       @map("announcement_id")
+  announcement    Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  fileName        String       @map("file_name") // 表示名（アップロード時の元ファイル名）
+  driveFileId     String       @map("drive_file_id")
+  mimeType        String       @map("mime_type")
+  fileSize        Int          @map("file_size")
+  sortOrder       Int          @default(0) @map("sort_order")
+  createdByUserId String?      @map("created_by_user_id")
+  createdByUser   User?        @relation("AnnouncementAttachmentsCreated", fields: [createdByUserId], references: [id])
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  @@index([announcementId])
+  @@map("announcement_attachments")
 }
 
 enum ManualCategory {

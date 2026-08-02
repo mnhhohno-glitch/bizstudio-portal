@@ -1,7 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ANNOUNCEMENT_CATEGORIES, ANNOUNCEMENT_STATUSES, AnnouncementCategoryKey, AnnouncementStatusKey } from "@/lib/constants/announcement";
+
+// T-156: お知らせ添付資料（PDF）
+type Attachment = {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  createdAt: string;
+};
 
 type Announcement = {
   id: string;
@@ -11,9 +19,16 @@ type Announcement = {
   status: AnnouncementStatusKey;
   publishedAt: string | null;
   author: { name: string };
+  attachments?: Attachment[];
   createdAt: string;
   updatedAt: string;
 };
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 type FormData = {
   title: string;
@@ -35,6 +50,12 @@ export default function AdminAnnouncementsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [aiFormatting, setAiFormatting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // T-156: 添付資料（編集モーダルでのみ操作可能。新規作成時は保存後に添付する）
+  const [modalAttachments, setModalAttachments] = useState<Attachment[]>([]);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentDragging, setAttachmentDragging] = useState(false);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const fetchAnnouncements = useCallback(async () => {
     setLoading(true);
@@ -56,6 +77,8 @@ export default function AdminAnnouncementsPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setFormData({ title: "", content: "", category: "IMPORTANT" });
+    setModalAttachments([]);
+    setAttachmentError(null);
     setModalOpen(true);
   };
 
@@ -66,6 +89,8 @@ export default function AdminAnnouncementsPage() {
       content: announcement.content,
       category: announcement.category,
     });
+    setModalAttachments(announcement.attachments ?? []);
+    setAttachmentError(null);
     setModalOpen(true);
   };
 
@@ -142,6 +167,66 @@ export default function AdminAnnouncementsPage() {
       setTimeout(() => setAiError(null), 3000);
     } finally {
       setAiFormatting(false);
+    }
+  };
+
+  // T-156: 添付はファイル選択の即時にアップロードして紐付ける（編集モーダルのみ）。
+  // 一覧stateにも反映し、キャンセルで閉じても一覧側の添付情報が古くならないようにする。
+  const syncAttachmentsToList = (announcementId: string, attachments: Attachment[]) => {
+    setAnnouncements((prev) =>
+      prev.map((a) => (a.id === announcementId ? { ...a, attachments } : a))
+    );
+  };
+
+  const handleAttachmentUpload = async (file: File) => {
+    if (!editingId) return;
+    if (file.type !== "application/pdf") {
+      setAttachmentError("PDFファイルのみアップロード可能です");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setAttachmentError("ファイルサイズは20MB以下にしてください");
+      return;
+    }
+
+    setAttachmentUploading(true);
+    setAttachmentError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/announcements/${editingId}/attachments`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setAttachmentError(data?.error || "アップロードに失敗しました");
+        return;
+      }
+      const data = await res.json();
+      const next = [...modalAttachments, data.attachment as Attachment];
+      setModalAttachments(next);
+      syncAttachmentsToList(editingId, next);
+    } catch {
+      setAttachmentError("アップロードに失敗しました");
+    } finally {
+      setAttachmentUploading(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+    }
+  };
+
+  const handleAttachmentDelete = async (attachmentId: string) => {
+    if (!editingId) return;
+    const res = await fetch(`/api/announcements/${editingId}/attachments/${attachmentId}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      const next = modalAttachments.filter((a) => a.id !== attachmentId);
+      setModalAttachments(next);
+      syncAttachmentsToList(editingId, next);
+    } else {
+      const data = await res.json().catch(() => null);
+      setAttachmentError(data?.error || "削除に失敗しました");
     }
   };
 
@@ -275,6 +360,92 @@ export default function AdminAnnouncementsPage() {
                 />
                 {aiError && (
                   <p className="mt-1 text-[12px] text-[#DC2626]">{aiError}</p>
+                )}
+              </div>
+
+              {/* T-156: 添付資料（PDF）。新規作成時は announcementId が未確定のため、保存後の編集でのみ添付可能 */}
+              <div>
+                <label className="block text-[14px] font-medium text-[#374151] mb-1">
+                  添付資料（PDF・任意）
+                </label>
+                {editingId ? (
+                  <>
+                    {modalAttachments.length > 0 && (
+                      <div className="space-y-2 mb-2">
+                        {modalAttachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="flex items-center gap-3 rounded-md border border-[#E5E7EB] px-3 py-2"
+                          >
+                            <span className="text-[16px]">📄</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-medium text-[#374151] truncate">
+                                {attachment.fileName}
+                              </p>
+                              <p className="text-[11px] text-[#6B7280]">
+                                {formatFileSize(attachment.fileSize)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAttachmentDelete(attachment.id)}
+                              className="shrink-0 border border-[#E5E7EB] bg-white text-[#DC2626] rounded-md px-3 py-1 text-[12px] hover:bg-[#FEE2E2]"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setAttachmentDragging(true);
+                      }}
+                      onDragLeave={() => setAttachmentDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setAttachmentDragging(false);
+                        const file = e.dataTransfer.files[0];
+                        if (file) handleAttachmentUpload(file);
+                      }}
+                      onClick={() => attachmentInputRef.current?.click()}
+                      className={`flex flex-col items-center justify-center rounded-md py-5 cursor-pointer transition-colors ${
+                        attachmentDragging
+                          ? "border-dashed border-2 border-[#2563EB] bg-[#F0F7FF]"
+                          : "border-dashed border-2 border-gray-300 hover:border-[#2563EB] hover:bg-[#F9FAFB]"
+                      }`}
+                    >
+                      {attachmentUploading ? (
+                        <p className="text-[13px] text-[#6B7280]">アップロード中...</p>
+                      ) : (
+                        <>
+                          <span className="text-[20px] mb-1">📄</span>
+                          <p className="text-[13px] text-[#6B7280]">
+                            PDFをドラッグ＆ドロップ または クリックして選択
+                          </p>
+                          <p className="text-[11px] text-[#9CA3AF] mt-1">最大20MB</p>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      accept="application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleAttachmentUpload(file);
+                      }}
+                    />
+                    {attachmentError && (
+                      <p className="mt-1 text-[12px] text-[#DC2626]">{attachmentError}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[12px] text-[#6B7280] rounded-md border border-dashed border-gray-300 px-3 py-3">
+                    添付資料は、お知らせを保存した後の編集画面から追加できます
+                  </p>
                 )}
               </div>
             </div>
