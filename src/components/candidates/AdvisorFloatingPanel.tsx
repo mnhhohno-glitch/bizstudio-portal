@@ -7,6 +7,7 @@ import { RATING_VALUE } from "@/lib/ai-rating";
 // T-151 Phase 2-2: 確認カードは面談ログ経路と共通のコンポーネントに切り出し済み。
 import SuggestedTaskCard, {
   suggestedTaskKey,
+  formatDueDateWithYear,
   type SuggestedTask,
 } from "@/components/common/SuggestedTaskCard";
 
@@ -99,7 +100,13 @@ export default function AdvisorFloatingPanel({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
       if (action === "create") {
-        toast.success(data.created ? "タスクを作成しました" : "既存タスクの期日を更新しました");
+        // T-151: 期日のみ更新だった場合は期日を年込みで出す（面談経路とも文言を統一）。
+        // 経路をまたいで同種の未完了タスクがあると通知が飛ばないため、ここが唯一の手がかりになる。
+        toast.success(
+          data.created
+            ? "タスクを作成しました"
+            : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
+        );
       }
       await fetchMessages(activeSessionId);
     } catch (e) {
