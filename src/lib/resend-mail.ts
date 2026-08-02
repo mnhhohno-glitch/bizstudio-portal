@@ -7,8 +7,18 @@
 // - 自動無効化の通知メール: 失敗しても無効化自体は成立させる（fail-open）
 
 const RESEND_API_URL = "https://api.resend.com/emails";
-const FROM = "BizStudio <noreply@bizstudio.co.jp>";
+const FROM = "株式会社ビズスタジオ <noreply@bizstudio.co.jp>";
 const TIMEOUT_MS = 10000;
+
+// staging（本番以外）からの誤送信対策: 件名の先頭に【検証】を自動付与する。
+// 専用の環境判別の仕組みは無いため、Railway のサービス名か PORTAL_BASE_URL に
+// "staging" が含まれるかで判定する（staging サービスは両方とも staging を含む）。
+// どちらも判定できない場合は「付けない」側に倒す（本番に【検証】が付く事故を防ぐ）。
+function isStagingEnv(): boolean {
+  const service = process.env.RAILWAY_SERVICE_NAME || "";
+  const baseUrl = process.env.PORTAL_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "";
+  return service.includes("staging") || baseUrl.includes("staging");
+}
 
 export type SendMailResult = { ok: true } | { ok: false; error: string };
 
@@ -16,6 +26,7 @@ export async function sendResendEmail(params: {
   to: string;
   subject: string;
   text: string;
+  replyTo?: string; // 受信者が返信したとき届くアドレス（例: 送信者本人の User.email）
 }): Promise<SendMailResult> {
   const resendApiKey = process.env.RESEND_API_KEY;
   if (!resendApiKey) {
@@ -23,6 +34,8 @@ export async function sendResendEmail(params: {
     console.error("[Resend] RESEND_API_KEY not configured");
     return { ok: false, error: "メール送信の設定がされていません（RESEND_API_KEY）" };
   }
+
+  const subject = isStagingEnv() ? `【検証】${params.subject}` : params.subject;
 
   try {
     const controller = new AbortController();
@@ -36,8 +49,9 @@ export async function sendResendEmail(params: {
       body: JSON.stringify({
         from: FROM,
         to: [params.to],
-        subject: params.subject,
+        subject,
         text: params.text,
+        ...(params.replyTo ? { reply_to: params.replyTo } : {}),
       }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timer));

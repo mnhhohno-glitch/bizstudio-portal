@@ -17,6 +17,7 @@ type TransferRow = {
   expiresAt: string;
   revokedAt: string | null;
   failedAttempts: number;
+  passwordInEmail: boolean;
   createdAt: string;
   status: "active" | "expired" | "revoked";
   filesDeleted: boolean;
@@ -242,6 +243,12 @@ export default function TransfersPage() {
                       )}
                       {detail && detail.id === t.id && (
                         <div className="space-y-3">
+                          <div>
+                            <p className="text-xs text-gray-600">
+                              <span className="font-semibold text-gray-500">パスワード: </span>
+                              {detail.passwordInEmail ? "メール記載" : "別途連絡"}
+                            </p>
+                          </div>
                           <div>
                             <p className="text-xs font-semibold text-gray-500 mb-1">ファイル</p>
                             <ul className="text-xs text-gray-600 space-y-0.5">

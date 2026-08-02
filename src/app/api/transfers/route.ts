@@ -56,6 +56,7 @@ export async function GET() {
       expiresAt: t.expiresAt,
       revokedAt: t.revokedAt,
       failedAttempts: t.failedAttempts,
+      passwordInEmail: t.passwordInEmail,
       createdAt: t.createdAt,
       status: getTransferStatus(t),
       filesDeleted: t.files.length > 0 && t.files.every((f) => f.deletedAt !== null),
@@ -79,6 +80,7 @@ export async function POST(req: NextRequest) {
     subject?: string;
     message?: string;
     expiresDays?: number;
+    passwordInEmail?: boolean;
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
   } | null;
 
@@ -94,13 +96,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const expiresDays = body.expiresDays ?? 7;
+  const expiresDays = body.expiresDays ?? 3;
   if (!Number.isInteger(expiresDays) || expiresDays < 1 || expiresDays > 30) {
     return NextResponse.json(
       { error: "有効期限は1〜30日で指定してください" },
       { status: 400 }
     );
   }
+
+  // 未指定は従来どおり「メールに記載する」
+  const passwordInEmail = body.passwordInEmail !== false;
 
   const files = body.files ?? [];
   if (files.length === 0) {
@@ -179,6 +184,7 @@ export async function POST(req: NextRequest) {
       message: body.message?.trim() || null,
       passwordHash,
       expiresAt,
+      passwordInEmail,
       files: { create: validated },
     },
     include: { files: true },
@@ -188,8 +194,10 @@ export async function POST(req: NextRequest) {
   const mailResult = await sendTransferNoticeEmail({
     to: recipientEmail,
     senderName: user.name ?? user.email,
+    senderEmail: user.email,
     url,
     password,
+    passwordInEmail,
     expiresAt,
     fileNames: validated.map((f) => f.fileName),
     subject: transfer.subject,
@@ -230,6 +238,7 @@ export async function POST(req: NextRequest) {
       id: transfer.id,
       url,
       password,
+      passwordInEmail,
       expiresAt,
       recipientEmail,
       files: validated.map((f) => ({ fileName: f.fileName, fileSize: f.fileSize })),

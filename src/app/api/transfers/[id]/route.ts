@@ -47,6 +47,7 @@ export async function GET(
     expiresAt: transfer.expiresAt,
     revokedAt: transfer.revokedAt,
     failedAttempts: transfer.failedAttempts,
+    passwordInEmail: transfer.passwordInEmail,
     createdAt: transfer.createdAt,
     status: getTransferStatus(transfer),
     sender: transfer.sender,
