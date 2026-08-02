@@ -4,13 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { RATING_VALUE } from "@/lib/ai-rating";
-
-// T-150: AI応答から検出したタスク候補。dueDate はサーバーが JST で確定済みの "YYYY-MM-DD"。
-type SuggestedTask = {
-  kind: "JOB_SEARCH_SEND" | "FORM_SURVEY";
-  due: string;
-  dueDate: string;
-};
+// T-151 Phase 2-2: 確認カードは面談ログ経路と共通のコンポーネントに切り出し済み。
+import SuggestedTaskCard, {
+  suggestedTaskKey,
+  type SuggestedTask,
+} from "@/components/common/SuggestedTaskCard";
 
 type Message = {
   id: string;
@@ -21,26 +19,6 @@ type Message = {
   suggestedTasks?: SuggestedTask[] | null;
   suggestedTasksDismissedAt?: string | null;
 };
-
-const SUGGESTED_TASK_LABEL: Record<SuggestedTask["kind"], string> = {
-  JOB_SEARCH_SEND: "求人検索・送付",
-  FORM_SURVEY: "アンケート送付・回答確認",
-};
-
-/**
- * "YYYY-MM-DD" を「2026年8月7日(金)」形式にする。
- * ★年を必ず含めること。AIが年を間違えた場合にCAが気づける最後の防壁のため、省略表記にしない。
- * 曜日は Date.UTC 固定で算出（ブラウザTZに依存させない）。
- */
-function formatDueDateWithYear(ymd: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-  if (!m) return ymd;
-  const [, y, mo, d] = m;
-  const dow = ["日", "月", "火", "水", "木", "金", "土"][
-    new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d))).getUTCDay()
-  ];
-  return `${Number(y)}年${Number(mo)}月${Number(d)}日(${dow})`;
-}
 
 function formatTime(iso: string) {
   const d = new Date(iso);
@@ -92,8 +70,6 @@ export default function AdvisorFloatingPanel({
   const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
   const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
   const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
-
-  const suggestedTaskKey = (messageId: string, kind: string) => `${messageId}:${kind}`;
 
   // T-150: カードの「タスクを作成」/「今回は不要」。成功後は fetchMessages で取り直す
   // （DB 側で suggestedTasksDismissedAt がセットされるためカードが消える）。
@@ -848,58 +824,19 @@ export default function AdvisorFloatingPanel({
                         !msg.suggestedTasksDismissedAt &&
                         Array.isArray(msg.suggestedTasks) &&
                         msg.suggestedTasks.length > 0 && (
-                          <div className="mt-3 space-y-2">
-                            {msg.suggestedTasks.map((task) => {
-                              const key = suggestedTaskKey(msg.id, task.kind);
-                              const busy = !!taskCardBusy[key];
-                              const err = taskCardError[key];
-                              const due = taskDueEdits[key] ?? task.dueDate;
-                              return (
-                                <div
-                                  key={key}
-                                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[13px]"
-                                >
-                                  <div className="flex items-center gap-1.5 font-semibold text-amber-900">
-                                    <span>📌</span>
-                                    <span>タスク候補: {SUGGESTED_TASK_LABEL[task.kind]}</span>
-                                  </div>
-                                  <div className="mt-1 text-gray-700">対象: {candidateName} さん</div>
-                                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                    <span className="text-gray-700">期日</span>
-                                    <span className="font-semibold text-gray-900">
-                                      {formatDueDateWithYear(due)}
-                                    </span>
-                                    <input
-                                      type="date"
-                                      value={due}
-                                      disabled={busy}
-                                      onChange={(e) =>
-                                        setTaskDueEdits((p) => ({ ...p, [key]: e.target.value }))
-                                      }
-                                      className="rounded border border-gray-300 px-2 py-1 text-[12px] focus:border-[#2563EB] focus:outline-none disabled:opacity-50"
-                                    />
-                                  </div>
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <button
-                                      onClick={() => handleSuggestedTask(msg.id, task, "create")}
-                                      disabled={busy}
-                                      className="rounded-md bg-[#2563EB] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#1D4ED8] disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      {busy ? "処理中..." : "タスクを作成"}
-                                    </button>
-                                    <button
-                                      onClick={() => handleSuggestedTask(msg.id, task, "dismiss")}
-                                      disabled={busy}
-                                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-[12px] text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      今回は不要
-                                    </button>
-                                  </div>
-                                  {err && <div className="mt-1.5 text-[12px] text-red-600">{err}</div>}
-                                </div>
-                              );
-                            })}
-                          </div>
+                          <SuggestedTaskCard
+                            ownerId={msg.id}
+                            tasks={msg.suggestedTasks}
+                            candidateName={candidateName}
+                            busy={taskCardBusy}
+                            error={taskCardError}
+                            dueEdits={taskDueEdits}
+                            onDueChange={(key, value) =>
+                              setTaskDueEdits((p) => ({ ...p, [key]: value }))
+                            }
+                            onCreate={(task) => handleSuggestedTask(msg.id, task, "create")}
+                            onDismiss={(task) => handleSuggestedTask(msg.id, task, "dismiss")}
+                          />
                         )}
                     </div>
                   </div>
