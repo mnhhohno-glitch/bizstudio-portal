@@ -88,6 +88,8 @@ export async function GET(
       origin: true,
       // T-133 FU: 求職者本人のマイページ回答。CA画面の「本人回答」列で表示（読むだけ・書き込みしない）。
       responseStatus: true,
+      // T-152: 面談ログの「どの面談のものか」。面談画面の専用アップロード欄の添付済み表示に使う。
+      interviewId: true,
       uploadedByUserId: true,
       createdAt: true,
       updatedAt: true,

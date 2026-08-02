@@ -1412,6 +1412,12 @@ model CandidateFile {
   candidate         Candidate             @relation(fields: [candidateId], references: [id])
   folderId          String?               @map("folder_id")
   folder            BSDocumentFolder?     @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  // T-152: この面談ログが「どの面談のものか」の紐付け。面談画面の専用アップロード欄から
+  //   アップロードした場合のみ値が入る（既存の添付タブ経由は null のまま＝挙動不変）。
+  //   analyze-with-intake は当該面談に紐づく txt を最優先で使い、無ければ従来どおり最新 txt へ
+  //   フォールバックする。面談が削除されてもファイルは残す（SetNull）。
+  interviewId       String?               @map("interview_id")
+  interview         InterviewRecord?      @relation("InterviewMeetingFiles", fields: [interviewId], references: [id], onDelete: SetNull)
   category          CandidateFileCategory
   fileName          String                @map("file_name")
   fileSize          Int                   @map("file_size")
@@ -1483,6 +1489,7 @@ model CandidateFile {
 
   @@unique([candidateId, kyuujinJobId]) // T-133 P1: 同一候補者×同一kyuujin Jobの重複行防止（NULLは重複扱いされない）
   @@index([candidateId, category, archivedAt])
+  @@index([interviewId]) // T-152: 当該面談に紐づくログの検索用
   @@index([folderId])
   // T-071: 実績表の CA 別期間集計（uploadedByUserId = User.id × created_at/last_exported_at レンジ）用
   @@index([uploadedByUserId, createdAt])
@@ -2153,6 +2160,8 @@ model InterviewRecord {
   memos         InterviewMemo[]
   attachments   InterviewAttachment[]
   workHistories WorkHistory[]
+  // T-152: この面談に紐づく面談ログ等（CandidateFile.interviewId 経由）
+  meetingFiles  CandidateFile[]       @relation("InterviewMeetingFiles")
   createdAt     DateTime              @default(now()) @map("created_at")
   updatedAt     DateTime              @updatedAt @map("updated_at")
 

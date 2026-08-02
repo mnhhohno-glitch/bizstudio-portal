@@ -46,6 +46,8 @@ type AttachmentRecord = {
   driveViewUrl: string;
   memo: string | null;
   createdAt: string;
+  // T-152: この面談ログが「どの面談のものか」。面談画面の専用アップロード欄経由のみ値が入る。
+  interviewId?: string | null;
 };
 
 type MemoRecord = {
@@ -458,6 +460,9 @@ export default function InterviewForm({
   const [uploading, setUploading] = useState(false);
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // T-152: 「この面談の面談ログ」専用アップロード欄の input と通信中フラグ
+  const logInputRef = useRef<HTMLInputElement>(null);
+  const [logUploading, setLogUploading] = useState(false);
   const prevIdRef = useRef<string | null>(null);
   const [candidate, setCandidate] = useState<CandidateInfo | null>(null);
   const [desiredSub, setDesiredSub] = useState("st-job");
@@ -812,6 +817,36 @@ export default function InterviewForm({
     }
   };
 
+  // T-152: 「この面談の面談ログ」専用アップロード。interviewId 付きで送り、
+  // どの面談のログかを記録する（解析はこの紐付きログを最優先で使う）。
+  const handleUploadInterviewLog = async (file: File) => {
+    if (!interviewId) return;
+    if (!file.name.toLowerCase().endsWith(".txt")) {
+      toast.error("面談ログは .txt ファイルのみアップロードできます");
+      return;
+    }
+    setLogUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("category", "MEETING");
+      fd.append("interviewId", interviewId);
+      const res = await fetch(`/api/candidates/${candidateId}/files/upload`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "アップロードに失敗しました");
+      }
+      const data = await res.json();
+      const att = data.file;
+      if (att) setAttachments((prev) => [att, ...prev]); // hasInterviewLog が即座に更新され解析ボタンが活性化する
+      toast.success(`${file.name} をこの面談のログとして記録しました`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setLogUploading(false);
+    }
+  };
+
   const handleDeleteAttachment = async (attachmentId: string) => {
     if (!confirm("この添付ファイルを削除しますか？")) return;
     try {
@@ -1092,6 +1127,13 @@ export default function InterviewForm({
   // 判定条件は analyze-with-intake/route.ts の isTxt（MIME と拡張子の OR）と揃えること。
   const hasInterviewLog = attachments.some(
     (a) => a.mimeType.startsWith("text/") || a.fileName.toLowerCase().endsWith(".txt"),
+  );
+  // T-152: この面談に紐づくログ（専用アップロード欄経由）。attachments は createdAt desc なので先頭が最新。
+  const linkedLog = attachments.find(
+    (a) =>
+      a.interviewId === interviewId &&
+      !!interviewId &&
+      (a.mimeType.startsWith("text/") || a.fileName.toLowerCase().endsWith(".txt")),
   );
   const d = detail;
   const r = rating;
@@ -1853,6 +1895,47 @@ export default function InterviewForm({
                       {hasPdf ? "（履歴書PDFだけでは解析できません）" : ""}
                     </p>
                   )}
+
+                  {/* T-152: この面談専用のログアップロード欄。ここから上げたログには interviewId が記録され、
+                      解析はこのログを最優先で使う（無ければ従来どおり最新txtへフォールバック）。 */}
+                  <div
+                    className="rounded-lg p-2.5 mb-2"
+                    style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg2)" }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", marginBottom: 4 }}>
+                      この面談の面談ログ（.txt）
+                    </div>
+                    {!interviewId ? (
+                      <p style={{ fontSize: 11, color: "var(--im-fg3)", margin: 0 }}>
+                        面談を保存するとログを添付できます
+                      </p>
+                    ) : linkedLog ? (
+                      <div className="flex items-center gap-1.5" style={{ fontSize: 12, color: "var(--im-fg)" }}>
+                        <span>📄</span>
+                        <span className="flex-1 min-w-0 truncate">{linkedLog.fileName}</span>
+                        <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>
+                          {new Date(linkedLog.createdAt).toLocaleString("ja-JP", {
+                            timeZone: "Asia/Tokyo",
+                            year: "numeric", month: "2-digit", day: "2-digit",
+                            hour: "2-digit", minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={logInputRef} type="file" className="hidden" accept=".txt"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadInterviewLog(f); e.target.value = ""; }}
+                        />
+                        <BtnMini onClick={() => logInputRef.current?.click()} disabled={logUploading}>
+                          {logUploading ? "アップロード中..." : "📎 ログをアップロード"}
+                        </BtnMini>
+                        <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>
+                          ここに面談ログをアップロードすると、この面談のログとして記録されます
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
                   {/* T-151: タスク候補の確認カード。解析ボタンの直下に出す。
                       破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。 */}
