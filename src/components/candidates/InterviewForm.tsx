@@ -13,6 +13,12 @@ import {
 } from "@/constants/resign-reason-hierarchy";
 import { SUPPORT_STATUS_LABEL } from "@/lib/support-status-constants";
 import { checkInputMissing, buildMissingSet } from "@/lib/interview-input-missing";
+// T-151: タスク候補の確認カード（AIアドバイザー経路と共通）。
+import SuggestedTaskCard, {
+  suggestedTaskKey,
+  formatDueDateWithYear,
+  type SuggestedTask,
+} from "@/components/common/SuggestedTaskCard";
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 // 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025) / 大野 望(1000004)
@@ -464,6 +470,14 @@ export default function InterviewForm({
   const [workHistories, setWorkHistories] = useState<WorkHistoryRecord[]>([]);
   const [intakeAnalyzing, setIntakeAnalyzing] = useState(false);
 
+  // T-151: 面談ログ解析から検出したタスク候補の確認カード。
+  // 候補・破棄時刻は interview_records に保存されるため、再読込・タブ切替でも復元される。
+  const [suggestedTasks, setSuggestedTasks] = useState<SuggestedTask[]>([]);
+  const [suggestedTasksDismissedAt, setSuggestedTasksDismissedAt] = useState<string | null>(null);
+  const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
+  const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
+  const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
+
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
     if (!interviewId) return;
@@ -504,6 +518,9 @@ export default function InterviewForm({
       setDetailState(loadedDetail);
       setRatingState(rec.rating || {});
       setAutosaveToken(rec.autosaveToken || null);
+      // T-151: 保存済みのタスク候補・破棄時刻を復元する（再読込・タブ切替でカードが消えないように）。
+      setSuggestedTasks(Array.isArray(rec.suggestedTasks) ? rec.suggestedTasks : []);
+      setSuggestedTasksDismissedAt(rec.suggestedTasksDismissedAt || null);
       lastResultFlagRef.current = rec.resultFlag || "";
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
       // T-067: 添付は CandidateFile(MEETING) から別 fetch（fetchMeetingFiles）で取得
@@ -947,7 +964,18 @@ export default function InterviewForm({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "解析に失敗しました");
       }
-      const { detailUpdates, interviewMemo: memo, workHistories: newWH, missingItems } = await res.json();
+      const {
+        detailUpdates,
+        interviewMemo: memo,
+        workHistories: newWH,
+        missingItems,
+        suggestedTasks: detectedTasks,
+      } = await res.json();
+      // T-151: 検出されたタスク候補。0件でも解析自体は成功なので何も出さない。
+      if (Array.isArray(detectedTasks)) {
+        setSuggestedTasks(detectedTasks);
+        if (detectedTasks.length > 0) setSuggestedTasksDismissedAt(null);
+      }
       if (detailUpdates && typeof detailUpdates === "object") {
         setDetailState((prev) => ({ ...prev, ...detailUpdates }));
       }
@@ -978,6 +1006,42 @@ export default function InterviewForm({
       toast.error(e instanceof Error ? e.message : "解析に失敗しました");
     } finally {
       setIntakeAnalyzing(false);
+    }
+  };
+
+  /* ---- T-151: タスク候補カードの「タスクを作成」/「今回は不要」 ---- */
+  const handleSuggestedTask = async (task: SuggestedTask, action: "create" | "dismiss") => {
+    if (!interviewId) return;
+    const key = suggestedTaskKey(interviewId, task.kind);
+    if (taskCardBusy[key]) return;
+    setTaskCardBusy((p) => ({ ...p, [key]: true }));
+    setTaskCardError((p) => ({ ...p, [key]: "" }));
+    try {
+      const res = await fetch(`/api/interviews/${interviewId}/suggested-tasks`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          action === "create"
+            ? { action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }
+            : { action },
+        ),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
+      if (action === "create") {
+        toast.success(
+          data.created
+            ? "タスクを作成しました"
+            : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
+        );
+      }
+      // 破棄・起票どちらもサーバー側で dismissedAt が入るためカードが消える。
+      setSuggestedTasksDismissedAt(new Date().toISOString());
+    } catch (e) {
+      // 失敗時はカードを残す（起票機会を失わせない）。
+      setTaskCardError((p) => ({ ...p, [key]: e instanceof Error ? e.message : "処理に失敗しました" }));
+    } finally {
+      setTaskCardBusy((p) => ({ ...p, [key]: false }));
     }
   };
 
@@ -1386,6 +1450,10 @@ export default function InterviewForm({
                 {tab.id === "attachments" && attachments.length > 0 && (
                   <span className="ml-1 rounded-full px-1.5" style={{ fontSize: 10, background: "var(--im-bg2)", color: "var(--im-fg2)" }}>{attachments.length}</span>
                 )}
+                {/* T-151: 未処理のタスク候補があることを他タブからも気づけるようにする */}
+                {tab.id === "attachments" && !suggestedTasksDismissedAt && suggestedTasks.length > 0 && (
+                  <span className="ml-1" style={{ fontSize: 11 }} title="タスク候補があります">📌</span>
+                )}
               </button>
             ))}
           </div>
@@ -1770,6 +1838,22 @@ export default function InterviewForm({
                     title="添付ファイル一覧"
                     right={attachments.length > 0 ? <BtnMini variant="ai" onClick={handleIntakeAnalyze} disabled={intakeAnalyzing}>{intakeAnalyzing ? "解析中..." : "✨ ログを解析して各カラムへ自動入力"}</BtnMini> : undefined}
                   />
+
+                  {/* T-151: タスク候補の確認カード。解析ボタンの直下に出す。
+                      破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。 */}
+                  {!suggestedTasksDismissedAt && suggestedTasks.length > 0 && (
+                    <SuggestedTaskCard
+                      ownerId={interviewId || ""}
+                      tasks={suggestedTasks}
+                      candidateName={candidate?.name || ""}
+                      busy={taskCardBusy}
+                      error={taskCardError}
+                      dueEdits={taskDueEdits}
+                      onDueChange={(key, value) => setTaskDueEdits((p) => ({ ...p, [key]: value }))}
+                      onCreate={(task) => handleSuggestedTask(task, "create")}
+                      onDismiss={(task) => handleSuggestedTask(task, "dismiss")}
+                    />
+                  )}
                   <div className="rounded-lg p-2" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg3)" }}>
                     {attachments.map((att) => (
                       <div key={att.id} className="rounded-lg p-2.5 mb-1.5" style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg)" }}>
