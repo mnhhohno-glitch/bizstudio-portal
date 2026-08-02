@@ -154,6 +154,8 @@ model User {
   dailyReports             DailyReport[]             @relation("DailyReportAuthor")
   // T-085: 他人の日報に残したコメントの投稿者リレーション。
   dailyReportComments      DailyReportComment[]      @relation("DailyReportCommentAuthor")
+  // T-147: セキュアファイル送信（リレーション追加のみ・DBカラム変更なし）
+  secureTransfersSent      SecureTransfer[]          @relation("SecureTransfersSent")
 
   @@map("users")
 }
@@ -2701,4 +2703,66 @@ model CandidateActivityLog {
   @@index([candidateId, eventType])
   @@index([eventType, createdAt])
   @@map("candidate_activity_logs")
+}
+
+// ============================================================================
+// T-147: セキュアファイル送信（ZIPパスワード運用の置き換え）
+// ============================================================================
+// クライアント企業へ個人情報・契約書を送るための、パスワード付きダウンロードURL発行機能。
+// - ファイル実体は Supabase Storage の非公開バケット "secure-transfers"（Drive は使わない）
+// - パスワードは bcrypt ハッシュのみ保持（平文はDBに持たない・発行時に一度だけ画面表示）
+// - 既存 FileShareLink（求職者書類の生年月日共有）とは完全に別系統。あちらには手を触れない
+// - candidateId は第1弾では常に null（FKは張らない・将来の求職者詳細からの導線用の受け皿のみ）
+model SecureTransfer {
+  id             String    @id @default(cuid())
+  token          String    @unique // URLに載る推測不能トークン（encryption.ts generateToken・48B base64url）
+  senderId       String    @map("sender_id")
+  sender         User      @relation("SecureTransfersSent", fields: [senderId], references: [id])
+  recipientEmail String    @map("recipient_email") // 1レコード1宛先（配列化しない）
+  subject        String?
+  message        String?   @db.Text // メール本文への添え書き
+  passwordHash   String    @map("password_hash") // bcryptjs。平文は保存しない
+  expiresAt      DateTime  @map("expires_at") // インスタントで保持。判定は new Date() > expiresAt（TZ非依存）
+  revokedAt      DateTime? @map("revoked_at") // 送信者の手動無効化 or パスワード10回失敗の自動無効化
+  failedAttempts Int       @default(0) @map("failed_attempts") // パスワード照合失敗回数。10で自動無効化
+  candidateId    String?   @map("candidate_id") // 第1弾は常に null
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  files     SecureTransferFile[]
+  downloads SecureTransferDownload[]
+
+  @@index([senderId, createdAt])
+  @@index([expiresAt])
+  @@map("secure_transfers")
+}
+
+model SecureTransferFile {
+  id          String         @id @default(cuid())
+  transferId  String         @map("transfer_id")
+  transfer    SecureTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  fileName    String         @map("file_name") // 表示用の元ファイル名（日本語可）
+  fileSize    Int            @map("file_size")
+  storagePath String         @unique @map("storage_path") // Supabase: transfers/<uuid>.<ext>（元名はパスに入れない）
+  deletedAt   DateTime?      @map("deleted_at") // cleanup cron が実体を消した時刻。行は証跡として残す
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  downloads SecureTransferDownload[]
+
+  @@index([transferId])
+  @@map("secure_transfer_files")
+}
+
+model SecureTransferDownload {
+  id           String              @id @default(cuid())
+  transferId   String              @map("transfer_id")
+  transfer     SecureTransfer      @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  fileId       String?             @map("file_id") // null = 一括DL（第1弾UIは個別DLのみ）
+  file         SecureTransferFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  downloadedAt DateTime            @default(now()) @map("downloaded_at")
+  ipAddress    String?             @map("ip_address")
+  userAgent    String?             @map("user_agent") @db.Text
+
+  @@index([transferId, downloadedAt])
+  @@map("secure_transfer_downloads")
 }

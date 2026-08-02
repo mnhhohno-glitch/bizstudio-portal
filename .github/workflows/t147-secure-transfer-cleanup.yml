@@ -1,0 +1,72 @@
+# T-147: セキュアファイル送信の期限切れ・無効化済みファイル実体を毎日削除する。
+# - 毎日 JST 04:30（= UTC 19:30）に schedule で本番へ dry_run=false（実削除）で1回叩く。
+#   既存 cron（auto-expire JST 03:00 / due-reminder JST 07:00）と被らない時刻。
+# - workflow_dispatch で手動実行も可能（dry_run=true なら削除せず対象一覧だけ確認できる）。
+# - Storage のファイルのみ削除し、DBレコードは残す（証跡保持・deletedAt をセット）。
+# - 呼び先は本番サービス bizstudio-portal-production（新規 cron は本番に統一・T-150 と同方針）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（auto-expire / resubmit-stale / due-reminder と同一シークレット）。
+# - default branch (master) に置かないと schedule が動かない。
+
+name: T-147 secure transfer cleanup (daily 04:30 JST)
+
+on:
+  schedule:
+    # 毎日 JST 04:30 = UTC 19:30
+    - cron: "30 19 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら削除せず対象一覧のみ（疎通確認用）。定時実行（schedule）は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine dry_run flag
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 定時実行は必ず実削除
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry=${{ github.event.inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call secure-transfer-cleanup API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/secure-transfer-cleanup?dry_run=${{ steps.flag.outputs.dry }}"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }} / dry_run=${{ steps.flag.outputs.dry }}"
+
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 180 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::secure-transfer-cleanup returned HTTP $HTTP"
+            exit 1
+          fi
+
+          if command -v jq >/dev/null 2>&1; then
+            echo "=== Summary ==="
+            jq -r '"mode=\(.mode) targetFiles=\(.targetFiles) targetTransfers=\(.targetTransfers) deleted=\(.deleted) failed=\(.failed)"' response.json || true
+          fi

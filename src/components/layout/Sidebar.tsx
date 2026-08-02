@@ -176,6 +176,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "/tasks", label: "タスク管理", icon: "✅" },
     { href: "/attendance", label: "勤怠管理", icon: "🕐" },
     { href: "/announcements", label: "お知らせ", icon: "📢" },
+    { href: "/transfers", label: "ファイル送信", icon: "🔐" },
     { href: "/documents", label: "資料一覧", icon: "📄" },
     { href: "/manuals", label: "マニュアル", icon: "📖" },
     { href: "/rpa-error/chat", label: "RPAエラー管理", icon: "🤖" },
