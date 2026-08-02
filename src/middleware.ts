@@ -5,13 +5,16 @@ export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // 求職者用ページ・APIは認証不要（最優先）
+  // /transfer/ は T-147 セキュアファイル送信の社外受信者用ページ（/transfers は社内用・対象外）
   if (
     pathname.startsWith("/g/") ||
     pathname.startsWith("/api/guides/") ||
     pathname.startsWith("/j/") ||
     pathname.startsWith("/api/jimu/") ||
     pathname.startsWith("/share/") ||
-    pathname.startsWith("/api/share/")
+    pathname.startsWith("/api/share/") ||
+    pathname.startsWith("/transfer/") ||
+    pathname.startsWith("/api/transfer/")
   ) {
     return NextResponse.next();
   }

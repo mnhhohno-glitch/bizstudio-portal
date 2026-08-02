@@ -3,7 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { compare } from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const SHARE_SECRET = process.env.PORTAL_SSO_SECRET || "bizstudio-sso-shared-secret-key";
+// T-147 ついで対応: フォールバック文字列を削除（既知文字列でJWTを偽造できてしまうため）。
+// PORTAL_SSO_SECRET 未設定は fail-closed（本番・staging とも設定済みを確認済み）。
+function getShareSecret(): string {
+  const secret = process.env.PORTAL_SSO_SECRET;
+  if (!secret) throw new Error("PORTAL_SSO_SECRET is not set");
+  return secret;
+}
 
 export async function POST(
   req: NextRequest,
@@ -36,7 +42,7 @@ export async function POST(
   // Issue a short-lived JWT for download access
   const accessToken = jwt.sign(
     { shareToken: token, fileIds: link.fileIds },
-    SHARE_SECRET,
+    getShareSecret(),
     { expiresIn: "2h" }
   );
 
