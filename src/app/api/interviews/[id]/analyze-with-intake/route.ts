@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
@@ -7,6 +8,8 @@ import {
   mapWorkHistoryArray,
   workHistoryToDetailSync,
 } from "@/lib/interview-analyzer-mapping";
+import { detectSuggestedTasksFromInterviewLog } from "@/lib/interview/detect-suggested-tasks";
+import type { SuggestedTask } from "@/lib/advisor/suggested-tasks";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -44,6 +47,7 @@ export async function POST(
         candidate: { select: { id: true, candidateNumber: true } },
       },
     });
+    // T-151: 破棄済みの面談では候補を出し直さない（CA が「今回は不要」と判断済みのため）。
     if (!record) {
       return NextResponse.json({ error: "面談レコードが見つかりません" }, { status: 404 });
     }
@@ -188,12 +192,42 @@ export async function POST(
 
     console.log(`[analyze-with-intake] Success: ${Object.keys(merged).length} detail fields, ${workHistories.length} work histories`);
 
+    // ---- T-151: タスク候補の検出（後段・fail-open） ----
+    // ★ここで例外を投げてはいけない。検出が失敗しても解析結果（各カラムへの自動入力）は必ず返す。
+    // ★入力は面談ログ(txt)のみ。履歴書PDFを混ぜると書類内の「送付」等で誤検出するため渡さない。
+    let suggestedTasks: SuggestedTask[] = [];
+    try {
+      if (!interviewLog.trim()) {
+        console.log("[analyze-with-intake] T-151: txt が無いため候補検出をスキップ");
+      } else if (record.suggestedTasksDismissedAt) {
+        console.log("[analyze-with-intake] T-151: 破棄済みのため候補検出をスキップ");
+      } else {
+        const detected = await detectSuggestedTasksFromInterviewLog({
+          interviewLog,
+          candidateId: record.candidate.id,
+        });
+        suggestedTasks = detected.suggestedTasks;
+
+        // 候補は面談レコードに保存する（ページ再読込・タブ切替でカードを復元するため）。
+        // 0件のときは null に戻す（空配列を残さない＝T-150 の advisor 側と同じ扱い）。
+        await prisma.interviewRecord.update({
+          where: { id: interviewId },
+          data: { suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : Prisma.DbNull },
+        });
+      }
+    } catch (e) {
+      // 保存に失敗しても解析本体は成功扱いにする。
+      console.error("[analyze-with-intake] T-151 候補検出に失敗（解析は成功）:", e);
+      suggestedTasks = [];
+    }
+
     return NextResponse.json({
       success: true,
       detailUpdates: merged,
       interviewMemo,
       workHistories,
       missingItems,
+      suggestedTasks,
     });
   } catch (e) {
     console.error("[analyze-with-intake] Unexpected error:", e);
