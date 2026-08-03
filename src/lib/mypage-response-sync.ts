@@ -221,23 +221,21 @@ export async function createOrUpdateResponseTask(
   }
 
   // 通知はトランザクション外（外部API・失敗してもタスクは残す）。
-  if (result.action === "created") {
+  // 集約後は「作成/更新した」と「通知した/しなかった」が一致しないため、両方をログに残す
+  // （通知は送信成功時に外形ログが出ないため、運用時の追跡はこの行が頼りになる）。
+  const notify = result.action === "created" || result.notify;
+  console.info(
+    `[createOrUpdateResponseTask] ${result.action} task=${result.taskId} candidate=${candidate.name} notify=${notify}`
+  );
+
+  if (notify) {
     await notifyMypageResponse(
       result.taskId,
       result.title,
       candidate.name,
       employee,
       user,
-      "created"
-    );
-  } else if (result.notify) {
-    await notifyMypageResponse(
-      result.taskId,
-      result.title,
-      candidate.name,
-      employee,
-      user,
-      "updated"
+      result.action === "created" ? "created" : "updated"
     );
   }
 }
