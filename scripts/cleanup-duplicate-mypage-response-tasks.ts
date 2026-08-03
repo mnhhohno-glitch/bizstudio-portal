@@ -17,9 +17,18 @@
  *   - rollback CSV を verify/ に出力（対象タスクIDと変更前 status）。
  *   - idempotent: 2回目以降は対象0件で正常終了する。
  *
+ * ★求人名の解決には KYUUJIN_PDF_TOOL_URL が必要。未設定だとラベルが1件も引けず、本文更新は
+ *   全件「温存」になる（既存本文を「求人ID: 12345」で潰さないためのガード。データは壊れない）。
+ *   本番の値は Railway の bizstudio-portal サービスの環境変数を参照。
+ *
+ * --refresh-all: 重複の有無に関わらず、未着手の【マイページ回答】タスク全件の本文を全量へ更新する。
+ *   重複掃除を先に済ませた後（＝2回目以降は重複0件で keep 対象も0件になる）に、既存タスクの本文を
+ *   新ロジックの全量表示へ揃えるために使う。
+ *
  * Usage:
  *   npx tsx scripts/cleanup-duplicate-mypage-response-tasks.ts            # dry-run
  *   npx tsx scripts/cleanup-duplicate-mypage-response-tasks.ts --execute  # 実行
+ *   npx tsx scripts/cleanup-duplicate-mypage-response-tasks.ts --refresh-all --execute
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -33,6 +42,8 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 const EXECUTE = process.argv.includes("--execute");
+// 重複が無いタスクも含め、未着手の【マイページ回答】タスク全件の本文を全量へ更新する。
+const REFRESH_ALL = process.argv.includes("--refresh-all");
 const TITLE_PREFIX = "【マイページ回答】";
 
 type KyuujinJobLite = { company: string; title: string };
@@ -161,15 +172,20 @@ async function main() {
   }[] = [];
   const keepTargets: { taskId: string; candidateId: string; candidateNumber: string; candidateName: string }[] = [];
 
-  for (const [candidateId, list] of dupCandidates) {
-    // findMany は createdAt desc なので先頭が最新。
-    const [keep, ...rest] = list;
+  // --refresh-all のときは重複していない求職者も本文更新の対象に含める。
+  const refreshSource = REFRESH_ALL ? [...byCandidate.entries()] : dupCandidates;
+  for (const [candidateId, list] of refreshSource) {
+    const keep = list[0]; // findMany は createdAt desc なので先頭が最新
     keepTargets.push({
       taskId: keep.id,
       candidateId,
       candidateNumber: keep.candidate?.candidateNumber ?? "",
       candidateName: keep.candidate?.name ?? "",
     });
+  }
+
+  for (const [candidateId, list] of dupCandidates) {
+    const [, ...rest] = list;
     for (const r of rest) {
       closeTargets.push({
         taskId: r.id,
@@ -186,7 +202,14 @@ async function main() {
   console.log("=== 結果 ===");
   console.log(`  重複している求職者          : ${dupCandidates.length} 名`);
   console.log(`  COMPLETED 化する重複タスク  : ${closeTargets.length} 件`);
-  console.log(`  残して本文を全量更新する枚数: ${keepTargets.length} 件`);
+  console.log(
+    `  本文を全量更新する枚数      : ${keepTargets.length} 件${REFRESH_ALL ? "（--refresh-all: 重複なしも含む）" : "（重複を解消して残す1枚）"}`
+  );
+  if (!process.env.KYUUJIN_PDF_TOOL_URL) {
+    console.warn(
+      "  ⚠ KYUUJIN_PDF_TOOL_URL 未設定: 求人名を解決できないため本文更新は全件「温存」になります"
+    );
+  }
   if (orphan > 0) console.log(`  candidateId なし（対象外）  : ${orphan} 件`);
 
   // 重複枚数の分布
