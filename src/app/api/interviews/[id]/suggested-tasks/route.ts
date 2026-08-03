@@ -1,8 +1,12 @@
 // T-151 Phase 2-6: 面談ログ解析が検出したタスク候補の「起票」「破棄」を受けるエンドポイント。
 //
 // PATCH body:
-//   { action: "dismiss" }                                        … 候補を破棄（カードを消す）
-//   { action: "create", kind, dueDate: "YYYY-MM-DD" }            … タスクを upsert して破棄も記録
+//   { action: "dismiss" }                                        … 候補をまとめて破棄（カードを消す）
+//   { action: "create", kind, dueDate: "YYYY-MM-DD" }            … タスクを upsert する
+//
+// ★create では破棄フラグを立てない。候補が複数あるとき、1件起票しただけで
+//   suggestedTasksDismissedAt が入るとカード全体が消え、残りの候補を起票できなくなるため。
+//   カードを閉じるのは「全候補が処理済みになった」と判断した画面側が dismiss を送ったときだけ。
 //
 // 起票ロジック本体は src/lib/ai-task-create.ts（AIアドバイザー経路と共通）。
 // このファイルは「面談レコードの存在確認」と「破棄フラグの記録」だけを担う。
@@ -64,14 +68,6 @@ export async function PATCH(
     actor: { id: actor.id, name: actor.name },
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
-
-  // カードを消すため、この面談の候補も破棄済みにする。
-  if (!record.suggestedTasksDismissedAt) {
-    await prisma.interviewRecord.update({
-      where: { id: interviewId },
-      data: { suggestedTasksDismissedAt: new Date() },
-    });
-  }
 
   return NextResponse.json({
     ok: true,

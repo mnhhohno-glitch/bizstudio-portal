@@ -41,10 +41,9 @@ export function buildTransferNoticeBody(params: {
   lines.push("");
   lines.push("■パスワード");
   if (params.passwordInEmail) {
-    // パスワードの行は前後に空行を置き、コピーしやすくする（確定仕様）
-    lines.push("");
+    // 見出しの直後に置き、後ろだけ空行を空ける（選択してコピーしやすくする）。
+    // 後ろの空行は if/else の後の push("") が兼ねる。
     lines.push(params.password);
-    lines.push("");
   } else {
     lines.push("パスワードは送信者より別途お伝えします。");
   }
