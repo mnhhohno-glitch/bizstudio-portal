@@ -1097,7 +1097,9 @@ export default function InterviewForm({
 
     // 全候補が処理済みになったらカードを閉じる（サーバーにも破棄を記録）。
     const closeIfAllDone = async (doneMap: Record<string, SuggestedTaskDone>) => {
-      const allDone = suggestedTasks.every((t) => doneMap[suggestedTaskKey(interviewId, t.kind)]);
+      const allDone =
+        suggestedTasks.length > 0 &&
+        suggestedTasks.every((t) => doneMap[suggestedTaskKey(interviewId, t.kind)]);
       if (!allDone) return;
       await fetch(`/api/interviews/${interviewId}/suggested-tasks`, {
         method: "PATCH",

@@ -23,7 +23,9 @@ import {
 // 箱B（deployed feedback-status ハンドラ）とのパリティ:
 //   - EXCLUDED → excludedBy=actor / excludedAt=now。それ以外へ変更 → excludedBy/At を無条件クリア（箱Bと同一）
 //   - portal応募意向の同期はステータス変更時に即時発火（INTERESTED→INTERESTED / APPLY→WANT_TO_APPLY /
-//     UNANSWERED→取り消し削除。PENDING/EXCLUDED/IN_SELECTION/SELECTION_ENDED は同期しない）＝箱Bと同一
+//     UNANSWERED・PENDING・EXCLUDED→取り消し削除。IN_SELECTION/SELECTION_ENDED は同期しない）
+//     ※PENDING/EXCLUDED の削除は箱Bからの意図的な差分（保留・対象外にした求人が
+//       「気になる」として回答タスク／フラグに残り続ける不整合を解消するため）
 //   - restore（EXCLUDED→UNANSWERED）は本APIの status=UNANSWERED で対応（箱B restore と同等・CAのみ）
 // actor 制約: user は EXCLUDED を指定不可・READONLY(IN_SELECTION/SELECTION_ENDED)も指定不可。
 //   EXCLUDED からの復帰も CA のみ（箱B restore が CA専用のため）。
@@ -135,18 +137,21 @@ export async function PATCH(request: Request) {
     try {
       const result = await applyJobResponseIntent(candidate.id, row.kyuujinJobId, intent, now);
       synced = result;
-      if (intent !== null) {
-        // 回答（気になる/応募したい）はタスク自動生成も webhook と同じく発火
-        const candWithCa = await prisma.candidate.findUnique({
-          where: { id: candidate.id },
-          select: CANDIDATE_CA_SELECT,
-        });
-        if (candWithCa) {
-          try {
-            await createOrUpdateResponseTask(candWithCa);
-          } catch (e) {
-            console.error("[response-status] タスク自動生成に失敗:", e);
-          }
+      // 回答（気になる/応募したい）→ タスク生成/集約。
+      // 取り消し（UNANSWERED/PENDING/EXCLUDED → intent=null）→ 既存の未着手タスクがある場合のみ
+      //   本文を全量で追従させる（取り消しを契機に新しいタスクは作らない＝refreshOnly）。
+      const candWithCa = await prisma.candidate.findUnique({
+        where: { id: candidate.id },
+        select: CANDIDATE_CA_SELECT,
+      });
+      if (candWithCa) {
+        try {
+          await createOrUpdateResponseTask(
+            candWithCa,
+            intent === null ? { refreshOnly: true } : undefined
+          );
+        } catch (e) {
+          console.error("[response-status] タスク自動生成に失敗:", e);
         }
       }
     } catch (e) {

@@ -37,13 +37,11 @@ export async function notifyCandidateQuestion(
   }
 
   // T-133 FU-11: 対象求人（求人紐付き質問のみ）。求職者ブロックの直後に1ブロック挿入。
-  const targetJobLines = params.jobRef
-    ? [
-        "",
-        "■ 対象求人",
-        `${params.jobRef}${params.jobTitle ? `／${params.jobTitle}` : ""}${params.jobCompany ? `／${params.jobCompany}` : ""}`,
-      ]
-    : [];
+  // 求人No が無くても会社名・求人タイトルが来ていれば出す（タスク件名・メモ側と同一の判定）。
+  const targetJobLabel = [params.jobRef, params.jobTitle, params.jobCompany]
+    .filter(Boolean)
+    .join("／");
+  const targetJobLines = targetJobLabel ? ["", "■ 対象求人", targetJobLabel] : [];
 
   const baseLines = [
     "❓ 求職者から担当CAへの質問が届きました",
