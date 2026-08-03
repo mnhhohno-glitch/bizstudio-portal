@@ -41,6 +41,9 @@ export function suggestedTaskKey(ownerId: string, kind: string): string {
   return `${ownerId}:${kind}`;
 }
 
+/** 候補1件ごとの処理済み状態。親が候補キー単位で持つ。 */
+export type SuggestedTaskDone = "created" | "dismissed";
+
 type Props = {
   /** 候補の持ち主（advisor なら messageId、面談なら interviewId）。 */
   ownerId: string;
@@ -49,6 +52,12 @@ type Props = {
   busy: Record<string, boolean>;
   error: Record<string, string>;
   dueEdits: Record<string, string>;
+  /**
+   * 処理済みの候補（候補キー → 作成済み / 不要）。
+   * 複数候補があるとき、1件処理しても残りは操作できる必要があるため、
+   * カード全体ではなく候補ごとに畳む（全件処理済みで閉じるのは親の責務）。
+   */
+  done: Record<string, SuggestedTaskDone>;
   onDueChange: (key: string, value: string) => void;
   onCreate: (task: SuggestedTask) => void;
   onDismiss: (task: SuggestedTask) => void;
@@ -61,6 +70,7 @@ export default function SuggestedTaskCard({
   busy,
   error,
   dueEdits,
+  done,
   onDueChange,
   onCreate,
   onDismiss,
@@ -74,6 +84,26 @@ export default function SuggestedTaskCard({
         const isBusy = !!busy[key];
         const err = error[key];
         const due = dueEdits[key] ?? task.dueDate;
+        const doneState = done[key];
+
+        // 処理済みの候補は結果だけを残す（残りの候補は操作できるまま）。
+        if (doneState) {
+          return (
+            <div
+              key={key}
+              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[13px] text-gray-500"
+            >
+              <span className="font-medium">
+                {doneState === "created" ? "✓ 作成済み" : "— 今回は不要"}
+              </span>
+              <span className="ml-2">タスク候補: {SUGGESTED_TASK_LABEL[task.kind]}</span>
+              {doneState === "created" && (
+                <span className="ml-2">期日 {formatDueDateWithYear(due)}</span>
+              )}
+            </div>
+          );
+        }
+
         return (
           <div
             key={key}

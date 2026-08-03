@@ -18,7 +18,12 @@ import SuggestedTaskCard, {
   suggestedTaskKey,
   formatDueDateWithYear,
   type SuggestedTask,
+  type SuggestedTaskDone,
 } from "@/components/common/SuggestedTaskCard";
+
+// 専用欄アップロード成功の中央通知の表示時間。既存トースト（約3秒）より長め＝
+// 「解析ボタンを押す」という次の操作に気づける時間を確保する。
+const LOG_UPLOAD_NOTICE_MS = 5000;
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
 // 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025) / 大野 望(1000004)
@@ -463,6 +468,11 @@ export default function InterviewForm({
   // T-152: 「この面談の面談ログ」専用アップロード欄の input と通信中フラグ
   const logInputRef = useRef<HTMLInputElement>(null);
   const [logUploading, setLogUploading] = useState(false);
+  // 専用欄のドラッグ&ドロップ受け入れ表示
+  const [logDragActive, setLogDragActive] = useState(false);
+  // 専用欄アップロード成功の中央通知（解析ボタンの押し忘れ防止）
+  const [logUploadNotice, setLogUploadNotice] = useState<string | null>(null);
+  const logNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevIdRef = useRef<string | null>(null);
   const [candidate, setCandidate] = useState<CandidateInfo | null>(null);
   const [desiredSub, setDesiredSub] = useState("st-job");
@@ -482,6 +492,8 @@ export default function InterviewForm({
   const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
   const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
   const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
+  // 候補1件ごとの処理済み状態。候補が複数あるとき1件の操作で全体を閉じないために持つ。
+  const [taskCardDone, setTaskCardDone] = useState<Record<string, SuggestedTaskDone>>({});
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -526,6 +538,7 @@ export default function InterviewForm({
       // T-151: 保存済みのタスク候補・破棄時刻を復元する（再読込・タブ切替でカードが消えないように）。
       setSuggestedTasks(Array.isArray(rec.suggestedTasks) ? rec.suggestedTasks : []);
       setSuggestedTasksDismissedAt(rec.suggestedTasksDismissedAt || null);
+      setTaskCardDone({}); // 面談を切り替えたら候補ごとの処理済み表示もリセットする
       lastResultFlagRef.current = rec.resultFlag || "";
       setLastSavedAt(rec.lastSavedAt ? new Date(rec.lastSavedAt) : null);
       // T-067: 添付は CandidateFile(MEETING) から別 fetch（fetchMeetingFiles）で取得
@@ -821,8 +834,9 @@ export default function InterviewForm({
   // どの面談のログかを記録する（解析はこの紐付きログを最優先で使う）。
   const handleUploadInterviewLog = async (file: File) => {
     if (!interviewId) return;
+    // クリック選択・ドラッグ&ドロップのどちらもここを通す（同じAPI・同じパラメータ）。
     if (!file.name.toLowerCase().endsWith(".txt")) {
-      toast.error("面談ログは .txt ファイルのみアップロードできます");
+      toast.error("面談ログ（.txt）のみアップロードできます");
       return;
     }
     setLogUploading(true);
@@ -839,12 +853,37 @@ export default function InterviewForm({
       const data = await res.json();
       const att = data.file;
       if (att) setAttachments((prev) => [att, ...prev]); // hasInterviewLog が即座に更新され解析ボタンが活性化する
-      toast.success(`${file.name} をこの面談のログとして記録しました`);
+      // 画面下の小さいトーストだと解析ボタンの押し忘れが起きるため、中央に出す。
+      showLogUploadNotice(file.name);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "アップロードに失敗しました");
     } finally {
       setLogUploading(false);
     }
+  };
+
+  /** 専用欄アップロード成功の中央通知を出す（数秒で自動的に消える）。 */
+  const showLogUploadNotice = (fileName: string) => {
+    if (logNoticeTimerRef.current) clearTimeout(logNoticeTimerRef.current);
+    setLogUploadNotice(fileName);
+    logNoticeTimerRef.current = setTimeout(() => setLogUploadNotice(null), LOG_UPLOAD_NOTICE_MS);
+  };
+
+  // アンマウント後に setState しないようタイマーを片付ける。
+  useEffect(() => {
+    return () => {
+      if (logNoticeTimerRef.current) clearTimeout(logNoticeTimerRef.current);
+    };
+  }, []);
+
+  /** 専用欄へのドロップ。1件目だけを対象にし、判定・送信はクリック選択と同じ経路に流す。 */
+  const handleDropInterviewLog = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setLogDragActive(false);
+    if (!interviewId || logUploading) return;
+    const file = Array.from(e.dataTransfer.files)[0];
+    if (file) handleUploadInterviewLog(file);
   };
 
   const handleDeleteAttachment = async (attachmentId: string) => {
@@ -1009,7 +1048,10 @@ export default function InterviewForm({
       // T-151: 検出されたタスク候補。0件でも解析自体は成功なので何も出さない。
       if (Array.isArray(detectedTasks)) {
         setSuggestedTasks(detectedTasks);
-        if (detectedTasks.length > 0) setSuggestedTasksDismissedAt(null);
+        if (detectedTasks.length > 0) {
+          setSuggestedTasksDismissedAt(null);
+          setTaskCardDone({}); // 再解析で出し直した候補を「処理済み」のまま表示しない
+        }
       }
       if (detailUpdates && typeof detailUpdates === "object") {
         setDetailState((prev) => ({ ...prev, ...detailUpdates }));
@@ -1044,36 +1086,56 @@ export default function InterviewForm({
     }
   };
 
-  /* ---- T-151: タスク候補カードの「タスクを作成」/「今回は不要」 ---- */
+  /* ---- T-151: タスク候補カードの「タスクを作成」/「今回は不要」 ----
+   * 候補は複数出ることがあるため、1件の操作では他の候補を消さない。
+   * 全候補が処理済み（作成済み or 不要）になって初めて dismiss を送ってカードを閉じる。
+   * 個別の「今回は不要」では破棄フラグを立てない（＝まとめ破棄のときだけ立てる現仕様を維持）。 */
   const handleSuggestedTask = async (task: SuggestedTask, action: "create" | "dismiss") => {
     if (!interviewId) return;
     const key = suggestedTaskKey(interviewId, task.kind);
-    if (taskCardBusy[key]) return;
+    if (taskCardBusy[key] || taskCardDone[key]) return;
+
+    // 全候補が処理済みになったらカードを閉じる（サーバーにも破棄を記録）。
+    const closeIfAllDone = async (doneMap: Record<string, SuggestedTaskDone>) => {
+      const allDone = suggestedTasks.every((t) => doneMap[suggestedTaskKey(interviewId, t.kind)]);
+      if (!allDone) return;
+      await fetch(`/api/interviews/${interviewId}/suggested-tasks`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss" }),
+      }).catch(() => {});
+      setSuggestedTasksDismissedAt(new Date().toISOString());
+    };
+
+    // 「今回は不要」は通信不要（この候補を畳むだけ）。
+    if (action === "dismiss") {
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "dismissed" };
+      setTaskCardDone(next);
+      setTaskCardError((p) => ({ ...p, [key]: "" }));
+      await closeIfAllDone(next);
+      return;
+    }
+
     setTaskCardBusy((p) => ({ ...p, [key]: true }));
     setTaskCardError((p) => ({ ...p, [key]: "" }));
     try {
       const res = await fetch(`/api/interviews/${interviewId}/suggested-tasks`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          action === "create"
-            ? { action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }
-            : { action },
-        ),
+        body: JSON.stringify({ action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
-      if (action === "create") {
-        toast.success(
-          data.created
-            ? "タスクを作成しました"
-            : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
-        );
-      }
-      // 破棄・起票どちらもサーバー側で dismissedAt が入るためカードが消える。
-      setSuggestedTasksDismissedAt(new Date().toISOString());
+      toast.success(
+        data.created
+          ? "タスクを作成しました"
+          : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
+      );
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "created" };
+      setTaskCardDone(next);
+      await closeIfAllDone(next);
     } catch (e) {
-      // 失敗時はカードを残す（起票機会を失わせない）。
+      // 失敗時はこの候補を操作可能なまま残す（起票機会を失わせない）。
       setTaskCardError((p) => ({ ...p, [key]: e instanceof Error ? e.message : "処理に失敗しました" }));
     } finally {
       setTaskCardBusy((p) => ({ ...p, [key]: false }));
@@ -1206,6 +1268,24 @@ export default function InterviewForm({
   /* ================================================================ */
   return (
     <div style={{ ...CSS_VARS, fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif', fontSize: 13, lineHeight: 1.5, color: "var(--im-fg)", background: "var(--im-bg2)" }}>
+
+      {/* 専用欄アップロード成功の中央通知。次にやること（解析）を同じ通知内に出す。
+          pointer-events-none＝表示中も背後を操作できる。画面を覆うオーバーレイは置かない。 */}
+      {logUploadNotice && (
+        <div
+          className="fixed left-1/2 top-1/2 z-[100] -translate-x-1/2 -translate-y-1/2 rounded-xl px-6 py-4 text-center shadow-2xl"
+          style={{ background: "rgba(17,24,39,0.94)", color: "#fff", pointerEvents: "none", maxWidth: "90vw" }}
+          role="status"
+          aria-live="polite"
+        >
+          <div style={{ fontSize: 14 }}>
+            {logUploadNotice} をこの面談のログとして記録しました
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginTop: 8 }}>
+            続けて「✨ ログを解析して各カラムへ自動入力」を押してください
+          </div>
+        </div>
+      )}
 
       {/* ============ HEADER ============ */}
       <div className="flex items-center justify-between px-5 py-2.5" style={{ background: "var(--im-bg)", borderBottom: "0.5px solid var(--im-bdr)" }}>
@@ -1900,7 +1980,26 @@ export default function InterviewForm({
                       解析はこのログを最優先で使う（無ければ従来どおり最新txtへフォールバック）。 */}
                   <div
                     className="rounded-lg p-2.5 mb-2"
-                    style={{ border: "0.5px solid var(--im-bdr)", background: "var(--im-bg2)" }}
+                    style={{
+                      border: logDragActive ? "1px dashed #2563EB" : "0.5px solid var(--im-bdr)",
+                      background: logDragActive ? "#EFF6FF" : "var(--im-bg2)",
+                    }}
+                    onDragOver={(e) => {
+                      // アップロード可能なときだけ受け入れ表示にする（差し替え済み・未保存では反応させない）。
+                      if (!interviewId || linkedLog) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setLogDragActive(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setLogDragActive(false);
+                    }}
+                    onDrop={(e) => {
+                      if (!interviewId || linkedLog) return;
+                      handleDropInterviewLog(e);
+                    }}
                   >
                     <div style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", marginBottom: 4 }}>
                       この面談の面談ログ（.txt）
@@ -1931,7 +2030,9 @@ export default function InterviewForm({
                           {logUploading ? "アップロード中..." : "📎 ログをアップロード"}
                         </BtnMini>
                         <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>
-                          ここに面談ログをアップロードすると、この面談のログとして記録されます
+                          {logDragActive
+                            ? "ここにドロップするとこの面談のログとして記録されます"
+                            : "ドラッグ＆ドロップ、またはボタンから選択すると、この面談のログとして記録されます"}
                         </span>
                       </div>
                     )}
@@ -1947,6 +2048,7 @@ export default function InterviewForm({
                       busy={taskCardBusy}
                       error={taskCardError}
                       dueEdits={taskDueEdits}
+                      done={taskCardDone}
                       onDueChange={(key, value) => setTaskDueEdits((p) => ({ ...p, [key]: value }))}
                       onCreate={(task) => handleSuggestedTask(task, "create")}
                       onDismiss={(task) => handleSuggestedTask(task, "dismiss")}

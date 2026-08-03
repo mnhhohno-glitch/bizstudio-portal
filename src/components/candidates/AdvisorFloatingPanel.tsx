@@ -9,6 +9,7 @@ import SuggestedTaskCard, {
   suggestedTaskKey,
   formatDueDateWithYear,
   type SuggestedTask,
+  type SuggestedTaskDone,
 } from "@/components/common/SuggestedTaskCard";
 
 type Message = {
@@ -115,9 +116,13 @@ export default function AdvisorFloatingPanel({
   const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
   const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
   const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
+  // 候補1件ごとの処理済み状態。候補が複数あるとき1件の操作で全体を閉じないために持つ。
+  const [taskCardDone, setTaskCardDone] = useState<Record<string, SuggestedTaskDone>>({});
 
-  // T-150: カードの「タスクを作成」/「今回は不要」。成功後は fetchMessages で取り直す
-  // （DB 側で suggestedTasksDismissedAt がセットされるためカードが消える）。
+  // T-150: カードの「タスクを作成」/「今回は不要」。
+  // 候補は複数出ることがあるため、1件の操作では他の候補を消さない。
+  // 全候補が処理済み（作成済み or 不要）になって初めて dismiss を送ってカードを閉じる。
+  // 個別の「今回は不要」では破棄フラグを立てない（＝まとめ破棄のときだけ立てる現仕様を維持）。
   const handleSuggestedTask = async (
     messageId: string,
     task: SuggestedTask,
@@ -125,36 +130,57 @@ export default function AdvisorFloatingPanel({
   ) => {
     if (!activeSessionId) return;
     const key = suggestedTaskKey(messageId, task.kind);
-    if (taskCardBusy[key]) return;
+    if (taskCardBusy[key] || taskCardDone[key]) return;
+
+    const endpoint = `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages/${messageId}/suggested-tasks`;
+
+    // このメッセージの全候補が処理済みになったらカードを閉じる（サーバーにも破棄を記録）。
+    const closeIfAllDone = async (doneMap: Record<string, SuggestedTaskDone>) => {
+      const owner = messages.find((m) => m.id === messageId);
+      const ownerTasks = Array.isArray(owner?.suggestedTasks) ? owner.suggestedTasks : [];
+      const allDone =
+        ownerTasks.length > 0 &&
+        ownerTasks.every((t) => doneMap[suggestedTaskKey(messageId, t.kind)]);
+      if (!allDone) return;
+      await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss" }),
+      }).catch(() => {});
+      await fetchMessages(activeSessionId);
+    };
+
+    // 「今回は不要」は通信不要（この候補を畳むだけ）。
+    if (action === "dismiss") {
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "dismissed" };
+      setTaskCardDone(next);
+      setTaskCardError((p) => ({ ...p, [key]: "" }));
+      await closeIfAllDone(next);
+      return;
+    }
+
     setTaskCardBusy((p) => ({ ...p, [key]: true }));
     setTaskCardError((p) => ({ ...p, [key]: "" }));
     try {
-      const res = await fetch(
-        `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages/${messageId}/suggested-tasks`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            action === "create"
-              ? { action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }
-              : { action },
-          ),
-        },
-      );
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
-      if (action === "create") {
-        // T-151: 期日のみ更新だった場合は期日を年込みで出す（面談経路とも文言を統一）。
-        // 経路をまたいで同種の未完了タスクがあると通知が飛ばないため、ここが唯一の手がかりになる。
-        toast.success(
-          data.created
-            ? "タスクを作成しました"
-            : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
-        );
-      }
-      await fetchMessages(activeSessionId);
+      // T-151: 期日のみ更新だった場合は期日を年込みで出す（面談経路とも文言を統一）。
+      // 経路をまたいで同種の未完了タスクがあると通知が飛ばないため、ここが唯一の手がかりになる。
+      toast.success(
+        data.created
+          ? "タスクを作成しました"
+          : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
+      );
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "created" };
+      setTaskCardDone(next);
+      await closeIfAllDone(next);
     } catch (e) {
-      // 失敗時はカードを残す（起票機会を失わせない）。
+      // 失敗時はこの候補を操作可能なまま残す（起票機会を失わせない）。
       setTaskCardError((p) => ({ ...p, [key]: e instanceof Error ? e.message : "処理に失敗しました" }));
     } finally {
       setTaskCardBusy((p) => ({ ...p, [key]: false }));
@@ -903,6 +929,7 @@ export default function AdvisorFloatingPanel({
                             busy={taskCardBusy}
                             error={taskCardError}
                             dueEdits={taskDueEdits}
+                            done={taskCardDone}
                             onDueChange={(key, value) =>
                               setTaskDueEdits((p) => ({ ...p, [key]: value }))
                             }
