@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { type SuggestedTaskKind } from "@/lib/advisor/suggested-tasks";
+import { findStoredTask, type SuggestedTaskKind } from "@/lib/advisor/suggested-tasks";
 import { createAiTask, validateAiTaskInput } from "@/lib/ai-task-create";
 
 export const runtime = "nodejs";
@@ -36,7 +36,9 @@ export async function PATCH(
 
   const record = await prisma.interviewRecord.findUnique({
     where: { id: interviewId },
-    select: { id: true, candidateId: true, suggestedTasksDismissedAt: true },
+    // suggestedTasks も読む: DOCUMENT_SEND の detail はここ（保存済みの候補）から取る。
+    // クライアントから受け取るとタスクのタイトルに任意文字列を差し込まれるため。
+    select: { id: true, candidateId: true, suggestedTasks: true, suggestedTasksDismissedAt: true },
   });
   if (!record) return NextResponse.json({ error: "面談記録が見つかりません" }, { status: 404 });
 
@@ -60,12 +62,16 @@ export async function PATCH(
   const invalid = validateAiTaskInput(body?.kind, body?.dueDate);
   if (invalid) return NextResponse.json({ error: invalid.error }, { status: invalid.status });
 
+  const stored = findStoredTask(record.suggestedTasks, body.kind as SuggestedTaskKind);
+
   const result = await createAiTask({
     candidateId: record.candidateId,
     kind: body.kind as SuggestedTaskKind,
     dueDateStr: (body.dueDate as string).trim(),
     origin: "interview",
     actor: { id: actor.id, name: actor.name },
+    detail: stored?.detail,
+    docAction: stored?.docAction,
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 

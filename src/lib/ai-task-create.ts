@@ -16,7 +16,11 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { SUGGESTED_TASK_KINDS, type SuggestedTaskKind } from "@/lib/advisor/suggested-tasks";
+import {
+  SUGGESTED_TASK_KINDS,
+  type SuggestedTaskKind,
+  type DocAction,
+} from "@/lib/advisor/suggested-tasks";
 import { notifyAiTaskCreated } from "@/lib/task-notification";
 
 /** AI 起票タスクの source（経路で分けない）。 */
@@ -26,7 +30,12 @@ export const AI_TASK_SOURCE = "AI_ADVISOR";
  *  （external/schedule-tasks がカテゴリ名で findMany するため、日程調整AI/RPA に拾われる）。 */
 export const KIND_CONFIG: Record<
   SuggestedTaskKind,
-  { categoryId: string; label: string; title: (name: string) => string }
+  {
+    categoryId: string;
+    label: string;
+    /** detail / docAction は DOCUMENT_SEND だけが使う（他種別は固定文言）。 */
+    title: (name: string, opts?: { detail?: string; docAction?: DocAction }) => string;
+  }
 > = {
   JOB_SEARCH_SEND: {
     categoryId: "cmmvzf6ct001m1doafno6y037", // 求人検索（既存・求職者対応グループ）
@@ -37,6 +46,18 @@ export const KIND_CONFIG: Record<
     categoryId: "cmsaluhq00001w8d6irm5omcs", // アンケート対応（T-150 で新設・求職者対応グループ）
     label: "アンケート送付・回答確認",
     title: (name) => `【アンケート】${name}さんへフォーム送付・回答確認`,
+  },
+  DOCUMENT_SEND: {
+    // ★書類作成専用カテゴリは新設しない（確定仕様）。既存の「その他」を流用し、
+    //   何のタスクかはタイトルの detail で分かるようにする。
+    categoryId: "cmmolygvj0049po4fy3navf7v", // その他（既存）
+    label: "書類作成・送付",
+    title: (name, opts) => {
+      const prefix = opts?.docAction === "send" ? "書類送付" : "書類作成";
+      // detail が無い場合でも「何の書類か分からないタスク」にはしない汎用文言を入れる。
+      const what = opts?.detail ?? "応募書類の作成・送付";
+      return `【${prefix}】${name}さんの${what}`;
+    },
   },
 };
 
@@ -77,6 +98,12 @@ export type CreateAiTaskParams = {
   origin: AiTaskOrigin;
   /** 操作中のCA。createdByUserId になる。 */
   actor: { id: string; name?: string | null };
+  /**
+   * DOCUMENT_SEND のみ: 約束の中身（タイトル・タスク内容欄に入る）。
+   * ★呼び出し側は必ず「保存済みの候補（DB）」から取ること。クライアント入力をそのまま渡さない。
+   */
+  detail?: string;
+  docAction?: DocAction;
 };
 
 export type CreateAiTaskResult =
@@ -113,7 +140,7 @@ export function validateAiTaskInput(
  * - 破棄フラグ（advisor_chat_messages / interview_records）は呼び出し側の責務。
  */
 export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAiTaskResult> {
-  const { candidateId, kind, dueDateStr, origin, actor } = params;
+  const { candidateId, kind, dueDateStr, origin, actor, detail, docAction } = params;
 
   // 罠#17: "YYYY-MM-DD" をそのまま new Date() に渡すと UTC 0:00 になる。
   // これが既存タスク（1,217件・66.9%）と同じ形式。"+09:00" を付けたり toISOString() を挟むと
@@ -133,6 +160,12 @@ export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAi
   if (!candidate) return { ok: false, error: "求職者が見つかりません", status: 404 };
 
   const config = KIND_CONFIG[kind];
+  const taskTitle = config.title(candidate.name, { detail, docAction });
+  // 「その他」カテゴリで起票する DOCUMENT_SEND は、説明にも約束の中身を残す
+  // （カテゴリ名だけでは何の作業か分からないため）。
+  const taskDescription = detail
+    ? `${ORIGIN_DESCRIPTION[origin]}\n約束の内容: ${detail}`
+    : ORIGIN_DESCRIPTION[origin];
 
   // ★手動タスク（source=NULL）は検索対象にしない。種別は専用カラムで絞る。
   const existing = await prisma.task.findFirst({
@@ -172,8 +205,8 @@ export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAi
     try {
       const task = await prisma.task.create({
         data: {
-          title: config.title(candidate.name),
-          description: ORIGIN_DESCRIPTION[origin],
+          title: taskTitle,
+          description: taskDescription,
           categoryId: config.categoryId,
           candidateId,
           status: "NOT_STARTED",
@@ -189,7 +222,9 @@ export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAi
                 fieldValues: {
                   create: requiredFields.map((f) => ({
                     fieldId: f.id,
-                    value: REQUIRED_FIELD_PLACEHOLDER,
+                    // 「その他」の必須項目「タスク内容」が固定文言だと何の作業か分からないため、
+                    // 約束の中身が取れているならそれを入れる。
+                    value: detail ?? REQUIRED_FIELD_PLACEHOLDER,
                   })),
                 },
               }
@@ -221,7 +256,7 @@ export async function createAiTask(params: CreateAiTaskParams): Promise<CreateAi
     try {
       await notifyAiTaskCreated({
         taskId,
-        title: config.title(candidate.name),
+        title: taskTitle,
         categoryLabel: config.label,
         candidateName: candidate.name,
         assigneeName: candidate.employee?.name ?? actor.name ?? null,
