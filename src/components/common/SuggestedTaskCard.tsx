@@ -7,18 +7,23 @@
 //
 // 期日は必ず年込みで表示する（AI の年ズレを CA が見つける最後の防壁）。
 
-export type SuggestedTaskKind = "JOB_SEARCH_SEND" | "FORM_SURVEY";
+export type SuggestedTaskKind = "JOB_SEARCH_SEND" | "FORM_SURVEY" | "DOCUMENT_SEND";
 
 /** AI 応答／面談ログから検出したタスク候補。dueDate はサーバーが JST で確定済みの "YYYY-MM-DD"。 */
 export type SuggestedTask = {
   kind: SuggestedTaskKind;
   due: string;
   dueDate: string;
+  /** DOCUMENT_SEND のみ: 約束の中身（例:「職務経歴書の修正・送付」）。 */
+  detail?: string;
+  docAction?: "create" | "send";
 };
 
+// 起票先カテゴリが「その他」でも、CA に見える表示は具体的にする（確定仕様）。
 export const SUGGESTED_TASK_LABEL: Record<SuggestedTaskKind, string> = {
   JOB_SEARCH_SEND: "求人検索・送付",
   FORM_SURVEY: "アンケート送付・回答確認",
+  DOCUMENT_SEND: "書類作成・送付",
 };
 
 /**
@@ -114,6 +119,9 @@ export default function SuggestedTaskCard({
               <span>タスク候補: {SUGGESTED_TASK_LABEL[task.kind]}</span>
             </div>
             <div className="mt-1 text-gray-700">対象: {candidateName} さん</div>
+            {task.detail && (
+              <div className="mt-0.5 text-gray-700">内容: {task.detail}</div>
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span className="text-gray-700">期日</span>
               <span className="font-semibold text-gray-900">{formatDueDateWithYear(due)}</span>

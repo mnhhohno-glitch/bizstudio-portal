@@ -49,7 +49,7 @@ async function detect(interviewLog: string): Promise<SuggestedTask[]> {
 
 type Case = {
   id: string;
-  expect: ("JOB_SEARCH_SEND" | "FORM_SURVEY")[];
+  expect: ("JOB_SEARCH_SEND" | "FORM_SURVEY" | "DOCUMENT_SEND")[];
   log: string;
 };
 

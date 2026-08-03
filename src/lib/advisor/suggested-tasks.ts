@@ -57,9 +57,16 @@ export const TASK_DETECTION_PROMPT = `
 T150_TASKS>>>
 `;
 
-/** 起票できる種別（この2つ以外は絶対に受け付けない）。 */
-export const SUGGESTED_TASK_KINDS = ["JOB_SEARCH_SEND", "FORM_SURVEY"] as const;
+/** 起票できる種別（この3つ以外は絶対に受け付けない）。 */
+export const SUGGESTED_TASK_KINDS = ["JOB_SEARCH_SEND", "FORM_SURVEY", "DOCUMENT_SEND"] as const;
 export type SuggestedTaskKind = (typeof SUGGESTED_TASK_KINDS)[number];
+
+/** DOCUMENT_SEND の書類作業の種類。作成/修正を含むなら create、送るだけなら send。 */
+export const DOC_ACTIONS = ["create", "send"] as const;
+export type DocAction = (typeof DOC_ACTIONS)[number];
+
+/** detail はタスクのタイトルに入るため、長さと文字種をサーバー側で必ず制限する。 */
+const MAX_DETAIL_CHARS = 40;
 
 export type SuggestedTask = {
   kind: SuggestedTaskKind;
@@ -67,7 +74,23 @@ export type SuggestedTask = {
   due: string;
   /** サーバー側で JST 確定させた期日 "YYYY-MM-DD"。UI ではこれを編集させる。 */
   dueDate: string;
+  /**
+   * DOCUMENT_SEND のみ: 約束の中身を表す短い語句（例: 「職務経歴書の修正・送付」）。
+   * 「その他」カテゴリで起票するため、CA が一覧で内容を判別できる唯一の手がかりになる。
+   */
+  detail?: string;
+  /** DOCUMENT_SEND のみ: タイトルの接頭辞（【書類作成】/【書類送付】）の決定に使う。 */
+  docAction?: DocAction;
 };
+
+/** AI 由来の自由文をタイトルに載せる前に無害化する（改行・制御文字を除去し長さを切る）。 */
+export function sanitizeDetail(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > MAX_DETAIL_CHARS ? cleaned.slice(0, MAX_DETAIL_CHARS) : cleaned;
+}
 
 /** 応答本文に併記させる JSON ブロックのマーカー。Markdown のコードフェンスにはしない。 */
 const TASKS_BLOCK_RE = /<<<T150_TASKS([\s\S]*?)T150_TASKS>>>/;
@@ -134,7 +157,18 @@ export function normalizeSuggestedTasks(raw: unknown): SuggestedTask[] {
     seen.add(kind);
     const dueRaw = (item as { due?: unknown }).due;
     const due = typeof dueRaw === "string" ? dueRaw.trim() : "none";
-    out.push({ kind, due, dueDate: resolveDueDate(due, today) });
+    const task: SuggestedTask = { kind, due, dueDate: resolveDueDate(due, today) };
+    // detail / docAction は DOCUMENT_SEND のタイトル生成にだけ使う。
+    // 他種別に付いてきても捨てる（既存2種のタイトルは固定文言のままにする）。
+    if (kind === "DOCUMENT_SEND") {
+      const detail = sanitizeDetail((item as { detail?: unknown }).detail);
+      if (detail) task.detail = detail;
+      const actionRaw = (item as { docAction?: unknown }).docAction;
+      if (typeof actionRaw === "string" && (DOC_ACTIONS as readonly string[]).includes(actionRaw)) {
+        task.docAction = actionRaw as DocAction;
+      }
+    }
+    out.push(task);
     if (out.length >= SUGGESTED_TASK_KINDS.length) break;
   }
   return out;
@@ -164,6 +198,31 @@ export function pendingKindsFromMessages(
     }
   }
   return pending;
+}
+
+/**
+ * 保存済みの候補（DBのJSON）から指定種別の1件を取り出す。
+ * 起票時の detail / docAction はここから取る＝クライアント入力をタイトルに入れないため。
+ * 保存値であっても detail は再サニタイズする（保存時点の実装差・手編集への保険）。
+ */
+export function findStoredTask(
+  stored: unknown,
+  kind: SuggestedTaskKind,
+): { detail?: string; docAction?: DocAction } | null {
+  const list = Array.isArray(stored) ? stored : null;
+  if (!list) return null;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    if ((item as { kind?: unknown }).kind !== kind) continue;
+    const detail = sanitizeDetail((item as { detail?: unknown }).detail);
+    const actionRaw = (item as { docAction?: unknown }).docAction;
+    const docAction =
+      typeof actionRaw === "string" && (DOC_ACTIONS as readonly string[]).includes(actionRaw)
+        ? (actionRaw as DocAction)
+        : undefined;
+    return { detail, docAction };
+  }
+  return null;
 }
 
 /** 未処理の候補が既にある種別を落とす（重複カードの抑止）。 */
