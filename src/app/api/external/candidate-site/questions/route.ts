@@ -112,18 +112,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "System user not found" }, { status: 500 });
   }
 
-  // 件名: 求人紐付きなら求人No、なければ従来形式（全体への質問）。
+  // 件名: 求人No（jobRef）があればそれ、無くても会社名があれば会社名で「どの求人の話か」を出す。
+  // どちらも無い（全体への質問）場合のみ従来形式。
   const title = jobRef
     ? `${TITLE_PREFIX}${candidate.name} - ${jobRef} への質問`
-    : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
+    : jobCompany
+      ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany} への質問`
+      : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
 
   // 詳細メモ: 求人紐付きなら冒頭に「■ 対象求人」ブロック（求人No／タイトル／社名）を追加。
   //   求人No は CandidateFile.externalJobRef と同値＝管理画面（求人紹介タブ）で該当ブックマークを検索できる参照。
-  const targetJobBlock = jobRef
+  //   求人No が無くても会社名・求人タイトルが来ていれば出す（CAが求人を特定できることが目的）。
+  const targetJobLabel = [jobRef, jobTitle, jobCompany].filter(Boolean).join("／");
+  const targetJobBlock = targetJobLabel
     ? [
         "■ 対象求人",
-        `${jobRef}${jobTitle ? `／${jobTitle}` : ""}${jobCompany ? `／${jobCompany}` : ""}`,
-        `（求人No ${jobRef} で求人紹介・ブックマークを検索できます）`,
+        targetJobLabel,
+        ...(jobRef
+          ? [`（求人No ${jobRef} で求人紹介・ブックマークを検索できます）`]
+          : []),
         "",
       ]
     : [];
