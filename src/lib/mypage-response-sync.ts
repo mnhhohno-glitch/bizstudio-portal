@@ -131,7 +131,9 @@ export async function createOrUpdateResponseTask(
   const result: TxResult = await prisma.$transaction(
     async (tx) => {
       // 同一求職者の並行処理を直列化（二重作成レースの根治）。トランザクション終了で自動解放。
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${candidate.id})::bigint)`;
+      // $queryRaw ではなく $executeRaw を使う: pg_advisory_xact_lock の戻り値は void で、
+      // $queryRaw だと Prisma が「型 void の列をデシリアライズできない」(P2010) で落ちる。
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${candidate.id})::bigint)`;
 
       const existingTask = await tx.task.findFirst({
         where: {
