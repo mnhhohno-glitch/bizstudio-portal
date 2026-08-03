@@ -112,13 +112,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "System user not found" }, { status: 500 });
   }
 
-  // 件名: 求人No（jobRef）があればそれ、無くても会社名があれば会社名で「どの求人の話か」を出す。
-  // どちらも無い（全体への質問）場合のみ従来形式。
-  const title = jobRef
-    ? `${TITLE_PREFIX}${candidate.name} - ${jobRef} への質問`
-    : jobCompany
-      ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany} への質問`
-      : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
+  // 件名: 会社名を優先して出す（CAがタスク一覧で会社名を見て優先度判断できるようにする）。
+  //   会社名＋求人No → 「{会社名}（{求人No}）への質問」／どちらか片方 → その値／両方なし → 従来形式。
+  // ★接頭辞 TITLE_PREFIX は変えないこと: 日次上限カウントが title startsWith で判定している。
+  const title =
+    jobCompany && jobRef
+      ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany}（${jobRef}）への質問`
+      : jobCompany
+        ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany} への質問`
+        : jobRef
+          ? `${TITLE_PREFIX}${candidate.name} - ${jobRef} への質問`
+          : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
 
   // 詳細メモ: 求人紐付きなら冒頭に「■ 対象求人」ブロック（求人No／タイトル／社名）を追加。
   //   求人No は CandidateFile.externalJobRef と同値＝管理画面（求人紹介タブ）で該当ブックマークを検索できる参照。
