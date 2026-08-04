@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
 import { normalizeCompanyKey, parseCompanyFromBookmarkFileName } from "@/lib/company-name-key";
+import { isDiagnosisContent } from "@/lib/advisor/diagnosis-extract";
+import {
+  extractCandidatePreference,
+  isEmptyPreference,
+  toJstDate,
+  type CandidatePreference,
+} from "@/lib/advisor/diagnosis-sections";
 
 // 求職者選択モード Phase 1a: 引き当て履歴の照合API。
 //
@@ -20,6 +27,10 @@ import { normalizeCompanyKey, parseCompanyFromBookmarkFileName } from "@/lib/com
 // Phase 2b（2026-07-13）: status にエントリー系3値（OFFER / DOC_PASS / ENTRY）を追加。
 //   JobEntry を kyuujinJobId で突合して、選考が進んでいる求人にはエントリー系を返す。
 //   既存4値（APPLY/INTERESTED/INTRODUCED/EXCLUDED）の判定・レスポンス形は不変（後方互換）。
+//
+// 志向パネル step1（2026-08-04）: レスポンスに preference（志向要約）を追加。
+//   出所は保存済みのタイプ診断（advisor_chat_messages.content）**のみ**。AI は呼ばない（費用ゼロ）。
+//   jobs[] / companyKeys[] の構造は一切変更していない（job-platform の除外フィルタが依存するため）。
 
 export const dynamic = "force-dynamic";
 
@@ -199,6 +210,38 @@ export async function GET(
     };
   });
 
+  // --- 志向パネル step1: 保存済みタイプ診断から志向要約を作る（AI 呼び出しなし・読み取りのみ） ---
+  //
+  // 診断の判定は既存の isDiagnosisContent（diagnosis-extract.ts）と完全に同一にする。
+  // Prisma は正規表現フィルタを持たないため、SQL 側では**判定条件の上位集合**（「職種キーワード」または
+  // 「検索条件」を含む assistant メッセージ）で絞り、最終判定は isDiagnosisContent に委ねる。
+  // これにより SQL 側の条件が甘くても取りこぼし・誤検出は起きない（判定の正は常に JS 側の1箇所）。
+  const diagnosisCandidates = await prisma.advisorChatMessage.findMany({
+    where: {
+      role: "assistant",
+      session: { candidateId: candidate.id },
+      OR: [{ content: { contains: "職種キーワード" } }, { content: { contains: "検索条件" } }],
+    },
+    select: { content: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 5, // 再診断は候補者あたり数件。最新から順に見て最初に判定を通った1件を採る
+  });
+
+  const latestDiagnosis = diagnosisCandidates.find((m) => isDiagnosisContent(m.content)) ?? null;
+
+  // preference は「診断が無い」「診断はあるが3ブロックとも切り出せない」のいずれでも null を返す。
+  // 空オブジェクトは返さない（job-platform 側が null チェック1回で表示可否を判定できるようにする）。
+  let preference:
+    | (CandidatePreference & { diagnosedAt: string | null })
+    | null = null;
+  if (latestDiagnosis) {
+    const p = extractCandidatePreference(latestDiagnosis.content);
+    if (!isEmptyPreference(p)) {
+      // 日付は JST。Railway は UTC 稼働のため toISOString().slice(0,10) は日付がずれる（罠#17）。
+      preference = { ...p, diagnosedAt: toJstDate(latestDiagnosis.createdAt) };
+    }
+  }
+
   // 同社フラグ用: 正規化済み会社名キーの一意リスト（job-platform normalizeCompanyName と同一規則）。
   const companyKeys = [
     ...new Set(
@@ -217,6 +260,8 @@ export async function GET(
       },
       jobs,
       companyKeys,
+      // 志向要約（個人情報）。既存フィールドと同じ Cache-Control: private, no-store の下で返す。
+      preference,
     },
     { headers: { "Cache-Control": "private, no-store" } },
   );
