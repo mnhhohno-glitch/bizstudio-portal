@@ -2727,6 +2727,8 @@ model SecureTransfer {
   failedAttempts Int       @default(0) @map("failed_attempts") // パスワード照合失敗回数。10で自動無効化
   passwordInEmail Boolean  @default(true) @map("password_in_email") // false = パスワードをメールに載せず送信者が別途伝える
   candidateId    String?   @map("candidate_id") // 第1弾は常に null
+  batchId        String?   @map("batch_id") // 同一の送信操作で作られたレコードの束ね（複数宛先対応）。旧レコードは null
+  expiryNotifiedAt DateTime? @map("expiry_notified_at") // 期限切れ予告メールを送信者へ送った時刻（二重送信防止）
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -2735,6 +2737,7 @@ model SecureTransfer {
 
   @@index([senderId, createdAt])
   @@index([expiresAt])
+  @@index([batchId])
   @@map("secure_transfers")
 }
 

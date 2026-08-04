@@ -3,7 +3,14 @@
 // 有効期限は必ず JST 表記（formatJstDateTime）。
 
 import { sendResendEmail, SendMailResult } from "@/lib/resend-mail";
-import { formatJstDateTime } from "@/lib/secure-transfer";
+import {
+  buildTransferNoticeBody,
+  formatJstDateTime,
+  TRANSFER_MAIL_SUBJECT,
+} from "@/lib/secure-transfer-shared";
+
+// 本文テンプレート本体はプレビュー画面（クライアント）と共用のため secure-transfer-shared.ts に移動。
+export { buildTransferNoticeBody, TRANSFER_MAIL_SUBJECT };
 
 function getBaseUrl(): string {
   return process.env.PORTAL_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "";
@@ -11,62 +18,6 @@ function getBaseUrl(): string {
 
 export function buildTransferUrl(token: string): string {
   return `${getBaseUrl()}/transfer/${token}`;
-}
-
-/** 受信者向け: ファイル送付案内（URL・パスワード・期限・ファイル名一覧・送信者名）。 */
-export function buildTransferNoticeBody(params: {
-  senderName: string;
-  senderEmail: string;
-  url: string;
-  password: string;
-  passwordInEmail: boolean; // false = パスワードは本文に載せず「別途お伝えします」と記載
-  expiresAt: Date;
-  fileNames: string[];
-  subject?: string | null;
-  message?: string | null;
-}): string {
-  const lines: string[] = [];
-  lines.push("ご担当者様");
-  lines.push("");
-  lines.push("株式会社ビズスタジオよりファイルをお送りいたします。");
-  lines.push("下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。");
-  lines.push("");
-  if (params.subject) {
-    lines.push(`■件名`);
-    lines.push(params.subject);
-    lines.push("");
-  }
-  lines.push("■ダウンロードURL");
-  lines.push(params.url);
-  lines.push("");
-  lines.push("■パスワード");
-  if (params.passwordInEmail) {
-    // 見出しの直後に置き、後ろだけ空行を空ける（選択してコピーしやすくする）。
-    // 後ろの空行は if/else の後の push("") が兼ねる。
-    lines.push(params.password);
-  } else {
-    lines.push("パスワードは送信者より別途お伝えします。");
-  }
-  lines.push("");
-  lines.push("■有効期限");
-  lines.push(`${formatJstDateTime(params.expiresAt)} まで（日本時間）`);
-  lines.push("");
-  lines.push("■ファイル");
-  for (const name of params.fileNames) {
-    lines.push(`・${name}`);
-  }
-  if (params.message) {
-    lines.push("");
-    lines.push(params.message);
-  }
-  lines.push("");
-  lines.push("※有効期限を過ぎるとファイルは自動的に削除され、ダウンロードできなくなります。");
-  lines.push("※本メールに心当たりがない場合は、お手数ですが破棄してください。");
-  lines.push("");
-  lines.push("──");
-  lines.push(`株式会社ビズスタジオ ${params.senderName}`);
-  lines.push(params.senderEmail);
-  return lines.join("\n");
 }
 
 export async function sendTransferNoticeEmail(params: {
@@ -83,9 +34,41 @@ export async function sendTransferNoticeEmail(params: {
 }): Promise<SendMailResult> {
   return sendResendEmail({
     to: params.to,
-    subject: "【株式会社ビズスタジオ】ファイル送付のご案内",
+    subject: TRANSFER_MAIL_SUBJECT,
     text: buildTransferNoticeBody(params),
     replyTo: params.senderEmail, // 受信者が返信すると送信者本人に届く
+  });
+}
+
+/**
+ * 送信者向け: 期限切れ予告（未ダウンロード）の通知。
+ * cleanup cron（JST 04:30）から、明日までに期限が切れる未DL・未無効化の送信について
+ * 送信者ごとに1通へまとめて送る。
+ */
+export async function sendTransferExpiryNoticeEmail(params: {
+  to: string; // 送信者（User.email）
+  senderName: string;
+  items: { recipientEmail: string; subject: string | null; expiresAt: Date }[];
+}): Promise<SendMailResult> {
+  const lines: string[] = [];
+  lines.push(`${params.senderName} 様`);
+  lines.push("");
+  lines.push("以下のファイル送付は有効期限が近づいていますが、相手はまだダウンロードしていません。");
+  lines.push("期限を過ぎるとファイルは自動削除され、ダウンロードできなくなります。");
+  lines.push("必要に応じて相手への連絡や、期限後の再送をご検討ください。");
+  lines.push("");
+  for (const item of params.items) {
+    lines.push(`・宛先: ${item.recipientEmail}`);
+    if (item.subject) lines.push(`　件名: ${item.subject}`);
+    lines.push(`　有効期限: ${formatJstDateTime(item.expiresAt)} まで（日本時間）`);
+    lines.push("");
+  }
+  lines.push("──");
+  lines.push("Bizstudio Portal（自動通知）");
+  return sendResendEmail({
+    to: params.to,
+    subject: "【株式会社ビズスタジオ】ファイル送付の有効期限が近づいています（未ダウンロード）",
+    text: lines.join("\n"),
   });
 }
 
