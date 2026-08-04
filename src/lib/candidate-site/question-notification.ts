@@ -37,11 +37,16 @@ export async function notifyCandidateQuestion(
   }
 
   // T-133 FU-11: 対象求人（求人紐付き質問のみ）。求職者ブロックの直後に1ブロック挿入。
-  // 求人No が無くても会社名・求人タイトルが来ていれば出す（タスク件名・メモ側と同一の判定）。
-  const targetJobLabel = [params.jobRef, params.jobTitle, params.jobCompany]
-    .filter(Boolean)
-    .join("／");
-  const targetJobLines = targetJobLabel ? ["", "■ 対象求人", targetJobLabel] : [];
+  // 求人番号が無くても会社名・求人タイトルが来ていれば出す（タスク件名・メモ側と同一の判定）。
+  // 表記はタスク詳細（questions/route.ts の「■ 対象求人」）と揃える。
+  const targetJobDetails = [
+    ...(params.jobRef ? [`求人番号: ${params.jobRef}`] : []),
+    ...(params.jobCompany ? [`企業名: ${params.jobCompany}`] : []),
+    ...(params.jobTitle ? [`求人タイトル: ${params.jobTitle}`] : []),
+  ];
+  const targetJobLines = targetJobDetails.length
+    ? ["", "■ 対象求人", ...targetJobDetails]
+    : [];
 
   const baseLines = [
     "❓ 求職者から担当CAへの質問が届きました",
@@ -50,7 +55,7 @@ export async function notifyCandidateQuestion(
     `${params.candidateName} 様（${params.candidateNumber}）`,
     ...targetJobLines,
     "",
-    "■ 質問（原文）",
+    "■ 質問内容",
     params.question,
     "",
     "■ 要約",

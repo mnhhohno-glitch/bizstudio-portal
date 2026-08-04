@@ -23,11 +23,44 @@ const MAX_JOB_REF_LEN = 100;
 const MAX_JOB_TITLE_LEN = 200;
 const MAX_JOB_COMPANY_LEN = 200;
 const TITLE_PREFIX = "【マイページ質問】";
+// 件名に載せる会社名の上限（全角30文字相当）。タスク一覧の行崩れ防止。
+const TITLE_COMPANY_MAX = 30;
 
 function str(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s.length ? s : null;
+}
+
+// 全角前提の丸め（サロゲートペア安全）。上限超過時のみ末尾に「…」。
+function clip(s: string, max: number): string {
+  const chars = [...s];
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : s;
+}
+
+// mypage（bizstudio-mypage の BFF `POST /api/site/questions`）は、求人詳細・求人カードから
+// 質問した場合に原文の先頭へ「【{会社名} / {求人タイトル} について】\n」を自動付記する。
+// 一方で構造化フィールド（companyName / jobTitle / jobRef）は現状 portal へ転送していない。
+// そのため、構造化フィールドが来なかった場合に限り、この見出しから会社名・求人タイトルを復元する。
+// （mypage 側が構造化フィールドを送るようになれば、そちらが優先されこの復元は使われない）
+function parseJobContextHeader(question: string): {
+  company: string | null;
+  title: string | null;
+  body: string;
+} {
+  const m = /^【(.+?)\s*について】\r?\n?/.exec(question);
+  if (!m) return { company: null, title: null, body: question };
+  const inner = m[1].trim();
+  const sep = inner.indexOf(" / ");
+  const company = sep >= 0 ? inner.slice(0, sep).trim() : inner;
+  const title = sep >= 0 ? inner.slice(sep + 3).trim() : null;
+  return {
+    company: company.length ? company : null,
+    title: title && title.length ? title : null,
+    // 見出しは「求職者が書いた文章」ではなく mypage の自動付記なので、
+    // 対象求人ブロックへ移した分は本文から取り除く。
+    body: question.slice(m[0].length),
+  };
 }
 
 // Task.createdByUserId 用のシステムユーザー（担当CA未設定時のフォールバック）。
@@ -77,8 +110,19 @@ export async function POST(request: Request) {
   //   - jobTitle / jobCompany: 表示用。件名は jobRef のみ・タイトル/社名はメモ側に全文。
   //   3つとも無い（全体への質問）場合は従来形式（求人ブロックなし・件名も従来）。長すぎる値は安全側で切り詰め。
   const jobRef = str(body.jobRef)?.slice(0, MAX_JOB_REF_LEN) ?? null;
-  const jobTitle = str(body.jobTitle)?.slice(0, MAX_JOB_TITLE_LEN) ?? null;
-  const jobCompany = str(body.companyName)?.slice(0, MAX_JOB_COMPANY_LEN) ?? null;
+  const rawJobTitle = str(body.jobTitle)?.slice(0, MAX_JOB_TITLE_LEN) ?? null;
+  const rawJobCompany = str(body.companyName)?.slice(0, MAX_JOB_COMPANY_LEN) ?? null;
+
+  // 構造化フィールドが無い場合のみ、mypage が原文先頭に付記した見出しから対象求人を復元する。
+  // 求人番号（jobRef）は見出しに含まれないため、ここでは復元できない（mypage 側の改修が必要）。
+  const parsed =
+    rawJobCompany || rawJobTitle
+      ? { company: null, title: null, body: question }
+      : parseJobContextHeader(question);
+  const jobCompany = rawJobCompany ?? parsed.company;
+  const jobTitle = rawJobTitle ?? parsed.title;
+  // 対象求人ブロックへ移した見出しを除いた、求職者本人が書いた本文。
+  const questionBody = parsed.body.trim() || question;
 
   // 上限ガード: 当日（JST 0:00 以降）の質問タスク作成数。候補者スコープ。
   const jstDayStart = todayJST().toDate();
@@ -113,37 +157,41 @@ export async function POST(request: Request) {
   }
 
   // 件名: 会社名を優先して出す（CAがタスク一覧で会社名を見て優先度判断できるようにする）。
-  //   会社名＋求人No → 「{会社名}（{求人No}）への質問」／どちらか片方 → その値／両方なし → 従来形式。
+  //   会社名＋求人番号 → 「{会社名}（求人番号 {No}）」／会社名のみ → 会社名／
+  //   会社名なし求人番号のみ → 「求人番号 {No}」／どちらも無し → 従来形式。
+  //   会社名は全角30文字で丸める（タスク一覧の行崩れ防止）。空の「（求人番号 -）」は出さない。
   // ★接頭辞 TITLE_PREFIX は変えないこと: 日次上限カウントが title startsWith で判定している。
-  const title =
-    jobCompany && jobRef
-      ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany}（${jobRef}）への質問`
-      : jobCompany
-        ? `${TITLE_PREFIX}${candidate.name} - ${jobCompany} への質問`
+  const titleCompany = jobCompany ? clip(jobCompany, TITLE_COMPANY_MAX) : null;
+  const titleSuffix =
+    titleCompany && jobRef
+      ? `${titleCompany}（求人番号 ${jobRef}）`
+      : titleCompany
+        ? titleCompany
         : jobRef
-          ? `${TITLE_PREFIX}${candidate.name} - ${jobRef} への質問`
-          : `${TITLE_PREFIX}${candidate.name} - 担当CAへの質問`;
+          ? `求人番号 ${jobRef}`
+          : "担当CAへの質問";
+  const title = `${TITLE_PREFIX}${candidate.name} - ${titleSuffix}`;
 
-  // 詳細メモ: 求人紐付きなら冒頭に「■ 対象求人」ブロック（求人No／タイトル／社名）を追加。
-  //   求人No は CandidateFile.externalJobRef と同値＝管理画面（求人紹介タブ）で該当ブックマークを検索できる参照。
-  //   求人No が無くても会社名・求人タイトルが来ていれば出す（CAが求人を特定できることが目的）。
-  const targetJobLabel = [jobRef, jobTitle, jobCompany].filter(Boolean).join("／");
-  const targetJobBlock = targetJobLabel
-    ? [
-        "■ 対象求人",
-        targetJobLabel,
-        ...(jobRef
-          ? [`（求人No ${jobRef} で求人紹介・ブックマークを検索できます）`]
-          : []),
-        "",
-      ]
-    : [];
+  // 詳細メモ: 冒頭に「■ 対象求人」ブロック（求人番号／企業名／求人タイトル）。
+  //   求人番号は CandidateFile.externalJobRef と同値＝管理画面（求人紹介タブ）で該当ブックマークを検索できる参照。
+  //   1つも特定できない場合も「求人の特定情報なし」と明記する（CAが「表示漏れ」と誤解しないため）。
+  const targetJobLines = [
+    ...(jobRef ? [`求人番号: ${jobRef}`] : []),
+    ...(jobCompany ? [`企業名: ${jobCompany}`] : []),
+    ...(jobTitle ? [`求人タイトル: ${jobTitle}`] : []),
+  ];
+  const targetJobBlock = [
+    "■ 対象求人",
+    ...(targetJobLines.length ? targetJobLines : ["求人の特定情報なし"]),
+    ...(jobRef ? [`（求人番号 ${jobRef} で求人紹介・ブックマークを検索できます）`] : []),
+    "",
+  ];
   const description = [
     `${candidate.name} 様から担当CAへの質問がありました。`,
     "",
     ...targetJobBlock,
-    "■ 質問（原文）",
-    question,
+    "■ 質問内容",
+    questionBody,
     "",
     "■ 要約",
     summary,
@@ -174,7 +222,7 @@ export async function POST(request: Request) {
       caName: employee?.name ?? null,
       caLineUserId: employee?.lineUserId ?? null,
       taskId: task.id,
-      question,
+      question: questionBody,
       summary,
       jobRef,
       jobTitle,
