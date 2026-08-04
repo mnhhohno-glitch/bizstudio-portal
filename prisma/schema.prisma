@@ -2780,6 +2780,7 @@ model TrainingMaterial {
   category    String
   url         String
   tag         String?
+  quizKey     String?  // この教材がクイズの場合、lv1 / sales / ca_ra を入れる（回答履歴との紐付けキー）
   sortOrder   Int      @default(0)
   isPublished Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -2787,4 +2788,47 @@ model TrainingMaterial {
 
   @@index([category, sortOrder])
   @@map("training_materials")
+}
+
+// クイズ1周分の回答記録。静的HTML（public/training/quiz/）が周回終了時に POST してくる
+// userId / userName はセッションから取得して保存（userName は当時の名前を残すための非正規化）
+// User モデルへのリレーションは張らない（既存モデル不変の方針）
+model TrainingQuizAttempt {
+  id             String   @id @default(cuid())
+  userId         String
+  userName       String
+  quizKey        String
+  quizTitle      String
+  mode           String
+  round          Int
+  totalQuestions Int
+  correctCount   Int
+  cleared        Boolean  @default(false)
+  startedAt      DateTime
+  finishedAt     DateTime
+  createdAt      DateTime @default(now())
+
+  answers TrainingQuizAnswer[]
+
+  @@index([userId, quizKey])
+  @@index([quizKey, createdAt])
+  @@map("training_quiz_attempts")
+}
+
+model TrainingQuizAnswer {
+  id           String   @id @default(cuid())
+  attemptId    String
+  qid          String
+  category     String
+  questionText String   @db.Text
+  chosenText   String   @db.Text
+  correctText  String   @db.Text
+  isCorrect    Boolean
+  position     Int
+
+  attempt TrainingQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+  @@index([qid, isCorrect])
+  @@map("training_quiz_answers")
 }

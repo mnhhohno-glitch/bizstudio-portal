@@ -9,9 +9,39 @@ type Material = {
   category: string;
   url: string;
   tag: string | null;
+  quizKey: string | null;
   sortOrder: number;
   isPublished: boolean;
 };
+
+type MyAttempt = {
+  quizKey: string;
+  mode: string;
+  round: number;
+  totalQuestions: number;
+  correctCount: number;
+  cleared: boolean;
+  finishedAt: string;
+};
+
+// quizKey ごとに自分の実績1行（例: 最高 38/40（3周でクリア） / 未受験）を組み立てる
+function buildMyResultLabel(attempts: MyAttempt[], quizKey: string): string {
+  const all = attempts.filter((a) => a.quizKey === quizKey);
+  if (all.length === 0) return "未受験";
+  // スコア表示は全問チャレンジの1周目を優先（範囲別だと分母が変わるため）
+  const full = all.filter((a) => a.mode === "全問チャレンジ");
+  const source = full.length > 0 ? full : all;
+  const round1 = source.filter((a) => a.round === 1);
+  const pool = round1.length > 0 ? round1 : source;
+  const best = pool.reduce((m, a) =>
+    a.correctCount / a.totalQuestions > m.correctCount / m.totalQuestions ? a : m
+  );
+  const clearedOnes = source
+    .filter((a) => a.cleared)
+    .sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
+  const clearedNote = clearedOnes.length > 0 ? `（${clearedOnes[0].round}周でクリア）` : "";
+  return `最高 ${best.correctCount}/${best.totalQuestions}${clearedNote}`;
+}
 
 type FormState = {
   title: string;
@@ -237,6 +267,7 @@ function MaterialModal({
 
 export default function TrainingPageClient({ isAdmin }: { isAdmin: boolean }) {
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [myAttempts, setMyAttempts] = useState<MyAttempt[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Material | null>(null);
@@ -253,9 +284,19 @@ export default function TrainingPageClient({ isAdmin }: { isAdmin: boolean }) {
     }
   }, []);
 
+  const fetchMyAttempts = useCallback(async () => {
+    // mine=1 で admin でも自分の分だけに絞る
+    const res = await fetch("/api/training/quiz-attempts?mine=1&limit=500");
+    if (res.ok) {
+      const data = await res.json();
+      setMyAttempts(data.attempts);
+    }
+  }, []);
+
   useEffect(() => {
     fetchMaterials();
-  }, [fetchMaterials]);
+    fetchMyAttempts();
+  }, [fetchMaterials, fetchMyAttempts]);
 
   const handleDelete = async (m: Material) => {
     if (!window.confirm(`「${m.title}」を削除します。よろしいですか？`)) return;
@@ -340,6 +381,20 @@ export default function TrainingPageClient({ isAdmin }: { isAdmin: boolean }) {
                     </a>
                     {m.description && (
                       <p className="mt-2 text-[13px] text-[#6B7280] whitespace-pre-wrap">{m.description}</p>
+                    )}
+                    {m.quizKey && (
+                      (() => {
+                        const label = buildMyResultLabel(myAttempts, m.quizKey);
+                        return (
+                          <p
+                            className={`mt-2 text-[13px] ${
+                              label === "未受験" ? "text-[#9CA3AF]" : "text-[#374151] font-medium"
+                            }`}
+                          >
+                            自分の実績: {label}
+                          </p>
+                        );
+                      })()
                     )}
                     <div className="mt-auto pt-4 flex items-center gap-2">
                       <a

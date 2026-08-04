@@ -120,6 +120,15 @@
   .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
   .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
 
+
+  /* 記録ステータス表示 */
+  .rec{
+    margin-top:14px;font-size:12px;color:var(--sub);text-align:center;
+    min-height:1.4em;
+  }
+  .rec.ok{color:var(--green);font-weight:700;}
+  .rec.ng{color:var(--amber);font-weight:700;}
+
   @media (prefers-reduced-motion:reduce){
     *{transition:none !important;}
   }
@@ -169,6 +178,7 @@
       <h2>間違えた問題</h2>
       <ul id="wrong-list"></ul>
     </div>
+    <div class="rec" id="rec"></div>
     <div class="actions" id="result-actions"></div>
   </section>
 
@@ -183,6 +193,9 @@
    a: 正解の選択肢番号(0始まり)
    exp: 解説(ビズスタジオの実務に合わせた内容)
 ===================================================================== */
+const QUIZ_KEY = "ca_ra";
+const QUIZ_TITLE = "CA・RAクイズ";
+
 const CATS = {
   A: "役割と仕組み",
   B: "仕事の流れ",
@@ -191,74 +204,122 @@ const CATS = {
 
 const QUESTIONS = [
 /* ---------- A: 役割と仕組み (7問) ---------- */
-{cat:"A", q:"人材紹介会社のビジネスモデルの基本は?",
+{qid:"ca_ra-A01", cat:"A", q:"人材紹介会社のビジネスモデルの基本は?",
  o:["求職者が月額料金を払う","求職者は無料で利用でき、企業が採用成功時に報酬を払う成功報酬型","国からの補助金で運営する","広告収入で運営する"],
  a:1, exp:"求職者無料+企業からの成功報酬。この構造を1文で説明できることが、求職者の警戒を解く第一歩。"},
-{cat:"A", q:"CA(キャリアアドバイザー)の役割は?",
+{qid:"ca_ra-A02", cat:"A", q:"CA(キャリアアドバイザー)の役割は?",
  o:["企業の採用ニーズを把握する","求職者に寄り添い、キャリアや希望を理解して最適な求人を提案する","給与計算を行う","広告を運用する"],
  a:1, exp:"CAは求職者の「伴走者」。面談で強みや志向を引き出し、書類添削・面接対策・内定後フォローまで一貫してサポートする。"},
-{cat:"A", q:"RA(リクルーティングアドバイザー)の役割は?",
+{qid:"ca_ra-A03", cat:"A", q:"RA(リクルーティングアドバイザー)の役割は?",
  o:["求職者の面談を担当する","採用したい企業と向き合い、採用課題の整理から求人作成・候補者推薦・選考管理まで行う","会社の経理を担当する","面接会場を設営する"],
  a:1, exp:"RAは企業の「採用パートナー」。経営課題や組織の状況から「どんな人材が必要か」を一緒に整理するところから始まる。"},
-{cat:"A", q:"「両面型」とは?",
+{qid:"ca_ra-A04", cat:"A", q:"「両面型」とは?",
  o:["2人1組で営業すること","CAとRAの両方を一人の担当者が兼務するスタイル","昼と夜で仕事を変えること","2つの会社に所属すること"],
  a:1, exp:"求職者と企業の双方を一人で担当する。業務範囲は広いが、マッチングの精度を自分でコントロールできる面白さがある。"},
-{cat:"A", q:"CA・RAそれぞれの「向き合う相手」の正しい組み合わせは?",
+{qid:"ca_ra-A05", cat:"A", q:"CA・RAそれぞれの「向き合う相手」の正しい組み合わせは?",
  o:["CA=企業 / RA=求職者","CA=求職者 / RA=企業","CA=株主 / RA=銀行","両方とも企業だけ"],
  a:1, exp:"CA=Candidate(求職者)側、RA=Recruiting(企業)側と覚える。面接でも面談でも即答必須の基本用語。"},
-{cat:"A", q:"CA・RAの成果に共通してつながることは?",
+{qid:"ca_ra-A06", cat:"A", q:"CA・RAの成果に共通してつながることは?",
  o:["電話の件数だけを増やすこと","「人」を深く理解すること","値引きをすること","長時間労働をすること"],
  a:1, exp:"求職者理解も企業理解も、突き詰めれば人の理解。記事のまとめでも「人を深く理解することが成果につながる」と結ばれている。"},
-{cat:"A", q:"AIが進化する時代でも人材紹介に人が介在する価値があるのはなぜ?",
+{qid:"ca_ra-A07", cat:"A", q:"AIが進化する時代でも人材紹介に人が介在する価値があるのはなぜ?",
  o:["法律で決まっているから","求人票に載らない企業の魅力や、履歴書に書ききれない求職者のポテンシャルを、対話で引き出せるから","AIより計算が速いから","人がいないと請求書が出せないから"],
  a:1, exp:"「この人にはこの企業が合う」という直感と対話による気づきが人の介在価値。当社がAIを使い倒しつつ面談を大事にする理由もここにある。"},
 
 /* ---------- B: 仕事の流れ (7問) ---------- */
-{cat:"B", q:"CAの仕事の最初のステップは?",
+{qid:"ca_ra-B01", cat:"B", q:"CAの仕事の最初のステップは?",
  o:["いきなり面接対策をする","転職サイト登録者へのスカウト送信や問い合わせ対応など、求職者との接点をつくること","企業に電話をかけること","求人票を作ること"],
  a:1, exp:"すべてはスカウト・問い合わせ対応から始まる。当社でスカウト配信をRPAで自動化しているのは、この入口を大量に確保するため。"},
-{cat:"B", q:"ヒアリング面談で聞き取ることとして記事に挙がっていたのは?",
+{qid:"ca_ra-B02", cat:"B", q:"ヒアリング面談で聞き取ることとして記事に挙がっていたのは?",
  o:["血液型と星座","転職を考えたきっかけ・これまでの経験・希望する働き方や条件","家族全員の年収","昨日の夕食"],
  a:1, exp:"きっかけ(Why)・経験(Can)・希望(Will)の3点が面談の柱。ここを丁寧に聞くから、合った求人を提案できる。"},
-{cat:"B", q:"応募が決まった後にCAが行う選考サポートは?",
+{qid:"ca_ra-B03", cat:"B", q:"応募が決まった後にCAが行う選考サポートは?",
  o:["何もしない。応募したら本人任せ","履歴書・職務経歴書のブラッシュアップと面接練習","本人の代わりに面接を受ける","企業に賄賂を送る"],
  a:1, exp:"書類添削と面接対策はCAの腕の見せどころ。今日14時に同席してもらう面接対策が、まさにこの工程の実物。"},
-{cat:"B", q:"内定が出た後のCAの仕事は?",
+{qid:"ca_ra-B04", cat:"B", q:"内定が出た後のCAの仕事は?",
  o:["内定が出たら業務終了","入社日の調整・条件交渉・入社後のフォローまで伴走する","次の求職者だけに集中する","企業との連絡を絶つ"],
  a:1, exp:"内定はゴールではない。入社日調整・条件交渉・入社後フォローまでやりきって初めて「最初から最後まで寄り添う伴走者」になる。"},
-{cat:"B", q:"RAの仕事のスタート地点は?",
+{qid:"ca_ra-B05", cat:"B", q:"RAの仕事のスタート地点は?",
  o:["求職者との面談","企業との関係構築と、採用課題・ニーズのヒアリング","面接練習","広告デザイン"],
  a:1, exp:"新規企業に電話やメールでアプローチし、採用の課題を聞くところから。企業が求める人材像を正確に掴むことが全ての起点。"},
-{cat:"B", q:"RAが求人票を作成した後に行うことは?",
+{qid:"ca_ra-B06", cat:"B", q:"RAが求人票を作成した後に行うことは?",
  o:["求人票を金庫にしまう","社内のCAに展開し、CAから推薦された候補者を企業に提案する","そのまま放置する","求職者に直接電話する"],
  a:1, exp:"RA→CA→求職者、という社内連携の流れ。CAとRAは分業でありチーム。推薦後は書類選考〜内定まで選考プロセス全体をRAが管理する。"},
-{cat:"B", q:"採用がうまく進まないとき、RAが行うことがある提案は?",
+{qid:"ca_ra-B07", cat:"B", q:"採用がうまく進まないとき、RAが行うことがある提案は?",
  o:["採用をあきらめさせる","採用要件の見直しや選考フローの改善提案","求人票の偽装","手数料の値上げ"],
  a:1, exp:"「この条件では採れません」と言えるのが採用パートナー。企業と並走し、要件やフローまで踏み込んで改善する。"},
 
 /* ---------- C: 魅力とキャリアパス (6問) ---------- */
-{cat:"C", q:"CA・RAという仕事のインパクトとして記事が挙げていたのは?",
+{qid:"ca_ra-C01", cat:"C", q:"CA・RAという仕事のインパクトとして記事が挙げていたのは?",
  o:["座って仕事ができる","求職者の人生の転換点と、企業の未来の両方に深く関われる","出張が多い","有名人に会える"],
  a:1, exp:"転職は人生の大きな転機であり、1人の採用が組織の未来を左右する。その両方に関われる数少ないポジション。"},
-{cat:"C", q:"CAの魅力として記事に書かれていたのは?",
+{qid:"ca_ra-C02", cat:"C", q:"CAの魅力として記事に書かれていたのは?",
  o:["ノルマがないこと","不安を抱える求職者の背中を押し、内定時の「ありがとう」に立ち会えること","誰とも話さなくていいこと","毎日定時で帰れること"],
  a:1, exp:"内定が決まったときの「ありがとう」は何度経験しても心に響く。奥村さんも面談動画で、求職者がこの話に一番強く共感していたと分析していた。"},
-{cat:"C", q:"RAの魅力として記事に書かれていたのは?",
+{qid:"ca_ra-C03", cat:"C", q:"RAの魅力として記事に書かれていたのは?",
  o:["在宅勤務ができること","企業の経営層と直接やり取りする機会が多く、ビジネス全体を俯瞰する視点が養われること","力仕事がないこと","転勤がないこと"],
  a:1, exp:"「この人材がいれば事業が加速する」採用を実現する達成感+経営視点が育つ。ビジネスインパクトの大きさがRAの醍醐味。"},
-{cat:"C", q:"CA・RA経験からのキャリアパスとして記事に挙がっていたのは?",
+{qid:"ca_ra-C04", cat:"C", q:"CA・RA経験からのキャリアパスとして記事に挙がっていたのは?",
  o:["人材業界の中でしか通用しない","両面型へのシフト/事業会社の人事/人事コンサルタント/HRサービスの営業・CS/独立・起業","医療系国家資格の取得","キャリアパスは存在しない"],
  a:1, exp:"候補者を見極める力・採用ノウハウは事業会社の人事でも即戦力になる。業界内外に道が広がる仕事。"},
-{cat:"C", q:"人材紹介業で独立・起業しやすいと言われる理由は?",
+{qid:"ca_ra-C05", cat:"C", q:"人材紹介業で独立・起業しやすいと言われる理由は?",
  o:["国が全額出資してくれるから","比較的少ない初期投資で始められ、培った人脈やノウハウを活かせるから","誰でも無審査で始められるから","競合が存在しないから"],
  a:1, exp:"設備投資がほぼ不要なビジネス。専門領域に特化した小規模エージェントとして独自のポジションを築く道もある。"},
-{cat:"C", q:"CA⇔RA・両面型を経験すると市場価値が高まる理由は?",
+{qid:"ca_ra-C06", cat:"C", q:"CA⇔RA・両面型を経験すると市場価値が高まる理由は?",
  o:["肩書きが2つになるから","求職者と企業の双方の視点を持つことでマッチングの質が飛躍的に向上するから","労働時間が2倍になるから","名刺が増えるから"],
  a:1, exp:"両側の視点を持つ人はマッチング精度が上がる。まずCAとして片側を極め、その後もう片側へ、が王道ルート。"}
 ];
 
 
 /* ===================================================================== */
+
+
+/* =====================================================================
+   回答記録（ポータルへ送信）
+   同一オリジンの /api/training/quiz-attempts にPOSTする。
+   未ログイン(401)や失敗時は黙って続行し、クイズの利用は妨げない。
+===================================================================== */
+const ATTEMPT_ENDPOINT = "/api/training/quiz-attempts";
+let attemptLog = [];      // 今の周回の解答明細
+let roundStartedAt = null;
+
+function recordAnswer(q, chosenIndex, isCorrect, position){
+  attemptLog.push({
+    qid: q.qid,
+    category: q.cat,
+    questionText: q.q,
+    chosenText: q.o[chosenIndex],
+    correctText: q.o[q.a],
+    isCorrect: !!isCorrect,
+    position: position
+  });
+}
+
+async function sendAttempt(payload){
+  const el = document.getElementById("rec");
+  if(el){ el.className = "rec"; el.textContent = "記録を保存しています…"; }
+  try{
+    const res = await fetch(ATTEMPT_ENDPOINT, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if(!el) return;
+    if(res.ok){
+      el.className = "rec ok";
+      el.textContent = "この結果を記録しました";
+    }else if(res.status === 401){
+      el.className = "rec ng";
+      el.textContent = "未ログインのため記録できませんでした（ポータルにログインしてから開き直してください）";
+    }else{
+      el.className = "rec ng";
+      el.textContent = "記録に失敗しました（結果は画面で確認できます）";
+    }
+  }catch(e){
+    if(el){ el.className = "rec ng"; el.textContent = "記録に失敗しました（オフラインの可能性があります）"; }
+  }
+}
 
 const $ = id => document.getElementById(id);
 const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
@@ -315,6 +376,8 @@ function beginRound(){
   cur = 0;
   wrong = [];
   correctCount = 0;
+  attemptLog = [];
+  roundStartedAt = new Date().toISOString();
   show("quiz");
   renderQuestion();
 }
@@ -335,7 +398,7 @@ function renderQuestion(){
     const b = document.createElement("button");
     b.className = "opt";
     b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
-    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs));
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs, oi));
     optWrap.appendChild(b);
   });
 
@@ -344,7 +407,8 @@ function renderQuestion(){
   $("btn-next").style.display = "none";
 }
 
-function answer(btn, isCorrect, q, optWrap, idxs){
+function answer(btn, isCorrect, q, optWrap, idxs, chosenIndex){
+  recordAnswer(q, chosenIndex, isCorrect, cur + 1);
   [...optWrap.children].forEach((b,pos)=>{
     b.disabled = true;
     if(idxs[pos]===q.a) b.classList.add("correct");
@@ -374,6 +438,18 @@ $("btn-next").addEventListener("click", ()=>{
 function showResult(){
   show("result");
   const total = order.length;
+  sendAttempt({
+    quizKey: QUIZ_KEY,
+    quizTitle: QUIZ_TITLE,
+    mode: modeLabel,
+    round: round,
+    startedAt: roundStartedAt,
+    finishedAt: new Date().toISOString(),
+    totalQuestions: total,
+    correctCount: correctCount,
+    cleared: wrong.length === 0,
+    answers: attemptLog
+  });
   $("score-n").textContent = correctCount;
   $("score-t").textContent = total;
   const hero = $("score-hero");

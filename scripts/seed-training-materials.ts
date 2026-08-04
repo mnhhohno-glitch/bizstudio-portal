@@ -17,6 +17,7 @@ type MaterialDef = {
   category: string;
   url: string;
   tag: string;
+  quizKey: string;
   sortOrder: number;
 };
 
@@ -27,6 +28,7 @@ const MATERIALS: MaterialDef[] = [
     category: "新人研修",
     url: "/training/quiz/bizstudio_quiz_lv1.html",
     tag: "クイズ",
+    quizKey: "lv1",
     sortOrder: 10,
   },
   {
@@ -35,6 +37,7 @@ const MATERIALS: MaterialDef[] = [
     category: "新人研修",
     url: "/training/quiz/bizstudio_quiz_sales.html",
     tag: "クイズ",
+    quizKey: "sales",
     sortOrder: 20,
   },
   {
@@ -43,6 +46,7 @@ const MATERIALS: MaterialDef[] = [
     category: "新人研修",
     url: "/training/quiz/bizstudio_quiz_ca_ra.html",
     tag: "クイズ",
+    quizKey: "ca_ra",
     sortOrder: 30,
   },
 ];
@@ -62,10 +66,11 @@ async function main() {
           description: def.description,
           category: def.category,
           tag: def.tag,
+          quizKey: def.quizKey,
           sortOrder: def.sortOrder,
         },
       });
-      console.log(`  更新: ${updated.title} (id=${updated.id})`);
+      console.log(`  更新: ${updated.title} (id=${updated.id}, quizKey=${updated.quizKey})`);
     } else {
       const created = await prisma.trainingMaterial.create({
         data: {
@@ -74,6 +79,7 @@ async function main() {
           category: def.category,
           url: def.url,
           tag: def.tag,
+          quizKey: def.quizKey,
           sortOrder: def.sortOrder,
           isPublished: true,
         },

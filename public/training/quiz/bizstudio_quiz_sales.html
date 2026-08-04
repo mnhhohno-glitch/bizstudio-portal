@@ -120,6 +120,15 @@
   .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
   .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
 
+
+  /* 記録ステータス表示 */
+  .rec{
+    margin-top:14px;font-size:12px;color:var(--sub);text-align:center;
+    min-height:1.4em;
+  }
+  .rec.ok{color:var(--green);font-weight:700;}
+  .rec.ng{color:var(--amber);font-weight:700;}
+
   @media (prefers-reduced-motion:reduce){
     *{transition:none !important;}
   }
@@ -169,6 +178,7 @@
       <h2>間違えた問題</h2>
       <ul id="wrong-list"></ul>
     </div>
+    <div class="rec" id="rec"></div>
     <div class="actions" id="result-actions"></div>
   </section>
 
@@ -183,6 +193,9 @@
    a: 正解の選択肢番号(0始まり)
    exp: 解説(ビズスタジオの実務に合わせた内容)
 ===================================================================== */
+const QUIZ_KEY = "sales";
+const QUIZ_TITLE = "営業職クイズ";
+
 const CATS = {
   A: "営業の分類(4つの軸)",
   B: "未経験からの始め方",
@@ -191,74 +204,122 @@ const CATS = {
 
 const QUESTIONS = [
 /* ---------- A: 営業の分類 (8問) ---------- */
-{cat:"A", q:"営業という仕事の本質として、記事で説明されていたのは?",
+{qid:"sales-A01", cat:"A", q:"営業という仕事の本質として、記事で説明されていたのは?",
  o:["とにかく商品を売り込むこと","相手の課題を理解し、最適な提案を行い、信頼関係を築くこと","電話を1日中かけ続けること","値引き交渉で勝つこと"],
  a:1, exp:"営業=売り込みではなく、課題理解→提案→信頼構築。ヒアリング、提案書作成、社内調整、アフターフォローまで含む幅広い仕事。"},
-{cat:"A", q:"営業を整理する4つの分類軸の組み合わせとして正しいのは?",
+{qid:"sales-A02", cat:"A", q:"営業を整理する4つの分類軸の組み合わせとして正しいのは?",
  o:["年齢 / 性別 / 学歴 / 経験","対象 / 顧客との関係性 / アプローチ方法 / 商材の種類","国内 / 海外 / 都市 / 地方","正社員 / 契約 / 派遣 / 業務委託"],
  a:1, exp:"①対象(法人/個人) ②関係性(新規/既存) ③アプローチ(反響/アウトバウンド) ④商材(有形/無形)。求人票を見たらこの4軸で分類する癖をつける。"},
-{cat:"A", q:"法人営業(BtoB)の特徴として正しいのは?",
+{qid:"sales-A03", cat:"A", q:"法人営業(BtoB)の特徴として正しいのは?",
  o:["一般消費者を相手にする","取引金額が大きく、複数の担当者と関わりながら進めることが多い","必ず一人で完結する仕事","飛び込み訪問しかない"],
  a:1, exp:"法人営業=企業・団体相手。金額が大きく、チームで動くことも多い。研修が充実した企業なら未経験でも始めやすい。"},
-{cat:"A", q:"個人営業(BtoC)の代表的な商材として記事に挙がっていたのは?",
+{qid:"sales-A04", cat:"A", q:"個人営業(BtoC)の代表的な商材として記事に挙がっていたのは?",
  o:["工作機械・半導体","保険・不動産・通信サービス","法人向けコンサルティング","業務用ソフトウェア"],
  a:1, exp:"個人営業は一般消費者が相手。保険・不動産・通信が代表例で、お客様一人ひとりと直接やり取りする場面が多い。"},
-{cat:"A", q:"新規営業の特徴として正しいのは?",
+{qid:"sales-A05", cat:"A", q:"新規営業の特徴として正しいのは?",
  o:["すでに取引のあるお客様だけを担当する","ゼロから関係を築く面白さがある一方、断られることも多く精神的なタフさが求められる","誰でもストレスなくできる","注文を受けるだけの仕事"],
  a:1, exp:"新規開拓は断られる回数が多い。メンタルの強さが求められるため、求職者のタイプによって向き不向きが分かれる。"},
-{cat:"A", q:"既存営業(ルート営業)の説明として正しいのは?",
+{qid:"sales-A06", cat:"A", q:"既存営業(ルート営業)の説明として正しいのは?",
  o:["飛び込み訪問が中心","取引のあるお客様との関係を深めながら追加提案やフォローを行う。未経験でも始めやすい","新しいお客様を毎日探す","営業の中で一番難易度が高い"],
  a:1, exp:"すでに関係性がある状態から始められる安定型。未経験者や「新しい人に声をかけるのが苦手」な人に向く。求人提案の頻出パターン。"},
-{cat:"A", q:"反響営業とは?",
+{qid:"sales-A07", cat:"A", q:"反響営業とは?",
  o:["自分から電話をかけまくる営業","お客様からの問い合わせや資料請求をきっかけに始める営業","上司の指示にただ反応する営業","クレーム対応専門の営業"],
  a:1, exp:"相手はすでに興味を持っているので「売り込む」より「相談に乗る」感覚。接客業出身者が入りやすい営業スタイル。"},
-{cat:"A", q:"無形商材の営業に特に求められる力は?",
+{qid:"sales-A08", cat:"A", q:"無形商材の営業に特に求められる力は?",
  o:["商品を持ち運ぶ体力","形のないサービスの価値を、課題理解にもとづいて言葉で伝える力","商品を実際に見せるプレゼン道具","在庫管理の知識"],
  a:1, exp:"ITサービス・コンサル・保険など形がない商材は、価値を言語化する力が問われる。有形(機械・食品など)は実物を見せられる分、提案しやすい。"},
 
 /* ---------- B: 未経験からの始め方 (6問) ---------- */
-{cat:"B", q:"未経験から始めやすい営業として記事に挙がっていた4つの組み合わせは?",
+{qid:"sales-B01", cat:"B", q:"未経験から始めやすい営業として記事に挙がっていた4つの組み合わせは?",
  o:["飛び込み営業/テレアポ/深夜営業/海外営業","反響営業/既存顧客フォロー/研修が充実した法人営業/わかりやすい商材の営業","新規開拓/無形商材/経営層向け/金融専門","どの営業も難易度は同じ"],
  a:1, exp:"この4つは求職者への提案でもそのまま使える型。「営業は無理」と言う求職者には、この入口から見せる。"},
-{cat:"B", q:"反響営業が未経験者に向いている理由は?",
+{qid:"sales-B02", cat:"B", q:"反響営業が未経験者に向いている理由は?",
  o:["ノルマがないから","すでに興味を持っているお客様が相手なので、相談に乗る感覚で進められるから","誰とも話さなくていいから","給与が一番高いから"],
  a:1, exp:"問い合わせ起点=関心のある人が相手。接客・販売経験者の対応力がそのまま活きる。"},
-{cat:"B", q:"「わかりやすい商材」を扱う営業が未経験向きな理由は?",
+{qid:"sales-B03", cat:"B", q:"「わかりやすい商材」を扱う営業が未経験向きな理由は?",
  o:["価格が安いから","商品理解のハードルが低く、自分が使ったことのある商品なら自然な言葉で伝えられるから","誰も競合がいないから","資格が不要だから"],
  a:1, exp:"日用品・食品・通信など身近な商材は理解が早い。「自分が良さを分かっている物」は自然に語れる。"},
-{cat:"B", q:"営業職がキャリアの選択肢になりやすい理由として記事に挙がっていたのは?",
+{qid:"sales-B04", cat:"B", q:"営業職がキャリアの選択肢になりやすい理由として記事に挙がっていたのは?",
  o:["楽な仕事だから","汎用的なビジネススキルが身につき、未経験でも挑戦しやすく、求人数も多いから","必ず高収入になるから","転勤がないから"],
  a:1, exp:"コミュニケーション力・課題発見力・提案力・交渉力など、どの職種でも使える力が身につく。だから未経験転職の受け皿として求人が多い。"},
-{cat:"B", q:"営業が「成果や成長を実感しやすい」と言われる理由は?",
+{qid:"sales-B05", cat:"B", q:"営業が「成果や成長を実感しやすい」と言われる理由は?",
  o:["evaluationが年1回だから","自分の行動が成果に直結しやすく、感謝や目標達成の場面が日常的にあるから","失敗しても誰にも気づかれないから","成果が全て運で決まるから"],
  a:1, exp:"「ありがとう」と言われる場面や目標達成の手応えが日常的にある。やりがい訴求の定番ポイント。"},
-{cat:"B", q:"営業の数値目標(ノルマ)について、記事の捉え方は?",
+{qid:"sales-B06", cat:"B", q:"営業の数値目標(ノルマ)について、記事の捉え方は?",
  o:["ノルマは悪であり避けるべき","目標があることで自分の成長を測りやすく、達成時の充実感も大きい","目標は形だけで誰も見ていない","目標未達だと即クビになる"],
  a:1, exp:"「ノルマに追われる」ではなく「成長の物差し」という捉え方。ネガティブな営業イメージを持つ求職者への切り返しに使える。"},
 
 /* ---------- C: キャリアと適性 (6問) ---------- */
-{cat:"C", q:"営業経験からのキャリア展開として記事に挙がっていたのは?",
+{qid:"sales-C01", cat:"C", q:"営業経験からのキャリア展開として記事に挙がっていたのは?",
  o:["営業以外への道はない","他業界の営業/人事・採用/広報/マネジメント/事業企画など幅広く展開できる","医師や弁護士になれる","キャリア展開には資格が必須"],
  a:1, exp:"営業で培った「人と向き合う力」は職種を越えて通用する。「営業→人事」は求職者へのキャリアパス提案の定番。"},
-{cat:"C", q:"人事・採用の仕事で特に活きる営業スキルは?",
+{qid:"sales-C02", cat:"C", q:"人事・採用の仕事で特に活きる営業スキルは?",
  o:["値引き交渉力","傾聴力と、相手に魅力を伝える力","在庫管理能力","プログラミング力"],
  a:1, exp:"採用は候補者に会社の魅力を伝える仕事。営業のヒアリング力・伝える力がそのまま武器になる。"},
-{cat:"C", q:"営業に向いている人の特徴として記事で挙げられていたのは?",
+{qid:"sales-C03", cat:"C", q:"営業に向いている人の特徴として記事で挙げられていたのは?",
  o:["話がうまく押しが強い人だけ","接客・販売経験がある/相手の話を丁寧に聞ける/目標に向かって取り組める/キャリアの幅を広げたい人","声が大きい人","飲み会が好きな人"],
  a:1, exp:"「話す力」より「聞く力」。押しの強さは必須ではない。営業=話術のイメージを崩すのが提案の第一歩。"},
-{cat:"C", q:"接客・販売の経験者が営業に向いていると言える理由は?",
+{qid:"sales-C04", cat:"C", q:"接客・販売の経験者が営業に向いていると言える理由は?",
  o:["立ち仕事に慣れているから","「お客様の要望を聞いて、合った商品を提案する」という営業の基本の流れをすでに体験しているから","制服を着慣れているから","レジ操作ができるから"],
  a:1, exp:"販売・サービス出身の求職者(当社のメイン層)に営業を提案する際の、一番の根拠になる考え方。"},
-{cat:"C", q:"「営業に向いているかどうか」よりも大切だと記事が結論づけていたのは?",
+{qid:"sales-C05", cat:"C", q:"「営業に向いているかどうか」よりも大切だと記事が結論づけていたのは?",
  o:["学歴が高いかどうか","どの種類の営業が自分に合っているかを見つけること","年収が高いかどうか","会社の知名度"],
  a:1, exp:"飛び込みが苦手でも反響営業なら活きる人がいる。「営業」を一つの型で捉えず、種類で選ぶ。CAの求人提案の考え方そのもの。"},
-{cat:"C", q:"営業経験が異業界への転職で評価されやすい理由は?",
+{qid:"sales-C06", cat:"C", q:"営業経験が異業界への転職で評価されやすい理由は?",
  o:["異業界では営業経験は評価されない","ヒアリング力・提案力・関係構築力は業界が変わっても通用するから","営業経験者は給料が安いから","業界知識が不要だから"],
  a:1, exp:"営業の基本スキルは業界をまたいで持ち運べる。メーカー営業→IT営業などのキャリアチェンジが成立する理由。"}
 ];
 
 
 /* ===================================================================== */
+
+
+/* =====================================================================
+   回答記録（ポータルへ送信）
+   同一オリジンの /api/training/quiz-attempts にPOSTする。
+   未ログイン(401)や失敗時は黙って続行し、クイズの利用は妨げない。
+===================================================================== */
+const ATTEMPT_ENDPOINT = "/api/training/quiz-attempts";
+let attemptLog = [];      // 今の周回の解答明細
+let roundStartedAt = null;
+
+function recordAnswer(q, chosenIndex, isCorrect, position){
+  attemptLog.push({
+    qid: q.qid,
+    category: q.cat,
+    questionText: q.q,
+    chosenText: q.o[chosenIndex],
+    correctText: q.o[q.a],
+    isCorrect: !!isCorrect,
+    position: position
+  });
+}
+
+async function sendAttempt(payload){
+  const el = document.getElementById("rec");
+  if(el){ el.className = "rec"; el.textContent = "記録を保存しています…"; }
+  try{
+    const res = await fetch(ATTEMPT_ENDPOINT, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if(!el) return;
+    if(res.ok){
+      el.className = "rec ok";
+      el.textContent = "この結果を記録しました";
+    }else if(res.status === 401){
+      el.className = "rec ng";
+      el.textContent = "未ログインのため記録できませんでした（ポータルにログインしてから開き直してください）";
+    }else{
+      el.className = "rec ng";
+      el.textContent = "記録に失敗しました（結果は画面で確認できます）";
+    }
+  }catch(e){
+    if(el){ el.className = "rec ng"; el.textContent = "記録に失敗しました（オフラインの可能性があります）"; }
+  }
+}
 
 const $ = id => document.getElementById(id);
 const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
@@ -315,6 +376,8 @@ function beginRound(){
   cur = 0;
   wrong = [];
   correctCount = 0;
+  attemptLog = [];
+  roundStartedAt = new Date().toISOString();
   show("quiz");
   renderQuestion();
 }
@@ -335,7 +398,7 @@ function renderQuestion(){
     const b = document.createElement("button");
     b.className = "opt";
     b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
-    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs));
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs, oi));
     optWrap.appendChild(b);
   });
 
@@ -344,7 +407,8 @@ function renderQuestion(){
   $("btn-next").style.display = "none";
 }
 
-function answer(btn, isCorrect, q, optWrap, idxs){
+function answer(btn, isCorrect, q, optWrap, idxs, chosenIndex){
+  recordAnswer(q, chosenIndex, isCorrect, cur + 1);
   [...optWrap.children].forEach((b,pos)=>{
     b.disabled = true;
     if(idxs[pos]===q.a) b.classList.add("correct");
@@ -374,6 +438,18 @@ $("btn-next").addEventListener("click", ()=>{
 function showResult(){
   show("result");
   const total = order.length;
+  sendAttempt({
+    quizKey: QUIZ_KEY,
+    quizTitle: QUIZ_TITLE,
+    mode: modeLabel,
+    round: round,
+    startedAt: roundStartedAt,
+    finishedAt: new Date().toISOString(),
+    totalQuestions: total,
+    correctCount: correctCount,
+    cleared: wrong.length === 0,
+    answers: attemptLog
+  });
   $("score-n").textContent = correctCount;
   $("score-t").textContent = total;
   const hero = $("score-hero");
