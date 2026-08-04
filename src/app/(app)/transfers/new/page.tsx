@@ -91,8 +91,9 @@ export default function NewTransferPage() {
   const [expiresDays, setExpiresDays] = useState(30);
   const [passwordInEmail, setPasswordInEmail] = useState(true);
   const [step, setStep] = useState<"form" | "confirm">("form");
-  // 確認画面で編集する（1）本文。確認画面に入るたびに既定文面＋添え書きから再合成する
+  // 確認画面で編集する（1）本文と（4）署名。確認画面に入るたびに既定文面から再合成する
   const [editableBody, setEditableBody] = useState("");
+  const [editableSignature, setEditableSignature] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [senderInfo, setSenderInfo] = useState<{ name: string; email: string } | null>(null);
@@ -163,6 +164,9 @@ export default function NewTransferPage() {
     if (!canProceed) return;
     // 添え書きを下書きとして既定文面に合成する（確認画面に入り直すたびに再合成 = 添え書きの変更を反映）
     setEditableBody(buildDefaultTransferBodyIntro(message));
+    setEditableSignature(
+      buildTransferSignature(senderInfo?.name ?? "", senderInfo?.email ?? "")
+    );
     setStep("confirm");
     window.scrollTo({ top: 0 });
   };
@@ -201,8 +205,9 @@ export default function NewTransferPage() {
         body: JSON.stringify({
           recipientEmails: recipients,
           subject: subject.trim() || undefined,
-          // 確認画面で編集された（1）本文の最終形をそのまま送る（message 列に保存される）
+          // 確認画面で編集された（1）本文・（4）署名の最終形をそのまま送る（message 列に署名込みで保存される）
           message: editableBody.trim() || undefined,
+          signature: editableSignature.trim(), // 空文字 = 署名なしの明示指定
           expiresDays,
           passwordInEmail,
           files: uploaded,
@@ -351,17 +356,15 @@ export default function NewTransferPage() {
 
   // ---------- 送信前の確認画面 ----------
   if (step === "confirm") {
-    // （2）（3）（4）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
-    const fixedPreview =
-      buildTransferFixedBlock({
-        url: "（送信時に宛先ごとに自動発行されます）",
-        password: "（送信時に自動生成されます）",
-        passwordInEmail,
-        expiresAt: calcExpiresAt(expiresDays),
-        fileNames: uploads.map((u) => u.file.name),
-      }) +
-      "\n\n" +
-      buildTransferSignature(senderInfo?.name ?? "（送信者名）", senderInfo?.email ?? "");
+    // （2）（3）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
+    // （署名（4）は下の署名欄で編集可能になったためここには含めない）
+    const fixedPreview = buildTransferFixedBlock({
+      url: "（送信時に宛先ごとに自動発行されます）",
+      password: "（送信時に自動生成されます）",
+      passwordInEmail,
+      expiresAt: calcExpiresAt(expiresDays),
+      fileNames: uploads.map((u) => u.file.name),
+    });
 
     return (
       <div className="max-w-xl">
@@ -420,6 +423,20 @@ export default function NewTransferPage() {
             <pre className="whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-xs leading-5 text-gray-500 font-sans">
               {fixedPreview}
             </pre>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1">署名（編集できます）</p>
+            <textarea
+              value={editableSignature}
+              onChange={(e) => setEditableSignature(e.target.value)}
+              disabled={sending}
+              rows={Math.min(10, Math.max(3, editableSignature.split("\n").length + 1))}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              役職・住所・電話番号などを自由に追記できます。空にすると署名なしで送信されます。
+            </p>
           </div>
 
           {sending && uploads.some((u) => u.status === "uploading") && (

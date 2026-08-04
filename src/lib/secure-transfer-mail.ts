@@ -25,10 +25,10 @@ export function buildTransferUrl(token: string): string {
  * - subject: 入力された件名をそのまま Subject ヘッダに使う（空欄時は既定文言）。
  *   staging の【検証】プレフィックスは sendResendEmail 側で入力件名にも付与される。
  * - body: 確認画面で編集された（1）本文の最終形（■件名 欄は廃止・本文には出さない）。
+ * - signature: 確認画面で編集された（4）署名の最終形（空なら署名なし）。
  */
 export async function sendTransferNoticeEmail(params: {
   to: string;
-  senderName: string;
   senderEmail: string;
   url: string;
   password: string;
@@ -37,6 +37,7 @@ export async function sendTransferNoticeEmail(params: {
   fileNames: string[];
   subject?: string | null;
   body: string;
+  signature: string;
 }): Promise<SendMailResult> {
   return sendResendEmail({
     to: params.to,

@@ -100,19 +100,18 @@ export function buildTransferFixedBlock(params: {
   return lines.join("\n");
 }
 
-/** （4）署名。自動・編集不可。 */
+/** （4）署名の既定文面。確認画面の署名欄の初期値（署名欄も全文編集可能）。 */
 export function buildTransferSignature(senderName: string, senderEmail: string): string {
   return ["──", `株式会社ビズスタジオ ${senderName}`, senderEmail].join("\n");
 }
 
 /**
  * 受信者向け案内メールの最終本文: （1）→（2）（3）→（4）を空行で連結。
- * body は確認画面で編集された全文（空にされた場合はそのまま省略される）。
+ * body / signature は確認画面で編集された全文（空にされた場合はその領域ごと省略される）。
  */
 export function buildTransferNoticeBody(params: {
   body: string;
-  senderName: string;
-  senderEmail: string;
+  signature: string;
   url: string;
   password: string;
   passwordInEmail: boolean;
@@ -131,6 +130,7 @@ export function buildTransferNoticeBody(params: {
       fileNames: params.fileNames,
     })
   );
-  parts.push(buildTransferSignature(params.senderName, params.senderEmail));
+  const signature = params.signature.trim();
+  if (signature) parts.push(signature);
   return parts.join("\n\n");
 }

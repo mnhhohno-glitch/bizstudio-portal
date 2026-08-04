@@ -25,7 +25,7 @@ import {
   calcExpiresAt,
   getTransferStatus,
 } from "@/lib/secure-transfer";
-import { MAX_TRANSFER_RECIPIENTS } from "@/lib/secure-transfer-shared";
+import { MAX_TRANSFER_RECIPIENTS, buildTransferSignature } from "@/lib/secure-transfer-shared";
 import { buildTransferUrl, sendTransferNoticeEmail } from "@/lib/secure-transfer-mail";
 
 export const runtime = "nodejs";
@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
     recipientEmails?: string[];
     subject?: string; // メール件名（Subject ヘッダ）。空欄は既定文言
     message?: string; // 確認画面で編集された（1）本文の最終形（宛名・挨拶・本題）
+    signature?: string; // 確認画面で編集された（4）署名の最終形。空文字=署名なし、未指定=既定署名
     expiresDays?: number;
     passwordInEmail?: boolean;
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
@@ -197,6 +198,16 @@ export async function POST(req: NextRequest) {
   const batchId = randomUUID();
   const expiresAt = calcExpiresAt(expiresDays);
 
+  // （1）本文と（4）署名は全宛先で共通。
+  // 署名はフィールド未指定（旧クライアント等）なら既定署名、空文字は「署名なし」の明示指定として扱う。
+  const bodyText = body.message?.trim() ?? "";
+  const signatureText =
+    typeof body.signature === "string"
+      ? body.signature.trim()
+      : buildTransferSignature(user.name ?? user.email, user.email);
+  // message 列には署名まで含めた編集内容の最終形を保存する（新規列は追加しない・確定仕様）
+  const storedMessage = [bodyText, signatureText].filter(Boolean).join("\n\n") || null;
+
   // 宛先ごとの処理結果。orphanPaths は「レコードに紐付かなくなった Storage パス」で最後にまとめて掃除する
   // （宛先0の実体は後続宛先の copy 元になるため、途中で消してはいけない）。
   const created: { id: string; recipientEmail: string; url: string; password: string }[] = [];
@@ -269,20 +280,19 @@ export async function POST(req: NextRequest) {
         senderId: user.id,
         recipientEmail,
         subject: body.subject?.trim() || null,
-        message: body.message?.trim() || null,
+        message: storedMessage,
         passwordHash,
         expiresAt,
         passwordInEmail,
         batchId,
         files: { create: recipientFiles },
       },
-      select: { id: true, subject: true, message: true },
+      select: { id: true, subject: true },
     });
 
     const url = buildTransferUrl(token);
     const mailResult = await sendTransferNoticeEmail({
       to: recipientEmail,
-      senderName: user.name ?? user.email,
       senderEmail: user.email,
       url,
       password,
@@ -290,7 +300,8 @@ export async function POST(req: NextRequest) {
       expiresAt,
       fileNames: recipientFiles.map((f) => f.fileName),
       subject: transfer.subject, // 入力値がそのまま Subject ヘッダになる（空は既定文言）
-      body: transfer.message ?? "", // 確認画面で編集された（1）本文の最終形（message 列に保存済み）
+      body: bodyText, // （1）本文。message 列には署名込みの最終形（storedMessage）を保存済み
+      signature: signatureText, // （4）署名。空なら署名なしで送る
     });
 
     if (!mailResult.ok) {
