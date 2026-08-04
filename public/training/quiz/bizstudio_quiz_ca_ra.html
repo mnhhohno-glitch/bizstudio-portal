@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ビズスタジオ 新人CA知識クイズ CA・RA編</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Zen+Antique+Soft&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --green:#155E4E;
+    --green-deep:#0C3F34;
+    --green-tint:#EAF3EF;
+    --ink:#1C2724;
+    --sub:#5C6B66;
+    --line:#D8E2DD;
+    --amber:#B96A12;
+    --amber-tint:#FBF1E3;
+    --red:#A63A2E;
+    --red-tint:#F9ECEA;
+    --bg:#F7FAF8;
+    --card:#FFFFFF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.7;
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 64px;}
+  header.app{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:6px 2px 14px;border-bottom:2px solid var(--green);
+    margin-bottom:20px;
+  }
+  .brand{font-weight:900;font-size:15px;letter-spacing:.06em;color:var(--green-deep);}
+  .brand small{display:block;font-weight:500;font-size:11px;color:var(--sub);letter-spacing:.12em;}
+  .lv{font-family:'Zen Antique Soft',serif;font-size:22px;color:var(--green);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 20px;box-shadow:0 1px 2px rgba(12,63,52,.05);}
+  h1{font-size:22px;font-weight:900;color:var(--green-deep);line-height:1.4;margin-bottom:10px;}
+  .lede{font-size:13.5px;color:var(--sub);margin-bottom:20px;}
+  .lede strong{color:var(--ink);}
+
+  .modes{display:grid;gap:10px;margin-bottom:18px;}
+  .mode-btn{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    width:100%;text-align:left;background:var(--green-tint);
+    border:1.5px solid var(--line);border-radius:12px;
+    padding:14px 16px;font-family:inherit;font-size:15px;font-weight:700;color:var(--green-deep);
+    cursor:pointer;transition:border-color .15s;
+  }
+  .mode-btn:hover,.mode-btn:focus-visible{border-color:var(--green);}
+  .mode-btn .count{font-size:12px;font-weight:500;color:var(--sub);flex-shrink:0;}
+  .rule{font-size:12.5px;color:var(--sub);border-top:1px dashed var(--line);padding-top:14px;}
+  .rule b{color:var(--green-deep);}
+
+  /* progress */
+  .progress{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .pbar>i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .25s;}
+  .pnum{font-size:13px;font-weight:700;color:var(--sub);white-space:nowrap;}
+  .round-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--amber);background:var(--amber-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:12px;
+  }
+  .cat-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--green);background:var(--green-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:10px;
+  }
+  .qtext{font-size:17px;font-weight:700;line-height:1.65;margin-bottom:18px;}
+
+  .opts{display:grid;gap:10px;}
+  .opt{
+    width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);
+    border-radius:12px;padding:13px 15px;font-family:inherit;font-size:14.5px;
+    color:var(--ink);cursor:pointer;line-height:1.55;transition:border-color .12s,background .12s;
+  }
+  .opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--green);}
+  .opt:disabled{cursor:default;}
+  .opt.correct{border-color:var(--green);background:var(--green-tint);font-weight:700;}
+  .opt.wrong{border-color:var(--red);background:var(--red-tint);}
+  .opt .k{display:inline-block;width:1.6em;font-weight:900;color:var(--sub);}
+  .opt.correct .k{color:var(--green);}
+  .opt.wrong .k{color:var(--red);}
+
+  .feedback{margin-top:16px;border-radius:12px;padding:14px 16px;font-size:14px;display:none;}
+  .feedback.ok{display:block;background:var(--green-tint);border:1px solid var(--green);}
+  .feedback.ng{display:block;background:var(--amber-tint);border:1px solid var(--amber);}
+  .feedback .verdict{font-weight:900;font-size:15px;margin-bottom:6px;}
+  .feedback.ok .verdict{color:var(--green-deep);}
+  .feedback.ng .verdict{color:var(--amber);}
+  .feedback .exp{color:var(--ink);}
+
+  .actions{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{
+    appearance:none;border:none;border-radius:99px;padding:12px 26px;
+    font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    background:var(--green);color:#fff;transition:background .15s;
+  }
+  .btn:hover,.btn:focus-visible{background:var(--green-deep);}
+  .btn.ghost{background:#fff;color:var(--green-deep);border:1.5px solid var(--green);}
+  .btn.ghost:hover,.btn.ghost:focus-visible{background:var(--green-tint);}
+  .btn:focus-visible,.opt:focus-visible,.mode-btn:focus-visible{outline:3px solid rgba(21,94,78,.35);outline-offset:2px;}
+
+  /* result */
+  .score-hero{text-align:center;padding:8px 0 18px;}
+  .score-hero .num{font-family:'Zen Antique Soft',serif;font-size:56px;color:var(--green);line-height:1.1;}
+  .score-hero .num small{font-size:22px;color:var(--sub);}
+  .score-hero .msg{font-size:15px;font-weight:700;color:var(--green-deep);margin-top:4px;}
+  .perfect .num{color:var(--amber);}
+  .wrong-list{border-top:1px dashed var(--line);padding-top:14px;margin-top:6px;}
+  .wrong-list h2{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:8px;}
+  .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
+  .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <div class="brand">BizStudio 新人CA研修<small>KNOWLEDGE DRILL</small></div>
+    <div class="lv">Lv.2</div>
+  </header>
+
+  <!-- ===== スタート画面 ===== -->
+  <section id="screen-start" class="card">
+    <h1>CA・RAクイズ<br>満点になるまで繰り返そう</h1>
+    <p class="lede">全20問・4択。記事「キャリアアドバイザー・RAという選択肢」を読んでから挑戦。答えるとその場で<strong>解説</strong>が出ます。1周終わったら<strong>間違えた問題だけ</strong>をもう一度。誤答ゼロになったらクリアです。</p>
+    <div class="modes" id="mode-list"></div>
+    <p class="rule"><b>ルール:</b> 調べながらでOK。ただし解説は必ず読むこと。画面を閉じると記録は消えるので、クリアしたら周回数をメモして報告してください。</p>
+  </section>
+
+  <!-- ===== 出題画面 ===== -->
+  <section id="screen-quiz" class="card" style="display:none;">
+    <div class="round-tag" id="round-tag"></div>
+    <div class="progress">
+      <div class="pbar"><i id="pbar-fill" style="width:0%"></i></div>
+      <div class="pnum" id="pnum"></div>
+    </div>
+    <div class="cat-tag" id="cat-tag"></div>
+    <p class="qtext" id="qtext"></p>
+    <div class="opts" id="opts"></div>
+    <div class="feedback" id="feedback">
+      <div class="verdict" id="verdict"></div>
+      <div class="exp" id="exp"></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-next" style="display:none;">次の問題へ</button>
+    </div>
+  </section>
+
+  <!-- ===== 結果画面 ===== -->
+  <section id="screen-result" class="card">
+    <div class="score-hero" id="score-hero">
+      <div class="num"><span id="score-n">0</span><small> / <span id="score-t">0</span></small></div>
+      <div class="msg" id="score-msg"></div>
+    </div>
+    <div class="wrong-list" id="wrong-wrap">
+      <h2>間違えた問題</h2>
+      <ul id="wrong-list"></ul>
+    </div>
+    <div class="actions" id="result-actions"></div>
+  </section>
+
+  <p class="note">© 株式会社ビズスタジオ 社内研修用 / 問題の追加・修正はHTML内の QUESTIONS を編集</p>
+</div>
+
+<script>
+/* =====================================================================
+   問題データ
+   ここを編集すれば問題の追加・修正ができます。
+   cat: "A"=転職活動の流れと用語 / "B"=人材紹介の仕組み / "C"=求人票の読み方
+   a: 正解の選択肢番号(0始まり)
+   exp: 解説(ビズスタジオの実務に合わせた内容)
+===================================================================== */
+const CATS = {
+  A: "役割と仕組み",
+  B: "仕事の流れ",
+  C: "魅力とキャリアパス"
+};
+
+const QUESTIONS = [
+/* ---------- A: 役割と仕組み (7問) ---------- */
+{cat:"A", q:"人材紹介会社のビジネスモデルの基本は?",
+ o:["求職者が月額料金を払う","求職者は無料で利用でき、企業が採用成功時に報酬を払う成功報酬型","国からの補助金で運営する","広告収入で運営する"],
+ a:1, exp:"求職者無料+企業からの成功報酬。この構造を1文で説明できることが、求職者の警戒を解く第一歩。"},
+{cat:"A", q:"CA(キャリアアドバイザー)の役割は?",
+ o:["企業の採用ニーズを把握する","求職者に寄り添い、キャリアや希望を理解して最適な求人を提案する","給与計算を行う","広告を運用する"],
+ a:1, exp:"CAは求職者の「伴走者」。面談で強みや志向を引き出し、書類添削・面接対策・内定後フォローまで一貫してサポートする。"},
+{cat:"A", q:"RA(リクルーティングアドバイザー)の役割は?",
+ o:["求職者の面談を担当する","採用したい企業と向き合い、採用課題の整理から求人作成・候補者推薦・選考管理まで行う","会社の経理を担当する","面接会場を設営する"],
+ a:1, exp:"RAは企業の「採用パートナー」。経営課題や組織の状況から「どんな人材が必要か」を一緒に整理するところから始まる。"},
+{cat:"A", q:"「両面型」とは?",
+ o:["2人1組で営業すること","CAとRAの両方を一人の担当者が兼務するスタイル","昼と夜で仕事を変えること","2つの会社に所属すること"],
+ a:1, exp:"求職者と企業の双方を一人で担当する。業務範囲は広いが、マッチングの精度を自分でコントロールできる面白さがある。"},
+{cat:"A", q:"CA・RAそれぞれの「向き合う相手」の正しい組み合わせは?",
+ o:["CA=企業 / RA=求職者","CA=求職者 / RA=企業","CA=株主 / RA=銀行","両方とも企業だけ"],
+ a:1, exp:"CA=Candidate(求職者)側、RA=Recruiting(企業)側と覚える。面接でも面談でも即答必須の基本用語。"},
+{cat:"A", q:"CA・RAの成果に共通してつながることは?",
+ o:["電話の件数だけを増やすこと","「人」を深く理解すること","値引きをすること","長時間労働をすること"],
+ a:1, exp:"求職者理解も企業理解も、突き詰めれば人の理解。記事のまとめでも「人を深く理解することが成果につながる」と結ばれている。"},
+{cat:"A", q:"AIが進化する時代でも人材紹介に人が介在する価値があるのはなぜ?",
+ o:["法律で決まっているから","求人票に載らない企業の魅力や、履歴書に書ききれない求職者のポテンシャルを、対話で引き出せるから","AIより計算が速いから","人がいないと請求書が出せないから"],
+ a:1, exp:"「この人にはこの企業が合う」という直感と対話による気づきが人の介在価値。当社がAIを使い倒しつつ面談を大事にする理由もここにある。"},
+
+/* ---------- B: 仕事の流れ (7問) ---------- */
+{cat:"B", q:"CAの仕事の最初のステップは?",
+ o:["いきなり面接対策をする","転職サイト登録者へのスカウト送信や問い合わせ対応など、求職者との接点をつくること","企業に電話をかけること","求人票を作ること"],
+ a:1, exp:"すべてはスカウト・問い合わせ対応から始まる。当社でスカウト配信をRPAで自動化しているのは、この入口を大量に確保するため。"},
+{cat:"B", q:"ヒアリング面談で聞き取ることとして記事に挙がっていたのは?",
+ o:["血液型と星座","転職を考えたきっかけ・これまでの経験・希望する働き方や条件","家族全員の年収","昨日の夕食"],
+ a:1, exp:"きっかけ(Why)・経験(Can)・希望(Will)の3点が面談の柱。ここを丁寧に聞くから、合った求人を提案できる。"},
+{cat:"B", q:"応募が決まった後にCAが行う選考サポートは?",
+ o:["何もしない。応募したら本人任せ","履歴書・職務経歴書のブラッシュアップと面接練習","本人の代わりに面接を受ける","企業に賄賂を送る"],
+ a:1, exp:"書類添削と面接対策はCAの腕の見せどころ。今日14時に同席してもらう面接対策が、まさにこの工程の実物。"},
+{cat:"B", q:"内定が出た後のCAの仕事は?",
+ o:["内定が出たら業務終了","入社日の調整・条件交渉・入社後のフォローまで伴走する","次の求職者だけに集中する","企業との連絡を絶つ"],
+ a:1, exp:"内定はゴールではない。入社日調整・条件交渉・入社後フォローまでやりきって初めて「最初から最後まで寄り添う伴走者」になる。"},
+{cat:"B", q:"RAの仕事のスタート地点は?",
+ o:["求職者との面談","企業との関係構築と、採用課題・ニーズのヒアリング","面接練習","広告デザイン"],
+ a:1, exp:"新規企業に電話やメールでアプローチし、採用の課題を聞くところから。企業が求める人材像を正確に掴むことが全ての起点。"},
+{cat:"B", q:"RAが求人票を作成した後に行うことは?",
+ o:["求人票を金庫にしまう","社内のCAに展開し、CAから推薦された候補者を企業に提案する","そのまま放置する","求職者に直接電話する"],
+ a:1, exp:"RA→CA→求職者、という社内連携の流れ。CAとRAは分業でありチーム。推薦後は書類選考〜内定まで選考プロセス全体をRAが管理する。"},
+{cat:"B", q:"採用がうまく進まないとき、RAが行うことがある提案は?",
+ o:["採用をあきらめさせる","採用要件の見直しや選考フローの改善提案","求人票の偽装","手数料の値上げ"],
+ a:1, exp:"「この条件では採れません」と言えるのが採用パートナー。企業と並走し、要件やフローまで踏み込んで改善する。"},
+
+/* ---------- C: 魅力とキャリアパス (6問) ---------- */
+{cat:"C", q:"CA・RAという仕事のインパクトとして記事が挙げていたのは?",
+ o:["座って仕事ができる","求職者の人生の転換点と、企業の未来の両方に深く関われる","出張が多い","有名人に会える"],
+ a:1, exp:"転職は人生の大きな転機であり、1人の採用が組織の未来を左右する。その両方に関われる数少ないポジション。"},
+{cat:"C", q:"CAの魅力として記事に書かれていたのは?",
+ o:["ノルマがないこと","不安を抱える求職者の背中を押し、内定時の「ありがとう」に立ち会えること","誰とも話さなくていいこと","毎日定時で帰れること"],
+ a:1, exp:"内定が決まったときの「ありがとう」は何度経験しても心に響く。奥村さんも面談動画で、求職者がこの話に一番強く共感していたと分析していた。"},
+{cat:"C", q:"RAの魅力として記事に書かれていたのは?",
+ o:["在宅勤務ができること","企業の経営層と直接やり取りする機会が多く、ビジネス全体を俯瞰する視点が養われること","力仕事がないこと","転勤がないこと"],
+ a:1, exp:"「この人材がいれば事業が加速する」採用を実現する達成感+経営視点が育つ。ビジネスインパクトの大きさがRAの醍醐味。"},
+{cat:"C", q:"CA・RA経験からのキャリアパスとして記事に挙がっていたのは?",
+ o:["人材業界の中でしか通用しない","両面型へのシフト/事業会社の人事/人事コンサルタント/HRサービスの営業・CS/独立・起業","医療系国家資格の取得","キャリアパスは存在しない"],
+ a:1, exp:"候補者を見極める力・採用ノウハウは事業会社の人事でも即戦力になる。業界内外に道が広がる仕事。"},
+{cat:"C", q:"人材紹介業で独立・起業しやすいと言われる理由は?",
+ o:["国が全額出資してくれるから","比較的少ない初期投資で始められ、培った人脈やノウハウを活かせるから","誰でも無審査で始められるから","競合が存在しないから"],
+ a:1, exp:"設備投資がほぼ不要なビジネス。専門領域に特化した小規模エージェントとして独自のポジションを築く道もある。"},
+{cat:"C", q:"CA⇔RA・両面型を経験すると市場価値が高まる理由は?",
+ o:["肩書きが2つになるから","求職者と企業の双方の視点を持つことでマッチングの質が飛躍的に向上するから","労働時間が2倍になるから","名刺が増えるから"],
+ a:1, exp:"両側の視点を持つ人はマッチング精度が上がる。まずCAとして片側を極め、その後もう片側へ、が王道ルート。"}
+];
+
+
+/* ===================================================================== */
+
+const $ = id => document.getElementById(id);
+const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
+function show(name){
+  for(const k in screens) screens[k].style.display = (k===name) ? "" : "none";
+}
+
+let pool = [];        // 今の周回で出題する問題(元QUESTIONSへの参照)
+let order = [];       // シャッフル済みインデックス
+let cur = 0;
+let wrong = [];       // 間違えた問題
+let correctCount = 0;
+let round = 1;
+let modeLabel = "";
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+/* ---- スタート画面 ---- */
+function buildStart(){
+  const list = $("mode-list");
+  list.innerHTML = "";
+  const modes = [
+    {key:"ALL", label:"全問チャレンジ", count:QUESTIONS.length},
+    {key:"A", label:"A. "+CATS.A, count:QUESTIONS.filter(q=>q.cat==="A").length},
+    {key:"B", label:"B. "+CATS.B, count:QUESTIONS.filter(q=>q.cat==="B").length},
+    {key:"C", label:"C. "+CATS.C, count:QUESTIONS.filter(q=>q.cat==="C").length}
+  ];
+  modes.forEach(m=>{
+    const b = document.createElement("button");
+    b.className = "mode-btn";
+    b.innerHTML = `<span>${m.label}</span><span class="count">${m.count}問</span>`;
+    b.addEventListener("click", ()=>startQuiz(m.key, m.label));
+    list.appendChild(b);
+  });
+  show("start");
+}
+
+function startQuiz(key, label){
+  modeLabel = label;
+  round = 1;
+  pool = (key==="ALL") ? QUESTIONS.slice() : QUESTIONS.filter(q=>q.cat===key);
+  beginRound();
+}
+
+function beginRound(){
+  order = shuffle(pool.map((_,i)=>i));
+  cur = 0;
+  wrong = [];
+  correctCount = 0;
+  show("quiz");
+  renderQuestion();
+}
+
+function renderQuestion(){
+  const q = pool[order[cur]];
+  $("round-tag").textContent = (round===1) ? `1周目 / ${modeLabel}` : `${round}周目(間違えた問題だけ) / ${modeLabel}`;
+  $("pnum").textContent = `${cur+1} / ${order.length}`;
+  $("pbar-fill").style.width = `${(cur)/order.length*100}%`;
+  $("cat-tag").textContent = q.cat + ". " + CATS[q.cat];
+  $("qtext").textContent = `Q${cur+1}. ${q.q}`;
+
+  const optWrap = $("opts");
+  optWrap.innerHTML = "";
+  const keys = ["ア","イ","ウ","エ"];
+  const idxs = shuffle(q.o.map((_,i)=>i));   // 選択肢もシャッフル
+  idxs.forEach((oi, pos)=>{
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs));
+    optWrap.appendChild(b);
+  });
+
+  const fb = $("feedback");
+  fb.className = "feedback";
+  $("btn-next").style.display = "none";
+}
+
+function answer(btn, isCorrect, q, optWrap, idxs){
+  [...optWrap.children].forEach((b,pos)=>{
+    b.disabled = true;
+    if(idxs[pos]===q.a) b.classList.add("correct");
+  });
+  if(!isCorrect){
+    btn.classList.add("wrong");
+    wrong.push(q);
+  }else{
+    correctCount++;
+  }
+  const fb = $("feedback");
+  fb.className = "feedback " + (isCorrect ? "ok" : "ng");
+  $("verdict").textContent = isCorrect ? "正解" : "不正解 — 解説を読んでから次へ";
+  $("exp").textContent = q.exp;
+  const nextBtn = $("btn-next");
+  nextBtn.style.display = "";
+  nextBtn.textContent = (cur+1 < order.length) ? "次の問題へ" : "結果を見る";
+  nextBtn.focus();
+}
+
+$("btn-next").addEventListener("click", ()=>{
+  cur++;
+  if(cur < order.length){ renderQuestion(); }
+  else{ showResult(); }
+});
+
+function showResult(){
+  show("result");
+  const total = order.length;
+  $("score-n").textContent = correctCount;
+  $("score-t").textContent = total;
+  const hero = $("score-hero");
+  const actions = $("result-actions");
+  actions.innerHTML = "";
+
+  if(wrong.length===0){
+    hero.classList.add("perfect");
+    $("score-msg").textContent = `満点クリア!(${round}周でクリア)周回数をメモして報告してください`;
+    $("wrong-wrap").style.display = "none";
+    addBtn(actions, "最初からもう一度", ()=>{round=1; beginRound();});
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }else{
+    hero.classList.remove("perfect");
+    $("score-msg").textContent = `あと${wrong.length}問。間違えた問題だけもう一度。`;
+    $("wrong-wrap").style.display = "";
+    const ul = $("wrong-list");
+    ul.innerHTML = "";
+    wrong.forEach(q=>{
+      const li = document.createElement("li");
+      li.textContent = q.q;
+      ul.appendChild(li);
+    });
+    addBtn(actions, `間違えた${wrong.length}問に再挑戦`, ()=>{
+      pool = wrong.slice();
+      round++;
+      beginRound();
+    });
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }
+}
+
+function addBtn(parent, label, fn, ghost){
+  const b = document.createElement("button");
+  b.className = "btn" + (ghost ? " ghost" : "");
+  b.textContent = label;
+  b.addEventListener("click", fn);
+  parent.appendChild(b);
+}
+
+buildStart();
+</script>
+</body>
+</html>

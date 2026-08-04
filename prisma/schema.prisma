@@ -2770,3 +2770,21 @@ model SecureTransferDownload {
   @@index([transferId, downloadedAt])
   @@map("secure_transfer_downloads")
 }
+
+// 研修メニュー（社内研修）: 研修教材のDB管理
+// 教材が増えてもコード修正不要にするため、URL・カテゴリをDBで持つ（静的HTMLは public/training/ 配下）
+model TrainingMaterial {
+  id          String   @id @default(cuid())
+  title       String
+  description String?  @db.Text
+  category    String
+  url         String
+  tag         String?
+  sortOrder   Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, sortOrder])
+  @@map("training_materials")
+}
