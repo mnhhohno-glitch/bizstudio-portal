@@ -1,12 +1,20 @@
-// T-147: セキュアファイル送信のうち、クライアント（送信前プレビュー画面）とサーバーの
+// T-147: セキュアファイル送信のうち、クライアント（送信前確認画面）とサーバーの
 // 両方から使う純粋関数だけを置くモジュール。
 // ここには Node 専用モジュール（crypto / jsonwebtoken / Resend 送信等）を import しないこと。
-// - buildTransferNoticeBody: 案内メール本文。プレビューと実送信で必ず同じ関数を使う（本文が食い違わないように）。
-// - calcExpiresAt / formatJstDateTime: 有効期限の計算・表示（プレビューでも同一ロジックで出す）。
+//
+// メール本文の構成（2026-08-04 改修で確定）:
+//   （1）本文               … 確認画面で全文編集可能（宛名・挨拶・本題。既定文面 + 添え書きを合成）
+//   （2）ファイル情報ブロック … 自動生成・編集不可（URL / パスワード / 有効期限 / ファイル）
+//                              「メールに記載しない」選択時は ■パスワード 欄ごと省略する
+//   （3）注意書き            … 自動・編集不可
+//   （4）署名               … 自動・編集不可
+// 件名は入力値がそのまま Subject ヘッダになる（空欄時は TRANSFER_MAIL_SUBJECT）。
+// 本文中に ■件名 欄は置かない。
+// 確認画面のプレビューと実送信は必ず同じ関数で組み立てる（食い違い防止）。
 
 export const MAX_TRANSFER_RECIPIENTS = 10; // 1回の送信操作で指定できる宛先数の上限
 
-/** 案内メールの件名（staging では送信時に【検証】が自動付与される）。 */
+/** 件名が未入力のときに使う既定のメール件名（staging では送信時に【検証】が自動付与される）。 */
 export const TRANSFER_MAIL_SUBJECT = "【株式会社ビズスタジオ】ファイル送付のご案内";
 
 /**
@@ -39,45 +47,46 @@ export function formatJstDateTime(dt: Date): string {
 }
 
 /**
- * 受信者向け: ファイル送付案内（URL・パスワード・期限・ファイル名一覧・送信者名）。
- * パスワードは本文中で独立した行に置く（コピーしやすくする・確定仕様）。
- * 有効期限は必ず JST 表記（formatJstDateTime）。
- * 送信前プレビューでは url / password に「（送信時に自動生成されます）」等のプレースホルダを渡す。
+ * （1）編集可能領域の既定文面。確認画面を開いたとき入力欄に入れる初期値。
+ * 前画面の「添え書き」は下書きとして末尾に合成する。
  */
-export function buildTransferNoticeBody(params: {
-  senderName: string;
-  senderEmail: string;
+export function buildDefaultTransferBodyIntro(message?: string | null): string {
+  const lines = [
+    "ご担当者様",
+    "",
+    "株式会社ビズスタジオよりファイルをお送りいたします。",
+    "下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。",
+  ];
+  const trimmed = message?.trim();
+  if (trimmed) {
+    lines.push("");
+    lines.push(trimmed);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * （2）ファイル情報ブロック +（3）注意書き。自動生成・編集不可。
+ * passwordInEmail=false のときは ■パスワード 欄ごと省略する（確定仕様）。
+ * パスワードは独立した行に置く（コピーしやすくする・確定仕様）。有効期限は必ず JST 表記。
+ * 確認画面ではプレースホルダ（「（送信時に自動生成されます）」等）を渡す。
+ */
+export function buildTransferFixedBlock(params: {
   url: string;
   password: string;
-  passwordInEmail: boolean; // false = パスワードは本文に載せず「別途お伝えします」と記載
+  passwordInEmail: boolean;
   expiresAt: Date;
   fileNames: string[];
-  subject?: string | null;
-  message?: string | null;
 }): string {
   const lines: string[] = [];
-  lines.push("ご担当者様");
-  lines.push("");
-  lines.push("株式会社ビズスタジオよりファイルをお送りいたします。");
-  lines.push("下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。");
-  lines.push("");
-  if (params.subject) {
-    lines.push(`■件名`);
-    lines.push(params.subject);
-    lines.push("");
-  }
   lines.push("■ダウンロードURL");
   lines.push(params.url);
   lines.push("");
-  lines.push("■パスワード");
   if (params.passwordInEmail) {
-    // 見出しの直後に置き、後ろだけ空行を空ける（選択してコピーしやすくする）。
-    // 後ろの空行は if/else の後の push("") が兼ねる。
+    lines.push("■パスワード");
     lines.push(params.password);
-  } else {
-    lines.push("パスワードは送信者より別途お伝えします。");
+    lines.push("");
   }
-  lines.push("");
   lines.push("■有効期限");
   lines.push(`${formatJstDateTime(params.expiresAt)} まで（日本時間）`);
   lines.push("");
@@ -85,16 +94,43 @@ export function buildTransferNoticeBody(params: {
   for (const name of params.fileNames) {
     lines.push(`・${name}`);
   }
-  if (params.message) {
-    lines.push("");
-    lines.push(params.message);
-  }
   lines.push("");
   lines.push("※有効期限を過ぎるとファイルは自動的に削除され、ダウンロードできなくなります。");
   lines.push("※本メールに心当たりがない場合は、お手数ですが破棄してください。");
-  lines.push("");
-  lines.push("──");
-  lines.push(`株式会社ビズスタジオ ${params.senderName}`);
-  lines.push(params.senderEmail);
   return lines.join("\n");
+}
+
+/** （4）署名。自動・編集不可。 */
+export function buildTransferSignature(senderName: string, senderEmail: string): string {
+  return ["──", `株式会社ビズスタジオ ${senderName}`, senderEmail].join("\n");
+}
+
+/**
+ * 受信者向け案内メールの最終本文: （1）→（2）（3）→（4）を空行で連結。
+ * body は確認画面で編集された全文（空にされた場合はそのまま省略される）。
+ */
+export function buildTransferNoticeBody(params: {
+  body: string;
+  senderName: string;
+  senderEmail: string;
+  url: string;
+  password: string;
+  passwordInEmail: boolean;
+  expiresAt: Date;
+  fileNames: string[];
+}): string {
+  const parts: string[] = [];
+  const body = params.body.trim();
+  if (body) parts.push(body);
+  parts.push(
+    buildTransferFixedBlock({
+      url: params.url,
+      password: params.password,
+      passwordInEmail: params.passwordInEmail,
+      expiresAt: params.expiresAt,
+      fileNames: params.fileNames,
+    })
+  );
+  parts.push(buildTransferSignature(params.senderName, params.senderEmail));
+  return parts.join("\n\n");
 }
