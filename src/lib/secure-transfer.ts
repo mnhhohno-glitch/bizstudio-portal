@@ -45,34 +45,9 @@ export function generateTransferPassword(): string {
   return chars.join("");
 }
 
-/**
- * 「JST の今日 + days 日後の 23:59:59.999」を返す。
- * 罠 #17: toISOString().slice(0,10) は UTC 基準で 9 時間ずれるので使わない。
- * JST 日付の取得は toLocaleDateString('sv-SE', {timeZone:'Asia/Tokyo'})（既存 jstDate.ts と同じ流儀）。
- */
-export function calcExpiresAt(days: number): Date {
-  const todayJst = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-  const [y, m, d] = todayJst.split("-").map((s) => parseInt(s, 10));
-  // 壁時計日付の加算は UTC に詰めて行う（DST 無し・月跨ぎ/年跨ぎは Date.UTC が正規化）
-  const target = new Date(Date.UTC(y, m - 1, d + days));
-  const yy = target.getUTCFullYear();
-  const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(target.getUTCDate()).padStart(2, "0");
-  return new Date(`${yy}-${mm}-${dd}T23:59:59.999+09:00`);
-}
-
-/** 画面・メール表示用の JST 日時文字列（例: "2026/08/09 23:59"）。 */
-export function formatJstDateTime(dt: Date): string {
-  return dt.toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
+// 有効期限計算・JST表示はプレビュー画面（クライアント）と共用のため secure-transfer-shared.ts に移動。
+// 既存の import 先（このモジュール）を変えないよう再エクスポートする。
+export { calcExpiresAt, formatJstDateTime } from "@/lib/secure-transfer-shared";
 
 export type TransferStatus = "active" | "expired" | "revoked";
 
