@@ -20,6 +20,12 @@ export function buildTransferUrl(token: string): string {
   return `${getBaseUrl()}/transfer/${token}`;
 }
 
+/**
+ * 受信者向け: ファイル送付案内。
+ * - subject: 入力された件名をそのまま Subject ヘッダに使う（空欄時は既定文言）。
+ *   staging の【検証】プレフィックスは sendResendEmail 側で入力件名にも付与される。
+ * - body: 確認画面で編集された（1）本文の最終形（■件名 欄は廃止・本文には出さない）。
+ */
 export async function sendTransferNoticeEmail(params: {
   to: string;
   senderName: string;
@@ -30,11 +36,11 @@ export async function sendTransferNoticeEmail(params: {
   expiresAt: Date;
   fileNames: string[];
   subject?: string | null;
-  message?: string | null;
+  body: string;
 }): Promise<SendMailResult> {
   return sendResendEmail({
     to: params.to,
-    subject: TRANSFER_MAIL_SUBJECT,
+    subject: params.subject?.trim() || TRANSFER_MAIL_SUBJECT,
     text: buildTransferNoticeBody(params),
     replyTo: params.senderEmail, // 受信者が返信すると送信者本人に届く
   });
