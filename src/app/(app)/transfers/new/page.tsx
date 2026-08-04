@@ -12,7 +12,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  buildTransferNoticeBody,
+  buildDefaultTransferBodyIntro,
+  buildTransferFixedBlock,
+  buildTransferSignature,
   calcExpiresAt,
   MAX_TRANSFER_RECIPIENTS,
   TRANSFER_MAIL_SUBJECT,
@@ -89,6 +91,8 @@ export default function NewTransferPage() {
   const [expiresDays, setExpiresDays] = useState(30);
   const [passwordInEmail, setPasswordInEmail] = useState(true);
   const [step, setStep] = useState<"form" | "confirm">("form");
+  // 確認画面で編集する（1）本文。確認画面に入るたびに既定文面＋添え書きから再合成する
+  const [editableBody, setEditableBody] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [senderInfo, setSenderInfo] = useState<{ name: string; email: string } | null>(null);
@@ -157,6 +161,8 @@ export default function NewTransferPage() {
 
   const handleProceed = () => {
     if (!canProceed) return;
+    // 添え書きを下書きとして既定文面に合成する（確認画面に入り直すたびに再合成 = 添え書きの変更を反映）
+    setEditableBody(buildDefaultTransferBodyIntro(message));
     setStep("confirm");
     window.scrollTo({ top: 0 });
   };
@@ -195,7 +201,8 @@ export default function NewTransferPage() {
         body: JSON.stringify({
           recipientEmails: recipients,
           subject: subject.trim() || undefined,
-          message: message.trim() || undefined,
+          // 確認画面で編集された（1）本文の最終形をそのまま送る（message 列に保存される）
+          message: editableBody.trim() || undefined,
           expiresDays,
           passwordInEmail,
           files: uploaded,
@@ -344,17 +351,17 @@ export default function NewTransferPage() {
 
   // ---------- 送信前の確認画面 ----------
   if (step === "confirm") {
-    const previewBody = buildTransferNoticeBody({
-      senderName: senderInfo?.name ?? "（送信者名）",
-      senderEmail: senderInfo?.email ?? "",
-      url: "（送信時に宛先ごとに自動発行されます）",
-      password: "（送信時に自動生成されます）",
-      passwordInEmail,
-      expiresAt: calcExpiresAt(expiresDays),
-      fileNames: uploads.map((u) => u.file.name),
-      subject: subject.trim() || null,
-      message: message.trim() || null,
-    });
+    // （2）（3）（4）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
+    const fixedPreview =
+      buildTransferFixedBlock({
+        url: "（送信時に宛先ごとに自動発行されます）",
+        password: "（送信時に自動生成されます）",
+        passwordInEmail,
+        expiresAt: calcExpiresAt(expiresDays),
+        fileNames: uploads.map((u) => u.file.name),
+      }) +
+      "\n\n" +
+      buildTransferSignature(senderInfo?.name ?? "（送信者名）", senderInfo?.email ?? "");
 
     return (
       <div className="max-w-xl">
@@ -365,7 +372,7 @@ export default function NewTransferPage() {
               この内容で {recipients.length}件に送信します
             </p>
             <p className="mt-1 text-xs text-blue-700">
-              URL とパスワードは宛先ごとに個別発行されます（本文の構成は全宛先で同一のため、1通分を表示しています）。
+              URL とパスワードは宛先ごとに個別発行されます（本文は全宛先で共通のため、1通分を表示しています）。
             </p>
           </div>
 
@@ -382,13 +389,36 @@ export default function NewTransferPage() {
 
           <div>
             <p className="text-xs font-semibold text-gray-500 mb-1">メール件名</p>
-            <p className="text-sm text-gray-800">{TRANSFER_MAIL_SUBJECT}</p>
+            <p className="text-sm text-gray-800">{subject.trim() || TRANSFER_MAIL_SUBJECT}</p>
+            {!subject.trim() && (
+              <p className="mt-0.5 text-xs text-gray-400">
+                件名が未入力のため既定の件名を使用します
+              </p>
+            )}
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">メール本文（実際に送信される内容）</p>
-            <pre className="whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-700 font-sans">
-              {previewBody}
+            <p className="text-xs font-semibold text-gray-500 mb-1">
+              メール本文（この欄は自由に編集できます）
+            </p>
+            <textarea
+              value={editableBody}
+              onChange={(e) => setEditableBody(e.target.value)}
+              disabled={sending}
+              rows={Math.min(16, Math.max(6, editableBody.split("\n").length + 1))}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              宛名・挨拶を含めて全文を書き換えできます。編集した内容がそのまま送信されます。
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1">
+              以下は自動で挿入されます（編集不可）
+            </p>
+            <pre className="whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-xs leading-5 text-gray-500 font-sans">
+              {fixedPreview}
             </pre>
           </div>
 
@@ -553,6 +583,9 @@ export default function NewTransferPage() {
             placeholder="例: ご契約書類の送付"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
           />
+          <p className="mt-1 text-xs text-gray-400">
+            そのままメールの件名になります。空欄の場合は「{TRANSFER_MAIL_SUBJECT}」が使われます。
+          </p>
         </div>
 
         {/* 添え書き */}
@@ -567,8 +600,7 @@ export default function NewTransferPage() {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
           />
           <p className="mt-1 text-xs text-gray-400">
-            宛名・URL・パスワード・署名は自動で入ります。相手への一言のみご記入ください。
-            会社名や個人名を宛名に入れたい場合は、この欄の先頭にご記入ください。
+            ここに書いた内容は、次の確認画面で全文を編集できます。URL・パスワード・有効期限・署名は自動で入ります。
           </p>
         </div>
 

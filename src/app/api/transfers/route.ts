@@ -86,8 +86,8 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => null)) as {
     recipientEmails?: string[];
-    subject?: string;
-    message?: string;
+    subject?: string; // メール件名（Subject ヘッダ）。空欄は既定文言
+    message?: string; // 確認画面で編集された（1）本文の最終形（宛名・挨拶・本題）
     expiresDays?: number;
     passwordInEmail?: boolean;
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
@@ -289,8 +289,8 @@ export async function POST(req: NextRequest) {
       passwordInEmail,
       expiresAt,
       fileNames: recipientFiles.map((f) => f.fileName),
-      subject: transfer.subject,
-      message: transfer.message,
+      subject: transfer.subject, // 入力値がそのまま Subject ヘッダになる（空は既定文言）
+      body: transfer.message ?? "", // 確認画面で編集された（1）本文の最終形（message 列に保存済み）
     });
 
     if (!mailResult.ok) {
