@@ -2815,6 +2815,26 @@ model TrainingQuizAttempt {
   @@map("training_quiz_attempts")
 }
 
+// 研修振り返り（日報）。1人1日1件で、同日の再送信は上書き（upsert）
+// reportDate は JST の日付文字列（罠#17: Railway 本番は UTC のため toISOString 由来の日付は使わない）
+// userId / userName はセッションから取得して保存（User モデルへのリレーションは張らない方針を踏襲）
+model TrainingReflection {
+  id           String   @id @default(cuid())
+  userId       String
+  userName     String
+  reportDate   String   // "2026-08-05" 形式のJST日付文字列
+  learned      String   @db.Text  // 今日一番の学び
+  confused     String   @db.Text  // 一番分からなかったこと
+  questions    String   @db.Text  // 明日聞きたいこと
+  freeNote     String?  @db.Text  // 自由記述(感想・その他)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, reportDate])
+  @@index([reportDate])
+  @@map("training_reflections")
+}
+
 model TrainingQuizAnswer {
   id           String   @id @default(cuid())
   attemptId    String

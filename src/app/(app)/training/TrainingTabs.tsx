@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/training", label: "教材一覧", adminOnly: false },
   { href: "/training/history", label: "回答履歴", adminOnly: false },
+  { href: "/training/reflection", label: "振り返り", adminOnly: false },
   { href: "/training/admin", label: "研修管理", adminOnly: true },
 ];
 

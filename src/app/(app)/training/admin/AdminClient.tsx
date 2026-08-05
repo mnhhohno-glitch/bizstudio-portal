@@ -59,7 +59,12 @@ export default function AdminClient({
 
       {/* セクション1: 社員別サマリ */}
       <section className="mt-4">
-        <h2 className="text-[16px] font-semibold text-[#374151] mb-3">社員別サマリ</h2>
+        <div className="flex items-center gap-3 mb-3">
+          <h2 className="text-[16px] font-semibold text-[#374151]">社員別サマリ</h2>
+          <Link href="/training/reflection" className="text-[13px] text-[#2563EB] hover:underline">
+            振り返りを見る →
+          </Link>
+        </div>
         {summary.length === 0 ? (
           <p className="text-[14px] text-[#6B7280]">クイズ教材が登録されていません</p>
         ) : (
