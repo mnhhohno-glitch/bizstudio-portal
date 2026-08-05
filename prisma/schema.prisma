@@ -2830,9 +2830,50 @@ model TrainingReflection {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // --- 第4弾（詳細版）で追加。すべて nullable / default 付きで既存データを壊さない ---
+  dayLabel         String?   // 例: "Day 1"
+  workJobCount     Int?      // 求人票判定：判定した件数
+  workCorrectCount Int?      // 求人票判定：正解した件数
+  workTarget       String?   // 対象の求職者（自由入力）
+  workMistake      String?   @db.Text // 間違えた求人とその理由
+  workNextTime     String?   @db.Text // 次に同じ判定をするとき何を変えるか
+  observeScene     String?   @db.Text // 同席：印象に残った場面と理由
+  observeHard      String?   @db.Text // 同席：自分がやるとしたら難しそうな点
+  isDraft          Boolean   @default(false) // 下書き=true / 提出済み=false
+  submittedAt      DateTime?
+
   @@unique([userId, reportDate])
   @@index([reportDate])
   @@map("training_reflections")
+}
+
+// 理解度チェック項目のマスタ。研修日（dayLabel）ごとに管理者が設定する
+model TrainingCheckItem {
+  id         String   @id @default(cuid())
+  dayLabel   String   // "Day 1" 等。この項目をどの研修日で出すか
+  label      String   // "必須条件と歓迎要件の違い"
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([dayLabel, sortOrder])
+  @@map("training_check_items")
+}
+
+// 理解度の回答。TrainingReflection への外部キーは張らず文字列で保持（既存モデル不変の方針）
+// 保存は該当 reflectionId の全削除 → 一括作成（差分更新にしない）
+model TrainingCheckAnswer {
+  id           String   @id @default(cuid())
+  reflectionId String
+  itemId       String
+  itemLabel    String   // 非正規化。後で項目名が変わっても当時の表記が残る
+  rating       String   // "A"=説明できる / "B"=分かった / "C"=あいまい / "D"=分からない
+  createdAt    DateTime @default(now())
+
+  @@unique([reflectionId, itemId])
+  @@index([itemId, rating])
+  @@map("training_check_answers")
 }
 
 model TrainingQuizAnswer {
