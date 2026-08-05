@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
     select: {
       id: true,
       recipientEmail: true,
+      ccEmails: true,
       subject: true,
       expiresAt: true,
       sender: { select: { id: true, name: true, email: true } },
@@ -153,6 +154,7 @@ export async function POST(request: NextRequest) {
         senderName: sender.name ?? sender.email,
         items: list.map((t) => ({
           recipientEmail: t.recipientEmail,
+          ccEmails: t.ccEmails,
           subject: t.subject,
           expiresAt: t.expiresAt,
         })),

@@ -23,7 +23,8 @@ function isStagingEnv(): boolean {
 export type SendMailResult = { ok: true } | { ok: false; error: string };
 
 export async function sendResendEmail(params: {
-  to: string;
+  to: string | string[]; // 複数指定するとその全員が TO に並ぶ1通になる
+  cc?: string[]; // CC。空配列・未指定なら cc ヘッダ自体を付けない
   subject: string;
   text: string;
   replyTo?: string; // 受信者が返信したとき届くアドレス（例: 送信者本人の User.email）
@@ -48,7 +49,8 @@ export async function sendResendEmail(params: {
       },
       body: JSON.stringify({
         from: FROM,
-        to: [params.to],
+        to: Array.isArray(params.to) ? params.to : [params.to],
+        ...(params.cc && params.cc.length > 0 ? { cc: params.cc } : {}),
         subject,
         text: params.text,
         ...(params.replyTo ? { reply_to: params.replyTo } : {}),

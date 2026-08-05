@@ -41,7 +41,8 @@ export async function GET(
 
   return NextResponse.json({
     id: transfer.id,
-    recipientEmail: transfer.recipientEmail,
+    recipientEmail: transfer.recipientEmail, // TO（複数はカンマ区切り。旧レコードは単一アドレス）
+    ccEmails: transfer.ccEmails, // CC（複数はカンマ区切り）。CC 無し・旧レコードは null
     subject: transfer.subject,
     message: transfer.message,
     expiresAt: transfer.expiresAt,
