@@ -21,14 +21,17 @@ export function buildTransferUrl(token: string): string {
 }
 
 /**
- * 受信者向け: ファイル送付案内。
+ * 受信者向け: ファイル送付案内。TO / CC を含む通常のメール1通として送る（2026-08-06 改修）。
+ * URL・パスワードは1組で、TO・CC の全受信者が同じものを使う。
+ * - to: TO のアドレス（1件以上）。cc: CC のアドレス（0件可）。
  * - subject: 入力された件名をそのまま Subject ヘッダに使う（空欄時は既定文言）。
  *   staging の【検証】プレフィックスは sendResendEmail 側で入力件名にも付与される。
  * - body: 確認画面で編集された（1）本文の最終形（■件名 欄は廃止・本文には出さない）。
+ * - signature: 確認画面で編集された（4）署名の最終形（空なら署名なし）。
  */
 export async function sendTransferNoticeEmail(params: {
-  to: string;
-  senderName: string;
+  to: string[];
+  cc?: string[];
   senderEmail: string;
   url: string;
   password: string;
@@ -37,9 +40,11 @@ export async function sendTransferNoticeEmail(params: {
   fileNames: string[];
   subject?: string | null;
   body: string;
+  signature: string;
 }): Promise<SendMailResult> {
   return sendResendEmail({
     to: params.to,
+    cc: params.cc,
     subject: params.subject?.trim() || TRANSFER_MAIL_SUBJECT,
     text: buildTransferNoticeBody(params),
     replyTo: params.senderEmail, // 受信者が返信すると送信者本人に届く
@@ -54,7 +59,12 @@ export async function sendTransferNoticeEmail(params: {
 export async function sendTransferExpiryNoticeEmail(params: {
   to: string; // 送信者（User.email）
   senderName: string;
-  items: { recipientEmail: string; subject: string | null; expiresAt: Date }[];
+  items: {
+    recipientEmail: string; // TO（複数はカンマ区切り）
+    ccEmails?: string | null; // CC（複数はカンマ区切り）。無い送信・旧レコードは null
+    subject: string | null;
+    expiresAt: Date;
+  }[];
 }): Promise<SendMailResult> {
   const lines: string[] = [];
   lines.push(`${params.senderName} 様`);
@@ -65,6 +75,7 @@ export async function sendTransferExpiryNoticeEmail(params: {
   lines.push("");
   for (const item of params.items) {
     lines.push(`・宛先: ${item.recipientEmail}`);
+    if (item.ccEmails) lines.push(`　CC: ${item.ccEmails}`);
     if (item.subject) lines.push(`　件名: ${item.subject}`);
     lines.push(`　有効期限: ${formatJstDateTime(item.expiresAt)} まで（日本時間）`);
     lines.push("");

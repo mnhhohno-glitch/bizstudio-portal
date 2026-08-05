@@ -1,17 +1,16 @@
 // T-147: セキュアファイル送信 作成・一覧API。
 // - GET  : 全社員の送信を閲覧可（社内の証跡目的・確定仕様）
-// - POST : 複数宛先対応。宛先ごとに secure_transfers レコード・URL・パスワードを個別発行し、
-//          同一操作の束ねとして batch_id を共有する（誰がDLしたか追跡・宛先単位の無効化のため）。
-//          メールも宛先ごとに個別送信（BCC・一括送信はしない・確定仕様）。
-//          Storage 実体も宛先ごとに独立させる（copy）。共有すると1宛先の無効化→cleanup削除で
-//          他宛先のファイルまで消えるため。
-// - 失敗時の方針: 宛先単位でメール送信に失敗したらその宛先のレコードだけ取り消して続行。
-//   全宛先失敗（またはStorageコピー失敗）は全て巻き戻して 502 を返し、
+// - POST : 2026-08-06 改修で「宛先ごとの個別送信」を廃止し、TO / CC を含む通常のメール1通に変更。
+//          1回の送信操作につき secure_transfers レコードは1件だけ作り、
+//          URL・パスワードも1組のみ発行して TO・CC の全受信者で共有する。
+//          recipient_email に TO をカンマ区切り、cc_emails に CC をカンマ区切りで格納する。
+//          batch_id は旧仕様の名残なので新規レコードにはセットしない（過去レコードのため列は残す）。
+//          誰がダウンロードしたかは特定できなくなる（ダウンロード履歴は日時・IPのみ・確定仕様）。
+// - 失敗時の方針: メール送信に失敗したらレコードごと取り消し Storage も掃除して 502 を返す。
 //   クライアント側は再アップロードからやり直す（不完全なレコードを残さない・従来と同じ）。
 // middleware は /api/ を素通しするため、認証はこのルートで行う（漏れ禁止）。
 
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabase";
@@ -25,11 +24,11 @@ import {
   calcExpiresAt,
   getTransferStatus,
 } from "@/lib/secure-transfer";
-import { MAX_TRANSFER_RECIPIENTS } from "@/lib/secure-transfer-shared";
+import { MAX_TRANSFER_RECIPIENTS, buildTransferSignature } from "@/lib/secure-transfer-shared";
 import { buildTransferUrl, sendTransferNoticeEmail } from "@/lib/secure-transfer-mail";
 
 export const runtime = "nodejs";
-export const maxDuration = 120; // 宛先数×（bcrypt + Storageコピー + メール送信）のため60秒から延長
+export const maxDuration = 120; // bcrypt + Storage 確認 + メール送信のため60秒から延長
 
 // upload-url が発行するパス以外を受け付けない（他オブジェクトの参照・パストラバーサル防止）
 const STORAGE_PATH_RE =
@@ -59,7 +58,8 @@ export async function GET() {
   return NextResponse.json({
     transfers: transfers.map((t) => ({
       id: t.id,
-      recipientEmail: t.recipientEmail,
+      recipientEmail: t.recipientEmail, // TO（複数はカンマ区切り。旧レコードは単一アドレス）
+      ccEmails: t.ccEmails, // CC（複数はカンマ区切り）。CC 無し・旧レコードは null
       subject: t.subject,
       expiresAt: t.expiresAt,
       revokedAt: t.revokedAt,
@@ -85,9 +85,11 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json().catch(() => null)) as {
-    recipientEmails?: string[];
+    recipientEmails?: string[]; // TO（1件以上・必須）
+    ccEmails?: string[]; // CC（任意）
     subject?: string; // メール件名（Subject ヘッダ）。空欄は既定文言
     message?: string; // 確認画面で編集された（1）本文の最終形（宛名・挨拶・本題）
+    signature?: string; // 確認画面で編集された（4）署名の最終形。空文字=署名なし、未指定=既定署名
     expiresDays?: number;
     passwordInEmail?: boolean;
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
@@ -97,25 +99,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 
-  const recipientEmails = (body.recipientEmails ?? [])
-    .map((e) => (typeof e === "string" ? e.trim() : ""))
-    .filter((e) => e.length > 0);
-  if (recipientEmails.length === 0) {
+  const normalizeList = (list: unknown): string[] =>
+    (Array.isArray(list) ? list : [])
+      .map((e) => (typeof e === "string" ? e.trim() : ""))
+      .filter((e) => e.length > 0);
+
+  const toEmails = normalizeList(body.recipientEmails);
+  const ccEmails = normalizeList(body.ccEmails);
+
+  if (toEmails.length === 0) {
     return NextResponse.json(
-      { error: "宛先メールアドレスを入力してください" },
+      { error: "宛先（TO）のメールアドレスを入力してください" },
       { status: 400 }
     );
   }
-  if (recipientEmails.length > MAX_TRANSFER_RECIPIENTS) {
+  // 上限は TO + CC の合計で判定する（1通のメールに載る受信者の総数）
+  if (toEmails.length + ccEmails.length > MAX_TRANSFER_RECIPIENTS) {
     return NextResponse.json(
-      { error: `宛先は最大${MAX_TRANSFER_RECIPIENTS}件までです` },
+      { error: `宛先とCCの合計は最大${MAX_TRANSFER_RECIPIENTS}件までです` },
       { status: 400 }
     );
   }
-  for (const email of recipientEmails) {
+  for (const email of toEmails) {
     if (!EMAIL_RE.test(email)) {
       return NextResponse.json(
         { error: `宛先メールアドレスの形式が正しくありません: ${email}` },
+        { status: 400 }
+      );
+    }
+  }
+  for (const email of ccEmails) {
+    if (!EMAIL_RE.test(email)) {
+      return NextResponse.json(
+        { error: `CCメールアドレスの形式が正しくありません: ${email}` },
         { status: 400 }
       );
     }
@@ -194,14 +210,17 @@ export async function POST(req: NextRequest) {
     validated.push({ fileName, fileSize: actualSize, storagePath });
   }
 
-  const batchId = randomUUID();
   const expiresAt = calcExpiresAt(expiresDays);
 
-  // 宛先ごとの処理結果。orphanPaths は「レコードに紐付かなくなった Storage パス」で最後にまとめて掃除する
-  // （宛先0の実体は後続宛先の copy 元になるため、途中で消してはいけない）。
-  const created: { id: string; recipientEmail: string; url: string; password: string }[] = [];
-  const failedRecipients: string[] = [];
-  const orphanPaths: string[] = [];
+  // （1）本文と（4）署名は全受信者で共通（メール自体が1通なので当然共通）。
+  // 署名はフィールド未指定（旧クライアント等）なら既定署名、空文字は「署名なし」の明示指定として扱う。
+  const bodyText = body.message?.trim() ?? "";
+  const signatureText =
+    typeof body.signature === "string"
+      ? body.signature.trim()
+      : buildTransferSignature(user.name ?? user.email, user.email);
+  // message 列には署名まで含めた編集内容の最終形を保存する（新規列は追加しない・確定仕様）
+  const storedMessage = [bodyText, signatureText].filter(Boolean).join("\n\n") || null;
 
   const removePaths = async (paths: string[]) => {
     if (paths.length === 0) return;
@@ -211,112 +230,55 @@ export async function POST(req: NextRequest) {
       .catch((e) => console.error("[T-147] rollback storage remove failed:", e));
   };
 
-  for (let i = 0; i < recipientEmails.length; i++) {
-    const recipientEmail = recipientEmails[i];
+  // パスワード・トークン生成（平文パスワードはこのリクエスト内でのみ保持。ログに出さない）。
+  // 1送信=1組。TO・CC の全受信者が同じ URL とパスワードを使う。
+  const password = generateTransferPassword();
+  const passwordHash = await hash(password, 10);
+  const token = generateTransferToken();
 
-    // 宛先ごとに Storage 実体を独立させる。先頭の宛先はアップロードされた実体をそのまま使い、
-    // 2件目以降は copy で複製する（コピー失敗は全巻き戻し）。
-    let recipientFiles: { fileName: string; fileSize: number; storagePath: string }[];
-    if (i === 0) {
-      recipientFiles = validated;
-    } else {
-      recipientFiles = [];
-      for (const f of validated) {
-        const ext = f.storagePath.split(".").pop() ?? "bin";
-        const newPath = `transfers/${randomUUID()}.${ext}`;
-        const { error: copyError } = await supabase.storage
-          .from(SECURE_TRANSFER_BUCKET)
-          .copy(f.storagePath, newPath);
-        if (copyError) {
-          console.error("[T-147] storage copy failed:", copyError);
-          // 全巻き戻し: ここまでに作ったレコード・複製・元実体をすべて消して 502
-          // （クライアントは再アップロードからやり直す）。
-          // パスの取得はレコード削除より先に行う（削除すると cascade で file 行も消えるため）。
-          const createdPaths = await prisma.secureTransferFile
-            .findMany({ where: { transfer: { batchId } }, select: { storagePath: true } })
-            .then((rows) => rows.map((r) => r.storagePath))
-            .catch(() => [] as string[]);
-          for (const c of created) {
-            await prisma.secureTransfer
-              .delete({ where: { id: c.id } })
-              .catch((e) => console.error("[T-147] rollback delete failed:", e));
-          }
-          await removePaths([
-            ...new Set([
-              ...validated.map((f2) => f2.storagePath),
-              ...recipientFiles.map((f2) => f2.storagePath),
-              ...orphanPaths,
-              ...createdPaths,
-            ]),
-          ]);
-          return NextResponse.json(
-            { error: "ファイルの複製に失敗しました。もう一度お試しください" },
-            { status: 502 }
-          );
-        }
-        recipientFiles.push({ fileName: f.fileName, fileSize: f.fileSize, storagePath: newPath });
-      }
-    }
-
-    // パスワード・トークン生成（平文パスワードはこのリクエスト内でのみ保持。ログに出さない）
-    const password = generateTransferPassword();
-    const passwordHash = await hash(password, 10);
-    const token = generateTransferToken();
-
-    const transfer = await prisma.secureTransfer.create({
-      data: {
-        token,
-        senderId: user.id,
-        recipientEmail,
-        subject: body.subject?.trim() || null,
-        message: body.message?.trim() || null,
-        passwordHash,
-        expiresAt,
-        passwordInEmail,
-        batchId,
-        files: { create: recipientFiles },
-      },
-      select: { id: true, subject: true, message: true },
-    });
-
-    const url = buildTransferUrl(token);
-    const mailResult = await sendTransferNoticeEmail({
-      to: recipientEmail,
-      senderName: user.name ?? user.email,
-      senderEmail: user.email,
-      url,
-      password,
-      passwordInEmail,
+  const transfer = await prisma.secureTransfer.create({
+    data: {
+      token,
+      senderId: user.id,
+      recipientEmail: toEmails.join(","),
+      ccEmails: ccEmails.length > 0 ? ccEmails.join(",") : null,
+      subject: body.subject?.trim() || null,
+      message: storedMessage,
+      passwordHash,
       expiresAt,
-      fileNames: recipientFiles.map((f) => f.fileName),
-      subject: transfer.subject, // 入力値がそのまま Subject ヘッダになる（空は既定文言）
-      body: transfer.message ?? "", // 確認画面で編集された（1）本文の最終形（message 列に保存済み）
-    });
+      passwordInEmail,
+      // batchId は設定しない（旧仕様の束ねキー。1送信1レコードになったため不要）
+      files: { create: validated },
+    },
+    select: { id: true, subject: true },
+  });
 
-    if (!mailResult.ok) {
-      // この宛先のレコードだけ取り消して続行（Storage 実体の削除は最後にまとめて行う）
-      await prisma.secureTransfer
-        .delete({ where: { id: transfer.id } })
-        .catch((e) => console.error("[T-147] rollback delete failed:", e));
-      orphanPaths.push(...recipientFiles.map((f) => f.storagePath));
-      failedRecipients.push(recipientEmail);
-      continue;
-    }
+  const url = buildTransferUrl(token);
+  const mailResult = await sendTransferNoticeEmail({
+    to: toEmails,
+    cc: ccEmails,
+    senderEmail: user.email,
+    url,
+    password,
+    passwordInEmail,
+    expiresAt,
+    fileNames: validated.map((f) => f.fileName),
+    subject: transfer.subject, // 入力値がそのまま Subject ヘッダになる（空は既定文言）
+    body: bodyText, // （1）本文。message 列には署名込みの最終形（storedMessage）を保存済み
+    signature: signatureText, // （4）署名。空なら署名なしで送る
+  });
 
-    created.push({ id: transfer.id, recipientEmail, url, password });
-  }
-
-  if (created.length === 0) {
-    // 全宛先でメール送信に失敗 → 元実体も含めて全て掃除し、再アップロードからやり直してもらう（従来と同じ挙動）
-    await removePaths([...new Set(orphanPaths)]);
+  if (!mailResult.ok) {
+    // 送信できなかったらレコードごと取り消して Storage も掃除し、再アップロードからやり直してもらう
+    await prisma.secureTransfer
+      .delete({ where: { id: transfer.id } })
+      .catch((e) => console.error("[T-147] rollback delete failed:", e));
+    await removePaths(validated.map((f) => f.storagePath));
     return NextResponse.json(
       { error: "メール送信に失敗しました。もう一度お試しください" },
       { status: 502 }
     );
   }
-
-  // 一部の宛先だけ失敗した場合は、その宛先の実体だけ掃除して成功分を返す
-  await removePaths([...new Set(orphanPaths)]);
 
   await prisma.auditLog.create({
     data: {
@@ -325,12 +287,11 @@ export async function POST(req: NextRequest) {
       // AuditTargetType は既存 DB enum のため値を足さない（共有DBの既存型変更を避ける）。
       // 判別は action 文字列で行う。
       targetType: "SYSTEM",
-      targetId: batchId,
+      targetId: transfer.id,
       metadata: {
-        batchId,
-        recipientEmails: created.map((c) => c.recipientEmail),
-        failedRecipients,
-        transferIds: created.map((c) => c.id),
+        transferId: transfer.id,
+        recipientEmails: toEmails,
+        ccEmails,
         fileNames: validated.map((f) => f.fileName),
         expiresAt: expiresAt.toISOString(),
       },
@@ -340,12 +301,14 @@ export async function POST(req: NextRequest) {
   // パスワードはこのレスポンスの一度きり（再表示不可・DBに平文なし）
   return NextResponse.json(
     {
-      batchId,
+      id: transfer.id,
+      recipientEmails: toEmails,
+      ccEmails,
       passwordInEmail,
       expiresAt,
       files: validated.map((f) => ({ fileName: f.fileName, fileSize: f.fileSize })),
-      transfers: created,
-      failedRecipients,
+      url,
+      password,
     },
     { status: 201 }
   );

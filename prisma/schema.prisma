@@ -2718,7 +2718,8 @@ model SecureTransfer {
   token          String    @unique // URLに載る推測不能トークン（encryption.ts generateToken・48B base64url）
   senderId       String    @map("sender_id")
   sender         User      @relation("SecureTransfersSent", fields: [senderId], references: [id])
-  recipientEmail String    @map("recipient_email") // 1レコード1宛先（配列化しない）
+  recipientEmail String    @map("recipient_email") // TO のアドレス。複数指定時はカンマ区切りで1レコードに格納する
+  ccEmails       String?   @map("cc_emails") @db.Text // CC のアドレス（カンマ区切り）。CC 無しは null
   subject        String?
   message        String?   @db.Text // メール本文への添え書き
   passwordHash   String    @map("password_hash") // bcryptjs。平文は保存しない
@@ -2727,7 +2728,7 @@ model SecureTransfer {
   failedAttempts Int       @default(0) @map("failed_attempts") // パスワード照合失敗回数。10で自動無効化
   passwordInEmail Boolean  @default(true) @map("password_in_email") // false = パスワードをメールに載せず送信者が別途伝える
   candidateId    String?   @map("candidate_id") // 第1弾は常に null
-  batchId        String?   @map("batch_id") // 同一の送信操作で作られたレコードの束ね（複数宛先対応）。旧レコードは null
+  batchId        String?   @map("batch_id") // 旧仕様（宛先ごとに1レコード）の束ね。TO/CC 方式への移行後は使用しない（過去レコードのため残す）
   expiryNotifiedAt DateTime? @map("expiry_notified_at") // 期限切れ予告メールを送信者へ送った時刻（二重送信防止）
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -2769,4 +2770,164 @@ model SecureTransferDownload {
 
   @@index([transferId, downloadedAt])
   @@map("secure_transfer_downloads")
+}
+
+// 研修メニュー（社内研修）: 研修教材のDB管理
+// 教材が増えてもコード修正不要にするため、URL・カテゴリをDBで持つ（静的HTMLは public/training/ 配下）
+model TrainingMaterial {
+  id          String   @id @default(cuid())
+  title       String
+  description String?  @db.Text
+  category    String
+  url         String
+  tag         String?
+  quizKey     String?  // この教材がクイズの場合、lv1 / sales / ca_ra を入れる（回答履歴との紐付けキー）
+  sortOrder   Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, sortOrder])
+  @@map("training_materials")
+}
+
+// クイズ1周分の回答記録。静的HTML（public/training/quiz/）が周回終了時に POST してくる
+// userId / userName はセッションから取得して保存（userName は当時の名前を残すための非正規化）
+// User モデルへのリレーションは張らない（既存モデル不変の方針）
+model TrainingQuizAttempt {
+  id             String   @id @default(cuid())
+  userId         String
+  userName       String
+  quizKey        String
+  quizTitle      String
+  mode           String
+  round          Int
+  totalQuestions Int
+  correctCount   Int
+  cleared        Boolean  @default(false)
+  startedAt      DateTime
+  finishedAt     DateTime
+  createdAt      DateTime @default(now())
+
+  answers TrainingQuizAnswer[]
+
+  @@index([userId, quizKey])
+  @@index([quizKey, createdAt])
+  @@map("training_quiz_attempts")
+}
+
+// 研修振り返り（日報）。1人1日1件で、同日の再送信は上書き（upsert）
+// reportDate は JST の日付文字列（罠#17: Railway 本番は UTC のため toISOString 由来の日付は使わない）
+// userId / userName はセッションから取得して保存（User モデルへのリレーションは張らない方針を踏襲）
+model TrainingReflection {
+  id           String   @id @default(cuid())
+  userId       String
+  userName     String
+  reportDate   String   // "2026-08-05" 形式のJST日付文字列
+  learned      String   @db.Text  // 今日一番の学び
+  confused     String   @db.Text  // 一番分からなかったこと
+  questions    String   @db.Text  // 明日聞きたいこと
+  freeNote     String?  @db.Text  // 自由記述(感想・その他)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // --- 第4弾（詳細版）で追加。すべて nullable / default 付きで既存データを壊さない ---
+  dayLabel         String?   // 例: "Day 1"
+  workJobCount     Int?      // 求人票判定：判定した件数
+  workCorrectCount Int?      // 求人票判定：正解した件数
+  workTarget       String?   // 対象の求職者（自由入力）
+  workMistake      String?   @db.Text // 間違えた求人とその理由
+  workNextTime     String?   @db.Text // 次に同じ判定をするとき何を変えるか
+  observeScene     String?   @db.Text // 同席：印象に残った場面と理由
+  observeHard      String?   @db.Text // 同席：自分がやるとしたら難しそうな点
+  isDraft          Boolean   @default(false) // 下書き=true / 提出済み=false
+  submittedAt      DateTime?
+
+  @@unique([userId, reportDate])
+  @@index([reportDate])
+  @@map("training_reflections")
+}
+
+// 理解度チェック項目のマスタ。研修日（dayLabel）ごとに管理者が設定する
+model TrainingCheckItem {
+  id         String   @id @default(cuid())
+  dayLabel   String   // "Day 1" 等。この項目をどの研修日で出すか
+  label      String   // "必須条件と歓迎要件の違い"
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([dayLabel, sortOrder])
+  @@map("training_check_items")
+}
+
+// 理解度の回答。TrainingReflection への外部キーは張らず文字列で保持（既存モデル不変の方針）
+// 保存は該当 reflectionId の全削除 → 一括作成（差分更新にしない）
+model TrainingCheckAnswer {
+  id           String   @id @default(cuid())
+  reflectionId String
+  itemId       String
+  itemLabel    String   // 非正規化。後で項目名が変わっても当時の表記が残る
+  rating       String   // "A"=説明できる / "B"=分かった / "C"=あいまい / "D"=分からない
+  createdAt    DateTime @default(now())
+
+  @@unique([reflectionId, itemId])
+  @@index([itemId, rating])
+  @@map("training_check_answers")
+}
+
+model TrainingQuizAnswer {
+  id           String   @id @default(cuid())
+  attemptId    String
+  qid          String
+  category     String
+  questionText String   @db.Text
+  chosenText   String   @db.Text
+  correctText  String   @db.Text
+  isCorrect    Boolean
+  position     Int
+
+  attempt TrainingQuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+  @@index([qid, isCorrect])
+  @@map("training_quiz_answers")
+}
+
+// 記述式ワークの設問（求人票）。管理画面CRUDは無く seed（prisma/seed-training-work.ts）で投入する
+model TrainingWorkItem {
+  id          String   @id @default(cuid())
+  workKey     String   // 例: "work0-shokushu-gyoshu"
+  itemCode    String   // 例: "J-01"
+  sortOrder   Int
+  title       String   // 求人タイトル
+  jobContent  String   @db.Text // 仕事内容（研修生に見せる本文）
+  hintNote    String?  @db.Text // 補足（任意・研修生に見せる）
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workKey, itemCode])
+  @@index([workKey, sortOrder])
+  @@map("training_work_items")
+}
+
+// 記述式ワークの回答。employeeId はセッションの User.id（User モデルへのリレーションは張らない方針を踏襲）
+model TrainingWorkAnswer {
+  id            String   @id @default(cuid())
+  employeeId    String
+  workKey       String
+  itemCode      String
+  answerCompany String   @db.Text // ①この会社は何をしている会社か
+  answerHelp    String   @db.Text // ②この仕事は誰を助ける仕事か
+  answerDay     String   @db.Text // ③1日の動きを想像して書く
+  answerUnknown String   @db.Text // ④分からなかった言葉
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([employeeId, workKey, itemCode])
+  @@index([workKey])
+  @@index([employeeId])
+  @@map("training_work_answers")
 }

@@ -3,10 +3,12 @@
 // T-147: セキュアファイル送信の新規作成画面。
 // - ファイルはブラウザから Supabase へ直接アップロード（署名付きアップロードURL・XHRで進捗表示）。
 //   ファイル本体を portal サーバー経由で流さない（確定仕様）。
-// - 複数宛先対応（改行・カンマ区切り、最大10件）。宛先ごとに URL・パスワードが個別発行される。
+// - 2026-08-06 改修: 宛先（TO）と CC を分けた通常のメール1通を送る方式に変更。
+//   URL・パスワードは1組だけ発行され、TO・CC の全受信者で共通になる（TO+CC 合計 最大10件）。
 // - 送信ボタン → 実際に送られるメール本文の確認画面 → 送信、の2段階。
 //   確認画面の本文は実送信と同じ buildTransferNoticeBody（secure-transfer-shared.ts）で組み立てる。
-// - 送信完了画面で宛先ごとの URL とパスワードを一度だけ表示する（再表示不可・DBに平文なし）。
+//   TO と CC にドメインが混在していたら確認画面で警告する（表示のみ・送信はブロックしない）。
+// - 送信完了画面で URL とパスワードを一度だけ表示する（再表示不可・DBに平文なし）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -16,6 +18,8 @@ import {
   buildTransferFixedBlock,
   buildTransferSignature,
   calcExpiresAt,
+  hasMixedEmailDomains,
+  parseEmailList,
   MAX_TRANSFER_RECIPIENTS,
   TRANSFER_MAIL_SUBJECT,
 } from "@/lib/secure-transfer-shared";
@@ -33,12 +37,14 @@ type UploadState = {
 };
 
 type SendResult = {
-  batchId: string;
+  id: string;
+  recipientEmails: string[];
+  ccEmails: string[];
   passwordInEmail: boolean;
   expiresAt: string;
   files: { fileName: string; fileSize: number }[];
-  transfers: { id: string; recipientEmail: string; url: string; password: string }[];
-  failedRecipients: string[];
+  url: string;
+  password: string;
 };
 
 function formatFileSize(bytes: number): string {
@@ -83,16 +89,42 @@ function uploadToSignedUrl(
   });
 }
 
+/** 入力されたアドレスをチップ表示する。形式不正は赤くして ⚠ を付ける。 */
+function EmailChips({ emails, tone }: { emails: string[]; tone: "blue" | "gray" }) {
+  if (emails.length === 0) return null;
+  const validCls = tone === "blue" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600";
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {emails.map((r, i) => {
+        const valid = EMAIL_RE.test(r);
+        return (
+          <span
+            key={`${r}-${i}`}
+            className={`inline-block rounded-full px-2.5 py-0.5 text-xs ${
+              valid ? validCls : "bg-red-50 text-red-600 border border-red-200"
+            }`}
+          >
+            {r}
+            {!valid && " ⚠"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function NewTransferPage() {
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [recipientsText, setRecipientsText] = useState("");
+  const [ccText, setCcText] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [expiresDays, setExpiresDays] = useState(30);
   const [passwordInEmail, setPasswordInEmail] = useState(true);
   const [step, setStep] = useState<"form" | "confirm">("form");
-  // 確認画面で編集する（1）本文。確認画面に入るたびに既定文面＋添え書きから再合成する
+  // 確認画面で編集する（1）本文と（4）署名。確認画面に入るたびに既定文面から再合成する
   const [editableBody, setEditableBody] = useState("");
+  const [editableSignature, setEditableSignature] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [senderInfo, setSenderInfo] = useState<{ name: string; email: string } | null>(null);
@@ -108,20 +140,25 @@ export default function NewTransferPage() {
       .catch(() => {});
   }, []);
 
-  // 宛先: 改行・カンマ・セミコロン区切りで複数入力（空要素は無視・重複はそのまま許容）
-  const recipients = useMemo(
-    () =>
-      recipientsText
-        .split(/[\n,、;]+/)
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0),
-    [recipientsText]
-  );
+  // 宛先・CC: 改行・カンマ・セミコロン区切りで複数入力（空要素は無視・重複はそのまま許容）
+  const recipients = useMemo(() => parseEmailList(recipientsText), [recipientsText]);
+  const ccRecipients = useMemo(() => parseEmailList(ccText), [ccText]);
   const invalidRecipients = useMemo(
     () => recipients.filter((r) => !EMAIL_RE.test(r)),
     [recipients]
   );
-  const tooManyRecipients = recipients.length > MAX_TRANSFER_RECIPIENTS;
+  const invalidCc = useMemo(
+    () => ccRecipients.filter((r) => !EMAIL_RE.test(r)),
+    [ccRecipients]
+  );
+  // 上限は TO + CC の合計（1通のメールに載る受信者の総数）
+  const totalRecipients = recipients.length + ccRecipients.length;
+  const tooManyRecipients = totalRecipients > MAX_TRANSFER_RECIPIENTS;
+  // CC は受信者全員に見えるため、別会社のアドレスが混ざっていたら確認画面で警告する
+  const mixedDomains = useMemo(
+    () => hasMixedEmailDomains([...recipients, ...ccRecipients]),
+    [recipients, ccRecipients]
+  );
 
   const addFiles = (fileList: FileList | null) => {
     if (!fileList) return;
@@ -156,6 +193,7 @@ export default function NewTransferPage() {
     uploads.length > 0 &&
     recipients.length > 0 &&
     invalidRecipients.length === 0 &&
+    invalidCc.length === 0 &&
     !tooManyRecipients &&
     !sending;
 
@@ -163,6 +201,9 @@ export default function NewTransferPage() {
     if (!canProceed) return;
     // 添え書きを下書きとして既定文面に合成する（確認画面に入り直すたびに再合成 = 添え書きの変更を反映）
     setEditableBody(buildDefaultTransferBodyIntro(message));
+    setEditableSignature(
+      buildTransferSignature(senderInfo?.name ?? "", senderInfo?.email ?? "")
+    );
     setStep("confirm");
     window.scrollTo({ top: 0 });
   };
@@ -194,15 +235,17 @@ export default function NewTransferPage() {
         uploaded.push({ fileName: u.file.name, fileSize: u.file.size, storagePath: data.storagePath });
       }
 
-      // 2) 送信レコード作成（宛先ごとに個別発行）＋メール送信
+      // 2) 送信レコード作成（1送信=1レコード・URL/パスワードは1組）＋メール1通送信
       const res = await fetch("/api/transfers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recipientEmails: recipients,
+          ccEmails: ccRecipients,
           subject: subject.trim() || undefined,
-          // 確認画面で編集された（1）本文の最終形をそのまま送る（message 列に保存される）
+          // 確認画面で編集された（1）本文・（4）署名の最終形をそのまま送る（message 列に署名込みで保存される）
           message: editableBody.trim() || undefined,
+          signature: editableSignature.trim(), // 空文字 = 署名なしの明示指定
           expiresDays,
           passwordInEmail,
           files: uploaded,
@@ -210,18 +253,13 @@ export default function NewTransferPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        // 全宛先失敗時はサーバー側で Storage ごとロールバック済み → 再アップロードが必要
+        // 送信失敗時はサーバー側で Storage ごとロールバック済み → 再アップロードが必要
         if (res.status === 502) {
           setUploads((prev) =>
             prev.map((u) => ({ ...u, status: "pending", progress: 0, storagePath: undefined }))
           );
         }
         throw new Error(data.error || "送信に失敗しました");
-      }
-      if ((data as SendResult).failedRecipients?.length > 0) {
-        toast.error(
-          `一部の宛先へ送信できませんでした: ${(data as SendResult).failedRecipients.join(", ")}`
-        );
       }
       setResult(data);
     } catch (e) {
@@ -248,25 +286,21 @@ export default function NewTransferPage() {
         <h1 className="mb-4 text-xl font-bold text-[#374151]">送信が完了しました</h1>
         <div className="rounded-xl bg-white p-6 shadow-sm space-y-4">
           <p className="text-sm text-gray-600">
-            {result.transfers.length}件の宛先へダウンロード案内メールを送信しました。
-            宛先ごとに URL とパスワードが個別に発行されています。
+            ダウンロード案内メールを1通送信しました。URL とパスワードは受信者全員で共通です。
           </p>
 
-          {result.failedRecipients.length > 0 && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-              <p className="text-sm font-semibold text-red-600">
-                以下の宛先へは送信できませんでした（レコードは作成されていません）:
+          <div className="space-y-1 text-sm">
+            <p className="text-gray-800">
+              <span className="text-xs font-semibold text-gray-500">宛先: </span>
+              {result.recipientEmails.join(", ")}
+            </p>
+            {result.ccEmails.length > 0 && (
+              <p className="text-gray-800">
+                <span className="text-xs font-semibold text-gray-500">CC: </span>
+                {result.ccEmails.join(", ")}
               </p>
-              <ul className="mt-1 text-sm text-red-600">
-                {result.failedRecipients.map((r) => (
-                  <li key={r}>・{r}</li>
-                ))}
-              </ul>
-              <p className="mt-1 text-xs text-red-500">
-                必要に応じて、新規送信からこの宛先へ再度お送りください。
-              </p>
-            </div>
-          )}
+            )}
+          </div>
 
           {!result.passwordInEmail && (
             <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-3">
@@ -274,7 +308,7 @@ export default function NewTransferPage() {
                 パスワードはメールに記載されていません。
               </p>
               <p className="mt-1 text-xs text-amber-800">
-                下記の宛先ごとのパスワードを、SMS・電話など、メール以外の方法で各受信者へお伝えください。
+                下記のパスワードを、SMS・電話など、メール以外の方法で受信者へお伝えください。
               </p>
               <p className="mt-1 text-sm font-semibold text-red-600">
                 ⚠ この画面を閉じるとパスワードは二度と表示できません。
@@ -282,51 +316,46 @@ export default function NewTransferPage() {
             </div>
           )}
 
-          <ul className="space-y-4">
-            {result.transfers.map((t) => (
-              <li key={t.id} className="rounded-lg border border-gray-200 p-4 space-y-3">
-                <p className="text-sm font-semibold text-gray-800">{t.recipientEmail}</p>
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 mb-1">ダウンロードURL</p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 break-all rounded bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                      {t.url}
-                    </code>
-                    <button
-                      onClick={() => copyText(t.url, "URL")}
-                      className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
-                    >
-                      コピー
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 mb-1">パスワード</p>
-                  <div className="flex items-center gap-2">
-                    <code
-                      className={`flex-1 rounded px-3 py-2 font-mono tracking-widest ${
-                        result.passwordInEmail
-                          ? "bg-gray-50 text-lg text-gray-800"
-                          : "bg-amber-50 text-2xl text-gray-900 border border-amber-200"
-                      }`}
-                    >
-                      {t.password}
-                    </code>
-                    <button
-                      onClick={() => copyText(t.password, "パスワード")}
-                      className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
-                    >
-                      コピー
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">ダウンロードURL</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 break-all rounded bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                  {result.url}
+                </code>
+                <button
+                  onClick={() => copyText(result.url, "URL")}
+                  className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  コピー
+                </button>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">パスワード</p>
+              <div className="flex items-center gap-2">
+                <code
+                  className={`flex-1 rounded px-3 py-2 font-mono tracking-widest ${
+                    result.passwordInEmail
+                      ? "bg-gray-50 text-lg text-gray-800"
+                      : "bg-amber-50 text-2xl text-gray-900 border border-amber-200"
+                  }`}
+                >
+                  {result.password}
+                </code>
+                <button
+                  onClick={() => copyText(result.password, "パスワード")}
+                  className="shrink-0 rounded border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  コピー
+                </button>
+              </div>
+            </div>
+          </div>
 
           <p className="text-xs text-red-500">
             ⚠ パスワードはこの画面でのみ表示されます。この画面を閉じると再表示できません
-            {result.passwordInEmail ? "（各宛先のメールにも記載済みです）。" : "。"}
+            {result.passwordInEmail ? "（送信したメールにも記載済みです）。" : "。"}
           </p>
 
           <div className="text-xs text-gray-500">
@@ -351,17 +380,15 @@ export default function NewTransferPage() {
 
   // ---------- 送信前の確認画面 ----------
   if (step === "confirm") {
-    // （2）（3）（4）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
-    const fixedPreview =
-      buildTransferFixedBlock({
-        url: "（送信時に宛先ごとに自動発行されます）",
-        password: "（送信時に自動生成されます）",
-        passwordInEmail,
-        expiresAt: calcExpiresAt(expiresDays),
-        fileNames: uploads.map((u) => u.file.name),
-      }) +
-      "\n\n" +
-      buildTransferSignature(senderInfo?.name ?? "（送信者名）", senderInfo?.email ?? "");
+    // （2）（3）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
+    // （署名（4）は下の署名欄で編集可能になったためここには含めない）
+    const fixedPreview = buildTransferFixedBlock({
+      url: "（送信時に自動発行されます）",
+      password: "（送信時に自動生成されます）",
+      passwordInEmail,
+      expiresAt: calcExpiresAt(expiresDays),
+      fileNames: uploads.map((u) => u.file.name),
+    });
 
     return (
       <div className="max-w-xl">
@@ -369,12 +396,24 @@ export default function NewTransferPage() {
         <div className="rounded-xl bg-white p-6 shadow-sm space-y-5">
           <div className="rounded-lg bg-blue-50 px-4 py-3">
             <p className="text-sm font-semibold text-blue-800">
-              この内容で {recipients.length}件に送信します
+              この内容でメールを1通送信します（宛先{recipients.length}件
+              {ccRecipients.length > 0 && ` / CC ${ccRecipients.length}件`}）
             </p>
             <p className="mt-1 text-xs text-blue-700">
-              URL とパスワードは宛先ごとに個別発行されます（本文は全宛先で共通のため、1通分を表示しています）。
+              ダウンロードURL とパスワードは1組だけ発行され、受信者全員で共通になります。
             </p>
           </div>
+
+          {mixedDomains && (
+            <div className="rounded-lg border-2 border-amber-300 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-semibold text-amber-800">
+                ⚠ 宛先に複数の会社のアドレスが含まれています
+              </p>
+              <p className="mt-1 text-xs text-amber-800">
+                CCに入れたアドレスは受信者全員に表示されます。送信先をご確認ください。
+              </p>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-semibold text-gray-500 mb-1">宛先（{recipients.length}件）</p>
@@ -386,6 +425,21 @@ export default function NewTransferPage() {
               ))}
             </ul>
           </div>
+
+          {ccRecipients.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">
+                CC（{ccRecipients.length}件）
+              </p>
+              <ul className="space-y-1">
+                {ccRecipients.map((r, i) => (
+                  <li key={`${r}-${i}`} className="text-sm text-gray-800">
+                    ・{r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-semibold text-gray-500 mb-1">メール件名</p>
@@ -420,6 +474,20 @@ export default function NewTransferPage() {
             <pre className="whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-xs leading-5 text-gray-500 font-sans">
               {fixedPreview}
             </pre>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1">署名（編集できます）</p>
+            <textarea
+              value={editableSignature}
+              onChange={(e) => setEditableSignature(e.target.value)}
+              disabled={sending}
+              rows={Math.min(10, Math.max(3, editableSignature.split("\n").length + 1))}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              役職・住所・電話番号などを自由に追記できます。空にすると署名なしで送信されます。
+            </p>
           </div>
 
           {sending && uploads.some((u) => u.status === "uploading") && (
@@ -521,54 +589,61 @@ export default function NewTransferPage() {
           )}
         </div>
 
-        {/* 宛先（複数） */}
+        {/* 宛先（TO） */}
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700">
-            宛先メールアドレス <span className="text-red-500">*</span>
+            宛先（TO） <span className="text-red-500">*</span>
             <span className="ml-2 text-xs font-normal text-gray-400">
-              改行またはカンマ区切りで最大{MAX_TRANSFER_RECIPIENTS}件
+              改行またはカンマ区切りで複数可
             </span>
           </label>
           <textarea
             value={recipientsText}
             onChange={(e) => setRecipientsText(e.target.value)}
             disabled={sending}
-            rows={3}
+            rows={2}
             placeholder={"example1@client.co.jp\nexample2@client.co.jp"}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
           />
-          {recipients.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {recipients.map((r, i) => {
-                const valid = EMAIL_RE.test(r);
-                return (
-                  <span
-                    key={`${r}-${i}`}
-                    className={`inline-block rounded-full px-2.5 py-0.5 text-xs ${
-                      valid
-                        ? "bg-blue-50 text-blue-700"
-                        : "bg-red-50 text-red-600 border border-red-200"
-                    }`}
-                  >
-                    {r}
-                    {!valid && " ⚠"}
-                  </span>
-                );
-              })}
-            </div>
-          )}
+          <EmailChips emails={recipients} tone="blue" />
           {invalidRecipients.length > 0 && (
             <p className="mt-1 text-xs text-red-500">
               形式が正しくないアドレスがあります: {invalidRecipients.join(", ")}
             </p>
           )}
+        </div>
+
+        {/* CC */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            CC（任意）
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              改行またはカンマ区切りで複数可
+            </span>
+          </label>
+          <textarea
+            value={ccText}
+            onChange={(e) => setCcText(e.target.value)}
+            disabled={sending}
+            rows={2}
+            placeholder={"cc@client.co.jp"}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+          />
+          <EmailChips emails={ccRecipients} tone="gray" />
+          {invalidCc.length > 0 && (
+            <p className="mt-1 text-xs text-red-500">
+              形式が正しくないアドレスがあります: {invalidCc.join(", ")}
+            </p>
+          )}
           {tooManyRecipients && (
             <p className="mt-1 text-xs text-red-500">
-              宛先は最大{MAX_TRANSFER_RECIPIENTS}件までです（現在 {recipients.length}件）
+              宛先とCCの合計は最大{MAX_TRANSFER_RECIPIENTS}件までです（現在 {totalRecipients}件）
             </p>
           )}
           <p className="mt-1 text-xs text-gray-400">
-            宛先ごとに URL とパスワードが個別に発行され、メールも1通ずつ送信されます。
+            宛先とCCを含めた1通のメールを送信します。ダウンロードURL
+            とパスワードは1組で、受信者全員が同じものを使います。
+            CCのアドレスは受信者全員に表示されます。
           </p>
         </div>
 

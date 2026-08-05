@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ビズスタジオ 新人CA知識クイズ 営業職編</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Zen+Antique+Soft&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --green:#155E4E;
+    --green-deep:#0C3F34;
+    --green-tint:#EAF3EF;
+    --ink:#1C2724;
+    --sub:#5C6B66;
+    --line:#D8E2DD;
+    --amber:#B96A12;
+    --amber-tint:#FBF1E3;
+    --red:#A63A2E;
+    --red-tint:#F9ECEA;
+    --bg:#F7FAF8;
+    --card:#FFFFFF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.7;
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 64px;}
+  header.app{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:6px 2px 14px;border-bottom:2px solid var(--green);
+    margin-bottom:20px;
+  }
+  .brand{font-weight:900;font-size:15px;letter-spacing:.06em;color:var(--green-deep);}
+  .brand small{display:block;font-weight:500;font-size:11px;color:var(--sub);letter-spacing:.12em;}
+  .lv{font-family:'Zen Antique Soft',serif;font-size:22px;color:var(--green);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 20px;box-shadow:0 1px 2px rgba(12,63,52,.05);}
+  h1{font-size:22px;font-weight:900;color:var(--green-deep);line-height:1.4;margin-bottom:10px;}
+  .lede{font-size:13.5px;color:var(--sub);margin-bottom:20px;}
+  .lede strong{color:var(--ink);}
+
+  .modes{display:grid;gap:10px;margin-bottom:18px;}
+  .mode-btn{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    width:100%;text-align:left;background:var(--green-tint);
+    border:1.5px solid var(--line);border-radius:12px;
+    padding:14px 16px;font-family:inherit;font-size:15px;font-weight:700;color:var(--green-deep);
+    cursor:pointer;transition:border-color .15s;
+  }
+  .mode-btn:hover,.mode-btn:focus-visible{border-color:var(--green);}
+  .mode-btn .count{font-size:12px;font-weight:500;color:var(--sub);flex-shrink:0;}
+  .rule{font-size:12.5px;color:var(--sub);border-top:1px dashed var(--line);padding-top:14px;}
+  .rule b{color:var(--green-deep);}
+
+  /* progress */
+  .progress{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .pbar>i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .25s;}
+  .pnum{font-size:13px;font-weight:700;color:var(--sub);white-space:nowrap;}
+  .round-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--amber);background:var(--amber-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:12px;
+  }
+  .cat-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--green);background:var(--green-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:10px;
+  }
+  .qtext{font-size:17px;font-weight:700;line-height:1.65;margin-bottom:18px;}
+
+  .opts{display:grid;gap:10px;}
+  .opt{
+    width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);
+    border-radius:12px;padding:13px 15px;font-family:inherit;font-size:14.5px;
+    color:var(--ink);cursor:pointer;line-height:1.55;transition:border-color .12s,background .12s;
+  }
+  .opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--green);}
+  .opt:disabled{cursor:default;}
+  .opt.correct{border-color:var(--green);background:var(--green-tint);font-weight:700;}
+  .opt.wrong{border-color:var(--red);background:var(--red-tint);}
+  .opt .k{display:inline-block;width:1.6em;font-weight:900;color:var(--sub);}
+  .opt.correct .k{color:var(--green);}
+  .opt.wrong .k{color:var(--red);}
+
+  .feedback{margin-top:16px;border-radius:12px;padding:14px 16px;font-size:14px;display:none;}
+  .feedback.ok{display:block;background:var(--green-tint);border:1px solid var(--green);}
+  .feedback.ng{display:block;background:var(--amber-tint);border:1px solid var(--amber);}
+  .feedback .verdict{font-weight:900;font-size:15px;margin-bottom:6px;}
+  .feedback.ok .verdict{color:var(--green-deep);}
+  .feedback.ng .verdict{color:var(--amber);}
+  .feedback .exp{color:var(--ink);}
+
+  .actions{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{
+    appearance:none;border:none;border-radius:99px;padding:12px 26px;
+    font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    background:var(--green);color:#fff;transition:background .15s;
+  }
+  .btn:hover,.btn:focus-visible{background:var(--green-deep);}
+  .btn.ghost{background:#fff;color:var(--green-deep);border:1.5px solid var(--green);}
+  .btn.ghost:hover,.btn.ghost:focus-visible{background:var(--green-tint);}
+  .btn:focus-visible,.opt:focus-visible,.mode-btn:focus-visible{outline:3px solid rgba(21,94,78,.35);outline-offset:2px;}
+
+  /* result */
+  .score-hero{text-align:center;padding:8px 0 18px;}
+  .score-hero .num{font-family:'Zen Antique Soft',serif;font-size:56px;color:var(--green);line-height:1.1;}
+  .score-hero .num small{font-size:22px;color:var(--sub);}
+  .score-hero .msg{font-size:15px;font-weight:700;color:var(--green-deep);margin-top:4px;}
+  .perfect .num{color:var(--amber);}
+  .wrong-list{border-top:1px dashed var(--line);padding-top:14px;margin-top:6px;}
+  .wrong-list h2{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:8px;}
+  .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
+  .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
+
+
+  /* 記録ステータス表示 */
+  .rec{
+    margin-top:14px;font-size:12px;color:var(--sub);text-align:center;
+    min-height:1.4em;
+  }
+  .rec.ok{color:var(--green);font-weight:700;}
+  .rec.ng{color:var(--amber);font-weight:700;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <div class="brand">BizStudio 新人CA研修<small>KNOWLEDGE DRILL</small></div>
+    <div class="lv">Lv.2</div>
+  </header>
+
+  <!-- ===== スタート画面 ===== -->
+  <section id="screen-start" class="card">
+    <h1>営業職クイズ<br>満点になるまで繰り返そう</h1>
+    <p class="lede">全20問・4択。記事「営業は“売り込む仕事”だけじゃない」を読んでから挑戦。答えるとその場で<strong>解説</strong>が出ます。1周終わったら<strong>間違えた問題だけ</strong>をもう一度。誤答ゼロになったらクリアです。</p>
+    <div class="modes" id="mode-list"></div>
+    <p class="rule"><b>ルール:</b> 調べながらでOK。ただし解説は必ず読むこと。画面を閉じると記録は消えるので、クリアしたら周回数をメモして報告してください。</p>
+  </section>
+
+  <!-- ===== 出題画面 ===== -->
+  <section id="screen-quiz" class="card" style="display:none;">
+    <div class="round-tag" id="round-tag"></div>
+    <div class="progress">
+      <div class="pbar"><i id="pbar-fill" style="width:0%"></i></div>
+      <div class="pnum" id="pnum"></div>
+    </div>
+    <div class="cat-tag" id="cat-tag"></div>
+    <p class="qtext" id="qtext"></p>
+    <div class="opts" id="opts"></div>
+    <div class="feedback" id="feedback">
+      <div class="verdict" id="verdict"></div>
+      <div class="exp" id="exp"></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-next" style="display:none;">次の問題へ</button>
+    </div>
+  </section>
+
+  <!-- ===== 結果画面 ===== -->
+  <section id="screen-result" class="card">
+    <div class="score-hero" id="score-hero">
+      <div class="num"><span id="score-n">0</span><small> / <span id="score-t">0</span></small></div>
+      <div class="msg" id="score-msg"></div>
+    </div>
+    <div class="wrong-list" id="wrong-wrap">
+      <h2>間違えた問題</h2>
+      <ul id="wrong-list"></ul>
+    </div>
+    <div class="rec" id="rec"></div>
+    <div class="actions" id="result-actions"></div>
+  </section>
+
+  <p class="note">© 株式会社ビズスタジオ 社内研修用 / 問題の追加・修正はHTML内の QUESTIONS を編集</p>
+</div>
+
+<script>
+/* =====================================================================
+   問題データ
+   ここを編集すれば問題の追加・修正ができます。
+   cat: "A"=転職活動の流れと用語 / "B"=人材紹介の仕組み / "C"=求人票の読み方
+   a: 正解の選択肢番号(0始まり)
+   exp: 解説(ビズスタジオの実務に合わせた内容)
+===================================================================== */
+const QUIZ_KEY = "sales";
+const QUIZ_TITLE = "営業職クイズ";
+
+const CATS = {
+  A: "営業の分類(4つの軸)",
+  B: "未経験からの始め方",
+  C: "キャリアと適性"
+};
+
+const QUESTIONS = [
+/* ---------- A: 営業の分類 (8問) ---------- */
+{qid:"sales-A01", cat:"A", q:"営業という仕事の本質として、記事で説明されていたのは?",
+ o:["とにかく商品を売り込むこと","相手の課題を理解し、最適な提案を行い、信頼関係を築くこと","電話を1日中かけ続けること","値引き交渉で勝つこと"],
+ a:1, exp:"営業=売り込みではなく、課題理解→提案→信頼構築。ヒアリング、提案書作成、社内調整、アフターフォローまで含む幅広い仕事。"},
+{qid:"sales-A02", cat:"A", q:"営業を整理する4つの分類軸の組み合わせとして正しいのは?",
+ o:["年齢 / 性別 / 学歴 / 経験","対象 / 顧客との関係性 / アプローチ方法 / 商材の種類","国内 / 海外 / 都市 / 地方","正社員 / 契約 / 派遣 / 業務委託"],
+ a:1, exp:"①対象(法人/個人) ②関係性(新規/既存) ③アプローチ(反響/アウトバウンド) ④商材(有形/無形)。求人票を見たらこの4軸で分類する癖をつける。"},
+{qid:"sales-A03", cat:"A", q:"法人営業(BtoB)の特徴として正しいのは?",
+ o:["一般消費者を相手にする","取引金額が大きく、複数の担当者と関わりながら進めることが多い","必ず一人で完結する仕事","飛び込み訪問しかない"],
+ a:1, exp:"法人営業=企業・団体相手。金額が大きく、チームで動くことも多い。研修が充実した企業なら未経験でも始めやすい。"},
+{qid:"sales-A04", cat:"A", q:"個人営業(BtoC)の代表的な商材として記事に挙がっていたのは?",
+ o:["工作機械・半導体","保険・不動産・通信サービス","法人向けコンサルティング","業務用ソフトウェア"],
+ a:1, exp:"個人営業は一般消費者が相手。保険・不動産・通信が代表例で、お客様一人ひとりと直接やり取りする場面が多い。"},
+{qid:"sales-A05", cat:"A", q:"新規営業の特徴として正しいのは?",
+ o:["すでに取引のあるお客様だけを担当する","ゼロから関係を築く面白さがある一方、断られることも多く精神的なタフさが求められる","誰でもストレスなくできる","注文を受けるだけの仕事"],
+ a:1, exp:"新規開拓は断られる回数が多い。メンタルの強さが求められるため、求職者のタイプによって向き不向きが分かれる。"},
+{qid:"sales-A06", cat:"A", q:"既存営業(ルート営業)の説明として正しいのは?",
+ o:["飛び込み訪問が中心","取引のあるお客様との関係を深めながら追加提案やフォローを行う。未経験でも始めやすい","新しいお客様を毎日探す","営業の中で一番難易度が高い"],
+ a:1, exp:"すでに関係性がある状態から始められる安定型。未経験者や「新しい人に声をかけるのが苦手」な人に向く。求人提案の頻出パターン。"},
+{qid:"sales-A07", cat:"A", q:"反響営業とは?",
+ o:["自分から電話をかけまくる営業","お客様からの問い合わせや資料請求をきっかけに始める営業","上司の指示にただ反応する営業","クレーム対応専門の営業"],
+ a:1, exp:"相手はすでに興味を持っているので「売り込む」より「相談に乗る」感覚。接客業出身者が入りやすい営業スタイル。"},
+{qid:"sales-A08", cat:"A", q:"無形商材の営業に特に求められる力は?",
+ o:["商品を持ち運ぶ体力","形のないサービスの価値を、課題理解にもとづいて言葉で伝える力","商品を実際に見せるプレゼン道具","在庫管理の知識"],
+ a:1, exp:"ITサービス・コンサル・保険など形がない商材は、価値を言語化する力が問われる。有形(機械・食品など)は実物を見せられる分、提案しやすい。"},
+
+/* ---------- B: 未経験からの始め方 (6問) ---------- */
+{qid:"sales-B01", cat:"B", q:"未経験から始めやすい営業として記事に挙がっていた4つの組み合わせは?",
+ o:["飛び込み営業/テレアポ/深夜営業/海外営業","反響営業/既存顧客フォロー/研修が充実した法人営業/わかりやすい商材の営業","新規開拓/無形商材/経営層向け/金融専門","どの営業も難易度は同じ"],
+ a:1, exp:"この4つは求職者への提案でもそのまま使える型。「営業は無理」と言う求職者には、この入口から見せる。"},
+{qid:"sales-B02", cat:"B", q:"反響営業が未経験者に向いている理由は?",
+ o:["ノルマがないから","すでに興味を持っているお客様が相手なので、相談に乗る感覚で進められるから","誰とも話さなくていいから","給与が一番高いから"],
+ a:1, exp:"問い合わせ起点=関心のある人が相手。接客・販売経験者の対応力がそのまま活きる。"},
+{qid:"sales-B03", cat:"B", q:"「わかりやすい商材」を扱う営業が未経験向きな理由は?",
+ o:["価格が安いから","商品理解のハードルが低く、自分が使ったことのある商品なら自然な言葉で伝えられるから","誰も競合がいないから","資格が不要だから"],
+ a:1, exp:"日用品・食品・通信など身近な商材は理解が早い。「自分が良さを分かっている物」は自然に語れる。"},
+{qid:"sales-B04", cat:"B", q:"営業職がキャリアの選択肢になりやすい理由として記事に挙がっていたのは?",
+ o:["楽な仕事だから","汎用的なビジネススキルが身につき、未経験でも挑戦しやすく、求人数も多いから","必ず高収入になるから","転勤がないから"],
+ a:1, exp:"コミュニケーション力・課題発見力・提案力・交渉力など、どの職種でも使える力が身につく。だから未経験転職の受け皿として求人が多い。"},
+{qid:"sales-B05", cat:"B", q:"営業が「成果や成長を実感しやすい」と言われる理由は?",
+ o:["evaluationが年1回だから","自分の行動が成果に直結しやすく、感謝や目標達成の場面が日常的にあるから","失敗しても誰にも気づかれないから","成果が全て運で決まるから"],
+ a:1, exp:"「ありがとう」と言われる場面や目標達成の手応えが日常的にある。やりがい訴求の定番ポイント。"},
+{qid:"sales-B06", cat:"B", q:"営業の数値目標(ノルマ)について、記事の捉え方は?",
+ o:["ノルマは悪であり避けるべき","目標があることで自分の成長を測りやすく、達成時の充実感も大きい","目標は形だけで誰も見ていない","目標未達だと即クビになる"],
+ a:1, exp:"「ノルマに追われる」ではなく「成長の物差し」という捉え方。ネガティブな営業イメージを持つ求職者への切り返しに使える。"},
+
+/* ---------- C: キャリアと適性 (6問) ---------- */
+{qid:"sales-C01", cat:"C", q:"営業経験からのキャリア展開として記事に挙がっていたのは?",
+ o:["営業以外への道はない","他業界の営業/人事・採用/広報/マネジメント/事業企画など幅広く展開できる","医師や弁護士になれる","キャリア展開には資格が必須"],
+ a:1, exp:"営業で培った「人と向き合う力」は職種を越えて通用する。「営業→人事」は求職者へのキャリアパス提案の定番。"},
+{qid:"sales-C02", cat:"C", q:"人事・採用の仕事で特に活きる営業スキルは?",
+ o:["値引き交渉力","傾聴力と、相手に魅力を伝える力","在庫管理能力","プログラミング力"],
+ a:1, exp:"採用は候補者に会社の魅力を伝える仕事。営業のヒアリング力・伝える力がそのまま武器になる。"},
+{qid:"sales-C03", cat:"C", q:"営業に向いている人の特徴として記事で挙げられていたのは?",
+ o:["話がうまく押しが強い人だけ","接客・販売経験がある/相手の話を丁寧に聞ける/目標に向かって取り組める/キャリアの幅を広げたい人","声が大きい人","飲み会が好きな人"],
+ a:1, exp:"「話す力」より「聞く力」。押しの強さは必須ではない。営業=話術のイメージを崩すのが提案の第一歩。"},
+{qid:"sales-C04", cat:"C", q:"接客・販売の経験者が営業に向いていると言える理由は?",
+ o:["立ち仕事に慣れているから","「お客様の要望を聞いて、合った商品を提案する」という営業の基本の流れをすでに体験しているから","制服を着慣れているから","レジ操作ができるから"],
+ a:1, exp:"販売・サービス出身の求職者(当社のメイン層)に営業を提案する際の、一番の根拠になる考え方。"},
+{qid:"sales-C05", cat:"C", q:"「営業に向いているかどうか」よりも大切だと記事が結論づけていたのは?",
+ o:["学歴が高いかどうか","どの種類の営業が自分に合っているかを見つけること","年収が高いかどうか","会社の知名度"],
+ a:1, exp:"飛び込みが苦手でも反響営業なら活きる人がいる。「営業」を一つの型で捉えず、種類で選ぶ。CAの求人提案の考え方そのもの。"},
+{qid:"sales-C06", cat:"C", q:"営業経験が異業界への転職で評価されやすい理由は?",
+ o:["異業界では営業経験は評価されない","ヒアリング力・提案力・関係構築力は業界が変わっても通用するから","営業経験者は給料が安いから","業界知識が不要だから"],
+ a:1, exp:"営業の基本スキルは業界をまたいで持ち運べる。メーカー営業→IT営業などのキャリアチェンジが成立する理由。"}
+];
+
+
+/* ===================================================================== */
+
+
+/* =====================================================================
+   回答記録（ポータルへ送信）
+   同一オリジンの /api/training/quiz-attempts にPOSTする。
+   未ログイン(401)や失敗時は黙って続行し、クイズの利用は妨げない。
+===================================================================== */
+const ATTEMPT_ENDPOINT = "/api/training/quiz-attempts";
+let attemptLog = [];      // 今の周回の解答明細
+let roundStartedAt = null;
+
+function recordAnswer(q, chosenIndex, isCorrect, position){
+  attemptLog.push({
+    qid: q.qid,
+    category: q.cat,
+    questionText: q.q,
+    chosenText: q.o[chosenIndex],
+    correctText: q.o[q.a],
+    isCorrect: !!isCorrect,
+    position: position
+  });
+}
+
+async function sendAttempt(payload){
+  const el = document.getElementById("rec");
+  if(el){ el.className = "rec"; el.textContent = "記録を保存しています…"; }
+  try{
+    const res = await fetch(ATTEMPT_ENDPOINT, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if(!el) return;
+    if(res.ok){
+      el.className = "rec ok";
+      el.textContent = "この結果を記録しました";
+    }else if(res.status === 401){
+      el.className = "rec ng";
+      el.textContent = "未ログインのため記録できませんでした（ポータルにログインしてから開き直してください）";
+    }else{
+      el.className = "rec ng";
+      el.textContent = "記録に失敗しました（結果は画面で確認できます）";
+    }
+  }catch(e){
+    if(el){ el.className = "rec ng"; el.textContent = "記録に失敗しました（オフラインの可能性があります）"; }
+  }
+}
+
+const $ = id => document.getElementById(id);
+const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
+function show(name){
+  for(const k in screens) screens[k].style.display = (k===name) ? "" : "none";
+}
+
+let pool = [];        // 今の周回で出題する問題(元QUESTIONSへの参照)
+let order = [];       // シャッフル済みインデックス
+let cur = 0;
+let wrong = [];       // 間違えた問題
+let correctCount = 0;
+let round = 1;
+let modeLabel = "";
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+/* ---- スタート画面 ---- */
+function buildStart(){
+  const list = $("mode-list");
+  list.innerHTML = "";
+  const modes = [
+    {key:"ALL", label:"全問チャレンジ", count:QUESTIONS.length},
+    {key:"A", label:"A. "+CATS.A, count:QUESTIONS.filter(q=>q.cat==="A").length},
+    {key:"B", label:"B. "+CATS.B, count:QUESTIONS.filter(q=>q.cat==="B").length},
+    {key:"C", label:"C. "+CATS.C, count:QUESTIONS.filter(q=>q.cat==="C").length}
+  ];
+  modes.forEach(m=>{
+    const b = document.createElement("button");
+    b.className = "mode-btn";
+    b.innerHTML = `<span>${m.label}</span><span class="count">${m.count}問</span>`;
+    b.addEventListener("click", ()=>startQuiz(m.key, m.label));
+    list.appendChild(b);
+  });
+  show("start");
+}
+
+function startQuiz(key, label){
+  modeLabel = label;
+  round = 1;
+  pool = (key==="ALL") ? QUESTIONS.slice() : QUESTIONS.filter(q=>q.cat===key);
+  beginRound();
+}
+
+function beginRound(){
+  order = shuffle(pool.map((_,i)=>i));
+  cur = 0;
+  wrong = [];
+  correctCount = 0;
+  attemptLog = [];
+  roundStartedAt = new Date().toISOString();
+  show("quiz");
+  renderQuestion();
+}
+
+function renderQuestion(){
+  const q = pool[order[cur]];
+  $("round-tag").textContent = (round===1) ? `1周目 / ${modeLabel}` : `${round}周目(間違えた問題だけ) / ${modeLabel}`;
+  $("pnum").textContent = `${cur+1} / ${order.length}`;
+  $("pbar-fill").style.width = `${(cur)/order.length*100}%`;
+  $("cat-tag").textContent = q.cat + ". " + CATS[q.cat];
+  $("qtext").textContent = `Q${cur+1}. ${q.q}`;
+
+  const optWrap = $("opts");
+  optWrap.innerHTML = "";
+  const keys = ["ア","イ","ウ","エ"];
+  const idxs = shuffle(q.o.map((_,i)=>i));   // 選択肢もシャッフル
+  idxs.forEach((oi, pos)=>{
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs, oi));
+    optWrap.appendChild(b);
+  });
+
+  const fb = $("feedback");
+  fb.className = "feedback";
+  $("btn-next").style.display = "none";
+}
+
+function answer(btn, isCorrect, q, optWrap, idxs, chosenIndex){
+  recordAnswer(q, chosenIndex, isCorrect, cur + 1);
+  [...optWrap.children].forEach((b,pos)=>{
+    b.disabled = true;
+    if(idxs[pos]===q.a) b.classList.add("correct");
+  });
+  if(!isCorrect){
+    btn.classList.add("wrong");
+    wrong.push(q);
+  }else{
+    correctCount++;
+  }
+  const fb = $("feedback");
+  fb.className = "feedback " + (isCorrect ? "ok" : "ng");
+  $("verdict").textContent = isCorrect ? "正解" : "不正解 — 解説を読んでから次へ";
+  $("exp").textContent = q.exp;
+  const nextBtn = $("btn-next");
+  nextBtn.style.display = "";
+  nextBtn.textContent = (cur+1 < order.length) ? "次の問題へ" : "結果を見る";
+  nextBtn.focus();
+}
+
+$("btn-next").addEventListener("click", ()=>{
+  cur++;
+  if(cur < order.length){ renderQuestion(); }
+  else{ showResult(); }
+});
+
+function showResult(){
+  show("result");
+  const total = order.length;
+  sendAttempt({
+    quizKey: QUIZ_KEY,
+    quizTitle: QUIZ_TITLE,
+    mode: modeLabel,
+    round: round,
+    startedAt: roundStartedAt,
+    finishedAt: new Date().toISOString(),
+    totalQuestions: total,
+    correctCount: correctCount,
+    cleared: wrong.length === 0,
+    answers: attemptLog
+  });
+  $("score-n").textContent = correctCount;
+  $("score-t").textContent = total;
+  const hero = $("score-hero");
+  const actions = $("result-actions");
+  actions.innerHTML = "";
+
+  if(wrong.length===0){
+    hero.classList.add("perfect");
+    $("score-msg").textContent = `満点クリア!(${round}周でクリア)周回数をメモして報告してください`;
+    $("wrong-wrap").style.display = "none";
+    addBtn(actions, "最初からもう一度", ()=>{round=1; beginRound();});
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }else{
+    hero.classList.remove("perfect");
+    $("score-msg").textContent = `あと${wrong.length}問。間違えた問題だけもう一度。`;
+    $("wrong-wrap").style.display = "";
+    const ul = $("wrong-list");
+    ul.innerHTML = "";
+    wrong.forEach(q=>{
+      const li = document.createElement("li");
+      li.textContent = q.q;
+      ul.appendChild(li);
+    });
+    addBtn(actions, `間違えた${wrong.length}問に再挑戦`, ()=>{
+      pool = wrong.slice();
+      round++;
+      beginRound();
+    });
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }
+}
+
+function addBtn(parent, label, fn, ghost){
+  const b = document.createElement("button");
+  b.className = "btn" + (ghost ? " ghost" : "");
+  b.textContent = label;
+  b.addEventListener("click", fn);
+  parent.appendChild(b);
+}
+
+buildStart();
+</script>
+</body>
+</html>

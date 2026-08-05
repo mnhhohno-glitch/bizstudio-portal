@@ -7,12 +7,47 @@
 //   （2）ファイル情報ブロック … 自動生成・編集不可（URL / パスワード / 有効期限 / ファイル）
 //                              「メールに記載しない」選択時は ■パスワード 欄ごと省略する
 //   （3）注意書き            … 自動・編集不可
-//   （4）署名               … 自動・編集不可
+//   （4）署名               … 確認画面で全文編集可能（既定は送信者名 + メールアドレス。空にすると署名なし）
 // 件名は入力値がそのまま Subject ヘッダになる（空欄時は TRANSFER_MAIL_SUBJECT）。
 // 本文中に ■件名 欄は置かない。
 // 確認画面のプレビューと実送信は必ず同じ関数で組み立てる（食い違い防止）。
+//
+// 宛先の扱い（2026-08-06 改修）:
+//   TO / CC を含む通常のメール1通を送る。URL・パスワードは1組のみ発行し全受信者で共通。
+//   secure_transfers は1送信につき1レコード（recipient_email に TO をカンマ区切り、cc_emails に CC）。
 
-export const MAX_TRANSFER_RECIPIENTS = 10; // 1回の送信操作で指定できる宛先数の上限
+export const MAX_TRANSFER_RECIPIENTS = 10; // 1回の送信操作で指定できる宛先数の上限（TO + CC の合計）
+
+/** 入力欄のテキスト（改行・カンマ・読点・セミコロン区切り）をアドレス配列にする。空要素は捨てる。 */
+export function parseEmailList(text: string): string[] {
+  return text
+    .split(/[\n,、;]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
+/** DB 保存形式（カンマ区切り）→ 表示用の配列。旧レコードの単一アドレスもそのまま1件で返る。 */
+export function splitStoredEmails(stored: string | null | undefined): string[] {
+  if (!stored) return [];
+  return stored
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
+/**
+ * TO + CC に異なるメールドメインが混在しているか。
+ * CC は受信者全員に見えるため、別会社のアドレスが混ざっていたら確認画面で警告する。
+ * 判定は `@` 以降の文字列の一致（大小文字は無視）。
+ */
+export function hasMixedEmailDomains(emails: string[]): boolean {
+  const domains = new Set(
+    emails
+      .map((e) => e.split("@")[1]?.trim().toLowerCase())
+      .filter((d): d is string => !!d)
+  );
+  return domains.size > 1;
+}
 
 /** 件名が未入力のときに使う既定のメール件名（staging では送信時に【検証】が自動付与される）。 */
 export const TRANSFER_MAIL_SUBJECT = "【株式会社ビズスタジオ】ファイル送付のご案内";
@@ -100,19 +135,18 @@ export function buildTransferFixedBlock(params: {
   return lines.join("\n");
 }
 
-/** （4）署名。自動・編集不可。 */
+/** （4）署名の既定文面。確認画面の署名欄の初期値（署名欄も全文編集可能）。 */
 export function buildTransferSignature(senderName: string, senderEmail: string): string {
   return ["──", `株式会社ビズスタジオ ${senderName}`, senderEmail].join("\n");
 }
 
 /**
  * 受信者向け案内メールの最終本文: （1）→（2）（3）→（4）を空行で連結。
- * body は確認画面で編集された全文（空にされた場合はそのまま省略される）。
+ * body / signature は確認画面で編集された全文（空にされた場合はその領域ごと省略される）。
  */
 export function buildTransferNoticeBody(params: {
   body: string;
-  senderName: string;
-  senderEmail: string;
+  signature: string;
   url: string;
   password: string;
   passwordInEmail: boolean;
@@ -131,6 +165,7 @@ export function buildTransferNoticeBody(params: {
       fileNames: params.fileNames,
     })
   );
-  parts.push(buildTransferSignature(params.senderName, params.senderEmail));
+  const signature = params.signature.trim();
+  if (signature) parts.push(signature);
   return parts.join("\n\n");
 }
