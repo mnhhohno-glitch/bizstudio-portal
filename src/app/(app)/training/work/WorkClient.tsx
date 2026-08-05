@@ -29,6 +29,8 @@ type Draft = {
   answerUnknown: string;
 };
 
+type SavedEntry = Draft & { updatedAt: string };
+
 const EMPTY_DRAFT: Draft = { answerCompany: "", answerHelp: "", answerDay: "", answerUnknown: "" };
 
 const FIELDS: { key: keyof Draft; label: string; rows: number; placeholder: string }[] = [
@@ -50,110 +52,19 @@ function formatJst(iso: string): string {
   return `${date.replaceAll("-", "/")} ${time}`;
 }
 
-function WorkCard({
-  item,
-  initialDraft,
-  savedAt,
-  onSaved,
-}: {
-  item: WorkItem;
-  initialDraft: Draft;
-  savedAt: string | null;
-  onSaved: (itemCode: string, updatedAt: string) => void;
-}) {
-  const [draft, setDraft] = useState<Draft>(initialDraft);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [savedMark, setSavedMark] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError("");
-    setSavedMark(false);
-    try {
-      const res = await fetch("/api/training/work", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workKey: WORK_KEY, itemCode: item.itemCode, ...draft }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error || "保存に失敗しました");
-        return;
-      }
-      onSaved(item.itemCode, data.updatedAt);
-      setSavedMark(true);
-    } catch {
-      setError("保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const textareaClass =
-    "w-full px-3 py-2 border border-[#E5E7EB] rounded-md text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] resize-y";
-
-  return (
-    <div className="bg-white rounded-[8px] border border-[#E5E7EB] p-5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#EFF6FF] text-[#2563EB] text-[12px] font-semibold">
-          {item.itemCode}
-        </span>
-        <h2 className="text-[15px] font-semibold text-[#374151]">{item.title}</h2>
-        {savedAt && (
-          <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] text-[12px]">
-            ✓ 保存済み {formatJst(savedAt)}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-3 p-3 rounded-md bg-[#F9FAFB] border border-[#E5E7EB]">
-        <p className="text-[12px] font-medium text-[#6B7280] mb-1">仕事内容</p>
-        <p className="text-[14px] text-[#374151] whitespace-pre-wrap leading-relaxed">
-          {item.jobContent}
-        </p>
-        {item.hintNote && (
-          <p className="mt-2 text-[13px] text-[#6B7280] whitespace-pre-wrap">{item.hintNote}</p>
-        )}
-      </div>
-
-      <div className="mt-4 space-y-3">
-        {FIELDS.map((f) => (
-          <div key={f.key}>
-            <label className="block text-[13px] font-medium text-[#374151] mb-1">{f.label}</label>
-            <textarea
-              value={draft[f.key]}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, [f.key]: e.target.value }));
-                setSavedMark(false);
-              }}
-              rows={f.rows}
-              placeholder={f.placeholder}
-              className={textareaClass}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-5 py-2 text-[14px] bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8] disabled:opacity-50"
-        >
-          {saving ? "保存中..." : "保存"}
-        </button>
-        {savedMark && <span className="text-[13px] text-[#16A34A]">保存しました</span>}
-        {error && <span className="text-[13px] text-[#DC2626]">{error}</span>}
-      </div>
-    </div>
-  );
+function isEmptyDraft(d: Draft): boolean {
+  return FIELDS.every((f) => d[f.key].trim().length === 0);
 }
 
 export default function WorkClient() {
   const [items, setItems] = useState<WorkItem[]>([]);
+  // 入力途中の内容は親で保持する（求人を移動しても画面上は消えない。ただし未保存なのでリロードでは消える）
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
-  const [savedAtMap, setSavedAtMap] = useState<Map<string, string>>(new Map());
+  const [saved, setSaved] = useState<Map<string, SavedEntry>>(new Map());
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -167,20 +78,26 @@ export default function WorkClient() {
         return;
       }
       const data = await res.json();
-      setItems(data.items);
+      const loadedItems: WorkItem[] = data.items;
       const draftMap = new Map<string, Draft>();
-      const savedMap = new Map<string, string>();
+      const savedMap = new Map<string, SavedEntry>();
       for (const a of data.answers as SavedAnswer[]) {
-        draftMap.set(a.itemCode, {
+        const d: Draft = {
           answerCompany: a.answerCompany,
           answerHelp: a.answerHelp,
           answerDay: a.answerDay,
           answerUnknown: a.answerUnknown,
-        });
-        savedMap.set(a.itemCode, a.updatedAt);
+        };
+        draftMap.set(a.itemCode, d);
+        savedMap.set(a.itemCode, { ...d, updatedAt: a.updatedAt });
       }
+      setItems(loadedItems);
       setDrafts(draftMap);
-      setSavedAtMap(savedMap);
+      setSaved(savedMap);
+      // 開いたときは未保存の最初の1件から。全件保存済みなら1件目
+      const firstUnsaved = loadedItems.findIndex((i) => !savedMap.has(i.itemCode));
+      setCurrentIndex(firstUnsaved === -1 ? 0 : firstUnsaved);
+      setFinished(false);
     } finally {
       setLoading(false);
     }
@@ -190,11 +107,130 @@ export default function WorkClient() {
     fetchData();
   }, [fetchData]);
 
-  const handleSaved = useCallback((itemCode: string, updatedAt: string) => {
-    setSavedAtMap((m) => new Map(m).set(itemCode, updatedAt));
-  }, []);
+  const current = items[currentIndex];
+  const currentDraft = current ? drafts.get(current.itemCode) ?? EMPTY_DRAFT : EMPTY_DRAFT;
+  const currentSaved = current ? saved.get(current.itemCode) ?? null : null;
+  const isLast = currentIndex === items.length - 1;
+  const savedCount = items.filter((i) => saved.has(i.itemCode)).length;
+  const unsavedItems = items.filter((i) => !saved.has(i.itemCode));
 
-  const savedCount = items.filter((i) => savedAtMap.has(i.itemCode)).length;
+  // 保存済みの内容と一致しなければ「未保存の変更あり」とみなす（保存時に trim されるため trim 後で比較する）
+  const isDirty = useCallback(
+    (itemCode: string) => {
+      const d = drafts.get(itemCode) ?? EMPTY_DRAFT;
+      const base: Draft = saved.get(itemCode) ?? EMPTY_DRAFT;
+      return FIELDS.some((f) => d[f.key].trim() !== base[f.key].trim());
+    },
+    [drafts, saved]
+  );
+
+  // 保存を伴わない移動。未保存の変更があるときだけ確認する
+  const goTo = useCallback(
+    (index: number, skipConfirm = false) => {
+      if (index < 0 || index >= items.length) return;
+      if (index === currentIndex && !finished) return;
+      const from = items[currentIndex];
+      if (!skipConfirm && from && isDirty(from.itemCode)) {
+        if (!window.confirm("保存していない入力があります。移動しますか？")) return;
+      }
+      setError("");
+      setFinished(false);
+      setCurrentIndex(index);
+    },
+    [items, currentIndex, finished, isDirty]
+  );
+
+  // テキストエリアにフォーカスが無いときだけ左右キーで前後移動する
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (loading || finished || items.length === 0) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || el?.isContentEditable) return;
+      e.preventDefault();
+      goTo(e.key === "ArrowLeft" ? currentIndex - 1 : currentIndex + 1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [goTo, currentIndex, loading, finished, items.length]);
+
+  const updateField = (key: keyof Draft, value: string) => {
+    if (!current) return;
+    setDrafts((m) => {
+      const next = new Map(m);
+      next.set(current.itemCode, { ...(next.get(current.itemCode) ?? EMPTY_DRAFT), [key]: value });
+      return next;
+    });
+  };
+
+  const save = async (item: WorkItem, draft: Draft): Promise<boolean> => {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/training/work", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workKey: WORK_KEY, itemCode: item.itemCode, ...draft }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error || "保存に失敗しました");
+        return false;
+      }
+      // サーバ側で trim されるため、保存済みの値も trim 後の内容で持つ
+      const stored: Draft = {
+        answerCompany: draft.answerCompany.trim(),
+        answerHelp: draft.answerHelp.trim(),
+        answerDay: draft.answerDay.trim(),
+        answerUnknown: draft.answerUnknown.trim(),
+      };
+      setSaved((m) => new Map(m).set(item.itemCode, { ...stored, updatedAt: data.updatedAt }));
+      setDrafts((m) => new Map(m).set(item.itemCode, stored));
+      return true;
+    } catch {
+      setError("保存に失敗しました");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const advance = () => {
+    setError("");
+    if (isLast) {
+      setFinished(true);
+    } else {
+      setCurrentIndex((i) => i + 1);
+    }
+  };
+
+  const handleSaveNext = async () => {
+    if (!current) return;
+    // 全欄が空だと API は 400 を返すため、保存を試みずに未入力のまま次へ進む
+    if (!isEmptyDraft(currentDraft)) {
+      const ok = await save(current, currentDraft);
+      if (!ok) return; // 失敗時は移動しない
+    }
+    advance();
+  };
+
+  const dotClass = (idx: number, itemCode: string) => {
+    const isSaved = saved.has(itemCode);
+    const isCurrent = idx === currentIndex && !finished;
+    return [
+      "w-3.5 h-3.5 rounded-full transition-all",
+      isSaved ? "bg-[#2563EB]" : "bg-white",
+      isCurrent
+        ? "border-[3px] border-[#1D4ED8] scale-125"
+        : isSaved
+          ? "border border-[#2563EB]"
+          : "border border-[#D1D5DB] hover:border-[#9CA3AF]",
+    ].join(" ");
+  };
+
+  const textareaClass =
+    "w-full px-3 py-1.5 border border-[#E5E7EB] rounded-md text-[14px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] resize-y";
 
   return (
     <div className="max-w-3xl">
@@ -214,29 +250,136 @@ export default function WorkClient() {
         <p className="py-12 text-center text-[14px] text-[#6B7280]">設問が登録されていません</p>
       ) : (
         <>
-          <div className="mt-4 flex items-center gap-3">
-            <span className="text-[14px] font-medium text-[#374151]">
-              進捗: {items.length}件中 {savedCount}件 保存済み
+          {/* 進捗インジケータ: 現在位置 + 件数分のドット（クリックで直接移動） */}
+          <div className="mt-4 flex items-center gap-3 flex-wrap">
+            <span className="text-[15px] font-semibold text-[#374151] tabular-nums">
+              {finished ? items.length : currentIndex + 1} / {items.length}
             </span>
-            <div className="flex-1 max-w-[240px] h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-[#2563EB] rounded-full transition-all"
-                style={{ width: `${items.length > 0 ? (savedCount / items.length) * 100 : 0}%` }}
-              />
+            <div className="flex items-center gap-2">
+              {items.map((item, idx) => (
+                <button
+                  key={item.itemCode}
+                  type="button"
+                  onClick={() => goTo(idx)}
+                  title={`${item.itemCode}${saved.has(item.itemCode) ? "（保存済み）" : "（未保存）"}`}
+                  aria-label={`${item.itemCode} へ移動`}
+                  className={dotClass(idx, item.itemCode)}
+                />
+              ))}
             </div>
+            <span className="text-[12px] text-[#6B7280]">保存済み {savedCount}件</span>
           </div>
 
-          <div className="mt-4 space-y-5 pb-10">
-            {items.map((item) => (
-              <WorkCard
-                key={item.itemCode}
-                item={item}
-                initialDraft={drafts.get(item.itemCode) ?? EMPTY_DRAFT}
-                savedAt={savedAtMap.get(item.itemCode) ?? null}
-                onSaved={handleSaved}
-              />
-            ))}
-          </div>
+          {finished ? (
+            // 完了画面
+            <div className="mt-4 bg-white rounded-[8px] border border-[#E5E7EB] p-6 text-center">
+              <p className="text-[16px] font-semibold text-[#374151]">
+                {items.length}件中 {savedCount}件 保存しました。お疲れさまでした。
+              </p>
+              {unsavedItems.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[13px] text-[#92400E]">
+                    未保存の求人があります（クリックするとその求人へ移動します）
+                  </p>
+                  <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+                    {unsavedItems.map((item) => (
+                      <button
+                        key={item.itemCode}
+                        type="button"
+                        onClick={() => goTo(items.findIndex((i) => i.itemCode === item.itemCode), true)}
+                        className="px-2 py-1 rounded border border-[#FDE68A] bg-[#FFFBEB] text-[12px] text-[#92400E] hover:bg-[#FEF3C7]"
+                      >
+                        {item.itemCode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="mt-5">
+                <button
+                  type="button"
+                  onClick={() => goTo(0, true)}
+                  className="px-5 py-2 text-[14px] border border-[#E5E7EB] rounded-md hover:bg-[#F9FAFB]"
+                >
+                  最初に戻る
+                </button>
+              </div>
+            </div>
+          ) : (
+            current && (
+              <div className="mt-4 bg-white rounded-[8px] border border-[#E5E7EB] p-5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#EFF6FF] text-[#2563EB] text-[12px] font-semibold">
+                    {current.itemCode}
+                  </span>
+                  <h2 className="text-[15px] font-semibold text-[#374151]">{current.title}</h2>
+                  {currentSaved && (
+                    <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] text-[12px]">
+                      ✓ 保存済み {formatJst(currentSaved.updatedAt)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-2.5 p-3 rounded-md bg-[#F9FAFB] border border-[#E5E7EB]">
+                  <p className="text-[12px] font-medium text-[#6B7280] mb-1">仕事内容</p>
+                  <p className="text-[14px] text-[#374151] whitespace-pre-wrap leading-6">
+                    {current.jobContent}
+                  </p>
+                  {current.hintNote && (
+                    <p className="mt-2 text-[13px] text-[#6B7280] whitespace-pre-wrap">
+                      {current.hintNote}
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {FIELDS.map((f) => (
+                    <div key={f.key}>
+                      <label className="block text-[13px] font-medium text-[#374151] mb-0.5">
+                        {f.label}
+                      </label>
+                      <textarea
+                        value={currentDraft[f.key]}
+                        onChange={(e) => updateField(f.key, e.target.value)}
+                        rows={f.rows}
+                        placeholder={f.placeholder}
+                        className={textareaClass}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {error && <p className="mt-2 text-[13px] text-[#DC2626]">{error}</p>}
+
+                {/* ナビゲーション */}
+                <div className="mt-4 flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => goTo(currentIndex - 1)}
+                    disabled={currentIndex === 0}
+                    className="px-4 py-2 text-[14px] border border-[#E5E7EB] rounded-md hover:bg-[#F9FAFB] disabled:opacity-40 disabled:hover:bg-white"
+                  >
+                    ← 前へ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={advance}
+                    className="text-[13px] text-[#6B7280] hover:text-[#374151] hover:underline"
+                  >
+                    保存せず{isLast ? "完了" : "次へ"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveNext}
+                    disabled={saving}
+                    className="ml-auto px-5 py-2 text-[14px] bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    {saving ? "保存中..." : isLast ? "保存して完了" : "保存して次へ →"}
+                  </button>
+                </div>
+              </div>
+            )
+          )}
         </>
       )}
     </div>
