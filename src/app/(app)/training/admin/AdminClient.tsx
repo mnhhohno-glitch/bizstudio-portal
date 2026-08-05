@@ -70,6 +70,33 @@ type CheckItem = {
 
 const RATING_MARKS: Record<string, string> = { A: "◎", B: "○", C: "△", D: "×" };
 
+type WorkItemLite = {
+  id: string;
+  itemCode: string;
+  sortOrder: number;
+  title: string;
+  jobContent: string;
+};
+
+type WorkAnswer = {
+  employeeId: string;
+  employeeName: string;
+  itemCode: string;
+  answerCompany: string;
+  answerHelp: string;
+  answerDay: string;
+  answerUnknown: string;
+  updatedAt: string;
+};
+
+type WorkStatsData = {
+  workKey: string;
+  workKeys: string[];
+  items: WorkItemLite[];
+  employees: { id: string; name: string }[];
+  answers: WorkAnswer[];
+};
+
 function formatMd(reportDate: string): string {
   const [, m, d] = reportDate.split("-");
   return `${Number(m)}/${Number(d)}`;
@@ -375,6 +402,243 @@ function CheckItemsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// 記述ワーク（職種・業種当て）の回答セクション
+// 提出状況マトリクス / 社員別の回答全文 / ④分からなかった言葉の全社員一覧（講師が講義の重点を決めるために使う）
+function WorkAnswersSection() {
+  const [data, setData] = useState<WorkStatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [workKey, setWorkKey] = useState("work0-shokushu-gyoshu");
+  const [view, setView] = useState<"matrix" | "detail" | "unknown">("matrix");
+  const [selectedEmployee, setSelectedEmployee] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/training/work-stats?workKey=${encodeURIComponent(workKey)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setData(d);
+      })
+      .finally(() => setLoading(false));
+  }, [workKey]);
+
+  const selectClass =
+    "px-3 py-1.5 border border-[#E5E7EB] rounded-md text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
+
+  // 保存日時の表示はJSTに固定する（罠#17: Railway 本番は UTC）
+  const formatJst = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "/")} ${d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const answerByEmployeeItem = new Map(
+    (data?.answers ?? []).map((a) => [`${a.employeeId}|${a.itemCode}`, a])
+  );
+  const itemByCode = new Map((data?.items ?? []).map((i) => [i.itemCode, i]));
+
+  // 回答があるがアクティブ社員一覧にいない人（退職者等）も行に出す
+  const answerOnlyEmployees = [
+    ...new Map(
+      (data?.answers ?? [])
+        .filter((a) => !(data?.employees ?? []).some((e) => e.id === a.employeeId))
+        .map((a) => [a.employeeId, { id: a.employeeId, name: a.employeeName }])
+    ).values(),
+  ];
+  const allEmployees = [...(data?.employees ?? []), ...answerOnlyEmployees];
+
+  const unknownAnswers = (data?.answers ?? [])
+    .filter((a) => a.answerUnknown.trim().length > 0)
+    .sort((a, b) =>
+      a.itemCode === b.itemCode
+        ? a.employeeName.localeCompare(b.employeeName, "ja")
+        : a.itemCode.localeCompare(b.itemCode)
+    );
+
+  const detailAnswers = (data?.items ?? []).map((item) => ({
+    item,
+    answer: answerByEmployeeItem.get(`${selectedEmployee}|${item.itemCode}`) ?? null,
+  }));
+
+  const viewButtons: { key: typeof view; label: string }[] = [
+    { key: "matrix", label: "提出状況" },
+    { key: "detail", label: "社員別回答" },
+    { key: "unknown", label: "分からなかった言葉" },
+  ];
+
+  return (
+    <section className="mt-8">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <h2 className="text-[16px] font-semibold text-[#374151]">記述ワーク回答</h2>
+        <select value={workKey} onChange={(e) => setWorkKey(e.target.value)} className={selectClass}>
+          {(data?.workKeys.length ? data.workKeys : [workKey]).map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+        <div className="flex rounded-md border border-[#E5E7EB] overflow-hidden">
+          {viewButtons.map((b) => (
+            <button
+              key={b.key}
+              onClick={() => setView(b.key)}
+              className={`px-3 py-1.5 text-[13px] ${
+                view === b.key ? "bg-[#2563EB] text-white" : "bg-white text-[#374151] hover:bg-[#F9FAFB]"
+              }`}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="py-8 text-center text-[14px] text-[#6B7280]">読み込み中...</p>
+      ) : !data || data.items.length === 0 ? (
+        <p className="py-8 text-center text-[14px] text-[#6B7280]">設問が登録されていません</p>
+      ) : view === "matrix" ? (
+        <div className="overflow-x-auto bg-white rounded-[8px] border border-[#E5E7EB]">
+          <table className="w-full text-[13px] border-collapse">
+            <thead>
+              <tr className="border-b border-[#E5E7EB] text-left text-[#6B7280]">
+                <th className="py-2.5 px-3 font-medium whitespace-nowrap">社員</th>
+                {data.items.map((i) => (
+                  <th key={i.itemCode} className="py-2.5 px-2 font-medium whitespace-nowrap" title={i.title}>
+                    {i.itemCode}
+                  </th>
+                ))}
+                <th className="py-2.5 px-3 font-medium whitespace-nowrap">提出数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allEmployees.map((u) => {
+                const submitted = data.items.filter((i) =>
+                  answerByEmployeeItem.has(`${u.id}|${i.itemCode}`)
+                ).length;
+                return (
+                  <tr key={u.id} className={`border-b border-[#F3F4F6] ${submitted === 0 ? "text-[#9CA3AF]" : ""}`}>
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <button
+                        onClick={() => {
+                          setSelectedEmployee(u.id);
+                          setView("detail");
+                        }}
+                        className="text-[#2563EB] hover:underline"
+                      >
+                        {u.name}
+                      </button>
+                    </td>
+                    {data.items.map((i) => {
+                      const has = answerByEmployeeItem.has(`${u.id}|${i.itemCode}`);
+                      return (
+                        <td key={i.itemCode} className="py-2.5 px-2 whitespace-nowrap">
+                          {has ? (
+                            <span className="text-[#16A34A] font-medium">✓</span>
+                          ) : (
+                            <span className="text-[#D1D5DB]">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="py-2.5 px-3">
+                      {submitted}/{data.items.length}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : view === "detail" ? (
+        <div>
+          <select
+            value={selectedEmployee}
+            onChange={(e) => setSelectedEmployee(e.target.value)}
+            className={selectClass}
+          >
+            <option value="">社員を選択してください</option>
+            {allEmployees.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+
+          {selectedEmployee && (
+            <div className="mt-3 space-y-3">
+              {detailAnswers.map(({ item, answer }) => (
+                <div key={item.itemCode} className="bg-white rounded-[8px] border border-[#E5E7EB] p-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#EFF6FF] text-[#2563EB] text-[12px] font-semibold">
+                      {item.itemCode}
+                    </span>
+                    <span className="text-[14px] font-medium text-[#374151]">{item.title}</span>
+                    {answer ? (
+                      <span className="ml-auto text-[12px] text-[#6B7280]">
+                        保存: {formatJst(answer.updatedAt)}
+                      </span>
+                    ) : (
+                      <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded bg-[#F3F4F6] text-[#9CA3AF] text-[12px]">
+                        未提出
+                      </span>
+                    )}
+                  </div>
+                  {answer && (
+                    <dl className="mt-3 space-y-2">
+                      {[
+                        { label: "① 何をしている会社か", value: answer.answerCompany },
+                        { label: "② 誰を助ける仕事か", value: answer.answerHelp },
+                        { label: "③ 1日の動き", value: answer.answerDay },
+                        { label: "④ 分からなかった言葉", value: answer.answerUnknown },
+                      ].map(({ label, value }) => (
+                        <div key={label}>
+                          <dt className="text-[12px] font-medium text-[#6B7280]">{label}</dt>
+                          <dd className="text-[14px] text-[#374151] whitespace-pre-wrap">
+                            {value || <span className="text-[#9CA3AF]">（未記入）</span>}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        // ④分からなかった言葉の全社員一覧（講師が講義の重点を決めるために使う）
+        <div className="overflow-x-auto bg-white rounded-[8px] border border-[#E5E7EB]">
+          <table className="w-full text-[13px] border-collapse">
+            <thead>
+              <tr className="border-b border-[#E5E7EB] text-left text-[#6B7280]">
+                <th className="py-2.5 px-3 font-medium whitespace-nowrap">求人</th>
+                <th className="py-2.5 px-3 font-medium whitespace-nowrap">社員</th>
+                <th className="py-2.5 px-3 font-medium">分からなかった言葉</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unknownAnswers.map((a) => (
+                <tr key={`${a.employeeId}-${a.itemCode}`} className="border-b border-[#F3F4F6]">
+                  <td className="py-2.5 px-3 whitespace-nowrap text-[#6B7280]" title={itemByCode.get(a.itemCode)?.title ?? ""}>
+                    {a.itemCode}
+                  </td>
+                  <td className="py-2.5 px-3 whitespace-nowrap text-[#374151]">{a.employeeName}</td>
+                  <td className="py-2.5 px-3 text-[#374151] whitespace-pre-wrap">{a.answerUnknown}</td>
+                </tr>
+              ))}
+              {unknownAnswers.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-4 text-center text-[#6B7280]">
+                    まだ記入がありません
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function AdminClient({
   summary,
   quizzes,
@@ -646,6 +910,9 @@ export default function AdminClient({
           </div>
         )}
       </section>
+
+      {/* セクションC: 記述ワーク回答 */}
+      <WorkAnswersSection />
 
       {/* セクションB: 理解度の集計 */}
       <section className="mt-8 mb-8">

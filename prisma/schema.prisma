@@ -2893,3 +2893,40 @@ model TrainingQuizAnswer {
   @@index([qid, isCorrect])
   @@map("training_quiz_answers")
 }
+
+// 記述式ワークの設問（求人票）。管理画面CRUDは無く seed（prisma/seed-training-work.ts）で投入する
+model TrainingWorkItem {
+  id          String   @id @default(cuid())
+  workKey     String   // 例: "work0-shokushu-gyoshu"
+  itemCode    String   // 例: "J-01"
+  sortOrder   Int
+  title       String   // 求人タイトル
+  jobContent  String   @db.Text // 仕事内容（研修生に見せる本文）
+  hintNote    String?  @db.Text // 補足（任意・研修生に見せる）
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workKey, itemCode])
+  @@index([workKey, sortOrder])
+  @@map("training_work_items")
+}
+
+// 記述式ワークの回答。employeeId はセッションの User.id（User モデルへのリレーションは張らない方針を踏襲）
+model TrainingWorkAnswer {
+  id            String   @id @default(cuid())
+  employeeId    String
+  workKey       String
+  itemCode      String
+  answerCompany String   @db.Text // ①この会社は何をしている会社か
+  answerHelp    String   @db.Text // ②この仕事は誰を助ける仕事か
+  answerDay     String   @db.Text // ③1日の動きを想像して書く
+  answerUnknown String   @db.Text // ④分からなかった言葉
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([employeeId, workKey, itemCode])
+  @@index([workKey])
+  @@index([employeeId])
+  @@map("training_work_answers")
+}
