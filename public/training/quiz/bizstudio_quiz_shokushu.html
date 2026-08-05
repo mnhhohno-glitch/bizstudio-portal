@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>職種・業種クイズ Lv2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Zen+Antique+Soft&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --green:#155E4E;
+    --green-deep:#0C3F34;
+    --green-tint:#EAF3EF;
+    --ink:#1C2724;
+    --sub:#5C6B66;
+    --line:#D8E2DD;
+    --amber:#B96A12;
+    --amber-tint:#FBF1E3;
+    --red:#A63A2E;
+    --red-tint:#F9ECEA;
+    --bg:#F7FAF8;
+    --card:#FFFFFF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.7;
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 64px;}
+  header.app{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:6px 2px 14px;border-bottom:2px solid var(--green);
+    margin-bottom:20px;
+  }
+  .brand{font-weight:900;font-size:15px;letter-spacing:.06em;color:var(--green-deep);}
+  .brand small{display:block;font-weight:500;font-size:11px;color:var(--sub);letter-spacing:.12em;}
+  .lv{font-family:'Zen Antique Soft',serif;font-size:22px;color:var(--green);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 20px;box-shadow:0 1px 2px rgba(12,63,52,.05);}
+  h1{font-size:22px;font-weight:900;color:var(--green-deep);line-height:1.4;margin-bottom:10px;}
+  .lede{font-size:13.5px;color:var(--sub);margin-bottom:20px;}
+  .lede strong{color:var(--ink);}
+
+  .modes{display:grid;gap:10px;margin-bottom:18px;}
+  .mode-btn{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    width:100%;text-align:left;background:var(--green-tint);
+    border:1.5px solid var(--line);border-radius:12px;
+    padding:14px 16px;font-family:inherit;font-size:15px;font-weight:700;color:var(--green-deep);
+    cursor:pointer;transition:border-color .15s;
+  }
+  .mode-btn:hover,.mode-btn:focus-visible{border-color:var(--green);}
+  .mode-btn .count{font-size:12px;font-weight:500;color:var(--sub);flex-shrink:0;}
+  .rule{font-size:12.5px;color:var(--sub);border-top:1px dashed var(--line);padding-top:14px;}
+  .rule b{color:var(--green-deep);}
+
+  /* progress */
+  .progress{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .pbar>i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .25s;}
+  .pnum{font-size:13px;font-weight:700;color:var(--sub);white-space:nowrap;}
+  .round-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--amber);background:var(--amber-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:12px;
+  }
+  .cat-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--green);background:var(--green-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:10px;
+  }
+  .qtext{font-size:17px;font-weight:700;line-height:1.65;margin-bottom:18px;}
+
+  .opts{display:grid;gap:10px;}
+  .opt{
+    width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);
+    border-radius:12px;padding:13px 15px;font-family:inherit;font-size:14.5px;
+    color:var(--ink);cursor:pointer;line-height:1.55;transition:border-color .12s,background .12s;
+  }
+  .opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--green);}
+  .opt:disabled{cursor:default;}
+  .opt.correct{border-color:var(--green);background:var(--green-tint);font-weight:700;}
+  .opt.wrong{border-color:var(--red);background:var(--red-tint);}
+  .opt .k{display:inline-block;width:1.6em;font-weight:900;color:var(--sub);}
+  .opt.correct .k{color:var(--green);}
+  .opt.wrong .k{color:var(--red);}
+
+  .feedback{margin-top:16px;border-radius:12px;padding:14px 16px;font-size:14px;display:none;}
+  .feedback.ok{display:block;background:var(--green-tint);border:1px solid var(--green);}
+  .feedback.ng{display:block;background:var(--amber-tint);border:1px solid var(--amber);}
+  .feedback .verdict{font-weight:900;font-size:15px;margin-bottom:6px;}
+  .feedback.ok .verdict{color:var(--green-deep);}
+  .feedback.ng .verdict{color:var(--amber);}
+  .feedback .exp{color:var(--ink);}
+
+  .actions{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{
+    appearance:none;border:none;border-radius:99px;padding:12px 26px;
+    font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    background:var(--green);color:#fff;transition:background .15s;
+  }
+  .btn:hover,.btn:focus-visible{background:var(--green-deep);}
+  .btn.ghost{background:#fff;color:var(--green-deep);border:1.5px solid var(--green);}
+  .btn.ghost:hover,.btn.ghost:focus-visible{background:var(--green-tint);}
+  .btn:focus-visible,.opt:focus-visible,.mode-btn:focus-visible{outline:3px solid rgba(21,94,78,.35);outline-offset:2px;}
+
+  /* result */
+  .score-hero{text-align:center;padding:8px 0 18px;}
+  .score-hero .num{font-family:'Zen Antique Soft',serif;font-size:56px;color:var(--green);line-height:1.1;}
+  .score-hero .num small{font-size:22px;color:var(--sub);}
+  .score-hero .msg{font-size:15px;font-weight:700;color:var(--green-deep);margin-top:4px;}
+  .perfect .num{color:var(--amber);}
+  .wrong-list{border-top:1px dashed var(--line);padding-top:14px;margin-top:6px;}
+  .wrong-list h2{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:8px;}
+  .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
+  .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
+
+
+  /* 記録ステータス表示 */
+  .rec{
+    margin-top:14px;font-size:12px;color:var(--sub);text-align:center;
+    min-height:1.4em;
+  }
+  .rec.ok{color:var(--green);font-weight:700;}
+  .rec.ng{color:var(--amber);font-weight:700;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <div class="brand">BizStudio 新人CA研修<small>KNOWLEDGE DRILL</small></div>
+    <div class="lv">Lv.2</div>
+  </header>
+
+  <!-- ===== スタート画面 ===== -->
+  <section id="screen-start" class="card">
+    <h1>職種・業種クイズ Lv2<br>満点になるまで繰り返そう</h1>
+    <p class="lede">求人票や経歴から、職種と業種を判断する力を確認します。全問正解で合格です。全20問・4択。答えるとその場で<strong>解説</strong>が出ます。1周終わったら<strong>間違えた問題だけ</strong>をもう一度。誤答ゼロになったらクリアです。</p>
+    <div class="modes" id="mode-list"></div>
+    <p class="rule"><b>ルール:</b> 調べながらでOK。ただし解説は必ず読むこと。画面を閉じると記録は消えるので、クリアしたら周回数をメモして報告してください。</p>
+  </section>
+
+  <!-- ===== 出題画面 ===== -->
+  <section id="screen-quiz" class="card" style="display:none;">
+    <div class="round-tag" id="round-tag"></div>
+    <div class="progress">
+      <div class="pbar"><i id="pbar-fill" style="width:0%"></i></div>
+      <div class="pnum" id="pnum"></div>
+    </div>
+    <div class="cat-tag" id="cat-tag"></div>
+    <p class="qtext" id="qtext"></p>
+    <div class="opts" id="opts"></div>
+    <div class="feedback" id="feedback">
+      <div class="verdict" id="verdict"></div>
+      <div class="exp" id="exp"></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-next" style="display:none;">次の問題へ</button>
+    </div>
+  </section>
+
+  <!-- ===== 結果画面 ===== -->
+  <section id="screen-result" class="card">
+    <div class="score-hero" id="score-hero">
+      <div class="num"><span id="score-n">0</span><small> / <span id="score-t">0</span></small></div>
+      <div class="msg" id="score-msg"></div>
+    </div>
+    <div class="wrong-list" id="wrong-wrap">
+      <h2>間違えた問題</h2>
+      <ul id="wrong-list"></ul>
+    </div>
+    <div class="rec" id="rec"></div>
+    <div class="actions" id="result-actions"></div>
+  </section>
+
+  <p class="note">© 株式会社ビズスタジオ 社内研修用 / 問題の追加・修正はHTML内の QUESTIONS を編集</p>
+</div>
+
+<script>
+/* =====================================================================
+   問題データ
+   ここを編集すれば問題の追加・修正ができます。
+   cat: "A"=営業の分類 / "B"=事務の分類 / "C"=業種の分類 / "D"=経歴の読み取り
+   a: 正解の選択肢番号(0始まり)
+   exp: 解説(ビズスタジオの実務に合わせた内容)
+===================================================================== */
+const QUIZ_KEY = "shokushu";
+const QUIZ_TITLE = "職種・業種クイズ Lv2";
+
+const CATS = {
+  A: "営業の分類",
+  B: "事務の分類",
+  C: "業種の分類",
+  D: "経歴の読み取り"
+};
+
+const QUESTIONS = [
+/* ---------- A: 営業の分類 (6問) ---------- */
+{qid:"shokushu-A01", cat:"A", q:"「スーパーや小売店を1日6〜8件まわり、売れ筋商品の案内と受注をする。新規開拓はない」この仕事の分類は?",
+ o:["法人・新規・有形","法人・既存・有形","個人・既存・有形","法人・既存・無形"],
+ a:1, exp:"訪問先が企業なので法人。既存の取引先のみなので既存。食品という形のある商品なので有形。"},
+{qid:"shokushu-A02", cat:"A", q:"「ショールームに来店したお客様にキッチンやバスの提案をする。飛び込みやテレアポはない」この仕事の分類は?",
+ o:["個人・新規・有形","個人・反響・有形","個人・反響・無形","法人・反響・有形"],
+ a:1, exp:"相手は個人。来店してくれた人に対応するので反響。住宅設備は形があるので有形。"},
+{qid:"shokushu-A03", cat:"A", q:"無形商材の営業が、有形商材の営業と比べて難しいとされる理由として最も適切なものは?",
+ o:["移動距離が長い","商品を見せられないため、説明で価値を伝える必要がある","在庫管理が必要","価格競争が激しい"],
+ a:1, exp:"形がないため、売る人の説明力が成果を左右する。"},
+{qid:"shokushu-A04", cat:"A", q:"接客・販売の経験がある求職者に、営業職を提案する場合。最も接続しやすいのは?",
+ o:["法人向けの新規開拓営業","個人向けのテレアポ営業","来店型のカウンター営業","代理店の開拓営業"],
+ a:2, exp:"来た人に対応するという仕事の構造が接客と同じ。"},
+{qid:"shokushu-A05", cat:"A", q:"「営業は苦手です」と話す求職者に、CAが最初にすべきことは?",
+ o:["営業以外の求人を探す","どの営業が苦手かを分解して聞く","営業のやりがいを説明する","年収が上がることを伝える"],
+ a:1, exp:"多くの場合、新規開拓のイメージだけで判断している。ルート営業や反響営業なら受けられることが多い。"},
+{qid:"shokushu-A06", cat:"A", q:"次のうち、成果によって年収の幅が最も大きくなりやすいのは?",
+ o:["ルート営業","カウンター営業","個人向けの保険営業","営業事務"],
+ a:2, exp:"歩合の比重が高く、無形商材で新規開拓型のため成果の差が年収に直結する。"},
+
+/* ---------- B: 事務の分類 (6問) ---------- */
+{qid:"shokushu-A07", cat:"B", q:"「受注データの入力、納期の調整、見積書と請求書の作成、取引先への電話対応」この事務の種類は?",
+ o:["一般事務","営業事務","経理","総務"],
+ a:1, exp:"営業担当と取引先を支える仕事。受発注が中心なら営業事務。"},
+{qid:"shokushu-A08", cat:"B", q:"「入退社の手続き、社会保険の手続き、勤怠の集計、備品の発注、採用の日程調整」この事務の種類は?",
+ o:["一般事務","営業事務","経理","総務・人事"],
+ a:3, exp:"社員全員を支える仕事。"},
+{qid:"shokushu-A09", cat:"B", q:"5種類の事務のうち、未経験からの求人数が最も少ないのは?",
+ o:["一般事務","営業事務","経理","総務・人事"],
+ a:3, exp:"求人の絶対数が少なく、未経験可の枠はさらに限られる。"},
+{qid:"shokushu-A10", cat:"B", q:"「事務職希望」の求職者に対し、CAが最初にすべきことは?",
+ o:["一般事務の求人を探す","どの種類の事務かを分解して聞く","資格取得を勧める","年収の希望を聞く"],
+ a:1, exp:"5種類のどれを指すかで提案が全く変わる。"},
+{qid:"shokushu-A11", cat:"B", q:"一般事務が未経験者にとって通りにくい理由として最も適切なものは?",
+ o:["必要なスキルが高い","求人数が少ない","応募が集中し倍率が高い","資格が必須である"],
+ a:2, exp:"未経験可の求人は多いが、その分応募が殺到する。"},
+{qid:"shokushu-A12", cat:"B", q:"資格が入口になり、取得すると応募できる求人が大きく増える事務は?",
+ o:["一般事務","営業事務","経理","総務"],
+ a:2, exp:"日商簿記3級が必須条件になっている求人が多い。"},
+
+/* ---------- C: 業種の分類 (5問) ---------- */
+{qid:"shokushu-A13", cat:"C", q:"「自社の工場で建築資材を製造し、商社や工務店へ販売している」この会社の分類は?",
+ o:["商社","メーカー","小売","サービス"],
+ a:1, exp:"工場を持ち、自分で作って売るのがメーカー。"},
+{qid:"shokushu-A14", cat:"C", q:"「工場は持たず、複数のメーカーから資材を仕入れて工務店へ販売している」この会社の分類は?",
+ o:["メーカー","商社","小売","建設"],
+ a:1, exp:"仕入れて売るのが商社。"},
+{qid:"shokushu-A15", cat:"C", q:"メーカーの営業事務と商社の営業事務で、調整する相手が異なる。商社の営業事務が調整する相手は?",
+ o:["自社の工場","仕入先のメーカー","自社の経理部","社内の営業部のみ"],
+ a:1, exp:"工場を持たないため、社外の仕入先と納期を調整する。"},
+{qid:"shokushu-A16", cat:"C", q:"次のうち、事業会社ではないものは?",
+ o:["株式会社","合同会社","有限会社","税理士法人"],
+ a:3, exp:"税理士法人、医療法人、学校法人、社会福祉法人などは事業会社に含まれない。"},
+{qid:"shokushu-A17", cat:"C", q:"求人票の必須条件に「事業会社での経理実務経験1年以上」とある。税理士法人で会計アシスタントを1年4ヶ月経験した求職者は?",
+ o:["応募できる","応募できない","歓迎要件次第","資格があれば応募できる"],
+ a:1, exp:"経験年数は満たすが、税理士法人は事業会社ではないため必須条件を外れる。"},
+
+/* ---------- D: 経歴の読み取り (3問) ---------- */
+{qid:"shokushu-A18", cat:"D", q:"「産業機械メーカーの営業事務を4年」という経歴の人が、最も通りやすい求人は?",
+ o:["IT企業の一般事務","建材商社の営業事務","税理士法人の経理","保険の個人営業"],
+ a:1, exp:"職種が同じで、有形商材という業種の性質も近い。"},
+{qid:"shokushu-A19", cat:"D", q:"「まつげサロンで6年、うち店長3年。売上管理とシフト作成も担当」この人の経験のうち、事務職への応募で最も評価されるのは?",
+ o:["接客での丁寧な対応","売上データの管理","シフト作成","店舗の売上目標達成"],
+ a:1, exp:"事務職が求めるのは処理の正確さ。数字を扱った経験が最も近い。"},
+{qid:"shokushu-A20", cat:"D", q:"求職者の経歴を読むとき、職種と業種の両方を確認する必要がある理由は?",
+ o:["年収を推測するため","職種名だけでは仕事の中身が分からないため","転職回数を数えるため","資格を確認するため"],
+ a:1, exp:"「営業事務」だけでは浮かばないが、「建材商社の営業事務」で初めて仕事の中身が浮かぶ。"}
+];
+
+/* ===================================================================== */
+
+
+/* =====================================================================
+   回答記録（ポータルへ送信）
+   同一オリジンの /api/training/quiz-attempts にPOSTする。
+   未ログイン(401)や失敗時は黙って続行し、クイズの利用は妨げない。
+===================================================================== */
+const ATTEMPT_ENDPOINT = "/api/training/quiz-attempts";
+let attemptLog = [];      // 今の周回の解答明細
+let roundStartedAt = null;
+
+function recordAnswer(q, chosenIndex, isCorrect, position){
+  attemptLog.push({
+    qid: q.qid,
+    category: q.cat,
+    questionText: q.q,
+    chosenText: q.o[chosenIndex],
+    correctText: q.o[q.a],
+    isCorrect: !!isCorrect,
+    position: position
+  });
+}
+
+async function sendAttempt(payload){
+  const el = document.getElementById("rec");
+  if(el){ el.className = "rec"; el.textContent = "記録を保存しています…"; }
+  try{
+    const res = await fetch(ATTEMPT_ENDPOINT, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if(!el) return;
+    if(res.ok){
+      el.className = "rec ok";
+      el.textContent = "この結果を記録しました";
+    }else if(res.status === 401){
+      el.className = "rec ng";
+      el.textContent = "未ログインのため記録できませんでした（ポータルにログインしてから開き直してください）";
+    }else{
+      el.className = "rec ng";
+      el.textContent = "記録に失敗しました（結果は画面で確認できます）";
+    }
+  }catch(e){
+    if(el){ el.className = "rec ng"; el.textContent = "記録に失敗しました（オフラインの可能性があります）"; }
+  }
+}
+
+const $ = id => document.getElementById(id);
+const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
+function show(name){
+  for(const k in screens) screens[k].style.display = (k===name) ? "" : "none";
+}
+
+let pool = [];        // 今の周回で出題する問題(元QUESTIONSへの参照)
+let order = [];       // シャッフル済みインデックス
+let cur = 0;
+let wrong = [];       // 間違えた問題
+let correctCount = 0;
+let round = 1;
+let modeLabel = "";
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+/* ---- スタート画面 ---- */
+function buildStart(){
+  const list = $("mode-list");
+  list.innerHTML = "";
+  const modes = [
+    {key:"ALL", label:"全問チャレンジ", count:QUESTIONS.length},
+    {key:"A", label:"A. "+CATS.A, count:QUESTIONS.filter(q=>q.cat==="A").length},
+    {key:"B", label:"B. "+CATS.B, count:QUESTIONS.filter(q=>q.cat==="B").length},
+    {key:"C", label:"C. "+CATS.C, count:QUESTIONS.filter(q=>q.cat==="C").length},
+    {key:"D", label:"D. "+CATS.D, count:QUESTIONS.filter(q=>q.cat==="D").length}
+  ];
+  modes.forEach(m=>{
+    const b = document.createElement("button");
+    b.className = "mode-btn";
+    b.innerHTML = `<span>${m.label}</span><span class="count">${m.count}問</span>`;
+    b.addEventListener("click", ()=>startQuiz(m.key, m.label));
+    list.appendChild(b);
+  });
+  show("start");
+}
+
+function startQuiz(key, label){
+  modeLabel = label;
+  round = 1;
+  pool = (key==="ALL") ? QUESTIONS.slice() : QUESTIONS.filter(q=>q.cat===key);
+  beginRound();
+}
+
+function beginRound(){
+  order = shuffle(pool.map((_,i)=>i));
+  cur = 0;
+  wrong = [];
+  correctCount = 0;
+  attemptLog = [];
+  roundStartedAt = new Date().toISOString();
+  show("quiz");
+  renderQuestion();
+}
+
+function renderQuestion(){
+  const q = pool[order[cur]];
+  $("round-tag").textContent = (round===1) ? `1周目 / ${modeLabel}` : `${round}周目(間違えた問題だけ) / ${modeLabel}`;
+  $("pnum").textContent = `${cur+1} / ${order.length}`;
+  $("pbar-fill").style.width = `${(cur)/order.length*100}%`;
+  $("cat-tag").textContent = q.cat + ". " + CATS[q.cat];
+  $("qtext").textContent = `Q${cur+1}. ${q.q}`;
+
+  const optWrap = $("opts");
+  optWrap.innerHTML = "";
+  const keys = ["ア","イ","ウ","エ"];
+  const idxs = shuffle(q.o.map((_,i)=>i));   // 選択肢もシャッフル
+  idxs.forEach((oi, pos)=>{
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs, oi));
+    optWrap.appendChild(b);
+  });
+
+  const fb = $("feedback");
+  fb.className = "feedback";
+  $("btn-next").style.display = "none";
+}
+
+function answer(btn, isCorrect, q, optWrap, idxs, chosenIndex){
+  recordAnswer(q, chosenIndex, isCorrect, cur + 1);
+  [...optWrap.children].forEach((b,pos)=>{
+    b.disabled = true;
+    if(idxs[pos]===q.a) b.classList.add("correct");
+  });
+  if(!isCorrect){
+    btn.classList.add("wrong");
+    wrong.push(q);
+  }else{
+    correctCount++;
+  }
+  const fb = $("feedback");
+  fb.className = "feedback " + (isCorrect ? "ok" : "ng");
+  $("verdict").textContent = isCorrect ? "正解" : "不正解 — 解説を読んでから次へ";
+  $("exp").textContent = q.exp;
+  const nextBtn = $("btn-next");
+  nextBtn.style.display = "";
+  nextBtn.textContent = (cur+1 < order.length) ? "次の問題へ" : "結果を見る";
+  nextBtn.focus();
+}
+
+$("btn-next").addEventListener("click", ()=>{
+  cur++;
+  if(cur < order.length){ renderQuestion(); }
+  else{ showResult(); }
+});
+
+function showResult(){
+  show("result");
+  const total = order.length;
+  sendAttempt({
+    quizKey: QUIZ_KEY,
+    quizTitle: QUIZ_TITLE,
+    mode: modeLabel,
+    round: round,
+    startedAt: roundStartedAt,
+    finishedAt: new Date().toISOString(),
+    totalQuestions: total,
+    correctCount: correctCount,
+    cleared: wrong.length === 0,
+    answers: attemptLog
+  });
+  $("score-n").textContent = correctCount;
+  $("score-t").textContent = total;
+  const hero = $("score-hero");
+  const actions = $("result-actions");
+  actions.innerHTML = "";
+
+  if(wrong.length===0){
+    hero.classList.add("perfect");
+    $("score-msg").textContent = `満点クリア!(${round}周でクリア)周回数をメモして報告してください`;
+    $("wrong-wrap").style.display = "none";
+    addBtn(actions, "最初からもう一度", ()=>{round=1; beginRound();});
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }else{
+    hero.classList.remove("perfect");
+    $("score-msg").textContent = `あと${wrong.length}問。間違えた問題だけもう一度。`;
+    $("wrong-wrap").style.display = "";
+    const ul = $("wrong-list");
+    ul.innerHTML = "";
+    wrong.forEach(q=>{
+      const li = document.createElement("li");
+      li.textContent = q.q;
+      ul.appendChild(li);
+    });
+    addBtn(actions, `間違えた${wrong.length}問に再挑戦`, ()=>{
+      pool = wrong.slice();
+      round++;
+      beginRound();
+    });
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }
+}
+
+function addBtn(parent, label, fn, ghost){
+  const b = document.createElement("button");
+  b.className = "btn" + (ghost ? " ghost" : "");
+  b.textContent = label;
+  b.addEventListener("click", fn);
+  parent.appendChild(b);
+}
+
+buildStart();
+</script>
+</body>
+</html>

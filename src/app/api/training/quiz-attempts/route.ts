@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 
-const VALID_QUIZ_KEYS = ["lv1", "sales", "ca_ra", "yomikata"];
+const VALID_QUIZ_KEYS = ["lv1", "sales", "ca_ra", "yomikata", "shokushu"];
 const MAX_LIMIT = 500;
 
 // クイズ結果の記録: ログイン済み全員（静的HTML public/training/quiz/ から same-origin で呼ばれる）
