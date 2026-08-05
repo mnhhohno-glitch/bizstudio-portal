@@ -350,7 +350,10 @@ export default function ReflectionClient({ isAdmin }: { isAdmin: boolean }) {
   const quizResults = materials.map((m) => {
     const own = todayAttempts.filter((a) => a.quizKey === m.quizKey);
     if (own.length === 0) return { material: m, label: "未受験", done: false };
-    const best = own.reduce((mx, a) =>
+    // 再挑戦ラウンド（間違えた問題だけの少問セット）が比率で勝たないよう、1周目のスコアを優先する
+    const round1 = own.filter((a) => a.round === 1);
+    const pool = round1.length > 0 ? round1 : own;
+    const best = pool.reduce((mx, a) =>
       a.correctCount / a.totalQuestions > mx.correctCount / mx.totalQuestions ? a : mx
     );
     const maxRound = Math.max(...own.map((a) => a.round));
