@@ -49,6 +49,16 @@ const MATERIALS: MaterialDef[] = [
     quizKey: "ca_ra",
     sortOrder: 30,
   },
+  {
+    title: "求人票の読み方クイズ（全18問）",
+    description:
+      "必須条件と歓迎要件／チャレンジエントリー／選考難易度／見る順番。午前の研修内容の定着確認。",
+    category: "新人研修",
+    url: "/training/quiz/bizstudio_quiz_yomikata.html",
+    tag: "クイズ",
+    quizKey: "yomikata",
+    sortOrder: 40,
+  },
 ];
 
 async function main() {
