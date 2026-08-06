@@ -66,6 +66,9 @@ export default function AdvisorFloatingPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  // 診断の二重起動ガード。読み込み完了直後の自動実行は setState の反映を待てないため、
+  // state（前レンダーの値しか見えない）ではなく ref で「いま走っているか」を判定する。
+  const isDiagnosingRef = useRef(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
 
   // T-155: 未読の面談ログ（MEETING txt・advisorIngestedAt=null）件数と取り込み中フラグ。
@@ -332,8 +335,14 @@ export default function AdvisorFloatingPanel({
   };
 
   const handleFullAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
     setIsAnalyzing(true);
+
+    // 読み込み完了後にタイプ診断を自動実行するかの判定材料。
+    //   aborted       : バッチ失敗・例外で中断したか（中断時は診断を走らせない）
+    //   ingestedCount : 実際に読み込めた件数（0件なら診断を走らせない＝無駄なAI費用を防ぐ）
+    let aborted = false;
+    let ingestedCount = 0;
 
     try {
       // Get bookmark file count (with extracted text)
@@ -397,12 +406,14 @@ export default function AdvisorFloatingPanel({
         } catch (error) {
           console.error(`[FullAnalysis] Batch ${i + 1} failed:`, error);
           toast.error(`バッチ${i + 1}の分析に失敗しました`);
+          aborted = true; // 中断したので診断の自動実行はしない
           break;
         }
       }
 
       const skipped = allSkippedFileIds.length;
       const succeeded = Math.max(0, totalFiles - skipped);
+      ingestedCount = succeeded; // 全件スキップ（succeeded=0）なら診断は走らせない
       toast.success(
         skipped > 0
           ? `${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
@@ -418,16 +429,19 @@ export default function AdvisorFloatingPanel({
       }
       window.dispatchEvent(new Event("bookmark-ratings-updated"));
     } catch (error) {
+      aborted = true;
       console.error("[FullAnalysis] Error:", error);
       toast.error("分析の開始に失敗しました");
     } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(null);
     }
+
+    await autoRunTypeDiagnosis(aborted, ingestedCount);
   };
 
   const handleAdditionalAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
 
     // Find the latest analysis message to determine sinceDate
     const lastAnalysis = [...messages]
@@ -450,6 +464,7 @@ export default function AdvisorFloatingPanel({
       (f: any) => f.extractedAt && new Date(f.createdAt) > new Date(sinceDate)
     ) || [];
 
+    // 新規0件はここで打ち切る（＝タイプ診断の自動実行にも到達しない）。
     if (newFiles.length === 0) {
       toast.info("前回の分析以降に追加されたブックマークはありません");
       return;
@@ -460,6 +475,10 @@ export default function AdvisorFloatingPanel({
     const batchSize = 5;
     const totalBatches = Math.ceil(totalFiles / batchSize);
     const allSkippedFileIds: string[] = [];
+
+    // 全件分析と同じ判定材料（中断したか／実際に読み込めた件数）。
+    let aborted = false;
+    let ingestedCount = 0;
 
     try {
       for (let i = 0; i < totalBatches; i++) {
@@ -497,12 +516,14 @@ export default function AdvisorFloatingPanel({
         } catch (error) {
           console.error(`[AdditionalAnalysis] Batch ${i + 1} failed:`, error);
           toast.error(`追加分析バッチ${i + 1}に失敗しました`);
+          aborted = true; // 中断したので診断の自動実行はしない
           break;
         }
       }
 
       const skipped = allSkippedFileIds.length;
       const succeeded = Math.max(0, totalFiles - skipped);
+      ingestedCount = succeeded; // 全件スキップ（succeeded=0）なら診断は走らせない
       toast.success(
         skipped > 0
           ? `追加${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
@@ -518,10 +539,37 @@ export default function AdvisorFloatingPanel({
       setIsAnalyzing(false);
       setAnalysisProgress(null);
     }
+
+    await autoRunTypeDiagnosis(aborted, ingestedCount);
   };
 
-  const handleTypeDiagnosis = async () => {
-    if (isDiagnosing || !activeSessionId || isSending || isAnalyzing) return;
+  /**
+   * 読み込み完了直後のタイプ診断 自動実行。
+   * CA が「タイプ診断」を押し忘れると求人プラットフォームの志向パネルが古い診断のまま残るため、
+   * 読み込みが正常に終わったときだけ、手動ボタンと**同一の処理**を続けて呼ぶ。
+   *
+   * 走らせない条件:
+   *   - aborted        : バッチ失敗・例外で中断した（読み込み結果が不完全なまま診断しない）
+   *   - ingestedCount 0: 読み込めた件数が0（「追加のみ」で新規なし／全件スキップ）＝無駄なAI費用を防ぐ
+   *
+   * 診断側（runTypeDiagnosis）は内部で例外を握るため、ここでの失敗が
+   * 直前の読み込み結果を巻き戻すことはない。
+   */
+  const autoRunTypeDiagnosis = async (aborted: boolean, ingestedCount: number) => {
+    if (aborted || ingestedCount <= 0) return;
+    if (isDiagnosingRef.current) return; // 既に診断が走っているなら重ねない
+    toast.info("続けてタイプ診断を自動実行します");
+    await runTypeDiagnosis();
+  };
+
+  /**
+   * タイプ診断の本体。手動ボタンからも自動実行からも、ここを通る（プロンプト・モデル・保存先は不変）。
+   * 二重起動の判定に state ではなく isDiagnosingRef を使うのは、自動実行が
+   * 直前の setState 反映を待てず、古い state 値では正しく判定できないため。
+   */
+  const runTypeDiagnosis = async () => {
+    if (isDiagnosingRef.current || !activeSessionId || isSending) return;
+    isDiagnosingRef.current = true;
     setIsDiagnosing(true);
 
     const diagnosisMessage = `この求職者のタイプ診断と検索戦略を分析してください。
@@ -566,8 +614,15 @@ export default function AdvisorFloatingPanel({
       setMessages((prev) => prev.filter((m) => !m.isLoading));
       alert(err instanceof Error ? err.message : "タイプ診断の実行に失敗しました");
     } finally {
+      isDiagnosingRef.current = false;
       setIsDiagnosing(false);
     }
+  };
+
+  // 手動の「タイプ診断」ボタン。分析中は押せない（既存挙動を維持）。
+  const handleTypeDiagnosis = async () => {
+    if (isAnalyzing) return;
+    await runTypeDiagnosis();
   };
 
   const hasAnalysisHistory = messages.some(
@@ -803,7 +858,7 @@ export default function AdvisorFloatingPanel({
                 <>
                   <button
                     onClick={handleFullAnalysis}
-                    disabled={!activeSessionId || isGeneratingGreeting}
+                    disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                     className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     📊 全件分析
@@ -820,7 +875,7 @@ export default function AdvisorFloatingPanel({
                   {hasAnalysisHistory && (
                     <button
                       onClick={handleAdditionalAnalysis}
-                      disabled={!activeSessionId || isGeneratingGreeting}
+                      disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                       className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       📊 追加のみ
