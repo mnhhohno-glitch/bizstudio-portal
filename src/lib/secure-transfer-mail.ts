@@ -52,6 +52,73 @@ export async function sendTransferNoticeEmail(params: {
 }
 
 /**
+ * 送信者向け: 送信控え（2026-08-06 追加）。
+ * 受信者への案内メールとは別の1通として送信者本人へ送る（BCC は使わない・確定仕様）。
+ *
+ * ★パスワードは絶対に載せない（控えに残さない方針）。
+ *   「実際に送信した本文の全文」は受信者向けと同じ buildTransferNoticeBody で組み立てるが、
+ *   password にはプレースホルダを渡す。passwordInEmail 自体は実際の値を渡すので、
+ *   案内文（下記URLを開き…）と ■パスワード 欄の有無は実送信と同じ見え方になる。
+ *
+ * 件名は「[送信控え] 」+ 実際に送った件名。staging の【検証】は sendResendEmail 側で
+ * さらに先頭へ付与されるため、控えにも【検証】が付く。
+ * この送信に失敗しても受信者への送信は成功扱いにする（呼び出し側で ok を無視してよい）。
+ */
+export async function sendTransferCopyEmail(params: {
+  to: string; // 送信者（User.email）
+  senderName: string;
+  recipientEmails: string[]; // TO
+  ccEmails: string[]; // CC
+  sentAt: Date;
+  url: string;
+  passwordInEmail: boolean;
+  expiresAt: Date;
+  fileNames: string[];
+  subject: string; // 実際に送った件名（既定文言に解決済みのもの）
+  body: string; // （1）本文
+  signature: string; // （4）署名
+}): Promise<SendMailResult> {
+  const lines: string[] = [];
+  lines.push(`${params.senderName} 様`);
+  lines.push("");
+  lines.push("以下の内容でファイルを送信しました。これは送信者控えです。");
+  lines.push("※セキュリティのため、この控えにパスワードは記載していません。");
+  lines.push("");
+  lines.push("──────────");
+  lines.push(`■送信日時: ${formatJstDateTime(params.sentAt)}（日本時間）`);
+  lines.push(`■件名: ${params.subject}`);
+  lines.push(`■宛先(TO): ${params.recipientEmails.join(", ")}`);
+  lines.push(`■CC: ${params.ccEmails.length > 0 ? params.ccEmails.join(", ") : "（なし）"}`);
+  lines.push(`■有効期限: ${formatJstDateTime(params.expiresAt)} まで（日本時間）`);
+  lines.push("■ファイル:");
+  for (const name of params.fileNames) {
+    lines.push(`・${name}`);
+  }
+  lines.push(`■ダウンロードURL: ${params.url}`);
+  lines.push("──────────");
+  lines.push("");
+  lines.push("【実際に送信したメール本文】");
+  lines.push("");
+  lines.push(
+    buildTransferNoticeBody({
+      body: params.body,
+      signature: params.signature,
+      url: params.url,
+      password: "（控えには記載していません）", // ★平文パスワードを控えに残さない
+      passwordInEmail: params.passwordInEmail,
+      expiresAt: params.expiresAt,
+      fileNames: params.fileNames,
+    })
+  );
+
+  return sendResendEmail({
+    to: params.to,
+    subject: `[送信控え] ${params.subject}`,
+    text: lines.join("\n"),
+  });
+}
+
+/**
  * 送信者向け: 期限切れ予告（未ダウンロード）の通知。
  * cleanup cron（JST 04:30）から、明日までに期限が切れる未DL・未無効化の送信について
  * 送信者ごとに1通へまとめて送る。

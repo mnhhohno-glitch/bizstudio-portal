@@ -6,6 +6,8 @@
 //          recipient_email に TO をカンマ区切り、cc_emails に CC をカンマ区切りで格納する。
 //          batch_id は旧仕様の名残なので新規レコードにはセットしない（過去レコードのため列は残す）。
 //          誰がダウンロードしたかは特定できなくなる（ダウンロード履歴は日時・IPのみ・確定仕様）。
+// - 控えメール（2026-08-06 追加）: sendCopyToSender（未指定=true）のとき送信者本人へ別の1通を送る。
+//   ★控えにパスワードは載せない。控えの失敗は受信者への送信の成否に影響させない（fail-open）。
 // - 失敗時の方針: メール送信に失敗したらレコードごと取り消し Storage も掃除して 502 を返す。
 //   クライアント側は再アップロードからやり直す（不完全なレコードを残さない・従来と同じ）。
 // middleware は /api/ を素通しするため、認証はこのルートで行う（漏れ禁止）。
@@ -24,8 +26,16 @@ import {
   calcExpiresAt,
   getTransferStatus,
 } from "@/lib/secure-transfer";
-import { MAX_TRANSFER_RECIPIENTS, buildTransferSignature } from "@/lib/secure-transfer-shared";
-import { buildTransferUrl, sendTransferNoticeEmail } from "@/lib/secure-transfer-mail";
+import {
+  MAX_TRANSFER_RECIPIENTS,
+  TRANSFER_MAIL_SUBJECT,
+  buildTransferSignature,
+} from "@/lib/secure-transfer-shared";
+import {
+  buildTransferUrl,
+  sendTransferNoticeEmail,
+  sendTransferCopyEmail,
+} from "@/lib/secure-transfer-mail";
 
 export const runtime = "nodejs";
 export const maxDuration = 120; // bcrypt + Storage 確認 + メール送信のため60秒から延長
@@ -92,6 +102,7 @@ export async function POST(req: NextRequest) {
     signature?: string; // 確認画面で編集された（4）署名の最終形。空文字=署名なし、未指定=既定署名
     expiresDays?: number;
     passwordInEmail?: boolean;
+    sendCopyToSender?: boolean; // 送信者本人への控えメール。未指定は送る（既定ON）
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
   } | null;
 
@@ -280,6 +291,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 送信者への控え（既定ON）。★失敗しても受信者への送信は成功扱いにする（fail-open・確定仕様）
+  const sendCopy = body.sendCopyToSender !== false;
+  let copySent = false;
+  if (sendCopy) {
+    const copyResult = await sendTransferCopyEmail({
+      to: user.email,
+      senderName: user.name ?? user.email,
+      recipientEmails: toEmails,
+      ccEmails,
+      sentAt: new Date(),
+      url,
+      passwordInEmail,
+      expiresAt,
+      fileNames: validated.map((f) => f.fileName),
+      subject: transfer.subject?.trim() || TRANSFER_MAIL_SUBJECT,
+      body: bodyText,
+      signature: signatureText,
+    }).catch((e) => {
+      console.error("[T-147] copy mail threw:", e);
+      return { ok: false as const, error: "copy mail threw" };
+    });
+    copySent = copyResult.ok;
+    if (!copyResult.ok) {
+      console.error(`[T-147] copy mail failed for sender=${user.id}（受信者への送信は成立済み）`);
+    }
+  }
+
   await prisma.auditLog.create({
     data: {
       actorUserId: user.id,
@@ -294,6 +332,8 @@ export async function POST(req: NextRequest) {
         ccEmails,
         fileNames: validated.map((f) => f.fileName),
         expiresAt: expiresAt.toISOString(),
+        copyRequested: sendCopy,
+        copySent,
       },
     },
   });
@@ -309,6 +349,8 @@ export async function POST(req: NextRequest) {
       files: validated.map((f) => ({ fileName: f.fileName, fileSize: f.fileSize })),
       url,
       password,
+      copyRequested: sendCopy,
+      copySent, // false かつ copyRequested=true なら控えだけ失敗（画面で注意表示する）
     },
     { status: 201 }
   );

@@ -2,15 +2,22 @@
 // 両方から使う純粋関数だけを置くモジュール。
 // ここには Node 専用モジュール（crypto / jsonwebtoken / Resend 送信等）を import しないこと。
 //
-// メール本文の構成（2026-08-04 改修で確定）:
-//   （1）本文               … 確認画面で全文編集可能（宛名・挨拶・本題。既定文面 + 添え書きを合成）
-//   （2）ファイル情報ブロック … 自動生成・編集不可（URL / パスワード / 有効期限 / ファイル）
-//                              「メールに記載しない」選択時は ■パスワード 欄ごと省略する
+// メール本文の構成（2026-08-06 改修で確定）:
+//   （1）本文               … 送信画面のプレビュー上で全文編集可能。**初期値は空**
+//                              （添え書きが入力されていればそれだけを初期値にする）
+//   （2）ファイル情報ブロック … 自動生成・編集不可
+//                              先頭に案内文（「下記URLを開き…」）を置き、URL / パスワード /
+//                              有効期限 / ファイル が続く。
+//                              「メールに記載しない」選択時は ■パスワード 欄ごと省略し、
+//                              案内文からもパスワードへの言及を外す。
 //   （3）注意書き            … 自動・編集不可
-//   （4）署名               … 確認画面で全文編集可能（既定は送信者名 + メールアドレス。空にすると署名なし）
+//   （4）署名               … 送信画面のプレビュー上で全文編集可能（既定は送信者名 + メールアドレス。空にすると署名なし）
 // 件名は入力値がそのまま Subject ヘッダになる（空欄時は TRANSFER_MAIL_SUBJECT）。
 // 本文中に ■件名 欄は置かない。
-// 確認画面のプレビューと実送信は必ず同じ関数で組み立てる（食い違い防止）。
+// 送信画面のプレビュー・確認画面・実送信は必ず同じ関数で組み立てる（食い違い防止）。
+//
+// 旧仕様との違い: 以前は本文の初期値に「ご担当者様 / 株式会社ビズスタジオよりファイルを…」の
+// 固定文が入っていたが、毎回消す手間があるため廃止した。案内文は（2）の先頭へ移動している。
 //
 // 宛先の扱い（2026-08-06 改修）:
 //   TO / CC を含む通常のメール1通を送る。URL・パスワードは1組のみ発行し全受信者で共通。
@@ -82,29 +89,29 @@ export function formatJstDateTime(dt: Date): string {
 }
 
 /**
- * （1）編集可能領域の既定文面。確認画面を開いたとき入力欄に入れる初期値。
- * 前画面の「添え書き」は下書きとして末尾に合成する。
+ * （1）編集可能領域の初期値。**固定の挨拶文は入れない**（2026-08-06 改修）。
+ * 添え書きが入力されていればそれだけを初期値にする。未入力なら空文字。
  */
 export function buildDefaultTransferBodyIntro(message?: string | null): string {
-  const lines = [
-    "ご担当者様",
-    "",
-    "株式会社ビズスタジオよりファイルをお送りいたします。",
-    "下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。",
-  ];
-  const trimmed = message?.trim();
-  if (trimmed) {
-    lines.push("");
-    lines.push(trimmed);
-  }
-  return lines.join("\n");
+  return message?.trim() ?? "";
+}
+
+/**
+ * （2）の先頭に置く案内文。パスワードをメールに載せるかで文面を変える（確定仕様）。
+ * 「メールに記載しない」ときはパスワードへの言及を外し、別途連絡する旨に差し替える。
+ */
+export function buildTransferLeadSentence(passwordInEmail: boolean): string {
+  return passwordInEmail
+    ? "下記URLを開き、パスワードを入力のうえ、有効期限までにダウンロードをお願いいたします。"
+    : "下記URLを開き、有効期限までにダウンロードをお願いいたします。パスワードは送信者より別途お伝えします。";
 }
 
 /**
  * （2）ファイル情報ブロック +（3）注意書き。自動生成・編集不可。
+ * 先頭に案内文（buildTransferLeadSentence）を置く。
  * passwordInEmail=false のときは ■パスワード 欄ごと省略する（確定仕様）。
  * パスワードは独立した行に置く（コピーしやすくする・確定仕様）。有効期限は必ず JST 表記。
- * 確認画面ではプレースホルダ（「（送信時に自動生成されます）」等）を渡す。
+ * 送信画面・確認画面ではプレースホルダ（「（送信時に自動生成されます）」等）を渡す。
  */
 export function buildTransferFixedBlock(params: {
   url: string;
@@ -114,6 +121,8 @@ export function buildTransferFixedBlock(params: {
   fileNames: string[];
 }): string {
   const lines: string[] = [];
+  lines.push(buildTransferLeadSentence(params.passwordInEmail));
+  lines.push("");
   lines.push("■ダウンロードURL");
   lines.push(params.url);
   lines.push("");
@@ -135,7 +144,7 @@ export function buildTransferFixedBlock(params: {
   return lines.join("\n");
 }
 
-/** （4）署名の既定文面。確認画面の署名欄の初期値（署名欄も全文編集可能）。 */
+/** （4）署名の既定文面。送信画面プレビューの署名欄の初期値（署名欄も全文編集可能）。 */
 export function buildTransferSignature(senderName: string, senderEmail: string): string {
   return ["──", `株式会社ビズスタジオ ${senderName}`, senderEmail].join("\n");
 }
