@@ -230,11 +230,17 @@ function buildAreaLine(desiredPrefectures: string[], targetAreas: string[]): str
 const DRAFT_GEMINI_MODEL = "gemini-2.5-flash";
 const DRAFT_GEMINI_TIMEOUT_MS = 8000;
 
+// 生成結果がこの長さを超えたら1回だけ短縮再生成する（再生成後も超えたらそのまま採用）
+const JOB_TYPE_LINE_RETRY_THRESHOLD = 100;
+
 /**
  * gemini-2.5-flash を直接呼ぶ薄いラッパ。
  * 共通クライアント（src/lib/ai/gemini-client.ts）はモデル固定・thinking設定不可・タイムアウト無しのため
  * 本用途（費用管理: thinkingBudget=0 / temperature=0 / 8秒タイムアウト）には使わず、ここで完結させる。
  * usage は規約どおり AiUsageLog に記録する（fire-and-forget）。
+ *
+ * 長さガード: 100字超なら「より短く」を追記して1回だけ再生成。再生成でも超えたら
+ * そのまま採用する（長い文でも空欄よりは有用）。再生成は最大1回・無限リトライ禁止。
  */
 async function generateJobTypeLine(
   categoryLabels: string[],
@@ -245,17 +251,46 @@ async function generateJobTypeLine(
   if (!apiKey) return "職種：";
   if (categoryLabels.length === 0) return "職種：";
 
+  const first = await callJobTypeGemini(apiKey, categoryLabels, desiredJobTypes, candidateId, false);
+  if (first === null) return "職種：";
+  if (first.length <= JOB_TYPE_LINE_RETRY_THRESHOLD) return first;
+
+  // 長すぎた → 短縮指示を足して1回だけ再生成
+  const retry = await callJobTypeGemini(apiKey, categoryLabels, desiredJobTypes, candidateId, true);
+  if (retry === null) return first; // 再生成が失敗しても初回結果は有効なので捨てない
+  // 再生成でも閾値超過ならそのまま採用（空欄にはしない）
+  return retry.length <= JOB_TYPE_LINE_RETRY_THRESHOLD || retry.length < first.length ? retry : first;
+}
+
+/** 1回分の Gemini 呼び出し。数値混入などの不採用時は null（呼び出し側でフォールバック判断）。 */
+async function callJobTypeGemini(
+  apiKey: string,
+  categoryLabels: string[],
+  desiredJobTypes: string[],
+  candidateId: string,
+  isRetry: boolean
+): Promise<string | null> {
   const systemInstruction = [
     "あなたは転職エージェントのキャリアアドバイザーです。",
     "求職者に送る案内文の中の「まとめた求人の職種の説明」を1行だけ書きます。",
     "厳守事項:",
     "- 出力は日本語1行のみ。前置き・記号・箇条書き・引用符・改行を付けない。",
     "- 「職種：」で書き始める。",
-    "- 40〜80字程度。",
+    "- 出力は80字以内（「職種：」を含む）。",
+    "- 職種は多くても3〜4種類の括りにまとめる。渡されたラベルを網羅的に列挙しない。",
+    "- 細かいラベルは上位の括りに寄せてよい（例: 「一般事務」「営業事務」「専門事務」→「事務職」）。ただし渡されたラベルに存在しない職種を新たに作り出さない。",
+    "- 該当が少数の職種は無理に含めず、中心となるものを優先する。",
+    "- 「〜など幅広い職種」のような締め方は、実際に括りが4種類を超える場合にのみ使う。",
     "- 件数・パーセンテージ・数値を一切書かない。",
-    "- 与えられた職種ラベルに無い職種を推測で足さない（事実の捏造禁止）。",
     "- 求職者本人が読む文章として、中立・丁寧な表現にする。",
-    "例: 職種：法人営業系からルート営業や既存顧客を中心とした営業職を中心にまとめています",
+    "",
+    "出力例1（営業系ラベルが中心＋事務系・サポート系が少数の場合）:",
+    "職種：営業職を中心に、事務職やカスタマーサポートなどの求人をまとめています",
+    "出力例2（事務系ラベルが大半の場合）:",
+    "職種：一般事務や営業事務を中心とした事務職の求人をまとめています",
+    ...(isRetry
+      ? ["", "前回の出力が長すぎました。今回はより短く、職種の括りを3種類以内にまとめること。"]
+      : []),
   ].join("\n");
 
   const userPrompt = [
@@ -290,7 +325,7 @@ async function generateJobTypeLine(
     );
     if (!res.ok) {
       console.error(`[site-guide-draft] Gemini error status=${res.status}`);
-      return "職種：";
+      return null;
     }
     const data = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -308,30 +343,29 @@ async function generateJobTypeLine(
       endpoint: "site-guide-draft",
       model: DRAFT_GEMINI_MODEL,
       usage: data.usageMetadata,
-      meta: { candidateId, labelCount: categoryLabels.length },
+      meta: { candidateId, labelCount: categoryLabels.length, ...(isRetry && { retry: true }) },
     });
 
     const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     return sanitizeJobTypeLine(raw);
   } catch (e) {
     console.error("[site-guide-draft] Gemini call failed:", e);
-    return "職種：";
+    return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Gemini 出力の防御的整形。壊れていたら空行にして全体は失敗させない。 */
-function sanitizeJobTypeLine(raw: string): string {
+/** Gemini 出力の防御的整形。壊れていたら null（不採用）。長さの調整は呼び出し側の再生成で行う。 */
+function sanitizeJobTypeLine(raw: string): string | null {
   let line = raw.trim().split("\n")[0].trim();
   line = line.replace(/^["'「『]|["'」』]$/g, "").trim();
-  if (line === "") return "職種：";
+  if (line === "") return null;
   if (!line.startsWith("職種：")) {
     line = line.startsWith("職種:") ? "職種：" + line.slice(3).trim() : `職種：${line}`;
   }
   // 件数・割合が紛れ込んだら不採用（求職者向け文面に数字を出さない仕様）
-  if (/\d+\s*件|\d+\s*[%％]/.test(line)) return "職種：";
-  if (line.length > 130) return "職種：";
+  if (/\d+\s*件|\d+\s*[%％]/.test(line)) return null;
   return line;
 }
 
