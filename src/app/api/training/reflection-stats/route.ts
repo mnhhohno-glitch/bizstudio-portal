@@ -13,7 +13,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const dayLabel = request.nextUrl.searchParams.get("dayLabel") || undefined;
+  const sp = request.nextUrl.searchParams;
+  const dayLabel = sp.get("dayLabel") || undefined;
+  const userId = sp.get("userId") || undefined;
+  const dateParam = sp.get("date");
+  // 振り返りの研修日は reportDate（JST の日付文字列）をそのまま使う。
+  // 日をまたいで下書き保存されても本人が申告した研修日に集計されるため createdAt より正確
+  const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : undefined;
 
   // 集計対象は項目マスタ起点（削除済み項目の回答は集計から外れるが、履歴表示は itemLabel 非正規化で残る）
   const items = await prisma.trainingCheckItem.findMany({
@@ -24,9 +30,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ stats: [] });
   }
 
+  // 理解度回答は userId / 日付を持たないため、対象の振り返りを引いて reflectionId で絞る
+  let reflectionIds: string[] | null = null;
+  if (userId || date) {
+    const reflections = await prisma.trainingReflection.findMany({
+      where: { ...(userId ? { userId } : {}), ...(date ? { reportDate: date } : {}) },
+      select: { id: true },
+    });
+    if (reflections.length === 0) {
+      return NextResponse.json({ stats: [] });
+    }
+    reflectionIds = reflections.map((r) => r.id);
+  }
+
   const grouped = await prisma.trainingCheckAnswer.groupBy({
     by: ["itemId", "rating"],
-    where: { itemId: { in: items.map((i) => i.id) } },
+    where: {
+      itemId: { in: items.map((i) => i.id) },
+      ...(reflectionIds ? { reflectionId: { in: reflectionIds } } : {}),
+    },
     _count: { _all: true },
   });
 

@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
         answerHelp: true,
         answerDay: true,
         answerUnknown: true,
+        createdAt: true, // 研修日の絞り込み用（JST 変換はクライアント側）
         updatedAt: true,
       },
     }),

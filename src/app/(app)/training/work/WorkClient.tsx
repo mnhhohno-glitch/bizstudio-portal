@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 
 const WORK_KEY = "work0-shokushu-gyoshu";
 
@@ -234,9 +235,14 @@ export default function WorkClient() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-[20px] font-semibold text-[#374151]">
-        記述ワーク：職種・業種を推測する
-      </h1>
+      <div className="flex items-center gap-3 flex-wrap">
+        <h1 className="text-[20px] font-semibold text-[#374151]">
+          記述ワーク：職種・業種を推測する
+        </h1>
+        <Link href="/training/work/review" className="text-[13px] text-[#2563EB] hover:underline">
+          自分の回答を見返す →
+        </Link>
+      </div>
 
       <div className="mt-3 p-3 rounded-md bg-[#FFFBEB] border border-[#FDE68A] text-[13px] text-[#92400E] leading-relaxed">
         業種や会社名は書かれていません。仕事内容だけを読んで推測してください。分からなくても構いません。分からなかった言葉を④に残すことが大切です。

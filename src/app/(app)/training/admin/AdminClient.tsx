@@ -3,9 +3,23 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
-export type SummaryRow = {
+export type QuizOption = { quizKey: string; title: string };
+
+export type EmployeeOption = { id: string; name: string; isActive: boolean };
+
+// 受験1回分。研修日で絞れるよう集計前の状態で受け取る
+export type AttemptRow = {
   userId: string;
-  userName: string;
+  quizKey: string;
+  mode: string;
+  round: number;
+  totalQuestions: number;
+  correctCount: number;
+  cleared: boolean;
+  finishedAt: string;
+};
+
+type SummaryRow = {
   quizKey: string;
   quizTitle: string;
   attemptCount: number;
@@ -13,7 +27,40 @@ export type SummaryRow = {
   clearLabel: string;
 };
 
-export type QuizOption = { quizKey: string; title: string };
+// 罠#17: Railway 本番は UTC で動くため、日付は必ず JST に変換してから比較・表示する
+function toJstDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+
+// 絞り込み対象の受験履歴から、1社員×1教材のサマリを組み立てる
+function buildSummary(own: AttemptRow[], quiz: QuizOption): SummaryRow {
+  const base: SummaryRow = {
+    quizKey: quiz.quizKey,
+    quizTitle: quiz.title,
+    attemptCount: own.length,
+    bestLabel: null,
+    clearLabel: own.length === 0 ? "未受験" : "未クリア",
+  };
+  if (own.length === 0) return base;
+
+  // スコアは全問チャレンジの1周目を優先（範囲別だと分母が変わるため）
+  const full = own.filter((a) => a.mode === "全問チャレンジ");
+  const source = full.length > 0 ? full : own;
+  const round1 = source.filter((a) => a.round === 1);
+  const pool = round1.length > 0 ? round1 : source;
+  const best = pool.reduce((m, a) =>
+    a.correctCount / a.totalQuestions > m.correctCount / m.totalQuestions ? a : m
+  );
+  base.bestLabel = `${best.correctCount}/${best.totalQuestions}`;
+
+  const clearedOnes = source
+    .filter((a) => a.cleared)
+    .sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
+  if (clearedOnes.length > 0) {
+    base.clearLabel = `✓ ${clearedOnes[0].round}周でクリア`;
+  }
+  return base;
+}
 
 type Stat = {
   qid: string;
@@ -86,6 +133,7 @@ type WorkAnswer = {
   answerHelp: string;
   answerDay: string;
   answerUnknown: string;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -404,7 +452,15 @@ function CheckItemsModal({ onClose }: { onClose: () => void }) {
 
 // 記述ワーク（職種・業種当て）の回答セクション
 // 提出状況マトリクス / 社員別の回答全文 / ④分からなかった言葉の全社員一覧（講師が講義の重点を決めるために使う）
-function WorkAnswersSection() {
+function WorkAnswersSection({
+  filterUserId,
+  filterDate,
+  onAnswerDates,
+}: {
+  filterUserId: string;
+  filterDate: string;
+  onAnswerDates: (dates: string[]) => void;
+}) {
   const [data, setData] = useState<WorkStatsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [workKey, setWorkKey] = useState("work0-shokushu-gyoshu");
@@ -415,11 +471,17 @@ function WorkAnswersSection() {
     setLoading(true);
     fetch(`/api/training/work-stats?workKey=${encodeURIComponent(workKey)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) setData(d);
+      .then((d: WorkStatsData | null) => {
+        if (!d) return;
+        setData(d);
+        // 研修日プルダウンの選択肢は「実際にデータがある日」だけなので、親へ渡す
+        onAnswerDates([...new Set(d.answers.map((a) => toJstDate(a.createdAt)))]);
       })
       .finally(() => setLoading(false));
-  }, [workKey]);
+  }, [workKey, onAnswerDates]);
+
+  // 社員で絞っている間は、詳細表示もその社員に固定する（state を同期させず参照時に解決する）
+  const detailEmployee = filterUserId || selectedEmployee;
 
   const selectClass =
     "px-3 py-1.5 border border-[#E5E7EB] rounded-md text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
@@ -430,22 +492,31 @@ function WorkAnswersSection() {
     return `${d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).replaceAll("-", "/")} ${d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}`;
   };
 
+  // 画面上部の絞り込み（社員 / 研修日）をこのセクションにも効かせる
+  const visibleAnswers = (data?.answers ?? []).filter(
+    (a) =>
+      (!filterUserId || a.employeeId === filterUserId) &&
+      (!filterDate || toJstDate(a.createdAt) === filterDate)
+  );
+
   const answerByEmployeeItem = new Map(
-    (data?.answers ?? []).map((a) => [`${a.employeeId}|${a.itemCode}`, a])
+    visibleAnswers.map((a) => [`${a.employeeId}|${a.itemCode}`, a])
   );
   const itemByCode = new Map((data?.items ?? []).map((i) => [i.itemCode, i]));
 
   // 回答があるがアクティブ社員一覧にいない人（退職者等）も行に出す
   const answerOnlyEmployees = [
     ...new Map(
-      (data?.answers ?? [])
+      visibleAnswers
         .filter((a) => !(data?.employees ?? []).some((e) => e.id === a.employeeId))
         .map((a) => [a.employeeId, { id: a.employeeId, name: a.employeeName }])
     ).values(),
   ];
-  const allEmployees = [...(data?.employees ?? []), ...answerOnlyEmployees];
+  const allEmployees = [...(data?.employees ?? []), ...answerOnlyEmployees].filter(
+    (e) => !filterUserId || e.id === filterUserId
+  );
 
-  const unknownAnswers = (data?.answers ?? [])
+  const unknownAnswers = visibleAnswers
     .filter((a) => a.answerUnknown.trim().length > 0)
     .sort((a, b) =>
       a.itemCode === b.itemCode
@@ -455,7 +526,7 @@ function WorkAnswersSection() {
 
   const detailAnswers = (data?.items ?? []).map((item) => ({
     item,
-    answer: answerByEmployeeItem.get(`${selectedEmployee}|${item.itemCode}`) ?? null,
+    answer: answerByEmployeeItem.get(`${detailEmployee}|${item.itemCode}`) ?? null,
   }));
 
   const viewButtons: { key: typeof view; label: string }[] = [
@@ -550,9 +621,10 @@ function WorkAnswersSection() {
       ) : view === "detail" ? (
         <div>
           <select
-            value={selectedEmployee}
+            value={detailEmployee}
             onChange={(e) => setSelectedEmployee(e.target.value)}
-            className={selectClass}
+            disabled={!!filterUserId}
+            className={`${selectClass} disabled:bg-[#F9FAFB] disabled:text-[#6B7280]`}
           >
             <option value="">社員を選択してください</option>
             {allEmployees.map((u) => (
@@ -562,7 +634,7 @@ function WorkAnswersSection() {
             ))}
           </select>
 
-          {selectedEmployee && (
+          {detailEmployee && (
             <div className="mt-3 space-y-3">
               {detailAnswers.map(({ item, answer }) => (
                 <div key={item.itemCode} className="bg-white rounded-[8px] border border-[#E5E7EB] p-4">
@@ -640,12 +712,19 @@ function WorkAnswersSection() {
 }
 
 export default function AdminClient({
-  summary,
   quizzes,
+  employees,
+  attempts,
 }: {
-  summary: SummaryRow[];
   quizzes: QuizOption[];
+  employees: EmployeeOption[];
+  attempts: AttemptRow[];
 }) {
+  // 画面全体に効く絞り込み
+  const [filterUserId, setFilterUserId] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [showUnattempted, setShowUnattempted] = useState(false);
+
   const [stats, setStats] = useState<Stat[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsQuizKey, setStatsQuizKey] = useState("");
@@ -658,12 +737,18 @@ export default function AdminClient({
   const [rStatsDay, setRStatsDay] = useState("");
   const [dayOptions, setDayOptions] = useState<string[]>([]);
 
+  const [workDates, setWorkDates] = useState<string[]>([]);
+
   const [checkItemsOpen, setCheckItemsOpen] = useState(false);
 
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const params = statsQuizKey ? `?quizKey=${encodeURIComponent(statsQuizKey)}` : "";
+      const qs = new URLSearchParams();
+      if (statsQuizKey) qs.set("quizKey", statsQuizKey);
+      if (filterUserId) qs.set("userId", filterUserId);
+      if (filterDate) qs.set("date", filterDate);
+      const params = qs.toString() ? `?${qs.toString()}` : "";
       const res = await fetch(`/api/training/quiz-stats${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -672,7 +757,7 @@ export default function AdminClient({
     } finally {
       setStatsLoading(false);
     }
-  }, [statsQuizKey]);
+  }, [statsQuizKey, filterUserId, filterDate]);
 
   useEffect(() => {
     fetchStats();
@@ -694,7 +779,11 @@ export default function AdminClient({
   const fetchRStats = useCallback(async () => {
     setRStatsLoading(true);
     try {
-      const params = rStatsDay ? `?dayLabel=${encodeURIComponent(rStatsDay)}` : "";
+      const qs = new URLSearchParams();
+      if (rStatsDay) qs.set("dayLabel", rStatsDay);
+      if (filterUserId) qs.set("userId", filterUserId);
+      if (filterDate) qs.set("date", filterDate);
+      const params = qs.toString() ? `?${qs.toString()}` : "";
       const res = await fetch(`/api/training/reflection-stats${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -703,22 +792,63 @@ export default function AdminClient({
     } finally {
       setRStatsLoading(false);
     }
-  }, [rStatsDay]);
+  }, [rStatsDay, filterUserId, filterDate]);
 
   useEffect(() => {
     fetchRStats();
   }, [fetchRStats]);
 
+  // 研修日の選択肢は、実際にデータがある日付だけを新しい順に出す
+  // （クイズ受験=finishedAt / 記述ワーク=createdAt / 振り返り=reportDate。いずれもJST）
+  const dateOptions = [
+    ...new Set([
+      ...attempts.map((a) => toJstDate(a.finishedAt)),
+      ...workDates,
+      ...reflections.map((r) => r.reportDate),
+    ]),
+  ]
+    .filter(Boolean)
+    .sort()
+    .reverse();
+
+  const handleWorkDates = useCallback((dates: string[]) => {
+    setWorkDates((prev) =>
+      prev.length === dates.length && prev.every((d, i) => d === dates[i]) ? prev : dates
+    );
+  }, []);
+
+  // 絞り込みを反映した受験履歴 → 社員ごとにグルーピングしてサマリを作る
+  const filteredAttempts = attempts.filter(
+    (a) =>
+      (!filterUserId || a.userId === filterUserId) &&
+      (!filterDate || toJstDate(a.finishedAt) === filterDate)
+  );
+  const visibleEmployees = employees.filter((e) => !filterUserId || e.id === filterUserId);
+  const summaryGroups = visibleEmployees
+    .map((emp) => {
+      const own = filteredAttempts.filter((a) => a.userId === emp.id);
+      const rows = quizzes
+        .map((q) => buildSummary(own.filter((a) => a.quizKey === q.quizKey), q))
+        // 未受験の行は既定で隠す（全社員×全教材だと行が膨らんで読めなくなるため）
+        .filter((r) => showUnattempted || r.attemptCount > 0);
+      return { employee: emp, rows };
+    })
+    .filter((g) => g.rows.length > 0);
+
   // 提出状況マトリクス: 実データが存在する reportDate の直近10日分を列にする
-  const matrixDates = [...new Set(reflections.map((r) => r.reportDate))]
+  const visibleReflections = reflections.filter(
+    (r) =>
+      (!filterUserId || r.userId === filterUserId) && (!filterDate || r.reportDate === filterDate)
+  );
+  const matrixDates = [...new Set(visibleReflections.map((r) => r.reportDate))]
     .sort()
     .reverse()
     .slice(0, 10)
     .reverse();
-  const matrixUsers = [...new Map(summary.map((s) => [s.userId, s.userName])).entries()].map(
-    ([id, name]) => ({ id, name })
+  const matrixUsers = visibleEmployees.map((e) => ({ id: e.id, name: e.name }));
+  const reflectionByUserDate = new Map(
+    visibleReflections.map((r) => [`${r.userId}|${r.reportDate}`, r])
   );
-  const reflectionByUserDate = new Map(reflections.map((r) => [`${r.userId}|${r.reportDate}`, r]));
 
   const selectClass =
     "px-3 py-1.5 border border-[#E5E7EB] rounded-md text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
@@ -727,62 +857,135 @@ export default function AdminClient({
     <div>
       <h1 className="text-[20px] font-semibold text-[#374151]">研修管理</h1>
 
+      {/* 画面全体に効く絞り込み */}
+      <div className="mt-3 p-3 rounded-[8px] bg-white border border-[#E5E7EB] flex items-center gap-3 flex-wrap">
+        <label className="text-[13px] font-medium text-[#374151]">社員</label>
+        <select
+          value={filterUserId}
+          onChange={(e) => setFilterUserId(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">全員</option>
+          {employees.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+              {e.isActive ? "" : "（退職等）"}
+            </option>
+          ))}
+        </select>
+
+        <label className="text-[13px] font-medium text-[#374151] ml-2">研修日</label>
+        <select
+          value={filterDate}
+          onChange={(e) => setFilterDate(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">すべて</option>
+          {dateOptions.map((d) => (
+            <option key={d} value={d}>
+              {d.replaceAll("-", "/")}
+            </option>
+          ))}
+        </select>
+
+        {(filterUserId || filterDate) && (
+          <button
+            onClick={() => {
+              setFilterUserId("");
+              setFilterDate("");
+            }}
+            className="px-3 py-1.5 text-[13px] border border-[#E5E7EB] rounded-md hover:bg-[#F9FAFB]"
+          >
+            絞り込みを解除
+          </button>
+        )}
+      </div>
+
       {/* セクション1: 社員別サマリ */}
       <section className="mt-4">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
           <h2 className="text-[16px] font-semibold text-[#374151]">社員別サマリ</h2>
           <Link href="/training/reflection" className="text-[13px] text-[#2563EB] hover:underline">
             振り返りを見る →
           </Link>
+          <label className="flex items-center gap-1.5 text-[13px] text-[#374151]">
+            <input
+              type="checkbox"
+              checked={showUnattempted}
+              onChange={(e) => setShowUnattempted(e.target.checked)}
+            />
+            未受験も表示する
+          </label>
         </div>
-        {summary.length === 0 ? (
+        {quizzes.length === 0 ? (
           <p className="text-[14px] text-[#6B7280]">クイズ教材が登録されていません</p>
+        ) : summaryGroups.length === 0 ? (
+          <p className="py-4 text-[14px] text-[#6B7280]">
+            該当する受験記録がありません{showUnattempted ? "" : "（「未受験も表示する」で全員分を表示できます）"}
+          </p>
         ) : (
-          <div className="overflow-x-auto bg-white rounded-[8px] border border-[#E5E7EB]">
-            <table className="w-full text-[13px] border-collapse">
-              <thead>
-                <tr className="border-b border-[#E5E7EB] text-left text-[#6B7280]">
-                  <th className="py-2.5 px-3 font-medium">社員</th>
-                  <th className="py-2.5 px-3 font-medium">教材</th>
-                  <th className="py-2.5 px-3 font-medium">挑戦回数</th>
-                  <th className="py-2.5 px-3 font-medium">最高スコア</th>
-                  <th className="py-2.5 px-3 font-medium">クリア</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.map((r) => (
-                  <tr
-                    key={`${r.userId}-${r.quizKey}`}
-                    className={`border-b border-[#F3F4F6] ${
-                      r.attemptCount === 0 ? "text-[#9CA3AF]" : ""
-                    }`}
+          // 社員ごとにグルーピングして表示する（フラットな全組み合わせは行が多すぎて読めないため）
+          <div className="space-y-3">
+            {summaryGroups.map(({ employee, rows }) => (
+              <div
+                key={employee.id}
+                className="bg-white rounded-[8px] border border-[#E5E7EB] overflow-hidden"
+              >
+                <div className="px-3 py-2 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center gap-2">
+                  <Link
+                    href={`/training/history?userId=${employee.id}`}
+                    className="text-[14px] font-semibold text-[#2563EB] hover:underline"
                   >
-                    <td className="py-2.5 px-3">
-                      <Link
-                        href={`/training/history?userId=${r.userId}`}
-                        className="text-[#2563EB] hover:underline"
+                    {employee.name}
+                  </Link>
+                  {!employee.isActive && (
+                    <span className="text-[11px] text-[#9CA3AF]">退職等</span>
+                  )}
+                  <span className="ml-auto text-[12px] text-[#6B7280]">
+                    受験 {rows.reduce((s, r) => s + r.attemptCount, 0)}回
+                  </span>
+                </div>
+                <table className="w-full text-[13px] border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#E5E7EB] text-left text-[#6B7280]">
+                      <th className="py-2 px-3 font-medium">教材</th>
+                      <th className="py-2 px-3 font-medium whitespace-nowrap">挑戦回数</th>
+                      <th className="py-2 px-3 font-medium whitespace-nowrap">最高スコア</th>
+                      <th className="py-2 px-3 font-medium">クリア</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr
+                        key={r.quizKey}
+                        className={`border-b border-[#F3F4F6] last:border-0 ${
+                          r.attemptCount === 0 ? "text-[#9CA3AF]" : ""
+                        }`}
                       >
-                        {r.userName}
-                      </Link>
-                    </td>
-                    <td className="py-2.5 px-3 text-[#374151]">{r.quizTitle}</td>
-                    <td className="py-2.5 px-3">{r.attemptCount}回</td>
-                    <td className="py-2.5 px-3">{r.bestLabel ?? "—"}</td>
-                    <td className="py-2.5 px-3">
-                      {r.clearLabel.startsWith("✓") ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] text-[12px]">
-                          {r.clearLabel}
-                        </span>
-                      ) : (
-                        <span className={r.clearLabel === "未受験" ? "text-[#9CA3AF]" : "text-[#6B7280]"}>
-                          {r.clearLabel}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <td className="py-2 px-3 text-[#374151]">{r.quizTitle}</td>
+                        <td className="py-2 px-3">{r.attemptCount}回</td>
+                        <td className="py-2 px-3">{r.bestLabel ?? "—"}</td>
+                        <td className="py-2 px-3">
+                          {r.clearLabel.startsWith("✓") ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] text-[12px]">
+                              {r.clearLabel}
+                            </span>
+                          ) : (
+                            <span
+                              className={
+                                r.clearLabel === "未受験" ? "text-[#9CA3AF]" : "text-[#6B7280]"
+                              }
+                            >
+                              {r.clearLabel}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -912,7 +1115,11 @@ export default function AdminClient({
       </section>
 
       {/* セクションC: 記述ワーク回答 */}
-      <WorkAnswersSection />
+      <WorkAnswersSection
+        filterUserId={filterUserId}
+        filterDate={filterDate}
+        onAnswerDates={handleWorkDates}
+      />
 
       {/* セクションB: 理解度の集計 */}
       <section className="mt-8 mb-8">
