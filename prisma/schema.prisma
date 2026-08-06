@@ -2895,6 +2895,23 @@ model TrainingQuizAnswer {
   @@map("training_quiz_answers")
 }
 
+// 記述式ワークの定義。ワークごとに設問ラベル（fieldLabels）が異なるため、UIハードコードをやめてDBで持つ
+// fieldLabels は最大4件の配列。key は TrainingWorkAnswer の既存カラム名（answerCompany/answerHelp/answerDay/answerUnknown）を流用する
+// 例: [{ key: "answerCompany", label: "① この会社は何をしている会社か", placeholder: "1行程度", rows: 2 }]
+model TrainingWorkSet {
+  id          String   @id @default(cuid())
+  workKey     String   @unique
+  title       String   // 画面に出すワーク名
+  description String   @db.Text // 画面上部の注意書き
+  fieldLabels Json     // 設問ラベルの配列
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("training_work_sets")
+}
+
 // 記述式ワークの設問（求人票）。管理画面CRUDは無く seed（prisma/seed-training-work.ts）で投入する
 model TrainingWorkItem {
   id          String   @id @default(cuid())

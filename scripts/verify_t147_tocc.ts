@@ -304,3 +304,6 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
+// トップレベル宣言が他の検証スクリプトとグローバルスコープで衝突しないよう、モジュール扱いにする
+export {};

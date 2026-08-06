@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import type { FieldLabel } from "@/lib/training-work";
+import { hasUnknownWordsField } from "@/lib/training-work";
 
 export type QuizOption = { quizKey: string; title: string };
 
@@ -137,9 +139,12 @@ type WorkAnswer = {
   updatedAt: string;
 };
 
+type WorkSetOption = { workKey: string; title: string; fieldLabels: FieldLabel[] };
+
 type WorkStatsData = {
   workKey: string;
-  workKeys: string[];
+  sets: WorkSetOption[];
+  fieldLabels: FieldLabel[];
   items: WorkItemLite[];
   employees: { id: string; name: string }[];
   answers: WorkAnswer[];
@@ -463,13 +468,15 @@ function WorkAnswersSection({
 }) {
   const [data, setData] = useState<WorkStatsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [workKey, setWorkKey] = useState("work0-shokushu-gyoshu");
+  // 未指定ならAPI側が sortOrder 先頭のワークを返す
+  const [workKey, setWorkKey] = useState("");
   const [view, setView] = useState<"matrix" | "detail" | "unknown">("matrix");
   const [selectedEmployee, setSelectedEmployee] = useState("");
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/training/work-stats?workKey=${encodeURIComponent(workKey)}`)
+    const qs = workKey ? `?workKey=${encodeURIComponent(workKey)}` : "";
+    fetch(`/api/training/work-stats${qs}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: WorkStatsData | null) => {
         if (!d) return;
@@ -482,6 +489,11 @@ function WorkAnswersSection({
 
   // 社員で絞っている間は、詳細表示もその社員に固定する（state を同期させず参照時に解決する）
   const detailEmployee = filterUserId || selectedEmployee;
+
+  const fields = data?.fieldLabels ?? [];
+  // ワーク①は同じ answerUnknown 列を別の設問に流用しているため、設問文で判定する
+  const showUnknownView = hasUnknownWordsField(fields);
+  const effectiveView = view === "unknown" && !showUnknownView ? "matrix" : view;
 
   const selectClass =
     "px-3 py-1.5 border border-[#E5E7EB] rounded-md text-[13px] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
@@ -529,20 +541,25 @@ function WorkAnswersSection({
     answer: answerByEmployeeItem.get(`${detailEmployee}|${item.itemCode}`) ?? null,
   }));
 
+  // 「分からなかった言葉」はその設問があるワークでのみ出す
   const viewButtons: { key: typeof view; label: string }[] = [
     { key: "matrix", label: "提出状況" },
     { key: "detail", label: "社員別回答" },
-    { key: "unknown", label: "分からなかった言葉" },
+    ...(showUnknownView ? [{ key: "unknown" as const, label: "分からなかった言葉" }] : []),
   ];
 
   return (
     <section className="mt-8">
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <h2 className="text-[16px] font-semibold text-[#374151]">記述ワーク回答</h2>
-        <select value={workKey} onChange={(e) => setWorkKey(e.target.value)} className={selectClass}>
-          {(data?.workKeys.length ? data.workKeys : [workKey]).map((k) => (
-            <option key={k} value={k}>
-              {k}
+        <select
+          value={data?.workKey ?? workKey}
+          onChange={(e) => setWorkKey(e.target.value)}
+          className={selectClass}
+        >
+          {(data?.sets ?? []).map((s) => (
+            <option key={s.workKey} value={s.workKey}>
+              {s.title}
             </option>
           ))}
         </select>
@@ -552,7 +569,9 @@ function WorkAnswersSection({
               key={b.key}
               onClick={() => setView(b.key)}
               className={`px-3 py-1.5 text-[13px] ${
-                view === b.key ? "bg-[#2563EB] text-white" : "bg-white text-[#374151] hover:bg-[#F9FAFB]"
+                effectiveView === b.key
+                  ? "bg-[#2563EB] text-white"
+                  : "bg-white text-[#374151] hover:bg-[#F9FAFB]"
               }`}
             >
               {b.label}
@@ -565,7 +584,7 @@ function WorkAnswersSection({
         <p className="py-8 text-center text-[14px] text-[#6B7280]">読み込み中...</p>
       ) : !data || data.items.length === 0 ? (
         <p className="py-8 text-center text-[14px] text-[#6B7280]">設問が登録されていません</p>
-      ) : view === "matrix" ? (
+      ) : effectiveView === "matrix" ? (
         <div className="overflow-x-auto bg-white rounded-[8px] border border-[#E5E7EB]">
           <table className="w-full text-[13px] border-collapse">
             <thead>
@@ -618,7 +637,7 @@ function WorkAnswersSection({
             </tbody>
           </table>
         </div>
-      ) : view === "detail" ? (
+      ) : effectiveView === "detail" ? (
         <div>
           <select
             value={detailEmployee}
@@ -654,17 +673,13 @@ function WorkAnswersSection({
                     )}
                   </div>
                   {answer && (
+                    // 設問ラベルはワーク定義（fieldLabels）から出す
                     <dl className="mt-3 space-y-2">
-                      {[
-                        { label: "① 何をしている会社か", value: answer.answerCompany },
-                        { label: "② 誰を助ける仕事か", value: answer.answerHelp },
-                        { label: "③ 1日の動き", value: answer.answerDay },
-                        { label: "④ 分からなかった言葉", value: answer.answerUnknown },
-                      ].map(({ label, value }) => (
-                        <div key={label}>
-                          <dt className="text-[12px] font-medium text-[#6B7280]">{label}</dt>
+                      {fields.map((f) => (
+                        <div key={f.key}>
+                          <dt className="text-[12px] font-medium text-[#6B7280]">{f.label}</dt>
                           <dd className="text-[14px] text-[#374151] whitespace-pre-wrap">
-                            {value || <span className="text-[#9CA3AF]">（未記入）</span>}
+                            {answer[f.key] || <span className="text-[#9CA3AF]">（未記入）</span>}
                           </dd>
                         </div>
                       ))}

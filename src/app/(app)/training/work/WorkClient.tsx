@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-
-const WORK_KEY = "work0-shokushu-gyoshu";
+import type { AnswerKey, FieldLabel } from "@/lib/training-work";
+import { ANSWER_KEYS } from "@/lib/training-work";
 
 type WorkItem = {
   id: string;
@@ -23,23 +23,23 @@ type SavedAnswer = {
   updatedAt: string;
 };
 
-type Draft = {
-  answerCompany: string;
-  answerHelp: string;
-  answerDay: string;
-  answerUnknown: string;
+type WorkSet = {
+  workKey: string;
+  title: string;
+  description: string;
+  fieldLabels: FieldLabel[];
 };
+
+type Draft = Record<AnswerKey, string>;
 
 type SavedEntry = Draft & { updatedAt: string };
 
-const EMPTY_DRAFT: Draft = { answerCompany: "", answerHelp: "", answerDay: "", answerUnknown: "" };
-
-const FIELDS: { key: keyof Draft; label: string; rows: number; placeholder: string }[] = [
-  { key: "answerCompany", label: "① この会社は何をしている会社か", rows: 2, placeholder: "1行程度" },
-  { key: "answerHelp", label: "② この仕事は誰を助ける仕事か", rows: 2, placeholder: "1行程度" },
-  { key: "answerDay", label: "③ 1日の動きを想像して書いてください", rows: 4, placeholder: "2〜3行" },
-  { key: "answerUnknown", label: "④ 分からなかった言葉があれば書いてください", rows: 2, placeholder: "例: レセプト、入稿" },
-];
+const EMPTY_DRAFT: Draft = {
+  answerCompany: "",
+  answerHelp: "",
+  answerDay: "",
+  answerUnknown: "",
+};
 
 // 保存日時の表示はJSTに固定する（罠#17: Railway 本番は UTC）
 function formatJst(iso: string): string {
@@ -53,11 +53,19 @@ function formatJst(iso: string): string {
   return `${date.replaceAll("-", "/")} ${time}`;
 }
 
-function isEmptyDraft(d: Draft): boolean {
-  return FIELDS.every((f) => d[f.key].trim().length === 0);
+function toDraft(a: SavedAnswer): Draft {
+  return {
+    answerCompany: a.answerCompany,
+    answerHelp: a.answerHelp,
+    answerDay: a.answerDay,
+    answerUnknown: a.answerUnknown,
+  };
 }
 
 export default function WorkClient() {
+  const [sets, setSets] = useState<WorkSet[]>([]);
+  const [workKey, setWorkKey] = useState<string | null>(null);
+  const [set, setSet] = useState<WorkSet | null>(null);
   const [items, setItems] = useState<WorkItem[]>([]);
   // 入力途中の内容は親で保持する（求人を移動しても画面上は消えない。ただし未保存なのでリロードでは消える）
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
@@ -69,29 +77,30 @@ export default function WorkClient() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const fetchData = useCallback(async () => {
+  // ワークごとに設問ラベルも件数も変わるため、切り替えのたびに取り直す
+  const fetchWork = useCallback(async (key: string | null) => {
     setLoading(true);
     setLoadError("");
+    setError("");
     try {
-      const res = await fetch(`/api/training/work?workKey=${encodeURIComponent(WORK_KEY)}`);
+      const qs = key ? `?workKey=${encodeURIComponent(key)}` : "";
+      const res = await fetch(`/api/training/work${qs}`);
       if (!res.ok) {
         setLoadError("読み込みに失敗しました。再読み込みしてください。");
         return;
       }
       const data = await res.json();
-      const loadedItems: WorkItem[] = data.items;
+      const loadedItems: WorkItem[] = data.items ?? [];
       const draftMap = new Map<string, Draft>();
       const savedMap = new Map<string, SavedEntry>();
-      for (const a of data.answers as SavedAnswer[]) {
-        const d: Draft = {
-          answerCompany: a.answerCompany,
-          answerHelp: a.answerHelp,
-          answerDay: a.answerDay,
-          answerUnknown: a.answerUnknown,
-        };
+      for (const a of (data.answers ?? []) as SavedAnswer[]) {
+        const d = toDraft(a);
         draftMap.set(a.itemCode, d);
         savedMap.set(a.itemCode, { ...d, updatedAt: a.updatedAt });
       }
+      setSets(data.sets ?? []);
+      setSet(data.set ?? null);
+      setWorkKey(data.workKey ?? null);
       setItems(loadedItems);
       setDrafts(draftMap);
       setSaved(savedMap);
@@ -105,9 +114,11 @@ export default function WorkClient() {
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchWork(null);
+  }, [fetchWork]);
 
+  // isDirty / save の依存に入るため、参照が毎回変わらないようにする
+  const fields: FieldLabel[] = useMemo(() => set?.fieldLabels ?? [], [set]);
   const current = items[currentIndex];
   const currentDraft = current ? drafts.get(current.itemCode) ?? EMPTY_DRAFT : EMPTY_DRAFT;
   const currentSaved = current ? saved.get(current.itemCode) ?? null : null;
@@ -115,14 +126,15 @@ export default function WorkClient() {
   const savedCount = items.filter((i) => saved.has(i.itemCode)).length;
   const unsavedItems = items.filter((i) => !saved.has(i.itemCode));
 
-  // 保存済みの内容と一致しなければ「未保存の変更あり」とみなす（保存時に trim されるため trim 後で比較する）
+  // 保存済みの内容と一致しなければ「未保存の変更あり」とみなす。
+  // このワークで使う欄だけを見る（使わない欄は常に空文字で保存されるため）
   const isDirty = useCallback(
     (itemCode: string) => {
       const d = drafts.get(itemCode) ?? EMPTY_DRAFT;
       const base: Draft = saved.get(itemCode) ?? EMPTY_DRAFT;
-      return FIELDS.some((f) => d[f.key].trim() !== base[f.key].trim());
+      return fields.some((f) => d[f.key].trim() !== base[f.key].trim());
     },
-    [drafts, saved]
+    [drafts, saved, fields]
   );
 
   // 保存を伴わない移動。未保存の変更があるときだけ確認する
@@ -156,7 +168,7 @@ export default function WorkClient() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [goTo, currentIndex, loading, finished, items.length]);
 
-  const updateField = (key: keyof Draft, value: string) => {
+  const updateField = (key: AnswerKey, value: string) => {
     if (!current) return;
     setDrafts((m) => {
       const next = new Map(m);
@@ -166,13 +178,19 @@ export default function WorkClient() {
   };
 
   const save = async (item: WorkItem, draft: Draft): Promise<boolean> => {
+    if (!workKey) return false;
     setSaving(true);
     setError("");
     try {
+      // このワークで使わない欄は空文字で送る（保存APIのリクエスト形式は変えない）
+      const payload: Record<string, string> = {};
+      for (const key of ANSWER_KEYS) {
+        payload[key] = fields.some((f) => f.key === key) ? draft[key] : "";
+      }
       const res = await fetch("/api/training/work", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workKey: WORK_KEY, itemCode: item.itemCode, ...draft }),
+        body: JSON.stringify({ workKey, itemCode: item.itemCode, ...payload }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -181,10 +199,10 @@ export default function WorkClient() {
       }
       // サーバ側で trim されるため、保存済みの値も trim 後の内容で持つ
       const stored: Draft = {
-        answerCompany: draft.answerCompany.trim(),
-        answerHelp: draft.answerHelp.trim(),
-        answerDay: draft.answerDay.trim(),
-        answerUnknown: draft.answerUnknown.trim(),
+        answerCompany: (payload.answerCompany ?? "").trim(),
+        answerHelp: (payload.answerHelp ?? "").trim(),
+        answerDay: (payload.answerDay ?? "").trim(),
+        answerUnknown: (payload.answerUnknown ?? "").trim(),
       };
       setSaved((m) => new Map(m).set(item.itemCode, { ...stored, updatedAt: data.updatedAt }));
       setDrafts((m) => new Map(m).set(item.itemCode, stored));
@@ -208,8 +226,9 @@ export default function WorkClient() {
 
   const handleSaveNext = async () => {
     if (!current) return;
-    // 全欄が空だと API は 400 を返すため、保存を試みずに未入力のまま次へ進む
-    if (!isEmptyDraft(currentDraft)) {
+    // このワークで使う欄がすべて空だと API は 400 を返すため、保存を試みずに次へ進む
+    const allEmpty = fields.every((f) => currentDraft[f.key].trim().length === 0);
+    if (!allEmpty) {
       const ok = await save(current, currentDraft);
       if (!ok) return; // 失敗時は移動しない
     }
@@ -237,16 +256,45 @@ export default function WorkClient() {
     <div className="max-w-3xl">
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-[20px] font-semibold text-[#374151]">
-          記述ワーク：職種・業種を推測する
+          {set ? set.title : "記述ワーク"}
         </h1>
         <Link href="/training/work/review" className="text-[13px] text-[#2563EB] hover:underline">
           自分の回答を見返す →
         </Link>
       </div>
 
-      <div className="mt-3 p-3 rounded-md bg-[#FFFBEB] border border-[#FDE68A] text-[13px] text-[#92400E] leading-relaxed">
-        業種や会社名は書かれていません。仕事内容だけを読んで推測してください。分からなくても構いません。分からなかった言葉を④に残すことが大切です。
-      </div>
+      {/* ワーク選択 */}
+      {sets.length > 0 && (
+        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+          {sets.map((s) => {
+            const active = s.workKey === workKey;
+            return (
+              <button
+                key={s.workKey}
+                type="button"
+                onClick={() => {
+                  if (s.workKey === workKey) return;
+                  fetchWork(s.workKey);
+                }}
+                className={[
+                  "px-3 py-1.5 text-[13px] rounded-md border transition-colors",
+                  active
+                    ? "bg-[#2563EB] text-white border-[#2563EB] font-medium"
+                    : "bg-white text-[#374151] border-[#E5E7EB] hover:bg-[#F9FAFB]",
+                ].join(" ")}
+              >
+                {s.title}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {set && (
+        <div className="mt-3 p-3 rounded-md bg-[#FFFBEB] border border-[#FDE68A] text-[13px] text-[#92400E] leading-relaxed">
+          {set.description}
+        </div>
+      )}
 
       {loading ? (
         <p className="py-12 text-center text-[14px] text-[#6B7280]">読み込み中...</p>
@@ -339,7 +387,7 @@ export default function WorkClient() {
                 </div>
 
                 <div className="mt-3 space-y-2">
-                  {FIELDS.map((f) => (
+                  {fields.map((f) => (
                     <div key={f.key}>
                       <label className="block text-[13px] font-medium text-[#374151] mb-0.5">
                         {f.label}
