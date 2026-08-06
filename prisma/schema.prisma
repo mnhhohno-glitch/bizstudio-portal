@@ -2718,7 +2718,8 @@ model SecureTransfer {
   token          String    @unique // URLに載る推測不能トークン（encryption.ts generateToken・48B base64url）
   senderId       String    @map("sender_id")
   sender         User      @relation("SecureTransfersSent", fields: [senderId], references: [id])
-  recipientEmail String    @map("recipient_email") // 1レコード1宛先（配列化しない）
+  recipientEmail String    @map("recipient_email") // TO のアドレス。複数指定時はカンマ区切りで1レコードに格納する
+  ccEmails       String?   @map("cc_emails") @db.Text // CC のアドレス（カンマ区切り）。CC 無しは null
   subject        String?
   message        String?   @db.Text // メール本文への添え書き
   passwordHash   String    @map("password_hash") // bcryptjs。平文は保存しない
@@ -2727,7 +2728,7 @@ model SecureTransfer {
   failedAttempts Int       @default(0) @map("failed_attempts") // パスワード照合失敗回数。10で自動無効化
   passwordInEmail Boolean  @default(true) @map("password_in_email") // false = パスワードをメールに載せず送信者が別途伝える
   candidateId    String?   @map("candidate_id") // 第1弾は常に null
-  batchId        String?   @map("batch_id") // 同一の送信操作で作られたレコードの束ね（複数宛先対応）。旧レコードは null
+  batchId        String?   @map("batch_id") // 旧仕様（宛先ごとに1レコード）の束ね。TO/CC 方式への移行後は使用しない（過去レコードのため残す）
   expiryNotifiedAt DateTime? @map("expiry_notified_at") // 期限切れ予告メールを送信者へ送った時刻（二重送信防止）
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
