@@ -64,8 +64,7 @@ export async function sendTransferNoticeEmail(params: {
  * さらに先頭へ付与されるため、控えにも【検証】が付く。
  * この送信に失敗しても受信者への送信は成功扱いにする（呼び出し側で ok を無視してよい）。
  */
-export async function sendTransferCopyEmail(params: {
-  to: string; // 送信者（User.email）
+export type TransferCopyParams = {
   senderName: string;
   recipientEmails: string[]; // TO
   ccEmails: string[]; // CC
@@ -77,7 +76,10 @@ export async function sendTransferCopyEmail(params: {
   subject: string; // 実際に送った件名（既定文言に解決済みのもの）
   body: string; // （1）本文
   signature: string; // （4）署名
-}): Promise<SendMailResult> {
+};
+
+/** 控えメールの本文を組み立てる。パスワードを含まないことを検証できるよう関数として切り出す。 */
+export function buildTransferCopyBody(params: TransferCopyParams): string {
   const lines: string[] = [];
   lines.push(`${params.senderName} 様`);
   lines.push("");
@@ -110,11 +112,16 @@ export async function sendTransferCopyEmail(params: {
       fileNames: params.fileNames,
     })
   );
+  return lines.join("\n");
+}
 
+export async function sendTransferCopyEmail(
+  params: TransferCopyParams & { to: string } // to = 送信者（User.email）
+): Promise<SendMailResult> {
   return sendResendEmail({
     to: params.to,
     subject: `[送信控え] ${params.subject}`,
-    text: lines.join("\n"),
+    text: buildTransferCopyBody(params),
   });
 }
 
