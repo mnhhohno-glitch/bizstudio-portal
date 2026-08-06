@@ -291,7 +291,7 @@ export default function WorkClient() {
       )}
 
       {set && (
-        <div className="mt-3 p-3 rounded-md bg-[#FFFBEB] border border-[#FDE68A] text-[13px] text-[#92400E] leading-relaxed">
+        <div className="mt-3 p-3 rounded-md bg-[#FFFBEB] border border-[#FDE68A] text-[13px] text-[#92400E] leading-relaxed whitespace-pre-wrap">
           {set.description}
         </div>
       )}
