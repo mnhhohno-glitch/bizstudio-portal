@@ -3,6 +3,14 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { RATING_VALUE } from "@/lib/ai-rating";
+// T-151 Phase 2-2: 確認カードは面談ログ経路と共通のコンポーネントに切り出し済み。
+import SuggestedTaskCard, {
+  suggestedTaskKey,
+  formatDueDateWithYear,
+  type SuggestedTask,
+  type SuggestedTaskDone,
+} from "@/components/common/SuggestedTaskCard";
 
 type Message = {
   id: string;
@@ -10,6 +18,8 @@ type Message = {
   content: string;
   createdAt: string;
   isLoading?: boolean;
+  suggestedTasks?: SuggestedTask[] | null;
+  suggestedTasksDismissedAt?: string | null;
 };
 
 function formatTime(iso: string) {
@@ -56,7 +66,141 @@ export default function AdvisorFloatingPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  // 診断の二重起動ガード。読み込み完了直後の自動実行は setState の反映を待てないため、
+  // state（前レンダーの値しか見えない）ではなく ref で「いま走っているか」を判定する。
+  const isDiagnosingRef = useRef(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
+
+  // T-155: 未読の面談ログ（MEETING txt・advisorIngestedAt=null）件数と取り込み中フラグ。
+  const [unreadLogCount, setUnreadLogCount] = useState(0);
+  const [isIngesting, setIsIngesting] = useState(false);
+
+  const fetchUnreadLogCount = async () => {
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files?category=MEETING`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const files: { fileName: string; mimeType: string; advisorIngestedAt?: string | null }[] =
+        data.files || [];
+      setUnreadLogCount(
+        files.filter(
+          (f) =>
+            !f.advisorIngestedAt &&
+            (f.mimeType?.startsWith("text/") || f.fileName.toLowerCase().endsWith(".txt")),
+        ).length,
+      );
+    } catch {
+      // 件数表示のみの機能なので黙って諦める（ボタンは0件扱い＝非活性になるだけ）
+    }
+  };
+
+  // T-155: 未読ログの取り込み。完了時に件数を取り直す（成功すればサーバー側で全件既読になり0になる）。
+  const handleIngestLogs = async () => {
+    if (isIngesting || unreadLogCount === 0 || isDiagnosingRef.current) return;
+    setIsIngesting(true);
+
+    // 取込完了後にタイプ診断を自動実行するかの判定材料。
+    //   aborted       : 取込が失敗・例外で終わったか（中断時は診断を走らせない）
+    //   ingestedCount : 実際に取り込めた面談ログの件数（0件なら診断を走らせない＝無駄なAI費用を防ぐ）
+    let aborted = false;
+    let ingestedCount = 0;
+
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/advisor/ingest-logs`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "取り込みに失敗しました");
+      ingestedCount = typeof data.ingested === "number" ? data.ingested : 0;
+      if (data.ingested === 0) {
+        toast.info("未読の面談ログはありません");
+      } else {
+        toast.success(`${data.ingested}件の面談ログを読み込みました。以降の会話に反映されます`);
+      }
+      await fetchUnreadLogCount();
+    } catch (e) {
+      aborted = true;
+      toast.error(e instanceof Error ? e.message : "取り込みに失敗しました");
+    } finally {
+      setIsIngesting(false);
+    }
+
+    // 取込内容を踏まえた診断にするため、取込が正常に終わった直後に続けて実行する。
+    await autoRunTypeDiagnosis(aborted, ingestedCount);
+  };
+
+  // T-150: 確認カードの状態。期日の編集値（messageId+kind 単位）と通信中フラグ。
+  const [taskDueEdits, setTaskDueEdits] = useState<Record<string, string>>({});
+  const [taskCardBusy, setTaskCardBusy] = useState<Record<string, boolean>>({});
+  const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
+  // 候補1件ごとの処理済み状態。候補が複数あるとき1件の操作で全体を閉じないために持つ。
+  const [taskCardDone, setTaskCardDone] = useState<Record<string, SuggestedTaskDone>>({});
+
+  // T-150: カードの「タスクを作成」/「今回は不要」。
+  // 候補は複数出ることがあるため、1件の操作では他の候補を消さない。
+  // 全候補が処理済み（作成済み or 不要）になって初めて dismiss を送ってカードを閉じる。
+  // 個別の「今回は不要」では破棄フラグを立てない（＝まとめ破棄のときだけ立てる現仕様を維持）。
+  const handleSuggestedTask = async (
+    messageId: string,
+    task: SuggestedTask,
+    action: "create" | "dismiss",
+  ) => {
+    if (!activeSessionId) return;
+    const key = suggestedTaskKey(messageId, task.kind);
+    if (taskCardBusy[key] || taskCardDone[key]) return;
+
+    const endpoint = `/api/candidates/${candidateId}/advisor/sessions/${activeSessionId}/messages/${messageId}/suggested-tasks`;
+
+    // このメッセージの全候補が処理済みになったらカードを閉じる（サーバーにも破棄を記録）。
+    const closeIfAllDone = async (doneMap: Record<string, SuggestedTaskDone>) => {
+      const owner = messages.find((m) => m.id === messageId);
+      const ownerTasks = Array.isArray(owner?.suggestedTasks) ? owner.suggestedTasks : [];
+      const allDone =
+        ownerTasks.length > 0 &&
+        ownerTasks.every((t) => doneMap[suggestedTaskKey(messageId, t.kind)]);
+      if (!allDone) return;
+      await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss" }),
+      }).catch(() => {});
+      await fetchMessages(activeSessionId);
+    };
+
+    // 「今回は不要」は通信不要（この候補を畳むだけ）。
+    if (action === "dismiss") {
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "dismissed" };
+      setTaskCardDone(next);
+      setTaskCardError((p) => ({ ...p, [key]: "" }));
+      await closeIfAllDone(next);
+      return;
+    }
+
+    setTaskCardBusy((p) => ({ ...p, [key]: true }));
+    setTaskCardError((p) => ({ ...p, [key]: "" }));
+    try {
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, kind: task.kind, dueDate: taskDueEdits[key] || task.dueDate }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "処理に失敗しました");
+      // T-151: 期日のみ更新だった場合は期日を年込みで出す（面談経路とも文言を統一）。
+      // 経路をまたいで同種の未完了タスクがあると通知が飛ばないため、ここが唯一の手がかりになる。
+      toast.success(
+        data.created
+          ? "タスクを作成しました"
+          : `既にタスクがあるため期日のみ更新しました（期日: ${formatDueDateWithYear(data.dueDate)}）`,
+      );
+      const next: Record<string, SuggestedTaskDone> = { ...taskCardDone, [key]: "created" };
+      setTaskCardDone(next);
+      await closeIfAllDone(next);
+    } catch (e) {
+      // 失敗時はこの候補を操作可能なまま残す（起票機会を失わせない）。
+      setTaskCardError((p) => ({ ...p, [key]: e instanceof Error ? e.message : "処理に失敗しました" }));
+    } finally {
+      setTaskCardBusy((p) => ({ ...p, [key]: false }));
+    }
+  };
 
   // T-126 Phase2: サーバ側 analyze-batch の hasValidThreeAxisMarkers と判定を厳密に一致させる。
   //   （** を除去 / 通過率・総合の ■ は任意）。ここが厳しすぎるとサーバが valid とみなす求人まで
@@ -65,9 +209,9 @@ export default function AdvisorFloatingPanel({
     if (!comment) return false;
     const c = comment.replace(/\*\*/g, "");
     return (
-      /■\s*本人希望[：:]\s*[ABCD]/.test(c) &&
-      /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c) &&
-      /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c)
+      new RegExp(`■\\s*本人希望[：:]\\s*${RATING_VALUE}`).test(c) &&
+      new RegExp(`(?:■\\s*)?通過率[：:]\\s*${RATING_VALUE}`).test(c) &&
+      new RegExp(`(?:■\\s*)?総合[：:]\\s*${RATING_VALUE}`).test(c)
     );
   };
 
@@ -126,6 +270,7 @@ export default function AdvisorFloatingPanel({
       }
     };
     initSession();
+    fetchUnreadLogCount(); // T-155: パネル表示時に未読ログ件数を取得
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateId]);
 
@@ -202,7 +347,7 @@ export default function AdvisorFloatingPanel({
   };
 
   const handleFullAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
     setIsAnalyzing(true);
 
     try {
@@ -297,7 +442,7 @@ export default function AdvisorFloatingPanel({
   };
 
   const handleAdditionalAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
 
     // Find the latest analysis message to determine sinceDate
     const lastAnalysis = [...messages]
@@ -390,8 +535,38 @@ export default function AdvisorFloatingPanel({
     }
   };
 
-  const handleTypeDiagnosis = async () => {
-    if (isDiagnosing || !activeSessionId || isSending || isAnalyzing) return;
+  /**
+   * 未読ログ取込の直後に走らせるタイプ診断 自動実行。
+   * CA が取込後に「タイプ診断」を押し忘れると求人プラットフォームの志向パネルが
+   * 古い診断のまま残るため、取込が正常に終わったときだけ、
+   * 手動ボタンと**同一の処理**を続けて呼ぶ。
+   *
+   * 求人分析（全件分析／追加のみ）からは呼ばない。業務上の順序は
+   * 「タイプ診断 → その結果を踏まえて求人を分析」であり、分析後に診断を回すのは順序が逆で、
+   * AI費用が1回分無駄になるため。
+   *
+   * 走らせない条件:
+   *   - aborted        : 取込が失敗・例外で終わった（取込結果が不完全なまま診断しない）
+   *   - ingestedCount 0: 取り込めた件数が0＝無駄なAI費用を防ぐ
+   *
+   * 診断側（runTypeDiagnosis）は内部で例外を握るため、ここでの失敗が
+   * 直前の取込結果を巻き戻すことはない。
+   */
+  const autoRunTypeDiagnosis = async (aborted: boolean, ingestedCount: number) => {
+    if (aborted || ingestedCount <= 0) return;
+    if (isDiagnosingRef.current) return; // 既に診断が走っているなら重ねない
+    toast.info("続けてタイプ診断を自動実行します");
+    await runTypeDiagnosis();
+  };
+
+  /**
+   * タイプ診断の本体。手動ボタンからも自動実行からも、ここを通る（プロンプト・モデル・保存先は不変）。
+   * 二重起動の判定に state ではなく isDiagnosingRef を使うのは、自動実行が
+   * 直前の setState 反映を待てず、古い state 値では正しく判定できないため。
+   */
+  const runTypeDiagnosis = async () => {
+    if (isDiagnosingRef.current || !activeSessionId || isSending) return;
+    isDiagnosingRef.current = true;
     setIsDiagnosing(true);
 
     const diagnosisMessage = `この求職者のタイプ診断と検索戦略を分析してください。
@@ -436,8 +611,15 @@ export default function AdvisorFloatingPanel({
       setMessages((prev) => prev.filter((m) => !m.isLoading));
       alert(err instanceof Error ? err.message : "タイプ診断の実行に失敗しました");
     } finally {
+      isDiagnosingRef.current = false;
       setIsDiagnosing(false);
     }
+  };
+
+  // 手動の「タイプ診断」ボタン。分析中は押せない（既存挙動を維持）。
+  const handleTypeDiagnosis = async () => {
+    if (isAnalyzing) return;
+    await runTypeDiagnosis();
   };
 
   const hasAnalysisHistory = messages.some(
@@ -593,11 +775,13 @@ export default function AdvisorFloatingPanel({
           </div>
 
           {/* Action buttons */}
-          <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 shrink-0 flex-wrap">
+          {/* T-155 追補: ボタンが1つ増えて折り返していたため、左3ボタンは gap と左右padding を詰め、
+              ボタン内で改行しないよう whitespace-nowrap を付ける（右の全件分析グループは変更しない）。 */}
+          <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2 shrink-0 flex-wrap">
             <button
               onClick={() => setShowGreetingOptions(!showGreetingOptions)}
               disabled={!activeSessionId || isGeneratingGreeting || isAnalyzing}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ✉ 挨拶文生成
             </button>
@@ -629,7 +813,7 @@ export default function AdvisorFloatingPanel({
             <button
               onClick={handleTypeDiagnosis}
               disabled={!activeSessionId || isDiagnosing || isSending || isAnalyzing || isGeneratingGreeting}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isDiagnosing ? (
                 <span className="flex items-center gap-1">
@@ -638,6 +822,24 @@ export default function AdvisorFloatingPanel({
                 </span>
               ) : (
                 "🔍 タイプ診断"
+              )}
+            </button>
+            {/* T-155: 未読の面談ログをまとめて取り込む。0件時は非活性＋文言で理由が分かる形にする */}
+            <button
+              onClick={handleIngestLogs}
+              disabled={unreadLogCount === 0 || isIngesting || isSending || isAnalyzing || isGeneratingGreeting || isDiagnosing}
+              title={unreadLogCount === 0 ? "未読の面談ログはありません" : `未読の面談ログ ${unreadLogCount}件を読み込みます`}
+              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isIngesting ? (
+                <span className="flex items-center gap-1">
+                  <span className="animate-spin text-sm">⏳</span>
+                  読み込み中...
+                </span>
+              ) : unreadLogCount > 0 ? (
+                `📥 未読ログ取込（${unreadLogCount}件）`
+              ) : (
+                "📥 未読ログなし"
               )}
             </button>
             <div className="ml-auto flex items-center gap-2">
@@ -653,7 +855,7 @@ export default function AdvisorFloatingPanel({
                 <>
                   <button
                     onClick={handleFullAnalysis}
-                    disabled={!activeSessionId || isGeneratingGreeting}
+                    disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                     className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     📊 全件分析
@@ -670,7 +872,7 @@ export default function AdvisorFloatingPanel({
                   {hasAnalysisHistory && (
                     <button
                       onClick={handleAdditionalAnalysis}
-                      disabled={!activeSessionId || isGeneratingGreeting}
+                      disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                       className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       📊 追加のみ
@@ -763,6 +965,30 @@ export default function AdvisorFloatingPanel({
                       <p className={`text-xs mt-1 ${msg.role === "user" ? "text-white/60 text-right" : "text-gray-400"}`}>
                         {!msg.isLoading && formatTime(msg.createdAt)}
                       </p>
+
+                      {/* T-150: タスク候補の確認カード。AI応答の直下に出す。
+                          破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。
+                          期日は必ず年込みで表示する（AIの年ズレをCAが見つける最後の防壁）。 */}
+                      {msg.role === "assistant" &&
+                        !msg.isLoading &&
+                        !msg.suggestedTasksDismissedAt &&
+                        Array.isArray(msg.suggestedTasks) &&
+                        msg.suggestedTasks.length > 0 && (
+                          <SuggestedTaskCard
+                            ownerId={msg.id}
+                            tasks={msg.suggestedTasks}
+                            candidateName={candidateName}
+                            busy={taskCardBusy}
+                            error={taskCardError}
+                            dueEdits={taskDueEdits}
+                            done={taskCardDone}
+                            onDueChange={(key, value) =>
+                              setTaskDueEdits((p) => ({ ...p, [key]: value }))
+                            }
+                            onCreate={(task) => handleSuggestedTask(msg.id, task, "create")}
+                            onDismiss={(task) => handleSuggestedTask(msg.id, task, "dismiss")}
+                          />
+                        )}
                     </div>
                   </div>
                 );

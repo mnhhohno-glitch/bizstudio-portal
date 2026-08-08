@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 export async function POST(request: Request) {
   try {
@@ -171,6 +172,15 @@ ${parsed_resume}` : ""}`;
     }
 
     const result = await response.json();
+
+    // T-135: 費用記録（fire-and-forget）
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: "guide-axis",
+      model: "gemini-3-flash-preview",
+      usage: result?.usageMetadata,
+    });
+
     const axis = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!axis) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 export async function POST(request: NextRequest) {
   const actor = await getSessionUser();
@@ -67,6 +68,15 @@ ${content.trim()}`,
     }
 
     const data = await response.json();
+
+    // T-135: 費用記録（fire-and-forget）
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: "announcement-format",
+      model: "gemini-2.0-flash",
+      usage: data?.usageMetadata,
+    });
+
     const formattedContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!formattedContent) {

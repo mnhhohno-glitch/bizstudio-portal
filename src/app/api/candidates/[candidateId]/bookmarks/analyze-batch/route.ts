@@ -5,15 +5,17 @@ import { getCandidateContext } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
+import { RATING_VALUE } from "@/lib/ai-rating";
+import { extractCompanyNameCandidates } from "@/lib/normalize-filename";
 
 export const maxDuration = 300; // 5 minutes
 
 function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   if (!comment) return false;
   const c = comment.replace(/\*\*/g, "");
-  const hasDesire = /■\s*本人希望[：:]\s*[ABCD]/.test(c);
-  const hasPass = /(?:■\s*)?通過率[：:]\s*[ABCD]/.test(c);
-  const hasOverall = /(?:■\s*)?総合[：:]\s*[ABCD]/.test(c);
+  const hasDesire = new RegExp(`■\\s*本人希望[：:]\\s*${RATING_VALUE}`).test(c);
+  const hasPass = new RegExp(`(?:■\\s*)?通過率[：:]\\s*${RATING_VALUE}`).test(c);
+  const hasOverall = new RegExp(`(?:■\\s*)?総合[：:]\\s*${RATING_VALUE}`).test(c);
   return hasDesire && hasPass && hasOverall;
 }
 
@@ -33,7 +35,7 @@ function compressBatchResultForSummary(content: string): string {
       continue;
     }
     // 3軸マーカー行（本人希望 / 通過率 / 総合）
-    if (/^■?\s*(?:本人希望|通過率|総合)\s*[：:]\s*[ABCD]/.test(noBold)) {
+    if (new RegExp(`^■?\\s*(?:本人希望|通過率|総合)\\s*[：:]\\s*${RATING_VALUE}`).test(noBold)) {
       kept.push(t);
       continue;
     }
@@ -63,7 +65,7 @@ function extractRatingsAndComments(
 
     for (const line of summarySection.split("\n")) {
       const trimmed = line.trim();
-      if (/^[ABCD]$/.test(trimmed)) { currentRating = trimmed; continue; }
+      if (new RegExp(`^${RATING_VALUE}$`).test(trimmed)) { currentRating = trimmed; continue; }
       if (trimmed === "該当なし" || trimmed === "") continue;
       if (trimmed.startsWith("*")) {
         const cn = trimmed.replace(/^\*\s*/, "").trim();
@@ -165,7 +167,8 @@ function extractRatingsAndComments(
         if (existing) {
           existing.comment = comment;
         } else {
-          const ratingMatch = comment.match(/■\s*総合[：:]\s*([ABCD])/) || comment.match(/総合[：:]\s*([ABCD])/);
+          const ratingMatch = comment.match(new RegExp(`■\\s*総合[：:]\\s*(${RATING_VALUE})`))
+            || comment.match(new RegExp(`総合[：:]\\s*(${RATING_VALUE})`));
           results.set(file.id, { rating: ratingMatch ? ratingMatch[1] : "", comment });
         }
         break;
@@ -179,7 +182,12 @@ function extractRatingsAndComments(
         const idx = normalizedText.indexOf(name);
         if (idx === -1) continue;
         const area = analysisText.substring(Math.max(0, idx - 100), Math.min(analysisText.length, idx + 600));
-        const patterns = [/■\s*総合[：:]\s*([ABCD])/, /総合[：:]\s*([ABCD])/, /評価[：:]\s*([ABCD])/, /【([ABCD])】/];
+        const patterns = [
+          new RegExp(`■\\s*総合[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`総合[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`評価[：:]\\s*(${RATING_VALUE})`),
+          new RegExp(`【(${RATING_VALUE})】`),
+        ];
         for (const p of patterns) {
           const m = area.match(p);
           if (m) { entry.rating = m[1]; break; }
@@ -242,6 +250,16 @@ function extractSearchNames(fileName: string): string[] {
       expanded.push(normalized);
     }
   }
+
+  // T-146 追加調査: ファイル名に会社名以外の文字（括弧書き・部署名・キャッチコピー・
+  // 記号）が混ざると、上のどの候補にも不純物が残り 【会社名】 と照合できずに
+  // 評価の保存ごとスキップされる（本番で 105 件・求職者 52 名）。
+  // ★必ず末尾に追加する★ — 候補は先頭から順に試され最初の一致で確定するため、
+  // 末尾に足す限り現在成功している照合の挙動は変わらない。
+  for (const core of extractCompanyNameCandidates(fileName)) {
+    if (!expanded.includes(core)) expanded.push(core);
+  }
+
   return expanded;
 }
 
@@ -314,6 +332,8 @@ export async function POST(
   }
 
   // 1. Fetch bookmark files with extracted text (optionally filtered by date)
+  //    extractedText の無い行は評価対象外。サイト経由（origin="candidate"/driveFileId=null）は
+  //    PDF実体が無く抽出テキストも生成されないため、この条件で自動的に除外される（AI評価対象外）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const whereClause: any = {
     candidateId,
@@ -401,7 +421,7 @@ export async function POST(
 
   const EVAL_RULES = `## 評価ルール
 
-各求人について、以下の3軸でA/B/C/D評価を行うこと。評価基準は上記の「求人マッチングスキル定義」（特に Phase 5: ABCDマッチング評価）に従う。
+各求人について、以下の3軸で評価を行うこと。**本人希望と通過率は A/B/C/D の4段階、総合は A/B+/B/C/D の5段階**（良い順に A > B+ > B > C > D。B+ は総合にのみ存在し、本人希望・通過率には使用しない）。評価基準は上記の「求人マッチングスキル定義」（特に Phase 5: ABCDマッチング評価）に従う。
 
 ### ① 本人希望（求職者の希望・志向性とのマッチ度）
 - A: 志向性も条件もほぼ一致。本人が間違いなく応募する求人
@@ -425,11 +445,32 @@ export async function POST(
 
 ### ③ 総合（紹介推奨度）
 - A: 積極的に紹介 — 本人希望にも合い、通過も見込める
+- B+: 紹介する価値は明確にあるが最優先ではない — 本人希望と通過率のどちらか一方がA、もう一方がB
 - B: 紹介してよい — バランスが取れている、または片方が強い
 - C: 条件付きで検討 — 紹介するなら補足説明や対策が必要
 - D: 紹介非推奨 — 本人にも合わず通過も厳しい
 
-判断材料: ①②の総合判断。本人希望Aでも通過率Dなら総合Cにする等、バランスを考慮（スキル定義 Phase 5 「総合評価」テーブル参照）
+判断材料: ①②を機械的に合成する。**必ずスキル定義 Phase 5「総合評価の算出」テーブルに従うこと。**
+
+| 希望 × 通過 | 総合評価 |
+|---|---|
+| A × A | 総合A |
+| A × B | 総合B+ |
+| B × A | 総合B+ |
+| A × C〜D | 総合B |
+| B × B | 総合B |
+| B × C | 総合C |
+| B × D | 総合C |
+| C × A〜B | 総合C |
+| C × C | 総合C |
+| C × D | 総合D |
+| D × 任意 | 総合D |
+
+**本表は希望×通過の全組み合わせを網羅する。表にない組み合わせは存在しないため、AIが独自に判断してはならない。**
+
+総合評価は「本人の希望に合っているか」を優先して決める。希望に合わない求人は、選考を通過しやすくても本人が応募しないため、良い評価を付けても紹介に結びつかない。したがって希望Aは通過が厳しくてもBを維持し、希望Cは通過が堅くてもCに留める。必須要件未充足（通過率D）の求人が総合A・総合B+ になることはない。
+
+**評価は必ず1つに確定させること。** 総合は A / B+ / B / C / D のいずれか1つ、本人希望と通過率は A / B / C / D のいずれか1つを返す。「A〜B」「B〜C」のような範囲表記、「Bより」「B寄り」「Bに近いC」等の曖昧表現は使用しない。迷った場合も必ず1つに決める。
 
 ## 出力フォーマット
 各求人の分析コメントは以下のフォーマットで、簡潔に出力してください。求人と求人の間には必ず空行を2行入れて区切ること：
@@ -438,12 +479,14 @@ export async function POST(
 
 【会社名】求人タイトル
 
-■ 本人希望: A〜D
-■ 通過率: A〜D
-■ 総合: A〜D
+■ 本人希望: A / B / C / D のいずれか1つ
+■ 通過率: A / B / C / D のいずれか1つ
+■ 総合: A / B+ / B / C / D のいずれか1つ
+
+※この3行には評価記号のみを書く。「A〜B」等の範囲表記や補足語を付けないこと。
 
 ◆ おすすめポイント（本人向け）
-評価ランク（A/B/C/D）に関係なく、すべての求人で「積極的・前向きな推薦コメント」を生成する。
+評価ランク（A/B+/B/C/D）に関係なく、すべての求人で「積極的・前向きな推薦コメント」を生成する。
 マイページに表示される内容なので、本人が読んで前向きに応募を検討できる文章にすること。
 
 ■ 全ランク共通の方針
@@ -480,7 +523,7 @@ export async function POST(
 - 求職者名は「○○さん」で統一する。「あなた」は使わない
 - 懸念点・確認事項・ネガティブな選考情報は書かない（それらは CA向けセクションに書く）
 - 「希望と異なる」「方向性が違う」「軽めにおすすめ」のようなネガティブ表現は使わない
-- 評価ランクA/B/C/Dの違いは本人向けコメントの文体には反映させない（CA向けにのみ反映）
+- 評価ランクA/B+/B/C/Dの違いは本人向けコメントの文体には反映させない（CA向けにのみ反映）
 
 ◆ 選考分析（CA向け）
 キャリアアドバイザーが選考を進める上で把握すべき現実的な評価を、事実ベースで簡潔に記載。
@@ -547,7 +590,11 @@ ${skillContent}
 ■ 総合A（積極的に紹介）
 
 ・会社名 — 本人希望:A / 通過率:A
+
+■ 総合B+（紹介する価値は明確だが最優先ではない）
+
 ・会社名 — 本人希望:A / 通過率:B
+・会社名 — 本人希望:B / 通過率:A
 
 ■ 総合B（紹介してよい）
 
@@ -556,13 +603,13 @@ ${skillContent}
 
 ■ 総合C（条件付きで検討）
 
-・会社名 — 本人希望:A / 通過率:D
 ・会社名 — 本人希望:C / 通過率:B
 
 ■ 総合D（紹介非推奨）
 
 ・会社名 — 本人希望:D / 通過率:D
 
+- ランクの並び順は 総合A → 総合B+ → 総合B → 総合C → 総合D とすること
 - 各ランクのヘッダー（■ 総合A 等）の前後に必ず空行を入れること
 - 各社は「・」で始め、1社1行で記載すること（1行に複数社を詰め込まない）
 - 該当なしのランクは「該当なし」と記載すること

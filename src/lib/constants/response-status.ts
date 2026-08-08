@@ -32,12 +32,21 @@ export const SUBMITTABLE_STATUSES: ReadonlySet<ResponseStatus> = new Set([
 ]);
 
 // portal 応募意向（CandidateJobResponse.response）へのマッピング。
-// 箱B feedback-status ハンドラの _PORTAL_INTENT_MAP と同一（INTERESTED/APPLY/UNANSWERED のみ同期、
-// PENDING/EXCLUDED/IN_SELECTION/SELECTION_ENDED は同期しない=undefined）。null は「取り消し（削除）」。
+// null は「取り消し（該当行を削除）」、undefined は「同期対象外（CJR に触らない）」。
+//
+// PENDING / EXCLUDED も null（削除）に含める:
+//   旧実装は箱B の _PORTAL_INTENT_MAP に合わせて UNANSWERED のみ削除していたため、
+//   「気になる」→「保留」/「対象外」に変更しても CandidateJobResponse の INTERESTED 行が残り、
+//   マイページ回答タスクの全量リストやブックマークのフラグ表示が実態とズレていた。
+//   仕分けで候補者の意向から外れた時点で回答レコードも消し、実態と一致させる。
+// IN_SELECTION / SELECTION_ENDED は CA駆動の選考進行状態であり、候補者の意向を否定するものでは
+//   ないため従来どおり同期対象外（undefined）のまま。
 export const PORTAL_INTENT_MAP: Record<string, "INTERESTED" | "WANT_TO_APPLY" | null | undefined> = {
   INTERESTED: "INTERESTED",
   APPLY: "WANT_TO_APPLY",
   UNANSWERED: null,
+  PENDING: null,
+  EXCLUDED: null,
 };
 
 export const EXCLUDED_ACTOR_VALUES = ["user", "ca"] as const;

@@ -471,8 +471,22 @@ function WeekMatrixTable({ weekly, rows }: { weekly: WeeklyResp | null; rows: Ro
           const totalUniq = r.uniq ? r.uniq(total.matrix) : null; // 2軸行の人数
           const totalTgt = hasTarget ? total.targets[r.targetKey!] : null; // 合計列の目標（月目標）
           const n = columns.length;
-          // 平均＝TOTAL実績÷列数（粒度で 5 or 6）。実績ベースの平均。
-          const avg = totalActual == null || n === 0 ? null : totalActual / n;
+          // 平均＝TOTAL実績÷列数（粒度で 7/5/6）。実績ベースの平均。
+          // 金額行（決定粗利/粗利単価）の平均は列数按分に意味がないため別ロジック：
+          //   - 決定粗利：Σ粗利 ÷ 決定件数（total.matrix.selection.acceptance）。0件は null（＝「—」）。
+          //     決定件数の定義は SQL 側（revenue > 0 の acceptance 期間内候補者ユニーク）と同じ。
+          //   - 粗利単価：合計欄と同じ値になり列の平均として無意味なので null 固定。
+          const isRevenueRow = r.targetKey === "revenue";
+          const isUnitPriceRow = r.targetKey === "unitPrice";
+          let avg: number | null;
+          if (isUnitPriceRow) {
+            avg = null;
+          } else if (isRevenueRow) {
+            const acCount = total.matrix.selection.acceptance;
+            avg = totalActual != null && acCount > 0 ? totalActual / acCount : null;
+          } else {
+            avg = totalActual == null || n === 0 ? null : totalActual / n;
+          }
           // 帯色（提案/エントリーの人数行のみ）。合計行は上罫線＋太字。
           const rowBg = r.band === "orange" ? "bg-[#FFF4E6]" : r.band ? "bg-[#EFF6FF]" : "bg-white";
           const totalCls = r.isTotal ? "border-t-2 border-[#9CA3AF] font-semibold" : "";

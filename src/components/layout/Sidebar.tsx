@@ -129,7 +129,6 @@ function FinanceNavItem() {
 }
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
-  const materialCreatorUrl = process.env.NEXT_PUBLIC_MATERIAL_CREATOR_URL || "";
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
     || "https://web-production-95808.up.railway.app";
   const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
@@ -139,13 +138,6 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     || "https://bizstudio-job-platform.vercel.app/jobs";
 
   const apps: AppItem[] = [
-    {
-      href: materialCreatorUrl,
-      label: "資料生成",
-      icon: "📝",
-      requiresAuth: true,
-      appId: "material_creator",
-    },
     {
       href: jobAnalyzerUrl,
       label: "求人出力",
@@ -179,6 +171,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "/documents", label: "資料一覧", icon: "📄" },
     { href: "/manuals", label: "マニュアル", icon: "📖" },
     { href: "/rpa-error/chat", label: "RPAエラー管理", icon: "🤖" },
+    { href: "/training", label: "研修", icon: "📚" },
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
 
@@ -201,6 +194,8 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
         <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
           アプリ
         </div>
+        {/* portal 内の画面なので AppNavItem（外部リンク・↗）ではなく NavItem で出す */}
+        <NavItem href="/transfers" label="ファイル送信" icon="🔐" />
         {apps.map((it) => (
           <AppNavItem key={it.href} {...it} />
         ))}

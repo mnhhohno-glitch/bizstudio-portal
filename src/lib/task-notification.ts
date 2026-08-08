@@ -279,3 +279,209 @@ export async function notifyTaskComment(params: TaskCommentParams): Promise<void
 
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
 }
+
+type AiTaskCreatedParams = {
+  taskId: string;
+  title: string;
+  categoryLabel: string;
+  candidateName: string;
+  assigneeName: string | null;
+  assigneeLineworksId: string | null;
+  dueDate: Date | null;
+  /** カード上で「タスクを作成」を押した CA。 */
+  actorName: string;
+  /**
+   * T-151: 起票の経路（例: "AIアドバイザーの会話" / "面談ログの解析"）。
+   * 見出しは経路非依存にし、経路はこの1行で伝える。未指定なら経路行を出さない。
+   */
+  originLabel?: string;
+};
+
+/**
+ * T-150: AI が検出した約束から起票されたタスクの作成通知。
+ * T-151 で面談ログ経路が加わったため、見出しは経路非依存にし、経路は originLabel の1行で伝える。
+ *
+ * 既存 notifyTaskCreated を使わず専用関数にしている理由:
+ *  - notifyTaskCreated 側の担当者引き当ては「ユーザー名の文字列一致」（tasks/route.ts の
+ *    where: { name: { in: assigneeNames } }）で、同名ユーザーがいると誤爆する。
+ *    T-150 は担当CAが確定しているので employee.user.lineworksId を直接受け取る。
+ *  - 「作成者」が AI なのか操作CAなのか曖昧になるため、文面を専用に書く。
+ * 先例: mypage-response-sync.ts の notifyMypageResponse（自動生成タスク専用の通知）。
+ *
+ * メンション不可時は notifyTaskCreated と同じ3段フォールバックを踏襲する
+ * （実測で active 9名中2名が lineworksId 未設定）。
+ */
+export async function notifyAiTaskCreated(params: AiTaskCreatedParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return;
+  }
+
+  const dueDateStr = params.dueDate
+    ? new Date(params.dueDate).toLocaleDateString("ja-JP", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+    : "未設定";
+
+  const baseLines = [
+    "🤖 AIが検出した約束からタスクが作成されました",
+    "",
+    ...(params.originLabel ? ["■ 検出元", params.originLabel, ""] : []),
+    "■ タスク",
+    params.title,
+    "",
+    "■ 種別",
+    params.categoryLabel,
+    "",
+    "■ 求職者",
+    `${params.candidateName} 様`,
+    "",
+    "■ 担当者",
+    params.assigneeName ?? "未設定",
+    "",
+    "■ 期限",
+    dueDateStr,
+    "",
+    "■ 作成操作",
+    `${params.actorName}（確認のうえ作成）`,
+    "",
+    "🔗 詳細はこちら",
+    `${baseUrl}/tasks/${params.taskId}`,
+  ];
+
+  const header = "AIが検出した約束から新しいタスクが作成されました";
+
+  // 1) lineworksId があればメンション付き
+  if (params.assigneeLineworksId) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [`<m userId="${params.assigneeLineworksId}">`, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return;
+    } catch (e) {
+      console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名があれば名前プレフィックス付きでメンションなし
+  if (params.assigneeName) {
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${params.assigneeName}さん ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}
+
+export type DueReminderItem = {
+  taskId: string;
+  title: string;
+  candidateName: string | null;
+  /** "YYYY-MM-DD"（JST 暦日） */
+  dueDate: string;
+  /** 0 以下 = 期日当日 / 1 以上 = 超過日数 */
+  overdueDays: number;
+  assignee: string | null;
+};
+
+type AiTaskDueReminderParams = {
+  jstToday: string;
+  items: DueReminderItem[];
+  /** 上限で本文から畳んだ件数。 */
+  truncated: number;
+  assigneeNames: string[];
+  assigneeLineworksIds: string[];
+};
+
+/** "2026-08-07" → "2026/08/07"（既存通知の toLocaleDateString("ja-JP") 表記に合わせる） */
+function ymdSlash(ymd: string): string {
+  return ymd.replace(/-/g, "/");
+}
+
+/**
+ * T-150: AI起票タスクの期日リマインド。期日当日の朝と、期日超過中の毎朝に送る。
+ *
+ * - 期日当日と超過を見出しで分け、超過は「N日超過」を各行に出す。
+ * - 複数件あっても1通にまとめる（1件ごとに飛ばすと通知過多で無視される）。
+ * - メンション不可時は既存 notifyTaskCreated と同じ3段フォールバック
+ *   （実測で active 9名中2名が lineworksId 未設定）。
+ */
+export async function notifyAiTaskDueReminder(params: AiTaskDueReminderParams): Promise<void> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL;
+
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return;
+  }
+  if (params.items.length === 0) return;
+
+  const line = (i: DueReminderItem) => {
+    const who = i.candidateName ? `${i.candidateName} 様` : "求職者なし";
+    const assignee = i.assignee ? ` / 担当 ${i.assignee}` : "";
+    const over = i.overdueDays > 0 ? ` ・${i.overdueDays}日超過` : "";
+    return `・${i.title}（${who}${assignee} / 期日 ${ymdSlash(i.dueDate)}${over}）`;
+  };
+
+  const todayItems = params.items.filter((i) => i.overdueDays <= 0);
+  const overdueItems = params.items.filter((i) => i.overdueDays > 0);
+
+  const baseLines: string[] = [
+    "⏰ 期日のタスクがあります（AI起票分）",
+    "",
+  ];
+  if (todayItems.length > 0) {
+    baseLines.push(`■ 本日が期日（${todayItems.length}件）`, ...todayItems.map(line), "");
+  }
+  if (overdueItems.length > 0) {
+    baseLines.push(`■ 期日超過（${overdueItems.length}件）`, ...overdueItems.map(line), "");
+  }
+  if (params.truncated > 0) {
+    baseLines.push(`…ほか ${params.truncated} 件（多いため省略）`, "");
+  }
+  baseLines.push("🔗 タスク一覧", `${baseUrl}/tasks`);
+
+  const header = "期日のタスクがあります";
+
+  // 1) lineworksId があるユーザーだけメンション
+  const mentionLines = params.assigneeLineworksIds.filter(Boolean).map((id) => `<m userId="${id}">`);
+  if (mentionLines.length > 0) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [...mentionLines, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return;
+    } catch (e) {
+      console.warn("期日リマインドのメンションに失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名があれば名前プレフィックス付き
+  if (params.assigneeNames.length > 0) {
+    const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${namePrefix} ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}

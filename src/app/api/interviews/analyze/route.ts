@@ -244,6 +244,10 @@ export async function POST(request: NextRequest) {
           maxOutputTokens: 16384,
           temperature: 0.1,
           ...(useSchema && { responseSchema }),
+          log: {
+            endpoint: "interview-analyze",
+            meta: { pass: "main", attempt, useSchema, hasPdf: pdfText.length > 0 },
+          },
         });
         const parsed = parseJsonResponse<unknown>(raw);
         const normalized = normalizeCommonAnalysis(parsed);
@@ -269,6 +273,7 @@ export async function POST(request: NextRequest) {
                 userPrompt: userPrompt + secondPassSuffix,
                 responseMimeType: "application/json",
                 maxOutputTokens: 16384,
+                log: { endpoint: "interview-analyze", meta: { pass: "2nd-resignation" } },
               });
               const parsed2 = parseJsonResponse<unknown>(raw2);
               const second = normalizeCommonAnalysis(parsed2);
@@ -299,6 +304,7 @@ export async function POST(request: NextRequest) {
                 userPrompt: userPrompt + workHistoryPassSuffix,
                 responseMimeType: "application/json",
                 maxOutputTokens: 16384,
+                log: { endpoint: "interview-analyze", meta: { pass: "2nd-work-history" } },
               });
               const parsedWh = parseJsonResponse<unknown>(rawWh);
               const normWh = normalizeCommonAnalysis(parsedWh);

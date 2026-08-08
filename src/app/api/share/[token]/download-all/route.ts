@@ -5,8 +5,13 @@ import jwt from "jsonwebtoken";
 import archiver from "archiver";
 import { PassThrough } from "stream";
 
-const SHARE_SECRET =
-  process.env.PORTAL_SSO_SECRET || "bizstudio-sso-shared-secret-key";
+// T-147 ついで対応: フォールバック文字列を削除（既知文字列でJWTを偽造できてしまうため）。
+// PORTAL_SSO_SECRET 未設定は fail-closed（本番・staging とも設定済みを確認済み）。
+function getShareSecret(): string {
+  const secret = process.env.PORTAL_SSO_SECRET;
+  if (!secret) throw new Error("PORTAL_SSO_SECRET is not set");
+  return secret;
+}
 
 export async function GET(
   req: NextRequest,
@@ -21,7 +26,7 @@ export async function GET(
 
   let fileIds: string[];
   try {
-    const payload = jwt.verify(accessToken, SHARE_SECRET) as {
+    const payload = jwt.verify(accessToken, getShareSecret()) as {
       shareToken: string;
       fileIds: string;
     };

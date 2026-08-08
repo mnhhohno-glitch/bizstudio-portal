@@ -85,6 +85,9 @@ export async function POST(
   const category = formData.get("category") as string | null;
   const memo = formData.get("memo") as string | null;
   const folderIdRaw = formData.get("folderId") as string | null;
+  // T-152: 面談画面の専用アップロード欄からのみ渡される任意パラメータ。
+  // 渡された場合のみ「この面談のログ」として紐付ける。既存の添付タブ経由は従来どおり null。
+  const interviewIdRaw = formData.get("interviewId") as string | null;
 
   if (!file || !category) {
     return withCors(NextResponse.json({ error: "ファイルとカテゴリは必須です" }, { status: 400 }), origin);
@@ -122,6 +125,20 @@ export async function POST(
     folderId = folder.id;
   }
 
+  // T-152: interviewId が渡された場合は「この求職者の実在する面談」であることを検証する。
+  // 他求職者の面談IDを紐付ける事故を防ぐため candidateId 一致も条件に含める。
+  let interviewId: string | null = null;
+  if (interviewIdRaw && interviewIdRaw.trim()) {
+    const interview = await prisma.interviewRecord.findFirst({
+      where: { id: interviewIdRaw.trim(), candidateId },
+      select: { id: true },
+    });
+    if (!interview) {
+      return withCors(NextResponse.json({ error: "指定された面談が見つかりません" }, { status: 400 }), origin);
+    }
+    interviewId = interview.id;
+  }
+
   try {
     const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
     if (!parentFolderId) {
@@ -153,6 +170,7 @@ export async function POST(
         driveViewUrl: webViewLink,
         driveFolderId: candidateFolderId,
         memo: memo?.trim() || null,
+        interviewId,
         uploadedByUserId: userId,
       },
       include: { uploadedBy: { select: { id: true, name: true } } },

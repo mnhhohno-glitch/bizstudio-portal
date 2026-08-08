@@ -14,7 +14,10 @@ export default async function AnnouncementDetailPage({ params }: Props) {
 
   const announcement = await prisma.announcement.findUnique({
     where: { id, status: "PUBLISHED" },
-    include: { author: { select: { name: true } } },
+    include: {
+      author: { select: { name: true } },
+      attachments: { orderBy: { sortOrder: "asc" } },
+    },
   });
 
   if (!announcement) {
@@ -107,6 +110,56 @@ export default async function AnnouncementDetailPage({ params }: Props) {
             {announcement.content}
           </ReactMarkdown>
         </div>
+
+        {/* T-156: 添付資料。0件のお知らせではセクションごと非表示。
+            閲覧はセッション認証付き view API 経由のみ（Drive の URL は使わない） */}
+        {announcement.attachments.length > 0 && (
+          <>
+            <hr className="my-6 border-[#E5E7EB]" />
+            <div>
+              <h2 className="text-[16px] font-semibold text-[#374151] mb-3">📎 添付資料</h2>
+
+              {/* 1件目はページ内にインライン表示（高さはマニュアル詳細と同じ） */}
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-[14px] text-[#374151] truncate">
+                  📄 {announcement.attachments[0].fileName}
+                </p>
+                <a
+                  href={`/api/announcements/${announcement.id}/attachments/${announcement.attachments[0].id}/view`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-[14px] text-[#2563EB] hover:underline"
+                >
+                  別タブで開く ↗
+                </a>
+              </div>
+              <iframe
+                src={`/api/announcements/${announcement.id}/attachments/${announcement.attachments[0].id}/view`}
+                className="w-full border border-[#E5E7EB] rounded-[8px]"
+                style={{ height: "calc(100vh - 300px)" }}
+                title={announcement.attachments[0].fileName}
+              />
+
+              {/* 2件目以降はファイル名リスト（クリックで別タブ表示） */}
+              {announcement.attachments.length > 1 && (
+                <ul className="mt-4 space-y-2">
+                  {announcement.attachments.slice(1).map((attachment) => (
+                    <li key={attachment.id}>
+                      <a
+                        href={`/api/announcements/${announcement.id}/attachments/${attachment.id}/view`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 text-[14px] text-[#2563EB] hover:underline"
+                      >
+                        📄 {attachment.fileName}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -7,10 +7,18 @@ import {
   parseDocWithAI,
   parseTextFile,
 } from "@/lib/file-parser";
-import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
+import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
+// T-150: 検出指示（TASK_DETECTION_PROMPT）は lib 側に置き、route と検証スクリプトで
+// 同じ実文言を参照する（route ファイルは Next.js の制約で任意の定数を export できないため）。
+import {
+  extractSuggestedTasks,
+  pendingKindsFromMessages,
+  dropAlreadyPendingKinds,
+  TASK_DETECTION_PROMPT,
+} from "@/lib/advisor/suggested-tasks";
 
 const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
@@ -80,6 +88,7 @@ const ADVISOR_PERSONA_PROMPT = `# Role & Persona
 
 `;
 
+
 const CANDIDATE_DATA_HEADER = `
 
 ---
@@ -103,36 +112,9 @@ const OPUS_KEYWORDS = [
   /求人.{0,10}評価/, /求人.{0,10}分析/,
 ];
 
-// スキルプロンプト（フルスキル版）が必要な場合のキーワード
-const SKILL_KEYWORDS = [
-  /タイプ診断/, /志向性/, /6タイプ/,
-  /検索戦略/, /検索軸/, /求人.{0,10}検索/,
-  /マッチング/, /マッチ度/, /ABCD/,
-  /Will[\s-]*Can[\s-]*Must/i,
-  /逆転質問/,
-  /求人.{0,10}分析/, /求人.{0,10}評価/,
-  /フレームワーク/,
-  /タイプ.{0,5}更新/, /評価.{0,5}アップデート/,
-];
-
-function needsSkillPrompt(message: string, hasFile: boolean): boolean {
-  if (hasFile) return true;
-  return SKILL_KEYWORDS.some((p) => p.test(message));
-}
-
-const LIGHT_SYSTEM_PROMPT = `あなたはビズスタジオのキャリアアドバイザーAIアシスタントです。
-転職エージェントとして求職者の支援を行っています。
-
-以下の情報を踏まえてアドバイスしてください:
-- 求職者の経歴、希望条件、面談内容に基づいた具体的なアドバイス
-- 面接対策、書類添削、年収交渉などの転職支援全般
-- 業界・職種の知識を活かした的確な回答
-
-タイプ診断、検索戦略の策定、求人のマッチング評価など、専門的なフレームワークが必要な場合は「タイプ診断して」「検索戦略を考えて」等と指示してください。
-
-回答は簡潔に、求職者名を使って親しみやすく対応してください。
-
-`;
+// LIGHTモード（needsSkillPrompt / SKILL_KEYWORDS / LIGHT_SYSTEM_PROMPT によるキーワード分岐）は
+// 2026-07-17 に廃止。キーワード非マッチ時にスキルが完全脱落し、実績値・憧れ枠等の
+// スキル固有知識を答えられない構造問題があったため、常時フル版スキル注入に統一した。
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function selectModel(message: string, hasFile: boolean): string {
@@ -192,17 +174,19 @@ export async function POST(
   if (file?.base64) {
     try {
       const mt = file.mimeType || "";
+      // T-135: 添付OCRの費用を候補者・呼び出し元つきで帳簿へ（記録は file-parser 内で実施）
+      const logMeta = { candidateId, caller: "advisor-chat-attachment" };
       if (mt === "application/pdf") {
-        fileContext = await parsePdfWithAI(file.base64);
+        fileContext = await parsePdfWithAI(file.base64, logMeta);
       } else if (mt.startsWith("image/")) {
-        fileContext = await parseImageWithAI(file.base64, mt);
+        fileContext = await parseImageWithAI(file.base64, mt, logMeta);
       } else if (mt === "text/plain" || mt === "text/csv") {
         const fullText = parseTextFile(file.base64);
         fileContext = fullText.length > MAX_TEXT_FILE_CHARS
           ? fullText.substring(0, MAX_TEXT_FILE_CHARS) + `\n\n...（以下省略、全${fullText.length}文字）`
           : fullText;
       } else if (mt.includes("word") || mt.includes("document") || mt.includes("excel") || mt.includes("spreadsheet") || mt.includes("powerpoint") || mt.includes("presentation")) {
-        fileContext = await parseDocWithAI(file.base64, mt);
+        fileContext = await parseDocWithAI(file.base64, mt, logMeta);
       }
     } catch (e) {
       console.error("File parse error:", e);
@@ -286,30 +270,51 @@ export async function POST(
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
-  const useSkill = needsSkillPrompt(content || "", !!file);
-  console.log(`[Advisor] Skill mode: ${useSkill ? "FULL" : "LIGHT"}`);
-  // キャッシュ最適化: FULL時は固定(PERSONA+skill)を独立ブロック化し cache_control 付与、
+  // LIGHTモード廃止: 常にフル版スキルを注入する。
+  // 旧実装はキーワード分岐（needsSkillPrompt）でFULL/LIGHTを切り替えていたが、キーワードに
+  // マッチしない質問（実績値・憧れ枠等のスキル固有知識を問うもの）でスキルが完全脱落する
+  // 構造問題があったため常時FULLに統一（2026-07-17 将幸さん決定）。
+  // キャッシュ最適化: 固定(PERSONA+skill)を独立ブロック化し cache_control 付与、
   // 可変(候補者context)を別ブロックに分離（候補者横断で skill がキャッシュ読みになる）。
-  // LIGHT時は system が小さくキャッシュ最小長未満のため単一ブロックのまま。
-  // テキスト内容は不変（連結を分割するだけ）。
-  const systemBlocks = useSkill
-    ? [
-        {
-          type: "text" as const,
-          text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkill(),
-          cache_control: { type: "ephemeral" as const },
-        },
-        {
-          type: "text" as const,
-          text: CANDIDATE_DATA_HEADER + context,
-        },
-      ]
-    : [
-        {
-          type: "text" as const,
-          text: LIGHT_SYSTEM_PROMPT + context,
-        },
-      ];
+  const systemBlocks = [
+    {
+      type: "text" as const,
+      text: ADVISOR_PERSONA_PROMPT + getJobMatchingSkillFull() + TASK_DETECTION_PROMPT,
+      cache_control: { type: "ephemeral" as const },
+    },
+    {
+      type: "text" as const,
+      text: CANDIDATE_DATA_HEADER + context,
+    },
+  ];
+
+  // T-150: 検出根拠を「今回CAが打鍵した分」だけに構造で限定する。
+  // pastMessages の最終要素は今回のユーザー発言そのもの（L204-206 で保存 → L209-213 で取り直すため）。
+  // 別枠で追加すると同じ発言が2回 API に乗る（費用増＋検出の不安定化）ので、最終要素を差し替える。
+  // content（CA打鍵分）と fileContext（添付解析結果）は別変数のまま存在するため、
+  // 添付ファイルの中身が <ca_input> に入る経路自体が存在しなくなる（プロンプトの指示に頼らない分離）。
+  const apiMessages = pastMessages.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
+
+  const lastIdx = apiMessages.length - 1;
+  if (lastIdx >= 0 && apiMessages[lastIdx].role === "user") {
+    const attachedFileName = file?.name || "添付ファイル";
+    // 添付のみ送信時、UI（AdvisorFloatingPanel）は content に "添付ファイル: <name>" という
+    // 合成文字列を入れる（＝CAは何も打鍵していない）。これを打鍵分として渡すと、
+    // ファイル名の文言で誤検出しうるため ca_input を空にする。
+    const typed = (content ?? "").trim();
+    const isSyntheticAttachmentLabel = !!file && typed === `添付ファイル: ${file?.name ?? ""}`;
+    const caInput = isSyntheticAttachmentLabel ? "" : typed;
+
+    apiMessages[lastIdx] = {
+      role: "user",
+      content:
+        `<ca_input>\n${caInput}\n</ca_input>\n` +
+        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : ""),
+    };
+  }
 
   const usedModel = selectModel(content || "", !!file);
 
@@ -329,10 +334,7 @@ export async function POST(
         max_tokens: 4000,
         temperature: 0.7,
         system: systemBlocks,
-        messages: pastMessages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
+        messages: apiMessages,
       }),
       signal: controller.signal,
     });
@@ -359,21 +361,52 @@ export async function POST(
     const data = await response.json();
     const u = data.usage ?? {};
     console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
-    // T-126: usage を永続化。FULL/LIGHT はスキルモードで判別（note）。
+    // T-126: usage を永続化。LIGHTモード廃止後は常に skill-full。
     await recordAdvisorUsage({
       endpoint: "advisor-chat",
       model: usedModel,
       usage: u,
       candidateId,
-      note: useSkill ? "skill-full" : "skill-light",
+      note: "skill-full",
     });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""
       ? rawContent
       : "応答の生成に失敗しました。もう一度お試しください。";
 
+    // T-150: 応答本文に併記されたタスク候補 JSON を剥がし、期日を JST で確定させる。
+    // 失敗しても候補なしとして続行する（チャット応答は必ず成立させる＝fail-open）。
+    // DB に保存するのは必ず cleanContent 側（生保存すると画面に JSON が出るうえ、
+    // 次ターンの messages に乗って AI が自分の過去 JSON を模倣する）。
+    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(aiContent);
+
+    // 同一セッションで未処理の候補が既にある種別は落とす。
+    // 検出根拠を今回の <ca_input> に限定しても、AI は履歴に残る過去ターンの約束を拾って
+    // 毎ターン同じ候補を出す（staging 実測）。カードが毎ターン再出現するのを決定的に抑止する。
+    // allMessages（L209-212 で取得済み）は今回より前の全メッセージを全カラム含むので追加クエリ不要。
+    const pendingKinds = pendingKindsFromMessages(allMessages);
+    const suggestedTasks = dropAlreadyPendingKinds(detectedTasks, pendingKinds);
+    if (detectedTasks.length > suggestedTasks.length) {
+      console.log(
+        `[advisor-chat] suggestedTasks suppressed (already pending in session): ` +
+          detectedTasks.filter((t) => !suggestedTasks.includes(t)).map((t) => t.kind).join(","),
+      );
+    }
+    if (suggestedTasks.length > 0) {
+      console.log(
+        `[advisor-chat] suggestedTasks detected candidateId=${candidateId} ` +
+          suggestedTasks.map((t) => `${t.kind}(${t.due}→${t.dueDate})`).join(" "),
+      );
+    }
+
     const saved = await prisma.advisorChatMessage.create({
-      data: { sessionId, role: "assistant", content: aiContent },
+      data: {
+        sessionId,
+        role: "assistant",
+        content: cleanContent,
+        // 候補0件のときは null のままにする（空配列を入れない）。
+        suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
+      },
     });
 
     await prisma.advisorChatSession.update({
@@ -385,12 +418,14 @@ export async function POST(
     // 診断の判定は content ヒューリスティック（検索条件（推奨）/職種キーワード）。
     // fire-and-forget（await しない）。失敗はログのみで、チャット応答・診断体験に一切影響させない。
     // ※ portal は Railway の常駐 Node のためレスポンス返却後も継続実行される（Vercel lambda と異なる）。
-    if (isDiagnosisContent(aiContent)) {
+    // T-150: 渡すのは候補 JSON を剥がした後の本文。判定キーワード（検索条件（推奨）/職種キーワード）に
+    // JSON はマッチしないため判定結果は変わらないが、Gemini 抽出の入力にノイズを乗せない。
+    if (isDiagnosisContent(cleanContent)) {
       void runDiagnosisExtraction({
         candidateId,
         sessionId,
         messageId: saved.id,
-        diagnosisText: aiContent,
+        diagnosisText: cleanContent,
       }).catch((e) => console.error("[advisor-chat] diagnosis extraction failed:", e));
     }
 

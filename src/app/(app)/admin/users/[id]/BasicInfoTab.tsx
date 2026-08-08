@@ -1,18 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import type { EmployeeBasic } from "./detail-types";
-import { calcAge, calcTenure, patchEmployeeSection } from "./detail-types";
+import { calcAge, calcTenure } from "./detail-types";
 import {
   FormField,
   TextInput,
   DateInput,
   SelectInput,
   ReadOnlyField,
-  SaveBar,
   BlockTitle,
   ResumeAiButton,
+  useSectionAutoSave,
+  AutoSaveIndicator,
+  RelationSelect,
+  AddressLookupButton,
 } from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
@@ -31,6 +33,10 @@ const BASIC_AI_KEYS = [
 ] as const;
 
 // T-096 タブ1: 基本情報（ヘッダー全項目の編集＋住所・電話・緊急連絡先）
+// T-096 追補（自動保存化）:
+//  - 保存ボタン・キャンセルボタンを撤去し、テキスト/日付は onBlur、セレクトは onChange で即保存する。
+//  - 郵便番号→住所の自動反映は廃止し、隣に「住所表示」ボタンを新設した（誤上書き防止）。
+//  - 緊急連絡先の続柄は選択式に変更（RelationSelect）。
 
 export default function BasicInfoTab({
   employee,
@@ -41,7 +47,6 @@ export default function BasicInfoTab({
   todayJst: string;
   aiFillData?: Record<string, unknown> | null;
 }) {
-  const router = useRouter();
   const initial = {
     employeeNumber: employee.employeeNumber,
     name: employee.name,
@@ -59,11 +64,10 @@ export default function BasicInfoTab({
     emergencyContactPhone: employee.emergencyContactPhone ?? "",
   };
   const [form, setForm] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // T-097: 郵便番号で複数住所候補が返った場合の選択肢（1件は自動入力するため空のまま）
+  // 「住所表示」ボタン結果の候補（複数件時の選択肢）。ボタンでしか設定されないため onFocus/onChange 上書きは起きない。
   const [postalCandidates, setPostalCandidates] = useState<string[]>([]);
+
+  const autoSave = useSectionAutoSave(employee.id, "basic", initial);
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）
   const ai = useResumeAiFill(employee.id, setForm, BASIC_AI_KEYS);
@@ -72,76 +76,47 @@ export default function BasicInfoTab({
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
-    setSaved(false);
   };
 
-  // T-097: 郵便番号→住所 自動補完。1件は自動入力、複数件は候補ドロップダウン、0件は何もしない。
-  const lookupPostal = async (raw: string) => {
-    const code = raw.replace(/\D/g, "");
-    if (code.length < 7) return;
-    try {
-      const res = await fetch(`/api/masters/postal-code/${code}`);
-      if (!res.ok) return;
-      const j = await res.json();
-      const matches: string[] = (j?.matches ?? []).map(
-        (m: { address: string }) => m.address,
-      );
-      if (matches.length === 1) {
-        setForm((f) => ({ ...f, address: matches[0] }));
-        setPostalCandidates([]);
-        setSaved(false);
-      } else if (matches.length > 1) {
-        setPostalCandidates(matches);
-      } else {
-        setPostalCandidates([]);
-      }
-    } catch {
+  // テキスト・日付・数値・textarea 用: onBlur で自動保存する closure。
+  const blurSave = (field: keyof typeof form) => () =>
+    autoSave.save(field as string, form[field]);
+
+  // セレクト用: onChange で form 反映＋即保存。
+  const selectSave = (field: keyof typeof form) => (v: string) => {
+    setForm((f) => ({ ...f, [field]: v }));
+    autoSave.save(field as string, v);
+  };
+
+  // 住所表示ボタンの結果ハンドラ。1件=即上書き（保存）、複数件=候補ドロップダウンで選択、0件=何もしない。
+  const handlePostalResolved = (r: { address?: string; candidates?: string[]; message?: string }) => {
+    if (r.address) {
+      setForm((f) => ({ ...f, address: r.address! }));
+      setPostalCandidates([]);
+      autoSave.save("address", r.address);
+    } else if (r.candidates && r.candidates.length > 0) {
+      setPostalCandidates(r.candidates);
+    } else {
       setPostalCandidates([]);
     }
-  };
-
-  const onPostalChange = (v: string) => {
-    set("postalCode")(v);
-    if (v.replace(/\D/g, "").length === 7) lookupPostal(v);
   };
 
   const selectPostalCandidate = (addr: string) => {
     setForm((f) => ({ ...f, address: addr }));
     setPostalCandidates([]);
-    setSaved(false);
+    autoSave.save("address", addr);
   };
 
   // 入力中のリアルタイム計算（保存前でも確認できる）
   const age = calcAge(form.birthday || null, todayJst);
   const tenure = calcTenure(form.hireDate || null, form.resignDate || null, todayJst);
 
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await patchEmployeeSection(employee.id, "basic", form);
-      setSaved(true);
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setForm(initial);
-    setSaved(false);
-    setError(null);
-    router.refresh();
-  };
-
   return (
     <div className="px-5 py-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <BlockTitle>基本情報</BlockTitle>
         <div className="flex items-center gap-3">
+          <AutoSaveIndicator status={autoSave.status} error={autoSave.error} />
           {dropFill.filledCount != null && (
             <span className="text-[11px] text-green-600">{filledMessage(dropFill.filledCount)}</span>
           )}
@@ -150,21 +125,21 @@ export default function BasicInfoTab({
       </div>
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="社員番号">
-          <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} />
+          <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} onBlur={blurSave("employeeNumber")} />
         </FormField>
         <FormField label="氏名">
-          <TextInput value={form.name} onChange={set("name")} />
+          <TextInput value={form.name} onChange={set("name")} onBlur={blurSave("name")} />
         </FormField>
         <FormField label="フリガナ">
-          <TextInput value={form.furigana} onChange={set("furigana")} placeholder="例: ビズスタ タロウ" />
+          <TextInput value={form.furigana} onChange={set("furigana")} onBlur={blurSave("furigana")} placeholder="例: ビズスタ タロウ" />
         </FormField>
         <FormField label={`生年月日${age != null ? `（${age}歳）` : ""}`}>
-          <DateInput value={form.birthday} onChange={set("birthday")} />
+          <DateInput value={form.birthday} onChange={set("birthday")} onBlur={blurSave("birthday")} />
         </FormField>
         <FormField label="性別">
           <SelectInput
             value={form.gender}
-            onChange={set("gender")}
+            onChange={selectSave("gender")}
             options={[
               { value: "", label: "未設定" },
               { value: "男", label: "男" },
@@ -175,7 +150,7 @@ export default function BasicInfoTab({
         <FormField label="在籍状態">
           <SelectInput
             value={form.status}
-            onChange={set("status")}
+            onChange={selectSave("status")}
             options={[
               { value: "active", label: "在籍" },
               { value: "disabled", label: "退社" },
@@ -183,10 +158,10 @@ export default function BasicInfoTab({
           />
         </FormField>
         <FormField label="入社日">
-          <DateInput value={form.hireDate} onChange={set("hireDate")} />
+          <DateInput value={form.hireDate} onChange={set("hireDate")} onBlur={blurSave("hireDate")} />
         </FormField>
         <FormField label="退社日">
-          <DateInput value={form.resignDate} onChange={set("resignDate")} />
+          <DateInput value={form.resignDate} onChange={set("resignDate")} onBlur={blurSave("resignDate")} />
         </FormField>
         <FormField label="在籍年数（自動）">
           <ReadOnlyField>{tenure ?? "—"}</ReadOnlyField>
@@ -199,16 +174,20 @@ export default function BasicInfoTab({
           <FormField label="郵便番号">
             <TextInput
               value={form.postalCode}
-              onChange={onPostalChange}
-              onBlur={() => lookupPostal(form.postalCode)}
+              onChange={set("postalCode")}
+              onBlur={blurSave("postalCode")}
               placeholder="例: 1000001"
             />
           </FormField>
-          {/* 郵便番号を独立した行に置くためのスペーサ */}
-          <div className="col-span-3" aria-hidden />
+          <div>
+            <label className="block text-[10px] text-gray-400 mb-1">&nbsp;</label>
+            <AddressLookupButton postalCode={form.postalCode} onResolved={handlePostalResolved} />
+          </div>
+          {/* 郵便番号＋ボタンを独立行に置くためのスペーサ */}
+          <div className="col-span-2" aria-hidden />
           <div className="col-span-3">
             <FormField label="住所">
-              <TextInput value={form.address} onChange={set("address")} />
+              <TextInput value={form.address} onChange={set("address")} onBlur={blurSave("address")} />
             </FormField>
             {postalCandidates.length > 1 && (
               <div className="mt-1 rounded-md border border-gray-200 bg-white shadow-sm">
@@ -229,7 +208,7 @@ export default function BasicInfoTab({
             )}
           </div>
           <FormField label="電話番号">
-            <TextInput value={form.phone} onChange={set("phone")} />
+            <TextInput value={form.phone} onChange={set("phone")} onBlur={blurSave("phone")} />
           </FormField>
         </div>
       </div>
@@ -238,18 +217,16 @@ export default function BasicInfoTab({
         <BlockTitle>緊急連絡先</BlockTitle>
         <div className="grid grid-cols-4 gap-x-6 gap-y-3">
           <FormField label="氏名">
-            <TextInput value={form.emergencyContactName} onChange={set("emergencyContactName")} />
+            <TextInput value={form.emergencyContactName} onChange={set("emergencyContactName")} onBlur={blurSave("emergencyContactName")} />
           </FormField>
           <FormField label="続柄">
-            <TextInput value={form.emergencyContactRelation} onChange={set("emergencyContactRelation")} />
+            <RelationSelect value={form.emergencyContactRelation} onChange={selectSave("emergencyContactRelation")} />
           </FormField>
           <FormField label="電話番号">
-            <TextInput value={form.emergencyContactPhone} onChange={set("emergencyContactPhone")} />
+            <TextInput value={form.emergencyContactPhone} onChange={set("emergencyContactPhone")} onBlur={blurSave("emergencyContactPhone")} />
           </FormField>
         </div>
       </div>
-
-      <SaveBar saving={saving} error={error} saved={saved} onSave={handleSave} onCancel={handleCancel} />
     </div>
   );
 }

@@ -22,7 +22,9 @@ export type AdvisorEndpoint =
   | "greeting"
   | "daily-report-assist"
   | "daily-report-chat"
-  | "diagnosis-extract"; // T-132: 診断散文→希望条件の構造化抽出（Gemini）
+  | "diagnosis-extract" // T-132: 診断散文→希望条件の構造化抽出（Gemini）
+  | "interview-task-detect" // T-151: 面談ログからのタスク約束検出（Anthropic）
+  | "advisor-log-ingest"; // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
 
 type TokenBreakdown = {
   inputTokens: number;

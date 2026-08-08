@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { GOOGLE_FORM_CATEGORY_GROUPS } from "@/constants/google-form-categories";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -208,8 +208,20 @@ export default function GoogleFormCreatorModal({
 
   // 改修③（途中保存）: 開いた時に見つかった下書き（復元プロンプト用）と保存状態。
   const [draftPrompt, setDraftPrompt] = useState<{ questionsJson: unknown; updatedAt: string | null } | null>(null);
-  const [draftSaving, setDraftSaving] = useState(false);
-  const [draftSavedNotice, setDraftSavedNotice] = useState<string | null>(null);
+  // 自動保存の3状態表示（保存中 / 保存しました / 保存に失敗しました）。
+  // 手動の「途中保存」ボタンからも同じ saveDraftNow を呼ぶので、この state に集約する。
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  // 「フォーム作成」押下時の確認ダイアログの表示制御。
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
+  // 「この内容で再生成」を最後に実行したときの指示テキスト（trim 済）。
+  // 現在の regenerateInstruction と比較して、未反映の指示があるかを確認ダイアログで判定する。
+  const [lastAppliedInstruction, setLastAppliedInstruction] = useState<string>("");
+  // 自動保存のレースコンディション対策トークン。古いレスポンスで状態を上書きしない。
+  const saveTokenRef = useRef(0);
+  // 800ms デバウンスタイマーの参照。フォーム作成前フラッシュでキャンセルする。
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 確認ダイアログの「キャンセル」に初期フォーカスを当てるための参照。
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   const pdfCandidates = useMemo(
     () =>
@@ -335,8 +347,13 @@ export default function GoogleFormCreatorModal({
     setRegenerateInstruction("");
     setRegenerateNotice(null);
     setDraftPrompt(null);
-    setDraftSaving(false);
-    setDraftSavedNotice(null);
+    setAutoSaveStatus("idle");
+    setShowCreateConfirm(false);
+    setLastAppliedInstruction("");
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
   };
 
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
@@ -578,13 +595,33 @@ export default function GoogleFormCreatorModal({
     setStep("confirmQuestions");
   };
 
-  // T-035 step2: 確認画面「フォーム作成」。保持中の questionsJson でフォーム化（create_form_v2）。
-  const handleConfirmCreate = async () => {
+  // T-035 step2: 確認画面「フォーム作成」ボタン。いきなり作成せず確認ダイアログを1枚挟む。
+  // 実際の作成処理は doCreate。
+  const handleConfirmCreate = () => {
     if (!questionsJson) return;
+    setShowCreateConfirm(true);
+  };
+
+  // 確認ダイアログの「フォームを作成する」を押したときの本体処理。
+  // 1) デバウンス待ちの未保存分をフラッシュ → 保存できなければ作成中止。
+  // 2) create_form_v2 を実行。
+  const doCreate = async () => {
+    setShowCreateConfirm(false);
+    if (!questionsJson) return;
+
     setStep("processing");
     setErrorMessage(null);
     setStageStatus((s) => ({ ...s, create: "pending" }));
     setFormResult(null);
+
+    // フォーム作成前フラッシュ: create_form_v2 はローカル state を送るが、
+    // 「保存 → 作成の順序を保証」するため下書きも先に確定させる。
+    const flushed = await flushPendingDraft();
+    if (!flushed) {
+      setStep("confirmQuestions");
+      toast.error("編集内容の保存に失敗したため、フォーム作成を中止しました。保存状態を確認して再度お試しください。");
+      return;
+    }
 
     const e3 = await runCreate(questionsJson);
     if (!e3) {
@@ -595,28 +632,90 @@ export default function GoogleFormCreatorModal({
     toast.success("Google フォーム作成完了");
   };
 
-  // 改修③（途中保存）: 現在の questionsJson を下書きとして保存（PUT upsert）。
+  // 確認ダイアログを開いた瞬間に「キャンセル」へフォーカスを移す（Enter 誤爆で作成されないように）。
+  useEffect(() => {
+    if (showCreateConfirm) {
+      // 描画後に focus を当てるため次フレームで実行。
+      queueMicrotask(() => cancelButtonRef.current?.focus());
+    }
+  }, [showCreateConfirm]);
+
+  // 現在のテキストエリア値と、最後に「この内容で再生成」を押したときの指示テキストが
+  // 一致しない、かつ現在の値が空でない場合、指示が未反映のまま残っていると判定。
+  const hasStaleInstruction =
+    regenerateInstruction.trim() !== "" &&
+    regenerateInstruction.trim() !== lastAppliedInstruction;
+
+  // 自動保存の中核。PUT /draft を1回実行し、失敗したら1回だけ自動リトライ。
+  // saveTokenRef で古いレスポンスによる state 上書きを防ぐ（レースコンディション対策）。
+  // 呼び出し元: 自動保存 effect / 「途中保存」ボタン / フォーム作成前フラッシュ。
+  const saveDraftNow = useCallback(
+    async (payload: unknown): Promise<boolean> => {
+      const token = ++saveTokenRef.current;
+      setAutoSaveStatus("saving");
+      const doPut = async () => {
+        const res = await fetch(`/api/candidates/${candidateId}/google-form/draft`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ questionsJson: payload }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err?.error || `保存に失敗しました (HTTP ${res.status})`);
+        }
+      };
+      try {
+        await doPut();
+        if (saveTokenRef.current === token) setAutoSaveStatus("saved");
+        return true;
+      } catch {
+        try {
+          await doPut();
+          if (saveTokenRef.current === token) setAutoSaveStatus("saved");
+          return true;
+        } catch {
+          if (saveTokenRef.current === token) setAutoSaveStatus("failed");
+          return false;
+        }
+      }
+    },
+    [candidateId],
+  );
+
+  // 自動保存: confirmQuestions 中に questionsJson が変わったら 800ms デバウンスで保存する。
+  // - 削除（handleDeleteChecked）/ 再生成（handleRegenerate*）で questionsJson が変わるたびに再スケジュール。
+  // - null / step 不一致では走らない。
+  // - unmount / 依存変更でタイマーは常にクリーンアップ。
+  useEffect(() => {
+    if (step !== "confirmQuestions") return;
+    if (!questionsJson) return;
+    const timer = setTimeout(() => {
+      void saveDraftNow(questionsJson);
+    }, 800);
+    debounceTimerRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (debounceTimerRef.current === timer) debounceTimerRef.current = null;
+    };
+  }, [questionsJson, step, saveDraftNow]);
+
+  // フォーム作成前フラッシュ: デバウンス待ちをキャンセルして、直近の questionsJson を確定保存する。
+  // 「フォーム作成」を押した瞬間に呼ぶ。保存失敗時は false を返し、呼び出し元がフォーム作成を中止する。
+  const flushPendingDraft = async (): Promise<boolean> => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (!questionsJson) return true;
+    return await saveDraftNow(questionsJson);
+  };
+
+  // 手動「途中保存」ボタン。saveDraftNow に集約（自動保存と同じ状態表示に統一）。
   const handleSaveDraft = async () => {
     if (!questionsJson) return;
-    setDraftSaving(true);
-    setDraftSavedNotice(null);
-    try {
-      const res = await fetch(`/api/candidates/${candidateId}/google-form/draft`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionsJson }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error || `途中保存に失敗しました (HTTP ${res.status})`);
-      }
-      setDraftSavedNotice("保存しました");
-      toast.success("途中保存しました");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDraftSaving(false);
-    }
+    const ok = await saveDraftNow(questionsJson);
+    if (ok) toast.success("途中保存しました");
+    else toast.error("途中保存に失敗しました");
   };
 
   // 改修③（途中保存）: 下書きを復元 → 生成をスキップして確認画面へ。
@@ -626,7 +725,8 @@ export default function GoogleFormCreatorModal({
     setCheckedTargets({});
     setRegenerateInstruction("");
     setRegenerateNotice(null);
-    setDraftSavedNotice(null);
+    setLastAppliedInstruction("");
+    setAutoSaveStatus("idle");
     setDraftPrompt(null);
     setStep("confirmQuestions");
   };
@@ -660,6 +760,8 @@ export default function GoogleFormCreatorModal({
     setCheckedTargets({});
     setRegenerateInstruction("");
     setRegenerateNotice(null);
+    // 「最初から作り直し」は指示テキスト不要のため、未反映指示の追跡もクリア。
+    setLastAppliedInstruction("");
   };
 
   // T-035 step2: 確認画面の部分再生成。チェックした item ＋指示で regenerate_questions を呼ぶ。
@@ -711,6 +813,8 @@ export default function GoogleFormCreatorModal({
       setQuestionsJson(data.questionsJson);
       setCheckedTargets({});
       setRegenerateInstruction("");
+      // 適用した指示を記録（確認ダイアログの未反映警告判定に使う）。
+      setLastAppliedInstruction(instruction);
       const regenCount = Array.isArray(data.regenerated) ? data.regenerated.length : data.regenerated ? 1 : 0;
       if (regenCount === 0) setRegenerateNotice("変更されませんでした。");
       setStageStatus((s) => ({ ...s, generate: "done" }));
@@ -816,6 +920,7 @@ export default function GoogleFormCreatorModal({
   if (!isOpen) return null;
 
   return (
+    <>
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
       {...overlayClose}
@@ -1372,13 +1477,14 @@ export default function GoogleFormCreatorModal({
                 >
                   閉じる
                 </button>
-                {/* 改修③（途中保存）: 現在の質問内容を下書き保存。 */}
+                {/* 改修③（途中保存）: 現在の質問内容を下書き保存。
+                    自動保存も動いているため必須ではないが、明示的な確定操作として残す。 */}
                 <button
                   onClick={handleSaveDraft}
-                  disabled={isRegenerating || draftSaving || totalItems === 0}
+                  disabled={isRegenerating || autoSaveStatus === "saving" || totalItems === 0}
                   className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2.5 text-[13px] font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {draftSaving ? "保存中..." : "途中保存"}
+                  {autoSaveStatus === "saving" ? "保存中..." : "途中保存"}
                 </button>
                 <button
                   onClick={handleRegenerate}
@@ -1395,8 +1501,26 @@ export default function GoogleFormCreatorModal({
                   フォーム作成
                 </button>
               </div>
-              {draftSavedNotice && (
-                <div className="mt-1 text-right text-[12px] text-green-600">{draftSavedNotice}</div>
+              {/* 自動保存の3状態表示。「保存に失敗しました」には手動リトライ導線を付ける。 */}
+              {autoSaveStatus !== "idle" && (
+                <div className="mt-1 text-right text-[12px]">
+                  {autoSaveStatus === "saving" && <span className="text-gray-500">保存中…</span>}
+                  {autoSaveStatus === "saved" && <span className="text-green-600">保存しました</span>}
+                  {autoSaveStatus === "failed" && (
+                    <>
+                      <span className="text-red-600">保存に失敗しました </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (questionsJson) void saveDraftNow(questionsJson);
+                        }}
+                        className="underline text-red-600"
+                      >
+                        再試行
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               </div>
             </div>
@@ -1556,5 +1680,50 @@ export default function GoogleFormCreatorModal({
         )}
       </div>
     </div>
+
+    {/* 「フォーム作成」押下時の確認ダイアログ。
+        - モーダル本体(z-50)より上のレイヤ(z-60)に置くことで、ダイアログ backdrop クリックでは
+          本体モーダルの overlayClose が発火しないようにする。
+        - 未反映の再生成指示がある場合は本文の先頭に警告行を出す（ブロックはしない）。 */}
+    {showCreateConfirm && (
+      <div
+        className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center"
+        onClick={() => setShowCreateConfirm(false)}
+      >
+        <div
+          className="bg-white rounded-xl w-full max-w-md mx-4 p-6 shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 className="text-[15px] font-bold text-[#374151] mb-4">フォームを作成します</h3>
+          <div className="text-[13px] text-gray-700 space-y-2 mb-5">
+            {hasStaleInstruction && (
+              <p className="rounded-md bg-orange-50 border border-orange-200 px-3 py-2 text-[13px] text-orange-800">
+                ⚠ 再生成の指示が入力されたままです。「この内容で再生成」を押していない可能性があります。
+              </p>
+            )}
+            <p>質問の再生成はすべて完了していますか？</p>
+            <p>この内容でフォームを作成してよろしいでしょうか？</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              ref={cancelButtonRef}
+              type="button"
+              onClick={() => setShowCreateConfirm(false)}
+              className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              onClick={doCreate}
+              className="flex-1 bg-[#16A34A] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#15803D]"
+            >
+              フォームを作成する
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

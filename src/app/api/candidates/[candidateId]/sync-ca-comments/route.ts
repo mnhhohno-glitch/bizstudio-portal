@@ -2,16 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
+import { toMatchLabel } from "@/lib/ai-rating";
 
-function toMatchLabel(rating: string | null): string {
-  switch (rating) {
-    case "A": return "◎ 非常にマッチ";
-    case "B": return "○ マッチ";
-    case "C":
-    case "D": return "△ チャレンジ求人";
-    default: return "";
-  }
-}
+// T-146 P2-2: 3ファイルに同一コピーがあったため @/lib/ai-rating に集約（B+ 対応）
 
 export async function POST(
   _req: NextRequest,

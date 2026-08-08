@@ -17,12 +17,19 @@ function getAuth() {
 
 /**
  * Google Drive にファイルをアップロード（汎用）
+ *
+ * makePublic=true（デフォルト）: 従来どおり「リンクを知る全員が閲覧可（anyone reader）」を付与する。
+ *   既存の呼び出し側（マニュアル・求職者ファイル等）は引数省略でこの挙動のまま。
+ * makePublic=false: 公開権限を一切付与しない（T-156 お知らせ添付用）。
+ *   閲覧はサービスアカウント経由の downloadFileFromDrive でのみ可能になるため、
+ *   返り値の webViewLink をエンドユーザーに配ってはならない。
  */
 export async function uploadFileToDrive(
   fileName: string,
   fileBuffer: Buffer,
   folderId?: string,
-  mimeType: string = "application/pdf"
+  mimeType: string = "application/pdf",
+  makePublic: boolean = true
 ): Promise<{ fileId: string; webViewLink: string }> {
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
@@ -46,6 +53,15 @@ export async function uploadFileToDrive(
   });
 
   const fileId = response.data.id!;
+
+  if (!makePublic) {
+    return {
+      fileId,
+      webViewLink:
+        response.data.webViewLink ||
+        `https://drive.google.com/file/d/${fileId}/view`,
+    };
+  }
 
   await drive.permissions.create({
     fileId,

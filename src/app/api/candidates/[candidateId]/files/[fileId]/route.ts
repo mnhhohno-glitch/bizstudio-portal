@@ -5,6 +5,7 @@ import { hashToken } from "@/lib/encryption";
 import { deletePdfFromDrive, downloadFileFromDrive } from "@/lib/google-drive";
 import { getCorsHeaders, handleCorsOptions, withCors } from "@/lib/cors";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
+import { RATING_VALUE, toMatchLabel } from "@/lib/ai-rating";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
@@ -95,15 +96,7 @@ export async function GET(
   return withCors(NextResponse.json({ file }), origin);
 }
 
-function toMatchLabel(rating: string | null): string {
-  switch (rating) {
-    case "A": return "◎ 非常にマッチ";
-    case "B": return "○ マッチ";
-    case "C":
-    case "D": return "△ チャレンジ求人";
-    default: return "";
-  }
-}
+// T-146 P2-2: 3ファイルに同一コピーがあったため @/lib/ai-rating に集約（B+ 対応）
 
 export async function PATCH(
   req: NextRequest,
@@ -157,8 +150,8 @@ export async function PATCH(
   }
 
   // 1. DB保存（テキストから "■ 総合: X" を抽出して aiMatchRating も同期）
-  const ratingMatch = aiAnalysisComment.match(/■\s*総合[：:]\s*([ABCD])/)
-                   || aiAnalysisComment.match(/総合[：:]\s*([ABCD])/);
+  const ratingMatch = aiAnalysisComment.match(new RegExp(`■\\s*総合[：:]\\s*(${RATING_VALUE})`))
+                   || aiAnalysisComment.match(new RegExp(`総合[：:]\\s*(${RATING_VALUE})`));
   const updateData: { aiAnalysisComment: string; aiMatchRating?: string } = { aiAnalysisComment };
   if (ratingMatch) {
     updateData.aiMatchRating = ratingMatch[1];

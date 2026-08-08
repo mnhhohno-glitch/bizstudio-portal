@@ -55,6 +55,18 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
   context += `- 担当CA: ${candidate.employee?.name || "未設定"}\n`;
   context += `- 登録日: ${candidate.createdAt.toISOString().slice(0, 10)}\n\n`;
 
+  // T-155: 面談ログの累積ダイジェスト。
+  // ★messages route はコンテキストを末尾から 20,000 字で切り詰めるため、確実に届くよう
+  //   基本情報の直後（前方）に置く。可変ブロック側なので prompt キャッシュ（罠#39）への影響は無い。
+  const hasLogDigest = !!candidate.advisorLogDigest?.trim();
+  if (hasLogDigest) {
+    const digestDate = candidate.advisorLogDigestUpdatedAt
+      ? candidate.advisorLogDigestUpdatedAt.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })
+      : "";
+    context += `## 面談内容の要約（取り込み済みの面談ログより${digestDate ? `・${digestDate}更新` : ""}）\n`;
+    context += `${candidate.advisorLogDigest!.trim()}\n\n`;
+  }
+
   // 転職軸ワークシート
   const ws1 = guideData.worksheet_q1;
   const ws2 = guideData.worksheet_q2;
@@ -110,11 +122,18 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
   }
 
   // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDF/テキストのみ、最大4件）
+  // T-155: ダイジェストがある場合、MEETING の txt は本文読み込みを止める（ダイジェストと二重に
+  //   入れる意味がなく、最新4件の枠と 8,000字/20,000字の予算を圧迫するだけのため）。
+  //   ダイジェストが無い求職者では従来どおり本文を読む（既存の挙動を壊さない）。
+  //   ORIGINAL / BS_DOCUMENT（履歴書PDF等）と MEETING の PDF は従来どおり読む。
   const keyFiles = await prisma.candidateFile.findMany({
     where: {
       candidateId,
       category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
       mimeType: { in: ["application/pdf", "text/plain"] },
+      ...(hasLogDigest
+        ? { NOT: { category: "MEETING", mimeType: "text/plain" } }
+        : {}),
     },
     orderBy: { createdAt: "desc" },
     take: 4,
@@ -134,7 +153,13 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
             ? raw.substring(0, MEETING_TEXT_MAX_CHARS) + "\n...(以下省略)"
             : raw;
         } else {
-          parsedText = await parsePdfWithAI(base64);
+          // T-135: この OCR は候補者1名あたり最大4ファイル分走る。費用の帰属先を追えるよう
+          // candidateId と呼び出し元を記録する（アドバイザー系の隠れ Gemini コストの主因）。
+          parsedText = await parsePdfWithAI(base64, {
+            candidateId,
+            caller: "advisor-context",
+            category: file.category,
+          });
         }
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;

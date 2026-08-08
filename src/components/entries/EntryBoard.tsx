@@ -90,6 +90,11 @@ export type Entry = {
   jobDbCost?: number | null;
   // T-120: タスク作成（エントリー対応依頼）で依頼対象になった日時。バッジ「タスク依頼中」表示に使用。
   taskRequestedAt?: string | null;
+  // T-140: 応募経路。"site-apply" = ブックマークからサイト経由レコードを直接エントリー登録した行。
+  route?: string | null;
+  // T-140: サイト経由エントリーで企業名クリック→自社求人サイト詳細を開くための job-platform 側 source_job_id。
+  //   通常の求人紹介経由エントリーでは null（企業名クリックは originalUrl=kyuujin PDF プレビュー）。
+  externalJobRef?: string | null;
 };
 
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）

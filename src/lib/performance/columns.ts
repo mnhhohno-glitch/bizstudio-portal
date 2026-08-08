@@ -1,5 +1,5 @@
 // T-071 実績表マトリクスの列生成（粒度 day/week/month）。
-// - day  ：起算日から 5 日（各列 1 日）
+// - day  ：起算日から 7 日連続（各列 1 日、土日祝も含む。UI ラベル「週」に対応）
 // - week ：起算日から 5 週（W1=起算日〜最初の日曜、W2-5=月〜日。splitIntoFiveWeeks）
 // - month：起算月から 6 ヶ月（各列 1 暦月）
 // すべて JST。各列 from=0:00 JST、to=末の 23:59:59.999 JST（罠 #17）。
@@ -61,7 +61,9 @@ export function buildColumns(granularity: Granularity, anchorDate: string): Matr
 
   if (granularity === "day") {
     const cols: MatrixColumn[] = [];
-    for (let i = 0; i < 5; i++) {
+    // UI「週」表示は起算日から 7 日連続（土日祝を含む）。土日祝の実績も表示から漏らさない設計。
+    // 目標は営業日にのみ按分（route 側で isBusinessDay 判定）、土日祝列は null（「—」表示）。
+    for (let i = 0; i < 7; i++) {
       const ds = addDays(anchorDate, i);
       cols.push({
         index: i,

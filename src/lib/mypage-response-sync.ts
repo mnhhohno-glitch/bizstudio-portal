@@ -6,6 +6,8 @@
 import { prisma } from "@/lib/prisma";
 import { sendBotMessage } from "@/lib/lineworks";
 
+// 旧: タスクの重複排除窓。現在はタスク集約が未着手タスクの有無で決まるため、
+// 「既存タスク更新時に LINE 通知を再送するまでのクールダウン」として使う。
 export const DEDUP_WINDOW_MINUTES = 10;
 
 // candidate-response webhook と同一の取得形。呼び出し側はこの select で Candidate を取る。
@@ -71,10 +73,41 @@ export async function applyJobResponseIntent(
 }
 
 /**
- * マイページ回答タスクの自動生成/更新（10分dedup・担当CA宛・LINE WORKS タスクBot通知）。
- * candidate-response webhook から移動（挙動不変）。
+ * JST の「当日 0:00」を絶対時刻として返す（タスク期限用）。
+ * 罠#17: `toISOString().slice(0,10)` は Railway（UTC）で JST 深夜に前日へズレるため使わない。
  */
-export async function createOrUpdateResponseTask(candidate: CandidateWithCA) {
+function todayJstDueDate(): Date {
+  // sv-SE ロケールは "YYYY-MM-DD" 形式を返す
+  const ymd = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  return new Date(`${ymd}T00:00:00+09:00`);
+}
+
+/**
+ * マイページ回答タスクの自動生成/更新（未着手タスクへの集約・担当CA宛・LINE WORKS タスクBot通知）。
+ *
+ * 集約方式（旧: 10分dedup窓）:
+ * - 同一求職者の未着手（NOT_STARTED）【マイページ回答】タスクが残っている限り新規作成せず、
+ *   その1枚を「現時点の全量」で上書きする。IN_PROGRESS は CA が着手中の内容を書き換えないため
+ *   集約対象にせず新規作成する。COMPLETED も同様（片付け済み＝新しい回答は新しいタスク）。
+ * - 本文は常に CandidateJobResponse の全量から組み立てる。旧実装は時間窓
+ *   （updatedAt >= existingTask.createdAt）の差分を全置換していたため、更新のたびに
+ *   前回本文の求人が消える欠落バグがあった。
+ * - 検索〜作成/更新は pg_advisory_xact_lock（求職者単位）で直列化する。旧実装は
+ *   findFirst→create の read-then-write レースで 1ms 差の二重作成が実際に発生していた。
+ * - 更新時も LINE 通知を送る。ただし直前の更新から10分以内の再更新は通知のみスキップ
+ *   （タスク本文の更新自体は必ず行う）。
+ * - 求人ラベルが1件も解決できない（kyuujinPDF 応答不能）場合、更新はスキップして既存本文を
+ *   温存する。「求人ID: 12345」だけの本文で会社名入りの既存本文を潰さないため。
+ *   新規作成時は本文が無いよりましなのでフォールバックラベルのまま作成する。
+ *
+ * @param options.refreshOnly 既存の未着手タスクがある場合のみ本文を追従させ、無ければ何もしない。
+ *   回答の「取り消し（保留・対象外・未回答へ変更）」時に使う。取り消しを契機に新しいタスクを
+ *   生やしてしまわないため。
+ */
+export async function createOrUpdateResponseTask(
+  candidate: CandidateWithCA,
+  options?: { refreshOnly?: boolean }
+) {
   if (!candidate.employee?.userId || !candidate.employee.user) {
     console.warn(
       `求職者 ${candidate.name} に担当CAが設定されていないため、タスク生成をスキップ`
@@ -84,60 +117,128 @@ export async function createOrUpdateResponseTask(candidate: CandidateWithCA) {
 
   const employee = candidate.employee;
   const user = employee.user!;
-  const dedupCutoff = new Date(Date.now() - DEDUP_WINDOW_MINUTES * 60 * 1000);
   const titlePrefix = `【マイページ回答】${candidate.name}`;
 
-  const existingTask = await prisma.task.findFirst({
-    where: {
-      candidateId: candidate.id,
-      title: { startsWith: titlePrefix },
-      createdAt: { gte: dedupCutoff },
-      status: { not: "COMPLETED" },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  const recentResponses = await prisma.candidateJobResponse.findMany({
-    where: {
-      candidateId: candidate.id,
-      response: { in: ["WANT_TO_APPLY", "INTERESTED"] },
-      updatedAt: { gte: existingTask?.createdAt ?? dedupCutoff },
-    },
-    orderBy: { respondedAt: "desc" },
-  });
-
-  if (recentResponses.length === 0) return;
-
+  // 外部fetch（kyuujinPDF）はトランザクションの外で済ませる（advisory lock の保持時間を最小化）。
   const jobMap = await fetchJobMap(candidate.candidateNumber);
-  const { title, description } = buildTaskContent(
-    candidate.name,
-    recentResponses,
-    jobMap
+
+  type TxResult =
+    | { action: "created"; taskId: string; title: string }
+    | { action: "updated"; taskId: string; title: string; notify: boolean }
+    | { action: "skipped"; reason: string }
+    | null;
+
+  const result: TxResult = await prisma.$transaction(
+    async (tx) => {
+      // 同一求職者の並行処理を直列化（二重作成レースの根治）。トランザクション終了で自動解放。
+      // $queryRaw ではなく $executeRaw を使う: pg_advisory_xact_lock の戻り値は void で、
+      // $queryRaw だと Prisma が「型 void の列をデシリアライズできない」(P2010) で落ちる。
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${candidate.id})::bigint)`;
+
+      const existingTask = await tx.task.findFirst({
+        where: {
+          candidateId: candidate.id,
+          title: { startsWith: titlePrefix },
+          status: "NOT_STARTED",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // 全量（差分窓なし）。取り消し済み・未回答は CandidateJobResponse に存在しないので自然に除外される。
+      const responses = await tx.candidateJobResponse.findMany({
+        where: {
+          candidateId: candidate.id,
+          response: { in: ["WANT_TO_APPLY", "INTERESTED"] },
+        },
+        orderBy: { respondedAt: "desc" },
+      });
+
+      // 有効な回答が0件かつ既存タスクも無い → 作るものが無い。
+      if (responses.length === 0 && !existingTask) return null;
+      // 取り消し契機（refreshOnly）で既存タスクが無ければ、新しいタスクは生やさない。
+      if (options?.refreshOnly && !existingTask) return null;
+
+      const { title, description } = buildTaskContent(
+        candidate.name,
+        responses,
+        jobMap
+      );
+
+      if (existingTask) {
+        // ラベルが1件も解決できていない＝kyuujinPDF 応答不能とみなし、既存本文を温存する。
+        const anyResolved = responses.some((r) => jobMap.has(r.externalJobId));
+        if (responses.length > 0 && !anyResolved) {
+          return { action: "skipped", reason: "job-label-unresolved" };
+        }
+
+        // 通知のクールダウン判定は更新前の updatedAt で行う（更新すると now になるため）。
+        const sincePrevUpdate = Date.now() - existingTask.updatedAt.getTime();
+        const withinCooldown =
+          sincePrevUpdate < DEDUP_WINDOW_MINUTES * 60 * 1000;
+
+        await tx.task.update({
+          where: { id: existingTask.id },
+          data: { title, description, dueDate: todayJstDueDate() },
+        });
+
+        return {
+          action: "updated",
+          taskId: existingTask.id,
+          title,
+          // 通知しないケース: 全量0件（全部取り下げ／保留）／取り消し契機の追従更新。
+          // どちらも「回答が増えた」わけではないのでCAを呼ぶ必要がない。
+          notify:
+            !withinCooldown && responses.length > 0 && !options?.refreshOnly,
+        };
+      }
+
+      const task = await tx.task.create({
+        data: {
+          title,
+          description,
+          candidateId: candidate.id,
+          status: "NOT_STARTED",
+          priority: "MEDIUM",
+          dueDate: new Date(),
+          createdByUserId: user.id,
+          completionType: "any",
+          assignees: {
+            create: [{ employeeId: employee.id }],
+          },
+        },
+      });
+
+      return { action: "created", taskId: task.id, title };
+    },
+    { maxWait: 10000, timeout: 20000 }
   );
 
-  if (existingTask) {
-    await prisma.task.update({
-      where: { id: existingTask.id },
-      data: { title, description },
-    });
-  } else {
-    const task = await prisma.task.create({
-      data: {
-        title,
-        description,
-        candidateId: candidate.id,
-        status: "NOT_STARTED",
-        priority: "MEDIUM",
-        dueDate: new Date(),
-        createdByUserId: user.id,
-        completionType: "any",
-        assignees: {
-          create: [{ employeeId: employee.id }],
-        },
-      },
-    });
+  if (!result) return;
 
-    await notifyMypageResponse(task.id, title, candidate.name, employee, user);
+  if (result.action === "skipped") {
+    console.warn(
+      `[createOrUpdateResponseTask] 求人ラベル解決不能のため既存タスクの更新をスキップ（${candidate.name}）: ${result.reason}`
+    );
+    return;
+  }
+
+  // 通知はトランザクション外（外部API・失敗してもタスクは残す）。
+  // 集約後は「作成/更新した」と「通知した/しなかった」が一致しないため、両方をログに残す
+  // （通知は送信成功時に外形ログが出ないため、運用時の追跡はこの行が頼りになる）。
+  const notify = result.action === "created" || result.notify;
+  console.info(
+    `[createOrUpdateResponseTask] ${result.action} task=${result.taskId} candidate=${candidate.name} notify=${notify}`
+  );
+
+  if (notify) {
+    await notifyMypageResponse(
+      result.taskId,
+      result.title,
+      candidate.name,
+      employee,
+      user,
+      result.action === "created" ? "created" : "updated"
+    );
   }
 }
 
@@ -196,11 +297,24 @@ async function fetchJobMap(
   return map;
 }
 
+// 本文は「差分の追記」ではなく「現時点の全量」。呼び出し側が毎回これで全置換する。
 function buildTaskContent(
   candidateName: string,
   responses: { externalJobId: number; response: string }[],
   jobMap: Map<number, string>
 ): { title: string; description: string } {
+  // 全量0件（すべて取り下げ・保留・対象外に変更された）→ 既存タスクの本文をこの形へ更新する。
+  if (responses.length === 0) {
+    return {
+      title: `【マイページ回答】${candidateName} - 回答なし`,
+      description: [
+        `${candidateName}様のマイページ回答状況（最新の全量）です。`,
+        "",
+        "（現在有効な回答はありません。すべて取り下げ・保留等に変更されました）",
+      ].join("\n"),
+    };
+  }
+
   const grouped: Record<string, string[]> = {};
   for (const r of responses) {
     if (!grouped[r.response]) grouped[r.response] = [];
@@ -219,7 +333,7 @@ function buildTaskContent(
   const title = `【マイページ回答】${candidateName} - ${titleParts.join("・")}`;
 
   const lines = [
-    `${candidateName}様がマイページで以下の求人に回答しました。`,
+    `${candidateName}様のマイページ回答状況（最新の全量）です。`,
     "",
   ];
   if (grouped.WANT_TO_APPLY) {
@@ -245,7 +359,9 @@ async function notifyMypageResponse(
   title: string,
   candidateName: string,
   employee: { name: string },
-  user: { lineworksId: string | null }
+  user: { lineworksId: string | null },
+  // "created" = 新規作成 / "updated" = 既存の未着手タスクへ集約（回答が追加・変更された）
+  mode: "created" | "updated" = "created"
 ) {
   try {
     const botId = process.env.LINEWORKS_TASK_BOT_ID;
@@ -254,8 +370,13 @@ async function notifyMypageResponse(
 
     if (!botId || !channelId) return;
 
+    const headline =
+      mode === "updated"
+        ? "マイページ回答タスクが更新されました（回答が追加・変更されました）"
+        : "マイページ回答タスクが自動生成されました";
+
     const lines = [
-      "📋 マイページ回答タスクが自動生成されました",
+      `📋 ${headline}`,
       "",
       "■ タイトル",
       title,
@@ -276,7 +397,7 @@ async function notifyMypageResponse(
     if (user.lineworksId) {
       const mentionedLines = [
         `<m userId="${user.lineworksId}">`,
-        " マイページ回答タスクが自動生成されました",
+        ` ${headline}`,
         "",
         ...lines.slice(2),
       ];

@@ -69,12 +69,19 @@ export async function POST(request: Request) {
   }
 
   // 取り消し: 該当（候補者×求人）の回答レコードを削除。無ければ no-op（冪等）。
-  // 正常系（値あり）と同一の複合キーで特定する。タスクの再生成はしない（追加専用のまま）。
+  // 正常系（値あり）と同一の複合キーで特定する。
+  // タスクは新規作成しないが、既存の未着手タスクがあれば本文を全量で追従させる（refreshOnly）。
+  // これをしないと取り消した求人が回答タスクの本文に残り続ける。
   if (isClear) {
     const before = await prisma.candidateJobResponse.count({
       where: { candidateId: candidate.id, externalJobId: jobId },
     });
     await applyJobResponseIntent(candidate.id, jobId, null);
+    try {
+      await createOrUpdateResponseTask(candidate, { refreshOnly: true });
+    } catch (e) {
+      console.error("マイページ回答タスクの追従更新に失敗:", e);
+    }
     return NextResponse.json({
       success: true,
       cleared: true,

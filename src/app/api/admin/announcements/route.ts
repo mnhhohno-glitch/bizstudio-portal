@@ -17,6 +17,11 @@ export async function GET() {
       author: {
         select: { name: true },
       },
+      // T-156: 編集モーダルの添付一覧用（既存フィールドは不変・加算のみ）
+      attachments: {
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, fileName: true, fileSize: true, createdAt: true },
+      },
     },
   });
 

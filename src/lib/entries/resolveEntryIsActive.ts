@@ -3,10 +3,12 @@ import { INACTIVE_TRIGGERS } from "@/lib/constants/entry-flag-rules";
 /**
  * エントリーの is_active のあるべき値を、現在のフラグ状態から双方向に判定する。
  *
- * 無効になるのは次の3条件のみ（運用ルール・2026-07 確定）:
+ * 無効になるのは次の4条件のみ（運用ルール・2026-07 確定）:
  *   1. personFlag が INACTIVE_TRIGGERS.personFlags に該当（本人へ通知済み）
  *   2. companyFlag が INACTIVE_TRIGGERS.companyFlags に該当（企業へ辞退報告済み）
  *   3. entryFlag が "求人紹介"（求人紹介段階は全件無効）
+ *   4. entryFlag が "エントリー" かつ personFlag が "辞退受付済"（エントリー段階は
+ *      企業対応が存在しないため、本人への辞退受付完了だけで無効化する）
  *
  * 上記以外はすべて有効。選考落ち・本人辞退・クローズ等の「結果」では無効化しない。
  * 本人／企業への連絡が完了して初めて無効になる。
@@ -35,6 +37,10 @@ export function resolveEntryIsActive(input: {
 
   // 2. 企業へ辞退報告済み
   if (input.companyFlag && INACTIVE_TRIGGERS.companyFlags.includes(input.companyFlag)) return false;
+
+  // 4. エントリー段階の本人辞退：企業対応（連絡フロー）が存在しない段階なので、
+  //    本人への辞退受付完了だけで無効化する。書類選考以降は従来どおり企業側「辞退報告済」を待つ。
+  if (input.entryFlag === "エントリー" && input.personFlag === "辞退受付済") return false;
 
   // entry-flag-rules.ts 側で entryFlagDetail のトリガーが定義されている場合のみ従う
   if (input.entryFlagDetail && INACTIVE_TRIGGERS.entryFlagDetails.includes(input.entryFlagDetail)) return false;

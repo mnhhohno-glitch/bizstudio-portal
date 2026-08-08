@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 function fmtSalary(v: number | null | undefined): string {
   if (v == null) return "";
@@ -163,6 +164,16 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await response.json();
+
+    // T-135: 費用記録（fire-and-forget）
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: "interview-organize",
+      model: "gemini-2.0-flash",
+      usage: data?.usageMetadata,
+      meta: { candidateNumber: candidate?.candidateNumber ?? null },
+    });
+
     const suggestions = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!suggestions) {

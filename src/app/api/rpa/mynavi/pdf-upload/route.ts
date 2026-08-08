@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
     let resumeData: GeminiResumeResult | null = null;
     let aiErrorDetail: string | null = null;
     try {
-      resumeData = await parseResumeWithGemini(pdfBuffer);
+      resumeData = await parseResumeWithGemini(pdfBuffer, { caller: "rpa-mynavi-pdf-upload" });
     } catch (e) {
       aiErrorDetail = e instanceof Error ? e.message : String(e);
       console.error("[rpa/mynavi/pdf-upload] Gemini error:", aiErrorDetail);

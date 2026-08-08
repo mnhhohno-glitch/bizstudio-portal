@@ -166,7 +166,7 @@ model InterviewMemo {
   - メッセージ＝当日サマリ（面談[初回/既存]・求人紹介BM数・エントリー・選定率[BM/D]・スケジュール消化・**コメント**[統合本文 `reportBody`]）＋**本番直リンク `?date=`**。直リンクは `PORTAL_PUBLIC_URL` or 本番ドメイン定数で固定（`PORTAL_BASE_URL` はサービス毎に staging/本番が異なるため使わない＝staging から送っても本番に飛ばす）。
 - **コメントは統合1本文＋確定制（T-069②後）**：`scheduleNote`/`metricsReflection`（①の2分割）→ **`reportBody`（統合・定型■1〜■6）** に集約（migration `20260608120000_t069_report_body_confirm`、`report_body TEXT` + `comment_confirmed_at TIMESTAMP` を nullable 追加・冪等）。**確定（`commentConfirmedAt`）でないと提出不可**。本文編集で未確定に戻す。入力UIは右アコーディオン＋中央ポップアップ＋自動保存が同一 `reportBody`（CA×日付1レコード）を更新。
 - **日報AIアシスト（T-069③）**：`POST /api/daily-report/assist`（**Claude `claude-sonnet-4-6`**・`src/lib/claude.ts`・`ANTHROPIC_API_KEY`。Gemini不使用）。**日報skill `src/skills/daily-report-advisor/SKILL.md`（`getDailyReportSkill`）＋ `job-matching-advisor` skill** を system 注入（cache_control: ephemeral）。当日集計（`computeWeeklyMatrix`＋`computeJobSearchDay`＋支援中ACTIVE数）を**数字として渡す＝AIに計算させない（捏造防止）**。役割＝**■1〜■6 構造保持の整理本文（rewrittenBody）＋上司視点アドバイス（advice）**。JSON `{message, rewrittenBody, advice}`。会話は `DailyReportChat` 保存。旧 `/api/daily-report/chat`（aiBody用ドロワー）は別ルート・不変。BM目安＝支援中(ACTIVE)求職者数×0.8〜1.2件/日・選定率80%・エントリー率70%（skill 内）。
-- **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、ABCD＝`aiMatchRating` 構成比、**選定率＝(A+B+C)÷合計BM**（D・未評価除外。D は「見る目」の指標として母数に含める）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
+- **求人検索の行動量・精度（日報グラフ）**：`computeJobSearchDay`（`/api/daily-report`）。BM数＝`CandidateFile(BOOKMARK).createdAt` 当日、出力数＝`lastExportedAt` 当日、評価内訳＝`aiMatchRating` 構成比（**T-146 以降 A/B+/B/C/D の5段階**・未評価含む）、**選定率＝出力数÷(BM数＋紹介保留数)＝`exportCount ÷ bmCount`**（T-092 で変更。`aiMatchRating` は参照しない＝D評価でも出力するため分子を評価で絞らない。※旧定義 `(A+B+C)÷合計BM` は廃止済み）。担当＝`uploadedByUserId`。⚠️ **紹介保留＝BOOKMARK に `archivedAt` が入っただけ（aiMatchRating は実値保持。D の約77%が保留へ移動）**。グラフ用は **`archivedAt` 条件を付けない（保留含む）**。`archivedAt=null` だと D を取りこぼし選定率が100%固定になる。既存 metrics.ts の `jobSearched/jobIntroduced`（`archivedAt=null`）とは別物・不変。
 
 ### 当月実績タブの属性集計（T-071②・円グラフ4種）
 - 母集団＝**当月の初回面談（`interview_count=1`・辞退系除外・担当軸 `candidate.employeeId`）**。4種とも母数＝初回面談数。
@@ -435,3 +435,209 @@ FileMaker「業務管理ファイル（社員管理）」を廃止しportalに�
 
 - **`taskRequestedAt != null` かつ `entryFlag === "エントリー"` の間だけ表示**。フラグが「書類選考」以降へ進めば条件が外れて自動的に消える（タブ移動のみがトリガ。タスク完了状態には非連動）。
 - 担当者2名化（佐藤 葵 + 見ル野 未来）と合わせた UI 詳細は `14-ui-component-map.md`「タスク作成ウィザード（/tasks/new）＋ エントリー『タスク依頼中』バッジ（T-120）」を参照。
+
+## T-139: 日程調整タスク外部API（GET取得 / PATCH更新, master, 2026-07-11）
+
+日程調整AIエージェント（外部RPA機）が非営業時間帯にポーリング（約30分に1回・低頻度）で、scout-scheduler 由来の「日程調整」タスクを読み取り／更新するための外部API 2本。レート制限なし。
+
+### 関連スキーマ要約（Phase 1 調査）
+
+- `Task`（`prisma/schema.prisma` L804-832）: `id` / `title` / `status TaskStatus @default(NOT_STARTED)`（enum: `NOT_STARTED`/`IN_PROGRESS`/`COMPLETED`・L78-82）/ `categoryId → TaskCategory` / `candidateId String?`（nullable）/ `createdByUserId String`（**必須**）/ `createdAt DateTime @default(now())`（Prisma DateTime = UTC instant 保存）。
+- `TaskCategory`（L749-766）: `name`。日程調整タスクは **`category.name === "日程調整"`** で識別（タイトル命名や専用カラムではなくカテゴリ名が正）。
+- `TaskTemplateField`（L769-787）: `label`（"希望日時"/"面談形式"/"備考" 等）。フィールドの「意味」はこの label。
+- `TaskFieldValue`（L866-876）: `taskId` / `fieldId → TaskTemplateField` / `value String @db.Text`（生テキスト。create-schedule-task は素の文字列で保存）。`@@unique([taskId, fieldId])`。
+- `TaskComment`（L898-910）: `userId String`（**必須**・User FK）/ `content`。作者 nullable 不可。
+- `TaskAssignee`（L835-846）: `taskId` / `employeeId → Employee`。担当は **Employee**（User ではない）。
+
+### 新設エンドポイント
+
+いずれも認証は **`x-api-secret` ヘッダ = 環境変数 `EXTERNAL_API_SECRET`**（create-schedule-task と同一）。不一致は 401。共有ロジックは `src/lib/schedule-tasks.ts`。
+
+**GET `/api/external/schedule-tasks`** — カテゴリ「日程調整」のタスク一覧（他カテゴリは絶対に返さない）。
+- クエリ: `status`（カンマ区切り複数可・許可外は400）/ `createdAfter` `createdBefore`（ISO・**TZ無しはJST(+09:00)解釈**）/ `limit`（既定100・最大500）。
+- ソート: `createdAt` 昇順。
+- レスポンス `{ tasks: [{ id, title, status, createdAt(JST +09:00), fields:{"希望日時","面談形式","備考"}(無い値はnull・生テキスト), assignees:[{id,name}], candidateId(無ければnull), hasExemptComment }] }`。
+- `hasExemptComment`（boolean）: そのタスクのコメントのいずれかに判定キーワードを含めば `true`。
+  判定キーワードは `SCHEDULE_EXEMPT_COMMENT_MARKER`（env / コード定数・既定 `自動対応対象外`）。
+  RPAは対象外判定時に受け口2へ `{"comment":"自動対応対象外：...理由..."}` を送る運用。
+  コメントは `【日程調整AI】` 接頭辞付きで保存されるが、判定は `content.includes(marker)` なので接頭辞の有無に依存しない。
+  RPAはこのフラグが `true` のタスクを再処理スキップする。
+
+**PATCH `/api/external/schedule-tasks/[taskId]`** — status 変更 / コメント追加（両方任意・少なくとも一方必須）。
+- 安全柵: 対象が「日程調整」でなければ **403**（一切更新しない）。存在しない taskId は **404**。
+- `status`: `NOT_STARTED`/`IN_PROGRESS`/`COMPLETED` のみ（許可外400）。
+- `comment`: TaskComment として追加。作者は `resolveSystemUserId()`（anonymous@local → admin）。本文先頭に **`【日程調整AI】`** を付与し人間がAI発と判別可能に。
+- 通知抑止: 内部ルート（`/api/tasks/[taskId]/status`・`/comments`）は LINE WORKS 通知（`notifyTaskCompleted`/`notifyTaskComment`）を発火させるが、**本APIは通知ヘルパーを一切呼ばない**（夜間ポーリングでの通知連発防止）。
+- レスポンス: 更新後タスク（GET と同一形状）。
+
+### JST/日付の扱い（罠#17）
+
+`createdAt` は UTC instant 保存。`createdAfter`/`createdBefore` の TZ無し入力は `${s}+09:00` として `new Date()` に解釈させ、Prisma の `gte`/`lte`（Date=UTC）へそのまま渡す。返却は `toJstIso()`（+9h した UTC 要素を `+09:00` 表記で組む）。`toISOString().slice()` 系の変換は不使用。
+
+### create-schedule-task の `candidateId` パラメータ（T-139 氏名正規化 step1, master, 2026-07-20）
+
+`POST /api/external/create-schedule-task` は任意の `candidateId`（portal の `Candidate.id`）を受け取り、**PDF由来の正式氏名でタスクタイトル氏名を上書き**する。背景: フォーム手入力の氏名は入力ミス（例「平塚美月 美月」の名の重複入力・異体字「山﨑/山崎」・読み仮名の括弧付与）が起こり、RPAのマイナビ検索を失敗させる。マイナビ応募PDFから Gemini が機械抽出した `Candidate.name`（`rpa/mynavi/pdf-upload` が保存）はマイナビ登録氏名と完全一致するため、こちらを正とする。
+
+- **氏名解決**: `candidateId` があり `Candidate` が実在すれば `Candidate.name`（trim済）を `effectiveName` としてタイトルの氏名部分に使う。タイトルの命名パターン（`【${source} 新規面談調整】新規応募者 ${氏名}` 等）は不変で、**氏名の値だけが変わる**。
+- **後方互換（絶対条件）**: `candidateId` 無し／`Candidate` 不在なら従来どおりフォームの `candidateName` を使う。無効な `candidateId` でも **400 にせず**安全側（従来動作）へフォールバック（エラーで弾くとフォーム送信全体が失敗し応募者に影響するため）。scout-scheduler が cid を送り始めるまでは常にフォーム氏名。
+- **Task 紐付け**: 実在が確認できた `candidateId` のみ `Task.candidateId` にセット（無効値は FK エラー回避のため `null`）。従来 NULL のままだった求職者紐付けがこの経路で通り、タスク→求職者の画面遷移が可能になる副産物。
+- **フォーム氏名の保全**: 氏名を差し替えた場合（`effectiveName !== candidateName`）、元のフォーム入力氏名を `備考`（TaskFieldValue）へ `フォーム入力氏名: ○○` として追記（既存 notes があれば `\n\n` 区切りで併記）。照合ミス疑い時に人が元値を確認できるようにするため。差し替えが無ければ備考は従来どおり。
+- 全体3段階（portal step1=本受け皿 → scout-scheduler が cid 転送 → RPA がフォームURLに cid 付与）の step1。実装: `src/app/api/external/create-schedule-task/route.ts`。
+
+## 日程調整AIエージェント（T-139 step4・最終確定版）
+
+RPA機（マイナビ操作・対象外判定・返信送信）と portal（枠取り・文面生成）の分業。
+**稼働時間帯の制御は RPA 側の責務**（portal に時間帯制限は無い）。
+
+> ⚠️ step3 で一時実装した「portal自走の夜間バッチ（`/api/internal/schedule-agent/run`）＋ 30分毎 cron」は**中止・削除済み**。
+> portal はタスクを**読み取るだけ**で、status 変更・コメント追加は **RPA が既存 PATCH で行う**。
+
+### 構成
+
+| 要素 | パス | 役割 |
+|--|--|--|
+| 判定受け口 | `POST /api/external/schedule-agent/resolve` | 本体。2モード・結果4区分 |
+| 定型パース | `src/lib/schedule-agent/parse-preferences.ts` | 「希望日時」正規表現・氏名抽出・面談形式→方法 |
+| LLM抽出 | `src/lib/schedule-agent/extract-message.ts` | モードB。**年は出力させない** |
+| 枠探索 | `src/lib/schedule-agent/match-slot.ts` | 空き判定＋多重仮予約の上限 |
+| 仮予約 | `src/lib/schedule-agent/reserve.ts` | 二重予約チェック＋登録 |
+| 文面 | `src/lib/schedule-agent/reply-templates.ts` | テンプレA〜D（一字一句固定） |
+| JST/env | `src/lib/schedule-agent/jst.ts` / `config.ts` | 日付ユーティリティ・env アクセサ |
+
+### resolve エンドポイント
+
+認証 `x-api-secret`（`EXTERNAL_API_SECRET`）。入力は **taskId の有無**で判別:
+
+- **モードA** `{ taskId }` … URL申し込み分。カテゴリ「日程調整」以外・存在しない → **404**（カテゴリ柵）。
+  「希望日時」を**正規表現で定型パース**（`第N希望: YYYY年M月D日（曜） HH:MM〜HH:MM`／「なし」行はスキップ）。
+  面談方法は「面談形式」フィールドの値（**LLM推測しない**）: 「電話」を含む→A系 / それ以外→B系。
+- **モードB** `{ candidateName, messageBody, executedAt }` … マイナビ直接返信分。LLM構造化抽出。
+  面談方法: 電話→A系 / オンライン・**不明→B系**（不明時のオンライン既定はモードBのみの規則）。
+
+レスポンス（両モード共通）:
+```json
+{ "result": "reserved|today_only|unavailable|no_reply",
+  "reservedAt": "2026-07-15T19:00:00+09:00|null",
+  "reservedAtLabel": "7月15日（火）19:00～|null",
+  "method": "電話|オンライン|null",
+  "replyText": "<完成した返信文面>|null",
+  "alreadyReserved": true｜false }
+```
+
+| result | 意味 | 文面 |
+|--|--|--|
+| `reserved` | 確保成功 | テンプレA(電話)／B(オンライン) |
+| `today_only` | 当日希望のみ | テンプレC |
+| `unavailable` | 全希望埋まり・範囲外 | テンプレD |
+| `no_reply` | 解釈不能・日程外・env未設定 | **なし（null）** |
+
+### 枠ルール
+
+- 60分枠。開始は **9:00〜20:00**（20:00開始が最終＝20:00〜21:00 まで可）。
+- **当日不可**。翌営業日〜**2週間以内**のみ。土日祝は不可（`isBusinessDay` 再利用）。
+- 幅のある希望（17:00〜20:00）は**幅の中の最も早い60分枠から**30分刻みで試す。
+  幅が60分未満（17:00〜17:30）は**開始から後ろへ広げて60分**（17:00〜18:00）。
+- 希望の振り分け: 範囲外（過去・2週間超・土日祝）と当日は**個別にスキップ**し、範囲内の将来希望だけ探索。
+  範囲内の将来希望がゼロで当日希望のみ → `today_only`。全部探して空き無し／全希望が範囲外 → `unavailable`。
+- 空き判定: 対象CA（env）のうち **カレンダー連携が生きているCAのみ**。誰か1人でも空いていればOK。
+  **どのCAが空いていたかは選ばない・記録しない**（担当割当は翌朝人間が行う）。
+  ※`getCalendarEvents` は未接続でも `[]`（＝終日空きに見える）を返すため、接続レコードが無いCAは必ず除外する。
+- **同一枠の多重仮予約の上限**: 仮予約カレンダーはCA個人カレンダーに映らないため、空き判定だけだと同じ枠に別候補者の
+  仮予約が無限に積める。**「その枠の既存仮予約数 ≧ その枠で空いているCA人数」なら埋まり扱い**として次の枠を探す。
+- 全日時 JST。`toISOString().slice(0,10)` 系は禁止（罠#17）。日付は `toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})`。
+
+### 年のサーバー側決定（LLMに年を出力させない）
+
+`extract-message.ts` の responseSchema には **year フィールドが存在しない**（プロンプトでも明示禁止）。
+LLM が返すのは月・日・時刻・条件・面談方法・日程の話か否かのみ。年は `jst.ts` の `resolveYearNearestFuture()` が
+**「今日以降の最も近い出現」**（今年の月日が過ぎていれば翌年）で機械決定する。12月末実行×1月の月日 → 翌年が正しく解決される。
+
+### 仮予約カレンダー運用
+
+- イベント名: `{氏名} {M/D(曜)HH:MM-HH:MM} {面談方法}`（例 `山田太郎 7/15(火)19:00-20:00 電話`）。説明欄に氏名・面談方法・モード・元taskId・作成日時。
+- **二重予約防止**: 登録前に仮予約カレンダーの未来イベントを走査し、**同一氏名（タイトル先頭一致）**が既にあれば
+  新規登録せず `alreadyReserved: true` で既存予約から**同じ文面を再生成**して返す（result は `reserved`）。
+- 翌朝人間が振り分けるまでの**仮置き場**。**AIは削除しない**（不要なら人が手動削除）。
+
+### 新設 env
+
+| env | 用途 | 未設定時 |
+|--|--|--|
+| `SCHEDULE_RESERVATION_CALENDAR_ID` | 共有カレンダー「仮予約」のID | **枠取り・登録を一切行わず `no_reply`**（誤送信防止） |
+| `SCHEDULE_RESERVATION_WRITER_USER_ID` | 書き込み名義ユーザー（大野将幸の userId） | 同上 |
+| `SCHEDULE_AGENT_TARGET_USER_IDS` | 空き判定対象CA（カンマ区切り・3名） | `unavailable` |
+| `SCHEDULE_FORM_URL` | テンプレC/Dに差し込むURL | 既定 `https://schedule.bizstudio.co.jp/` |
+
+### 既存 GET への追加（後方互換）
+
+`GET /api/external/schedule-tasks` に任意 `dedupeByName=true` を追加。タイトルから抽出した氏名が同一のタスクが
+複数あれば **createdAt 最新の1件のみ**返す。**未指定時は従来どおり全件**（レスポンス形状も不変）。
+
+### カレンダー連携切れ検知メール（step5）
+
+`resolve` は対象CAごとに Google カレンダーを能動プローブし、**連携切れが1名でも見つかれば**
+`masayuki_oono@bizstudio.co.jp` にメール通知する（既存 Resend 実装を流用・`RESEND_API_KEY`）。
+
+- **プローブ**（`probe-connections.ts`）: 4状態を区別 — `ok` / `no_connection`（レコード無し）/
+  `refresh_failed`（既存ヘルパが自動削除する）/ `fetch_failed`（認証OKだが list 例外）。
+  `ok` 以外を「壊れている」とみなす。
+- **除外**: 壊れているCAは `findAvailableSlot` の第5引数 `excludeUserIds` で明示除外する。
+  `refresh_failed` はレコード削除で自然に除外されるが、`fetch_failed` はレコード残存のため
+  明示除外しないと `getCalendarEvents` が `[]` を返して「空き」と誤判定される（重要）。
+- **重複抑止**: `ScheduleAgentAlertLog(user_id, date)` の UNIQUE 制約で
+  **同一CA×同一JST日付につき最大1通**。複数CAが同時検知でも1通にまとめて対象欄に列挙。
+  ログ行を先に作成してから送信するため、並行実行のレース勝者だけが送る。
+- **副作用の分離**: メール送信の成否は `resolve` 応答に影響しない
+  （全例外を内部で握りつぶす・失敗時もその日はリトライしない＝毎30分の連続再送を避ける）。
+
+追加テーブル: `schedule_agent_alert_logs`（`user_id`, `date` "YYYY-MM-DD" JST, `sent_at`。
+UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
+
+### RPAとの分業（重要）
+
+- portal は **タスクを読み取るだけ**。`resolve` は **status 変更もコメント追加もしない**。
+- 対象外判定は **RPA が実施済み**の前提（portal は判定しない）。
+- 返信送信後の `COMPLETED` 化・コメント付与は **RPA が既存 PATCH `/api/external/schedule-tasks/[taskId]`** で行う。
+- `resolve` は通知部品（LINE WORKS 等）を**一切呼ばない・importもしない**。
+  → **step6（下記）で「仮予約が新規成立したときのみ」通知可の例外を追加**（承認済み）。
+
+### 仮予約成立時の後続処理（step6/step7・master, 2026-07）
+
+`resolve` が**新規に仮予約を作成できたとき**（`result=reserved` かつ `alreadyReserved=false`）に限り、
+`runPostReservation`（`src/lib/schedule-agent/post-reserve.ts`）で後続処理を発火する。
+成立は1候補者につき1回（`reserve.ts` の二重予約チェックで担保）なので夜間ポーリングでも連発しない。
+`alreadyReserved=true`（既存再返信）・`today_only`・`unavailable`・`no_reply` では**発火しない**。
+フローA（モードA・taskId由来）/フローB（モードB・メッセージ由来）の両方で発火する。
+
+**現行の後続処理は「(2) LINE通知」「(3) 翌朝タスク」の2点**（仮予約カレンダー登録は resolve 本体）。
+面談管理登録（下記 (1)）は **step7 で既定無効**（手動運用）。
+
+- **(1) 面談管理登録**（`InterviewRecord`）: **step7 で既定 OFF（手動運用に統一）**。
+  実運用の日程調整タスクは candidateId=null が多く「入る時/入らない時」で中途半端になるため。
+  env `SCHEDULE_AGENT_INTERVIEW_REGISTER="true"`（大小問わず）のときだけ登録する（将来の再検討用にロジックは残置）。
+  既定（未設定/"false"）では呼ばれず、翌朝タスク本文に「面談管理への登録は手動で行ってください（AIは登録しません）」と明記する。
+  - 有効時（env true）の挙動: 担当CA=placeholder「仮予約」。`candidateId` が無ければスキップ。
+    非破壊（`interviewCount=null`＝実績集計から除外・`isLatest=false`・`status="draft"`・`interviewTool`=`電話`/`オンライン`）。
+- **(2) LINE通知**: 既存タスク通知と同じ Bot/チャンネル（`LINEWORKS_TASK_BOT_ID`/`LINEWORKS_TASK_CHANNEL_ID`）。
+  求職者名・仮予約日時・面談方法・「AI自動仮予約」の旨を送る。env 未設定ならスキップ（失敗にしない）。
+- **(3) タスク作成**: カテゴリ **`その他`**（`日程調整` は RPA が再ポーリングし二重予約になり得るため使わない）。
+  `status=NOT_STARTED`・assignee はマイナビ管理担当（`isMynaviAssignee=true` の慣例）。本文に
+  求職者名・仮予約日時・面談方法・由来（フローA/B）・元taskId・「仮予約カレンダーから振り分け」＋
+  面談登録の状態（既定は「手動で登録」）を記載。
+
+**安全設計**: `runPostReservation` は**絶対に throw しない**（各処理を try/catch で隔離）。
+`resolve` 応答（reserved 文面・値・HTTPコード）は不変。(2) が失敗しても (3) は実行し、
+特に (3) を最優先で成立させる。いずれか失敗時は `masayuki_oono@bizstudio.co.jp` へ**1通**メール
+（Resend・step5 の日次重複抑止は掛けない＝成立ごとの単発）。面談登録が無効な間は失敗対象から外れる
+（対象は LINE送信失敗・タスク作成失敗のみ）。
+
+**ダミーCA「仮予約」**:
+- `User`（`status=disabled`＝ログイン不可・`isMynaviAssignee=false`・`lineworksId=null`・`role=member`）＋
+  `Employee`（`status=active`＝面談担当ドロップダウンに出す・`userId`でUserにリンク・`jobCategory=null`＝
+  実績表CAセレクタ/集計から除外・`isExemptFromAttendance=true`＝未打刻アラート除外・`employeeNumber="9000"`）。
+- `InterviewRecord.interviewerUserId`/`createdByUserId` は名前に反して **Employee.id** を参照するため User+Employee 両方が必要。
+  env `SCHEDULE_PLACEHOLDER_CA_USER_ID` には **User.id** を設定し、コードが `employee.findFirst({where:{userId}})` で Employee.id へ解決する。
+- **他機能への波及**: `jobCategory=null`＋Userの各フラグにより実績表・マイナビ・LINE宛先・勤怠アラート・ログインからは除外される。
+  ただし `status="active"` の Employee 一覧（`/api/employees`・社員マスター・勤怠の従業員リスト・各画面の担当CAフィルタ）
+  には面談担当と同じ `status:"active"` 条件で**表示される**（面談担当に出すための必須条件と同一のため排除不可）。
+  実害は表示のみ（候補者の担当CAとして選ばれることはなく、実績・通知・打刻には現れない）。

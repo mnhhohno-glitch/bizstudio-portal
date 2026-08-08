@@ -1,13 +1,27 @@
 /**
  * Gemini API 呼び出しクライアント
  * 環境変数 GEMINI_API_KEY を使用
- * 
- * Model: gemini-2.0-flash (安定版の高速モデル)
+ *
+ * Model: gemini-3-flash-preview
+ *
+ * T-135: 全呼び出しの usage を AiUsageLog に記録する。呼び出し側は params.log に
+ * { endpoint } を渡すだけでよい（記録は内部で fire-and-forget・失敗しても本処理は止まらない）。
+ * log 未指定の呼び出しは記録されないため、**新しい呼び出しを足すときは必ず log を付けること**。
  */
+
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_API_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+/** T-135: AI費用帳簿への記録指定。endpoint は処理を識別する固定文字列。 */
+export interface GeminiUsageLogParams {
+  /** 処理の識別子（'interview-analyze' 等）。AiUsageLog.endpoint に入る */
+  endpoint: string;
+  /** 任意の付帯情報（candidateId・パス種別など） */
+  meta?: Record<string, unknown>;
+}
 
 export interface GeminiGenerateParams {
   systemInstruction: string;
@@ -17,6 +31,8 @@ export interface GeminiGenerateParams {
   maxOutputTokens?: number;
   /** 抽出系は 0.1 で確定的に（参考: 他プロジェクト）。未指定時 0.2 */
   temperature?: number;
+  /** T-135: 指定すると呼び出し後に AiUsageLog へ1行記録する（fire-and-forget）。 */
+  log?: GeminiUsageLogParams;
 }
 
 /** PDF を添付して generateContent する用。contents の先頭に inlineData で PDF を置き、続けて userPrompt を送る */
@@ -59,7 +75,7 @@ function buildRequestBody(
 }
 
 export async function generateWithGemini(params: GeminiGenerateParams): Promise<string> {
-  return generateWithGeminiInternal(buildRequestBody(params));
+  return generateWithGeminiInternal(buildRequestBody(params), params.log);
 }
 
 /** Gemini の usageMetadata（コスト記録用）。欠損時は 0 扱い。 */
@@ -79,26 +95,30 @@ export const GEMINI_MODEL_ID = GEMINI_MODEL;
 export async function generateWithGeminiDetailed(
   params: GeminiGenerateParams,
 ): Promise<{ text: string; usage: GeminiUsage }> {
-  return generateWithGeminiDetailedInternal(buildRequestBody(params));
+  return generateWithGeminiDetailedInternal(buildRequestBody(params), params.log);
 }
 
 /** PDF を添付して Gemini に送り、応答テキストを返す */
 export async function generateWithGeminiWithPdf(params: GeminiGenerateWithPdfParams): Promise<string> {
-  return generateWithGeminiInternal(buildRequestBody(params, { pdfBase64: params.pdfBase64 }));
+  return generateWithGeminiInternal(buildRequestBody(params, { pdfBase64: params.pdfBase64 }), params.log);
 }
 
 /** 画像1枚を添付して Gemini Vision に送り、応答テキストを返す。PDF→画像→各ページVision で抽出する構成で使用 */
 export async function generateWithGeminiWithImage(params: GeminiGenerateWithImageParams): Promise<string> {
-  return generateWithGeminiInternal(buildRequestBody(params, { imageBase64: params.imageBase64 }));
+  return generateWithGeminiInternal(buildRequestBody(params, { imageBase64: params.imageBase64 }), params.log);
 }
 
-async function generateWithGeminiInternal(requestBody: ReturnType<typeof buildRequestBody>): Promise<string> {
-  const { text } = await generateWithGeminiDetailedInternal(requestBody);
+async function generateWithGeminiInternal(
+  requestBody: ReturnType<typeof buildRequestBody>,
+  log?: GeminiUsageLogParams,
+): Promise<string> {
+  const { text } = await generateWithGeminiDetailedInternal(requestBody, log);
   return text;
 }
 
 async function generateWithGeminiDetailedInternal(
   requestBody: ReturnType<typeof buildRequestBody>,
+  log?: GeminiUsageLogParams,
 ): Promise<{ text: string; usage: GeminiUsage }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "ここにあなたのAPIキー") {
@@ -123,8 +143,31 @@ async function generateWithGeminiDetailedInternal(
       finishReason?: string;
     }>;
     promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
-    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      cachedContentTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
+
+  // T-135: usage の記録は**応答検証より前**に行う。空candidates（ブロック/思考トークン枯渇）でも
+  // 入力トークンは課金されるため、throw して記録が漏れると「見えない費用」が生まれる。
+  // 記録は fire-and-forget（await しない・失敗しても本処理に影響しない）。
+  if (log) {
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: log.endpoint,
+      model: GEMINI_MODEL,
+      usage: data.usageMetadata,
+      meta: {
+        ...log.meta,
+        finishReason: data.candidates?.[0]?.finishReason ?? null,
+        // 応答が取れなかったコールも費用は発生している。原因追跡用に残す。
+        ...(data.candidates?.length ? {} : { blocked: data.promptFeedback?.blockReason ?? "NO_CANDIDATES" }),
+      },
+    });
+  }
 
   const candidates = data.candidates;
   if (!candidates || candidates.length === 0) {
@@ -171,7 +214,7 @@ export function parseJsonResponse<T = unknown>(raw: string): T {
     ? firstBrace
     : firstBracket;
   if (start >= 0) {
-    let slice = cleaned.slice(start);
+    const slice = cleaned.slice(start);
     try {
       return JSON.parse(slice) as T;
     } catch {

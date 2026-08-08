@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { toast } from "sonner";
 import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
-import { stripFileMetadata, stripCorpSuffixes } from "@/lib/normalize-filename";
-import { resolveJobDbFromBookmark, extractJobNoFromRef } from "@/lib/constants/source-media";
+import { stripFileMetadata, stripCorpSuffixes, extractCompanyNameCandidates } from "@/lib/normalize-filename";
+import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
+import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
+import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -31,6 +33,20 @@ type Job = {
 const RESPONSE_BADGE: Record<string, { label: string; cls: string }> = {
   WANT_TO_APPLY: { label: "応募したい", cls: "bg-red-100 text-red-700" },
   INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
+};
+
+// T-133 FU: CA画面の「本人回答」列用。求職者本人のマイページ回答 = CandidateFile.responseStatus。
+// 上の RESPONSE_BADGE（CandidateJobResponse 由来・会社名脇チップ）とは別テーブル・別系統。
+// キーは CandidateFile.responseStatus の正準値（src/lib/constants/response-status.ts）。
+// UNANSWERED / null / 不明値はこのマップに含めず、呼び出し側で「—」表示する。
+// 色は既存バッジ配色を流用（応募したい=赤・気になる=黄）。新色は作らない。
+const RESPONSE_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  APPLY: { label: "応募したい", cls: "bg-red-100 text-red-700" },
+  INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
+  PENDING: { label: "保留", cls: "bg-gray-100 text-gray-600" },
+  EXCLUDED: { label: "対象外", cls: "bg-gray-100 text-gray-400" },
+  IN_SELECTION: { label: "選考中", cls: "bg-blue-100 text-blue-700" },
+  SELECTION_ENDED: { label: "選考終了", cls: "bg-gray-100 text-gray-500" },
 };
 
 type JobsResponse = {
@@ -292,10 +308,15 @@ type BookmarkFile = {
   aiAnalyzedAt: string | null;
   caComment: string | null; // T-128 batch4: CAアドバイザーコメント
   candidateNote: string | null; // T-133 FU-1: 求職者本人が /site/ で書いたメモ（CA画面では表示のみ）
+  // T-133 FU: 求職者本人のマイページ回答（UNANSWERED/INTERESTED/APPLY/PENDING/EXCLUDED/IN_SELECTION/SELECTION_ENDED）。CA画面は表示のみ。
+  responseStatus?: string | null;
   lastExportedAt: string | null;
   lastExportedTo: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
   origin?: string | null;
+  // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
+  externalJobRef?: string | null;
+  sourceMedia?: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
   archivedAt?: string | null;
@@ -382,28 +403,133 @@ function ArchiveModal({
   );
 }
 
-const RATING_STYLES: Record<string, string> = {
-  A: "bg-green-100 text-green-800 border-green-300",
-  B: "bg-blue-100 text-blue-800 border-blue-300",
-  C: "bg-yellow-100 text-yellow-800 border-yellow-300",
-  D: "bg-red-100 text-red-800 border-red-300",
+/**
+ * ランクの配色は**ここが単一の出所**。バッジ（className）とドーナツグラフ（SVG の stroke）で共有する。
+ * stroke はバッジ枠線と同じ Tailwind トークン（-300）を指すので、円とバッジの色が完全に一致し、
+ * グラフ用に別の色を定義する必要がない（hex を書き起こさない）。
+ */
+const RATING_PALETTE: Record<string, { badge: string; stroke: string }> = {
+  A: { badge: "bg-green-100 text-green-800 border-green-300", stroke: "stroke-green-300" },
+  "B+": { badge: "bg-cyan-100 text-cyan-800 border-cyan-300", stroke: "stroke-cyan-300" },
+  B: { badge: "bg-blue-100 text-blue-800 border-blue-300", stroke: "stroke-blue-300" },
+  C: { badge: "bg-yellow-100 text-yellow-800 border-yellow-300", stroke: "stroke-yellow-300" },
+  D: { badge: "bg-red-100 text-red-800 border-red-300", stroke: "stroke-red-300" },
+  未評価: { badge: "bg-gray-100 text-gray-500 border-gray-300", stroke: "stroke-gray-300" },
 };
+const RATING_STYLES: Record<string, string> = Object.fromEntries(
+  Object.entries(RATING_PALETTE).map(([k, v]) => [k, v.badge]),
+);
+
+/** 評価内訳・ドーナツで共通のランク列。未評価は実データに1件でもあるときだけ末尾に足す。 */
+const RATING_RANKS = ["A", "B+", "B", "C", "D"];
+function ratingCols(maps: Record<string, number>[]): string[] {
+  const hasUnrated = maps.some((m) => (m["未評価"] ?? 0) > 0);
+  return hasUnrated ? [...RATING_RANKS, "未評価"] : RATING_RANKS;
+}
 const RATING_LABELS: Record<string, string> = {
-  A: "A 非常に良い", B: "B 良い", C: "C 要検討", D: "D 合わない",
+  A: "A 非常に良い", "B+": "B+ 良い（上位）", B: "B 良い", C: "C 要検討", D: "D 合わない",
 };
 
+/**
+ * ランク別内訳のドーナツグラフ（外部ライブラリ不使用・SVG の stroke-dasharray のみ）。
+ *
+ * 半径を r = 15.9155 にすると円周 2πr = 100 になるため、dasharray/dashoffset に
+ * 「％の値そのもの」を渡せる（比率計算が1回で済み、丸め誤差で隙間が出ない）。
+ * グループを -90度回転して 12時方向から時計回りに描く。
+ *
+ * エッジケース:
+ *   - 総数0件: セグメントを1つも描かず、薄いグレーの空円だけを出す（NaN を作らない）。
+ *   - 1ランク100%: dasharray が "100 0" になり途切れず1色で閉じる。
+ *   - 件数3桁以上: 中心の数字のフォントを桁数に応じて落とし、円からはみ出させない。
+ */
+function RatingDonut({ label, map, cols, size = 88 }: {
+  label: string;
+  map: Record<string, number>;
+  cols: string[];
+  size?: number;
+}) {
+  const total = cols.reduce((sum, k) => sum + (map[k] ?? 0), 0);
+  // 累積%を進めながらセグメントを積む。total=0 のときは segments が空配列になる。
+  let acc = 0;
+  const segments = total === 0 ? [] : cols.flatMap((k) => {
+    const n = map[k] ?? 0;
+    if (n === 0) return [];
+    const portion = (n / total) * 100;
+    const seg = { k, n, portion, offset: acc };
+    acc += portion;
+    return [seg];
+  });
+  const digits = String(total).length;
+  const numCls = digits >= 4 ? "text-[12px]" : digits === 3 ? "text-[14px]" : "text-[17px]";
+
+  return (
+    <div className="flex flex-col items-center gap-0.5 shrink-0">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90" role="img" aria-label={`${label}の内訳`}>
+          {/* 土台のリング。0件のときはこれだけが見える。 */}
+          <circle
+            cx="18" cy="18" r="15.9155" fill="none"
+            className="stroke-gray-100" strokeWidth="4"
+          />
+          {segments.map((s) => (
+            <circle
+              key={s.k}
+              cx="18" cy="18" r="15.9155" fill="none"
+              className={RATING_PALETTE[s.k]?.stroke ?? "stroke-gray-300"}
+              strokeWidth="4"
+              strokeDasharray={`${s.portion} ${100 - s.portion}`}
+              strokeDashoffset={-s.offset}
+            >
+              <title>{`${label} ${s.k === "未評価" ? "—" : s.k}: ${s.n}件 (${Math.round(s.portion)}%)`}</title>
+            </circle>
+          ))}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center leading-none pointer-events-none">
+          <span className={`${numCls} font-bold tabular-nums text-gray-700`}>{total}</span>
+          <span className="text-[9px] text-gray-400 mt-0.5">件</span>
+        </div>
+      </div>
+      <span className="text-[12px] text-gray-500">{label}</span>
+    </div>
+  );
+}
+
+/** 総合/希望/通過 の3つのドーナツ＋共通凡例。気になる/応募したいは0件が多く円が描けないため対象外。 */
+function RatingDonuts({ summary, cols }: {
+  summary: { overall: Record<string, number>; wish: Record<string, number>; pass: Record<string, number> };
+  cols: string[];
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-end gap-3 min-w-0">
+      <RatingDonut label="総合" map={summary.overall} cols={cols} />
+      <RatingDonut label="希望" map={summary.wish} cols={cols} />
+      <RatingDonut label="通過" map={summary.pass} cols={cols} />
+      {/* 凡例は3円で共通。円ごとには出さない。 */}
+      <div className="flex flex-col gap-0.5 shrink-0 pt-1">
+        {cols.map((k) => (
+          <span key={k} className="flex items-center gap-1 text-[11px] text-gray-500 whitespace-nowrap">
+            <span className={`inline-block w-2.5 h-2.5 rounded-sm border ${RATING_PALETTE[k]?.badge ?? "bg-gray-100 border-gray-300"}`} />
+            {k === "未評価" ? "—" : k}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 総合のみ B+ を取りうる（希望・通過は A/B/C/D）。ただし読み取りは3軸とも同じ
+// パターンを使う。幅表記「B〜C」は B+ にマッチせず従来どおり先頭1文字 "B" を返す。
 function parse3AxisRatings(comment: string | null): { wish: string; pass: string; overall: string } | null {
   if (!comment) return null;
-  const w = comment.match(/■\s*本人希望[：:]\s*([ABCD])/);
-  const p = comment.match(/■\s*通過率[：:]\s*([ABCD])/);
-  const o = comment.match(/■\s*総合[：:]\s*([ABCD])/);
+  const w = extractAxis(comment, "本人希望");
+  const p = extractAxis(comment, "通過率");
+  const o = extractAxis(comment, "総合");
   if (!w && !p && !o) return null;
-  return { wish: w?.[1] || "—", pass: p?.[1] || "—", overall: o?.[1] || "—" };
+  return { wish: w || "—", pass: p || "—", overall: o || "—" };
 }
 
 /* ---------- Bookmark sort helpers (pure functions) ---------- */
 // A=最良 … D=最低。空欄/null/「—」は方向に関わらず常に末尾に寄せるため Infinity 扱い。
-const RANK_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
 function rankValue(r: string | null | undefined): number {
   if (!r) return Number.POSITIVE_INFINITY;
   const v = RANK_ORDER[r];
@@ -433,7 +559,7 @@ function jstDateKey(v: string | number | Date | null | undefined): string {
 
 // ---- 2段（1次/2次）クロスソートモデル ----
 // 並び替えキーは最大2つ（1次・2次）。各キーは基準 + 方向。
-type SortBasis = "company_name" | "want" | "interest" | "wish" | "pass" | "overall" | "uploader" | "date";
+type SortBasis = "company_name" | "want" | "interest" | "wish" | "pass" | "overall" | "response" | "uploader" | "date";
 type SortDir = "asc" | "desc";
 type SortKey = { basis: SortBasis; dir: SortDir };
 
@@ -454,21 +580,56 @@ const BASIS_LABEL: Record<SortBasis, string> = {
   wish: "希望",
   pass: "通過",
   overall: "総合",
+  response: "本人回答",
   uploader: "担当",
   date: "紹介日",
 };
 
-// 応募したい/気になる ステータスを基準に応じた優先順位の数値へ。その他(null)は常に末尾(2)。
-function responseRank(resp: string | null, basis: "want" | "interest"): number {
-  if (basis === "want") {
-    if (resp === "WANT_TO_APPLY") return 0;
-    if (resp === "INTERESTED") return 1;
-    return 2;
+// 修正2: 並び替えの判定値を「本人回答優先」にするための正規化。
+// 2つの記録系統は同じ意味の値でも綴りが違うため、必ず同じ内部意向へ正規化してから比較する。
+//   本人回答 CandidateFile.responseStatus : APPLY / INTERESTED / PENDING / EXCLUDED / UNANSWERED
+//                                           （＋CA駆動の IN_SELECTION / SELECTION_ENDED）
+//   従来値   CandidateJobResponse.response : WANT_TO_APPLY / INTERESTED
+// ★「応募したい」が APPLY と WANT_TO_APPLY で綴り違い。大文字小文字・前後空白も吸収する。
+type ResponseIntent = "APPLY" | "INTERESTED" | "PENDING" | "EXCLUDED";
+function normalizeResponseIntent(resp: string | null | undefined): ResponseIntent | null {
+  if (!resp) return null;
+  switch (resp.trim().toUpperCase()) {
+    case "APPLY":
+    case "WANT_TO_APPLY":
+      return "APPLY";
+    case "INTERESTED":
+      return "INTERESTED";
+    case "PENDING":
+      return "PENDING";
+    case "EXCLUDED":
+      return "EXCLUDED";
+    default:
+      // UNANSWERED / IN_SELECTION / SELECTION_ENDED / 不明値は「回答なし」＝常に末尾。
+      return null;
   }
-  // interest
-  if (resp === "INTERESTED") return 0;
-  if (resp === "WANT_TO_APPLY") return 1;
-  return 2;
+}
+
+// 本人回答（CandidateFile.responseStatus）を優先し、無ければ従来値（CandidateJobResponse 由来）へフォールバック。
+// 従来値は廃止しない（旧マイページ経由の過去分は従来値にしか記録が無く、落とすと並びが壊れるため）。
+// IN_SELECTION / SELECTION_ENDED は CA 駆動で本人の意向ではないため「回答なし」扱いになり、従来値へ落ちる。
+function resolveResponseForSort(
+  own: string | null | undefined,
+  legacy: string | null | undefined,
+): ResponseIntent | null {
+  return normalizeResponseIntent(own) ?? normalizeResponseIntent(legacy);
+}
+
+// 正規化済み意向 → 基準に応じた優先順位の数値。回答なしは基準に関わらず常に末尾。
+// 順位: 応募したい ＞ 気になる ＞ 保留 ＞ 対象外 ＞ 未回答（「気になる順」では上位2つが入れ替わる）。
+const WANT_ORDER: ResponseIntent[] = ["APPLY", "INTERESTED", "PENDING", "EXCLUDED"];
+const INTEREST_ORDER: ResponseIntent[] = ["INTERESTED", "APPLY", "PENDING", "EXCLUDED"];
+/** 回答なしの順位値。方向トグル付きの response 基準で「常に末尾」を判定するのに使う。 */
+const RESPONSE_RANK_NONE = WANT_ORDER.length;
+function responseRank(resp: string | null, basis: "want" | "interest"): number {
+  const intent = normalizeResponseIntent(resp);
+  if (!intent) return RESPONSE_RANK_NONE; // 回答なしは常に末尾
+  return (basis === "want" ? WANT_ORDER : INTEREST_ORDER).indexOf(intent);
 }
 
 // 基準ごとの値取得を accessor で受け取り、BM/Jobs 両方で同一ロジックを共有する。
@@ -499,6 +660,19 @@ function compareByBasis<T>(a: T, b: T, key: SortKey, acc: SortAccessors<T>): num
     case "overall": {
       const k = key.basis as "wish" | "pass" | "overall";
       return compareRank(acc.getRank(a, k), acc.getRank(b, k), dir);
+    }
+    case "response": {
+      // 本人回答列のソート。順序定義は「応募したい順」ボタンと同じ responseRank(want) を流用する
+      //（応募したい > 気になる > 保留 > 対象外）。担当/紹介日と同じく方向トグルを持つが、
+      // 未回答は他列の欠損と同様に方向に関わらず常に末尾へ寄せる。
+      const ra = responseRank(acc.getResponse(a), "want");
+      const rb = responseRank(acc.getResponse(b), "want");
+      const aMissing = ra === RESPONSE_RANK_NONE;
+      const bMissing = rb === RESPONSE_RANK_NONE;
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      return (ra - rb) * dir;
     }
     case "uploader": {
       const ua = acc.getUploader?.(a) ?? "";
@@ -586,7 +760,7 @@ function SortBasisButtons({ degreeOf, activateBasis }: {
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[12px] text-gray-500 shrink-0">表示順：</span>
+      <span className="text-[13px] text-gray-500 shrink-0">表示順：</span>
       <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
         {([
           { basis: "company_name", label: "名前順" },
@@ -598,7 +772,7 @@ function SortBasisButtons({ degreeOf, activateBasis }: {
             <button
               key={opt.basis}
               onClick={() => activateBasis(opt.basis)}
-              className={`px-3 py-1 text-[12px] font-medium transition-colors flex items-center gap-1 ${i > 0 ? "border-l border-gray-300" : ""} ${
+              className={`px-3 py-1 text-[13px] font-medium transition-colors flex items-center gap-1 ${i > 0 ? "border-l border-gray-300" : ""} ${
                 deg ? "bg-[#2563EB] text-white" : "bg-white text-gray-600 hover:bg-gray-50"
               }`}
             >
@@ -615,6 +789,131 @@ function SortBasisButtons({ degreeOf, activateBasis }: {
 }
 
 // 「並び替え：」1次/2次チップバー（基準ラベル・▲▼方向トグル〔want/interest 非表示〕・✕解除）。BM・Jobs 共用。
+/**
+ * T-146 P2-6: 引き当ての評価内訳（ブックマークタブ）。
+ * 「選定率」は日報側に別定義の同名指標があるため、この語は使わない。
+ * 母数は絞り込み後の表示中の件数（AI評価対象外を除く）＝一覧に見えている行と一致させる。
+ */
+function RatingBreakdown({ summary, filtering, totalAll, archivedCount, onClearFilter }: {
+  summary: {
+    total: number; excluded: number;
+    overall: Record<string, number>; wish: Record<string, number>; pass: Record<string, number>;
+    interested: Record<string, number>; applied: Record<string, number>;
+  };
+  filtering: boolean;
+  totalAll: number;
+  /** 紹介保留（CandidateFile.archivedAt != null）の件数。一覧（分母）には含まれない別枠の数。 */
+  archivedCount: number;
+  onClearFilter: () => void;
+}) {
+  // 開閉状態は保持しない。呼び出し側で key={candidateId} を付けており、
+  // 求職者を切り替えると再マウントされて必ず閉じた状態から始まる（localStorage 等にも保存しない）。
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  if (summary.total === 0) return null;
+
+  const pct = (n: number) => Math.round((n / summary.total) * 100);
+
+  // ランク列。A/B+/B/C/D は0件でも常に出す（「そのランクが無い」ことを読み取れるようにする）。
+  // 列の決定はドーナツグラフと共通の ratingCols() に委譲する（両者で列が食い違わないようにするため）。
+  const DETAIL_MAPS: { label: string; map: Record<string, number> }[] = [
+    { label: "希望", map: summary.wish },
+    { label: "通過", map: summary.pass },
+    { label: "気になる", map: summary.interested },
+    { label: "応募したい", map: summary.applied },
+  ];
+  const COLS = ratingCols([summary.overall, ...DETAIL_MAPS.map((d) => d.map)]);
+
+  // ★1行目のバッジ行と詳細行はこの1つの grid の直接の子として並べ、同じ列トラックを共有する。
+  //   これによりランク列の幅はバッジの幅で決まり、その真下に数値が中央揃えで並ぶ。
+  //   列構成: [ラベル] + ランク数ぶんの auto + [詳細ボタン]
+  const gridTemplateColumns = `auto repeat(${COLS.length}, auto) auto`;
+
+  return (
+    <div className="w-fit whitespace-nowrap border-l border-gray-200 pl-3">
+      <div
+        className="grid items-center gap-x-3 gap-y-1 justify-end"
+        style={{ gridTemplateColumns }}
+      >
+        {/* ---- 1行目: ラベル / ランクごとのバッジ / 詳細ボタン ---- */}
+        <span className="text-[14px] text-gray-500 justify-self-start">
+          評価内訳
+          <span className="ml-1 text-gray-700 font-medium tabular-nums">{summary.total}件</span>
+        </span>
+        {COLS.map((k) => {
+          const n = summary.overall[k] ?? 0;
+          const s = RATING_STYLES[k];
+          return (
+            <span
+              key={`chip-${k}`}
+              className="inline-flex items-center gap-1 justify-self-center"
+              title={`総合${k === "未評価" ? "評価なし" : k}: ${n}件 (${pct(n)}%)`}
+            >
+              <span className={`inline-flex items-center justify-center min-w-[24px] h-[22px] px-1.5 rounded text-[14px] font-bold border ${s ?? "bg-gray-100 text-gray-500 border-gray-300"}`}>
+                {k === "未評価" ? "—" : k}
+              </span>
+              <span className="text-[14px] tabular-nums text-gray-700">{n}</span>
+              <span className="text-[12px] tabular-nums text-gray-400">{pct(n)}%</span>
+            </span>
+          );
+        })}
+        <button
+          onClick={() => setDetailOpen((v) => !v)}
+          className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium justify-self-end"
+          title="希望/通過/本人回答のランク別内訳を開閉"
+        >
+          詳細 {detailOpen ? "▲" : "▼"}
+        </button>
+
+        {/* ---- 詳細: 同じ grid に続けて流し込む（列位置が1行目と一致する） ---- */}
+        {detailOpen && (
+          <>
+            {/* ヘッダ行。バッジと二重に見えるため薄い色にとどめる。 */}
+            <span />
+            {COLS.map((k) => (
+              <span key={`head-${k}`} className="text-[13px] font-medium text-gray-400 justify-self-center">
+                {k === "未評価" ? "—" : k}
+              </span>
+            ))}
+            <span />
+
+            {DETAIL_MAPS.map(({ label, map }) => (
+              <Fragment key={`row-${label}`}>
+                <span className="text-[13px] text-gray-500 justify-self-start">{label}</span>
+                {COLS.map((k) => (
+                  <span key={`${label}-${k}`} className="text-[13px] tabular-nums text-gray-700 justify-self-center">
+                    {map[k] ?? 0}
+                  </span>
+                ))}
+                <span />
+              </Fragment>
+            ))}
+
+            {/* 区切り線を挟んだ最下段。全列ぶち抜きで右寄せ。 */}
+            <span
+              className="mt-1.5 pt-1.5 border-t border-gray-200 text-[13px] text-gray-400 text-right"
+              style={{ gridColumn: "1 / -1" }}
+            >
+              <span title="サイト経由でPDF未保管のため母数から除外">AI評価対象外 {summary.excluded}件</span>
+              <span className="mx-1.5 text-gray-300">｜</span>
+              <span title="紹介保留に移動した件数（この一覧の母数には含まれない）">紹介保留 {archivedCount}件</span>
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* 絞り込み中は「表示中の数字が全体ではない」ことの注意書きなので、
+          詳細の開閉に関わらず常に出す（アコーディオン内に隠すと部分集計を全体と誤読する）。 */}
+      {filtering && (
+        <div className="mt-1 text-right text-[13px] text-amber-600">
+          絞り込み中（{summary.total + summary.excluded}件 / 全{totalAll}件）
+          <button onClick={onClearFilter} className="ml-1 underline hover:text-amber-700">解除</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SortChipBar({ sortKeys, cycleKeyDir, removeKey }: {
   sortKeys: SortKey[];
   cycleKeyDir: (b: SortBasis) => void;
@@ -623,11 +922,11 @@ function SortChipBar({ sortKeys, cycleKeyDir, removeKey }: {
   if (sortKeys.length === 0) return null;
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[12px] text-gray-500 shrink-0">並び替え：</span>
+      <span className="text-[13px] text-gray-500 shrink-0">並び替え：</span>
       {sortKeys.map((k, i) => (
         <span
           key={k.basis}
-          className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[11px] text-[#2563EB]"
+          className="inline-flex items-center gap-1 rounded-full border border-[#2563EB]/40 bg-blue-50 pl-2 pr-1 py-0.5 text-[13px] text-[#2563EB]"
         >
           <span className="font-semibold">{i === 0 ? "1次" : "2次"}</span>
           <span>{BASIS_LABEL[k.basis]}</span>
@@ -687,7 +986,7 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchToJobs, onArchivedChange }: { candidateId: string; jobResponseMap: Map<string, string>; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCountChange, onSwitchToJobs, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -724,6 +1023,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   // T-133 FU-1: 求職者メモの閲覧（読み取り専用。求職者が /site/ で編集するもの）
   const [noteView, setNoteView] = useState<{ fileName: string; note: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  // DBNO列: job-platform 求人詳細へ SSO 遷移中の externalJobRef（二重クリック防止＋⏳表示）
+  const [openingRef, setOpeningRef] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
 
@@ -742,6 +1043,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
     return null;
   }, [jobResponseMap]);
+
+  // DBNO クリック: portal SSO（issue-app-token）で job-platform 求人詳細を新規タブで開く。
+  // T-140: EntryTable と共有するため実処理は @/lib/openJobPlatformDetail に切り出し。
+  // ここでは二重クリック防止の in-flight ガード(openingRef)だけを持つ。
+  const handleOpenJobPlatformDetail = async (externalJobRef: string) => {
+    if (openingRef) return;
+    setOpeningRef(externalJobRef);
+    try {
+      await openJobPlatformDetail(externalJobRef);
+    } finally {
+      setOpeningRef(null);
+    }
+  };
 
   const triggerExtraction = (fileIds: string[], label = "") => {
     if (fileIds.length === 0) return;
@@ -793,7 +1107,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   // Auto-extract text for existing files without extraction (run once)
   useEffect(() => {
     if (extractTriggered.current || loading || files.length === 0) return;
-    const filesWithoutText = files.filter((f) => !f.extractedAt);
+    // PDF実体が無い行（サイト経由・driveFileId=null）はテキスト抽出できない＝AI評価対象外。無駄な抽出要求を避けて除外。
+    const filesWithoutText = files.filter((f) => !f.extractedAt && f.driveFileId);
     if (filesWithoutText.length > 0) {
       extractTriggered.current = true;
       triggerExtraction(filesWithoutText.map((f) => f.id), ":auto");
@@ -815,16 +1130,16 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     const baseText = editingComment ? editedCommentText : (selectedAnalysis?.comment || "");
     setRating(newValue);
 
-    const markerLineRe = new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*$`, "m");
+    const markerLineRe = new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*${RATING_VALUE}?\\s*$`, "m");
     let newText: string;
     if (newValue === "") {
       newText = markerLineRe.test(baseText)
-        ? baseText.replace(new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*[ABCD]?\\s*\\n?`, "m"), "")
+        ? baseText.replace(new RegExp(`^[ \\t]*■\\s*${label}[：:]\\s*${RATING_VALUE}?\\s*\\n?`, "m"), "")
         : baseText;
     } else if (markerLineRe.test(baseText)) {
       newText = baseText.replace(markerLineRe, `■ ${label}: ${newValue}`);
     } else {
-      const otherMarkerRe = /^[ \t]*■\s*(?:本人希望|通過率|総合)[：:]\s*[ABCD]?\s*$/m;
+      const otherMarkerRe = new RegExp(`^[ \\t]*■\\s*(?:本人希望|通過率|総合)[：:]\\s*${RATING_VALUE}?\\s*$`, "m");
       const m = baseText.match(otherMarkerRe);
       if (m && m.index !== undefined) {
         const insertPos = m.index + m[0].length;
@@ -863,6 +1178,10 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
 
     setUploading(false);
+    // 二重発火防止（FU-8）: この後の fetchFiles() で files が更新されると、未抽出キャッチアップ effect が
+    // :upload と併走して同じ求人を2回 extract→job-platform投入してしまう。先に extractTriggered を立てて
+    // キャッチアップを抑止し、アップロード分は下の :upload 経路のみで1回だけ抽出させる。
+    extractTriggered.current = true;
     fetchFiles();
 
     // Background text extraction for uploaded files
@@ -946,14 +1265,25 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds: Array.from(selectedIds) }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // 全件PDF未保管（422）等はサーバの理由をそのまま表示する。
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error || "一括ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。");
+        return;
+      }
+      const downloaded = parseInt(res.headers.get("X-Downloaded-Count") || "0", 10);
+      const skipped = parseInt(res.headers.get("X-Skipped-Count") || "0", 10);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bookmarks_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.zip`;
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      a.download = downloaded === 1 ? `bookmark_${stamp}.pdf` : `bookmarks_${stamp}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      if (skipped > 0) {
+        toast.success(`${downloaded}件をダウンロードしました（${skipped}件はPDF未保管のためスキップ）`);
+      }
     } catch {
       toast.error("一括ダウンロードに失敗しました。ファイル数が多い場合は個別にDLしてください。");
     } finally {
@@ -973,7 +1303,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
   const bookmarkAccessors: SortAccessors<BookmarkFile> = {
     getCompanyName: (f) => f.fileName,
     getRank: (f, axis) => parse3AxisRatings(f.aiAnalysisComment)?.[axis] ?? null,
-    getResponse: (f) => findJobResponse(f.fileName),
+    // 修正2: 本人回答（responseStatus・「本人回答」列と同じ値）を優先し、無ければ従来値へフォールバック。
+    getResponse: (f) => resolveResponseForSort(f.responseStatus, findJobResponse(f.fileName)),
     getDate: (f) => f.createdAt,
     getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
   };
@@ -989,6 +1320,51 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       return true;
     });
     return [...result].sort(makeCompositeComparator(sortKeys, bookmarkAccessors));
+  })();
+
+  // T-146 P2-6: 評価内訳（絞り込み後の表示中の件数を集計）。
+  //   ※「選定率」とは呼ばない。日報側に同名で別定義の指標（出力数÷(BM数+紹介保留数)）があり、
+  //     同じ語で違う数字が2箇所に出ると必ず混乱するため。
+  //   母数からは「AI評価対象外」（サイト経由でPDF未保管）を除く。一覧で対象外と明示している行を
+  //   分母に入れると内訳が不当に薄まるため。バッジと同じ値解決（総合のみ aiMatchRating フォールバック）。
+  const ratingSummary = (() => {
+    const evaluable = filteredFiles.filter(
+      (f) => !(f.origin === "candidate" && !f.driveFileId && !f.aiAnalysisComment)
+    );
+    const tally = (axis: "wish" | "pass" | "overall") => {
+      const m: Record<string, number> = {};
+      for (const f of evaluable) {
+        const parsed = parse3AxisRatings(f.aiAnalysisComment);
+        const raw = axis === "overall" ? parsed?.overall || f.aiMatchRating || "" : parsed?.[axis] ?? "";
+        const key = raw && raw !== "—" && RANK_ORDER[raw] !== undefined ? raw : "未評価";
+        m[key] = (m[key] ?? 0) + 1;
+      }
+      return m;
+    };
+    // 本人回答（気になる/応募したい）別の総合ランク内訳。
+    // 判定値は一覧の「本人回答」列・「応募したい順/気になる順」ソートと同じ bookmarkAccessors.getResponse
+    //（＝ resolveResponseForSort(responseStatus, 従来値)）を通し、normalizeResponseIntent で正規化する。
+    // 新しい判定ロジックは作らない＝一覧の並びと集計値が食い違わない。
+    const tallyByResponse = (intent: "APPLY" | "INTERESTED") => {
+      const m: Record<string, number> = {};
+      for (const f of evaluable) {
+        if (normalizeResponseIntent(bookmarkAccessors.getResponse(f)) !== intent) continue;
+        const parsed = parse3AxisRatings(f.aiAnalysisComment);
+        const raw = parsed?.overall || f.aiMatchRating || "";
+        const key = raw && raw !== "—" && RANK_ORDER[raw] !== undefined ? raw : "未評価";
+        m[key] = (m[key] ?? 0) + 1;
+      }
+      return m;
+    };
+    return {
+      total: evaluable.length,
+      excluded: filteredFiles.length - evaluable.length,
+      overall: tally("overall"),
+      wish: tally("wish"),
+      pass: tally("pass"),
+      interested: tallyByResponse("INTERESTED"),
+      applied: tallyByResponse("APPLY"),
+    };
   })();
 
   const toggleAll = () => {
@@ -1081,18 +1457,39 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
     }
   };
 
+  // サイト経由（origin="candidate" & driveFileId=null）判定。求人紹介タブには構造上出せないため、
+  // 求人紹介への移動対象から外し、専用の「エントリーへ登録」導線へ回す。
+  const isSiteApply = (f: BookmarkFile) => f.origin === "candidate" && !f.driveFileId;
+  const selectedSiteApplyIds = [...selectedIds].filter((id) => {
+    const f = files.find((x) => x.id === id);
+    return f ? isSiteApply(f) : false;
+  });
+
   const [movingToJobs, setMovingToJobs] = useState(false);
   const handleMoveToJobs = async () => {
     if (selectedIds.size === 0) return;
+    const selected = files.filter((f) => selectedIds.has(f.id));
+    // サイト経由は kyuujin に対応 job が無く求人紹介タブに出せない。求人紹介へは移動させず
+    //（＝ last_exported_at を立てず）、「エントリーへ登録」へ案内する。通常行のみ従来処理。
+    const siteApply = selected.filter(isSiteApply);
+    const movable = selected.filter((f) => !isSiteApply(f));
+
+    if (movable.length === 0) {
+      toast.info("サイト応募の求人は「エントリーへ登録」から進めてください");
+      return;
+    }
+
     setMovingToJobs(true);
     try {
-      const selected = files.filter((f) => selectedIds.has(f.id));
-      const exportedIds = selected.filter((f) => f.lastExportedAt).map((f) => f.id);
-      const notExportedIds = selected.filter((f) => !f.lastExportedAt).map((f) => f.id);
+      const exportedIds = movable.filter((f) => f.lastExportedAt).map((f) => f.id);
+      const notExportedIds = movable.filter((f) => !f.lastExportedAt).map((f) => f.id);
 
       let restoredCount = 0;
+      let alreadyActiveCount = 0;
       let sentCount = 0;
-      const messages: string[] = [];
+      // 「出力済」だが kyuujin 側に求人が無い行（抽出失敗等）。restore できないので新規送信でやり直す。
+      let missingIds: string[] = [];
+      const problems: string[] = [];
 
       if (exportedIds.length > 0) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/restore-jobs`, {
@@ -1103,33 +1500,98 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "復活処理に失敗しました");
         restoredCount = data.restored ?? 0;
-        if (data.notMatched?.length) messages.push(`照合失敗: ${data.notMatched.length}件`);
-        if (data.notExcluded?.length) messages.push(`既に有効: ${data.notExcluded.length}件`);
+        alreadyActiveCount = data.notExcluded?.length ?? 0;
+        missingIds = data.missingFileIds ?? [];
+        if (data.ambiguous?.length) {
+          problems.push(
+            `照合できませんでした（${data.ambiguous.length}件・似た会社名の求人あり）: ` +
+              data.ambiguous.map((a: { fileName: string }) => a.fileName).join(" / ")
+          );
+        }
+        if (data.errors?.length) problems.push(data.errors.join(" / "));
       }
 
-      if (notExportedIds.length > 0) {
+      // 新規送信対象 = 未出力 + 出力済だが kyuujin に存在しない行。
+      // db種別は元の出力先に合わせる（既定は HITO-Link/マイナビ）。
+      const sendTargetIds = [...notExportedIds, ...missingIds];
+      const groups = new Map<string, string[]>();
+      for (const id of sendTargetIds) {
+        const f = movable.find((x) => x.id === id);
+        const dbType = f?.lastExportedTo === "circus" ? "circus" : "hito_mynavi";
+        groups.set(dbType, [...(groups.get(dbType) ?? []), id]);
+      }
+
+      for (const [dbType, ids] of groups) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileIds: notExportedIds, dbType: "hito_mynavi", targetAreas: ["首都圏"] }),
+          body: JSON.stringify({ fileIds: ids, dbType, targetAreas: ["首都圏"] }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "送信に失敗しました");
-        sentCount = data.uploadedCount ?? notExportedIds.length;
+        if (!res.ok) {
+          problems.push(data.error || "送信に失敗しました");
+          continue;
+        }
+        // uploadedCount=PDF送信分、linkedCount=サイト経由(PDF不要)分。両方を「移動」件数に含める。
+        const n = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
+        sentCount += n || ids.length;
       }
 
-      const parts: string[] = [];
-      if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
-      if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
-      if (messages.length) parts.push(messages.join(" / "));
-      toast.success(parts.length ? parts.join("、") + "しました" : "処理が完了しました");
+      const moved = restoredCount + sentCount + alreadyActiveCount;
+      if (moved === 0) {
+        // 「押しても何も起きない」を無くす。理由が分かる形で必ず知らせる。
+        toast.error(
+          problems.length
+            ? `求人紹介へ移動できませんでした。${problems.join(" / ")}`
+            : "求人紹介へ移動できませんでした（対象の求人が求人ツール側に見つかりません）"
+        );
+      } else {
+        const parts: string[] = [];
+        if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
+        if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
+        if (alreadyActiveCount > 0) parts.push(`${alreadyActiveCount}件は既に有効`);
+        toast.success(parts.join("、") + "しました");
+        if (problems.length) toast.error(problems.join(" / "));
+      }
+
+      if (siteApply.length > 0) {
+        toast.info(`サイト応募${siteApply.length}件は移動対象外です。「エントリーへ登録」から進めてください`);
+      }
 
       setSelectedIds(new Set());
-      onSwitchToJobs?.();
+      fetchFiles();
+      if (moved > 0) onSwitchToJobs?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
       setMovingToJobs(false);
+    }
+  };
+
+  // サイト経由レコードを求人紹介を経由せずエントリー(JobEntry)へ直接登録する。
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [registeringEntry, setRegisteringEntry] = useState(false);
+  const handleRegisterEntry = async (entryDate: string) => {
+    if (selectedSiteApplyIds.length === 0) return;
+    setRegisteringEntry(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/to-entry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: selectedSiteApplyIds, entryDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "エントリー登録に失敗しました");
+      const parts = [`${data.created ?? 0}件をエントリーに登録`];
+      if (data.skipped > 0) parts.push(`${data.skipped}件は登録済みのためスキップ`);
+      toast.success(parts.join("、") + "しました");
+      setShowEntryModal(false);
+      setSelectedIds(new Set());
+      onEntryCreated?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
+    } finally {
+      setRegisteringEntry(false);
     }
   };
 
@@ -1200,7 +1662,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
         {/* Select all + bulk delete */}
         {files.length > 0 && (
           <div className="flex items-center gap-3 mt-2">
-            <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
+            <label className="flex items-center gap-1.5 text-[13px] text-gray-600 cursor-pointer">
               <input
                 type="checkbox"
                 checked={allChecked}
@@ -1209,7 +1671,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
               />
               全選択
             </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
+            <label className="flex items-center gap-1.5 text-[13px] text-gray-600 cursor-pointer">
               <input
                 type="checkbox"
                 checked={unexportedAllChecked}
@@ -1223,29 +1685,61 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 <button
                   onClick={handleBulkArchive}
                   disabled={bulkArchiving}
-                  className="text-[12px] text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
+                  className="text-[13px] text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
                 >
                   📦 紹介保留に移動（{selectedIds.size}件）
                 </button>
                 <button
                   onClick={handleBulkDownload}
                   disabled={bulkDownloading}
-                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
+                  className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
                 >
                   {bulkDownloading ? "⬇ ダウンロード中..." : `⬇ 一括DL（${selectedIds.size}件）`}
                 </button>
                 <button
                   onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setOtherSearch(""); setShowOtherDropdown(false); setShowSendModal(true); }}
-                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+                  className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
                 >
                   📤 求人出力へ送信（{selectedIds.size}件）
                 </button>
                 <button
                   onClick={handleMoveToJobs}
                   disabled={movingToJobs}
-                  className="text-[12px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
+                  className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
                 >
                   {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
+                </button>
+                {selectedSiteApplyIds.length > 0 && (
+                  <button
+                    onClick={() => setShowEntryModal(true)}
+                    disabled={registeringEntry}
+                    className="text-[13px] text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50"
+                    title="サイト応募（求職者本人がマイページで応募した求人）を求人紹介を経由せずエントリー管理へ直接登録します"
+                  >
+                    {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedSiteApplyIds.length}件）`}
+                  </button>
+                )}
+                {/* 社名コピー: エントリー管理（EntryBoard.tsx「社名をコピー」）と同一挙動。
+                    区切りは改行、成功時 toast、失敗時は alert(names) にフォールバック。
+                    BM側は会社名列がファイル名なので、抽出は T-146 の extractCompanyNameCandidates を再利用する
+                    （先頭候補＝会社名コア。新規に正規表現は書き起こさない）。 */}
+                <button
+                  onClick={async () => {
+                    const names = filteredFiles
+                      .filter((f) => selectedIds.has(f.id))
+                      .map((f) => extractCompanyNameCandidates(f.fileName)[0] ?? stripFileMetadata(f.fileName))
+                      .join("\n");
+                    try {
+                      await navigator.clipboard.writeText(names);
+                      toast.success(`${selectedIds.size}件の社名をコピーしました`);
+                    } catch {
+                      alert(names);
+                    }
+                  }}
+                  className="text-[13px] text-gray-600 hover:text-gray-800 font-medium"
+                  title="選択した行の会社名を改行区切りでコピーします"
+                >
+                  📋 社名コピー（{selectedIds.size}件）
                 </button>
               </>
             )}
@@ -1261,7 +1755,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="🔍 ファイル名で検索..."
-                className="w-full border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+                className="w-full border border-gray-300 rounded-md pl-3 pr-7 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
@@ -1272,7 +1766,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="border border-gray-300 rounded-md px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
+                className="border border-gray-300 rounded-md px-2 py-1 text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2563EB] focus:border-[#2563EB]"
               />
               {filterDate && (
                 <button onClick={() => setFilterDate("")} className="absolute -right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
@@ -1283,9 +1777,38 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
         {/* Sort: 会社名軸の基準ボタン + 1次/2次チップバー（2段クロスソート, BM/Jobs 共用） */}
         {files.length > 0 && (
-          <div className="flex flex-col gap-1.5 mt-2">
-            <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
-            <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
+          <div className="flex items-start justify-between gap-3 mt-2">
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <SortBasisButtons degreeOf={degreeOf} activateBasis={activateBasis} />
+              <SortChipBar sortKeys={sortKeys} cycleKeyDir={cycleKeyDir} removeKey={removeKey} />
+            </div>
+            {/* 表示順/並び替えの行と評価内訳ブロックの間。狭いときは折り返して縮み、
+                評価内訳ブロック（shrink-0）を潰さない。詳細の開閉とは連動せず常時表示。 */}
+            {ratingSummary.total > 0 && (
+              <div className="min-w-0 shrink">
+                <RatingDonuts
+                  summary={ratingSummary}
+                  cols={ratingCols([
+                    ratingSummary.overall,
+                    ratingSummary.wish,
+                    ratingSummary.pass,
+                    ratingSummary.interested,
+                    ratingSummary.applied,
+                  ])}
+                />
+              </div>
+            )}
+            {/* 右端の位置は固定し、中身が増えたら左へ伸びる。幅は固定値にせず w-fit（RatingBreakdown 側）で中身なり。 */}
+            <div className="shrink-0">
+              <RatingBreakdown
+                key={candidateId}
+                summary={ratingSummary}
+                filtering={Boolean(searchQuery || filterDate)}
+                totalAll={files.length}
+                archivedCount={archivedCount}
+                onClearFilter={() => { setSearchQuery(""); setFilterDate(""); }}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -1299,8 +1822,10 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
 
       {/* Table header */}
       {files.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[11px] font-medium text-gray-500 select-none">
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-[13px] font-medium text-gray-500 select-none">
           <span className="w-4 shrink-0" />
+          <span className="w-[80px] shrink-0">DB名</span>
+          <span className="w-[120px] shrink-0">DBNO</span>
           <span className="flex-1 min-w-0">会社名</span>
           <span onClick={() => activateBasis("wish")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("wish") ? "text-[#2563EB]" : ""}`}>
@@ -1314,6 +1839,17 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("overall") ? "text-[#2563EB]" : ""}`}>
             総合<DirArrows dir={keyOf("overall")?.dir ?? null} /><OrderBadge n={degreeOf("overall")} />
           </span>
+          {/* T-133 FU: 本人回答（CandidateFile.responseStatus）。
+              並び替えは担当/紹介日と同じ2段クロスソート機構に response 基準として組み込む。
+              順序定義は「応募したい順」ボタンと同じ responseRank(want) を流用（compareByBasis 参照）。 */}
+          <span
+            onClick={() => activateBasis("response")}
+            className={`w-[84px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("response") ? "text-[#2563EB]" : ""}`}
+            title="求職者本人がマイページで付けた回答（気になる/応募したい 等）"
+          >
+            本人回答
+            <DirArrows dir={keyOf("response")?.dir ?? null} /><OrderBadge n={degreeOf("response")} />
+          </span>
           <span
             onClick={() => activateBasis("uploader")}
             className={`w-[72px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("uploader") ? "text-[#2563EB]" : ""}`}
@@ -1323,7 +1859,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
           </span>
           <span
             onClick={() => activateBasis("date")}
-            className={`w-[52px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 whitespace-nowrap ${degreeOf("date") ? "text-[#2563EB]" : ""}`}
+            className={`w-[68px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 whitespace-nowrap ${degreeOf("date") ? "text-[#2563EB]" : ""}`}
           >
             紹介日
             <DirArrows dir={keyOf("date")?.dir ?? null} /><OrderBadge n={degreeOf("date")} />
@@ -1352,6 +1888,30 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                   onChange={() => toggleSelect(file.id)}
                   className="w-4 h-3.5 shrink-0 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                 />
+                {(() => {
+                  // DB名: sourceMedia 優先 → externalJobRef 接頭辞判定。判定不能は「—」。
+                  const dbName = resolveBookmarkMedia(file.sourceMedia, file.externalJobRef);
+                  const ref = file.externalJobRef ?? null;
+                  return (
+                    <>
+                      <span className="w-[80px] shrink-0 text-[11px] text-gray-600 truncate" title={dbName ?? undefined}>
+                        {dbName ?? <span className="text-gray-300">—</span>}
+                      </span>
+                      <span className="w-[120px] shrink-0 text-[11px] truncate">
+                        {ref ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(ref); }}
+                            disabled={openingRef === ref}
+                            className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-full text-left disabled:opacity-50 disabled:cursor-wait"
+                            title={`${ref} — クリックで求人ページを開く`}
+                          >{openingRef === ref ? "⏳ " : ""}{ref}</button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </span>
+                    </>
+                  );
+                })()}
                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                   <span className="shrink-0 text-sm">{getFileIcon(file.mimeType)}</span>
                   <button
@@ -1376,6 +1936,16 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                   )}
                 </div>
                 {(() => {
+                  // サイト経由（PDF未保管）は AI評価対象外。空「—」だと「未分析」と紛らわしいので明示する。
+                  const isSiteNoPdf = file.origin === "candidate" && !file.driveFileId;
+                  if (isSiteNoPdf && !file.aiAnalysisComment) {
+                    return (
+                      <span
+                        className="w-[168px] shrink-0 text-center text-[10px] text-gray-400"
+                        title="PDF未保管のためAI評価対象外（サイト経由求人）"
+                      >AI評価対象外</span>
+                    );
+                  }
                   const axis = parse3AxisRatings(file.aiAnalysisComment);
                   const badge = (v: string | undefined) => {
                     if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
@@ -1394,6 +1964,19 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                     </>
                   );
                 })()}
+                {(() => {
+                  // T-133 FU: 求職者本人のマイページ回答（responseStatus）。UNANSWERED/null/不明は「—」。内部値は出さず日本語表示。
+                  const b = file.responseStatus ? RESPONSE_STATUS_BADGE[file.responseStatus] : null;
+                  return (
+                    <span className="w-[84px] shrink-0 text-center">
+                      {b ? (
+                        <span className={`inline-flex items-center justify-center rounded px-1.5 py-0 text-[10px] font-medium ${b.cls}`}>{b.label}</span>
+                      ) : (
+                        <span className="text-[10px] text-gray-300">—</span>
+                      )}
+                    </span>
+                  );
+                })()}
                 {file.origin === "candidate" ? (
                   <span
                     className="w-[72px] shrink-0 text-[11px] text-emerald-600 font-medium truncate"
@@ -1402,7 +1985,7 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                 ) : (
                   <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 )}
-                <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
+                <span className="w-[68px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
                 <span className="w-[100px] shrink-0 flex items-center gap-0.5 justify-end">
                   {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}
                   {file.driveFileId && (
@@ -1455,6 +2038,14 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
       </div>
 
       {/* Send to job tool modal */}
+      {showEntryModal && (
+        <EntryDateModal
+          count={selectedSiteApplyIds.length}
+          onConfirm={handleRegisterEntry}
+          onCancel={() => setShowEntryModal(false)}
+        />
+      )}
+
       {showSendModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseSend}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
@@ -1692,6 +2283,8 @@ function BookmarkSection({ candidateId, jobResponseMap, onCountChange, onSwitchT
                       >
                         <option value="">—</option>
                         <option value="A">A</option>
+                        {/* B+ は総合のみ。本人希望・通過率は A/B/C/D の4段階（T-146） */}
+                        {axis === "overall" && <option value="B+">B+</option>}
                         <option value="B">B</option>
                         <option value="C">C</option>
                         <option value="D">D</option>
@@ -2038,7 +2631,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
     }
   };
 
-  const ratingOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+  const ratingOrder = RANK_ORDER;
   const filteredFiles = (() => {
     let result = files.filter((f) => {
       if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -2052,8 +2645,8 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
           const axisA = parse3AxisRatings(a.aiAnalysisComment);
           const axisB = parse3AxisRatings(b.aiAnalysisComment);
           const key = sortField;
-          const va = axisA ? (ratingOrder[axisA[key]] ?? 4) : 4;
-          const vb = axisB ? (ratingOrder[axisB[key]] ?? 4) : 4;
+          const va = axisA ? (ratingOrder[axisA[key]] ?? RANK_UNRANKED) : RANK_UNRANKED;
+          const vb = axisB ? (ratingOrder[axisB[key]] ?? RANK_UNRANKED) : RANK_UNRANKED;
           return (va - vb) * dir;
         }
         if (sortField === "archivedBy") {
@@ -2413,6 +3006,10 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   // Bookmark ratings for cross-referencing with jobs
   const [bookmarkRatings, setBookmarkRatings] = useState<Map<string, { wish: string; pass: string; overall: string }>>(new Map());
 
+  // 修正2: 求人紹介一覧の並び替えでも本人回答を優先するため、ブックマーク側の responseStatus を
+  // 会社名キー（bookmarkRatings と同一の正規化）で引けるようにする。取得は fetchBookmarkRatings に相乗り（追加リクエストなし）。
+  const [bookmarkResponses, setBookmarkResponses] = useState<Map<string, string>>(new Map());
+
   // T-128 Phase2-1: エントリー化時に jobDb/externalJobNo を正値化するためのブックマーク由来ソース情報。
   //   key = 会社名の正規化キー（fetchBookmarkRatings と同じルールを使う。厳密1:1にならないケースはあるが
   //   job-platform 経由は現状100% HITO-Link のため、同一会社複数求人は同じ jobDb になる）。
@@ -2442,6 +3039,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       const map = new Map<string, { wish: string; pass: string; overall: string }>();
       // T-128 Phase2-1: sourceType/externalJobRef/sourceMedia も同じ正規化キーで別マップに保持。
       const srcMap = new Map<string, { sourceType: string | null; externalJobRef: string | null; sourceMedia: string | null }>();
+      // 修正2: 本人回答（responseStatus）の会社名別マップ。意向として意味のある値だけ入れる
+      //（UNANSWERED 等で実回答を上書きしない＝未登録なら従来値へフォールバックできる）。
+      const respMap = new Map<string, string>();
       for (const f of data.files || []) {
         const key = normalize(
           (f.fileName as string)
@@ -2453,6 +3053,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         );
         const axis = parse3AxisRatings(f.aiAnalysisComment);
         if (key && axis) map.set(key, axis);
+        if (key && normalizeResponseIntent(f.responseStatus as string | null)) {
+          respMap.set(key, f.responseStatus as string);
+        }
         // sourceType が来ている行だけソースマップに登録（job-platform 由来を優先し、上書きしない）。
         if (key && f.sourceType) {
           const prev = srcMap.get(key);
@@ -2466,6 +3069,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         }
       }
       setBookmarkRatings(map);
+      setBookmarkResponses(respMap);
       setBookmarkSourceMap(srcMap);
     } catch { /* silent */ }
   }, [candidateId]);
@@ -2477,6 +3081,16 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
     }
     return null;
   }, [bookmarkRatings]);
+
+  // 修正2: 会社名からブックマーク側の本人回答（responseStatus）を引く。照合規則は findBookmarkRating と同一。
+  const findBookmarkResponse = useCallback((companyName: string): string | null => {
+    const cn = normalize(companyName.replace(/株式会社|有限会社|合同会社/g, "").trim());
+    if (!cn) return null;
+    for (const [key, resp] of bookmarkResponses) {
+      if (key.includes(cn) || cn.includes(key)) return resp;
+    }
+    return null;
+  }, [bookmarkResponses]);
 
   // T-128 Phase2-1: 会社名からブックマークの sourceType/externalJobRef/sourceMedia を引く。
   //   fetchBookmarkRatings と同一の正規化ルール（法人格除去 + 部分一致）。job-platform 由来が優先。
@@ -2793,7 +3407,8 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   const jobAccessors: SortAccessors<Job> = {
     getCompanyName: (j) => j.company_name,
     getRank: (j, axis) => findBookmarkRating(j.company_name)?.[axis] ?? null,
-    getResponse: (j) => j.candidate_response,
+    // 修正2: ブックマーク側の本人回答を優先し、無ければ従来値（行の candidate_response）へフォールバック。
+    getResponse: (j) => resolveResponseForSort(findBookmarkResponse(j.company_name), j.candidate_response),
     getDate: (j) => j.created_at,
   };
 
@@ -2873,7 +3488,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onEntryCreated={fetchEntries} />
       )}
 
       {/* ===== 紹介保留サブタブ ===== */}

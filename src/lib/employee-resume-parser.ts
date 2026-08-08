@@ -5,6 +5,8 @@
  * PDF/Word/画像をネイティブ理解可能（OCR/抽出ライブラリ不要）。
  */
 
+import { recordGeminiUsage } from "@/lib/ai-usage";
+
 const GEMINI_MODEL = "gemini-3-flash-preview";
 
 export type EmployeeResumeResult = {
@@ -115,6 +117,16 @@ export async function parseEmployeeResume(
   }
 
   const data = await response.json();
+
+  // T-135: 費用記録（fire-and-forget・空レスポンスで throw する前に）
+  void recordGeminiUsage({
+    system: "portal",
+    endpoint: "employee-resume-parse",
+    model: GEMINI_MODEL,
+    usage: data?.usageMetadata,
+    meta: { fileCount: files.length },
+  });
+
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText || typeof rawText !== "string") {
     throw new Error("Gemini レスポンスが空です");

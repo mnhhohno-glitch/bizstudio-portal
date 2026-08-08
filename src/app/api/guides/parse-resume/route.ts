@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordGeminiUsage } from "@/lib/ai-usage";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -111,6 +112,15 @@ export async function POST(request: Request) {
     }
 
     const data = await response.json();
+
+    // T-135: 費用記録（fire-and-forget）
+    void recordGeminiUsage({
+      system: "portal",
+      endpoint: "guide-resume-parse",
+      model: "gemini-3-flash-preview",
+      usage: data?.usageMetadata,
+    });
+
     const parsedResume = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!parsedResume) {
