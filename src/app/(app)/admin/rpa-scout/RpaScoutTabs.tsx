@@ -8,6 +8,7 @@ const TABS = [
   { href: "/admin/rpa-scout/calendar", label: "配信計画カレンダー" },
   { href: "/admin/rpa-scout/patterns", label: "パターン管理" },
   { href: "/admin/rpa-scout/logs", label: "変更ログ" },
+  { href: "/admin/rpa-scout/dashboard", label: "ダッシュボード" },
 ];
 
 export default function RpaScoutTabs() {
