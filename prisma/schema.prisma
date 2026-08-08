@@ -2948,3 +2948,120 @@ model TrainingWorkAnswer {
   @@index([employeeId])
   @@map("training_work_answers")
 }
+
+// ============================================================
+// RPAスカウト検索条件管理（Phase 1）
+// マイナビスカウトRPA 1〜6号機の検索条件・変更ログ・配信計画を管理する
+// ============================================================
+
+// RPA号機マスタ
+model RpaScoutMachine {
+  id             String   @id @default(cuid())
+  machineNo      Int      @unique // 1〜6
+  accountName    String // アカウント名（例: 藤本 なつみ）
+  employeeCode   String // 社員コード（例: BS1000010）
+  mynaviSaveName String // マイナビ上の保存名称（例: RPA1(藤本なつみ)）
+  isActive       Boolean  @default(true) // false=停止中（操作は可能）
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("rpa_scout_machines")
+}
+
+// 職種マスタ（job-platform 0004_masters_seed.sql の master_job_categories を移植。値は原文のまま）
+model RpaScoutJobCategory {
+  id        Int    @id @default(autoincrement())
+  large     String // 大分類名
+  middle    String // 中分類名
+  small     String // 小分類名
+  sortOrder Int // 表示順（0004のINSERT順）
+
+  @@unique([large, middle, small])
+  @@index([large])
+  @@index([middle])
+  @@map("rpa_scout_job_categories")
+}
+
+// 検索条件パターン
+model RpaScoutPattern {
+  id                  String   @id @default(cuid())
+  targetMachineNo     Int? // 1〜6。null=全号機対象/旧体系
+  name                String // パターン名（号機プレフィックスなし）
+  sendStatus          String? // "UNSENT"(未送信) | "SENT"(送信済)
+  registDays          Int?
+  registDirection     String? // "WITHIN"(以内) | "AFTER"(以降)
+  lastLoginDays       Int? // デフォルト1
+  areaType            String? // "EAST" | "WEST" | "NATIONWIDE" | "PREFECTURES"
+  prefectures         Json? // areaType=PREFECTURES時の県名配列
+  education           String? // "NONE" | "高卒" | "専門卒" | "短大卒" | "高専卒" | "大卒" | "大学院卒"
+  gradYearFrom        Int? // 西暦4桁
+  gradYearTo          Int?
+  companyCount        Int? // 1 | 2 | 3
+  jobCategories       Json? // 小分類名配列（最大3件・RpaScoutJobCategory.small と一致）
+  jobCategoryPriority String? // "FIRST"(職種第1) | "SECOND"(職種第2)
+  workLocations       Json? // 県名配列。新規作成時デフォルト ["首都圏","愛知","大阪","兵庫","京都"]
+  workLocationPriority String? // "NONE"(エリア不順) | "SECOND"(エリア第2)
+  transferTiming      String? // "すぐにでも" | "3カ月以内" | "半年以内" | "1年以内" | "未定"
+  rawConditions       Json? // 移行データの原文15列（isMigrated=true時のみ）
+  isActive            Boolean  @default(true) // false=論理削除
+  isMigrated          Boolean  @default(false) // Excel移行由来
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([targetMachineNo])
+  @@map("rpa_scout_patterns")
+}
+
+// 件名テンプレート
+model RpaScoutSubjectTemplate {
+  id        String   @id @default(cuid())
+  name      String // テンプレ名（例: 【未送信用】口コミ4.9オーダーメイド）
+  subject   String // 件名
+  body      String?  @db.Text // 本文
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("rpa_scout_subject_templates")
+}
+
+// 検索条件の変更ログ（実績）。「現在の設定」は号機ごとの最新レコードで表現する
+model RpaScoutLog {
+  id                String   @id @default(cuid())
+  machineNo         Int // 1〜6
+  patternId         String? // 移行データはnull
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  searchCount       Int? // 検索件数。停止記録はnull
+  recordedAt        DateTime // 記録日時（JST値をそのまま保持。UTC変換しない）
+  recordedByUserId  String?
+  createdAt         DateTime @default(now())
+
+  @@index([machineNo, recordedAt])
+  @@index([recordedAt])
+  @@map("rpa_scout_logs")
+}
+
+// 配信計画（カレンダー）。実績ログとは独立で自動連動しない
+model RpaScoutPlan {
+  id                String    @id @default(cuid())
+  planDate          DateTime // 計画日（JST値をそのまま保持・日付のみ意味を持つ）
+  timeSlot          String // "AM" | "PM" | "EVENING"（表示名: AM / PM / 夕方）
+  machineNo         Int // 1〜6
+  patternId         String?
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  memo              String?
+  reflectedAt       DateTime? // 土日計画のマイナビ反映日時
+  reflectedByUserId String? // 反映チェックを押した人
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([planDate])
+  @@index([machineNo, planDate])
+  @@map("rpa_scout_plans")
+}

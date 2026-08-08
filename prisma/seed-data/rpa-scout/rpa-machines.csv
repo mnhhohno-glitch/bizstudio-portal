@@ -1,0 +1,7 @@
+machine_no,account_name,employee_code,mynavi_save_name,is_active
+1,藤本 なつみ,BS1000010,RPA1(藤本なつみ),true
+2,岡田 かなこ,BS1000011,RPA2(岡田かなこ),true
+3,上原 ちはる,BS1000012,RPA3(上原ちはる),true
+4,上原 千遥,BS1000013,RPA4(上原千遥),true
+5,岡田 愛子,BS1000014,RPA5(岡田愛子),false
+6,安藤 嘉富,BS1000015,RPA6(安藤嘉富),false

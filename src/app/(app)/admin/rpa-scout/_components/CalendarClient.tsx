@@ -1,0 +1,307 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Toaster, toast } from "sonner";
+import { PageTitle } from "@/components/ui/PageTitle";
+import { addDaysYmd, mondayOfWeek, nowJstYmd, ymdWeekday } from "@/lib/rpa-scout/jst";
+import { timeSlotLabel, TIME_SLOT_ORDER, MACHINE_NOS } from "@/lib/rpa-scout/constants";
+import {
+  fmtJstDate,
+  fmtJstDateTime,
+  type RpaPattern,
+  type RpaPlan,
+  type RpaTemplate,
+} from "./types";
+import PlanModal from "./PlanModal";
+
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+const SLOT_BADGE: Record<string, string> = {
+  AM: "bg-[#DBEAFE] text-[#1D4ED8]",
+  PM: "bg-[#DCFCE7] text-[#166534]",
+  EVENING: "bg-[#EDE9FE] text-[#6D28D9]",
+};
+
+function isWeekend(ymd: string): boolean {
+  const wd = ymdWeekday(ymd);
+  return wd === 0 || wd === 6;
+}
+
+export default function CalendarClient() {
+  const today = nowJstYmd();
+  const [viewMode, setViewMode] = useState<"week" | "day">("week");
+  const [anchor, setAnchor] = useState(today); // 表示基準日（JST ymd）
+  const [plans, setPlans] = useState<RpaPlan[]>([]);
+  const [pending, setPending] = useState<RpaPlan[]>([]);
+  const [patterns, setPatterns] = useState<RpaPattern[]>([]);
+  const [templates, setTemplates] = useState<RpaTemplate[]>([]);
+  const [modal, setModal] = useState<
+    | { mode: "create"; date: string; machineNo: number }
+    | { mode: "edit"; plan: RpaPlan }
+    | null
+  >(null);
+
+  // 表示範囲（週表示は月曜始まり。週の境界判定もJSTのymd文字列演算で行う＝罠#17対応）
+  const days = useMemo(() => {
+    if (viewMode === "day") return [anchor];
+    const monday = mondayOfWeek(anchor);
+    return Array.from({ length: 7 }, (_, i) => addDaysYmd(monday, i));
+  }, [viewMode, anchor]);
+
+  const loadPlans = useCallback(async () => {
+    const res = await fetch(`/api/rpa-scout/plans?from=${days[0]}&to=${days[days.length - 1]}`);
+    if (res.ok) setPlans((await res.json()).plans);
+  }, [days]);
+
+  const loadPending = useCallback(async () => {
+    const from = addDaysYmd(nowJstYmd(), -14);
+    const to = addDaysYmd(nowJstYmd(), 14);
+    const res = await fetch(`/api/rpa-scout/plans?from=${from}&to=${to}&pendingWeekend=1`);
+    if (res.ok) setPending((await res.json()).plans);
+  }, []);
+
+  useEffect(() => {
+    loadPlans();
+  }, [loadPlans]);
+
+  useEffect(() => {
+    loadPending();
+    (async () => {
+      const [pRes, tRes] = await Promise.all([
+        fetch("/api/rpa-scout/patterns"),
+        fetch("/api/rpa-scout/templates"),
+      ]);
+      if (pRes.ok) setPatterns((await pRes.json()).patterns);
+      if (tRes.ok) setTemplates((await tRes.json()).templates);
+    })();
+  }, [loadPending]);
+
+  const reload = () => {
+    loadPlans();
+    loadPending();
+  };
+
+  const move = (dir: -1 | 1) => {
+    setAnchor(addDaysYmd(anchor, viewMode === "week" ? dir * 7 : dir));
+  };
+
+  const toggleReflected = async (plan: RpaPlan, reflected: boolean) => {
+    const res = await fetch(`/api/rpa-scout/plans/${plan.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reflected }),
+    });
+    if (res.ok) {
+      toast.success(reflected ? "反映済みにしました" : "反映チェックを外しました");
+      reload();
+    } else {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "更新に失敗しました");
+    }
+  };
+
+  const plansFor = (date: string, machineNo: number) =>
+    plans
+      .filter((p) => fmtJstDate(p.planDate) === date && p.machineNo === machineNo)
+      .sort((a, b) => (TIME_SLOT_ORDER[a.timeSlot] ?? 9) - (TIME_SLOT_ORDER[b.timeSlot] ?? 9));
+
+  return (
+    <div>
+      <Toaster position="top-center" richColors />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <PageTitle>配信計画カレンダー</PageTitle>
+        <div className="flex items-center gap-2 text-[13px]">
+          <button
+            onClick={() => move(-1)}
+            className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 hover:bg-[#F9FAFB]"
+          >
+            ← {viewMode === "week" ? "前週" : "前日"}
+          </button>
+          <button
+            onClick={() => setAnchor(today)}
+            className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 hover:bg-[#F9FAFB]"
+          >
+            今日
+          </button>
+          <button
+            onClick={() => move(1)}
+            className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 hover:bg-[#F9FAFB]"
+          >
+            {viewMode === "week" ? "翌週" : "翌日"} →
+          </button>
+          <div className="ml-2 flex overflow-hidden rounded-[6px] border border-[#D1D5DB]">
+            <button
+              onClick={() => setViewMode("week")}
+              className={
+                viewMode === "week"
+                  ? "bg-[#2563EB] px-3 py-1.5 font-medium text-white"
+                  : "px-3 py-1.5 hover:bg-[#F9FAFB]"
+              }
+            >
+              週
+            </button>
+            <button
+              onClick={() => setViewMode("day")}
+              className={
+                viewMode === "day"
+                  ? "bg-[#2563EB] px-3 py-1.5 font-medium text-white"
+                  : "px-3 py-1.5 hover:bg-[#F9FAFB]"
+              }
+            >
+              日
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 土日 反映待ちバナー */}
+      {pending.length > 0 && (
+        <div className="mb-4 rounded-[8px] border border-[#FCD34D] bg-[#FFFBEB] p-3">
+          <div className="mb-2 text-[13px] font-bold text-[#92400E]">
+            ⚠ 土日 反映待ち（{pending.length}件）
+          </div>
+          <div className="space-y-1">
+            {pending.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center gap-2 text-[13px] text-[#374151]"
+              >
+                <span className="font-medium">
+                  {fmtJstDate(p.planDate)}（{WEEKDAY_LABELS[ymdWeekday(fmtJstDate(p.planDate))]}）
+                </span>
+                <span>{p.machineNo}号機</span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${SLOT_BADGE[p.timeSlot] ?? ""}`}
+                >
+                  {timeSlotLabel(p.timeSlot)}
+                </span>
+                <span className="break-all">{p.patternName}</span>
+                <button
+                  onClick={() => toggleReflected(p, true)}
+                  className="rounded border border-[#D97706] px-2 py-0.5 text-[12px] font-medium text-[#B45309] hover:bg-[#FEF3C7]"
+                >
+                  マイナビ反映済みにする
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-[8px] border border-[#E5E7EB] bg-white">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr>
+              <th className="w-20 border-b border-r border-[#E5E7EB] bg-white px-2 py-2 text-left text-[12px] font-semibold text-[#374151]/80">
+                号機
+              </th>
+              {days.map((d) => {
+                const weekend = isWeekend(d);
+                const isToday = d === today;
+                return (
+                  <th
+                    key={d}
+                    className={[
+                      "border-b border-r border-[#E5E7EB] px-2 py-2 text-center text-[12px] font-semibold",
+                      weekend ? "bg-[#FFF7ED]" : "bg-white",
+                      isToday ? "text-[#2563EB]" : "text-[#374151]/80",
+                    ].join(" ")}
+                  >
+                    {d.slice(5).replace("-", "/")}（{WEEKDAY_LABELS[ymdWeekday(d)]}）
+                    {isToday && <span className="ml-1 text-[10px]">今日</span>}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {MACHINE_NOS.map((no) => (
+              <tr key={no}>
+                <td className="border-b border-r border-[#E5E7EB] bg-[#F9FAFB] px-2 py-2 align-top font-medium text-[#374151]">
+                  {no}号機
+                </td>
+                {days.map((d) => {
+                  const weekend = isWeekend(d);
+                  const cellPlans = plansFor(d, no);
+                  return (
+                    <td
+                      key={d}
+                      onClick={() => setModal({ mode: "create", date: d, machineNo: no })}
+                      className={[
+                        "min-w-[130px] cursor-pointer border-b border-r border-[#E5E7EB] p-1 align-top",
+                        weekend ? "bg-[#FFF7ED] hover:bg-[#FFEDD5]" : "hover:bg-[#F9FAFB]",
+                      ].join(" ")}
+                    >
+                      <div className="min-h-[48px] space-y-1">
+                        {cellPlans.map((p) => (
+                          <div
+                            key={p.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setModal({ mode: "edit", plan: p });
+                            }}
+                            className="rounded border border-[#E5E7EB] bg-white p-1 shadow-sm hover:border-[#93C5FD]"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span
+                                className={`rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`}
+                              >
+                                {timeSlotLabel(p.timeSlot)}
+                              </span>
+                              {weekend && p.reflectedAt && (
+                                <span
+                                  title={`${p.reflectedByName ?? "?"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
+                                  className="rounded bg-[#DCFCE7] px-1 text-[10px] font-medium text-[#166534]"
+                                >
+                                  ✓反映済
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11px] font-medium text-[#374151]">
+                              {p.patternName}
+                            </div>
+                            <div className="truncate text-[10px] text-[#6B7280]">
+                              {p.subjectName}
+                            </div>
+                            {weekend && (
+                              <label
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-0.5 flex items-center gap-1 text-[10px] text-[#6B7280]"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={!!p.reflectedAt}
+                                  onChange={(e) => toggleReflected(p, e.target.checked)}
+                                />
+                                マイナビ反映済み
+                              </label>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <PlanModal
+          {...(modal.mode === "create"
+            ? { plan: null, presetDate: modal.date, presetMachineNo: modal.machineNo }
+            : { plan: modal.plan, presetDate: null, presetMachineNo: null })}
+          patterns={patterns}
+          templates={templates}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            setModal(null);
+            reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
