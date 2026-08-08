@@ -12,6 +12,7 @@ import EndNoticeModal from "./EndNoticeModal";
 import EntryRouteSwitchModal from "./EntryRouteSwitchModal";
 import EntryEditModal from "./EntryEditModal";
 import InterviewGuideCopyModal from "./InterviewGuideCopyModal";
+import CandidateGuideMessageModal from "./CandidateGuideMessageModal";
 import TaskSyncConfirmDialog, { type TaskSyncSlot, type TaskSyncAction } from "./TaskSyncConfirmDialog";
 import { FilterShell, FilterTopRow, FilterGroup, FilterField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -282,6 +283,8 @@ export default function EntryBoard() {
   const [showEndNotice, setShowEndNotice] = useState(false);
   const [showBulkEndFlag, setShowBulkEndFlag] = useState(false);
   const [showInterviewGuideCopy, setShowInterviewGuideCopy] = useState(false);
+  // 求職者向け「選考状況＋求人ページURL」案内文の作成モーダル（同一求職者のみ）
+  const [showGuideMessage, setShowGuideMessage] = useState(false);
 
   // URL edit modal
   const [urlModalEntryId, setUrlModalEntryId] = useState<string | null>(null);
@@ -1222,6 +1225,17 @@ export default function EntryBoard() {
               📋 面接案内コピー
             </button>
             <button
+              onClick={() => setShowGuideMessage(true)}
+              disabled={!isSameCandidate}
+              title={!isSameCandidate ? "1人の求職者を選んでください" : "✓した選考の状況と求人ページURLをまとめた案内文を作成"}
+              className="border border-emerald-400 text-emerald-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ✉️ 案内文を作成
+            </button>
+            {!isSameCandidate && (
+              <span className="text-[11px] text-gray-500">案内文の作成は1人の求職者を選んでください</span>
+            )}
+            <button
               onClick={() => handleBulkArchive(selectedEntries)}
               className="border border-red-400 text-red-600 rounded-md px-3 py-1 text-sm font-medium hover:bg-red-50"
             >
@@ -1380,6 +1394,14 @@ export default function EntryBoard() {
         <InterviewGuideCopyModal
           selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
           onClose={() => setShowInterviewGuideCopy(false)}
+        />
+      )}
+
+      {/* 求職者向け案内文（選考状況＋求人ページURL） */}
+      {showGuideMessage && (
+        <CandidateGuideMessageModal
+          selectedEntries={entries.filter((e) => selectedIds.has(e.id))}
+          onClose={() => setShowGuideMessage(false)}
         />
       )}
 
