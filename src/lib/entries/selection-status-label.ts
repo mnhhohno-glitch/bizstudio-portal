@@ -50,14 +50,16 @@ const FINAL_INTERVIEW_DETAILS: ReadonlySet<string> = new Set([
 const DETAIL_LABELS: Record<string, string> = {
   適性検査受講中: "適性検査受検中",
   適性検査受講済: "適性検査受検済",
-  一次日程調整中: "一次面接の日程調整中",
-  一次面接実施前: "一次面接前",
+  // 面接段階は日時行（buildInterviewLine）を併記するため、括弧側は段階名だけに留める。
+  // 「一次面接前」＋「一次面接：8月17日…」だと重複して冗長になるため。
+  一次日程調整中: "一次面接（日程調整中）",
+  一次面接実施前: "一次面接",
   一次面接選考中: "一次面接の結果待ち",
-  二次日程調整中: "二次面接の日程調整中",
-  二次面接実施前: "二次面接前",
+  二次日程調整中: "二次面接（日程調整中）",
+  二次面接実施前: "二次面接",
   二次面接選考中: "二次面接の結果待ち",
-  最終日程調整中: "最終面接の日程調整中",
-  最終面接実施前: "最終面接前",
+  最終日程調整中: "最終面接（日程調整中）",
+  最終面接実施前: "最終面接",
   最終面接選考中: "最終面接の結果待ち",
   // 以下は「何も付けない」ことを明示（マップに無い値と同じ扱いだが、意図的な無表示であることを残す）
   検討中: "",
@@ -109,3 +111,114 @@ export function selectionDetailLabel(
   if (!entryFlagDetail) return "";
   return DETAIL_LABELS[entryFlagDetail] ?? "";
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 面接日時の案内行
+//
+// 調査根拠: docs/reports/guide-message-interview-schedule-survey.md
+//   - 面接は一次・二次・最終の3段階のみ（三次面接は存在しない。§2）
+//   - 日付=DateTime? / 時刻=String? / 実施形式=String? の別カラム（§2）
+//   - 実施形式の実値は「オンライン」95件・「対面」52件のみ。自由文字列なので
+//     ホワイトリスト方式にし、未知値は何も出さない（生値を求職者に見せない・§4-2）
+//   - 時刻は "HH:mm:ss" と "HH:mm" が混在する。正規化しないと「14:00:00」と出る（§4-3）
+//   - 日付は必ず JST 変換。toISOString は禁止（罠 #17・§4-4）
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 案内対象の面接スロット。 */
+export type InterviewSlot = "first" | "second" | "final";
+
+const SLOT_LABELS: Record<InterviewSlot, string> = {
+  first: "一次面接",
+  second: "二次面接",
+  final: "最終面接",
+};
+
+/**
+ * entry_flag_detail から「いま案内すべき面接」を決める。
+ * 予定が入っている面接をすべて出すのではなく、選考段階に対応する1つだけを出す。
+ * 対応する段階でなければ null（＝日時行を出さない）。
+ */
+const DETAIL_TO_SLOT: Record<string, InterviewSlot> = {
+  一次日程調整中: "first",
+  一次面接実施前: "first",
+  一次面接選考中: "first",
+  二次日程調整中: "second",
+  二次面接実施前: "second",
+  二次面接選考中: "second",
+  最終日程調整中: "final",
+  最終面接実施前: "final",
+  最終面接選考中: "final",
+};
+
+export function interviewSlotForDetail(entryFlagDetail: string | null): InterviewSlot | null {
+  if (!entryFlagDetail) return null;
+  return DETAIL_TO_SLOT[entryFlagDetail] ?? null;
+}
+
+/**
+ * 実施形式のホワイトリスト。DB は自由文字列なので、ここに無い値は何も出力しない。
+ * 実データは「オンライン」「対面」の2値のみ（「電話」は選択肢にあるが実データ0件）。
+ */
+const INTERVIEW_TOOL_LABELS: Record<string, string> = {
+  オンライン: "オンライン",
+  対面: "対面",
+  電話: "電話",
+};
+
+const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/**
+ * JST 基準で「2026年8月17日（月）」を返す。
+ * 曜日は JST の暦日付から Date.UTC 経由で決定的に求める（Intl のロケール差異に依存しない）。
+ */
+function formatJstDateWithWeekday(date: Date): string | null {
+  // 罠 #17: toISOString は本番UTC環境で1日ずれるため禁止。必ず Asia/Tokyo で暦日付を取る。
+  const ymd = date.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD"
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const weekday = WEEKDAY_JA[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
+  return `${y}年${mo}月${d}日（${weekday}）`;
+}
+
+/** "10:00:00" / "13:00" のゆれを "HH:mm" に正規化。取れなければ null。 */
+function normalizeTime(time: string | null): string | null {
+  if (!time) return null;
+  const m = time.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  if (!Number.isFinite(hh) || hh > 23) return null;
+  return `${String(hh).padStart(2, "0")}:${m[2]}`;
+}
+
+export type InterviewSchedule = {
+  date: Date | string | null;
+  time: string | null;
+  tool: string | null;
+};
+
+/**
+ * 「一次面接：2026年8月17日（月）14:00　対面」の1行を組み立てる。
+ *
+ *   - 日付が無ければ null（日程調整中で未定のケース。行ごと出さない）
+ *   - 時刻が無ければ日付で終える
+ *   - 実施形式はホワイトリストにある場合のみ、全角スペース1つ空けて付ける
+ */
+export function buildInterviewLine(slot: InterviewSlot, schedule: InterviewSchedule): string | null {
+  if (!schedule.date) return null;
+  const date = schedule.date instanceof Date ? schedule.date : new Date(schedule.date);
+  if (Number.isNaN(date.getTime())) return null;
+  const ymd = formatJstDateWithWeekday(date);
+  if (!ymd) return null;
+
+  const hhmm = normalizeTime(schedule.time);
+  const tool = schedule.tool ? INTERVIEW_TOOL_LABELS[schedule.tool] : undefined;
+
+  let line = `${SLOT_LABELS[slot]}：${ymd}`;
+  if (hhmm) line += hhmm;
+  if (tool) line += `　${tool}`;
+  return line;
+}
+

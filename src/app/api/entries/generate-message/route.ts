@@ -7,6 +7,8 @@ import {
   NOTIFIED_REJECTION_PERSON_FLAGS,
   classifySelectionSection,
   selectionDetailLabel,
+  interviewSlotForDetail,
+  buildInterviewLine,
   type SelectionSection,
 } from "@/lib/entries/selection-status-label";
 
@@ -55,7 +57,35 @@ type EntryRow = {
   personFlag: string | null;
   externalJobId: number;
   externalJobRef: string | null;
+  firstInterviewDate: Date | null;
+  firstInterviewTime: string | null;
+  firstInterviewTool: string | null;
+  secondInterviewDate: Date | null;
+  secondInterviewTime: string | null;
+  secondInterviewTool: string | null;
+  finalInterviewDate: Date | null;
+  finalInterviewTime: string | null;
+  finalInterviewTool: string | null;
 };
+
+/**
+ * 「いま案内すべき面接」の1行を返す。出せない場合は null。
+ *   - 選考終了 / 入社済 セクションでは出さない（補足文言を出さない既存判断と揃える）
+ *   - 出す面接は entry_flag_detail が示す段階のものだけ（予定が入っている面接を全部出さない）
+ *   - 該当面接の日付が空なら出さない（日程調整中で未定のケース）
+ */
+function interviewLineFor(entry: EntryRow, section: SelectionSection): string | null {
+  if (section === "選考終了" || section === "入社済") return null;
+  const slot = interviewSlotForDetail(entry.entryFlagDetail);
+  if (!slot) return null;
+  const schedule =
+    slot === "first"
+      ? { date: entry.firstInterviewDate, time: entry.firstInterviewTime, tool: entry.firstInterviewTool }
+      : slot === "second"
+        ? { date: entry.secondInterviewDate, time: entry.secondInterviewTime, tool: entry.secondInterviewTool }
+        : { date: entry.finalInterviewDate, time: entry.finalInterviewTime, tool: entry.finalInterviewTool };
+  return buildInterviewLine(slot, schedule);
+}
 
 /**
  * エントリーに対応する台帳行（CandidateFile category=BOOKMARK）を1行に決める。
@@ -88,7 +118,7 @@ function buildJobUrl(siteBase: string, token: string, row: LedgerRow | null): st
   return null;
 }
 
-type CompanyBlock = { companyName: string; detail: string; urls: string[] };
+type CompanyBlock = { companyName: string; detail: string; interviewLines: string[]; urls: string[] };
 
 /** 案内文の全文を組み立てる。同一会社は1行にまとめ、URLだけを複数行並べる。 */
 function buildMessage(
@@ -112,6 +142,7 @@ function buildMessage(
     parts.push("");
     for (const b of blocks) {
       parts.push(b.detail ? `・${b.companyName}（${b.detail}）` : `・${b.companyName}`);
+      for (const l of b.interviewLines) parts.push(l); // 面接日時は会社名の次・URLより前
       for (const u of b.urls) parts.push(u);
       parts.push("");
     }
@@ -165,6 +196,15 @@ export async function POST(request: Request) {
     personFlag: true,
     externalJobId: true,
     externalJobRef: true,
+    firstInterviewDate: true,
+    firstInterviewTime: true,
+    firstInterviewTool: true,
+    secondInterviewDate: true,
+    secondInterviewTime: true,
+    secondInterviewTool: true,
+    finalInterviewDate: true,
+    finalInterviewTime: true,
+    finalInterviewTool: true,
   } as const;
 
   const selected: EntryRow[] = entryIds.length
@@ -281,7 +321,7 @@ export async function POST(request: Request) {
     const key = `${section} ${entry.companyName}`;
     let block = blockIndex.get(key);
     if (!block) {
-      block = { companyName: entry.companyName, detail: "", urls: [] };
+      block = { companyName: entry.companyName, detail: "", interviewLines: [], urls: [] };
       blockIndex.set(key, block);
       const list = bySection.get(section);
       if (list) list.push(block);
@@ -289,6 +329,10 @@ export async function POST(request: Request) {
     }
     // 補足文言は同一会社の最初の非空を採用（別求人で状況が違う場合の重複表示を避ける）。
     if (!block.detail) block.detail = selectionDetailLabel(entry.entryFlagDetail, section);
+    const interviewLine = interviewLineFor(entry, section);
+    if (interviewLine && !block.interviewLines.includes(interviewLine)) {
+      block.interviewLines.push(interviewLine);
+    }
     if (url && !block.urls.includes(url)) block.urls.push(url);
   }
 
