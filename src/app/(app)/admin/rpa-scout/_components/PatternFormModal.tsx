@@ -17,6 +17,18 @@ import type { JobCategoryRow, RpaPattern } from "./types";
 import AreaSelector from "./AreaSelector";
 import JobCategorySelector from "./JobCategorySelector";
 
+// 検索条件の種別ごとの区切り。マイナビの検索条件画面と同じく先頭に帯を置く（帯は横幅いっぱい）
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="border-y border-[#BFDBFE] bg-[#EFF6FF] px-5 py-1.5 text-[13px] font-bold text-[#1E3A8A]">
+        {title}
+      </div>
+      <div className="space-y-4 px-5 py-4">{children}</div>
+    </section>
+  );
+}
+
 // パターン新規作成／編集フォーム。
 // 画面上部に「N号機：生成名」のリアルタイムプレビューを固定表示（保存時と同一の生成関数を使用）
 export default function PatternFormModal({
@@ -212,7 +224,8 @@ export default function PatternFormModal({
           )}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto pb-2">
+          <Section title="基本設定">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={label}>対象号機</label>
@@ -246,7 +259,9 @@ export default function PatternFormModal({
               </div>
             </div>
           </div>
+          </Section>
 
+          <Section title="登録・ログイン">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={label}>登録日</label>
@@ -301,7 +316,9 @@ export default function PatternFormModal({
               <div className="mt-0.5 text-[11px] text-[#9CA3AF]">デフォルト1（名前に含めない）</div>
             </div>
           </div>
+          </Section>
 
+          <Section title="居住地">
           <div>
             <label className={label}>エリア</label>
             <AreaSelector
@@ -313,8 +330,10 @@ export default function PatternFormModal({
               }}
             />
           </div>
+          </Section>
 
-          <div className="grid grid-cols-3 gap-4">
+          <Section title="最終学歴">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={label}>学歴</label>
               <select
@@ -350,20 +369,70 @@ export default function PatternFormModal({
                 />
               </div>
             </div>
-            <div>
-              <label className={label}>経験社数</label>
-              <select
-                value={companyCount}
-                onChange={(e) => setCompanyCount(e.target.value)}
-                className={`${inputCls} w-full`}
-              >
-                <option value="">未選択</option>
-                {COMPANY_COUNT_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    〜{n}社
-                  </option>
+          </div>
+          </Section>
+
+          <Section title="経験">
+          <div>
+            <label className={label}>経験社数</label>
+            <select
+              value={companyCount}
+              onChange={(e) => setCompanyCount(e.target.value)}
+              className={`${inputCls} w-48`}
+            >
+              <option value="">未選択</option>
+              {COMPANY_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  〜{n}社
+                </option>
+              ))}
+            </select>
+          </div>
+          </Section>
+
+          <Section title="希望条件">
+          <div>
+            <label className={label}>希望職種（大→中→小の3階層・最大3件）</label>
+            <JobCategorySelector
+              categories={categories}
+              selected={jobCategories}
+              onChange={setJobCategories}
+            />
+          </div>
+
+          <div>
+            <label className={label}>希望職種順位</label>
+            <select
+              value={jobCategoryPriority}
+              onChange={(e) => setJobCategoryPriority(e.target.value)}
+              className={`${inputCls} w-48`}
+            >
+              <option value="">指定なし（デフォルト）</option>
+              {JOB_CATEGORY_PRIORITY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={label}>
+              希望勤務地（デフォルト: {DEFAULT_WORK_LOCATIONS.join("/")}）
+            </label>
+            <div className="max-h-32 overflow-y-auto rounded-[6px] border border-[#E5E7EB] p-2">
+              <div className="grid grid-cols-4 gap-1">
+                {WORK_LOCATION_OPTIONS.map((loc) => (
+                  <label key={loc} className="flex items-center gap-1.5 text-[13px] text-[#374151]">
+                    <input
+                      type="checkbox"
+                      checked={workLocations.includes(loc)}
+                      onChange={() => toggleWorkLocation(loc)}
+                    />
+                    {loc}
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
@@ -400,51 +469,7 @@ export default function PatternFormModal({
               </select>
             </div>
           </div>
-
-          <div>
-            <label className={label}>
-              希望勤務地（デフォルト: {DEFAULT_WORK_LOCATIONS.join("/")}）
-            </label>
-            <div className="max-h-32 overflow-y-auto rounded-[6px] border border-[#E5E7EB] p-2">
-              <div className="grid grid-cols-4 gap-1">
-                {WORK_LOCATION_OPTIONS.map((loc) => (
-                  <label key={loc} className="flex items-center gap-1.5 text-[13px] text-[#374151]">
-                    <input
-                      type="checkbox"
-                      checked={workLocations.includes(loc)}
-                      onChange={() => toggleWorkLocation(loc)}
-                    />
-                    {loc}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className={label}>希望職種（大→中→小の3階層・最大3件）</label>
-            <JobCategorySelector
-              categories={categories}
-              selected={jobCategories}
-              onChange={setJobCategories}
-            />
-          </div>
-
-          <div>
-            <label className={label}>希望職種順位</label>
-            <select
-              value={jobCategoryPriority}
-              onChange={(e) => setJobCategoryPriority(e.target.value)}
-              className={`${inputCls} w-48`}
-            >
-              <option value="">指定なし（デフォルト）</option>
-              {JOB_CATEGORY_PRIORITY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          </Section>
         </div>
 
         <div className="flex justify-end gap-2 border-t px-5 py-3">

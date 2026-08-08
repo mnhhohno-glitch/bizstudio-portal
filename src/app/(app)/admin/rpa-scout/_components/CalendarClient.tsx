@@ -8,6 +8,8 @@ import { timeSlotLabel, TIME_SLOT_ORDER, MACHINE_NOS } from "@/lib/rpa-scout/con
 import {
   fmtJstDate,
   fmtJstDateTime,
+  fmtJstTime,
+  type RpaLog,
   type RpaPattern,
   type RpaPlan,
   type RpaTemplate,
@@ -32,6 +34,9 @@ export default function CalendarClient() {
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [anchor, setAnchor] = useState(today); // 表示基準日（JST ymd）
   const [plans, setPlans] = useState<RpaPlan[]>([]);
+  const [logs, setLogs] = useState<RpaLog[]>([]);
+  const [showLogs, setShowLogs] = useState(true); // 「実績を表示」トグル（デフォルトON）
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [pending, setPending] = useState<RpaPlan[]>([]);
   const [patterns, setPatterns] = useState<RpaPattern[]>([]);
   const [templates, setTemplates] = useState<RpaTemplate[]>([]);
@@ -53,6 +58,14 @@ export default function CalendarClient() {
     if (res.ok) setPlans((await res.json()).plans);
   }, [days]);
 
+  // 実績（変更ログ）は表示範囲を1リクエストで取り切る（セルごとにfetchしない）
+  const loadLogs = useCallback(async () => {
+    const res = await fetch(
+      `/api/rpa-scout/logs?from=${days[0]}&to=${days[days.length - 1]}&limit=500&sort=recordedAt&order=asc`
+    );
+    if (res.ok) setLogs((await res.json()).logs);
+  }, [days]);
+
   const loadPending = useCallback(async () => {
     const from = addDaysYmd(nowJstYmd(), -14);
     const to = addDaysYmd(nowJstYmd(), 14);
@@ -63,6 +76,10 @@ export default function CalendarClient() {
   useEffect(() => {
     loadPlans();
   }, [loadPlans]);
+
+  useEffect(() => {
+    loadLogs();
+  }, [loadLogs]);
 
   useEffect(() => {
     loadPending();
@@ -105,6 +122,12 @@ export default function CalendarClient() {
       .filter((p) => fmtJstDate(p.planDate) === date && p.machineNo === machineNo)
       .sort((a, b) => (TIME_SLOT_ORDER[a.timeSlot] ?? 9) - (TIME_SLOT_ORDER[b.timeSlot] ?? 9));
 
+  // 実績は記録時刻の昇順で縦積み
+  const logsFor = (date: string, machineNo: number) =>
+    logs
+      .filter((l) => fmtJstDate(l.recordedAt) === date && l.machineNo === machineNo)
+      .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+
   return (
     <div>
       <Toaster position="top-center" richColors />
@@ -129,7 +152,15 @@ export default function CalendarClient() {
           >
             {viewMode === "week" ? "翌週" : "翌日"} →
           </button>
-          <div className="ml-2 flex overflow-hidden rounded-[6px] border border-[#D1D5DB]">
+          <label className="ml-2 flex items-center gap-1.5 rounded-[6px] border border-[#D1D5DB] px-3 py-1.5">
+            <input
+              type="checkbox"
+              checked={showLogs}
+              onChange={(e) => setShowLogs(e.target.checked)}
+            />
+            実績を表示
+          </label>
+          <div className="flex overflow-hidden rounded-[6px] border border-[#D1D5DB]">
             <button
               onClick={() => setViewMode("week")}
               className={
@@ -223,6 +254,7 @@ export default function CalendarClient() {
                 {days.map((d) => {
                   const weekend = isWeekend(d);
                   const cellPlans = plansFor(d, no);
+                  const cellLogs = showLogs ? logsFor(d, no) : [];
                   return (
                     <td
                       key={d}
@@ -233,6 +265,50 @@ export default function CalendarClient() {
                       ].join(" ")}
                     >
                       <div className="min-h-[48px] space-y-1">
+                        {/* 実績チップ（表示専用・グレー系）。クリックしても編集モーダルは開かない */}
+                        {cellLogs.map((l) => {
+                          const expanded = expandedLogId === l.id;
+                          return (
+                            <div
+                              key={l.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedLogId(expanded ? null : l.id);
+                              }}
+                              title={`${fmtJstDateTime(l.recordedAt)}｜${l.patternName}｜${l.subjectName}｜${
+                                l.searchCount != null ? `${l.searchCount.toLocaleString()}件` : "停止"
+                              }${l.recordedByName ? `｜${l.recordedByName}` : ""}`}
+                              className="rounded border border-[#D1D5DB] bg-[#F3F4F6] p-1"
+                            >
+                              <div className="flex items-center gap-1">
+                                <span className="rounded bg-[#E5E7EB] px-1 text-[10px] font-bold text-[#4B5563]">
+                                  実績
+                                </span>
+                                <span className="text-[10px] font-medium text-[#4B5563]">
+                                  {fmtJstTime(l.recordedAt)}
+                                </span>
+                                <span className="ml-auto text-[10px] font-semibold text-[#374151]">
+                                  {l.searchCount != null ? `${l.searchCount.toLocaleString()}件` : "停止"}
+                                </span>
+                              </div>
+                              <div
+                                className={[
+                                  "mt-0.5 text-[11px] text-[#4B5563]",
+                                  expanded ? "break-all" : "truncate",
+                                ].join(" ")}
+                              >
+                                {l.patternName}
+                              </div>
+                              {expanded && (
+                                <div className="mt-0.5 break-all text-[10px] text-[#6B7280]">
+                                  {l.subjectName}
+                                  {l.recordedByName ? `（${l.recordedByName}）` : ""}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
                         {cellPlans.map((p) => (
                           <div
                             key={p.id}
@@ -240,9 +316,12 @@ export default function CalendarClient() {
                               e.stopPropagation();
                               setModal({ mode: "edit", plan: p });
                             }}
-                            className="rounded border border-[#E5E7EB] bg-white p-1 shadow-sm hover:border-[#93C5FD]"
+                            className="rounded border border-[#BFDBFE] bg-[#F5F9FF] p-1 shadow-sm hover:border-[#60A5FA]"
                           >
                             <div className="flex items-center gap-1">
+                              <span className="rounded bg-[#DBEAFE] px-1 text-[10px] font-bold text-[#1E40AF]">
+                                計画
+                              </span>
                               <span
                                 className={`rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`}
                               >

@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
 
   const sp = request.nextUrl.searchParams;
   const page = Math.max(1, parseInt(sp.get("page") || "1", 10));
-  const limit = 50;
+  // 一覧は50件/頁。カレンダーは表示範囲（最大6号機×7日）を1リクエストで取り切るため limit を指定する
+  const limit = Math.min(500, Math.max(1, parseInt(sp.get("limit") || "50", 10)));
   const machineNo = sp.get("machineNo") ? parseInt(sp.get("machineNo")!, 10) : null;
   const from = sp.get("from"); // "YYYY-MM-DD"（JST）
   const to = sp.get("to");

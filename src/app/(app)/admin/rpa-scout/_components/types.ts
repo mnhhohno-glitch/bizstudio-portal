@@ -84,6 +84,11 @@ export function fmtJstDate(s: string): string {
   return s.slice(0, 10);
 }
 
+// JST壁時計値 → "HH:mm"
+export function fmtJstTime(s: string): string {
+  return s.slice(11, 16);
+}
+
 // 真のUTC instant（createdAt等）→ JST日付表示
 export function fmtUtcInstantAsJstDate(s: string): string {
   return new Date(s).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
