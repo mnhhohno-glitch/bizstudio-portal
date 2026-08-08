@@ -1485,8 +1485,11 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       const notExportedIds = movable.filter((f) => !f.lastExportedAt).map((f) => f.id);
 
       let restoredCount = 0;
+      let alreadyActiveCount = 0;
       let sentCount = 0;
-      const messages: string[] = [];
+      // 「出力済」だが kyuujin 側に求人が無い行（抽出失敗等）。restore できないので新規送信でやり直す。
+      let missingIds: string[] = [];
+      const problems: string[] = [];
 
       if (exportedIds.length > 0) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/restore-jobs`, {
@@ -1497,35 +1500,67 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "復活処理に失敗しました");
         restoredCount = data.restored ?? 0;
-        if (data.notMatched?.length) messages.push(`照合失敗: ${data.notMatched.length}件`);
-        if (data.notExcluded?.length) messages.push(`既に有効: ${data.notExcluded.length}件`);
+        alreadyActiveCount = data.notExcluded?.length ?? 0;
+        missingIds = data.missingFileIds ?? [];
+        if (data.ambiguous?.length) {
+          problems.push(
+            `照合できませんでした（${data.ambiguous.length}件・似た会社名の求人あり）: ` +
+              data.ambiguous.map((a: { fileName: string }) => a.fileName).join(" / ")
+          );
+        }
+        if (data.errors?.length) problems.push(data.errors.join(" / "));
       }
 
-      if (notExportedIds.length > 0) {
+      // 新規送信対象 = 未出力 + 出力済だが kyuujin に存在しない行。
+      // db種別は元の出力先に合わせる（既定は HITO-Link/マイナビ）。
+      const sendTargetIds = [...notExportedIds, ...missingIds];
+      const groups = new Map<string, string[]>();
+      for (const id of sendTargetIds) {
+        const f = movable.find((x) => x.id === id);
+        const dbType = f?.lastExportedTo === "circus" ? "circus" : "hito_mynavi";
+        groups.set(dbType, [...(groups.get(dbType) ?? []), id]);
+      }
+
+      for (const [dbType, ids] of groups) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileIds: notExportedIds, dbType: "hito_mynavi", targetAreas: ["首都圏"] }),
+          body: JSON.stringify({ fileIds: ids, dbType, targetAreas: ["首都圏"] }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "送信に失敗しました");
+        if (!res.ok) {
+          problems.push(data.error || "送信に失敗しました");
+          continue;
+        }
         // uploadedCount=PDF送信分、linkedCount=サイト経由(PDF不要)分。両方を「移動」件数に含める。
-        sentCount = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
-        if (sentCount === 0) sentCount = notExportedIds.length;
+        const n = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
+        sentCount += n || ids.length;
       }
 
-      const parts: string[] = [];
-      if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
-      if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
-      if (messages.length) parts.push(messages.join(" / "));
-      toast.success(parts.length ? parts.join("、") + "しました" : "処理が完了しました");
+      const moved = restoredCount + sentCount + alreadyActiveCount;
+      if (moved === 0) {
+        // 「押しても何も起きない」を無くす。理由が分かる形で必ず知らせる。
+        toast.error(
+          problems.length
+            ? `求人紹介へ移動できませんでした。${problems.join(" / ")}`
+            : "求人紹介へ移動できませんでした（対象の求人が求人ツール側に見つかりません）"
+        );
+      } else {
+        const parts: string[] = [];
+        if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
+        if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
+        if (alreadyActiveCount > 0) parts.push(`${alreadyActiveCount}件は既に有効`);
+        toast.success(parts.join("、") + "しました");
+        if (problems.length) toast.error(problems.join(" / "));
+      }
 
       if (siteApply.length > 0) {
         toast.info(`サイト応募${siteApply.length}件は移動対象外です。「エントリーへ登録」から進めてください`);
       }
 
       setSelectedIds(new Set());
-      onSwitchToJobs?.();
+      fetchFiles();
+      if (moved > 0) onSwitchToJobs?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
