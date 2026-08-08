@@ -7,7 +7,9 @@ import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import { displayPatternName, machineLabel } from "@/lib/rpa-scout/pattern-name";
 import { AREA_TYPE_LABELS } from "@/lib/rpa-scout/area";
 import {
+  fmtJstShortDateTime,
   fmtUtcInstantAsJstDate,
+  isRecentlyUsed,
   type JobCategoryRow,
   type RpaPattern,
 } from "./types";
@@ -23,6 +25,7 @@ type SortKey =
   | "companyCount"
   | "jobCategory"
   | "status"
+  | "lastUsed"
   | "createdAt";
 
 // 表示値（移行行で構造化カラムがnullなら rawConditions から表示）
@@ -122,6 +125,8 @@ export default function PatternsClient() {
         return jobCategoryText(p);
       case "status":
         return p.isActive ? 0 : 1;
+      case "lastUsed":
+        return p.lastUsedAt ?? "";
       case "createdAt":
         return p.createdAt;
     }
@@ -135,6 +140,14 @@ export default function PatternsClient() {
     if (filterActive === "active") rows = rows.filter((p) => p.isActive);
     else if (filterActive === "inactive") rows = rows.filter((p) => !p.isActive);
     const sorted = [...rows].sort((a, b) => {
+      // 最終使用は未使用を昇順・降順のいずれでも最後尾に固定する
+      if (sortKey === "lastUsed") {
+        if (!a.lastUsedAt && !b.lastUsedAt) return 0;
+        if (!a.lastUsedAt) return 1;
+        if (!b.lastUsedAt) return -1;
+        const cmp = a.lastUsedAt.localeCompare(b.lastUsedAt);
+        return sortAsc ? cmp : -cmp;
+      }
       const av = sortValue(a, sortKey);
       const bv = sortValue(b, sortKey);
       const cmp =
@@ -231,6 +244,7 @@ export default function PatternsClient() {
                   <SortTh label="経験社数" k="companyCount" />
                   <SortTh label="職種" k="jobCategory" />
                   <SortTh label="状態" k="status" />
+                  <SortTh label="最終使用" k="lastUsed" />
                   <SortTh label="作成日" k="createdAt" />
                   <Th>操作</Th>
                 </tr>
@@ -272,6 +286,24 @@ export default function PatternsClient() {
                         </span>
                       )}
                     </Td>
+                    <Td className="whitespace-nowrap">
+                      {p.lastUsedAt ? (
+                        <span
+                          className={
+                            isRecentlyUsed(p.lastUsedAt) ? "font-semibold text-red-600" : ""
+                          }
+                        >
+                          {fmtJstShortDateTime(p.lastUsedAt)}
+                          {p.lastUsedMachineNo != null && (
+                            <span className="ml-1 text-[#6B7280]">
+                              {p.lastUsedMachineNo}号機
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-[#9CA3AF]">-</span>
+                      )}
+                    </Td>
                     <Td className="whitespace-nowrap">{fmtUtcInstantAsJstDate(p.createdAt)}</Td>
                     <Td className="whitespace-nowrap">
                       <div className="flex items-center gap-1">
@@ -301,7 +333,7 @@ export default function PatternsClient() {
                 {visible.length === 0 && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="border-b border-[#E5E7EB] px-3 py-8 text-center text-[#9CA3AF]"
                     >
                       該当するパターンがありません

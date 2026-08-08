@@ -5,7 +5,14 @@ import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { nowJstDateTimeLocal } from "@/lib/rpa-scout/jst";
-import type { RpaMachine, RpaPattern, RpaTemplate } from "./types";
+import {
+  isRecentlyUsed,
+  lastUsedSuffix,
+  type RpaMachine,
+  type RpaPattern,
+  type RpaTemplate,
+} from "./types";
+import LastUsedNote from "./LastUsedNote";
 
 // 状況ボードの「更新」モーダル。保存で RpaScoutLog に1レコードINSERT
 export default function UpdateLogModal({
@@ -107,21 +114,30 @@ export default function UpdateLogModal({
               <option value="">選択してください</option>
               <optgroup label={`${machine.machineNo}号機用・全号機用`}>
                 {own.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {displayPatternName(p.targetMachineNo, p.name)}
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
+                  >
+                    {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
                   </option>
                 ))}
               </optgroup>
               {others.length > 0 && (
                 <optgroup label="────── 他号機用 ──────">
                   {others.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {displayPatternName(p.targetMachineNo, p.name)}
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
+                    >
+                      {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
                     </option>
                   ))}
                 </optgroup>
               )}
             </select>
+            <LastUsedNote pattern={patterns.find((p) => p.id === patternId)} />
           </div>
 
           <div>

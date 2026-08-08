@@ -6,7 +6,15 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
 import { ymdWeekday } from "@/lib/rpa-scout/jst";
-import { fmtJstDate, type RpaPattern, type RpaPlan, type RpaTemplate } from "./types";
+import {
+  fmtJstDate,
+  isRecentlyUsed,
+  lastUsedSuffix,
+  type RpaPattern,
+  type RpaPlan,
+  type RpaTemplate,
+} from "./types";
+import LastUsedNote from "./LastUsedNote";
 
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -146,21 +154,30 @@ export default function PlanModal({
               <option value="">選択してください</option>
               <optgroup label={`${machineNo}号機用・全号機用`}>
                 {own.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {displayPatternName(p.targetMachineNo, p.name)}
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
+                  >
+                    {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
                   </option>
                 ))}
               </optgroup>
               {others.length > 0 && (
                 <optgroup label="────── 他号機用 ──────">
                   {others.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {displayPatternName(p.targetMachineNo, p.name)}
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
+                    >
+                      {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
                     </option>
                   ))}
                 </optgroup>
               )}
             </select>
+            <LastUsedNote pattern={patterns.find((p) => p.id === patternId)} />
           </div>
 
           <div>

@@ -1,4 +1,5 @@
 // RPAスカウト管理のクライアント側共有型・表示ヘルパー
+import { addDaysYmd, nowJstYmd } from "@/lib/rpa-scout/jst";
 
 export type RpaLog = {
   id: string;
@@ -46,6 +47,9 @@ export type RpaPattern = {
   isActive: boolean;
   isMigrated: boolean;
   createdAt: string;
+  // 最終使用（全号機横断。patternId紐付け優先＋パターン名フォールバック）
+  lastUsedAt: string | null; // JST壁時計値
+  lastUsedMachineNo: number | null;
 };
 
 export type RpaTemplate = {
@@ -92,4 +96,26 @@ export function fmtJstTime(s: string): string {
 // 真のUTC instant（createdAt等）→ JST日付表示
 export function fmtUtcInstantAsJstDate(s: string): string {
   return new Date(s).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+
+// JST壁時計値 → "M/D HH:mm"（最終使用の表示用）
+export function fmtJstShortDateTime(s: string): string {
+  const [, m, d] = fmtJstDate(s).split("-");
+  return `${Number(m)}/${Number(d)} ${fmtJstTime(s)}`;
+}
+
+// 最終使用が3日以内か（JSTのymd文字列比較で判定＝罠#17対応）
+export function isRecentlyUsed(lastUsedAt: string | null): boolean {
+  if (!lastUsedAt) return false;
+  return fmtJstDate(lastUsedAt) >= addDaysYmd(nowJstYmd(), -3);
+}
+
+// パターン選択肢の末尾に付ける最終使用の表記
+export function lastUsedSuffix(p: {
+  lastUsedAt: string | null;
+  lastUsedMachineNo: number | null;
+}): string {
+  if (!p.lastUsedAt) return "（未使用）";
+  const machine = p.lastUsedMachineNo != null ? ` ${p.lastUsedMachineNo}号機` : "";
+  return `（最終: ${fmtJstShortDateTime(p.lastUsedAt)}${machine}）`;
 }
