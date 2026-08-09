@@ -198,8 +198,8 @@ export default function PatternsClient() {
     }
   };
 
-  const SortTh = ({ label, k }: { label: string; k: SortKey }) => (
-    <Th>
+  const SortTh = ({ label, k, className = "" }: { label: string; k: SortKey; className?: string }) => (
+    <Th className={`whitespace-nowrap ${className}`}>
       <button
         onClick={() => onSort(k)}
         className="flex items-center gap-0.5 hover:text-[#2563EB]"
@@ -263,122 +263,161 @@ export default function PatternsClient() {
       ) : (
         <div className="rounded-[8px] border border-[#E5E7EB] bg-white">
           <TableWrap>
-            <Table>
-              <thead>
-                <tr>
-                  <SortTh label="対象号機" k="machine" />
-                  <SortTh label="パターン名" k="name" />
-                  <SortTh label="送信状態" k="sendStatus" />
-                  <SortTh label="登録日" k="regist" />
-                  <SortTh label="エリア" k="area" />
-                  <SortTh label="卒業年度" k="gradYear" />
-                  <SortTh label="経験社数" k="companyCount" />
-                  <SortTh label="職種" k="jobCategory" />
-                  <SortTh label="状態" k="status" />
-                  <SortTh label="最終使用" k="lastUsed" />
-                  <SortTh label="作成日" k="createdAt" />
-                  <Th>操作</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((p) => (
-                  <tr key={p.id} className={p.isActive ? "" : "bg-[#F9FAFB] text-[#9CA3AF]"}>
-                    <Td className="whitespace-nowrap">{machineLabel(p.targetMachineNo)}</Td>
-                    <Td>
-                      <div className="flex items-center gap-1">
-                        <span className="break-all">{p.name}</span>
-                        {p.isMigrated && (
-                          <span className="shrink-0 rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[10px] font-medium text-[#92400E]">
-                            移行
+            {/* 13列あるため最小幅を確保し、足りない場合は TableWrap 側で横スクロールさせる */}
+            <div className="min-w-[1450px]">
+              <Table className="table-fixed">
+                {/* パターン名以外を内容ぶんの固定幅にし、残りをすべてパターン名へ割り当てる */}
+                <colgroup>
+                  <col style={{ width: 78 }} />
+                  <col />
+                  <col style={{ width: 76 }} />
+                  <col style={{ width: 92 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 88 }} />
+                  <col style={{ width: 84 }} />
+                  <col style={{ width: 130 }} />
+                  <col style={{ width: 64 }} />
+                  <col style={{ width: 128 }} />
+                  <col style={{ width: 92 }} />
+                  <col style={{ width: 176 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <SortTh label="対象号機" k="machine" />
+                    <SortTh label="パターン名" k="name" />
+                    <SortTh label="送信状態" k="sendStatus" />
+                    <SortTh label="登録日" k="regist" />
+                    <SortTh label="エリア" k="area" />
+                    <SortTh label="卒業年度" k="gradYear" />
+                    <SortTh label="経験社数" k="companyCount" />
+                    <SortTh label="職種" k="jobCategory" />
+                    <SortTh label="状態" k="status" />
+                    <SortTh label="最終使用" k="lastUsed" />
+                    <SortTh label="作成日" k="createdAt" />
+                    <Th className="sticky right-0 z-20 whitespace-nowrap bg-white shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.15)]">
+                      操作
+                    </Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((p) => (
+                    <tr key={p.id} className={p.isActive ? "" : "bg-[#F9FAFB] text-[#9CA3AF]"}>
+                      <Td className="whitespace-nowrap">{machineLabel(p.targetMachineNo)}</Td>
+                      <Td className="overflow-hidden">
+                        <div className="flex items-center gap-1">
+                          {/* 長い名前は1行で末尾省略。全文は title で読める */}
+                          <span className="min-w-0 truncate" title={p.name}>
+                            {p.name}
                           </span>
-                        )}
-                      </div>
-                    </Td>
-                    <Td className="whitespace-nowrap">
-                      {p.sendStatus === "UNSENT"
-                        ? "未送信"
-                        : p.sendStatus === "SENT"
-                          ? "送信済"
-                          : "-"}
-                    </Td>
-                    <Td className="whitespace-nowrap">{registText(p)}</Td>
-                    <Td className="max-w-[160px] truncate" >{areaText(p)}</Td>
-                    <Td className="whitespace-nowrap">{gradYearText(p)}</Td>
-                    <Td className="whitespace-nowrap">{companyCountText(p)}</Td>
-                    <Td className="max-w-[160px] truncate">{jobCategoryText(p)}</Td>
-                    <Td className="whitespace-nowrap">
-                      {p.isActive ? (
-                        <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[11px] font-medium text-[#166534]">
-                          有効
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-[#E5E7EB] px-2 py-0.5 text-[11px] font-medium text-[#6B7280]">
-                          停止
-                        </span>
-                      )}
-                    </Td>
-                    <Td className="whitespace-nowrap">
-                      {p.lastUsedAt ? (
-                        <span
-                          className={
-                            isRecentlyUsed(p.lastUsedAt) ? "font-semibold text-red-600" : ""
-                          }
-                        >
-                          {fmtJstShortDateTime(p.lastUsedAt)}
-                          {p.lastUsedMachineNo != null && (
-                            <span className="ml-1 text-[#6B7280]">
-                              {p.lastUsedMachineNo}号機
+                          {p.isMigrated && (
+                            <span className="shrink-0 rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[10px] font-medium text-[#92400E]">
+                              移行
                             </span>
                           )}
+                        </div>
+                      </Td>
+                      <Td className="whitespace-nowrap">
+                        {p.sendStatus === "UNSENT"
+                          ? "未送信"
+                          : p.sendStatus === "SENT"
+                            ? "送信済"
+                            : "-"}
+                      </Td>
+                      <Td className="overflow-hidden whitespace-nowrap">{registText(p)}</Td>
+                      <Td className="overflow-hidden">
+                        <span className="block truncate" title={areaText(p)}>
+                          {areaText(p)}
                         </span>
-                      ) : (
-                        <span className="text-[#9CA3AF]">-</span>
-                      )}
-                    </Td>
-                    <Td className="whitespace-nowrap">{fmtUtcInstantAsJstDate(p.createdAt)}</Td>
-                    <Td className="whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => copy(displayPatternName(p.targetMachineNo, p.name))}
-                          title="号機込みでコピー"
-                          className="rounded px-1.5 py-0.5 text-[#6B7280] hover:bg-[#F3F4F6]"
-                        >
-                          📋
-                        </button>
-                        <button
-                          onClick={() => setForm({ mode: "edit", pattern: p })}
-                          className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
-                        >
-                          編集
-                        </button>
-                        <button
-                          onClick={() => openDuplicate(p)}
-                          className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
-                        >
-                          複製
-                        </button>
-                        <button
-                          onClick={() => toggleActive(p)}
-                          className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
-                        >
-                          {p.isActive ? "停止" : "復帰"}
-                        </button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-                {visible.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={12}
-                      className="border-b border-[#E5E7EB] px-3 py-8 text-center text-[#9CA3AF]"
-                    >
-                      該当するパターンがありません
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </Table>
+                      </Td>
+                      <Td className="overflow-hidden whitespace-nowrap">{gradYearText(p)}</Td>
+                      <Td className="overflow-hidden whitespace-nowrap">{companyCountText(p)}</Td>
+                      <Td className="overflow-hidden">
+                        <span className="block truncate" title={jobCategoryText(p)}>
+                          {jobCategoryText(p)}
+                        </span>
+                      </Td>
+                      <Td className="whitespace-nowrap">
+                        {p.isActive ? (
+                          <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[11px] font-medium text-[#166534]">
+                            有効
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-[#E5E7EB] px-2 py-0.5 text-[11px] font-medium text-[#6B7280]">
+                            停止
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="whitespace-nowrap">
+                        {p.lastUsedAt ? (
+                          <span
+                            className={
+                              isRecentlyUsed(p.lastUsedAt) ? "font-semibold text-red-600" : ""
+                            }
+                          >
+                            {fmtJstShortDateTime(p.lastUsedAt)}
+                            {p.lastUsedMachineNo != null && (
+                              <span className="ml-1 text-[#6B7280]">
+                                {p.lastUsedMachineNo}号機
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </Td>
+                      <Td className="overflow-hidden whitespace-nowrap">
+                        {fmtUtcInstantAsJstDate(p.createdAt)}
+                      </Td>
+                      {/* 横スクロールしても操作ボタンが見えるよう右端に固定する */}
+                      <Td
+                        className={[
+                          "sticky right-0 z-10 whitespace-nowrap shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.15)]",
+                          p.isActive ? "bg-white" : "bg-[#F9FAFB]",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => copy(displayPatternName(p.targetMachineNo, p.name))}
+                            title="号機込みでコピー"
+                            className="rounded px-1.5 py-0.5 text-[#6B7280] hover:bg-[#F3F4F6]"
+                          >
+                            📋
+                          </button>
+                          <button
+                            onClick={() => setForm({ mode: "edit", pattern: p })}
+                            className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
+                          >
+                            編集
+                          </button>
+                          <button
+                            onClick={() => openDuplicate(p)}
+                            className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
+                          >
+                            複製
+                          </button>
+                          <button
+                            onClick={() => toggleActive(p)}
+                            className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
+                          >
+                            {p.isActive ? "停止" : "復帰"}
+                          </button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                  {visible.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={12}
+                        className="border-b border-[#E5E7EB] px-3 py-8 text-center text-[#9CA3AF]"
+                      >
+                        該当するパターンがありません
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </div>
           </TableWrap>
         </div>
       )}
