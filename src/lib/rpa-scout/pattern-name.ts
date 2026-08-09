@@ -28,17 +28,9 @@ export function generatePatternName(input: PatternNameInput): string {
   // --- 基本部品（常に含める・「_」連結） ---
   const baseParts: string[] = [];
 
-  // 2. 登録日
+  // 2. 登録日。日数は名前に出さず、以内=開放日 / 以降=既登録 の2表記に統一する
   if (input.registDays != null && input.registDirection) {
-    if (input.registDays === 7 && input.registDirection === "WITHIN") {
-      baseParts.push("開放日");
-    } else if (input.registDays === 8 && input.registDirection === "AFTER") {
-      baseParts.push("既登録");
-    } else if (input.registDirection === "WITHIN") {
-      baseParts.push(`登録${input.registDays}日以内`);
-    } else {
-      baseParts.push(`登録${input.registDays}日以降`);
-    }
+    baseParts.push(input.registDirection === "WITHIN" ? "開放日" : "既登録");
   }
 
   // 3. エリア

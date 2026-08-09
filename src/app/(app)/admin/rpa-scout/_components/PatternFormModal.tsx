@@ -313,7 +313,7 @@ export default function PatternFormModal({
                 </div>
               </div>
               <div className="mt-0.5 text-[11px] text-[#9CA3AF]">
-                7日以内=開放日 / 8日以降=既登録
+                以内=開放日 / 以降=既登録
               </div>
             </div>
             <div>
