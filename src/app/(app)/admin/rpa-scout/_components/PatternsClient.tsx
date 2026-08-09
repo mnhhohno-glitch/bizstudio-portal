@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
+import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName, machineLabel } from "@/lib/rpa-scout/pattern-name";
 import { AREA_TYPE_LABELS } from "@/lib/rpa-scout/area";
 import {
@@ -14,6 +15,12 @@ import {
   type RpaPattern,
 } from "./types";
 import PatternFormModal from "./PatternFormModal";
+
+// フォームの開き方。duplicate は複製元の条件を初期値に持つ新規作成（複製元は書き換えない）
+type FormState =
+  | { mode: "new" }
+  | { mode: "edit"; pattern: RpaPattern }
+  | { mode: "duplicate"; pattern: RpaPattern; sourceName: string };
 
 type SortKey =
   | "machine"
@@ -71,7 +78,11 @@ export default function PatternsClient() {
   const [filterActive, setFilterActive] = useState<string>("active"); // active | inactive | all
   const [sortKey, setSortKey] = useState<SortKey>("machine");
   const [sortAsc, setSortAsc] = useState(true);
-  const [formTarget, setFormTarget] = useState<RpaPattern | "new" | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
+  // 複製の号機選択ダイアログ（複製元と、選択中の号機 "" = 全号機）
+  const [dupSource, setDupSource] = useState<RpaPattern | null>(null);
+  const [dupMachine, setDupMachine] = useState<string>("");
+  const dupOverlayClose = useOverlayClose(() => setDupSource(null));
 
   const load = useCallback(async () => {
     const [pRes, cRes] = await Promise.all([
@@ -89,6 +100,26 @@ export default function PatternsClient() {
 
   const copy = (text: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success("コピーしました"));
+  };
+
+  const openDuplicate = (p: RpaPattern) => {
+    setDupSource(p);
+    setDupMachine(p.targetMachineNo != null ? String(p.targetMachineNo) : "");
+  };
+
+  // 複製元の全条件を引き継ぎ、号機だけダイアログで選んだ値に差し替えて新規作成フォームを開く。
+  // 名前は引き継がず生成関数で再生成、isMigrated / rawConditions は引き継がない（POST側で常にfalse/未設定）。
+  const startDuplicate = () => {
+    if (!dupSource) return;
+    setForm({
+      mode: "duplicate",
+      pattern: {
+        ...dupSource,
+        targetMachineNo: dupMachine === "" ? null : Number(dupMachine),
+      },
+      sourceName: displayPatternName(dupSource.targetMachineNo, dupSource.name),
+    });
+    setDupSource(null);
   };
 
   const toggleActive = async (p: RpaPattern) => {
@@ -185,7 +216,7 @@ export default function PatternsClient() {
       <div className="mb-4 flex items-center justify-between">
         <PageTitle>検索条件パターン管理</PageTitle>
         <button
-          onClick={() => setFormTarget("new")}
+          onClick={() => setForm({ mode: "new" })}
           className="rounded-[6px] bg-[#2563EB] px-4 py-2 text-[13px] font-medium text-white hover:bg-[#1D4ED8]"
         >
           ＋ 新規作成
@@ -315,10 +346,16 @@ export default function PatternsClient() {
                           📋
                         </button>
                         <button
-                          onClick={() => setFormTarget(p)}
+                          onClick={() => setForm({ mode: "edit", pattern: p })}
                           className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
                         >
                           編集
+                        </button>
+                        <button
+                          onClick={() => openDuplicate(p)}
+                          className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB]"
+                        >
+                          複製
                         </button>
                         <button
                           onClick={() => toggleActive(p)}
@@ -346,14 +383,71 @@ export default function PatternsClient() {
         </div>
       )}
 
-      {formTarget && (
+      {dupSource && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          {...dupOverlayClose}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl bg-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b px-5 py-3 text-[15px] font-bold text-[#374151]">
+              パターンを複製
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div>
+                <div className="mb-1 text-[12px] font-semibold text-[#6B7280]">複製元</div>
+                <div className="break-all text-[13px] text-[#111827]">
+                  {displayPatternName(dupSource.targetMachineNo, dupSource.name)}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-[12px] font-semibold text-[#6B7280]">
+                  対象号機
+                </label>
+                <select
+                  value={dupMachine}
+                  onChange={(e) => setDupMachine(e.target.value)}
+                  className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[14px]"
+                >
+                  <option value="">全号機</option>
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n}号機
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t px-5 py-3">
+              <button
+                onClick={() => setDupSource(null)}
+                className="rounded-[6px] border border-[#D1D5DB] px-4 py-1.5 text-[13px] text-[#374151] hover:bg-[#F9FAFB]"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={startDuplicate}
+                className="rounded-[6px] bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8]"
+              >
+                複製して編集
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {form && (
         <PatternFormModal
-          pattern={formTarget === "new" ? null : formTarget}
+          pattern={form.mode === "new" ? null : form.pattern}
+          mode={form.mode}
+          sourceName={form.mode === "duplicate" ? form.sourceName : undefined}
           existingPatterns={patterns}
           categories={categories}
-          onClose={() => setFormTarget(null)}
+          onClose={() => setForm(null)}
           onSaved={() => {
-            setFormTarget(null);
+            setForm(null);
             load();
           }}
         />

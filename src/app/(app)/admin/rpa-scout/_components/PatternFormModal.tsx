@@ -31,21 +31,27 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 // パターン新規作成／編集フォーム。
 // 画面上部に「N号機：生成名」のリアルタイムプレビューを固定表示（保存時と同一の生成関数を使用）
+// mode="duplicate" は複製元の条件を初期値に持つ新規作成（保存はPOST・複製元は一切変更しない）
 export default function PatternFormModal({
   pattern,
+  mode = pattern ? "edit" : "new",
+  sourceName,
   existingPatterns,
   categories,
   onClose,
   onSaved,
 }: {
-  pattern: RpaPattern | null; // null=新規
+  pattern: RpaPattern | null; // null=新規 / 複製時は号機を差し替えた複製元
+  mode?: "new" | "edit" | "duplicate";
+  sourceName?: string; // 複製元の表示名（"N号機：パターン名"）
   existingPatterns: RpaPattern[];
   categories: JobCategoryRow[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const overlayClose = useOverlayClose(onClose);
-  const isNew = pattern == null;
+  const isEdit = mode === "edit";
+  const isNew = !isEdit; // 複製もサーバ側は新規作成（POST）
 
   const [targetMachineNo, setTargetMachineNo] = useState<string>(
     pattern?.targetMachineNo != null ? String(pattern.targetMachineNo) : ""
@@ -125,11 +131,13 @@ export default function PatternFormModal({
   const machineNoNum = targetMachineNo === "" ? null : Number(targetMachineNo);
   const previewFull = `${machineLabel(machineNoNum)}：${previewName}`;
 
+  // 複製時は自分自身の除外をしない（＝条件を変えずに保存しようとすると複製元と同名で警告が出る）
+  const excludeId = isEdit ? pattern?.id : undefined;
   const duplicateExists = useMemo(
     () =>
       previewName !== "" &&
-      existingPatterns.some((p) => p.isActive && p.name === previewName && p.id !== pattern?.id),
-    [existingPatterns, previewName, pattern?.id]
+      existingPatterns.some((p) => p.isActive && p.name === previewName && p.id !== excludeId),
+    [existingPatterns, previewName, excludeId]
   );
 
   const copyPreview = () => {
@@ -185,9 +193,18 @@ export default function PatternFormModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="text-[15px] font-bold text-[#374151]">
-            {isNew ? "パターン新規作成" : "パターン編集"}
-          </h2>
+          <div>
+            <h2 className="text-[15px] font-bold text-[#374151]">
+              {mode === "duplicate"
+                ? "パターン新規作成（複製）"
+                : isEdit
+                  ? "パターン編集"
+                  : "パターン新規作成"}
+            </h2>
+            {mode === "duplicate" && sourceName && (
+              <div className="mt-0.5 text-[11px] text-[#6B7280]">複製元: {sourceName}</div>
+            )}
+          </div>
           <button onClick={onClose} className="text-xl text-gray-400 hover:text-gray-600">
             ×
           </button>
@@ -217,7 +234,7 @@ export default function PatternFormModal({
               ⚠ 同名のパターンが既に存在します（保存は可能です）
             </div>
           )}
-          {!isNew && pattern?.isMigrated && (
+          {isEdit && pattern?.isMigrated && (
             <div className="mt-1 text-[12px] text-[#6B7280]">
               移行パターンです。保存すると名前が自動生成名で上書きされ、移行フラグが外れます。
             </div>
