@@ -1,0 +1,170 @@
+# T-160: 本番 portal の死活監視。5分ごとにヘルスチェックし、落ちていたら LINE WORKS に通知する。
+#
+# 背景: 2026-08-10 に Railway ホスト機の I/O 飽和で本番Postgresが応答不能になり、
+#       portal 全ページが約半日 502 になったが、気づいたのは社員からの報告だった。
+#
+# 設計:
+#  - portal 自身ではなく GitHub Actions から叩く。portal に監視を持たせると
+#    portal が死んだ時に監視も一緒に死ぬため。
+#  - 通知先は大野将幸ひとりへの DM。障害アラートを CA 全員のトークルームに流すと
+#    通常業務のノイズになる。Bot は既存のタスク通知Bot(11818394)を流用。
+#  - 誤報防止: 1回失敗しただけでは鳴らさない。30秒あけて2回連続で失敗したときのみ障害と判定する。
+#  - 重複防止: 障害中に5分ごとに鳴り続けると邪魔なので、状態遷移したときだけ通知する。
+#    状態の保持は GitHub Actions cache（portal の DB は使わない。DBが落ちている時に使えないため）。
+#    リポジトリが public なので、Issue や状態ファイルのコミットだと障害履歴が
+#    社外から見えてしまう。cache ならリポジトリ上に残らない。
+#
+#  - default branch (master) に置かないと schedule が動かない。
+
+name: T-160 uptime monitor (every 5 min)
+
+on:
+  schedule:
+    # 5分ごと。GitHub 側の混雑で数分遅延することがある（仕様）。
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      health_url:
+        description: "疎通確認用のURL上書き。空なら本番。存在しないURLを入れると障害通知のテストになる。"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# 状態を cache で持つので、複数の実行が同時に走ると状態が壊れる。直列化する。
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+env:
+  PROD_HEALTH_URL: "https://bizstudio-portal-production.up.railway.app/api/health"
+  PORTAL_URL: "https://bizstudio-portal-production.up.railway.app"
+  STATE_DIR: ".uptime-state"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 直近の状態を取り出す。key はわざと毎回ユニークにして必ず外し、
+      # restore-keys の前方一致で「最後に保存された状態」を拾う
+      # （cache は同じ key で上書きできないため、この形が定石）。
+      - name: Restore previous state
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: uptime-state-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-
+
+      - name: Health check (2回連続失敗で障害と判定)
+        id: check
+        run: |
+          URL="${{ github.event.inputs.health_url }}"
+          if [ -z "$URL" ]; then URL="$PROD_HEALTH_URL"; fi
+          echo "target=$URL"
+
+          probe() {
+            curl -sS -o /dev/null --max-time 10 -w "%{http_code}" "$1" 2>/dev/null || true
+          }
+
+          CODE="$(probe "$URL")"
+          [ -z "$CODE" ] && CODE="000"
+          echo "1回目: HTTP $CODE"
+
+          if [ "$CODE" != "200" ]; then
+            echo "30秒待って再試行します（一時的なネットワーク揺らぎでの誤報を避けるため）"
+            sleep 30
+            CODE="$(probe "$URL")"
+            [ -z "$CODE" ] && CODE="000"
+            echo "2回目: HTTP $CODE"
+          fi
+
+          if [ "$CODE" = "200" ]; then
+            echo "current=up" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=down" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$CODE" = "000" ]; then
+            echo "status_text=応答なし" >> "$GITHUB_OUTPUT"
+          else
+            echo "status_text=HTTP $CODE" >> "$GITHUB_OUTPUT"
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Decide transition
+        id: decide
+        run: |
+          PREV="unknown"
+          SINCE=""
+          if [ -f "$STATE_DIR/state.json" ]; then
+            PREV="$(jq -r '.state // "unknown"' "$STATE_DIR/state.json")"
+            SINCE="$(jq -r '.since // empty' "$STATE_DIR/state.json")"
+          fi
+          CURRENT="${{ steps.check.outputs.current }}"
+          echo "前回=$PREV / 今回=$CURRENT"
+
+          NOW_MS=$(date +%s%3N)
+          ACTION="none"
+
+          if [ "$CURRENT" = "down" ] && [ "$PREV" != "down" ]; then
+            # 障害の立ち上がり。ここでだけ鳴らす
+            ACTION="notify_down"
+            echo "{\"state\":\"down\",\"since\":$NOW_MS}" > /tmp/next-state.json
+          elif [ "$CURRENT" = "up" ] && [ "$PREV" = "down" ]; then
+            ACTION="notify_up"
+            if [ -n "$SINCE" ]; then
+              echo "down_minutes=$(( (NOW_MS - SINCE) / 60000 ))" >> "$GITHUB_OUTPUT"
+            fi
+            echo "{\"state\":\"up\",\"since\":$NOW_MS}" > /tmp/next-state.json
+          fi
+
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+
+          if [ "$ACTION" != "none" ]; then
+            mkdir -p "$STATE_DIR"
+            cp /tmp/next-state.json "$STATE_DIR/state.json"
+            echo "状態を更新: $(cat "$STATE_DIR/state.json")"
+          else
+            echo "状態変化なし。通知も保存もしない"
+          fi
+
+      - name: Notify LINE WORKS (障害検知)
+        if: steps.decide.outputs.action == 'notify_down'
+        env:
+          MODE: down
+          TARGET_URL: ${{ env.PORTAL_URL }}
+          STATUS_TEXT: ${{ steps.check.outputs.status_text }}
+          LW_CLIENT_ID: ${{ secrets.LINEWORKS_CLIENT_ID }}
+          LW_CLIENT_SECRET: ${{ secrets.LINEWORKS_CLIENT_SECRET }}
+          LW_SERVICE_ACCOUNT: ${{ secrets.LINEWORKS_SERVICE_ACCOUNT }}
+          LW_PRIVATE_KEY: ${{ secrets.LINEWORKS_PRIVATE_KEY }}
+          LW_BOT_ID: ${{ secrets.LINEWORKS_TASK_BOT_ID }}
+          LW_USER_ID: ${{ secrets.LINEWORKS_ALERT_USER_ID }}
+        run: node .github/scripts/uptime-notify.mjs
+
+      - name: Notify LINE WORKS (復旧)
+        if: steps.decide.outputs.action == 'notify_up'
+        env:
+          MODE: up
+          TARGET_URL: ${{ env.PORTAL_URL }}
+          DOWN_MINUTES: ${{ steps.decide.outputs.down_minutes }}
+          LW_CLIENT_ID: ${{ secrets.LINEWORKS_CLIENT_ID }}
+          LW_CLIENT_SECRET: ${{ secrets.LINEWORKS_CLIENT_SECRET }}
+          LW_SERVICE_ACCOUNT: ${{ secrets.LINEWORKS_SERVICE_ACCOUNT }}
+          LW_PRIVATE_KEY: ${{ secrets.LINEWORKS_PRIVATE_KEY }}
+          LW_BOT_ID: ${{ secrets.LINEWORKS_TASK_BOT_ID }}
+          LW_USER_ID: ${{ secrets.LINEWORKS_ALERT_USER_ID }}
+        run: node .github/scripts/uptime-notify.mjs
+
+      # 通知を送れた時だけ状態を確定させる。送信に失敗したまま状態を進めると
+      # 「障害中なのに通知が一度も飛んでいない」状態で黙り込んでしまうため。
+      - name: Save state
+        if: steps.decide.outputs.action != 'none'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: uptime-state-${{ github.run_id }}-${{ github.run_attempt }}
