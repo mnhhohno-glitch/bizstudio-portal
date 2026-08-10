@@ -400,3 +400,43 @@ col + INTERVAL '9 hours'
 
 **関連ケース**:
 - T-135（2026/7/5-7/6）: この罠を 2 回踏み、「18 時間ズレ」「未取込 4 名」「9 桁会員 No」という 3 つの誤報告を生成。正しい変換で全て解消。詳細: `docs/survey_T-135_timezone_drift.md`
+
+## 41. 全ページ 502 のとき、まずインフラかコードかを切り分ける
+
+**罠**: 全ページが 502 になると、反射的に「直近のデプロイが原因では」と考えてコミットを疑いに行ってしまう。だが**全ページが一斉に死ぬ障害の原因はほぼコードではない**。2026-08-10 の障害では、この誤った仮説に時間を使い、切り分けに 45 分を要した。
+
+### 判定軸（この 3 つが揃えばホスト起因＝コード修正では直らない）
+
+| 確認項目 | ホスト起因のときの値 |
+|--|--|
+| 自コンテナの CPU throttle | `nr_throttled 0`（制限されていない） |
+| DB 接続数 | max_connections に余裕がある（例: 55/100） |
+| データ用ディスク使用率 | 満杯でない（例: 1%） |
+
+上記が全て正常なのに DB が応答しない場合、**自分の使い方の問題ではなくホスト機の問題**。逆に言えば、この 3 つのどれかが振り切れていれば自分たちのコード・設定に原因がある。
+
+### 切り分け手順
+
+1. `railway ssh --service <DBサービス名>` でコンテナ内部に入る。**`railway run` は使用禁止**（ローカルの空 DB に繋がる）
+2. Railway のプロキシが飽和していると通常の接続（psql / Prisma）が ECONNRESET やタイムアウトで通らず、調査自体ができない。**必ずコンテナ内部から直接計測する**
+3. ホスト全体の負荷: `cat /proc/loadavg` — コア数の 10 倍以上なら異常（今回は 48 コア機で 944）。**コンテナ内で見てもホストの値が出る**
+4. **I/O 圧迫の決定的指標**: `cat /proc/pressure/io` — `some` の avg10 / avg60 / avg300 が全て 99 なら、I/O 待ちで完全停止が 5 分以上継続している
+5. 自コンテナの制限状況: `cat /sys/fs/cgroup/cpu.stat`（`nr_throttled`）、`cat /sys/fs/cgroup/memory.max` と `memory.current`
+6. Postgres の checkpoint 所要時間: `railway logs` の `checkpoint complete` にある `write=` の秒数。通常 0.5〜2 秒。異常に伸びていれば書き込みが劣化している（今回は約 10MB の書き込みに 133.8 秒＝約 80KB/s）。**`checkpoint starting` の後に `checkpoint complete` が来ていない**なら checkpointer が刺さっている
+7. I/O で刺さったプロセス: `ps -eo stat= | sort | uniq -c` で uninterruptible **D state** のプロセスが存在するか
+8. ディスクは `df -h /var/lib/postgresql/data` で確認。Railway ダッシュボードのボリューム使用量表示は障害時に `0MB/50000MB` のような無意味な値を返すことがあるので信用しない
+
+### やってはいけないこと
+
+- **直近コミットの revert**。全ページ 502 の原因がクライアント側 UI 変更であることはまずない。サーバ側で全リクエストに乗るもの（middleware・共通レイアウト・DB 接続層）以外は容疑者にならない
+- **PID の増加をフォーク暴走と判断する**。PID は逆行することがあり信頼できない（今回 03:12 に 25964 → 03:31 に 99004 → 03:40 に 26015 と逆行し、「7 万プロセスのフォーク暴走」と誤読した。実プロセス数は 55 だった）。必ず `ps` で**実プロセス数を数える**
+- **障害対応中の master 直 push による「ついでの改善」**。切り分けが濁るうえ、検証もできない
+
+### インフラ構成メモ
+
+- 本番 Postgres は portal とは**別の Railway プロジェクト**にある。`bizstudio-portal` プロジェクトのサービスは `bizstudio-portal` と `bizstudio-portal-staging` のみで、DB は**プロジェクト `surprising-acceptance` / サービス `Postgres`**（接続先 `trolley.proxy.rlwy.net:40669`）。障害時に Railway 画面で探すと見つからず時間を溶かすので注意
+- この DB は **ai-resume-generator**（`BIZSTUDIO_DATABASE_URL`）と **portal-staging** と共有している。**DB 再起動はこれらも巻き添えにする**
+- kyuujin-pdf-tool / candidate-intake / job-platform は別 DB なので影響しない
+
+**関連ケース**:
+- 2026-08-10: Railway ホスト機の I/O 飽和（noisy neighbor）で本番 portal が全ページ 502。パターン辞書は `08-bug-patterns.md` の L-1。検知の仕組みは T-160（`4f49d46`）で 5 分ごとの死活監視 + LINE WORKS 通知を実装済み
