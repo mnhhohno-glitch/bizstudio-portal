@@ -1,10 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Toaster, toast } from "sonner";
+import { Toaster } from "sonner";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
-import { fmtJstDateTime, type RpaMachine, type RpaPattern, type RpaTemplate } from "./types";
+import {
+  buildExcelSubjectText,
+  fmtJstDateTime,
+  type RpaMachine,
+  type RpaPattern,
+  type RpaTemplate,
+} from "./types";
+import { CopyFallbackModal, useCopyText } from "./CopyText";
 import UpdateLogModal from "./UpdateLogModal";
 
 export default function StatusBoardClient() {
@@ -30,17 +37,28 @@ export default function StatusBoardClient() {
     load();
   }, [load]);
 
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      toast.success("コピーしました");
-    });
-  };
+  const { copy, fallback, closeFallback } = useCopyText();
 
   return (
     <div>
       <Toaster position="top-center" richColors />
       <div className="mb-4 flex items-center justify-between">
         <PageTitle>RPAスカウト 状況ボード</PageTitle>
+      </div>
+
+      {/* 配信Excelのテンプレートマスタ B2:B5 に一括で貼り戻すためのコピー */}
+      <div className="mb-4 rounded-[8px] border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3">
+        <button
+          onClick={() => copy(buildExcelSubjectText(machines), "配信Excel用の件名テンプレ名")}
+          disabled={loading}
+          className="rounded-[6px] bg-[#2563EB] px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+        >
+          配信Excel用にコピー
+        </button>
+        <div className="mt-1.5 text-[11px] text-[#1E3A8A]">
+          05_集計ファイル.xlsx の「テンプレートマスタ」シート B2
+          セルに貼り付けてください（1〜4号機分）。件名・本文は自動で反映されます。
+        </div>
       </div>
 
       {loading ? (
@@ -91,7 +109,7 @@ export default function StatusBoardClient() {
                       <div className="flex items-start gap-1">
                         <span className="break-all font-medium">{patternDisplay}</span>
                         <button
-                          onClick={() => copy(patternDisplay)}
+                          onClick={() => copy(patternDisplay, "パターン名")}
                           title="パターン名をコピー"
                           className="shrink-0 rounded px-1 text-[#6B7280] hover:bg-[#F3F4F6]"
                         >
@@ -139,6 +157,14 @@ export default function StatusBoardClient() {
             setModalMachine(null);
             load();
           }}
+        />
+      )}
+
+      {fallback && (
+        <CopyFallbackModal
+          title={fallback.title}
+          text={fallback.text}
+          onClose={closeFallback}
         />
       )}
     </div>

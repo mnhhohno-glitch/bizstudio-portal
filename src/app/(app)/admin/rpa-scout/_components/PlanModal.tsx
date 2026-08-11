@@ -8,10 +8,12 @@ import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
 import { achievementPct } from "@/lib/rpa-scout/dashboard";
 import { nowJstDateTimeLocal, ymdWeekday } from "@/lib/rpa-scout/jst";
 import {
+  currentSubjectTemplateId,
   fmtJstDate,
   fmtJstDateTime,
   isRecentlyUsed,
   lastUsedSuffix,
+  type RpaMachine,
   type RpaPattern,
   type RpaPlan,
   type RpaTemplate,
@@ -28,6 +30,7 @@ export default function PlanModal({
   presetMachineNo,
   patterns,
   templates,
+  machines,
   onClose,
   onSaved,
 }: {
@@ -36,6 +39,7 @@ export default function PlanModal({
   presetMachineNo: number | null;
   patterns: RpaPattern[];
   templates: RpaTemplate[];
+  machines: RpaMachine[]; // 「現在」バッジ判定用（各号機の最新ログを持つ）
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -242,6 +246,10 @@ export default function PlanModal({
               value={subjectTemplateId}
               onChange={setSubjectTemplateId}
               sendStatus={selectedPattern?.sendStatus ?? null}
+              currentTemplateId={currentSubjectTemplateId(
+                machines.find((m) => m.machineNo === machineNo),
+                templates
+              )}
             />
           </div>
 

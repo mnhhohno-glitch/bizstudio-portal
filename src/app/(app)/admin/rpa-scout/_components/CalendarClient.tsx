@@ -10,6 +10,7 @@ import {
   fmtJstDateTime,
   fmtJstTime,
   type RpaLog,
+  type RpaMachine,
   type RpaPattern,
   type RpaPlan,
   type RpaTemplate,
@@ -40,6 +41,7 @@ export default function CalendarClient() {
   const [pending, setPending] = useState<RpaPlan[]>([]);
   const [patterns, setPatterns] = useState<RpaPattern[]>([]);
   const [templates, setTemplates] = useState<RpaTemplate[]>([]);
+  const [machines, setMachines] = useState<RpaMachine[]>([]); // 件名の「現在」判定用
   const [modal, setModal] = useState<
     | { mode: "create"; date: string; machineNo: number }
     | { mode: "edit"; plan: RpaPlan }
@@ -81,8 +83,15 @@ export default function CalendarClient() {
     loadLogs();
   }, [loadLogs]);
 
+  // 各号機の最新ログ（件名の「現在」判定に使う）。実績記録で変わるため reload でも取り直す
+  const loadMachines = useCallback(async () => {
+    const res = await fetch("/api/rpa-scout/machines");
+    if (res.ok) setMachines((await res.json()).machines);
+  }, []);
+
   useEffect(() => {
     loadPending();
+    loadMachines();
     (async () => {
       const [pRes, tRes] = await Promise.all([
         fetch("/api/rpa-scout/patterns"),
@@ -91,12 +100,13 @@ export default function CalendarClient() {
       if (pRes.ok) setPatterns((await pRes.json()).patterns);
       if (tRes.ok) setTemplates((await tRes.json()).templates);
     })();
-  }, [loadPending]);
+  }, [loadPending, loadMachines]);
 
   const reload = () => {
     loadPlans();
     loadPending();
     loadLogs(); // 実績記録／取り消しで変更ログ側も変わるため一緒に取り直す
+    loadMachines();
   };
 
   const move = (dir: -1 | 1) => {
@@ -423,6 +433,7 @@ export default function CalendarClient() {
             : { plan: modal.plan, presetDate: null, presetMachineNo: null })}
           patterns={patterns}
           templates={templates}
+          machines={machines}
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null);

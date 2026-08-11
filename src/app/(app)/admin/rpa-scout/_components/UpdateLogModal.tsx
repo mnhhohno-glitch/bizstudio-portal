@@ -6,6 +6,7 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { nowJstDateTimeLocal } from "@/lib/rpa-scout/jst";
 import {
+  currentSubjectTemplateId,
   isRecentlyUsed,
   lastUsedSuffix,
   type RpaMachine,
@@ -150,6 +151,7 @@ export default function UpdateLogModal({
               value={subjectTemplateId}
               onChange={setSubjectTemplateId}
               sendStatus={selectedPattern?.sendStatus ?? null}
+              currentTemplateId={currentSubjectTemplateId(machine, templates)}
             />
           </div>
 

@@ -128,6 +128,32 @@ export function isRecentlyUsed(lastUsedAt: string | null): boolean {
   return fmtJstDate(lastUsedAt) >= addDaysYmd(nowJstYmd(), -3);
 }
 
+// その号機に「現在」設定されている件名テンプレのid（最新ログ基準＝状況ボードのカード表示と同じ）。
+// subjectTemplateId を優先し、無い場合（移行データ）はテンプレ名で照合する。特定できなければ null
+export function currentSubjectTemplateId(
+  machine: RpaMachine | null | undefined,
+  templates: RpaTemplate[]
+): string | null {
+  const log = machine?.latestLog;
+  if (!log) return null;
+  if (log.subjectTemplateId) return log.subjectTemplateId;
+  const name = (log.subjectName ?? "").trim();
+  if (!name) return null;
+  return templates.find((t) => t.isActive && t.name.trim() === name)?.id ?? null;
+}
+
+// 配信Excel（05_集計ファイル.xlsx のテンプレートマスタ B2:B5）に貼る用のテキスト。
+// 1〜4号機の現在の件名テンプレ名を号機順に改行区切りで返す。
+// 記録が無い号機は空行にして行位置（＝Excelの号機）をずらさない。末尾に改行は付けない
+export const EXCEL_SUBJECT_MACHINE_NOS = [1, 2, 3, 4] as const;
+
+export function buildExcelSubjectText(machines: RpaMachine[]): string {
+  return EXCEL_SUBJECT_MACHINE_NOS.map((no) => {
+    const m = machines.find((x) => x.machineNo === no);
+    return m?.latestLog?.subjectName?.trim() ?? "";
+  }).join("\n");
+}
+
 // パターン選択肢の末尾に付ける最終使用の表記
 export function lastUsedSuffix(p: {
   lastUsedAt: string | null;
