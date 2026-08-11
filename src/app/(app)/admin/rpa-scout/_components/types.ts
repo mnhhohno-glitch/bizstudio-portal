@@ -12,6 +12,14 @@ export type RpaLog = {
   recordedAt: string; // JST壁時計値（"....Z" 形式で流れてくるがUTC変換せず slice で表示する）
   recordedByUserId: string | null;
   recordedByName?: string | null;
+  // 配信計画から記録された実績なら元計画。null=状況ボードからの直接記録／移行データ
+  sourcePlan?: {
+    id: string;
+    planDate: string; // JST壁時計値
+    timeSlot: string;
+    expectedCount: number | null;
+    memo: string | null;
+  } | null;
 };
 
 export type RpaMachine = {

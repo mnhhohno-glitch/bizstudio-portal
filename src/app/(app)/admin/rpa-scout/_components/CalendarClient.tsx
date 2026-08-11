@@ -5,7 +5,6 @@ import { Toaster, toast } from "sonner";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { addDaysYmd, mondayOfWeek, nowJstYmd, ymdWeekday } from "@/lib/rpa-scout/jst";
 import { timeSlotLabel, TIME_SLOT_ORDER, MACHINE_NOS } from "@/lib/rpa-scout/constants";
-import { achievementLevel, achievementPct } from "@/lib/rpa-scout/dashboard";
 import {
   fmtJstDate,
   fmtJstDateTime,
@@ -23,13 +22,6 @@ const SLOT_BADGE: Record<string, string> = {
   AM: "bg-[#DBEAFE] text-[#1D4ED8]",
   PM: "bg-[#DCFCE7] text-[#166534]",
   EVENING: "bg-[#EDE9FE] text-[#6D28D9]",
-};
-
-// 達成率バッジの配色（閾値は dashboard.ts の ACHIEVEMENT_WARN / ACHIEVEMENT_ALERT）
-const ACHIEVEMENT_BADGE: Record<string, string> = {
-  ok: "bg-[#F3F4F6] text-[#6B7280]",
-  warn: "bg-[#FEF3C7] text-[#B45309]",
-  alert: "bg-[#FEE2E2] text-[#DC2626]",
 };
 
 function isWeekend(ymd: string): boolean {
@@ -126,9 +118,30 @@ export default function CalendarClient() {
     }
   };
 
+  // 実績記録の取り消し。実績チップ側からのみ辿れる（実施済みの計画チップは出さないため）
+  const cancelExecution = async (log: RpaLog) => {
+    if (!log.sourcePlan) return;
+    if (!confirm("実績の記録を取り消しますか？\n変更ログから該当の1件が削除され、計画が未実施に戻ります。"))
+      return;
+    const res = await fetch(`/api/rpa-scout/plans/${log.sourcePlan.id}/execute`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      toast.success("実績の記録を取り消しました");
+      setExpandedLogId(null);
+      reload();
+    } else {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "取り消しに失敗しました");
+    }
+  };
+
+  // 実績記録済みの計画は実績チップが同じ内容を表すため、計画チップは出さない（レコードは残す）
   const plansFor = (date: string, machineNo: number) =>
     plans
-      .filter((p) => fmtJstDate(p.planDate) === date && p.machineNo === machineNo)
+      .filter(
+        (p) => !p.executedAt && fmtJstDate(p.planDate) === date && p.machineNo === machineNo
+      )
       .sort((a, b) => (TIME_SLOT_ORDER[a.timeSlot] ?? 9) - (TIME_SLOT_ORDER[b.timeSlot] ?? 9));
 
   // 実績は記録時刻の昇順で縦積み
@@ -314,62 +327,50 @@ export default function CalendarClient() {
                                   {l.recordedByName ? `（${l.recordedByName}）` : ""}
                                 </div>
                               )}
+                              {/* 計画から記録された実績のみ、取り消し導線を出す（計画チップは非表示のため） */}
+                              {expanded && l.sourcePlan && (
+                                <div className="mt-1 border-t border-[#E5E7EB] pt-1">
+                                  <div className="text-[10px] text-[#6B7280]">
+                                    この実績は配信計画から記録されました（
+                                    {timeSlotLabel(l.sourcePlan.timeSlot)}
+                                    {l.sourcePlan.expectedCount != null &&
+                                      `・想定 ${l.sourcePlan.expectedCount.toLocaleString()}件`}
+                                    ）
+                                  </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      cancelExecution(l);
+                                    }}
+                                    className="mt-1 rounded border border-[#FCA5A5] px-1.5 py-0.5 text-[10px] text-[#DC2626] hover:bg-[#FEF2F2]"
+                                  >
+                                    実績の記録を取り消す
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
 
-                        {cellPlans.map((p) => {
-                          // 実施済みの計画は実績チップと並ぶため、薄く表示して埋もれさせる
-                          const done = !!p.executedAt;
-                          // 予実。想定と実績が揃ったときだけ達成率を出す
-                          const pct =
-                            done && p.expectedCount != null && p.executedSearchCount != null
-                              ? achievementPct(p.executedSearchCount, p.expectedCount)
-                              : null;
-                          const level =
-                            pct != null
-                              ? achievementLevel(p.executedSearchCount!, p.expectedCount!)
-                              : null;
-                          return (
+                        {/* 計画チップ（未実施のみ）。実績記録済みは実績チップが表すため出さない */}
+                        {cellPlans.map((p) => (
                           <div
                             key={p.id}
                             onClick={(e) => {
                               e.stopPropagation();
                               setModal({ mode: "edit", plan: p });
                             }}
-                            className={
-                              done
-                                ? "rounded border border-[#E5E7EB] bg-white/60 p-1 hover:border-[#93C5FD]"
-                                : "rounded border border-[#BFDBFE] bg-[#F5F9FF] p-1 shadow-sm hover:border-[#60A5FA]"
-                            }
+                            className="rounded border border-[#BFDBFE] bg-[#F5F9FF] p-1 shadow-sm hover:border-[#60A5FA]"
                           >
                             <div className="flex items-center gap-1">
-                              <span
-                                className={
-                                  done
-                                    ? "rounded bg-[#F3F4F6] px-1 text-[10px] font-bold text-[#9CA3AF]"
-                                    : "rounded bg-[#DBEAFE] px-1 text-[10px] font-bold text-[#1E40AF]"
-                                }
-                              >
+                              <span className="rounded bg-[#DBEAFE] px-1 text-[10px] font-bold text-[#1E40AF]">
                                 計画
                               </span>
                               <span
-                                className={
-                                  done
-                                    ? "rounded bg-[#F3F4F6] px-1 text-[10px] font-bold text-[#9CA3AF]"
-                                    : `rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`
-                                }
+                                className={`rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`}
                               >
                                 {timeSlotLabel(p.timeSlot)}
                               </span>
-                              {done && (
-                                <span
-                                  title={`${p.executedByName ?? "?"} が ${fmtJstDateTime(p.executedAt!)} に実績記録`}
-                                  className="rounded bg-[#F3F4F6] px-1 text-[10px] font-medium text-[#9CA3AF]"
-                                >
-                                  実施済み
-                                </span>
-                              )}
                               {weekend && p.reflectedAt && (
                                 <span
                                   title={`${p.reflectedByName ?? "?"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
@@ -379,48 +380,15 @@ export default function CalendarClient() {
                                 </span>
                               )}
                             </div>
-                            <div
-                              className={[
-                                "mt-0.5 truncate text-[11px] font-medium",
-                                done ? "text-[#9CA3AF]" : "text-[#374151]",
-                              ].join(" ")}
-                            >
+                            <div className="mt-0.5 truncate text-[11px] font-medium text-[#374151]">
                               {p.patternName}
                             </div>
-                            <div
-                              className={[
-                                "truncate text-[10px]",
-                                done ? "text-[#D1D5DB]" : "text-[#6B7280]",
-                              ].join(" ")}
-                            >
+                            <div className="truncate text-[10px] text-[#6B7280]">
                               {p.subjectName}
                             </div>
-                            {/* 予実。未実施は想定のみ、実施済みは 想定→実績（達成率） */}
                             {p.expectedCount != null && (
-                              <div className="mt-0.5 flex items-center gap-1 text-[10px]">
-                                {done ? (
-                                  p.executedSearchCount != null ? (
-                                    <>
-                                      <span className="text-[#6B7280] tabular-nums">
-                                        {p.expectedCount.toLocaleString()}→
-                                        {p.executedSearchCount.toLocaleString()}件
-                                      </span>
-                                      <span
-                                        className={`rounded px-1 font-bold ${ACHIEVEMENT_BADGE[level!]}`}
-                                      >
-                                        {pct}%
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <span className="text-[#9CA3AF] tabular-nums">
-                                      想定 {p.expectedCount.toLocaleString()}件（実績なし）
-                                    </span>
-                                  )
-                                ) : (
-                                  <span className="font-medium text-[#1D4ED8] tabular-nums">
-                                    予定 {p.expectedCount.toLocaleString()}件
-                                  </span>
-                                )}
+                              <div className="mt-0.5 text-[10px] font-medium text-[#1D4ED8] tabular-nums">
+                                予定 {p.expectedCount.toLocaleString()}件
                               </div>
                             )}
                             {weekend && (
@@ -437,8 +405,7 @@ export default function CalendarClient() {
                               </label>
                             )}
                           </div>
-                          );
-                        })}
+                        ))}
                       </div>
                     </td>
                   );

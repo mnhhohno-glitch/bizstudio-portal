@@ -49,18 +49,48 @@ export async function GET(request: NextRequest) {
   const userIds = Array.from(
     new Set(logs.map((l) => l.recordedByUserId).filter((v): v is string => !!v))
   );
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true, email: true },
-      })
-    : [];
+  // 「配信計画から記録された実績」かどうかを1クエリで解決する（カレンダーが取消導線の出し分けに使う。
+  // セルごとの追加fetchを避けるため、ログ取得のレスポンスに同梱する）
+  const [users, sourcePlans] = await Promise.all([
+    userIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true, email: true },
+        })
+      : [],
+    logs.length
+      ? prisma.rpaScoutPlan.findMany({
+          where: { executedLogId: { in: logs.map((l) => l.id) } },
+          select: {
+            id: true,
+            executedLogId: true,
+            planDate: true,
+            timeSlot: true,
+            expectedCount: true,
+            memo: true,
+          },
+        })
+      : [],
+  ]);
   const userNameMap = Object.fromEntries(users.map((u) => [u.id, u.name ?? u.email]));
+  const planByLogId = new Map(
+    sourcePlans.map((p) => [
+      p.executedLogId!,
+      {
+        id: p.id,
+        planDate: p.planDate,
+        timeSlot: p.timeSlot,
+        expectedCount: p.expectedCount,
+        memo: p.memo,
+      },
+    ])
+  );
 
   return NextResponse.json({
     logs: logs.map((l) => ({
       ...l,
       recordedByName: l.recordedByUserId ? (userNameMap[l.recordedByUserId] ?? null) : null,
+      sourcePlan: planByLogId.get(l.id) ?? null, // null=状況ボードからの直接記録／移行データ
     })),
     total,
     page,

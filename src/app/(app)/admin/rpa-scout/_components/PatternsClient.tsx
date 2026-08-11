@@ -7,6 +7,7 @@ import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName, machineLabel } from "@/lib/rpa-scout/pattern-name";
 import { AREA_TYPE_LABELS } from "@/lib/rpa-scout/area";
+import { firstSetOr, isUnset, UNSET_LABEL } from "@/lib/rpa-scout/display";
 import {
   fmtJstShortDateTime,
   fmtUtcInstantAsJstDate,
@@ -35,38 +36,54 @@ type SortKey =
   | "lastUsed"
   | "createdAt";
 
-// 表示値（移行行で構造化カラムがnullなら rawConditions から表示）
+// 表示値（構造化カラム優先、移行行で null なら rawConditions の原文を使う）。
+// 「未選択」の表記ゆれは firstSetOr / isUnset に集約し、移行・新規で同じ表記にする。
+
+function sendStatusText(p: RpaPattern): string {
+  if (p.sendStatus === "UNSENT") return "未送信";
+  if (p.sendStatus === "SENT") return "送信済";
+  return UNSET_LABEL;
+}
+
 function registText(p: RpaPattern): string {
-  if (p.registDays != null && p.registDirection) {
-    return `${p.registDays}日${p.registDirection === "WITHIN" ? "以内" : "以降"}`;
-  }
-  return p.rawConditions?.regist_date ?? "-";
+  const structured =
+    p.registDays != null && p.registDirection
+      ? `${p.registDays}日${p.registDirection === "WITHIN" ? "以内" : "以降"}`
+      : null;
+  return firstSetOr(structured, p.rawConditions?.regist_date);
+}
+
+// Json列（prefectures / jobCategories）は配列以外（{} 等）が入り得るため、必ず配列に正規化してから使う
+function jsonList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v) => !isUnset(v)).map(String) : [];
 }
 
 function areaText(p: RpaPattern): string {
-  if (p.areaType === "PREFECTURES") return (p.prefectures ?? []).join("/") || "県指定";
-  if (p.areaType) return AREA_TYPE_LABELS[p.areaType as keyof typeof AREA_TYPE_LABELS] ?? p.areaType;
-  return p.rawConditions?.residence ?? "-";
+  if (p.areaType === "PREFECTURES") return firstSetOr(jsonList(p.prefectures).join("/"), "県指定");
+  const structured = p.areaType
+    ? (AREA_TYPE_LABELS[p.areaType as keyof typeof AREA_TYPE_LABELS] ?? p.areaType)
+    : null;
+  return firstSetOr(structured, p.rawConditions?.residence);
 }
 
 function gradYearText(p: RpaPattern): string {
-  if (p.gradYearFrom != null || p.gradYearTo != null) {
-    return `${p.gradYearFrom ?? ""}〜${p.gradYearTo ?? ""}`;
-  }
+  const structured =
+    p.gradYearFrom != null || p.gradYearTo != null
+      ? `${p.gradYearFrom ?? ""}〜${p.gradYearTo ?? ""}`
+      : null;
   const raw = [p.rawConditions?.grad_year_from, p.rawConditions?.grad_year_to]
-    .filter(Boolean)
+    .filter((v) => !isUnset(v))
     .join("〜");
-  return raw || "-";
+  return firstSetOr(structured, raw);
 }
 
 function companyCountText(p: RpaPattern): string {
-  if (p.companyCount != null) return `〜${p.companyCount}社`;
-  return p.rawConditions?.company_count ?? "-";
+  const structured = p.companyCount != null ? `〜${p.companyCount}社` : null;
+  return firstSetOr(structured, p.rawConditions?.company_count);
 }
 
 function jobCategoryText(p: RpaPattern): string {
-  if (p.jobCategories?.length) return p.jobCategories.join("/");
-  return p.rawConditions?.job_category ?? "-";
+  return firstSetOr(jsonList(p.jobCategories).join("/"), p.rawConditions?.job_category);
 }
 
 export default function PatternsClient() {
@@ -143,7 +160,7 @@ export default function PatternsClient() {
       case "name":
         return p.name;
       case "sendStatus":
-        return p.sendStatus ?? "";
+        return sendStatusText(p);
       case "regist":
         return registText(p);
       case "area":
@@ -316,13 +333,7 @@ export default function PatternsClient() {
                           )}
                         </div>
                       </Td>
-                      <Td className="whitespace-nowrap">
-                        {p.sendStatus === "UNSENT"
-                          ? "未送信"
-                          : p.sendStatus === "SENT"
-                            ? "送信済"
-                            : "-"}
-                      </Td>
+                      <Td className="whitespace-nowrap">{sendStatusText(p)}</Td>
                       <Td className="overflow-hidden whitespace-nowrap">{registText(p)}</Td>
                       <Td className="overflow-hidden">
                         <span className="block truncate" title={areaText(p)}>
