@@ -300,19 +300,24 @@ export async function GET(request: NextRequest) {
     pct: achievementPct(pvaActualTotal, pvaExpectedTotal),
     missingExpectedCount,
     noActualCount,
-    // 号機別は既存の号機別テーブルと同じ表示ルール（停止号機は号機指定時のみ）
-    machineRows: displayMachines.map((m) => {
-      const rows = pvaRows.filter((r) => r.machineNo === m.machineNo);
-      const expected = rows.reduce((s, r) => s + r.expected, 0);
-      const actual = rows.reduce((s, r) => s + r.actual, 0);
-      return {
-        machineNo: m.machineNo,
-        planCount: rows.length,
-        expected,
-        actual,
-        pct: achievementPct(actual, expected),
-      };
-    }),
+    // 号機別は「予実データがある号機だけ」を出す。稼働状況テーブルと同じく停止号機は原則出ないが、
+    // 停止号機に予実が残っている期間だけは行を出す（隠すとサマリ合計と号機別の合計が食い違うため）。
+    // isActive を返して画面側で「停止」と分かるようにする
+    machineRows: machines
+      .filter((m) => pvaRows.some((r) => r.machineNo === m.machineNo))
+      .map((m) => {
+        const rows = pvaRows.filter((r) => r.machineNo === m.machineNo);
+        const expected = rows.reduce((s, r) => s + r.expected, 0);
+        const actual = rows.reduce((s, r) => s + r.actual, 0);
+        return {
+          machineNo: m.machineNo,
+          isActive: m.isActive,
+          planCount: rows.length,
+          expected,
+          actual,
+          pct: achievementPct(actual, expected),
+        };
+      }),
     worst5: [...pvaRows].sort((a, b) => a.pct - b.pct || a.planDate.localeCompare(b.planDate)).slice(0, 5),
   };
 

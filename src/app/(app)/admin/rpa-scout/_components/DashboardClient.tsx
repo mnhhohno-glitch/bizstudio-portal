@@ -368,9 +368,16 @@ export default function DashboardClient() {
                     <tbody>
                       {data.planVsActual.machineRows.map((m) => (
                         <tr key={m.machineNo} className="border-b border-[#F1F5F9] last:border-b-0">
-                          <Mtd>{m.machineNo}号機</Mtd>
-                          <Mtd right>{m.expected > 0 ? nf(m.expected) : "-"}</Mtd>
-                          <Mtd right>{m.expected > 0 ? nf(m.actual) : "-"}</Mtd>
+                          <Mtd>
+                            {m.machineNo}号機
+                            {!m.isActive && (
+                              <span className="ml-1 rounded-[4px] bg-[#F3F4F6] px-1 py-0.5 text-[10px] font-semibold text-[#6B7280]">
+                                停止
+                              </span>
+                            )}
+                          </Mtd>
+                          <Mtd right>{nf(m.expected)}</Mtd>
+                          <Mtd right>{nf(m.actual)}</Mtd>
                           <Mtd right>
                             {m.pct == null ? (
                               <span className="text-[#9CA3AF]">-</span>

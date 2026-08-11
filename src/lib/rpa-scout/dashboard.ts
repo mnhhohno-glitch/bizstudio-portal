@@ -126,6 +126,7 @@ export type PlanVsActualRow = {
 
 export type PlanVsActualMachineRow = {
   machineNo: number;
+  isActive: boolean;
   planCount: number;
   expected: number;
   actual: number;
@@ -272,7 +273,7 @@ export function buildAnalysisPrompt(
     lines.push("|--|--|--|--|");
     for (const m of planVsActual.machineRows) {
       lines.push(
-        `| ${m.machineNo}号機 | ${nf(m.expected)} | ${nf(m.actual)} | ${m.pct != null ? `${m.pct}%` : "-"} |`
+        `| ${m.machineNo}号機${m.isActive ? "" : "（停止）"} | ${nf(m.expected)} | ${nf(m.actual)} | ${m.pct != null ? `${m.pct}%` : "-"} |`
       );
     }
     lines.push("## 乖離の大きい計画 TOP5");
