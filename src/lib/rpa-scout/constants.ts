@@ -53,3 +53,29 @@ export function timeSlotLabel(slot: string): string {
 }
 
 export const MACHINE_NOS = [1, 2, 3, 4, 5, 6] as const;
+
+// メールテンプレートの種別（Excelのテンプレートマスタの区分と対応）
+export const TEMPLATE_KIND_OPTIONS = [
+  { value: "UNSENT", label: "未送信用" },
+  { value: "SENT", label: "送信済用" },
+  { value: "INDIVIDUAL", label: "個別配信用" },
+] as const;
+
+export const TEMPLATE_KIND_VALUES = TEMPLATE_KIND_OPTIONS.map((o) => o.value) as readonly string[];
+
+export function templateKindLabel(kind: string | null | undefined): string {
+  if (!kind) return "未設定";
+  return TEMPLATE_KIND_OPTIONS.find((o) => o.value === kind)?.label ?? kind;
+}
+
+// テンプレート本文の差し込みタグ。RPA（Power Automate Desktop）側で置換されるため表記を変えない
+export const TEMPLATE_MERGE_TAGS = [
+  { tag: "[社名]", desc: "求職者の在籍企業名（マイナビから取得して置換）" },
+  { tag: "[最終学歴]", desc: "最終学歴（マイナビから取得して置換）" },
+  { tag: "[経験職種]", desc: "経験職種（マイナビから取得して置換）" },
+  { tag: "[担当者]", desc: "担当者名（Excelの設定シートの値に置換）" },
+] as const;
+
+// 画面に常時出すExcel貼り戻しの注意書き
+export const TEMPLATE_EXCEL_NOTE =
+  "テンプレートを変更した場合は、コピーして 05_集計ファイル.xlsx のテンプレートマスタ／メール設定に貼り替えてください。RPAはExcelを参照して配信します。";

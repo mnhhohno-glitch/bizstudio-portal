@@ -63,8 +63,12 @@ export type RpaPattern = {
 export type RpaTemplate = {
   id: string;
   name: string;
+  kind: string | null; // UNSENT / SENT / INDIVIDUAL。移行前データはnull
   subject: string;
+  body: string | null;
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RpaPlan = {

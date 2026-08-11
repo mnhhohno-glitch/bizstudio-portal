@@ -3017,6 +3017,7 @@ model RpaScoutPattern {
 model RpaScoutSubjectTemplate {
   id        String   @id @default(cuid())
   name      String // テンプレ名（例: 【未送信用】口コミ4.9オーダーメイド）
+  kind      String? // UNSENT=未送信用 / SENT=送信済用 / INDIVIDUAL=個別配信用。移行前データはnull
   subject   String // 件名
   body      String?  @db.Text // 本文
   isActive  Boolean  @default(true)

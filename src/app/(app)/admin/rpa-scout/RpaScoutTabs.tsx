@@ -9,6 +9,7 @@ const TABS = [
   { href: "/admin/rpa-scout/patterns", label: "パターン管理" },
   { href: "/admin/rpa-scout/logs", label: "変更ログ" },
   { href: "/admin/rpa-scout/dashboard", label: "ダッシュボード" },
+  { href: "/admin/rpa-scout/templates", label: "テンプレート管理" },
 ];
 
 export default function RpaScoutTabs() {
