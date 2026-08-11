@@ -60,7 +60,10 @@ export default function PatternFormModal({
   const [registDays, setRegistDays] = useState<string>(
     pattern?.registDays != null ? String(pattern.registDays) : ""
   );
-  const [registDirection, setRegistDirection] = useState(pattern?.registDirection ?? "WITHIN");
+  // "WITHIN" | "AFTER" | "NONE"（NONE=登録日で絞らない。保存時は registDays/registDirection とも null）
+  const [registDirection, setRegistDirection] = useState(
+    pattern ? (pattern.registDirection ?? "NONE") : "WITHIN"
+  );
   const [lastLoginDays, setLastLoginDays] = useState<string>(
     pattern?.lastLoginDays != null ? String(pattern.lastLoginDays) : "1"
   );
@@ -89,11 +92,13 @@ export default function PatternFormModal({
   );
   const [saving, setSaving] = useState(false);
 
+  const registNone = registDirection === "NONE";
+
   const input = useMemo(
     () => ({
       sendStatus: sendStatus || null,
-      registDays: registDays === "" ? null : Number(registDays),
-      registDirection: registDays === "" ? null : registDirection,
+      registDays: registNone || registDays === "" ? null : Number(registDays),
+      registDirection: registNone || registDays === "" ? null : registDirection,
       lastLoginDays: lastLoginDays === "" ? null : Number(lastLoginDays),
       areaType,
       prefectures,
@@ -288,9 +293,10 @@ export default function PatternFormModal({
                   min={1}
                   value={registDays}
                   onChange={(e) => setRegistDays(e.target.value)}
-                  className={`${inputCls} w-20`}
+                  disabled={registNone}
+                  className={`${inputCls} w-20 ${registNone ? "bg-[#F3F4F6] text-[#9CA3AF]" : ""}`}
                 />
-                <span className="text-[13px]">日</span>
+                <span className={`text-[13px] ${registNone ? "text-[#9CA3AF]" : ""}`}>日</span>
                 <div className="flex gap-2">
                   <label className="flex items-center gap-1 text-[13px]">
                     <input
@@ -310,10 +316,21 @@ export default function PatternFormModal({
                     />
                     以降
                   </label>
+                  <label className="flex items-center gap-1 text-[13px]">
+                    <input
+                      type="radio"
+                      name="registDirection"
+                      checked={registNone}
+                      onChange={() => setRegistDirection("NONE")}
+                    />
+                    指定なし
+                  </label>
                 </div>
               </div>
               <div className="mt-0.5 text-[11px] text-[#9CA3AF]">
                 以内=開放日 / 以降=既登録
+                <br />
+                指定なし=登録日で絞らない（名前に含めない）
               </div>
             </div>
             <div>

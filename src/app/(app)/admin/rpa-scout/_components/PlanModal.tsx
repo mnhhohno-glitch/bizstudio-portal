@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
-import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
 import { achievementPct } from "@/lib/rpa-scout/dashboard";
 import { nowJstDateTimeLocal, ymdWeekday } from "@/lib/rpa-scout/jst";
@@ -11,14 +10,13 @@ import {
   currentSubjectTemplateId,
   fmtJstDate,
   fmtJstDateTime,
-  isRecentlyUsed,
-  lastUsedSuffix,
   type RpaMachine,
   type RpaPattern,
   type RpaPlan,
   type RpaTemplate,
 } from "./types";
 import LastUsedNote from "./LastUsedNote";
+import PatternSelect from "./PatternSelect";
 import SubjectTemplateSelect from "./SubjectTemplateSelect";
 
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -62,17 +60,6 @@ export default function PlanModal({
   const [searchCount, setSearchCount] = useState<string>("");
   const [recordedAt, setRecordedAt] = useState(nowJstDateTimeLocal());
   const [executing, setExecuting] = useState(false);
-
-  // その号機用＋全号機用を上に
-  const { own, others } = useMemo(() => {
-    const own = patterns.filter(
-      (p) => p.targetMachineNo === machineNo || p.targetMachineNo == null
-    );
-    const others = patterns.filter(
-      (p) => p.targetMachineNo != null && p.targetMachineNo !== machineNo
-    );
-    return { own, others };
-  }, [patterns, machineNo]);
 
   const selectedPattern = patterns.find((p) => p.id === patternId);
 
@@ -205,37 +192,12 @@ export default function PlanModal({
 
           <div>
             <label className={label}>パターン</label>
-            <select
+            <PatternSelect
+              patterns={patterns}
               value={patternId}
-              onChange={(e) => setPatternId(e.target.value)}
-              className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
-            >
-              <option value="">選択してください</option>
-              <optgroup label={`${machineNo}号機用・全号機用`}>
-                {own.map((p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                    style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
-                  >
-                    {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
-                  </option>
-                ))}
-              </optgroup>
-              {others.length > 0 && (
-                <optgroup label="────── 他号機用 ──────">
-                  {others.map((p) => (
-                    <option
-                      key={p.id}
-                      value={p.id}
-                      style={isRecentlyUsed(p.lastUsedAt) ? { color: "#DC2626" } : undefined}
-                    >
-                      {displayPatternName(p.targetMachineNo, p.name)} {lastUsedSuffix(p)}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
+              onChange={setPatternId}
+              machineNo={machineNo}
+            />
             <LastUsedNote pattern={selectedPattern} />
           </div>
 
