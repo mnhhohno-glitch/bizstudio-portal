@@ -69,6 +69,7 @@ export type RpaPlan = {
   subjectTemplateId: string | null;
   subjectName: string;
   memo: string | null;
+  expectedCount: number | null; // 想定検索件数（任意入力）
   reflectedAt: string | null; // JST壁時計値
   reflectedByUserId: string | null;
   reflectedByName?: string | null;

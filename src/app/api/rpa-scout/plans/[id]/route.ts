@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { jstStringToDbDate, nowJstDateTimeLocal, ymdWeekday, dbDateToJstYmd } from "@/lib/rpa-scout/jst";
-import { attachPlanNamesOne } from "@/lib/rpa-scout/plan-serialize";
+import { attachPlanNamesOne, parseExpectedCount } from "@/lib/rpa-scout/plan-serialize";
 
 // 編集（時間帯・パターン・件名・メモ）と「マイナビ反映済み」チェック（reflected: true/false）
 export async function PATCH(
@@ -43,6 +43,7 @@ export async function PATCH(
   const data: {
     timeSlot?: string;
     memo?: string | null;
+    expectedCount?: number | null;
     patternId?: string;
     patternName?: string;
     subjectTemplateId?: string;
@@ -56,6 +57,9 @@ export async function PATCH(
   }
   if ("memo" in body) {
     data.memo = typeof body.memo === "string" && body.memo !== "" ? body.memo : null;
+  }
+  if ("expectedCount" in body) {
+    data.expectedCount = parseExpectedCount(body.expectedCount);
   }
   if (typeof body.patternId === "string" && body.patternId) {
     const pattern = await prisma.rpaScoutPattern.findUnique({ where: { id: body.patternId } });

@@ -7,6 +7,9 @@ import { addDaysYmd, mondayOfWeek, nowJstYmd } from "@/lib/rpa-scout/jst";
 import {
   UNCLASSIFIED,
   SEARCH_COUNT_DROP_THRESHOLD,
+  ACHIEVEMENT_WARN,
+  ACHIEVEMENT_ALERT,
+  achievementLevel,
   axisPct,
   trimTopEntries,
   shortJstDate,
@@ -306,6 +309,115 @@ export default function DashboardClient() {
             </div>
           </div>
 
+          {/* 予実（想定件数 vs 実績） */}
+          <Band
+            title="予実管理"
+            note="実績記録済み × 想定件数ありの計画のみ集計"
+          />
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <Card title="期間サマリ">
+              {data.planVsActual.planCount === 0 ? (
+                <div className="py-4 text-center text-[12px] text-[#9CA3AF]">対象なし</div>
+              ) : (
+                <>
+                  <div className="flex items-end justify-between gap-2 py-1">
+                    <div>
+                      <div className="text-[11.5px] text-[#6B7280]">想定 → 実績</div>
+                      <div className="text-[19px] font-bold tabular-nums text-[#1F2937]">
+                        {nf(data.planVsActual.expectedTotal)} → {nf(data.planVsActual.actualTotal)}
+                      </div>
+                    </div>
+                    <AchievementBadge
+                      actual={data.planVsActual.actualTotal}
+                      expected={data.planVsActual.expectedTotal}
+                      large
+                    />
+                  </div>
+                  <div className="mt-1.5 border-t border-[#F1F5F9] pt-1.5 text-[11.5px] text-[#6B7280]">
+                    対象計画: {data.planVsActual.planCount}件
+                  </div>
+                </>
+              )}
+              {(data.planVsActual.missingExpectedCount > 0 ||
+                data.planVsActual.noActualCount > 0) && (
+                <div className="mt-1 text-[11px] text-[#9CA3AF]">
+                  {data.planVsActual.missingExpectedCount > 0 && (
+                    <div>想定未入力: {data.planVsActual.missingExpectedCount}件（分母から除外）</div>
+                  )}
+                  {data.planVsActual.noActualCount > 0 && (
+                    <div>実績なし（停止記録）: {data.planVsActual.noActualCount}件（分母から除外）</div>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            <Card title="号機別の予実">
+              {data.planVsActual.planCount === 0 || data.planVsActual.machineRows.length === 0 ? (
+                <div className="py-4 text-center text-[12px] text-[#9CA3AF]">対象なし</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr>
+                        <Mth>号機</Mth>
+                        <Mth right>想定</Mth>
+                        <Mth right>実績</Mth>
+                        <Mth right>達成率</Mth>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.planVsActual.machineRows.map((m) => (
+                        <tr key={m.machineNo} className="border-b border-[#F1F5F9] last:border-b-0">
+                          <Mtd>{m.machineNo}号機</Mtd>
+                          <Mtd right>{m.expected > 0 ? nf(m.expected) : "-"}</Mtd>
+                          <Mtd right>{m.expected > 0 ? nf(m.actual) : "-"}</Mtd>
+                          <Mtd right>
+                            {m.pct == null ? (
+                              <span className="text-[#9CA3AF]">-</span>
+                            ) : (
+                              <AchievementBadge actual={m.actual} expected={m.expected} />
+                            )}
+                          </Mtd>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            <Card title="乖離の大きい計画 TOP5">
+              {data.planVsActual.worst5.length === 0 ? (
+                <div className="py-4 text-center text-[12px] text-[#9CA3AF]">対象なし</div>
+              ) : (
+                data.planVsActual.worst5.map((w) => (
+                  <div
+                    key={w.planId}
+                    className="flex items-baseline gap-2 border-b border-[#F1F5F9] py-1.5 text-[12px] last:border-b-0"
+                  >
+                    <span className="shrink-0 whitespace-nowrap text-[#6B7280]">
+                      {shortJstDate(w.planDate)} {w.machineNo}号機
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                      title={w.patternName}
+                    >
+                      {w.patternName}
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap tabular-nums text-[#6B7280]">
+                      {nf(w.expected)}→{nf(w.actual)}件
+                    </span>
+                    <AchievementBadge actual={w.actual} expected={w.expected} />
+                  </div>
+                ))
+              )}
+              <div className="mt-2 text-[11px] text-[#6B7280]">
+                達成率 {Math.round(ACHIEVEMENT_ALERT * 100)}%未満＝赤 /{" "}
+                {Math.round(ACHIEVEMENT_WARN * 100)}%未満＝琥珀。慢性的に低い号機・パターンはリスト枯渇のサイン。
+              </div>
+            </Card>
+          </div>
+
           {/* 条件軸別 使用構成 */}
           <Band
             title="条件軸別の使用構成（使用率）"
@@ -476,6 +588,35 @@ function Diff({ diff, suffix }: { diff: number; suffix: string }) {
     return <span className="text-[#059669]">前期間 +{nf(diff)}{suffix}</span>;
   if (diff < 0) return <span className="text-[#DC2626]">前期間 {nf(diff)}{suffix}</span>;
   return <span className="text-[#6B7280]">前期間 ±0{suffix}</span>;
+}
+
+// 達成率バッジ。閾値は dashboard.ts の ACHIEVEMENT_WARN / ACHIEVEMENT_ALERT に集約
+function AchievementBadge({
+  actual,
+  expected,
+  large,
+}: {
+  actual: number;
+  expected: number;
+  large?: boolean;
+}) {
+  if (expected <= 0) return <span className="text-[#9CA3AF]">-</span>;
+  const level = achievementLevel(actual, expected);
+  const tone =
+    level === "alert"
+      ? "bg-[#FEE2E2] text-[#DC2626]"
+      : level === "warn"
+        ? "bg-[#FEF3C7] text-[#B45309]"
+        : "bg-[#ECFDF5] text-[#059669]";
+  return (
+    <span
+      className={`shrink-0 whitespace-nowrap rounded-[4px] font-bold tabular-nums ${tone} ${
+        large ? "px-2 py-1 text-[15px]" : "px-1.5 py-0.5 text-[10.5px]"
+      }`}
+    >
+      {Math.round((actual / expected) * 100)}%
+    </span>
+  );
 }
 
 function Band({ title, note }: { title: string; note: string }) {

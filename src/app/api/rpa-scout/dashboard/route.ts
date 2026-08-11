@@ -5,6 +5,7 @@ import { jstStringToDbDate, addDaysYmd, nowJstYmd, dbDateToJstYmd } from "@/lib/
 import {
   UNCLASSIFIED,
   SEARCH_COUNT_DROP_THRESHOLD,
+  achievementPct,
   areaAxisLabel,
   sendStatusAxisLabel,
   registAxisLabel,
@@ -14,6 +15,8 @@ import {
   type DashboardData,
   type ContinuousUseAlert,
   type SearchDropAlert,
+  type PlanVsActual,
+  type PlanVsActualRow,
 } from "@/lib/rpa-scout/dashboard";
 
 type LastUsedRow = { key: string; recordedAt: Date; machineNo: number };
@@ -47,7 +50,8 @@ export async function GET(request: NextRequest) {
 
   const whereMachine = machineNo != null ? { machineNo } : {};
 
-  const [logs, prevAgg, patterns, lastByIdRows, lastByNameRows, machines] = await Promise.all([
+  const [logs, prevAgg, patterns, lastByIdRows, lastByNameRows, machines, executedPlans] =
+    await Promise.all([
     // 期間内ログ（recordedAt はJST壁時計値。境界もJST文字列のまま。罠#17）
     prisma.rpaScoutLog.findMany({
       where: {
@@ -85,6 +89,17 @@ export async function GET(request: NextRequest) {
       FROM rpa_scout_logs
       ORDER BY "patternName", "recordedAt" DESC`,
     prisma.rpaScoutMachine.findMany({ orderBy: { machineNo: "asc" } }),
+    // 予実用。実績記録済みの計画を executedAt（=生成ログの recordedAt と同値のJST壁時計）で期間絞り
+    prisma.rpaScoutPlan.findMany({
+      where: {
+        ...whereMachine,
+        executedAt: {
+          gte: jstStringToDbDate(from),
+          lt: jstStringToDbDate(addDaysYmd(to, 1)),
+        },
+      },
+      orderBy: { executedAt: "asc" },
+    }),
   ]);
 
   // ---- ログ→パターン紐付け（patternId優先、null移行ログはパターン名完全一致でフォールバック） ----
@@ -236,6 +251,71 @@ export async function GET(request: NextRequest) {
     };
   });
 
+  // ---- 予実（想定件数 vs 実績） ----
+  // 実績件数は計画が生成した RpaScoutLog から取る（期間内ログに含まれるが、
+  // 号機フィルタ等でズレないよう executedLogId で明示的に引き直す）
+  const executedLogIds = executedPlans
+    .map((p) => p.executedLogId)
+    .filter((v): v is string => !!v);
+  const executedLogs = executedLogIds.length
+    ? await prisma.rpaScoutLog.findMany({
+        where: { id: { in: executedLogIds } },
+        select: { id: true, searchCount: true },
+      })
+    : [];
+  const executedCountById = new Map(executedLogs.map((l) => [l.id, l.searchCount]));
+
+  const pvaRows: PlanVsActualRow[] = [];
+  let missingExpectedCount = 0;
+  let noActualCount = 0;
+  for (const p of executedPlans) {
+    // 想定0以下は目標として意味を持たないため未入力と同じ扱い
+    if (p.expectedCount == null || p.expectedCount <= 0) {
+      missingExpectedCount++;
+      continue;
+    }
+    const actual = p.executedLogId ? (executedCountById.get(p.executedLogId) ?? null) : null;
+    if (actual == null) {
+      // 停止記録（件数なし）は達成率を出せないので分母から外す
+      noActualCount++;
+      continue;
+    }
+    pvaRows.push({
+      planId: p.id,
+      planDate: toWire(p.planDate),
+      machineNo: p.machineNo,
+      patternName: p.patternName,
+      expected: p.expectedCount,
+      actual,
+      pct: achievementPct(actual, p.expectedCount)!,
+    });
+  }
+
+  const pvaExpectedTotal = pvaRows.reduce((s, r) => s + r.expected, 0);
+  const pvaActualTotal = pvaRows.reduce((s, r) => s + r.actual, 0);
+  const planVsActual: PlanVsActual = {
+    planCount: pvaRows.length,
+    expectedTotal: pvaExpectedTotal,
+    actualTotal: pvaActualTotal,
+    pct: achievementPct(pvaActualTotal, pvaExpectedTotal),
+    missingExpectedCount,
+    noActualCount,
+    // 号機別は既存の号機別テーブルと同じ表示ルール（停止号機は号機指定時のみ）
+    machineRows: displayMachines.map((m) => {
+      const rows = pvaRows.filter((r) => r.machineNo === m.machineNo);
+      const expected = rows.reduce((s, r) => s + r.expected, 0);
+      const actual = rows.reduce((s, r) => s + r.actual, 0);
+      return {
+        machineNo: m.machineNo,
+        planCount: rows.length,
+        expected,
+        actual,
+        pct: achievementPct(actual, expected),
+      };
+    }),
+    worst5: [...pvaRows].sort((a, b) => a.pct - b.pct || a.planDate.localeCompare(b.planDate)).slice(0, 5),
+  };
+
   // ---- KPI ----
   const searchCounts = logs.map((l) => l.searchCount).filter((v): v is number => v != null);
   const searchTotal = searchCounts.reduce((s, v) => s + v, 0);
@@ -266,11 +346,12 @@ export async function GET(request: NextRequest) {
       continuousUseCount: continuousUse.length,
     },
     machineRows,
+    planVsActual,
     allMachines: machines.map((m) => ({ machineNo: m.machineNo, isActive: m.isActive })),
     axes,
     top5,
     alerts: { continuousUse, searchDrop },
-    meta: { queryCount: 6, unclassifiedLogCount },
+    meta: { queryCount: executedLogIds.length ? 8 : 7, unclassifiedLogCount },
   };
 
   return NextResponse.json(data);

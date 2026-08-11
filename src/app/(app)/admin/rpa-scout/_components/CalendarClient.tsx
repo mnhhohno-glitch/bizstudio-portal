@@ -5,6 +5,7 @@ import { Toaster, toast } from "sonner";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { addDaysYmd, mondayOfWeek, nowJstYmd, ymdWeekday } from "@/lib/rpa-scout/jst";
 import { timeSlotLabel, TIME_SLOT_ORDER, MACHINE_NOS } from "@/lib/rpa-scout/constants";
+import { achievementLevel, achievementPct } from "@/lib/rpa-scout/dashboard";
 import {
   fmtJstDate,
   fmtJstDateTime,
@@ -22,6 +23,13 @@ const SLOT_BADGE: Record<string, string> = {
   AM: "bg-[#DBEAFE] text-[#1D4ED8]",
   PM: "bg-[#DCFCE7] text-[#166534]",
   EVENING: "bg-[#EDE9FE] text-[#6D28D9]",
+};
+
+// 達成率バッジの配色（閾値は dashboard.ts の ACHIEVEMENT_WARN / ACHIEVEMENT_ALERT）
+const ACHIEVEMENT_BADGE: Record<string, string> = {
+  ok: "bg-[#F3F4F6] text-[#6B7280]",
+  warn: "bg-[#FEF3C7] text-[#B45309]",
+  alert: "bg-[#FEE2E2] text-[#DC2626]",
 };
 
 function isWeekend(ymd: string): boolean {
@@ -313,6 +321,15 @@ export default function CalendarClient() {
                         {cellPlans.map((p) => {
                           // 実施済みの計画は実績チップと並ぶため、薄く表示して埋もれさせる
                           const done = !!p.executedAt;
+                          // 予実。想定と実績が揃ったときだけ達成率を出す
+                          const pct =
+                            done && p.expectedCount != null && p.executedSearchCount != null
+                              ? achievementPct(p.executedSearchCount, p.expectedCount)
+                              : null;
+                          const level =
+                            pct != null
+                              ? achievementLevel(p.executedSearchCount!, p.expectedCount!)
+                              : null;
                           return (
                           <div
                             key={p.id}
@@ -378,6 +395,34 @@ export default function CalendarClient() {
                             >
                               {p.subjectName}
                             </div>
+                            {/* 予実。未実施は想定のみ、実施済みは 想定→実績（達成率） */}
+                            {p.expectedCount != null && (
+                              <div className="mt-0.5 flex items-center gap-1 text-[10px]">
+                                {done ? (
+                                  p.executedSearchCount != null ? (
+                                    <>
+                                      <span className="text-[#6B7280] tabular-nums">
+                                        {p.expectedCount.toLocaleString()}→
+                                        {p.executedSearchCount.toLocaleString()}件
+                                      </span>
+                                      <span
+                                        className={`rounded px-1 font-bold ${ACHIEVEMENT_BADGE[level!]}`}
+                                      >
+                                        {pct}%
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-[#9CA3AF] tabular-nums">
+                                      想定 {p.expectedCount.toLocaleString()}件（実績なし）
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="font-medium text-[#1D4ED8] tabular-nums">
+                                    予定 {p.expectedCount.toLocaleString()}件
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             {weekend && (
                               <label
                                 onClick={(e) => e.stopPropagation()}

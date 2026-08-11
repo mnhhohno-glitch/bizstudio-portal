@@ -3055,6 +3055,7 @@ model RpaScoutPlan {
   subjectTemplateId String?
   subjectName       String // スナップショット
   memo              String?
+  expectedCount     Int? // 想定検索件数（任意入力。null=想定なし）
   reflectedAt       DateTime? // 土日計画のマイナビ反映日時
   reflectedByUserId String? // 反映チェックを押した人
   executedAt        DateTime? // 実績として記録した日時（JST値をそのまま保持・null=未実施）

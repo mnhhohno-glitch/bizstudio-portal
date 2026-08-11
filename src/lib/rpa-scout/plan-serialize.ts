@@ -1,6 +1,13 @@
 // 配信計画（RpaScoutPlan）のAPIレスポンス整形。plans / plans/[id] / plans/[id]/execute で共用する
 import { prisma } from "@/lib/prisma";
 
+// 想定件数の正規化。空欄・0以下は「想定なし」として null に寄せる（達成率の分母にしないため）
+export function parseExpectedCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const n = Math.trunc(value);
+  return n > 0 ? n : null;
+}
+
 type PlanLike = {
   reflectedByUserId: string | null;
   createdByUserId: string | null;

@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { dbDateToJstYmd, jstStringToDbDate, ymdWeekday } from "@/lib/rpa-scout/jst";
-import { attachPlanNames } from "@/lib/rpa-scout/plan-serialize";
+import { attachPlanNames, parseExpectedCount } from "@/lib/rpa-scout/plan-serialize";
 
 // from/to（"YYYY-MM-DD" JST）で範囲取得。pendingWeekend=1 で「土日×未反映」のみに絞る
 export async function GET(request: NextRequest) {
@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
       subjectTemplateId: template.id,
       subjectName: template.name, // スナップショット
       memo: typeof body.memo === "string" && body.memo !== "" ? body.memo : null,
+      expectedCount: parseExpectedCount(body.expectedCount),
       createdByUserId: actor.id,
     },
   });

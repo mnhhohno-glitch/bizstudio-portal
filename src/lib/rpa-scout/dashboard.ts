@@ -5,6 +5,27 @@
 // 検索件数下降アラートの閾値（直近2回比較で -15% 超の下降を検知。調整はここだけ変える）
 export const SEARCH_COUNT_DROP_THRESHOLD = 0.15;
 
+// 予実（想定件数 vs 実績）の達成率しきい値。カレンダーのチップとダッシュボードで共用するため、
+// 調整はこの2定数だけを変える
+export const ACHIEVEMENT_WARN = 0.8; // これ未満で琥珀
+export const ACHIEVEMENT_ALERT = 0.5; // これ未満で赤
+
+export type AchievementLevel = "ok" | "warn" | "alert";
+
+// 達成率の水準。想定が0以下（＝目標として意味を持たない）は判定しない
+export function achievementLevel(actual: number, expected: number): AchievementLevel {
+  if (expected <= 0) return "ok";
+  const ratio = actual / expected;
+  if (ratio < ACHIEVEMENT_ALERT) return "alert";
+  if (ratio < ACHIEVEMENT_WARN) return "warn";
+  return "ok";
+}
+
+// 達成率（%）。想定が0以下なら算出不能で null
+export function achievementPct(actual: number, expected: number): number | null {
+  return expected > 0 ? Math.round((actual / expected) * 100) : null;
+}
+
 export const UNCLASSIFIED = "未分類";
 
 // ---- 条件分類（パターンの条件カラム → 集計軸ラベル。nullなら未分類扱い） ----
@@ -91,6 +112,37 @@ export type SearchDropAlert = {
   lastAt: string; // JST壁時計値
 };
 
+// ---- 予実（想定件数 vs 実績） ----
+
+export type PlanVsActualRow = {
+  planId: string;
+  planDate: string; // JST壁時計値
+  machineNo: number;
+  patternName: string;
+  expected: number;
+  actual: number;
+  pct: number; // 達成率（%）
+};
+
+export type PlanVsActualMachineRow = {
+  machineNo: number;
+  planCount: number;
+  expected: number;
+  actual: number;
+  pct: number | null; // 対象0件なら null
+};
+
+export type PlanVsActual = {
+  planCount: number; // 集計対象（想定件数あり×実績あり）の計画数
+  expectedTotal: number;
+  actualTotal: number;
+  pct: number | null; // 対象0件なら null
+  missingExpectedCount: number; // 実績記録済みだが想定未入力の計画数（分母から除外）
+  noActualCount: number; // 想定はあるが実績が停止記録（件数なし）で算出不能な計画数
+  machineRows: PlanVsActualMachineRow[];
+  worst5: PlanVsActualRow[];
+};
+
 export type DashboardData = {
   period: { from: string; to: string; prevFrom: string; prevTo: string };
   kpi: {
@@ -106,6 +158,7 @@ export type DashboardData = {
     continuousUseCount: number;
   };
   machineRows: DashboardMachineRow[];
+  planVsActual: PlanVsActual;
   allMachines: { machineNo: number; isActive: boolean }[];
   axes: {
     area: AxisEntry[];
@@ -172,12 +225,12 @@ export function buildAnalysisPrompt(
   data: DashboardData,
   opts: { periodLabel: string; machineLabel: string }
 ): string {
-  const { kpi, axes, machineRows, top5, alerts, period } = data;
+  const { kpi, axes, machineRows, top5, alerts, period, planVsActual } = data;
   const total = kpi.changeCount;
 
   const lines: string[] = [];
   lines.push(
-    "以下は人材紹介会社のマイナビスカウトRPA配信の実績データです。配信条件の偏り・リストの枯渇傾向・ローテーションの改善点を分析し、来週の配信計画の提案をしてください。"
+    "以下は人材紹介会社のマイナビスカウトRPA配信の実績データです。配信条件の偏り・リストの枯渇傾向・ローテーションの改善点に加え、計画時の想定件数と実績の乖離（予実）を分析し、来週の配信計画の提案をしてください。"
   );
   lines.push("");
   lines.push("# 集計条件");
@@ -201,6 +254,38 @@ export function buildAnalysisPrompt(
     `- 平均検索件数/回: ${kpi.searchAvg != null ? nf(kpi.searchAvg) : "-"}${kpi.prevSearchAvg != null ? `（前期間 ${nf(kpi.prevSearchAvg)}）` : ""}`
   );
   lines.push(`- 3日以内の連続使用: ${kpi.continuousUseCount}件`);
+  lines.push("");
+  lines.push("# 予実（想定件数 vs 実績）");
+  if (planVsActual.planCount === 0) {
+    lines.push("対象なし（想定件数が入力された実績記録済み計画がありません）");
+  } else {
+    const notes = [`対象計画 ${planVsActual.planCount}件`];
+    if (planVsActual.missingExpectedCount > 0)
+      notes.push(`想定未入力 ${planVsActual.missingExpectedCount}件`);
+    if (planVsActual.noActualCount > 0)
+      notes.push(`実績なし ${planVsActual.noActualCount}件`);
+    lines.push(
+      `- 想定合計: ${nf(planVsActual.expectedTotal)}件 / 実績合計: ${nf(planVsActual.actualTotal)}件 / 達成率: ${planVsActual.pct ?? "-"}%（${notes.join("・")}）`
+    );
+    lines.push("## 号機別");
+    lines.push("| 号機 | 想定 | 実績 | 達成率 |");
+    lines.push("|--|--|--|--|");
+    for (const m of planVsActual.machineRows) {
+      lines.push(
+        `| ${m.machineNo}号機 | ${nf(m.expected)} | ${nf(m.actual)} | ${m.pct != null ? `${m.pct}%` : "-"} |`
+      );
+    }
+    lines.push("## 乖離の大きい計画 TOP5");
+    if (planVsActual.worst5.length === 0) {
+      lines.push("- 対象なし");
+    } else {
+      planVsActual.worst5.forEach((w, i) =>
+        lines.push(
+          `${i + 1}. ${shortJstDate(w.planDate)} ${w.machineNo}号機 ${w.patternName} 想定${nf(w.expected)}→実績${nf(w.actual)}件（${w.pct}%）`
+        )
+      );
+    }
+  }
   lines.push("");
   lines.push("# 号機別");
   lines.push("| 号機 | 状態 | 現在のパターン | 変更回数 | 最新検索件数 | 前回比 |");

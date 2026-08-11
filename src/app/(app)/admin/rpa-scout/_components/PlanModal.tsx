@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
+import { achievementPct } from "@/lib/rpa-scout/dashboard";
 import { nowJstDateTimeLocal, ymdWeekday } from "@/lib/rpa-scout/jst";
 import {
   fmtJstDate,
@@ -45,6 +46,9 @@ export default function PlanModal({
   const [timeSlot, setTimeSlot] = useState(plan?.timeSlot ?? "");
   const [patternId, setPatternId] = useState(plan?.patternId ?? "");
   const [subjectTemplateId, setSubjectTemplateId] = useState(plan?.subjectTemplateId ?? "");
+  const [expectedCount, setExpectedCount] = useState<string>(
+    plan?.expectedCount != null ? String(plan.expectedCount) : ""
+  );
   const [memo, setMemo] = useState(plan?.memo ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -84,11 +88,14 @@ export default function PlanModal({
     const res = await fetch(isNew ? "/api/rpa-scout/plans" : `/api/rpa-scout/plans/${plan!.id}`, {
       method: isNew ? "POST" : "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        isNew
-          ? { planDate: date, machineNo, timeSlot, patternId, subjectTemplateId, memo }
-          : { timeSlot, patternId, subjectTemplateId, memo }
-      ),
+      body: JSON.stringify({
+        ...(isNew ? { planDate: date, machineNo } : {}),
+        timeSlot,
+        patternId,
+        subjectTemplateId,
+        expectedCount: expectedCount === "" ? null : Number(expectedCount),
+        memo,
+      }),
     });
     setSaving(false);
     if (res.ok) {
@@ -244,6 +251,21 @@ export default function PlanModal({
           </div>
 
           <div>
+            <label className={label}>想定件数（任意）</label>
+            <input
+              type="number"
+              min={0}
+              value={expectedCount}
+              onChange={(e) => setExpectedCount(e.target.value)}
+              placeholder="例: 300"
+              className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
+            />
+            <div className="mt-1 text-[11px] text-[#6B7280]">
+              この条件で何件ヒットする想定か。実績と突き合わせて予実管理に使います。
+            </div>
+          </div>
+
+          <div>
             <label className={label}>メモ（任意）</label>
             <textarea
               value={memo}
@@ -269,6 +291,14 @@ export default function PlanModal({
                       {plan!.executedSearchCount != null
                         ? `${plan!.executedSearchCount.toLocaleString()}件`
                         : "停止（件数なし）"}
+                      {plan!.expectedCount != null && (
+                        <>
+                          （想定 {plan!.expectedCount.toLocaleString()}件
+                          {plan!.executedSearchCount != null &&
+                            `・達成率 ${achievementPct(plan!.executedSearchCount, plan!.expectedCount)}%`}
+                          ）
+                        </>
+                      )}
                       {plan!.executedByName ? <br /> : null}
                       {plan!.executedByName ? `記録者: ${plan!.executedByName}` : null}
                     </div>
@@ -287,7 +317,14 @@ export default function PlanModal({
                     この計画の号機・パターン・件名のまま、変更ログに1件記録します（計画は残ります）。
                   </div>
                   <div>
-                    <label className={label}>検索件数（空欄=停止記録）</label>
+                    <label className={label}>
+                      検索件数（空欄=停止記録）
+                      {plan!.expectedCount != null && (
+                        <span className="ml-2 font-normal text-[#2563EB]">
+                          想定 {plan!.expectedCount.toLocaleString()}件
+                        </span>
+                      )}
+                    </label>
                     <input
                       type="number"
                       min={0}
