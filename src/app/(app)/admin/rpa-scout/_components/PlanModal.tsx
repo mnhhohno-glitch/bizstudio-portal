@@ -5,9 +5,10 @@ import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
 import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
-import { ymdWeekday } from "@/lib/rpa-scout/jst";
+import { nowJstDateTimeLocal, ymdWeekday } from "@/lib/rpa-scout/jst";
 import {
   fmtJstDate,
+  fmtJstDateTime,
   isRecentlyUsed,
   lastUsedSuffix,
   type RpaPattern,
@@ -46,6 +47,12 @@ export default function PlanModal({
   const [subjectTemplateId, setSubjectTemplateId] = useState(plan?.subjectTemplateId ?? "");
   const [memo, setMemo] = useState(plan?.memo ?? "");
   const [saving, setSaving] = useState(false);
+
+  // 実績記録（計画をそのまま RpaScoutLog 化する）
+  const executed = !!plan?.executedAt;
+  const [searchCount, setSearchCount] = useState<string>("");
+  const [recordedAt, setRecordedAt] = useState(nowJstDateTimeLocal());
+  const [executing, setExecuting] = useState(false);
 
   // その号機用＋全号機用を上に
   const { own, others } = useMemo(() => {
@@ -90,6 +97,46 @@ export default function PlanModal({
     } else {
       const data = await res.json().catch(() => null);
       toast.error(data?.error ?? "保存に失敗しました");
+    }
+  };
+
+  const execute = async () => {
+    if (!plan || executed) return;
+    if (!recordedAt) {
+      toast.error("記録日時を入力してください");
+      return;
+    }
+    setExecuting(true);
+    const res = await fetch(`/api/rpa-scout/plans/${plan.id}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        searchCount: searchCount === "" ? null : Number(searchCount),
+        recordedAt,
+      }),
+    });
+    setExecuting(false);
+    if (res.ok) {
+      toast.success("実績として記録しました");
+      onSaved();
+    } else {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "実績の記録に失敗しました");
+    }
+  };
+
+  const cancelExecution = async () => {
+    if (!plan || !executed) return;
+    if (!confirm("実績の記録を取り消しますか？\n変更ログから該当の1件が削除されます。")) return;
+    setExecuting(true);
+    const res = await fetch(`/api/rpa-scout/plans/${plan.id}/execute`, { method: "DELETE" });
+    setExecuting(false);
+    if (res.ok) {
+      toast.success("実績の記録を取り消しました");
+      onSaved();
+    } else {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error ?? "取り消しに失敗しました");
     }
   };
 
@@ -205,6 +252,71 @@ export default function PlanModal({
               className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
             />
           </div>
+
+          {/* 計画どおり実行した場合、ここから直接 変更ログ（実績）を作る。計画は残す */}
+          {!isNew && (
+            <div className="space-y-3 border-t pt-4">
+              <div className="text-[13px] font-bold text-[#374151]">実績として記録</div>
+
+              {executed ? (
+                <>
+                  <div className="rounded-[6px] border border-[#BBF7D0] bg-[#F0FDF4] px-3 py-2 text-[13px] text-[#166534]">
+                    <div className="font-semibold">✓ 実施済み</div>
+                    <div className="mt-1 text-[12px]">
+                      記録日時: {fmtJstDateTime(plan!.executedAt!)}
+                      <br />
+                      検索件数:{" "}
+                      {plan!.executedSearchCount != null
+                        ? `${plan!.executedSearchCount.toLocaleString()}件`
+                        : "停止（件数なし）"}
+                      {plan!.executedByName ? <br /> : null}
+                      {plan!.executedByName ? `記録者: ${plan!.executedByName}` : null}
+                    </div>
+                  </div>
+                  <button
+                    onClick={cancelExecution}
+                    disabled={executing}
+                    className="rounded-[6px] border border-[#FCA5A5] px-3 py-1.5 text-[13px] text-[#DC2626] hover:bg-[#FEF2F2] disabled:opacity-50"
+                  >
+                    {executing ? "処理中..." : "実績の記録を取り消す"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="text-[12px] text-[#6B7280]">
+                    この計画の号機・パターン・件名のまま、変更ログに1件記録します（計画は残ります）。
+                  </div>
+                  <div>
+                    <label className={label}>検索件数（空欄=停止記録）</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={searchCount}
+                      onChange={(e) => setSearchCount(e.target.value)}
+                      placeholder="例: 850"
+                      className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>記録日時</label>
+                    <input
+                      type="datetime-local"
+                      value={recordedAt}
+                      onChange={(e) => setRecordedAt(e.target.value)}
+                      className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
+                    />
+                  </div>
+                  <button
+                    onClick={execute}
+                    disabled={executing}
+                    className="rounded-[6px] bg-[#16A34A] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#15803D] disabled:opacity-50"
+                  >
+                    {executing ? "記録中..." : "この内容で実績を記録"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t px-5 py-3">

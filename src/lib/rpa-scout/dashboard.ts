@@ -40,14 +40,11 @@ export function sendStatusAxisLabel(p: PatternConditions): string | null {
   return null;
 }
 
-// 登録日区分（pattern-name.ts の命名規則と同じ区分け）
+// 登録日区分。pattern-name.ts と同じく 以内=開放日 / 以降=既登録 の2区分に統一する
+// （日数別の独立バケットは作らず、どちらかに吸収する）
 export function registAxisLabel(p: PatternConditions): string | null {
   if (p.registDays == null || !p.registDirection) return null;
-  if (p.registDays === 8 && p.registDirection === "AFTER") return "既登録（8日以降）";
-  if (p.registDays === 7 && p.registDirection === "WITHIN") return "開放日（7日以内）";
-  return p.registDirection === "WITHIN"
-    ? `登録${p.registDays}日以内`
-    : `登録${p.registDays}日以降`;
+  return p.registDirection === "WITHIN" ? "開放日" : "既登録";
 }
 
 // 卒業年度帯（下2桁レンジ文字列。pattern-name.ts と同じ表記）

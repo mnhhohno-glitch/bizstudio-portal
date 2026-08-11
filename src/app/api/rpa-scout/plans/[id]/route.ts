@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { jstStringToDbDate, nowJstDateTimeLocal, ymdWeekday, dbDateToJstYmd } from "@/lib/rpa-scout/jst";
+import { attachPlanNamesOne } from "@/lib/rpa-scout/plan-serialize";
 
 // 編集（時間帯・パターン・件名・メモ）と「マイナビ反映済み」チェック（reflected: true/false）
 export async function PATCH(
@@ -35,7 +36,7 @@ export async function PATCH(
           }
         : { reflectedAt: null, reflectedByUserId: null },
     });
-    return NextResponse.json({ plan: await withUserNames(plan) });
+    return NextResponse.json({ plan: await attachPlanNamesOne(plan) });
   }
 
   // 内容編集
@@ -74,10 +75,11 @@ export async function PATCH(
   }
 
   const plan = await prisma.rpaScoutPlan.update({ where: { id }, data });
-  return NextResponse.json({ plan: await withUserNames(plan) });
+  return NextResponse.json({ plan: await attachPlanNamesOne(plan) });
 }
 
-// 計画は実績ではないため物理削除でよい
+// 計画は実績ではないため物理削除でよい。
+// 実績記録済みでも生成済みの RpaScoutLog は残す（実績は実際に配信した記録のため）
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -92,24 +94,4 @@ export async function DELETE(
 
   await prisma.rpaScoutPlan.delete({ where: { id } });
   return NextResponse.json({ ok: true });
-}
-
-async function withUserNames<
-  T extends { reflectedByUserId: string | null; createdByUserId: string | null },
->(plan: T) {
-  const userIds = [plan.reflectedByUserId, plan.createdByUserId].filter(
-    (v): v is string => !!v
-  );
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true, email: true },
-      })
-    : [];
-  const nameMap = Object.fromEntries(users.map((u) => [u.id, u.name ?? u.email]));
-  return {
-    ...plan,
-    reflectedByName: plan.reflectedByUserId ? (nameMap[plan.reflectedByUserId] ?? null) : null,
-    createdByName: plan.createdByUserId ? (nameMap[plan.createdByUserId] ?? null) : null,
-  };
 }

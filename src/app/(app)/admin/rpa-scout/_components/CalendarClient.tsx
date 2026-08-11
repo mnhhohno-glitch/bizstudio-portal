@@ -96,6 +96,7 @@ export default function CalendarClient() {
   const reload = () => {
     loadPlans();
     loadPending();
+    loadLogs(); // 実績記録／取り消しで変更ログ側も変わるため一緒に取り直す
   };
 
   const move = (dir: -1 | 1) => {
@@ -309,24 +310,49 @@ export default function CalendarClient() {
                           );
                         })}
 
-                        {cellPlans.map((p) => (
+                        {cellPlans.map((p) => {
+                          // 実施済みの計画は実績チップと並ぶため、薄く表示して埋もれさせる
+                          const done = !!p.executedAt;
+                          return (
                           <div
                             key={p.id}
                             onClick={(e) => {
                               e.stopPropagation();
                               setModal({ mode: "edit", plan: p });
                             }}
-                            className="rounded border border-[#BFDBFE] bg-[#F5F9FF] p-1 shadow-sm hover:border-[#60A5FA]"
+                            className={
+                              done
+                                ? "rounded border border-[#E5E7EB] bg-white/60 p-1 hover:border-[#93C5FD]"
+                                : "rounded border border-[#BFDBFE] bg-[#F5F9FF] p-1 shadow-sm hover:border-[#60A5FA]"
+                            }
                           >
                             <div className="flex items-center gap-1">
-                              <span className="rounded bg-[#DBEAFE] px-1 text-[10px] font-bold text-[#1E40AF]">
+                              <span
+                                className={
+                                  done
+                                    ? "rounded bg-[#F3F4F6] px-1 text-[10px] font-bold text-[#9CA3AF]"
+                                    : "rounded bg-[#DBEAFE] px-1 text-[10px] font-bold text-[#1E40AF]"
+                                }
+                              >
                                 計画
                               </span>
                               <span
-                                className={`rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`}
+                                className={
+                                  done
+                                    ? "rounded bg-[#F3F4F6] px-1 text-[10px] font-bold text-[#9CA3AF]"
+                                    : `rounded px-1 text-[10px] font-bold ${SLOT_BADGE[p.timeSlot] ?? ""}`
+                                }
                               >
                                 {timeSlotLabel(p.timeSlot)}
                               </span>
+                              {done && (
+                                <span
+                                  title={`${p.executedByName ?? "?"} が ${fmtJstDateTime(p.executedAt!)} に実績記録`}
+                                  className="rounded bg-[#F3F4F6] px-1 text-[10px] font-medium text-[#9CA3AF]"
+                                >
+                                  実施済み
+                                </span>
+                              )}
                               {weekend && p.reflectedAt && (
                                 <span
                                   title={`${p.reflectedByName ?? "?"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
@@ -336,10 +362,20 @@ export default function CalendarClient() {
                                 </span>
                               )}
                             </div>
-                            <div className="mt-0.5 truncate text-[11px] font-medium text-[#374151]">
+                            <div
+                              className={[
+                                "mt-0.5 truncate text-[11px] font-medium",
+                                done ? "text-[#9CA3AF]" : "text-[#374151]",
+                              ].join(" ")}
+                            >
                               {p.patternName}
                             </div>
-                            <div className="truncate text-[10px] text-[#6B7280]">
+                            <div
+                              className={[
+                                "truncate text-[10px]",
+                                done ? "text-[#D1D5DB]" : "text-[#6B7280]",
+                              ].join(" ")}
+                            >
                               {p.subjectName}
                             </div>
                             {weekend && (
@@ -356,7 +392,8 @@ export default function CalendarClient() {
                               </label>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </td>
                   );

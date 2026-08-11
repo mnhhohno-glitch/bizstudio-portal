@@ -3057,6 +3057,9 @@ model RpaScoutPlan {
   memo              String?
   reflectedAt       DateTime? // 土日計画のマイナビ反映日時
   reflectedByUserId String? // 反映チェックを押した人
+  executedAt        DateTime? // 実績として記録した日時（JST値をそのまま保持・null=未実施）
+  executedLogId     String? // 生成した RpaScoutLog.id（取り消し時に削除する対象）
+  executedByUserId  String? // 実績記録を押した人
   createdByUserId   String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

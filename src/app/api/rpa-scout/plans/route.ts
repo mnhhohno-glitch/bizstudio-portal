@@ -3,30 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { dbDateToJstYmd, jstStringToDbDate, ymdWeekday } from "@/lib/rpa-scout/jst";
-
-async function attachUserNames<
-  T extends { reflectedByUserId: string | null; createdByUserId: string | null },
->(plans: T[]) {
-  const userIds = Array.from(
-    new Set(
-      plans
-        .flatMap((p) => [p.reflectedByUserId, p.createdByUserId])
-        .filter((v): v is string => !!v)
-    )
-  );
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true, email: true },
-      })
-    : [];
-  const nameMap = Object.fromEntries(users.map((u) => [u.id, u.name ?? u.email]));
-  return plans.map((p) => ({
-    ...p,
-    reflectedByName: p.reflectedByUserId ? (nameMap[p.reflectedByUserId] ?? null) : null,
-    createdByName: p.createdByUserId ? (nameMap[p.createdByUserId] ?? null) : null,
-  }));
-}
+import { attachPlanNames } from "@/lib/rpa-scout/plan-serialize";
 
 // from/to（"YYYY-MM-DD" JST）で範囲取得。pendingWeekend=1 で「土日×未反映」のみに絞る
 export async function GET(request: NextRequest) {
@@ -59,7 +36,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ plans: await attachUserNames(plans) });
+  return NextResponse.json({ plans: await attachPlanNames(plans) });
 }
 
 export async function POST(request: NextRequest) {
@@ -106,6 +83,6 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  const [withNames] = await attachUserNames([plan]);
+  const [withNames] = await attachPlanNames([plan]);
   return NextResponse.json({ plan: withNames });
 }

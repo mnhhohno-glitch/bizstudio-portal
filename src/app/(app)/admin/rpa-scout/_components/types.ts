@@ -72,6 +72,11 @@ export type RpaPlan = {
   reflectedAt: string | null; // JST壁時計値
   reflectedByUserId: string | null;
   reflectedByName?: string | null;
+  executedAt: string | null; // 実績記録済みなら記録日時（JST壁時計値）。null=未実施
+  executedLogId: string | null;
+  executedByUserId: string | null;
+  executedByName?: string | null;
+  executedSearchCount?: number | null; // 生成した RpaScoutLog の検索件数（null=停止記録）
   createdByUserId: string | null;
   createdByName?: string | null;
 };
