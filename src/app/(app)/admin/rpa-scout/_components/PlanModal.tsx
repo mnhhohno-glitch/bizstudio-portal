@@ -17,6 +17,7 @@ import {
   type RpaTemplate,
 } from "./types";
 import LastUsedNote from "./LastUsedNote";
+import SubjectTemplateSelect from "./SubjectTemplateSelect";
 
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -69,7 +70,7 @@ export default function PlanModal({
     return { own, others };
   }, [patterns, machineNo]);
 
-  const activeTemplates = templates.filter((t) => t.isActive);
+  const selectedPattern = patterns.find((p) => p.id === patternId);
 
   const save = async () => {
     if (!timeSlot) {
@@ -231,23 +232,17 @@ export default function PlanModal({
                 </optgroup>
               )}
             </select>
-            <LastUsedNote pattern={patterns.find((p) => p.id === patternId)} />
+            <LastUsedNote pattern={selectedPattern} />
           </div>
 
           <div>
             <label className={label}>件名テンプレート</label>
-            <select
+            <SubjectTemplateSelect
+              templates={templates}
               value={subjectTemplateId}
-              onChange={(e) => setSubjectTemplateId(e.target.value)}
-              className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5"
-            >
-              <option value="">選択してください</option>
-              {activeTemplates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+              onChange={setSubjectTemplateId}
+              sendStatus={selectedPattern?.sendStatus ?? null}
+            />
           </div>
 
           <div>
