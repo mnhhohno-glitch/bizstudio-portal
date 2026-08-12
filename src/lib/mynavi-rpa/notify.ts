@@ -131,7 +131,22 @@ export async function notifyMynaviDuplicateSkip(
 }
 
 /**
+ * エラー通知の context キー → 表示ラベル。
+ * 未知のキーはキー名のまま出す（載せ忘れても情報が消えないように）。
+ */
+const ERROR_CONTEXT_LABELS: Record<string, string> = {
+  batchId: "バッチID",
+  detail: "詳細",
+  diagnostics: "診断",
+  failedPdf: "失敗PDF",
+};
+
+/**
  * エラー通知
+ *
+ * context は JSON のベタ書きではなく1項目1行で出す。
+ * 「AI解析失敗」だけでは原因に辿り着けず切り分けに時間がかかったため、
+ * finishReason・試行回数・退避PDFのリンクをこの本文から読めるようにしている。
  */
 export async function notifyMynaviError(
   message: string,
@@ -142,8 +157,13 @@ export async function notifyMynaviError(
 
   try {
     const lines = ["🚨 マイナビ転職応募取り込み エラー", message];
-    if (context && Object.keys(context).length > 0) {
-      lines.push(JSON.stringify(context));
+    if (context) {
+      for (const [key, value] of Object.entries(context)) {
+        if (value === null || value === undefined || value === "") continue;
+        const label = ERROR_CONTEXT_LABELS[key] ?? key;
+        const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+        lines.push(`${label}: ${text}`);
+      }
     }
     await sendBotMessage(ch.botId, ch.channelId, lines.join("\n"));
   } catch (e) {

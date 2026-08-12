@@ -1394,6 +1394,11 @@ model MynaviRpaProcessingLog {
   pdfFileName       String?           @map("pdf_file_name")
   pdfFileId         String?           @map("pdf_file_id")
   errorMessage      String?           @map("error_message") @db.Text
+  /// AI解析失敗時に退避したPDFの Drive ファイルID / 閲覧URL。
+  /// 失敗したPDFが現存しないと原因の再現ができないため 2026-08-12 に追加。
+  /// 成功時は CandidateFile 側に入るのでここは null。
+  failedPdfFileId   String?           @map("failed_pdf_file_id")
+  failedPdfUrl      String?           @map("failed_pdf_url")
   // T-064: 自動紐付け結果（matched / no_recruiter_name / no_machine_master / no_candidate_today / no_candidate_yesterday / error）
   scoutLinkResult   String?           @map("scout_link_result")
   scoutLinkedSlotId String?           @map("scout_linked_slot_id")
