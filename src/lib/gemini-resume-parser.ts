@@ -67,48 +67,84 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 - 性別は "male" または "female" で出力する`;
 
 /**
- * PDF バッファを Gemini API に送信し、履歴書フィールドを抽出する。
- * 失敗時（API キー未設定 / API エラー / レスポンス不正 / JSON 解析失敗）は throw する。
- * 呼び出し側で catch し、AI 解析失敗として扱うこと。
+ * リトライ計画。
+ * 1回目は現行どおり maxOutputTokens=4000（happy path の挙動を変えない）。
+ * 2回目以降は出力枠を広げる。gemini-3-flash-preview は thinking モデルで
+ * 思考トークンも同じ出力枠を消費するため、同一PDFでも思考量のブレだけで
+ * 4000 に到達して JSON が途中で切れることがある（実測: 成功 1363〜3100 / 失敗は全て 3996）。
+ * 枠は上限であって予約ではないため、広げても実際に生成した分しか課金されない。
  */
-export async function parseResumeWithGemini(
-  pdfBuffer: Buffer,
-  /** T-135: 費用帳簿の付帯情報（呼び出し元・候補者など）。 */
-  logMeta?: Record<string, unknown>,
-): Promise<GeminiResumeResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY が設定されていません");
-  }
+const ATTEMPT_PLAN: ReadonlyArray<{ maxOutputTokens: number; delayMs: number }> = [
+  { maxOutputTokens: 4000, delayMs: 0 },
+  { maxOutputTokens: 8192, delayMs: 1000 },
+  { maxOutputTokens: 8192, delayMs: 3000 },
+];
 
-  const base64Data = pdfBuffer.toString("base64");
+/** 再試行しても結果が変わらない finishReason（内容起因のブロック） */
+const NON_RETRYABLE_FINISH_REASONS = new Set([
+  "SAFETY",
+  "RECITATION",
+  "PROHIBITED_CONTENT",
+  "BLOCKLIST",
+  "SPII",
+]);
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "application/pdf",
-                  data: base64Data,
+type AttemptResult =
+  | { ok: true; parsed: Record<string, unknown> }
+  | { ok: false; retryable: boolean; message: string };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Gemini への 1 回分の呼び出し。throw せず AttemptResult を返す
+ * （リトライ可否をログ付きで呼び出し側に判断させるため）。
+ */
+async function attemptParseResume(params: {
+  apiKey: string;
+  base64Data: string;
+  pdfBytes: number;
+  maxOutputTokens: number;
+  attempt: number;
+  totalAttempts: number;
+  logMeta?: Record<string, unknown>;
+}): Promise<AttemptResult> {
+  const { apiKey, base64Data, pdfBytes, maxOutputTokens, attempt, totalAttempts, logMeta } = params;
+  const tag = `[gemini-resume-parser] attempt ${attempt}/${totalAttempts} (maxOutputTokens=${maxOutputTokens})`;
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: "application/pdf",
+                    data: base64Data,
+                  },
                 },
-              },
-              { text: RESUME_PROMPT },
-            ],
+                { text: RESUME_PROMPT },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens,
           },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4000,
-        },
-      }),
-    },
-  );
+        }),
+      },
+    );
+  } catch (e) {
+    // ネットワーク断・タイムアウト等。典型的な一時障害なのでリトライする
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`${tag} fetch failed:`, msg);
+    return { ok: false, retryable: true, message: `Gemini API 通信エラー: ${msg}` };
+  }
 
   if (!response.ok) {
     // 原因追跡用: HTTPステータスに加えてレスポンスボディの先頭500文字を残す
@@ -119,14 +155,23 @@ export async function parseResumeWithGemini(
     } catch {
       errorBody = "(body 読み取り失敗)";
     }
-    console.error(
-      `[gemini-resume-parser] Gemini API error. status=${response.status} body(500):`,
-      errorBody,
-    );
-    throw new Error(`Gemini API error: ${response.status}`);
+    console.error(`${tag} Gemini API error. status=${response.status} body(500):`, errorBody);
+    // 429=レート制限 / 5xx=サーバ側障害 は一時的。4xx（キー不正・リクエスト不正）は再試行しても同じ
+    const retryable = response.status === 429 || response.status >= 500;
+    return { ok: false, retryable, message: `Gemini API error: ${response.status}` };
   }
 
-  const data = await response.json();
+  let data: {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+    usageMetadata?: Record<string, number>;
+  };
+  try {
+    data = await response.json();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`${tag} response.json() failed. status=${response.status}:`, msg);
+    return { ok: false, retryable: true, message: `Gemini レスポンスがJSONではありません: ${msg}` };
+  }
   // finishReason は成否判定には使わず、失敗時のログ用にのみ保持する
   // （MAX_TOKENS = 出力途中切れ、SAFETY = ブロック 等の切り分けに必要）
   const finishReason: string | null = data?.candidates?.[0]?.finishReason ?? null;
@@ -138,16 +183,23 @@ export async function parseResumeWithGemini(
     endpoint: "resume-parse",
     model: GEMINI_MODEL,
     usage: data?.usageMetadata,
-    meta: { pdfBytes: pdfBuffer.length, finishReason, ...logMeta },
+    // attempt / maxOutputTokens も残す。リトライ分も1コール1行で課金されるため、
+    // 帳簿上どの試行の費用かを後から切り分けられるようにする。
+    meta: { pdfBytes, finishReason, attempt, maxOutputTokens, ...logMeta },
   });
 
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText || typeof rawText !== "string") {
     console.error(
-      `[gemini-resume-parser] Empty response. status=${response.status} finishReason=${finishReason ?? "null"} body(500):`,
+      `${tag} Empty response. status=${response.status} finishReason=${finishReason ?? "null"} body(500):`,
       JSON.stringify(data).substring(0, 500),
     );
-    throw new Error(`Gemini レスポンスが空です（finishReason=${finishReason ?? "null"}）`);
+    // 思考トークンだけで出力枠を使い切ると本文が空になる。枠を広げれば通る可能性がある
+    return {
+      ok: false,
+      retryable: !NON_RETRYABLE_FINISH_REASONS.has(finishReason ?? ""),
+      message: `Gemini レスポンスが空です（finishReason=${finishReason ?? "null"}）`,
+    };
   }
 
   let parsed: Record<string, unknown>;
@@ -165,14 +217,76 @@ export async function parseResumeWithGemini(
     parsed = JSON.parse(jsonStr);
   } catch {
     console.error(
-      `[gemini-resume-parser] JSON parse failed. status=${response.status} finishReason=${finishReason ?? "null"} rawTextLength=${rawText.length} rawText(500):`,
+      `${tag} JSON parse failed. status=${response.status} finishReason=${finishReason ?? "null"} rawTextLength=${rawText.length} rawText(500):`,
       rawText.substring(0, 500),
     );
     // finishReason はエラーメッセージにも載せる。Railway のログは流れて消えるが、
     // MynaviRpaProcessingLog.errorMessage は残るため後追い調査ができる。
-    throw new Error(
-      `Gemini レスポンスのJSON解析に失敗しました（finishReason=${finishReason ?? "null"}）`,
-    );
+    return {
+      ok: false,
+      retryable: !NON_RETRYABLE_FINISH_REASONS.has(finishReason ?? ""),
+      message: `Gemini レスポンスのJSON解析に失敗しました（finishReason=${finishReason ?? "null"}）`,
+    };
+  }
+
+  return { ok: true, parsed };
+}
+
+/**
+ * PDF バッファを Gemini API に送信し、履歴書フィールドを抽出する。
+ * 一時的な失敗（レート制限 / 5xx / 通信断 / 出力枠到達による途中切れ）は
+ * ATTEMPT_PLAN に従って最大3回まで自動リトライする。
+ * 全試行が失敗した場合、および再試行しても無駄な失敗（キー未設定 / 4xx / 内容ブロック）は throw する。
+ * 呼び出し側で catch し、AI 解析失敗として扱うこと。
+ */
+export async function parseResumeWithGemini(
+  pdfBuffer: Buffer,
+  /** T-135: 費用帳簿の付帯情報（呼び出し元・候補者など）。 */
+  logMeta?: Record<string, unknown>,
+): Promise<GeminiResumeResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY が設定されていません");
+  }
+
+  const base64Data = pdfBuffer.toString("base64");
+  const totalAttempts = ATTEMPT_PLAN.length;
+
+  let parsed: Record<string, unknown> | null = null;
+  let lastMessage = "Gemini 解析に失敗しました";
+
+  for (let i = 0; i < totalAttempts; i++) {
+    const plan = ATTEMPT_PLAN[i];
+    if (plan.delayMs > 0) await sleep(plan.delayMs);
+
+    const result = await attemptParseResume({
+      apiKey,
+      base64Data,
+      pdfBytes: pdfBuffer.length,
+      maxOutputTokens: plan.maxOutputTokens,
+      attempt: i + 1,
+      totalAttempts,
+      logMeta,
+    });
+
+    if (result.ok) {
+      if (i > 0) {
+        console.warn(
+          `[gemini-resume-parser] リトライで成功 (attempt ${i + 1}/${totalAttempts}, maxOutputTokens=${plan.maxOutputTokens})`,
+        );
+      }
+      parsed = result.parsed;
+      break;
+    }
+
+    lastMessage = result.message;
+    if (!result.retryable) {
+      throw new Error(lastMessage);
+    }
+  }
+
+  if (!parsed) {
+    throw new Error(`${lastMessage}｜${totalAttempts}回リトライしても解析できませんでした`);
   }
 
   return {
