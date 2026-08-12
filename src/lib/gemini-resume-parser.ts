@@ -111,10 +111,25 @@ export async function parseResumeWithGemini(
   );
 
   if (!response.ok) {
+    // 原因追跡用: HTTPステータスに加えてレスポンスボディの先頭500文字を残す
+    // （AI Studio 側は成功率100%に見えても、ここで落ちていれば本文にエラー詳細が入る）
+    let errorBody = "";
+    try {
+      errorBody = (await response.text()).substring(0, 500);
+    } catch {
+      errorBody = "(body 読み取り失敗)";
+    }
+    console.error(
+      `[gemini-resume-parser] Gemini API error. status=${response.status} body(500):`,
+      errorBody,
+    );
     throw new Error(`Gemini API error: ${response.status}`);
   }
 
   const data = await response.json();
+  // finishReason は成否判定には使わず、失敗時のログ用にのみ保持する
+  // （MAX_TOKENS = 出力途中切れ、SAFETY = ブロック 等の切り分けに必要）
+  const finishReason: string | null = data?.candidates?.[0]?.finishReason ?? null;
 
   // T-135: 費用記録（fire-and-forget）。空レスポンスで throw する前に記録する
   // （空でも入力トークンは課金されるため、ここで漏らすと「見えない費用」になる）。
@@ -123,12 +138,16 @@ export async function parseResumeWithGemini(
     endpoint: "resume-parse",
     model: GEMINI_MODEL,
     usage: data?.usageMetadata,
-    meta: { pdfBytes: pdfBuffer.length, ...logMeta },
+    meta: { pdfBytes: pdfBuffer.length, finishReason, ...logMeta },
   });
 
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText || typeof rawText !== "string") {
-    throw new Error("Gemini レスポンスが空です");
+    console.error(
+      `[gemini-resume-parser] Empty response. status=${response.status} finishReason=${finishReason ?? "null"} body(500):`,
+      JSON.stringify(data).substring(0, 500),
+    );
+    throw new Error(`Gemini レスポンスが空です（finishReason=${finishReason ?? "null"}）`);
   }
 
   let parsed: Record<string, unknown>;
@@ -146,10 +165,14 @@ export async function parseResumeWithGemini(
     parsed = JSON.parse(jsonStr);
   } catch {
     console.error(
-      "[gemini-resume-parser] JSON parse failed. rawText (500 chars):",
+      `[gemini-resume-parser] JSON parse failed. status=${response.status} finishReason=${finishReason ?? "null"} rawTextLength=${rawText.length} rawText(500):`,
       rawText.substring(0, 500),
     );
-    throw new Error("Gemini レスポンスのJSON解析に失敗しました");
+    // finishReason はエラーメッセージにも載せる。Railway のログは流れて消えるが、
+    // MynaviRpaProcessingLog.errorMessage は残るため後追い調査ができる。
+    throw new Error(
+      `Gemini レスポンスのJSON解析に失敗しました（finishReason=${finishReason ?? "null"}）`,
+    );
   }
 
   return {
