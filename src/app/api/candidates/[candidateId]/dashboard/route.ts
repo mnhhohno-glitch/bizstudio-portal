@@ -136,11 +136,25 @@ export async function GET(
     }),
     prisma.candidateNote.aggregate({ where: { candidateId }, _max: { createdAt: true } }),
     prisma.contactLog.aggregate({ where: { candidateId }, _max: { contactedAt: true } }),
+    // T-161 R2: 最終求人提案日・提案件数は「出力済 ∪ 出力なし紹介済み」（本人応募は除外）。
+    // マイページ反応の母数（下の baseFiles）は「掲載＝送信済」の定義のため従来どおり lastExportedAt 基準を維持。
     prisma.candidateFile.aggregate({
-      where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } },
-      _max: { lastExportedAt: true },
+      where: {
+        candidateId,
+        category: "BOOKMARK",
+        NOT: { origin: "candidate", driveFileId: null },
+        OR: [{ lastExportedAt: { not: null } }, { introducedAt: { not: null } }],
+      },
+      _max: { lastExportedAt: true, introducedAt: true },
     }),
-    prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } } }),
+    prisma.candidateFile.count({
+      where: {
+        candidateId,
+        category: "BOOKMARK",
+        NOT: { origin: "candidate", driveFileId: null },
+        OR: [{ lastExportedAt: { not: null } }, { introducedAt: { not: null } }],
+      },
+    }),
     // マイページ反応の母数＆新台帳の仕分け: マイページ掲載求人（送信済 かつ 紹介保留=archived を除く）
     //   の kyuujinJobId と responseStatus。新 /site/ の仕分けはここ（CandidateFile.responseStatus）に入る。
     prisma.candidateFile.findMany({
@@ -198,7 +212,8 @@ export async function GET(
   };
 
   /* ----- ②こちらの対応 ----- */
-  const bookmarkMaxExport = bookmarkAgg._max.lastExportedAt ?? null;
+  // T-161 R2: 最終提案 = 出力日と紹介日（出力なし紹介済み）の新しい方。
+  const bookmarkMaxExport = maxDate(bookmarkAgg._max.lastExportedAt ?? null, bookmarkAgg._max.introducedAt ?? null);
   const maxEntryDate = entries.reduce<Date | null>((m, e) => (e.entryDate && (!m || e.entryDate > m) ? e.entryDate : m), null);
   // 最終求人提案日 = BOOKMARK送信日 と 求人紹介(JobEntry)記録日 の新しい方
   const lastProposal = maxDate(bookmarkMaxExport, maxEntryDate);

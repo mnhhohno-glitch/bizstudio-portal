@@ -101,6 +101,8 @@ export async function GET(
       aiAnalyzedAt: true,
       lastExportedAt: true,
       lastExportedTo: true,
+      // T-161: 出力なしの「紹介済み」時刻。ブックマーク一覧の紹介済みバッジ・ボタン活性判定に使う。
+      introducedAt: true,
       archivedAt: true,
       archivedReason: true,
       archivedNote: true,

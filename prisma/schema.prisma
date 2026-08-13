@@ -1485,6 +1485,11 @@ model CandidateFile {
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
   sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
+  // T-161: サイト経由（favorites POST）で受信する求人スナップショット。従来は jobTitle を受信しつつ破棄していた
+  //   （void jobTitle）ため、下流のエントリー化で求人タイトル・職種が空になっていた。会社名は従来どおり fileName に
+  //   埋め込み（変えない）。受信できなかった項目は null のまま（捏造しない）。エントリー化（to-entry）で JobEntry へ引き継ぐ。
+  jobTitle          String?               @map("job_title")
+  jobCategory       String?               @map("job_category")
   // T-131: 手動アップPDFの job-platform 自動投入（フルデータ化）。投入試行時刻。
   //   externalJobRef が入れば紐付け完了。null のまま2h超過は滞留として拾い直し対象。
   platformSubmittedAt DateTime?           @map("platform_submitted_at")

@@ -115,7 +115,16 @@ export async function GET(req: Request) {
   // 担当は candidate.employeeId 軸に統一。CF は同一候補者×同日に JE 提案があれば除外（移行重複ガード）。
   if (tab === "proposal") {
     const jeWhere: Prisma.JobEntryWhereInput = { candidate: candFilter, archivedAt: null, jobIntroDate: range };
-    const cfWhere: Prisma.CandidateFileWhereInput = { category: "BOOKMARK", lastExportedAt: range, candidate: candFilter };
+    // T-161 R1/R2: 提案 = 出力した行 ∪ 出力せず紹介済みにした行（introducedAt のみ）。本人応募は除外。
+    const cfWhere: Prisma.CandidateFileWhereInput = {
+      category: "BOOKMARK",
+      candidate: candFilter,
+      NOT: { origin: "candidate", driveFileId: null },
+      OR: [
+        { lastExportedAt: range },
+        { lastExportedAt: null, introducedAt: range },
+      ],
+    };
     const [jeRows, cfRows] = await Promise.all([
       prisma.jobEntry.findMany({
         where: jeWhere,
@@ -125,8 +134,8 @@ export async function GET(req: Request) {
       }),
       prisma.candidateFile.findMany({
         where: cfWhere,
-        select: { id: true, fileName: true, lastExportedAt: true, candidateId: true, candidate: { select: CANDIDATE_SELECT } },
-        orderBy: { lastExportedAt: "desc" },
+        select: { id: true, fileName: true, lastExportedAt: true, introducedAt: true, candidateId: true, candidate: { select: CANDIDATE_SELECT } },
+        orderBy: [{ lastExportedAt: { sort: "desc", nulls: "last" } }, { introducedAt: "desc" }],
         take: ROW_LIMIT,
       }),
     ]);
@@ -140,12 +149,14 @@ export async function GET(req: Request) {
         FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
         WHERE ${empPredSql} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
         UNION ALL
-        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)・本人応募（origin='candidate' & drive_file_id IS NULL）は除外。
+        SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
-        WHERE ${empPredSql} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+        WHERE ${empPredSql} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2 WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
-              AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+              AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
           )
       )
       SELECT COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int recs,
@@ -159,8 +170,8 @@ export async function GET(req: Request) {
     const merged: PRow[] = [
       ...jeRows.map((r) => ({ id: `je-${r.id}`, date: ymd(r.jobIntroDate), jobTitle: r.jobTitle, companyName: r.companyName, cand: r.candidate, src: "JE" })),
       ...cfRows
-        .filter((r) => !jeKeys.has(`${r.candidate.candidateNumber}|${ymd(r.lastExportedAt)}`))
-        .map((r) => ({ id: `cf-${r.id}`, date: ymd(r.lastExportedAt), jobTitle: r.fileName, companyName: null, cand: r.candidate, src: "CF" })),
+        .filter((r) => !jeKeys.has(`${r.candidate.candidateNumber}|${ymd(r.lastExportedAt ?? r.introducedAt)}`))
+        .map((r) => ({ id: `cf-${r.id}`, date: ymd(r.lastExportedAt ?? r.introducedAt), jobTitle: r.fileName, companyName: null, cand: r.candidate, src: "CF" })),
     ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, ROW_LIMIT);
     return NextResponse.json({
       tab, summary: { persons: sum.persons, records: sum.recs },

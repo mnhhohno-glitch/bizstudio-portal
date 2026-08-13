@@ -27,6 +27,8 @@ function toIsoOrNull(dateInput: string): string | null {
 export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
   const [companyName, setCompanyName] = useState(entry.companyName || "");
   const [jobTitle, setJobTitle] = useState(entry.jobTitle || "");
+  // T-161: 職種（紹介履歴タブの職種バッジの元データ）。サイト経由等で自動で埋まらなかった行を人が補えるようにする。
+  const [jobCategory, setJobCategory] = useState(entry.jobCategory || "");
   const [jobDb, setJobDb] = useState(entry.jobDb || "");
   const [jobType, setJobType] = useState(entry.jobType || "");
   const [externalJobNo, setExternalJobNo] = useState(entry.externalJobNo || "");
@@ -58,6 +60,7 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
         body: JSON.stringify({
           companyName: companyName.trim(),
           jobTitle: jobTitle.trim() || null,
+          jobCategory: jobCategory.trim() || null,
           jobDb: jobDb || null,
           jobType: jobType || null,
           externalJobNo: externalJobNo.trim() || null,
@@ -123,6 +126,17 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
                   value={jobTitle}
                   onChange={(e) => setJobTitle(e.target.value)}
                   disabled={saving}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">職種</label>
+                <input
+                  type="text"
+                  value={jobCategory}
+                  onChange={(e) => setJobCategory(e.target.value)}
+                  disabled={saving}
+                  placeholder="例: 営業 / 事務"
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
                 />
               </div>

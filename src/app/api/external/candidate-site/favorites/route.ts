@@ -249,6 +249,9 @@ export async function POST(request: Request) {
 
   const companyName = str(body.companyName);
   const jobTitle = str(body.jobTitle);
+  // T-161: 職種。mypage が送ってくれば保存する（jobCategory / jobType 両方の名前を受け付ける）。
+  // 送られてこなければ null のまま（捏造しない）。
+  const jobCategory = str(body.jobCategory ?? body.jobType);
   const extractedText = str(body.extractedText);
   const jobUrl = str(body.jobUrl);
   // 本人メモ（任意）。candidateNote / note 両方受け付ける。空文字・未指定は null。
@@ -275,15 +278,16 @@ export async function POST(request: Request) {
       externalJobRef,
       origin: "candidate",
       memo: jobUrl,
+      // T-161: 求人スナップショットを保存する（旧実装は jobTitle を受信しつつ void で破棄していた）。
+      // 下流のエントリー化（to-entry）で JobEntry.jobTitle / jobCategory へ引き継ぐための保管。
+      jobTitle,
+      jobCategory,
       candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
       ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
       uploadedByUserId: systemUserId,
     },
     select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });
-
-  // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
-  void jobTitle;
 
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
 }
