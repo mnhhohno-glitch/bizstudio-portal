@@ -440,3 +440,40 @@ col + INTERVAL '9 hours'
 
 **関連ケース**:
 - 2026-08-10: Railway ホスト機の I/O 飽和（noisy neighbor）で本番 portal が全ページ 502。パターン辞書は `08-bug-patterns.md` の L-1。検知の仕組みは T-160（`4f49d46`）で 5 分ごとの死活監視 + LINE WORKS 通知を実装済み
+
+## 42. 一覧の行を丸ごと差し替える更新の再発条件（更新APIの include が一覧より狭いと列が消える）
+
+**症状**: エントリー管理画面で何かを更新すると、その行の「担当RC」が `-` になる。リロードすると戻る（T-161 で修正済み）。
+
+**原因**: エントリー管理の一覧は、更新API（`PATCH /api/entries/[entryId]`・`PATCH /api/entries/[entryId]/flags`）の
+レスポンスで行を**丸ごと差し替えている**（`EntryBoard.tsx` の `setEntries(prev.map(...))`）。
+一覧の表示に使う項目を新しく増やしたときに、更新APIのレスポンスに同じ項目を足し忘れると
+「更新すると消える／リロードで戻る」が再発する。今回（T-161）は `candidate.recruiterName` がこれに該当した。
+
+**予防**: 一覧に列を追加するときは、更新API側のレスポンス項目（include/select）も必ず同時に確認すること。
+`GET /api/entries` と PATCH 2本の `include.candidate.select` は常に同一に保つ。
+
+**見分け方**: 「更新直後だけ消える／リロードで戻る」＝ほぼ確実にこのパターン。DB を疑う前に一覧APIと更新APIの include を突き合わせる。
+
+**副作用**: 消えた列でクライアントソートしていると、その行だけソートキーが null になり並び順も飛ぶ。
+
+## 43. 求人紹介一覧の成立条件（片方のデータ源だけ見て件数を判断しない）
+
+求人紹介一覧（紹介履歴タブ）は、**求人出力ツール（kyuujin）側の求人と、portal側のサイト経由/紹介済みブックマークの両方**から成る
+（T-161 R3・`api/candidates/[candidateId]/jobs/route.ts`）。片方だけを見て件数を判断しないこと。
+
+**実績として数えるかどうかは一覧に出るかどうかとは別**:
+本人が自分で応募したもの（「本人応募」バッジ・origin='candidate' & drive_file_id IS NULL）は一覧には出るが実績には数えない（R1）。
+CAが出力せず紹介済みにしたもの（「紹介済み」バッジ・introduced_at）は一覧に出て実績にも数える（R2）。
+
+## 44. `last_exported_at` は「紹介済みフラグ」ではない（流用すると人事評価の数字が変わる）
+
+`candidate_files.last_exported_at` は **「CAが求人ツールへ実際に出力した」行動量の実測値**で、
+日報「求人検索」の出力数・選定率（`jobSearch.ts`）、日報CAメトリクスの紹介数（`metrics.ts`）、
+週次実績の提案人数（`weeklyMatrix.ts`・人事評価用）、実績詳細（`performance/detail`）、
+supportSubStatus 自動判定、求職者ダッシュボードの最終提案日の**分子そのもの**。
+
+「出力していないが紹介扱いにしたい」は `introduced_at` で表現する（T-161 の mark-introduced API）。
+集計側は `COALESCE(last_exported_at, introduced_at)` ＋ 本人応募除外（`NOT (origin='candidate' AND drive_file_id IS NULL)`）で統一済み。
+**実在した事故**: 旧 send-to-job-tool がサイト経由行にも last_exported_at を立てており、
+「出力済バッジは付くのに求人紹介に出ない」表示矛盾と日報出力数の水増し（本番9件）が起きていた（T-161 で修正・データもクリア済み）。
