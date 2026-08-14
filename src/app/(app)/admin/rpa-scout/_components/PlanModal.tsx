@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
-import { TIME_SLOTS } from "@/lib/rpa-scout/constants";
+import { TIME_SLOTS, timeSlotLabel } from "@/lib/rpa-scout/constants";
 import { achievementPct } from "@/lib/rpa-scout/dashboard";
 import { nowJstDateTimeLocal, ymdWeekday } from "@/lib/rpa-scout/jst";
 import {
@@ -26,6 +26,7 @@ export default function PlanModal({
   plan,
   presetDate,
   presetMachineNo,
+  siblingPlans,
   patterns,
   templates,
   machines,
@@ -35,6 +36,7 @@ export default function PlanModal({
   plan: RpaPlan | null; // null=新規
   presetDate: string | null;
   presetMachineNo: number | null;
+  siblingPlans: RpaPlan[]; // 同じ日付×号機の他の計画（自分自身は含まない）。時間帯の重複警告に使う
   patterns: RpaPattern[];
   templates: RpaTemplate[];
   machines: RpaMachine[]; // 「現在」バッジ判定用（各号機の最新ログを持つ）
@@ -63,6 +65,9 @@ export default function PlanModal({
 
   const selectedPattern = patterns.find((p) => p.id === patternId);
 
+  // 同じマスに同じ時間帯の計画が既にあるか（1日3件＝AM/PM/夕方 が想定運用のため重複は注意喚起する）
+  const sameSlotPlans = siblingPlans.filter((p) => p.timeSlot === timeSlot);
+
   const save = async () => {
     if (!timeSlot) {
       toast.error("時間帯を選択してください");
@@ -75,6 +80,16 @@ export default function PlanModal({
     if (!subjectTemplateId) {
       toast.error("件名テンプレートを選択してください");
       return;
+    }
+    // 既存計画を黙って上書きすることはない（常に別レコードになる）ので、意図せぬ二重登録だけ確認する
+    if (sameSlotPlans.length > 0) {
+      const detail = sameSlotPlans
+        .map((p) => `・${p.patternName}${p.executedAt ? "（実施済み）" : ""}`)
+        .join("\n");
+      const ok = confirm(
+        `この号機・この日には既に ${timeSlotLabel(timeSlot)} の計画が ${sameSlotPlans.length}件 あります。\n${detail}\n\n上書きではなく別の計画として${isNew ? "追加" : "保存"}します。よろしいですか？`
+      );
+      if (!ok) return;
     }
     setSaving(true);
     const res = await fetch(isNew ? "/api/rpa-scout/plans" : `/api/rpa-scout/plans/${plan!.id}`, {
@@ -188,6 +203,21 @@ export default function PlanModal({
                 </label>
               ))}
             </div>
+            {sameSlotPlans.length > 0 && (
+              <div className="mt-2 rounded-[6px] border border-[#FCD34D] bg-[#FFFBEB] px-2 py-1.5 text-[12px] text-[#92400E]">
+                ⚠ この号機・この日には既に {timeSlotLabel(timeSlot)} の計画があります（
+                {sameSlotPlans.map((p) => p.patternName).join(" / ")}
+                ）。上書きはされず、それぞれ別の計画として残ります。
+              </div>
+            )}
+            {siblingPlans.length > 0 && sameSlotPlans.length === 0 && (
+              <div className="mt-2 text-[11px] text-[#6B7280]">
+                このマスの既存計画:{" "}
+                {siblingPlans
+                  .map((p) => `${timeSlotLabel(p.timeSlot)}${p.executedAt ? "（実施済み）" : ""}`)
+                  .join(" / ")}
+              </div>
+            )}
           </div>
 
           <div>

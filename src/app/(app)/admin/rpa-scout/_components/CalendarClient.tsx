@@ -146,13 +146,15 @@ export default function CalendarClient() {
     }
   };
 
+  // そのマス（日付×号機）の全計画。実施済みも含む＝時間帯の重複警告はこちらを基準にする
+  const allPlansFor = (date: string, machineNo: number) =>
+    plans
+      .filter((p) => fmtJstDate(p.planDate) === date && p.machineNo === machineNo)
+      .sort((a, b) => (TIME_SLOT_ORDER[a.timeSlot] ?? 9) - (TIME_SLOT_ORDER[b.timeSlot] ?? 9));
+
   // 実績記録済みの計画は実績チップが同じ内容を表すため、計画チップは出さない（レコードは残す）
   const plansFor = (date: string, machineNo: number) =>
-    plans
-      .filter(
-        (p) => !p.executedAt && fmtJstDate(p.planDate) === date && p.machineNo === machineNo
-      )
-      .sort((a, b) => (TIME_SLOT_ORDER[a.timeSlot] ?? 9) - (TIME_SLOT_ORDER[b.timeSlot] ?? 9));
+    allPlansFor(date, machineNo).filter((p) => !p.executedAt);
 
   // 実績は記録時刻の昇順で縦積み
   const logsFor = (date: string, machineNo: number) =>
@@ -416,6 +418,19 @@ export default function CalendarClient() {
                             )}
                           </div>
                         ))}
+
+                        {/* 追加導線。チップがマスを埋めても必ず押せるよう常時表示する
+                            （以前はマスの余白クリックだけが導線で、チップで埋まると新規作成できなかった） */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setModal({ mode: "create", date: d, machineNo: no });
+                          }}
+                          className="w-full rounded border border-dashed border-[#D1D5DB] py-0.5 text-[11px] text-[#9CA3AF] hover:border-[#60A5FA] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
+                        >
+                          ＋ 追加
+                        </button>
                       </div>
                     </td>
                   );
@@ -427,10 +442,18 @@ export default function CalendarClient() {
       </div>
 
       {modal && (
+        // siblingPlans = 同じマスの他の計画（自分自身は除く）。時間帯が重複したら保存前に警告する
         <PlanModal
           {...(modal.mode === "create"
             ? { plan: null, presetDate: modal.date, presetMachineNo: modal.machineNo }
             : { plan: modal.plan, presetDate: null, presetMachineNo: null })}
+          siblingPlans={
+            modal.mode === "create"
+              ? allPlansFor(modal.date, modal.machineNo)
+              : allPlansFor(fmtJstDate(modal.plan.planDate), modal.plan.machineNo).filter(
+                  (p) => p.id !== modal.plan.id
+                )
+          }
           patterns={patterns}
           templates={templates}
           machines={machines}
