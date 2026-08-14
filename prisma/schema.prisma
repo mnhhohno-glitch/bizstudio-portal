@@ -1517,6 +1517,13 @@ model CandidateFile {
   memo              String?               @db.Text
   extractedText     String?               @map("extracted_text") @db.Text
   extractedAt       DateTime?             @map("extracted_at")
+  // T-164: アップロード済みファイル本体から抽出したテキストの永続キャッシュ（advisor-context 用）。
+  //   PDFの中身は一度アップロードされたら変わらない前提で、一度解析したら再解析しない。
+  //   extractedText（BOOKMARK求人票の抽出パイプライン専用）とは別系統。
+  //   ファイル実体の差し替え（replace-docx/xlsx 等）時は3列とも NULL に戻すこと。
+  parsedText    String?   @map("parsed_text") @db.Text
+  parsedAt      DateTime? @map("parsed_at")
+  parseFailedAt DateTime? @map("parse_failed_at") // 失敗を永久キャッシュしない（parsedText が無ければ次回再試行）
   aiMatchRating     String?               @map("ai_match_rating")
   aiAnalysisComment String?               @map("ai_analysis_comment") @db.Text
   aiAnalyzedAt      DateTime?             @map("ai_analyzed_at")
@@ -1607,6 +1614,9 @@ model AdvisorChatSession {
   messages        AdvisorChatMessage[]
   contextCache    String?              @map("context_cache") @db.Text
   contextCachedAt DateTime?            @map("context_cached_at")
+  // T-164: context の材料（候補者・ファイル・評価・面談ログ等の更新状態）のハッシュ。
+  //   一致すれば経過時間に関係なくキャッシュを使い、変われば再ビルドする（上限TTL 24h を安全弁に併置）。
+  contextFingerprint String? @map("context_fingerprint")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
