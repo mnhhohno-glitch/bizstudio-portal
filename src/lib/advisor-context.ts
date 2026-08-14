@@ -146,7 +146,14 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     },
     orderBy: { createdAt: "desc" },
     take: 4,
-    select: { driveFileId: true, fileName: true, category: true, mimeType: true },
+    select: {
+      id: true,
+      driveFileId: true,
+      fileName: true,
+      category: true,
+      mimeType: true,
+      parsedText: true, // T-164: 解析済みならDriveダウンロードもAI解析もスキップ
+    },
   });
 
   if (keyFiles.length > 0) {
@@ -154,26 +161,58 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     for (const file of keyFiles) {
       if (!file.driveFileId) continue; // PDF実体が無い行はスキップ（BOOKMARK除外済だが型安全のため）
       try {
-        const { base64 } = await downloadFileFromDrive(file.driveFileId);
-        let parsedText: string;
-        if (file.mimeType === "text/plain") {
-          const raw = parseTextFile(base64);
-          parsedText = raw.length > MEETING_TEXT_MAX_CHARS
+        // T-164: アップロード済みファイルの中身は変わらないため、一度解析したら永続再利用する
+        //   （従来はセッション30分キャッシュ失効のたびに Drive ダウンロード + Gemini 解析が走り、
+        //    context 再ビルドに実測 15,507ms かかっていた＝「最初の1通が遅い」の主因）。
+        //   parsedText には未加工の全文を保存し、切り詰めは従来どおり使用時に行う。
+        let raw = file.parsedText;
+        if (!raw || raw.trim() === "") {
+          const { base64 } = await downloadFileFromDrive(file.driveFileId);
+          if (file.mimeType === "text/plain") {
+            raw = parseTextFile(base64);
+          } else {
+            // T-135: この OCR は費用の帰属先を追えるよう candidateId と呼び出し元を記録する。
+            // parsePdfWithAI 自体は変更しない（呼ぶかどうかの判断だけを T-164 で変更）。
+            raw = await parsePdfWithAI(base64, {
+              candidateId,
+              caller: "advisor-context",
+              category: file.category,
+            });
+          }
+          // parsePdfWithAI / parseTextFile は失敗時に throw せず定型文を返すため、
+          // 定型文を parsedText に保存しない（失敗の永久キャッシュ防止・次回再試行）。
+          const isFailureText =
+            raw.trim() === "" ||
+            raw === "（ファイルの読み取りに失敗しました）" ||
+            raw === "（画像の読み取りに失敗しました）" ||
+            raw === "（テキストファイルの読み取りに失敗しました）";
+          try {
+            await prisma.candidateFile.update({
+              where: { id: file.id },
+              data: isFailureText
+                ? { parseFailedAt: new Date() }
+                : { parsedText: raw, parsedAt: new Date(), parseFailedAt: null },
+            });
+          } catch (persistErr) {
+            // 永続化の失敗は context ビルドを落とさない（次回再解析されるだけ）
+            console.error(`[advisor-context] parsedText persist failed: ${file.fileName}`, persistErr);
+          }
+        }
+        const parsedText =
+          file.mimeType === "text/plain" && raw.length > MEETING_TEXT_MAX_CHARS
             ? raw.substring(0, MEETING_TEXT_MAX_CHARS) + "\n...(以下省略)"
             : raw;
-        } else {
-          // T-135: この OCR は候補者1名あたり最大4ファイル分走る。費用の帰属先を追えるよう
-          // candidateId と呼び出し元を記録する（アドバイザー系の隠れ Gemini コストの主因）。
-          parsedText = await parsePdfWithAI(base64, {
-            candidateId,
-            caller: "advisor-context",
-            category: file.category,
-          });
-        }
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `${parsedText}\n\n`;
       } catch (error) {
         console.error(`File parse error: ${file.fileName}`, error);
+        // Drive ダウンロード等の例外も失敗として記録（次回再試行の対象。同一リクエスト内では再試行しない）
+        try {
+          await prisma.candidateFile.update({
+            where: { id: file.id },
+            data: { parseFailedAt: new Date() },
+          });
+        } catch { /* 記録失敗は無視 */ }
         context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
         context += `（読み取りに失敗しました）\n\n`;
       }
