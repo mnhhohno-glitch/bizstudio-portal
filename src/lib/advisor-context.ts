@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { downloadFileFromDrive } from "@/lib/google-drive";
@@ -13,6 +14,52 @@ const RATINGS_SECTION_MAX_CHARS = 2000;
 // 評価一覧はチャット用（AIが「どれが一番いい？」等に答えるため）で、
 // 求人を評価する側の analyze-batch に自分の過去評価を見せない（判定の自己調整を防ぐ）。
 export const RATINGS_SECTION_MARKER = "## ブックマーク求人の評価一覧";
+
+/**
+ * T-164: context の材料（候補者・ファイル・評価・メモ・ワークシート・面談ログダイジェスト）の
+ * 更新状態から指紋を作る。AIは呼ばない・軽い集計クエリのみ。
+ * 指紋が一致すれば contextCache を経過時間に関係なく再利用できる（messages route が使用）。
+ * 日時は UTC の instant（toISOString の完全形）をそのままハッシュ材料にする。
+ * 暦日への変換はしない（罠#17: JST 暦日が必要な場面で toISOString().slice(0,10) を使わないこと）。
+ */
+export async function computeContextFingerprint(candidateId: string): Promise<string> {
+  const [candidate, fileAgg, ratedCount, noteAgg, guide] = await Promise.all([
+    prisma.candidate.findUnique({
+      where: { id: candidateId },
+      select: { updatedAt: true, advisorLogDigestUpdatedAt: true },
+    }),
+    prisma.candidateFile.aggregate({
+      where: { candidateId },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    prisma.candidateFile.count({
+      where: { candidateId, aiMatchRating: { not: null } },
+    }),
+    prisma.candidateNote.aggregate({
+      where: { candidateId },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    prisma.guideEntry.findFirst({
+      where: { candidateId, guideType: "INTERVIEW" },
+      select: { updatedAt: true },
+    }),
+  ]);
+
+  const material = [
+    candidate?.updatedAt?.toISOString() ?? "",
+    candidate?.advisorLogDigestUpdatedAt?.toISOString() ?? "",
+    fileAgg._count._all,
+    fileAgg._max.updatedAt?.toISOString() ?? "",
+    ratedCount,
+    noteAgg._count._all,
+    noteAgg._max.updatedAt?.toISOString() ?? "",
+    guide?.updatedAt?.toISOString() ?? "",
+  ].join("|");
+
+  return createHash("sha256").update(material).digest("hex");
+}
 
 /**
  * Build candidate context string for AI advisor.

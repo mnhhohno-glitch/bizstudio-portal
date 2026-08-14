@@ -8,6 +8,7 @@ import {
   parseTextFile,
 } from "@/lib/file-parser";
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
+import { computeContextFingerprint } from "@/lib/advisor-context";
 import { isAnalysisMessage } from "@/lib/advisor-message-kind";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
@@ -98,7 +99,9 @@ const CANDIDATE_DATA_HEADER = `
 
 `;
 
-const CACHE_TTL = 30 * 60 * 1000;
+// T-164: contextキャッシュの主判定は contextFingerprint（材料が変わったか）。
+// この定数は指紋計算に漏れがあっても1日で必ず作り直すための上限TTL（安全弁）。
+const CACHE_TTL = 24 * 60 * 60 * 1000;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_PAST_MESSAGES = 20;
 // T-163: API送信用の1メッセージ本文クランプ。面談ログ全文貼り付け（実測 max 32,104字）等への防御。
@@ -242,17 +245,25 @@ export async function POST(
   // コンテキスト取得（キャッシュ対応）
   const session = await prisma.advisorChatSession.findUnique({
     where: { id: sessionId },
-    select: { contextCache: true, contextCachedAt: true },
+    select: { contextCache: true, contextCachedAt: true, contextFingerprint: true },
   });
 
   let context = session?.contextCache || "";
+
+  // T-164: 失効判定を「経過時間」から「材料の指紋一致」に変更。
+  //   旧30分TTLは (1) 材料が変わらなくても30分ごとに再ビルド（従来15.5秒の待ち）
+  //   (2) 逆に30分以内は全件分析直後でも古い評価のまま、の両方の問題があった。
+  //   指紋が一致すれば経過時間に関係なくキャッシュを使い、変わっていれば即再ビルドする。
+  //   CACHE_TTL(24h) は指紋計算の漏れがあっても1日で必ず作り直すための安全弁。
+  const fingerprint = await computeContextFingerprint(candidateId);
   const cacheExpired = !session?.contextCachedAt ||
     Date.now() - new Date(session.contextCachedAt).getTime() > CACHE_TTL;
+  const fingerprintChanged = session?.contextFingerprint !== fingerprint;
 
   // T-163: contextビルド所要時間の実測。キャッシュヒット（再ビルドなし）は 0 のまま。
   let contextBuildMs = 0;
 
-  if (!context || cacheExpired) {
+  if (!context || cacheExpired || fingerprintChanged) {
     const contextT0 = Date.now();
     try {
       const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
@@ -264,7 +275,11 @@ export async function POST(
         context = contextData.context || "";
         await prisma.advisorChatSession.update({
           where: { id: sessionId },
-          data: { contextCache: context, contextCachedAt: new Date() },
+          data: {
+            contextCache: context,
+            contextCachedAt: new Date(),
+            contextFingerprint: fingerprint,
+          },
         });
       }
     } catch (e) {
