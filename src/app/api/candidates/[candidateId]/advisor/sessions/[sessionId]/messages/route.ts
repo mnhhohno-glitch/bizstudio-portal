@@ -8,6 +8,7 @@ import {
   parseTextFile,
 } from "@/lib/file-parser";
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
+import { isAnalysisMessage } from "@/lib/advisor-message-kind";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
@@ -100,6 +101,9 @@ const CANDIDATE_DATA_HEADER = `
 const CACHE_TTL = 30 * 60 * 1000;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_PAST_MESSAGES = 20;
+// T-163: API送信用の1メッセージ本文クランプ。面談ログ全文貼り付け（実測 max 32,104字）等への防御。
+// analyze-batch 側の MAX_CHAT_MESSAGE_CHARS とは独立に定義する。DB・画面表示には影響させない。
+const MAX_PAST_MESSAGE_CHARS = 4000;
 const MAX_TEXT_FILE_CHARS = 8000;
 const API_TIMEOUT_MS = 120000; // 2分
 
@@ -215,11 +219,16 @@ export async function POST(
   });
 
   // 過去メッセージ取得（直近20件に制限）
+  // T-163: 求人全件分析の産物（完了カード・旧バッチ出力）は AI への送信窓から除外して
+  // 「直近20件」を数える。除外は API 送信のみで、DB・画面表示には一切影響しない。
+  // 分析結果そのものは候補者context の評価一覧（advisor-context.ts）経由で AI に届く。
   const allMessages = await prisma.advisorChatMessage.findMany({
     where: { sessionId },
     orderBy: { createdAt: "asc" },
   });
-  const pastMessages = allMessages.slice(-MAX_PAST_MESSAGES);
+  const pastMessages = allMessages
+    .filter((m) => !isAnalysisMessage(m))
+    .slice(-MAX_PAST_MESSAGES);
 
   // セッションタイトル自動更新（初回メッセージ時）
   const displayTitle = (content || file?.name || "").trim();
@@ -293,9 +302,13 @@ export async function POST(
   // 別枠で追加すると同じ発言が2回 API に乗る（費用増＋検出の不安定化）ので、最終要素を差し替える。
   // content（CA打鍵分）と fileContext（添付解析結果）は別変数のまま存在するため、
   // 添付ファイルの中身が <ca_input> に入る経路自体が存在しなくなる（プロンプトの指示に頼らない分離）。
+  // T-163: API送信用に限り 1メッセージ 4,000字でクランプ（DB・画面表示には影響しない）。
   const apiMessages = pastMessages.map((m) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content:
+      m.content.length > MAX_PAST_MESSAGE_CHARS
+        ? m.content.substring(0, MAX_PAST_MESSAGE_CHARS) + "\n…（長いため省略）"
+        : m.content,
   }));
 
   const lastIdx = apiMessages.length - 1;
