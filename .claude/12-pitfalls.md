@@ -477,3 +477,24 @@ supportSubStatus 自動判定、求職者ダッシュボードの最終提案日
 集計側は `COALESCE(last_exported_at, introduced_at)` ＋ 本人応募除外（`NOT (origin='candidate' AND drive_file_id IS NULL)`）で統一済み。
 **実在した事故**: 旧 send-to-job-tool がサイト経由行にも last_exported_at を立てており、
 「出力済バッジは付くのに求人紹介に出ない」表示矛盾と日報出力数の水増し（本番9件）が起きていた（T-161 で修正・データもクリア済み）。
+
+## （採番待ち・T-163）AIアドバイザーのチャット履歴テーブルは、求人の全件分析の出力と共用されている
+
+`analyze-batch` はバッチごとに user/assistant 1組を `advisor_chat_messages` に書き込んでいた。
+チャットAPIが送る「直近20件」の窓を分析出力が占拠し（実測84.7%）、入力トークン肥大と
+few-shot汚染（AIが長文レポート調を模倣し「簡潔に」の指示が効かなくなる）を同時に起こす。
+T-163 で完了カード1枚に変更＋`kind` カラムで送信窓から分離。
+個別の評価は `CandidateFile.aiMatchRating` / `aiAnalysisComment` に保存済みで一覧バッジから閲覧できるため、
+チャットへの長文出力は二重表示だった。
+今後このテーブルに別用途のメッセージを書き込む場合は必ず `kind` を付けて送信窓から分離すること。
+
+**関連の罠**: 最終バッチの総合まとめは「過去バッチ結果」を入力に取る。T-163 以降の供給元は
+チャット履歴ではなく analyze-batch 内のプロセス内キャッシュ（`runBatchResultsCache`）＋
+`candidate_files.aiAnalysisComment` からの再構成フォールバック。チャット履歴に依存しないこと。
+
+## （採番待ち・T-163）キャッシュが効かない原因は byte 不一致（罠#39）だけではない。ephemeral のTTL（既定5分）切れもある
+
+`cache_creation_tokens` が毎回同値なら byte 一致は取れている。それでも cache_read が出ないならTTL切れを疑う。
+実測（T-163）ではチャットの連続コールが5分以内なのは 37.4%、cache_read 率 29.6%。
+1時間TTLは書き込み単価が2倍のため、ヒット率が 52.6% を超えないと素の入力より高くつく。
+（T-163 時点の実測: 60分以内の連続コールは 54.0% で、5分TTL比の損益分岐 57.5% に届かず 1時間化は見送り）
