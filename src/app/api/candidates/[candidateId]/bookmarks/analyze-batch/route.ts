@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { getCandidateContext } from "@/lib/advisor-context";
+import { getCandidateContext, RATINGS_SECTION_MARKER } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
@@ -431,10 +431,16 @@ export async function POST(
   if (!candidateContext) {
     try {
       candidateContext = await getCandidateContext(candidateId);
-      // Strip bookmark section (we send job postings separately)
+      // Strip bookmark sections (we send job postings separately)
+      // T-163: 評価一覧（RATINGS_SECTION_MARKER）はチャット用のため、評価する側の
+      // analyze-batch には見せない（自分の過去評価による判定の自己調整を防ぐ）。
+      // 評価一覧 → 求人票テキストの順で並ぶため、早い方の位置から除去する
+      // ＝analyze-batch の入力は T-163 以前と byte 同一に保たれる。
+      const ratingsIdx = candidateContext.indexOf(RATINGS_SECTION_MARKER);
       const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
-      if (bookmarkIdx !== -1) {
-        candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
+      const cutIdx = [ratingsIdx, bookmarkIdx].filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (cutIdx !== undefined) {
+        candidateContext = candidateContext.substring(0, cutIdx).trim();
       }
     } catch (e) {
       console.error("[AnalyzeBatch] Context error:", e);

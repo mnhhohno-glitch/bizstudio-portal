@@ -2,8 +2,17 @@ import { prisma } from "@/lib/prisma";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { parsePdfWithAI, parseTextFile } from "@/lib/file-parser";
+import { extractAxis, RANK_ORDER, RANK_UNRANKED, RATING_VALUE } from "@/lib/ai-rating";
+import { extractCompanyNameCandidates, stripFileMetadata } from "@/lib/normalize-filename";
 
 const MEETING_TEXT_MAX_CHARS = 8000;
+// T-163: 評価一覧セクションの上限。コメント本文を含めない1行1件形式でもここで打ち切る。
+const RATINGS_SECTION_MAX_CHARS = 2000;
+
+// T-163: analyze-batch が候補者contextから評価系セクションを除去する際の目印。
+// 評価一覧はチャット用（AIが「どれが一番いい？」等に答えるため）で、
+// 求人を評価する側の analyze-batch に自分の過去評価を見せない（判定の自己調整を防ぐ）。
+export const RATINGS_SECTION_MARKER = "## ブックマーク求人の評価一覧";
 
 /**
  * Build candidate context string for AI advisor.
@@ -209,6 +218,53 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
       context += "\n";
     }
     context += "\n";
+  }
+
+  // T-163: ブックマーク求人の評価一覧（1行1件・コメント本文は絶対に含めない＝肥大化防止）。
+  // チャットの送信窓から分析長文を除外した代わりに、AIが評価を踏まえて答えられる最小情報をここで渡す。
+  // ※ analyze-batch はこのセクション（RATINGS_SECTION_MARKER）以降を除去して従来と同一入力を保つ。
+  const ratedBookmarks = await prisma.candidateFile.findMany({
+    where: {
+      candidateId,
+      category: "BOOKMARK",
+      archivedAt: null,
+      aiMatchRating: { not: null },
+    },
+    select: { fileName: true, aiMatchRating: true, aiAnalysisComment: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (ratedBookmarks.length > 0) {
+    // 総合ランクの良い順（A → B+ → B → C → D → 幅表記等）。幅表記は先頭の評価値で並べる。
+    const headRatingRe = new RegExp(`^(${RATING_VALUE})`);
+    const rankOf = (rating: string | null): number => {
+      const m = (rating ?? "").match(headRatingRe);
+      return m ? RANK_ORDER[m[1]] ?? RANK_UNRANKED : RANK_UNRANKED;
+    };
+    const sorted = [...ratedBookmarks].sort(
+      (a, b) => rankOf(a.aiMatchRating) - rankOf(b.aiMatchRating)
+    );
+
+    const lines: string[] = [];
+    let usedChars = 0;
+    let omitted = 0;
+    for (const f of sorted) {
+      const company =
+        extractCompanyNameCandidates(f.fileName)[0] || stripFileMetadata(f.fileName) || f.fileName;
+      const kibou = extractAxis(f.aiAnalysisComment, "本人希望") ?? "-";
+      const tsuka = extractAxis(f.aiAnalysisComment, "通過率") ?? "-";
+      const line = `- ${company} — 希望:${kibou} / 通過:${tsuka} / 総合:${f.aiMatchRating}`;
+      if (usedChars + line.length + 1 > RATINGS_SECTION_MAX_CHARS) {
+        omitted++;
+        continue;
+      }
+      lines.push(line);
+      usedChars += line.length + 1;
+    }
+    if (omitted > 0) lines.push(`（ほか${omitted}件は省略）`);
+
+    context += `${RATINGS_SECTION_MARKER}（${ratedBookmarks.length}件・総合の良い順）\n`;
+    context += `${lines.join("\n")}\n\n`;
   }
 
   // ブックマーク求人票テキスト（最新5件のみ、コンテキスト肥大化防止）
