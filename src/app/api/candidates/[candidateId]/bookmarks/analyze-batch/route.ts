@@ -890,8 +890,14 @@ ${skillContent}
     //   - カード作成の失敗で分析本体（評価保存・レスポンス）を落とさない。
     if (isLastBatch) {
       try {
+        // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
+        // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
+        // （= 実行対象は allBookmarks.slice(0, end)）。allBookmarks 全体を数えると、
+        // 絞り込み（追加のみ / 未評価・破損のみ）で対象外だった過去評価分まで混入し、
+        // 見出しの件数がまとめ本文の「全N件」と矛盾する。
+        const runTargetFiles = allBookmarks.slice(0, end);
         const runFiles = await prisma.candidateFile.findMany({
-          where: { id: { in: allBookmarks.map((f) => f.id) } },
+          where: { id: { in: runTargetFiles.map((f) => f.id) } },
           select: { aiMatchRating: true },
         });
         // 幅表記（"A〜B"等）は先頭の評価値で読む。B+ を B と誤読しないよう RATING_VALUE（B\+ 先行の交替）を使う。
@@ -904,7 +910,7 @@ ${skillContent}
           else unrated++;
         }
         const header =
-          `【求人分析 完了】${allBookmarks.length}件を評価しました\n` +
+          `【求人分析 完了】${runFiles.length}件を評価しました\n` +
           `総合 A:${counts["A"]}件 / B+:${counts["B+"]}件 / B:${counts["B"]}件 / C:${counts["C"]}件 / D:${counts["D"]}件 / 未評価:${unrated}件`;
         const footer = `※ 各求人の評価コメントは、求人一覧の評価バッジをクリックすると開きます。`;
         // 本文全体を 2,000 字以内に収める（超過分は総合まとめ側を削り、件数と案内文は必ず残す）。
