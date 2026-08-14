@@ -1627,6 +1627,10 @@ model AdvisorChatMessage {
   suggestedTasks            Json?     @map("suggested_tasks")
   suggestedTasksDismissedAt DateTime? @map("suggested_tasks_dismissed_at")
 
+  // T-163: メッセージ種別。"ANALYSIS"=求人全件分析の産物（チャットAPIの送信窓から除外する）。
+  // null=通常チャット。画面表示・DB保存には影響させず、AI への送信内容の選別にのみ使う。
+  kind String?
+
   @@map("advisor_chat_messages")
 }
 
@@ -1649,6 +1653,9 @@ model AdvisorUsageLog {
   costUsd             Float    @map("cost_usd")
   isRetry             Boolean  @default(false) @map("is_retry")
   note                String?
+  // T-163: 所要時間の実測（従来は未計測だった）。どちらも記録開始以前の行は null。
+  latencyMs      Int? @map("latency_ms") // Anthropic API 呼び出しの所要時間(ms)
+  contextBuildMs Int? @map("context_build_ms") // 候補者contextビルド(PDF読み込み含む)の所要時間(ms)。キャッシュヒット時は 0
 
   @@index([createdAt])
   @@index([endpoint])
