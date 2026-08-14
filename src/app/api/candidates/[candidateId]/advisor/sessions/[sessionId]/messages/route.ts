@@ -312,8 +312,13 @@ export async function POST(
       cache_control: { type: "ephemeral" as const },
     },
     {
+      // T-164: 候補者contextにも cache_control を付与（従来は毎ターン満額処理＝取りこぼし）。
+      //   指紋方式（T-164）で context のバイト列が安定する時間が延びたため read 化が見込める。
+      //   TTL は既定の5分のまま（1時間TTLは 60分以内再コール率 54.0% < 損益分岐 57.5% のため不採用）。
+      //   第2ブロック単体の損益分岐はヒット率 21.7%超（write 1.25x / read 0.1x）。実測 37.4% で黒字見込み。
       type: "text" as const,
       text: CANDIDATE_DATA_HEADER + context,
+      cache_control: { type: "ephemeral" as const },
     },
   ];
 
