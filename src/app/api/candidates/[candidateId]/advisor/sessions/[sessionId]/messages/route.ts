@@ -249,7 +249,11 @@ export async function POST(
   const cacheExpired = !session?.contextCachedAt ||
     Date.now() - new Date(session.contextCachedAt).getTime() > CACHE_TTL;
 
+  // T-163: contextビルド所要時間の実測。キャッシュヒット（再ビルドなし）は 0 のまま。
+  let contextBuildMs = 0;
+
   if (!context || cacheExpired) {
+    const contextT0 = Date.now();
     try {
       const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
       const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
@@ -266,6 +270,7 @@ export async function POST(
     } catch (e) {
       console.error("Context fetch error:", e);
     }
+    contextBuildMs = Date.now() - contextT0;
   }
 
   // コンテキストが長すぎる場合は切り詰め
@@ -334,6 +339,9 @@ export async function POST(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
+  // T-163: Anthropic API 呼び出しの所要時間の実測。
+  const apiT0 = Date.now();
+
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -364,6 +372,8 @@ export async function POST(
         usage: null,
         candidateId,
         note: `error-${response.status}`,
+        latencyMs: Date.now() - apiT0,
+        contextBuildMs,
       });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
@@ -373,7 +383,8 @@ export async function POST(
 
     const data = await response.json();
     const u = data.usage ?? {};
-    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
+    const latencyMs = Date.now() - apiT0;
+    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs} context_build_ms=${contextBuildMs}`);
     // T-126: usage を永続化。LIGHTモード廃止後は常に skill-full。
     await recordAdvisorUsage({
       endpoint: "advisor-chat",
@@ -381,6 +392,8 @@ export async function POST(
       usage: u,
       candidateId,
       note: "skill-full",
+      latencyMs,
+      contextBuildMs,
     });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""

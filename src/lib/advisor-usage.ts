@@ -69,6 +69,9 @@ export type RecordAdvisorUsageParams = {
   fileCount?: number | null;
   isRetry?: boolean;
   note?: string | null;
+  // T-163: 所要時間の実測（optional。渡さない既存呼び出し元は null 記録のまま壊れない）。
+  latencyMs?: number | null; // Anthropic API 呼び出しの所要時間(ms)
+  contextBuildMs?: number | null; // 候補者contextビルドの所要時間(ms)。キャッシュヒット時は 0
 };
 
 /**
@@ -98,6 +101,8 @@ export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Prom
         costUsd,
         isRetry: params.isRetry ?? false,
         note,
+        latencyMs: params.latencyMs ?? null,
+        contextBuildMs: params.contextBuildMs ?? null,
       },
     });
   } catch (e) {
