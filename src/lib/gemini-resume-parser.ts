@@ -4,9 +4,7 @@
  * マイナビRPA（pdf-upload）でも同一の解析経路を共有する。
  */
 
-import { recordGeminiUsage } from "@/lib/ai-usage";
-
-const GEMINI_MODEL = "gemini-3-flash-preview";
+import { callGeminiForJson } from "@/lib/gemini-json-call";
 
 export type GeminiResumeResult = {
   name: string | null;
@@ -68,7 +66,8 @@ const RESUME_PROMPT = `以下はWEB履歴書（転職サイトの登録情報）
 
 /**
  * PDF バッファを Gemini API に送信し、履歴書フィールドを抽出する。
- * 失敗時（API キー未設定 / API エラー / レスポンス不正 / JSON 解析失敗）は throw する。
+ * 一時的な失敗（レート制限 / 5xx / 通信断 / 出力途中切れ）は callGeminiForJson が
+ * 最大3回まで自動リトライする。全滅した場合は GeminiJsonError を throw するので、
  * 呼び出し側で catch し、AI 解析失敗として扱うこと。
  */
 export async function parseResumeWithGemini(
@@ -76,82 +75,14 @@ export async function parseResumeWithGemini(
   /** T-135: 費用帳簿の付帯情報（呼び出し元・候補者など）。 */
   logMeta?: Record<string, unknown>,
 ): Promise<GeminiResumeResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY が設定されていません");
-  }
-
-  const base64Data = pdfBuffer.toString("base64");
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "application/pdf",
-                  data: base64Data,
-                },
-              },
-              { text: RESUME_PROMPT },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4000,
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  // T-135: 費用記録（fire-and-forget）。空レスポンスで throw する前に記録する
-  // （空でも入力トークンは課金されるため、ここで漏らすと「見えない費用」になる）。
-  void recordGeminiUsage({
-    system: "portal",
+  const parsed = await callGeminiForJson({
+    parts: [
+      { inlineData: { mimeType: "application/pdf", data: pdfBuffer.toString("base64") } },
+      { text: RESUME_PROMPT },
+    ],
     endpoint: "resume-parse",
-    model: GEMINI_MODEL,
-    usage: data?.usageMetadata,
-    meta: { pdfBytes: pdfBuffer.length, ...logMeta },
+    logMeta: { pdfBytes: pdfBuffer.length, ...logMeta },
   });
-
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText || typeof rawText !== "string") {
-    throw new Error("Gemini レスポンスが空です");
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    // Gemini が ```json ... ``` ラッパーや前文テキストを付与する場合がある
-    // 1) マークダウンコードブロック内の JSON を抽出
-    const codeBlockMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    // 2) コードブロックがなければ最初の { から最後の } までを抽出
-    const jsonStr = codeBlockMatch
-      ? codeBlockMatch[1].trim()
-      : rawText.substring(
-          rawText.indexOf("{"),
-          rawText.lastIndexOf("}") + 1,
-        );
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    console.error(
-      "[gemini-resume-parser] JSON parse failed. rawText (500 chars):",
-      rawText.substring(0, 500),
-    );
-    throw new Error("Gemini レスポンスのJSON解析に失敗しました");
-  }
-
   return {
     name: (parsed.name as string) || null,
     furigana: (parsed.furigana as string) || null,

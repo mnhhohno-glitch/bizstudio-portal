@@ -342,7 +342,7 @@ export default function CandidateHeader({
       <div className="px-6 pb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] text-gray-400 mr-1">URL・資料:</span>
-          <IssueSiteTokenButton candidateId={candidate.id} hasBirthday={!!candidate.birthday} />
+          <IssueSiteTokenButton candidateId={candidate.id} candidateName={candidate.name} hasBirthday={!!candidate.birthday} />
           <SitePreviewButton candidateId={candidate.id} hasBirthday={!!candidate.birthday} />
           {mypageLoading ? (
             <span className="inline-block border border-gray-200 bg-gray-50 rounded-md px-3 py-1 text-[12px] text-gray-400 animate-pulse">

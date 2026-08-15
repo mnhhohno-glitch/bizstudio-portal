@@ -62,10 +62,11 @@ export async function POST(
 
   // ブックマーク取得 → PDF有無で分岐（AI評価順にソート）。
   //   pdfFiles      : driveFileId ありの通常行（kyuujin へ PDF を新規アップロードして job を作る従来フロー）
-  //   linkOnlyFiles : サイト経由（origin="candidate" / driveFileId=null）。求職者がマイページで応募/気になるを
-  //                   押した求人＝kyuujin 側の求職者プロジェクトに既に job が存在する（candidateNumber で引ける）。
-  //                   PDF送信は不要で、エクスポート状態だけ成立させて「求人紹介へ移動」を通す。
-  //                   ※ CandidateFile.kyuujinJobId は未充填のことが多い（favorites/バックフィル由来）ため条件にしない。
+  //   linkOnlyFiles : サイト経由（origin="candidate" / driveFileId=null）。PDF実体が無く kyuujin へ送信できない。
+  //                   T-161: 旧実装はこの行にも lastExportedAt を立てていたが、kyuujin に job は作られないため
+  //                   「出力済なのに求人紹介に出ない」矛盾と日報の出力数水増しを生んでいた。
+  //                   lastExportedAt は「実際に kyuujin へ送信して job が作られた行」にのみ立てる（本修正）。
+  //                   サイト経由行は送信対象から外し、スキップとして件数を返す。
   const ratingOrder = RANK_ORDER;
   const bookmarkFiles = (
     await prisma.candidateFile.findMany({
@@ -82,10 +83,10 @@ export async function POST(
   const linkOnlyFiles = bookmarkFiles.filter(
     (f) => !f.driveFileId && f.origin === "candidate",
   );
-  const exportLabel = dbType === "circus" ? "circus" : "hito-link";
 
-  // 全件がサイト経由（PDFなし）の場合: kyuujin へのプロジェクト作成・アップロード・抽出は一切不要。
-  // 既存 job と紐付いた状態のまま、エクスポート状態だけ立てて「求人紹介へ移動」を成立させる。
+  // 全件がサイト経由（PDFなし）の場合: kyuujin へ送信できるものが無い。
+  // T-161: 旧実装はここで lastExportedAt を立てて「移動しました」と返していたが、実際には
+  // kyuujin に job は作られない（虚偽の出力済）。何もせず、理由を明示して返す。
   if (pdfFiles.length === 0) {
     if (linkOnlyFiles.length === 0) {
       return NextResponse.json(
@@ -93,18 +94,13 @@ export async function POST(
         { status: 422 },
       );
     }
-    await prisma.candidateFile.updateMany({
-      where: { id: { in: linkOnlyFiles.map((f) => f.id) } },
-      data: { lastExportedAt: new Date(), lastExportedTo: exportLabel },
-    });
-    try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
-    return NextResponse.json({
-      success: true,
-      uploadedCount: 0,
-      linkedCount: linkOnlyFiles.length,
-      failedCount: 0,
-      message: `${linkOnlyFiles.length}件を求人紹介に移動しました（サイト経由・PDF送信不要）`,
-    });
+    return NextResponse.json(
+      {
+        error: `サイト経由の求人${linkOnlyFiles.length}件はPDFが無いため求人ツールへ送信できません。「エントリーへ登録」または「紹介済みにする」から進めてください`,
+        skippedSiteCount: linkOnlyFiles.length,
+      },
+      { status: 422 },
+    );
   }
 
   try {
@@ -384,13 +380,11 @@ export async function POST(
       : `${KYUUJIN_PDF_TOOL_URL}/projects/${projectId}/memos?unit=${processingUnitId}`;
 
     // 7. Mark exported files
-    //    PDF送信できた行 + 同一リクエストのサイト経由行（PDF不要・紐付けのみ）の両方を出力済にする。
-    const exportedFileIds = [
-      ...pdfFiles
-        .filter((bf) => downloadedFiles.some((df) => df.driveFileId === bf.driveFileId))
-        .map((bf) => bf.id),
-      ...linkOnlyFiles.map((f) => f.id),
-    ];
+    //    T-161: 実際に kyuujin へ PDF を送信できた行にのみ lastExportedAt を立てる。
+    //    サイト経由行（linkOnlyFiles）は kyuujin に job が作られないため含めない（旧実装の水増しバグ修正）。
+    const exportedFileIds = pdfFiles
+      .filter((bf) => downloadedFiles.some((df) => df.driveFileId === bf.driveFileId))
+      .map((bf) => bf.id);
     if (exportedFileIds.length > 0) {
       await prisma.candidateFile.updateMany({
         where: { id: { in: exportedFileIds } },
@@ -402,14 +396,17 @@ export async function POST(
       try { await recalculateSubStatusIfAuto(candidateId); } catch (e) { console.error("recalculate error:", e); }
     }
 
-    const linkedNote = linkOnlyFiles.length > 0 ? `（うち${linkOnlyFiles.length}件はサイト経由・PDF不要）` : "";
+    const linkedNote = linkOnlyFiles.length > 0
+      ? `（サイト経由${linkOnlyFiles.length}件はPDFが無いため送信対象外。「エントリーへ登録」または「紹介済みにする」から進めてください）`
+      : "";
     return NextResponse.json({
       success: true,
       projectId,
       processingUnitId,
       recordKey,
       uploadedCount: downloadedFiles.length,
-      linkedCount: linkOnlyFiles.length,
+      linkedCount: 0,
+      skippedSiteCount: linkOnlyFiles.length,
       failedCount,
       projectUrl: memoUrl,
       message: `${downloadedFiles.length}件のPDFを送信しました${linkedNote}。メモ一覧で引当てを確認してください`,

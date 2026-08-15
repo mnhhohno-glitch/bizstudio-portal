@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { jstDateStart, jstDateEnd } from "@/lib/dailyReport/jstDate";
 
 // 設問別の誤答率集計: admin 限定
+// quizKey / userId / date（JST の "YYYY-MM-DD"）で絞り込める
 export async function GET(request: NextRequest) {
   const actor = await getSessionUser();
   if (!actor) {
@@ -12,8 +14,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const quizKey = request.nextUrl.searchParams.get("quizKey") || undefined;
-  const where = quizKey ? { attempt: { quizKey } } : {};
+  const sp = request.nextUrl.searchParams;
+  const quizKey = sp.get("quizKey") || undefined;
+  const userId = sp.get("userId") || undefined;
+  const dateParam = sp.get("date");
+  // 研修日は JST 基準。UTC 動作の本番で日付がずれないよう JST の1日を Date 範囲に変換する（罠#17）
+  const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : undefined;
+
+  const attemptFilter = {
+    ...(quizKey ? { quizKey } : {}),
+    ...(userId ? { userId } : {}),
+    ...(date ? { finishedAt: { gte: jstDateStart(date), lte: jstDateEnd(date) } } : {}),
+  };
+  const where =
+    Object.keys(attemptFilter).length > 0 ? { attempt: attemptFilter } : {};
 
   // qid ごとの回答総数・誤答数を集計し、表示用に設問文（最新の1件）を紐付ける
   const [totals, wrongs, questionTexts] = await Promise.all([

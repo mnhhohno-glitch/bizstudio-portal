@@ -66,6 +66,9 @@ export default function AdvisorFloatingPanel({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
+  // 診断の二重起動ガード。読み込み完了直後の自動実行は setState の反映を待てないため、
+  // state（前レンダーの値しか見えない）ではなく ref で「いま走っているか」を判定する。
+  const isDiagnosingRef = useRef(false);
   const [invalidOnlyMode, setInvalidOnlyMode] = useState(false);
 
   // T-155: 未読の面談ログ（MEETING txt・advisorIngestedAt=null）件数と取り込み中フラグ。
@@ -93,12 +96,20 @@ export default function AdvisorFloatingPanel({
 
   // T-155: 未読ログの取り込み。完了時に件数を取り直す（成功すればサーバー側で全件既読になり0になる）。
   const handleIngestLogs = async () => {
-    if (isIngesting || unreadLogCount === 0) return;
+    if (isIngesting || unreadLogCount === 0 || isDiagnosingRef.current) return;
     setIsIngesting(true);
+
+    // 取込完了後にタイプ診断を自動実行するかの判定材料。
+    //   aborted       : 取込が失敗・例外で終わったか（中断時は診断を走らせない）
+    //   ingestedCount : 実際に取り込めた面談ログの件数（0件なら診断を走らせない＝無駄なAI費用を防ぐ）
+    let aborted = false;
+    let ingestedCount = 0;
+
     try {
       const res = await fetch(`/api/candidates/${candidateId}/advisor/ingest-logs`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "取り込みに失敗しました");
+      ingestedCount = typeof data.ingested === "number" ? data.ingested : 0;
       if (data.ingested === 0) {
         toast.info("未読の面談ログはありません");
       } else {
@@ -106,10 +117,14 @@ export default function AdvisorFloatingPanel({
       }
       await fetchUnreadLogCount();
     } catch (e) {
+      aborted = true;
       toast.error(e instanceof Error ? e.message : "取り込みに失敗しました");
     } finally {
       setIsIngesting(false);
     }
+
+    // 取込内容を踏まえた診断にするため、取込が正常に終わった直後に続けて実行する。
+    await autoRunTypeDiagnosis(aborted, ingestedCount);
   };
 
   // T-150: 確認カードの状態。期日の編集値（messageId+kind 単位）と通信中フラグ。
@@ -332,7 +347,7 @@ export default function AdvisorFloatingPanel({
   };
 
   const handleFullAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
     setIsAnalyzing(true);
 
     try {
@@ -427,7 +442,7 @@ export default function AdvisorFloatingPanel({
   };
 
   const handleAdditionalAnalysis = async () => {
-    if (!activeSessionId || isAnalyzing) return;
+    if (!activeSessionId || isAnalyzing || isDiagnosingRef.current) return;
 
     // Find the latest analysis message to determine sinceDate
     const lastAnalysis = [...messages]
@@ -520,8 +535,38 @@ export default function AdvisorFloatingPanel({
     }
   };
 
-  const handleTypeDiagnosis = async () => {
-    if (isDiagnosing || !activeSessionId || isSending || isAnalyzing) return;
+  /**
+   * 未読ログ取込の直後に走らせるタイプ診断 自動実行。
+   * CA が取込後に「タイプ診断」を押し忘れると求人プラットフォームの志向パネルが
+   * 古い診断のまま残るため、取込が正常に終わったときだけ、
+   * 手動ボタンと**同一の処理**を続けて呼ぶ。
+   *
+   * 求人分析（全件分析／追加のみ）からは呼ばない。業務上の順序は
+   * 「タイプ診断 → その結果を踏まえて求人を分析」であり、分析後に診断を回すのは順序が逆で、
+   * AI費用が1回分無駄になるため。
+   *
+   * 走らせない条件:
+   *   - aborted        : 取込が失敗・例外で終わった（取込結果が不完全なまま診断しない）
+   *   - ingestedCount 0: 取り込めた件数が0＝無駄なAI費用を防ぐ
+   *
+   * 診断側（runTypeDiagnosis）は内部で例外を握るため、ここでの失敗が
+   * 直前の取込結果を巻き戻すことはない。
+   */
+  const autoRunTypeDiagnosis = async (aborted: boolean, ingestedCount: number) => {
+    if (aborted || ingestedCount <= 0) return;
+    if (isDiagnosingRef.current) return; // 既に診断が走っているなら重ねない
+    toast.info("続けてタイプ診断を自動実行します");
+    await runTypeDiagnosis();
+  };
+
+  /**
+   * タイプ診断の本体。手動ボタンからも自動実行からも、ここを通る（プロンプト・モデル・保存先は不変）。
+   * 二重起動の判定に state ではなく isDiagnosingRef を使うのは、自動実行が
+   * 直前の setState 反映を待てず、古い state 値では正しく判定できないため。
+   */
+  const runTypeDiagnosis = async () => {
+    if (isDiagnosingRef.current || !activeSessionId || isSending) return;
+    isDiagnosingRef.current = true;
     setIsDiagnosing(true);
 
     const diagnosisMessage = `この求職者のタイプ診断と検索戦略を分析してください。
@@ -566,8 +611,15 @@ export default function AdvisorFloatingPanel({
       setMessages((prev) => prev.filter((m) => !m.isLoading));
       alert(err instanceof Error ? err.message : "タイプ診断の実行に失敗しました");
     } finally {
+      isDiagnosingRef.current = false;
       setIsDiagnosing(false);
     }
+  };
+
+  // 手動の「タイプ診断」ボタン。分析中は押せない（既存挙動を維持）。
+  const handleTypeDiagnosis = async () => {
+    if (isAnalyzing) return;
+    await runTypeDiagnosis();
   };
 
   const hasAnalysisHistory = messages.some(
@@ -775,7 +827,7 @@ export default function AdvisorFloatingPanel({
             {/* T-155: 未読の面談ログをまとめて取り込む。0件時は非活性＋文言で理由が分かる形にする */}
             <button
               onClick={handleIngestLogs}
-              disabled={unreadLogCount === 0 || isIngesting || isSending || isAnalyzing || isGeneratingGreeting}
+              disabled={unreadLogCount === 0 || isIngesting || isSending || isAnalyzing || isGeneratingGreeting || isDiagnosing}
               title={unreadLogCount === 0 ? "未読の面談ログはありません" : `未読の面談ログ ${unreadLogCount}件を読み込みます`}
               className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[#2563EB] whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -803,7 +855,7 @@ export default function AdvisorFloatingPanel({
                 <>
                   <button
                     onClick={handleFullAnalysis}
-                    disabled={!activeSessionId || isGeneratingGreeting}
+                    disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                     className="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-[#2563EB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     📊 全件分析
@@ -820,7 +872,7 @@ export default function AdvisorFloatingPanel({
                   {hasAnalysisHistory && (
                     <button
                       onClick={handleAdditionalAnalysis}
-                      disabled={!activeSessionId || isGeneratingGreeting}
+                      disabled={!activeSessionId || isGeneratingGreeting || isDiagnosing}
                       className="bg-green-50 hover:bg-green-100 border border-green-200 rounded-md px-3 py-1.5 text-[13px] font-medium text-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       📊 追加のみ

@@ -641,3 +641,33 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   ただし `status="active"` の Employee 一覧（`/api/employees`・社員マスター・勤怠の従業員リスト・各画面の担当CAフィルタ）
   には面談担当と同じ `status:"active"` 条件で**表示される**（面談担当に出すための必須条件と同一のため排除不可）。
   実害は表示のみ（候補者の担当CAとして選ばれることはなく、実績・通知・打刻には現れない）。
+
+## 求人紹介タブの成立条件（T-161 改修後）
+
+紹介履歴タブの「求人紹介」一覧は **2つのデータ源の結合**（`src/app/api/candidates/[candidateId]/jobs/route.ts`）。
+
+1. **kyuujin-pdf-tool 側の求人**（`GET {KYUUJIN_PDF_TOOL_URL}/api/projects/by-job-seeker-id/{candidateNumber}/jobs`）
+   - CAが求人PDFを出力（send-to-job-tool）したときに作られる行。`source="kyuujin"`。
+   - 同一会社名×同一求人タイトルの重複 job は portal 側で排除（ブックマーク kyuujinJobId 紐付き優先→作成が古い方）。
+   - `hidden_job_introductions` に載る job.id は除外。
+2. **portal 側ブックマーク**（`candidate_files` category=BOOKMARK・`archivedAt IS NULL`・`kyuujinJobId IS NULL`）
+   - サイト経由（`origin='candidate' AND drive_file_id IS NULL`）… `source="site"`・バッジ「本人応募」
+   - 出力なし紹介済み（`introduced_at IS NOT NULL AND last_exported_at IS NULL`）… `source="introduced"`・バッジ「紹介済み」
+   - id は負数（kyuujin と衝突しない選択キー）。`file_id` に CandidateFile.id。非表示削除は不可（ブックマークタブで管理）。
+
+**一覧に出ることと実績に数えることは別**（R1/R2/R3）:
+- 実績（日報の紹介数・週次実績の提案）に数える = 非サイト行 かつ `COALESCE(last_exported_at, introduced_at) IS NOT NULL`
+- 本人応募（site）は一覧に出るが実績には数えない。
+- 紹介保留（archivedAt != null）は一覧にも出ない。
+
+## エントリーの求人情報の入り方（T-161 改修後）
+
+| 作成経路 | job_category | job_title | 求人URL | external_job_id | route |
+|--|--|--|--|--|--|
+| 求人紹介タブ（kyuujin 行）→ 選択してエントリー | kyuujin `job_category` | kyuujin `job_title` | `original_url` | kyuujin jobs.id | null |
+| 求人紹介タブ（portal 行）/ ブックマーク →「エントリーへ登録」（to-entry） | BM `job_category` | BM `job_title` | BM `memo`（URL形式のみ） | BM `kyuujin_job_id` ?? 0 | site行="site-apply" / 紹介済み行=null |
+| エントリー管理 → 新規登録（手動） | 入力欄なし=NULL | 手入力 | NULL | 0 | null |
+
+- to-entry の重複判定は **externalJobRef（求人単位）**。ref 無し行のみ会社名一致で判定。スキップは `skippedDetails`（会社名＋理由）で返り、UI が必ず表示する。
+- エントリー編集モーダルに「職種」入力欄あり（自動で埋まらなかった行を人が補う）。
+- サイト経由ブックマークの job_title / job_category は favorites POST が保存（T-161 新設列）。**T-161 以前の行は NULL のまま**（portal に元データが無い）。

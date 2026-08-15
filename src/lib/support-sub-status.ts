@@ -38,9 +38,17 @@ export async function calculateSubStatus(candidateId: string): Promise<string> {
   if (entries.some((e) => e.entryFlag === "エントリー")) return "エントリー";
   // 6. 求人紹介（JobEntry or 出力済BOOKMARK）
   if (entries.some((e) => e.entryFlag === "求人紹介")) return "求人紹介";
+  // T-161 R2: 「求人紹介」判定 = 出力済 ∪ 出力なし紹介済み（introducedAt）。
+  // 本人応募（origin='candidate' & driveFileId=null）は CA の紹介ではないため判定に含めない。
   const [exportedBookmarkCount, bookmarkCount] = await Promise.all([
     prisma.candidateFile.count({
-      where: { candidateId, category: "BOOKMARK", archivedAt: null, lastExportedAt: { not: null } },
+      where: {
+        candidateId,
+        category: "BOOKMARK",
+        archivedAt: null,
+        NOT: { origin: "candidate", driveFileId: null },
+        OR: [{ lastExportedAt: { not: null } }, { introducedAt: { not: null } }],
+      },
     }),
     prisma.candidateFile.count({
       where: { candidateId, category: "BOOKMARK", archivedAt: null },

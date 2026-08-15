@@ -8,6 +8,8 @@ import {
   parseTextFile,
 } from "@/lib/file-parser";
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
+import { computeContextFingerprint } from "@/lib/advisor-context";
+import { isAnalysisMessage } from "@/lib/advisor-message-kind";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
@@ -97,9 +99,14 @@ const CANDIDATE_DATA_HEADER = `
 
 `;
 
-const CACHE_TTL = 30 * 60 * 1000;
+// T-164: contextキャッシュの主判定は contextFingerprint（材料が変わったか）。
+// この定数は指紋計算に漏れがあっても1日で必ず作り直すための上限TTL（安全弁）。
+const CACHE_TTL = 24 * 60 * 60 * 1000;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_PAST_MESSAGES = 20;
+// T-163: API送信用の1メッセージ本文クランプ。面談ログ全文貼り付け（実測 max 32,104字）等への防御。
+// analyze-batch 側の MAX_CHAT_MESSAGE_CHARS とは独立に定義する。DB・画面表示には影響させない。
+const MAX_PAST_MESSAGE_CHARS = 4000;
 const MAX_TEXT_FILE_CHARS = 8000;
 const API_TIMEOUT_MS = 120000; // 2分
 
@@ -215,11 +222,16 @@ export async function POST(
   });
 
   // 過去メッセージ取得（直近20件に制限）
+  // T-163: 求人全件分析の産物（完了カード・旧バッチ出力）は AI への送信窓から除外して
+  // 「直近20件」を数える。除外は API 送信のみで、DB・画面表示には一切影響しない。
+  // 分析結果そのものは候補者context の評価一覧（advisor-context.ts）経由で AI に届く。
   const allMessages = await prisma.advisorChatMessage.findMany({
     where: { sessionId },
     orderBy: { createdAt: "asc" },
   });
-  const pastMessages = allMessages.slice(-MAX_PAST_MESSAGES);
+  const pastMessages = allMessages
+    .filter((m) => !isAnalysisMessage(m))
+    .slice(-MAX_PAST_MESSAGES);
 
   // セッションタイトル自動更新（初回メッセージ時）
   const displayTitle = (content || file?.name || "").trim();
@@ -233,14 +245,26 @@ export async function POST(
   // コンテキスト取得（キャッシュ対応）
   const session = await prisma.advisorChatSession.findUnique({
     where: { id: sessionId },
-    select: { contextCache: true, contextCachedAt: true },
+    select: { contextCache: true, contextCachedAt: true, contextFingerprint: true },
   });
 
   let context = session?.contextCache || "";
+
+  // T-164: 失効判定を「経過時間」から「材料の指紋一致」に変更。
+  //   旧30分TTLは (1) 材料が変わらなくても30分ごとに再ビルド（従来15.5秒の待ち）
+  //   (2) 逆に30分以内は全件分析直後でも古い評価のまま、の両方の問題があった。
+  //   指紋が一致すれば経過時間に関係なくキャッシュを使い、変わっていれば即再ビルドする。
+  //   CACHE_TTL(24h) は指紋計算の漏れがあっても1日で必ず作り直すための安全弁。
+  const fingerprint = await computeContextFingerprint(candidateId);
   const cacheExpired = !session?.contextCachedAt ||
     Date.now() - new Date(session.contextCachedAt).getTime() > CACHE_TTL;
+  const fingerprintChanged = session?.contextFingerprint !== fingerprint;
 
-  if (!context || cacheExpired) {
+  // T-163: contextビルド所要時間の実測。キャッシュヒット（再ビルドなし）は 0 のまま。
+  let contextBuildMs = 0;
+
+  if (!context || cacheExpired || fingerprintChanged) {
+    const contextT0 = Date.now();
     try {
       const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
       const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
@@ -251,12 +275,17 @@ export async function POST(
         context = contextData.context || "";
         await prisma.advisorChatSession.update({
           where: { id: sessionId },
-          data: { contextCache: context, contextCachedAt: new Date() },
+          data: {
+            contextCache: context,
+            contextCachedAt: new Date(),
+            contextFingerprint: fingerprint,
+          },
         });
       }
     } catch (e) {
       console.error("Context fetch error:", e);
     }
+    contextBuildMs = Date.now() - contextT0;
   }
 
   // コンテキストが長すぎる場合は切り詰め
@@ -283,8 +312,13 @@ export async function POST(
       cache_control: { type: "ephemeral" as const },
     },
     {
+      // T-164: 候補者contextにも cache_control を付与（従来は毎ターン満額処理＝取りこぼし）。
+      //   指紋方式（T-164）で context のバイト列が安定する時間が延びたため read 化が見込める。
+      //   TTL は既定の5分のまま（1時間TTLは 60分以内再コール率 54.0% < 損益分岐 57.5% のため不採用）。
+      //   第2ブロック単体の損益分岐はヒット率 21.7%超（write 1.25x / read 0.1x）。実測 37.4% で黒字見込み。
       type: "text" as const,
       text: CANDIDATE_DATA_HEADER + context,
+      cache_control: { type: "ephemeral" as const },
     },
   ];
 
@@ -293,9 +327,13 @@ export async function POST(
   // 別枠で追加すると同じ発言が2回 API に乗る（費用増＋検出の不安定化）ので、最終要素を差し替える。
   // content（CA打鍵分）と fileContext（添付解析結果）は別変数のまま存在するため、
   // 添付ファイルの中身が <ca_input> に入る経路自体が存在しなくなる（プロンプトの指示に頼らない分離）。
+  // T-163: API送信用に限り 1メッセージ 4,000字でクランプ（DB・画面表示には影響しない）。
   const apiMessages = pastMessages.map((m) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content:
+      m.content.length > MAX_PAST_MESSAGE_CHARS
+        ? m.content.substring(0, MAX_PAST_MESSAGE_CHARS) + "\n…（長いため省略）"
+        : m.content,
   }));
 
   const lastIdx = apiMessages.length - 1;
@@ -320,6 +358,9 @@ export async function POST(
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  // T-163: Anthropic API 呼び出しの所要時間の実測。
+  const apiT0 = Date.now();
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -351,6 +392,8 @@ export async function POST(
         usage: null,
         candidateId,
         note: `error-${response.status}`,
+        latencyMs: Date.now() - apiT0,
+        contextBuildMs,
       });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
@@ -360,7 +403,8 @@ export async function POST(
 
     const data = await response.json();
     const u = data.usage ?? {};
-    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
+    const latencyMs = Date.now() - apiT0;
+    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs} context_build_ms=${contextBuildMs}`);
     // T-126: usage を永続化。LIGHTモード廃止後は常に skill-full。
     await recordAdvisorUsage({
       endpoint: "advisor-chat",
@@ -368,6 +412,8 @@ export async function POST(
       usage: u,
       candidateId,
       note: "skill-full",
+      latencyMs,
+      contextBuildMs,
     });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""

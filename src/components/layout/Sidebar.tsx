@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+// 折りたたみ状態の保存先。既存の localStorage 利用（AnnouncementPopup 等）に合わせる
+const COLLAPSE_KEY = "portal-sidebar-collapsed";
 
 type Item = { href: string; label: string; icon: string };
 type AppItem = {
@@ -13,26 +16,28 @@ type AppItem = {
   appId?: string;
 };
 
-function NavItem({ href, label, icon }: Item) {
+function NavItem({ href, label, icon, collapsed }: Item & { collapsed: boolean }) {
   const pathname = usePathname();
   const active = pathname === href || (href !== "/" && pathname.startsWith(href));
 
   return (
     <Link
       href={href}
+      title={collapsed ? label : undefined}
       className={[
-        "relative flex h-12 items-center gap-3 px-4 text-[14px] transition-colors",
+        "relative flex h-12 items-center text-[14px] transition-colors",
+        collapsed ? "justify-center px-0" : "gap-3 px-4",
         active ? "bg-[#EEF2FF] text-[#374151]" : "text-white/90 hover:bg-white/10",
       ].join(" ")}
     >
       {active && <span className="absolute left-0 top-0 h-full w-1 bg-[#2563EB]" />}
       <span className="text-[16px]">{icon}</span>
-      <span className="font-medium">{label}</span>
+      {!collapsed && <span className="font-medium">{label}</span>}
     </Link>
   );
 }
 
-function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
+function AppNavItem({ href, label, icon, requiresAuth, appId, collapsed }: AppItem & { collapsed: boolean }) {
   const [loading, setLoading] = useState(false);
 
   const handleClick = async (e: React.MouseEvent) => {
@@ -76,19 +81,25 @@ function AppNavItem({ href, label, icon, requiresAuth, appId }: AppItem) {
       target={requiresAuth ? undefined : "_blank"}
       rel={requiresAuth ? undefined : "noopener noreferrer"}
       onClick={handleClick}
+      title={collapsed ? label : undefined}
       className={[
-        "relative flex h-12 items-center gap-3 px-4 text-[14px] transition-colors text-white/90",
+        "relative flex h-12 items-center text-[14px] transition-colors text-white/90",
+        collapsed ? "justify-center px-0" : "gap-3 px-4",
         loading ? "opacity-50 cursor-wait" : "hover:bg-white/10",
       ].join(" ")}
     >
       <span className="text-[16px]">{loading ? "⏳" : icon}</span>
-      <span className="font-medium">{label}</span>
-      <span className="ml-auto text-[12px] opacity-60">↗</span>
+      {!collapsed && (
+        <>
+          <span className="font-medium">{label}</span>
+          <span className="ml-auto text-[12px] opacity-60">↗</span>
+        </>
+      )}
     </a>
   );
 }
 
-function FinanceNavItem() {
+function FinanceNavItem({ collapsed }: { collapsed: boolean }) {
   const [loading, setLoading] = useState(false);
   const financeUrl = process.env.NEXT_PUBLIC_FINANCE_URL || "https://bizstudio-finance-production.up.railway.app";
 
@@ -116,19 +127,55 @@ function FinanceNavItem() {
   return (
     <button
       onClick={handleClick}
+      title={collapsed ? "経理管理" : undefined}
       className={[
-        "relative flex h-12 w-full items-center gap-3 px-4 text-[14px] transition-colors text-white/90",
+        "relative flex h-12 w-full items-center text-[14px] transition-colors text-white/90",
+        collapsed ? "justify-center px-0" : "gap-3 px-4",
         loading ? "opacity-50 cursor-wait" : "hover:bg-white/10",
       ].join(" ")}
     >
       <span className="text-[16px]">{loading ? "⏳" : "💰"}</span>
-      <span className="font-medium">経理管理</span>
-      <span className="ml-auto text-[12px] opacity-60">↗</span>
+      {!collapsed && (
+        <>
+          <span className="font-medium">経理管理</span>
+          <span className="ml-auto text-[12px] opacity-60">↗</span>
+        </>
+      )}
     </button>
   );
 }
 
 export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
+  // 初期値は展開。localStorage の読み出しはマウント後に行う（SSR とのズレを避ける）
+  const [collapsed, setCollapsed] = useState(false);
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(COLLAPSE_KEY) === "1") setCollapsed(true);
+    } catch {
+      // localStorage が使えない環境では展開状態のまま
+    }
+  }, []);
+
+  // 初回復元ぶんの幅アニメーションは走らせず、以降のトグルだけ滑らかにする
+  useEffect(() => {
+    const t = window.setTimeout(() => setAnimate(true), 50);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        // 保存できなくてもトグル自体は効かせる
+      }
+      return next;
+    });
+  };
+
   const jobAnalyzerUrl = process.env.NEXT_PUBLIC_JOB_ANALYZER_URL
     || "https://web-production-95808.up.railway.app";
   const resumeGeneratorUrl = process.env.NEXT_PUBLIC_RESUME_GENERATOR_URL
@@ -171,6 +218,7 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
     { href: "/documents", label: "資料一覧", icon: "📄" },
     { href: "/manuals", label: "マニュアル", icon: "📖" },
     { href: "/rpa-error/chat", label: "RPAエラー管理", icon: "🤖" },
+    { href: "/admin/rpa-scout", label: "RPAスカウト管理", icon: "📨" },
     { href: "/training", label: "研修", icon: "📚" },
     { href: "/settings", label: "設定", icon: "⚙️" },
   ];
@@ -185,32 +233,71 @@ export default function Sidebar({ isAdmin }: { isAdmin: boolean }) {
   ];
 
   return (
-    <aside className="w-60 shrink-0 bg-[#1E3A8A] text-white">
-      <Link href="/" className="h-16 bg-white px-4 flex items-center hover:bg-gray-50 transition-colors">
-        <img src="/logo.png" alt="BIZSTUDIO" className="h-10 w-auto" />
+    <aside
+      className={[
+        "shrink-0 overflow-hidden bg-[#1E3A8A] text-white",
+        collapsed ? "w-16" : "w-60",
+        animate ? "transition-[width] duration-200 ease-in-out" : "",
+      ].join(" ")}
+    >
+      <Link
+        href="/"
+        title="ホーム"
+        className={[
+          "flex h-16 items-center bg-white transition-colors hover:bg-gray-50",
+          collapsed ? "justify-center px-2" : "px-4",
+        ].join(" ")}
+      >
+        {collapsed ? (
+          // 折りたたみ時はロゴのしずくマーク部分だけを切り出して表示する
+          <span className="block h-5 w-10 overflow-hidden">
+            <img src="/logo.png" alt="BIZSTUDIO" className="h-5 w-[111px] max-w-none" />
+          </span>
+        ) : (
+          <img src="/logo.png" alt="BIZSTUDIO" className="h-10 w-auto" />
+        )}
       </Link>
 
-      <nav className="py-2">
-        <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
-          アプリ
-        </div>
+      <button
+        onClick={toggleCollapsed}
+        title={collapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+        aria-label={collapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+        aria-expanded={!collapsed}
+        className={[
+          "flex h-9 w-full items-center text-[14px] text-white/60 transition-colors hover:bg-white/10 hover:text-white",
+          collapsed ? "justify-center" : "justify-end px-4",
+        ].join(" ")}
+      >
+        {collapsed ? "»" : "«"}
+      </button>
+
+      <nav className="pb-2">
+        {collapsed ? (
+          <div className="mx-3 my-2 border-t border-white/10" />
+        ) : (
+          <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
+            アプリ
+          </div>
+        )}
         {/* portal 内の画面なので AppNavItem（外部リンク・↗）ではなく NavItem で出す */}
-        <NavItem href="/transfers" label="ファイル送信" icon="🔐" />
+        <NavItem href="/transfers" label="ファイル送信" icon="🔐" collapsed={collapsed} />
         {apps.map((it) => (
-          <AppNavItem key={it.href} {...it} />
+          <AppNavItem key={it.href} {...it} collapsed={collapsed} />
         ))}
-        <NavItem href="/schedule-urls" label="日程URL" icon="📅" />
+        <NavItem href="/schedule-urls" label="日程URL" icon="📅" collapsed={collapsed} />
 
         <div className="mt-2 border-t border-white/10 pt-2">
-          <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
-            管理
-          </div>
+          {!collapsed && (
+            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/50">
+              管理
+            </div>
+          )}
           {common.map((it) => (
-            <NavItem key={it.href} {...it} />
+            <NavItem key={it.href} {...it} collapsed={collapsed} />
           ))}
-          {isAdmin && <FinanceNavItem />}
+          {isAdmin && <FinanceNavItem collapsed={collapsed} />}
           {isAdmin && adminOnly.map((it) => (
-            <NavItem key={it.href} {...it} />
+            <NavItem key={it.href} {...it} collapsed={collapsed} />
           ))}
         </div>
       </nav>

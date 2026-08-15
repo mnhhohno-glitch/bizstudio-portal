@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import TopBar from "@/components/layout/TopBar";
 import Sidebar from "@/components/layout/Sidebar";
+import AnnouncementPopup from "@/components/announcements/AnnouncementPopup";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
@@ -23,6 +24,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </main>
         </div>
       </div>
+      {/* T-159: 新着お知らせポップアップ（認証済み画面のみ） */}
+      <AnnouncementPopup />
     </div>
   );
 }

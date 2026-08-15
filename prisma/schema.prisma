@@ -1394,6 +1394,11 @@ model MynaviRpaProcessingLog {
   pdfFileName       String?           @map("pdf_file_name")
   pdfFileId         String?           @map("pdf_file_id")
   errorMessage      String?           @map("error_message") @db.Text
+  /// AI解析失敗時に退避したPDFの Drive ファイルID / 閲覧URL。
+  /// 失敗したPDFが現存しないと原因の再現ができないため 2026-08-12 に追加。
+  /// 成功時は CandidateFile 側に入るのでここは null。
+  failedPdfFileId   String?           @map("failed_pdf_file_id")
+  failedPdfUrl      String?           @map("failed_pdf_url")
   // T-064: 自動紐付け結果（matched / no_recruiter_name / no_machine_master / no_candidate_today / no_candidate_yesterday / error）
   scoutLinkResult   String?           @map("scout_link_result")
   scoutLinkedSlotId String?           @map("scout_linked_slot_id")
@@ -1480,6 +1485,11 @@ model CandidateFile {
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
   sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
+  // T-161: サイト経由（favorites POST）で受信する求人スナップショット。従来は jobTitle を受信しつつ破棄していた
+  //   （void jobTitle）ため、下流のエントリー化で求人タイトル・職種が空になっていた。会社名は従来どおり fileName に
+  //   埋め込み（変えない）。受信できなかった項目は null のまま（捏造しない）。エントリー化（to-entry）で JobEntry へ引き継ぐ。
+  jobTitle          String?               @map("job_title")
+  jobCategory       String?               @map("job_category")
   // T-131: 手動アップPDFの job-platform 自動投入（フルデータ化）。投入試行時刻。
   //   externalJobRef が入れば紐付け完了。null のまま2h超過は滞留として拾い直し対象。
   platformSubmittedAt DateTime?           @map("platform_submitted_at")
@@ -1507,6 +1517,13 @@ model CandidateFile {
   memo              String?               @db.Text
   extractedText     String?               @map("extracted_text") @db.Text
   extractedAt       DateTime?             @map("extracted_at")
+  // T-164: アップロード済みファイル本体から抽出したテキストの永続キャッシュ（advisor-context 用）。
+  //   PDFの中身は一度アップロードされたら変わらない前提で、一度解析したら再解析しない。
+  //   extractedText（BOOKMARK求人票の抽出パイプライン専用）とは別系統。
+  //   ファイル実体の差し替え（replace-docx/xlsx 等）時は3列とも NULL に戻すこと。
+  parsedText    String?   @map("parsed_text") @db.Text
+  parsedAt      DateTime? @map("parsed_at")
+  parseFailedAt DateTime? @map("parse_failed_at") // 失敗を永久キャッシュしない（parsedText が無ければ次回再試行）
   aiMatchRating     String?               @map("ai_match_rating")
   aiAnalysisComment String?               @map("ai_analysis_comment") @db.Text
   aiAnalyzedAt      DateTime?             @map("ai_analyzed_at")
@@ -1597,6 +1614,9 @@ model AdvisorChatSession {
   messages        AdvisorChatMessage[]
   contextCache    String?              @map("context_cache") @db.Text
   contextCachedAt DateTime?            @map("context_cached_at")
+  // T-164: context の材料（候補者・ファイル・評価・面談ログ等の更新状態）のハッシュ。
+  //   一致すれば経過時間に関係なくキャッシュを使い、変われば再ビルドする（上限TTL 24h を安全弁に併置）。
+  contextFingerprint String? @map("context_fingerprint")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
@@ -1616,6 +1636,10 @@ model AdvisorChatMessage {
   // 「今回は不要」で破棄した候補を同一セッション内で再提示しないことも同じ仕組みで満たせる。
   suggestedTasks            Json?     @map("suggested_tasks")
   suggestedTasksDismissedAt DateTime? @map("suggested_tasks_dismissed_at")
+
+  // T-163: メッセージ種別。"ANALYSIS"=求人全件分析の産物（チャットAPIの送信窓から除外する）。
+  // null=通常チャット。画面表示・DB保存には影響させず、AI への送信内容の選別にのみ使う。
+  kind String?
 
   @@map("advisor_chat_messages")
 }
@@ -1639,6 +1663,9 @@ model AdvisorUsageLog {
   costUsd             Float    @map("cost_usd")
   isRetry             Boolean  @default(false) @map("is_retry")
   note                String?
+  // T-163: 所要時間の実測（従来は未計測だった）。どちらも記録開始以前の行は null。
+  latencyMs      Int? @map("latency_ms") // Anthropic API 呼び出しの所要時間(ms)
+  contextBuildMs Int? @map("context_build_ms") // 候補者contextビルド(PDF読み込み含む)の所要時間(ms)。キャッシュヒット時は 0
 
   @@index([createdAt])
   @@index([endpoint])
@@ -2895,6 +2922,23 @@ model TrainingQuizAnswer {
   @@map("training_quiz_answers")
 }
 
+// 記述式ワークの定義。ワークごとに設問ラベル（fieldLabels）が異なるため、UIハードコードをやめてDBで持つ
+// fieldLabels は最大4件の配列。key は TrainingWorkAnswer の既存カラム名（answerCompany/answerHelp/answerDay/answerUnknown）を流用する
+// 例: [{ key: "answerCompany", label: "① この会社は何をしている会社か", placeholder: "1行程度", rows: 2 }]
+model TrainingWorkSet {
+  id          String   @id @default(cuid())
+  workKey     String   @unique
+  title       String   // 画面に出すワーク名
+  description String   @db.Text // 画面上部の注意書き
+  fieldLabels Json     // 設問ラベルの配列
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("training_work_sets")
+}
+
 // 記述式ワークの設問（求人票）。管理画面CRUDは無く seed（prisma/seed-training-work.ts）で投入する
 model TrainingWorkItem {
   id          String   @id @default(cuid())
@@ -2930,4 +2974,126 @@ model TrainingWorkAnswer {
   @@index([workKey])
   @@index([employeeId])
   @@map("training_work_answers")
+}
+
+// ============================================================
+// RPAスカウト検索条件管理（Phase 1）
+// マイナビスカウトRPA 1〜6号機の検索条件・変更ログ・配信計画を管理する
+// ============================================================
+
+// RPA号機マスタ
+model RpaScoutMachine {
+  id             String   @id @default(cuid())
+  machineNo      Int      @unique // 1〜6
+  accountName    String // アカウント名（例: 藤本 なつみ）
+  employeeCode   String // 社員コード（例: BS1000010）
+  mynaviSaveName String // マイナビ上の保存名称（例: RPA1(藤本なつみ)）
+  isActive       Boolean  @default(true) // false=停止中（操作は可能）
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("rpa_scout_machines")
+}
+
+// 職種マスタ（job-platform 0004_masters_seed.sql の master_job_categories を移植。値は原文のまま）
+model RpaScoutJobCategory {
+  id        Int    @id @default(autoincrement())
+  large     String // 大分類名
+  middle    String // 中分類名
+  small     String // 小分類名
+  sortOrder Int // 表示順（0004のINSERT順）
+
+  @@unique([large, middle, small])
+  @@index([large])
+  @@index([middle])
+  @@map("rpa_scout_job_categories")
+}
+
+// 検索条件パターン
+model RpaScoutPattern {
+  id                  String   @id @default(cuid())
+  targetMachineNo     Int? // 1〜6。null=全号機対象/旧体系
+  name                String // パターン名（号機プレフィックスなし）
+  sendStatus          String? // "UNSENT"(未送信) | "SENT"(送信済)
+  registDays          Int?
+  registDirection     String? // "WITHIN"(以内) | "AFTER"(以降)
+  lastLoginDays       Int? // デフォルト1
+  areaType            String? // "EAST" | "WEST" | "NATIONWIDE" | "PREFECTURES"
+  prefectures         Json? // areaType=PREFECTURES時の県名配列
+  education           String? // "NONE" | "高卒" | "専門卒" | "短大卒" | "高専卒" | "大卒" | "大学院卒"
+  gradYearFrom        Int? // 西暦4桁
+  gradYearTo          Int?
+  companyCount        Int? // 1 | 2 | 3
+  jobCategories       Json? // 小分類名配列（最大3件・RpaScoutJobCategory.small と一致）
+  jobCategoryPriority String? // "FIRST"(職種第1) | "SECOND"(職種第2)
+  workLocations       Json? // 県名配列。新規作成時デフォルト ["首都圏","愛知","大阪","兵庫","京都"]
+  workLocationPriority String? // "NONE"(エリア不順) | "SECOND"(エリア第2)
+  transferTiming      String? // "すぐにでも" | "3カ月以内" | "半年以内" | "1年以内" | "未定"
+  rawConditions       Json? // 移行データの原文15列（isMigrated=true時のみ）
+  isActive            Boolean  @default(true) // false=論理削除
+  isMigrated          Boolean  @default(false) // Excel移行由来
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([targetMachineNo])
+  @@map("rpa_scout_patterns")
+}
+
+// 件名テンプレート
+model RpaScoutSubjectTemplate {
+  id        String   @id @default(cuid())
+  name      String // テンプレ名（例: 【未送信用】口コミ4.9オーダーメイド）
+  kind      String? // UNSENT=未送信用 / SENT=送信済用 / INDIVIDUAL=個別配信用。移行前データはnull
+  subject   String // 件名
+  body      String?  @db.Text // 本文
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("rpa_scout_subject_templates")
+}
+
+// 検索条件の変更ログ（実績）。「現在の設定」は号機ごとの最新レコードで表現する
+model RpaScoutLog {
+  id                String   @id @default(cuid())
+  machineNo         Int // 1〜6
+  patternId         String? // 移行データはnull
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  searchCount       Int? // 検索件数。停止記録はnull
+  recordedAt        DateTime // 記録日時（JST値をそのまま保持。UTC変換しない）
+  recordedByUserId  String?
+  createdAt         DateTime @default(now())
+
+  @@index([machineNo, recordedAt])
+  @@index([recordedAt])
+  @@map("rpa_scout_logs")
+}
+
+// 配信計画（カレンダー）。実績ログとは独立で自動連動しない
+model RpaScoutPlan {
+  id                String    @id @default(cuid())
+  planDate          DateTime // 計画日（JST値をそのまま保持・日付のみ意味を持つ）
+  timeSlot          String // "AM" | "PM" | "EVENING"（表示名: AM / PM / 夕方）
+  machineNo         Int // 1〜6
+  patternId         String?
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  memo              String?
+  expectedCount     Int? // 想定検索件数（任意入力。null=想定なし）
+  reflectedAt       DateTime? // 土日計画のマイナビ反映日時
+  reflectedByUserId String? // 反映チェックを押した人
+  executedAt        DateTime? // 実績として記録した日時（JST値をそのまま保持・null=未実施）
+  executedLogId     String? // 生成した RpaScoutLog.id（取り消し時に削除する対象）
+  executedByUserId  String? // 実績記録を押した人
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([planDate])
+  @@index([machineNo, planDate])
+  @@map("rpa_scout_plans")
 }

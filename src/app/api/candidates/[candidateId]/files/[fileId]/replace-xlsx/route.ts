@@ -82,6 +82,10 @@ export async function POST(
         fileSize: file.size,
         driveFileId: newDriveId,
         driveViewUrl: webViewLink,
+        // T-164: ファイル実体が差し替わったため、抽出テキストの永続キャッシュを無効化（次回参照時に再解析）
+        parsedText: null,
+        parsedAt: null,
+        parseFailedAt: null,
       },
       include: { uploadedBy: { select: { id: true, name: true } } },
     });

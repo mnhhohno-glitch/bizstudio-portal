@@ -1452,3 +1452,18 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 ### タブを閉じると消える仕様
 - 両画面とも **localStorage ではなく sessionStorage** を使う。日をまたいだ古い絞り込みが残り続ける問題や、他タブに絞り込みが漏れる問題を避けるための設計判断（プロンプト指定）。
 
+
+## エントリー管理画面（EntryBoard）の更新経路と state 更新の構造（T-161）
+
+`EntryBoard.tsx` は一覧を `entries` state（`GET /api/entries` の戻り）で保持し、更新後の反映方法が経路ごとに3種類ある。
+
+| 反映方法 | 該当経路 | 危険度 |
+|--|--|--|
+| **丸ごと差替**（`prev.map(e => e.id===id ? data.entry : e)`） | フラグ変更（PATCH /flags）/ 各種フィールド更新・求人種別セレクト（PATCH [entryId]）/ アーカイブ解除 / EntryEditModal / EntryRouteSwitchModal | **高**。PATCH レスポンスの `include` が一覧の `include` より狭いと、その差分が更新直後の画面から消える（リロードで復活） |
+| 部分マージ（`{...e, 特定列}`） | 求人DB URL 保存 | 低 |
+| 全件再取得（`fetchEntries()`） | EntryDetailModal / 一括フラグ / 一括選考終了 / お見送り通知 | なし |
+
+**不変条件**: `PATCH /api/entries/[entryId]` と `PATCH /api/entries/[entryId]/flags` の `include.candidate.select` は、
+`GET /api/entries` の include（`api/entries/route.ts`）と**常に同一に保つ**こと。現在は
+`id / name / candidateNumber / employeeId / recruiterName / employee.name` の6項目（recruiterName は T-161 で追加）。
+一覧に candidate 由来の列を増やすときは、**更新API 2本のレスポンスにも同時に足す**こと。

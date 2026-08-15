@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-
-const DEFAULT_WORK_KEY = "work0-shokushu-gyoshu";
+import { normalizeFieldLabels } from "@/lib/training-work";
 
 // 記述式ワークの管理用集計（admin のみ）
-// 設問一覧・全社員の回答・アクティブ社員一覧を返し、マトリクス/全文表示/④一覧はクライアントで組み立てる
+// ワーク定義・設問一覧・全社員の回答・アクティブ社員一覧を返し、
+// マトリクス/全文表示/④一覧はクライアントで組み立てる
 export async function GET(request: NextRequest) {
   const actor = await getSessionUser();
   if (!actor) {
@@ -15,9 +15,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const workKey = request.nextUrl.searchParams.get("workKey") || DEFAULT_WORK_KEY;
+  const sets = await prisma.trainingWorkSet.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: "asc" },
+    select: { workKey: true, title: true, fieldLabels: true },
+  });
 
-  const [items, answers, activeUsers, workKeyRows] = await Promise.all([
+  const requested = request.nextUrl.searchParams.get("workKey");
+  const current = sets.find((s) => s.workKey === requested) ?? sets[0] ?? null;
+  const workKey = current?.workKey ?? requested ?? "";
+
+  const [items, answers, activeUsers] = await Promise.all([
     prisma.trainingWorkItem.findMany({
       where: { workKey, isActive: true },
       orderBy: { sortOrder: "asc" },
@@ -33,6 +41,7 @@ export async function GET(request: NextRequest) {
         answerHelp: true,
         answerDay: true,
         answerUnknown: true,
+        createdAt: true, // 研修日の絞り込み用（JST 変換はクライアント側）
         updatedAt: true,
       },
     }),
@@ -40,11 +49,6 @@ export async function GET(request: NextRequest) {
       where: { status: "active" },
       orderBy: [{ employeeNumber: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
       select: { id: true, name: true, email: true },
-    }),
-    prisma.trainingWorkItem.findMany({
-      distinct: ["workKey"],
-      select: { workKey: true },
-      orderBy: { workKey: "asc" },
     }),
   ]);
 
@@ -65,7 +69,12 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     workKey,
-    workKeys: workKeyRows.map((r) => r.workKey),
+    sets: sets.map((s) => ({
+      workKey: s.workKey,
+      title: s.title,
+      fieldLabels: normalizeFieldLabels(s.fieldLabels),
+    })),
+    fieldLabels: current ? normalizeFieldLabels(current.fieldLabels) : [],
     items,
     employees: activeUsers.map((u) => ({ id: u.id, name: u.name ?? u.email })),
     answers: answers.map((a) => ({

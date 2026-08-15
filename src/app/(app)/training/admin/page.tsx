@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import AdminClient, { type SummaryRow, type QuizOption } from "./AdminClient";
+import AdminClient, { type AttemptRow, type EmployeeOption, type QuizOption } from "./AdminClient";
 
-// 社員別サマリは server component で組み立てる（quizKey を持つ全教材 × 全アクティブユーザー、未受験も行に出す）
+// 社員別サマリは「研修日で絞れる」必要があるため、集計済みの行ではなく受験履歴そのものを渡し、
+// 絞り込みを反映した集計はクライアント側で行う
 export default async function TrainingAdminPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -23,6 +24,7 @@ export default async function TrainingAdminPage() {
     prisma.trainingQuizAttempt.findMany({
       select: {
         userId: true,
+        userName: true,
         quizKey: true,
         mode: true,
         round: true,
@@ -38,40 +40,31 @@ export default async function TrainingAdminPage() {
     .filter((m): m is { quizKey: string; title: string } => m.quizKey !== null)
     .map((m) => ({ quizKey: m.quizKey, title: m.title }));
 
-  const rows: SummaryRow[] = [];
-  for (const u of activeUsers) {
-    for (const q of quizzes) {
-      const own = attempts.filter((a) => a.userId === u.id && a.quizKey === q.quizKey);
-      let bestLabel: string | null = null;
-      let clearLabel: "未受験" | "未クリア" | string = own.length === 0 ? "未受験" : "未クリア";
-      if (own.length > 0) {
-        // スコアは全問チャレンジの1周目を優先（範囲別だと分母が変わるため）
-        const full = own.filter((a) => a.mode === "全問チャレンジ");
-        const source = full.length > 0 ? full : own;
-        const round1 = source.filter((a) => a.round === 1);
-        const pool = round1.length > 0 ? round1 : source;
-        const best = pool.reduce((m, a) =>
-          a.correctCount / a.totalQuestions > m.correctCount / m.totalQuestions ? a : m
-        );
-        bestLabel = `${best.correctCount}/${best.totalQuestions}`;
-        const clearedOnes = source
-          .filter((a) => a.cleared)
-          .sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
-        if (clearedOnes.length > 0) {
-          clearLabel = `✓ ${clearedOnes[0].round}周でクリア`;
-        }
-      }
-      rows.push({
-        userId: u.id,
-        userName: u.name ?? u.email,
-        quizKey: q.quizKey,
-        quizTitle: q.title,
-        attemptCount: own.length,
-        bestLabel,
-        clearLabel,
-      });
+  // 退職者など active でない受験者も、過去の記録が消えないよう一覧に含める
+  const activeIds = new Set(activeUsers.map((u) => u.id));
+  const employees: EmployeeOption[] = activeUsers.map((u) => ({
+    id: u.id,
+    name: u.name ?? u.email,
+    isActive: true,
+  }));
+  const seenExtra = new Set<string>();
+  for (const a of attempts) {
+    if (!activeIds.has(a.userId) && !seenExtra.has(a.userId)) {
+      seenExtra.add(a.userId);
+      employees.push({ id: a.userId, name: a.userName, isActive: false });
     }
   }
 
-  return <AdminClient summary={rows} quizzes={quizzes} />;
+  const attemptRows: AttemptRow[] = attempts.map((a) => ({
+    userId: a.userId,
+    quizKey: a.quizKey,
+    mode: a.mode,
+    round: a.round,
+    totalQuestions: a.totalQuestions,
+    correctCount: a.correctCount,
+    cleared: a.cleared,
+    finishedAt: a.finishedAt.toISOString(),
+  }));
+
+  return <AdminClient quizzes={quizzes} employees={employees} attempts={attemptRows} />;
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { getCandidateContext } from "@/lib/advisor-context";
+import { getCandidateContext, RATINGS_SECTION_MARKER } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
@@ -280,7 +280,6 @@ function normalizeCompanyName(name: string): string {
 }
 
 const API_TIMEOUT_MS = 300000;
-const MAX_PAST_MESSAGES = 30;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_CHAT_MESSAGE_CHARS = 4000;
 
@@ -305,6 +304,53 @@ function setCachedRunContext(sessionId: string, context: string): void {
     if (now - v.ts >= RUN_CONTEXT_TTL_MS) runContextCache.delete(k);
   }
   runContextCache.set(sessionId, { context, ts: now });
+}
+
+// T-163: 中間バッチの圧縮結果を run 内で保持するプロセス内キャッシュ。
+// 従来は中間バッチの結果をチャット（advisor_chat_messages）へ書き込み、最終バッチが
+// チャット履歴経由で読み戻して総合まとめを作っていた。チャット書き込みを廃止したため、
+// 同じ内容（compressBatchResultForSummary 済みテキスト）をここに積んで最終バッチへ渡す。
+// Railway は単一プロセス常駐のため run 内の全バッチをカバーできる（runContextCache と同方式）。
+const runBatchResultsCache = new Map<string, { results: string[]; ts: number }>();
+
+function appendRunBatchResult(sessionId: string, compressed: string): void {
+  const now = Date.now();
+  for (const [k, v] of runBatchResultsCache) {
+    if (now - v.ts >= RUN_CONTEXT_TTL_MS) runBatchResultsCache.delete(k);
+  }
+  const entry = runBatchResultsCache.get(sessionId);
+  if (entry && now - entry.ts < RUN_CONTEXT_TTL_MS) {
+    entry.results.push(compressed);
+    entry.ts = now;
+  } else {
+    runBatchResultsCache.set(sessionId, { results: [compressed], ts: now });
+  }
+}
+
+function takeRunBatchResults(sessionId: string): string[] {
+  const entry = runBatchResultsCache.get(sessionId);
+  if (!entry || Date.now() - entry.ts >= RUN_CONTEXT_TTL_MS) return [];
+  return entry.results;
+}
+
+function clearRunBatchResults(sessionId: string): void {
+  runBatchResultsCache.delete(sessionId);
+}
+
+// T-163: 完了カード用に、最終バッチ出力から総合まとめセクションだけを取り出す。
+// 見つからなければ空文字を返す（呼び出し側は件数のみのカードにする。AIは再度呼ばない）。
+function extractOverallSummary(analysisText: string): string {
+  const idx = analysisText.indexOf("【総合優先順位");
+  if (idx === -1) return "";
+  let from = analysisText.lastIndexOf("\n", Math.max(0, idx - 1));
+  from = from === -1 ? 0 : from + 1; // 見出し行の行頭
+  // 直前行が罫線（━…）ならそこから含める（見た目を揃える）
+  if (from >= 2) {
+    const prevStart = analysisText.lastIndexOf("\n", from - 2) + 1;
+    const prevLine = analysisText.slice(prevStart, from - 1).trim();
+    if (/^━+$/.test(prevLine)) from = prevStart;
+  }
+  return analysisText.slice(from).trim();
 }
 
 export async function POST(
@@ -385,10 +431,16 @@ export async function POST(
   if (!candidateContext) {
     try {
       candidateContext = await getCandidateContext(candidateId);
-      // Strip bookmark section (we send job postings separately)
+      // Strip bookmark sections (we send job postings separately)
+      // T-163: 評価一覧（RATINGS_SECTION_MARKER）はチャット用のため、評価する側の
+      // analyze-batch には見せない（自分の過去評価による判定の自己調整を防ぐ）。
+      // 評価一覧 → 求人票テキストの順で並ぶため、早い方の位置から除去する
+      // ＝analyze-batch の入力は T-163 以前と byte 同一に保たれる。
+      const ratingsIdx = candidateContext.indexOf(RATINGS_SECTION_MARKER);
       const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
-      if (bookmarkIdx !== -1) {
-        candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
+      const cutIdx = [ratingsIdx, bookmarkIdx].filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (cutIdx !== undefined) {
+        candidateContext = candidateContext.substring(0, cutIdx).trim();
       }
     } catch (e) {
       console.error("[AnalyzeBatch] Context error:", e);
@@ -624,32 +676,45 @@ ${skillContent}
 - 「---」の区切り線で各求人を明確に分離すること`;
   }
 
-  // 6. Fetch chat history — 最終バッチ（総合まとめ生成）のみ過去バッチ結果を同梱する。
+  // 6. 過去バッチ結果 — 最終バッチ（総合まとめ生成）のみ同梱する。
   //    中間バッチは各求人単体分析に履歴不要のため非同梱（input 削減・質不変）。
-  //    T-126 Phase2: 最終バッチの履歴は compressBatchResultForSummary で会社名+3軸だけに圧縮し、
+  //    T-126 Phase2: 過去バッチ結果は compressBatchResultForSummary で会社名+3軸だけに圧縮し、
   //    uncached input を削減する（最終バッチの入力膨張=最高額コールの主因）。
-  const pastMessages = isLastBatch
-    ? (
-        await prisma.advisorChatMessage.findMany({
-          where: { sessionId },
-          orderBy: { createdAt: "asc" },
-        })
-      ).slice(-MAX_PAST_MESSAGES)
-    : [];
+  //    T-163: 供給元をチャット履歴（advisor_chat_messages）から run 内のプロセス内キャッシュへ変更。
+  //    中間バッチのチャット書き込みを廃止したため（step 8 参照）。内容は従来と同じ圧縮形式。
+  //    プロセス再起動等でキャッシュが空の場合は、各バッチが candidate_files に保存済みの
+  //    aiAnalysisComment（会社名見出し+3軸+本文を含む）から同じ圧縮で再構成するフォールバック。
+  let priorBatchResults: string[] = [];
+  if (isLastBatch) {
+    priorBatchResults = takeRunBatchResults(sessionId);
+    if (priorBatchResults.length === 0 && start > 0) {
+      priorBatchResults = allBookmarks
+        .slice(0, start)
+        .map((f) => (f.aiAnalysisComment ? compressBatchResultForSummary(f.aiAnalysisComment) : ""))
+        .filter((t) => t.trim() !== "");
+    }
+  }
+
+  const priorResultsText = priorBatchResults
+    .map((t) =>
+      t.length > MAX_CHAT_MESSAGE_CHARS
+        ? t.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
+        : t
+    )
+    .join("\n\n---\n\n");
 
   const messagesArray = [
-    ...pastMessages.map((m) => {
-      // assistant（過去バッチ結果）は総合まとめに必要な要点だけへ圧縮。
-      const compressed =
-        m.role === "assistant" ? compressBatchResultForSummary(m.content) : m.content;
-      return {
-        role: m.role as "user" | "assistant",
-        content:
-          compressed.length > MAX_CHAT_MESSAGE_CHARS
-            ? compressed.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
-            : compressed,
-      };
-    }),
+    // 過去バッチ結果を従来のチャット履歴と同じ位置（最終 user ターンの前）に assistant 発話として置く。
+    // systemPrompt の「これまでのバッチの結果はチャット履歴に含まれています」の参照先はこのターン。
+    ...(priorResultsText
+      ? [
+          {
+            role: "user" as const,
+            content: `これまでのバッチ（1〜${start}件目）の分析結果を出力してください。`,
+          },
+          { role: "assistant" as const, content: priorResultsText },
+        ]
+      : []),
     {
       // T-126 Phase2: 候補者情報は system の第2キャッシュブロックへ移動（run内不変=バッチ間で cache read 化）。
       // user ターンには可変部（このバッチの求人票）だけを置く。
@@ -755,26 +820,20 @@ ${skillContent}
     });
     const analysisText = data.content?.[0]?.text || "";
 
-    // 8. Save to chat
+    // 8. T-163: 中間バッチはチャットへ書き込まない。
+    //    従来はバッチごとに user/assistant 1組を advisor_chat_messages へ書き込んでいたが、
+    //    分析長文がチャットの送信窓（直近20件）を占拠し input 肥大と few-shot 汚染を
+    //    起こしていた（実測: 窓の84.7%が分析産物）。個別の評価は step 9 で
+    //    CandidateFile.aiMatchRating / aiAnalysisComment に保存され一覧バッジから閲覧できる。
+    //    中間バッチの結果は総合まとめ生成用にプロセス内キャッシュへ圧縮して積み、
+    //    最終バッチ完了後に「完了カード」1組だけを書き込む（step 9 の後）。
     const label = isLastBatch
       ? `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）+ 総合まとめ】`
       : `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）】`;
 
-    await prisma.advisorChatMessage.create({
-      data: {
-        sessionId,
-        role: "user",
-        content: `ブックマーク求人分析（${start + 1}〜${end}件目 / 全${totalFiles}件）を実行`,
-      },
-    });
-
-    await prisma.advisorChatMessage.create({
-      data: {
-        sessionId,
-        role: "assistant",
-        content: `${label}\n\n${analysisText}`,
-      },
-    });
+    if (!isLastBatch) {
+      appendRunBatchResult(sessionId, compressBatchResultForSummary(analysisText));
+    }
 
     // 9. Extract ratings + comments and save to CandidateFile
     //    「rating + comment + 3軸マーカー」の3点が揃って初めて DB 反映する。
@@ -823,6 +882,66 @@ ${skillContent}
       skippedCount: skippedFileIds.length,
       ratings: Object.fromEntries([...ratingsAndComments].map(([id, { rating }]) => [id, rating])),
     });
+
+    // T-163: 最終バッチ完了後、チャットへは「完了カード」1組のみを書き込む。
+    //   - 件数はAIに数えさせず、DB保存済みの aiMatchRating をプログラムで集計する
+    //     （このバッチの保存が終わった step 9 の後に再取得するため、run 全体の最新値になる）。
+    //   - 総合まとめ本文は最終バッチのAI出力から抽出。失敗時は件数のみのカード（AIは再度呼ばない）。
+    //   - カード作成の失敗で分析本体（評価保存・レスポンス）を落とさない。
+    if (isLastBatch) {
+      try {
+        // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
+        // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
+        // （= 実行対象は allBookmarks.slice(0, end)）。allBookmarks 全体を数えると、
+        // 絞り込み（追加のみ / 未評価・破損のみ）で対象外だった過去評価分まで混入し、
+        // 見出しの件数がまとめ本文の「全N件」と矛盾する。
+        const runTargetFiles = allBookmarks.slice(0, end);
+        const runFiles = await prisma.candidateFile.findMany({
+          where: { id: { in: runTargetFiles.map((f) => f.id) } },
+          select: { aiMatchRating: true },
+        });
+        // 幅表記（"A〜B"等）は先頭の評価値で読む。B+ を B と誤読しないよう RATING_VALUE（B\+ 先行の交替）を使う。
+        const headRatingRe = new RegExp(`^(${RATING_VALUE})`);
+        const counts: Record<string, number> = { A: 0, "B+": 0, B: 0, C: 0, D: 0 };
+        let unrated = 0;
+        for (const f of runFiles) {
+          const m = (f.aiMatchRating ?? "").match(headRatingRe);
+          if (m && m[1] in counts) counts[m[1]]++;
+          else unrated++;
+        }
+        const header =
+          `【求人分析 完了】${runFiles.length}件を評価しました\n` +
+          `総合 A:${counts["A"]}件 / B+:${counts["B+"]}件 / B:${counts["B"]}件 / C:${counts["C"]}件 / D:${counts["D"]}件 / 未評価:${unrated}件`;
+        const footer = `※ 各求人の評価コメントは、求人一覧の評価バッジをクリックすると開きます。`;
+        // 本文全体を 2,000 字以内に収める（超過分は総合まとめ側を削り、件数と案内文は必ず残す）。
+        const MAX_CARD_CHARS = 2000;
+        let summary = extractOverallSummary(analysisText);
+        const fixedLen = header.length + footer.length + 4; // 区切りの空行ぶん
+        const OMIT_SUFFIX = "\n…（省略）";
+        if (summary && fixedLen + summary.length > MAX_CARD_CHARS) {
+          summary =
+            summary.substring(0, Math.max(0, MAX_CARD_CHARS - fixedLen - OMIT_SUFFIX.length)) +
+            OMIT_SUFFIX;
+        }
+        const cardContent = summary ? `${header}\n\n${summary}\n\n${footer}` : `${header}\n\n${footer}`;
+
+        await prisma.advisorChatMessage.create({
+          data: {
+            sessionId,
+            role: "user",
+            content: `ブックマーク求人分析（全${totalFiles}件）を実行`,
+            kind: "ANALYSIS",
+          },
+        });
+        await prisma.advisorChatMessage.create({
+          data: { sessionId, role: "assistant", content: cardContent, kind: "ANALYSIS" },
+        });
+      } catch (cardErr) {
+        console.error("[AnalyzeBatch] completion card create failed (non-fatal):", cardErr);
+      } finally {
+        clearRunBatchResults(sessionId);
+      }
+    }
 
     return NextResponse.json({
       batchIndex,

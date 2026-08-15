@@ -173,6 +173,46 @@
 **関連ケース**:
 - T-135 step9（2026/7/6）: stats API + candidates API 修正。修正コミット: `1fb40ff`
 
+## カテゴリL: インフラ起因の全体停止系
+
+### L-1. 全ページ502 / Application failed to respond（Railway ホスト機の I/O 飽和）
+
+**症状**: 本番の**全ページ**が 502「Application failed to respond」。Railway の画面上は ACTIVE デプロイが「Deployment successful」、サービスは「Online」のまま変わらない。先行して Next.js の Digest 付き `Application error: a server-side exception has occurred` が出ることもある（今回の実例: Digest `1411427761`）。
+
+**最重要の判定**: **全ページが一斉に死ぬなら、原因はほぼコードではない**。
+
+- Digest `1411427761` の正体は共通レイアウトの入口にあるセッション照会 `prisma.user.findUnique()` が DB 応答なしで落ちているだけ。**これは原因ではなく結果**。全ページで同じ Digest が出るのは、全ページがこのセッション照会を通るからにすぎない
+- 直近コミットを疑って revert するのは**時間の無駄になりやすい**。クライアント側 UI の変更（画面の見た目・文言・一覧の列幅など）は全ページ 502 を引き起こさない。サーバ側で全リクエストに乗るもの（middleware・共通レイアウト・DB 接続層）以外は容疑者にならない
+
+**原因の構造**: Railway の同一ホスト機に同居する他テナントがディスク I/O を占有していた（noisy neighbor）。**こちら側のコード・データ・リソースはすべて正常値**だった。
+
+| 確認項目 | 実測値 | 判定 |
+|--|--|--|
+| ホスト load average（48 コア機） | 944 / 949 / 897 | 約 20 倍の過負荷 |
+| `/proc/pressure/io` | some avg10=99 / avg60=99 / avg300=99 | I/O 待ちで停止が 5 分以上継続 |
+| 自コンテナの CPU throttle | `nr_throttled 0` | **制限されていない** |
+| 自コンテナのメモリ | 341MB / 32GB | 余裕 |
+| データ用ディスク | 399MB / 46GB（1%） | 満杯ではない |
+| DB 接続数 | 55 / max_connections=100 | 枯渇していない |
+
+Postgres 側の劣化の見え方:
+
+- checkpoint の書き込みが段階的に劣化。通常 0.4〜2 秒だったものが、02:45 に **1,339 バッファ（約 10MB）の書き込みに 133.8 秒**（≒ 80KB/s）
+- **03:08:25 UTC 開始の checkpoint はついに一度も完了しなかった**（checkpointer が I/O で刺さった状態）
+- uninterruptible D state のプロセスが 2 本残留
+- OOM・FATAL・`too many connections`・Postgres の再起動は**ログに一切無い**（＝自分の使い方の問題ではない証拠）
+
+**対処**: **コード修正では直らない**。
+
+- Railway サポートへエスカレーション（**別ホストノードへの移設要請**）、または負荷が収まるのを待つ
+- Postgres サービスの再起動は試す価値があるが、ホスト機が過負荷だと**新コンテナ自体を起動できない**。今回は redeploy を 3 回試行して**全て FAILED・ビルドログもデプロイログも空**。`railway restart` も「Deployment is not restartable」で拒否された
+- 最終的に Railway 側の負荷が収まって**自然復旧**した（こちらの操作で復旧させたわけではない）
+
+**検知**: T-160 で GitHub Actions による 5 分ごとの死活監視 + LINE WORKS 通知を実装済み（`.github/workflows/uptime-monitor.yml` / `src/app/api/health/route.ts`）。本障害は**社員からの報告でしか気づけなかった**ため。
+
+**関連ケース**:
+- 2026-08-10: 03:08 UTC（JST 12:08）に checkpoint 停止、05:05 UTC（JST 14:05）頃までに DB 応答が回復（`/api/health` の DB 往復 3〜99ms を実測）。利用者からは半日規模の停止として報告された。切り分け手順は罠 #41、監視実装は T-160（`4f49d46`）
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認

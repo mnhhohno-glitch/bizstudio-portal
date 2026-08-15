@@ -102,6 +102,9 @@ export async function PATCH(
           name: true,
           candidateNumber: true,
           employeeId: true,
+          // T-161: 一覧(GET /api/entries)と同じく担当RCを返す。EntryBoard は本レスポンスで
+          // 行を丸ごと差し替えるため、ここに無い列は更新直後の画面から消える（リロードで復活）。
+          recruiterName: true,
           employee: { select: { name: true } },
         },
       },

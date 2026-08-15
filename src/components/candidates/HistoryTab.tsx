@@ -12,6 +12,12 @@ import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-r
 /* ---------- Types ---------- */
 type Job = {
   id: number;
+  // T-161 R3: 行の出所。"kyuujin"=求人ツール由来 / "site"=本人応募（サイト経由）/
+  // "introduced"=CAが出力なしに紹介済みにした行。site/introduced は portal のブックマーク由来で
+  // id は負数（kyuujin と衝突しない選択キー）、file_id に CandidateFile.id を持つ。
+  source?: "kyuujin" | "site" | "introduced";
+  file_id?: string;
+  external_job_ref?: string | null;
   job_id: string | null;
   company_name: string;
   job_title: string;
@@ -62,6 +68,8 @@ type Entry = {
   id: string;
   candidateId: string;
   externalJobId: number;
+  // T-161: 求人単位の引き当てキー（job-platform source_job_id）。portal 由来行の「エントリー済」判定に使う。
+  externalJobRef?: string | null;
   companyName: string;
   jobTitle: string;
   jobDb: string | null;
@@ -312,6 +320,8 @@ type BookmarkFile = {
   responseStatus?: string | null;
   lastExportedAt: string | null;
   lastExportedTo: string | null;
+  // T-161: 出力なしの「紹介済み」時刻。出力済（lastExportedAt）とは別系統で、実績集計は両者の COALESCE。
+  introducedAt?: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
   origin?: string | null;
   // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
@@ -1460,10 +1470,46 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
   // サイト経由（origin="candidate" & driveFileId=null）判定。求人紹介タブには構造上出せないため、
   // 求人紹介への移動対象から外し、専用の「エントリーへ登録」導線へ回す。
   const isSiteApply = (f: BookmarkFile) => f.origin === "candidate" && !f.driveFileId;
-  const selectedSiteApplyIds = [...selectedIds].filter((id) => {
+
+  // T-161 R2: 出力なしで「紹介済み」にできる行 = 非サイト・未出力・未紹介。
+  const isIntroducible = (f: BookmarkFile) => !isSiteApply(f) && !f.lastExportedAt && !f.introducedAt;
+  const selectedIntroducibleIds = [...selectedIds].filter((id) => {
     const f = files.find((x) => x.id === id);
-    return f ? isSiteApply(f) : false;
+    return f ? isIntroducible(f) : false;
   });
+
+  // T-161: 「エントリーへ登録」対象 = サイト経由 + 紹介済み・未出力（to-entry のサーバー側条件と同一）。
+  const isEntryRegistrable = (f: BookmarkFile) => isSiteApply(f) || (!!f.introducedAt && !f.lastExportedAt);
+  const selectedEntryRegistrableIds = [...selectedIds].filter((id) => {
+    const f = files.find((x) => x.id === id);
+    return f ? isEntryRegistrable(f) : false;
+  });
+
+  const [markingIntroduced, setMarkingIntroduced] = useState(false);
+  const handleMarkIntroduced = async () => {
+    if (selectedIntroducibleIds.length === 0) return;
+    setMarkingIntroduced(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/mark-introduced`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: selectedIntroducibleIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "紹介済みへの変更に失敗しました");
+      const parts = [`${data.marked ?? 0}件を紹介済みにしました`];
+      if (data.skippedExported > 0) parts.push(`${data.skippedExported}件は出力済のため対象外`);
+      if (data.skippedSite > 0) parts.push(`${data.skippedSite}件は本人応募のため対象外`);
+      toast.success(parts.join("、"));
+      setSelectedIds(new Set());
+      fetchFiles();
+      onSwitchToJobs?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
+    } finally {
+      setMarkingIntroduced(false);
+    }
+  };
 
   const [movingToJobs, setMovingToJobs] = useState(false);
   const handleMoveToJobs = async () => {
@@ -1485,8 +1531,11 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       const notExportedIds = movable.filter((f) => !f.lastExportedAt).map((f) => f.id);
 
       let restoredCount = 0;
+      let alreadyActiveCount = 0;
       let sentCount = 0;
-      const messages: string[] = [];
+      // 「出力済」だが kyuujin 側に求人が無い行（抽出失敗等）。restore できないので新規送信でやり直す。
+      let missingIds: string[] = [];
+      const problems: string[] = [];
 
       if (exportedIds.length > 0) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/restore-jobs`, {
@@ -1497,35 +1546,67 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "復活処理に失敗しました");
         restoredCount = data.restored ?? 0;
-        if (data.notMatched?.length) messages.push(`照合失敗: ${data.notMatched.length}件`);
-        if (data.notExcluded?.length) messages.push(`既に有効: ${data.notExcluded.length}件`);
+        alreadyActiveCount = data.notExcluded?.length ?? 0;
+        missingIds = data.missingFileIds ?? [];
+        if (data.ambiguous?.length) {
+          problems.push(
+            `照合できませんでした（${data.ambiguous.length}件・似た会社名の求人あり）: ` +
+              data.ambiguous.map((a: { fileName: string }) => a.fileName).join(" / ")
+          );
+        }
+        if (data.errors?.length) problems.push(data.errors.join(" / "));
       }
 
-      if (notExportedIds.length > 0) {
+      // 新規送信対象 = 未出力 + 出力済だが kyuujin に存在しない行。
+      // db種別は元の出力先に合わせる（既定は HITO-Link/マイナビ）。
+      const sendTargetIds = [...notExportedIds, ...missingIds];
+      const groups = new Map<string, string[]>();
+      for (const id of sendTargetIds) {
+        const f = movable.find((x) => x.id === id);
+        const dbType = f?.lastExportedTo === "circus" ? "circus" : "hito_mynavi";
+        groups.set(dbType, [...(groups.get(dbType) ?? []), id]);
+      }
+
+      for (const [dbType, ids] of groups) {
         const res = await fetch(`/api/candidates/${candidateId}/bookmarks/send-to-job-tool`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileIds: notExportedIds, dbType: "hito_mynavi", targetAreas: ["首都圏"] }),
+          body: JSON.stringify({ fileIds: ids, dbType, targetAreas: ["首都圏"] }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "送信に失敗しました");
+        if (!res.ok) {
+          problems.push(data.error || "送信に失敗しました");
+          continue;
+        }
         // uploadedCount=PDF送信分、linkedCount=サイト経由(PDF不要)分。両方を「移動」件数に含める。
-        sentCount = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
-        if (sentCount === 0) sentCount = notExportedIds.length;
+        const n = (data.uploadedCount ?? 0) + (data.linkedCount ?? 0);
+        sentCount += n || ids.length;
       }
 
-      const parts: string[] = [];
-      if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
-      if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
-      if (messages.length) parts.push(messages.join(" / "));
-      toast.success(parts.length ? parts.join("、") + "しました" : "処理が完了しました");
+      const moved = restoredCount + sentCount + alreadyActiveCount;
+      if (moved === 0) {
+        // 「押しても何も起きない」を無くす。理由が分かる形で必ず知らせる。
+        toast.error(
+          problems.length
+            ? `求人紹介へ移動できませんでした。${problems.join(" / ")}`
+            : "求人紹介へ移動できませんでした（対象の求人が求人ツール側に見つかりません）"
+        );
+      } else {
+        const parts: string[] = [];
+        if (restoredCount > 0) parts.push(`${restoredCount}件を復活`);
+        if (sentCount > 0) parts.push(`${sentCount}件を新規送信`);
+        if (alreadyActiveCount > 0) parts.push(`${alreadyActiveCount}件は既に有効`);
+        toast.success(parts.join("、") + "しました");
+        if (problems.length) toast.error(problems.join(" / "));
+      }
 
       if (siteApply.length > 0) {
         toast.info(`サイト応募${siteApply.length}件は移動対象外です。「エントリーへ登録」から進めてください`);
       }
 
       setSelectedIds(new Set());
-      onSwitchToJobs?.();
+      fetchFiles();
+      if (moved > 0) onSwitchToJobs?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
@@ -1537,19 +1618,22 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [registeringEntry, setRegisteringEntry] = useState(false);
   const handleRegisterEntry = async (entryDate: string) => {
-    if (selectedSiteApplyIds.length === 0) return;
+    if (selectedEntryRegistrableIds.length === 0) return;
     setRegisteringEntry(true);
     try {
       const res = await fetch(`/api/candidates/${candidateId}/bookmarks/to-entry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileIds: selectedSiteApplyIds, entryDate }),
+        body: JSON.stringify({ fileIds: selectedEntryRegistrableIds, entryDate }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "エントリー登録に失敗しました");
       const parts = [`${data.created ?? 0}件をエントリーに登録`];
-      if (data.skipped > 0) parts.push(`${data.skipped}件は登録済みのためスキップ`);
+      if (data.skipped > 0) parts.push(`${data.skipped}件はスキップ`);
       toast.success(parts.join("、") + "しました");
+      // T-161: スキップを黙らせない。会社名と理由を必ず表示する（黙って消えると取りこぼしに気付けない）。
+      const notes = (data.skippedDetails ?? []).map((d: { companyName: string; reason: string }) => `${d.companyName}（${d.reason}）`);
+      if (notes.length > 0) toast.info(`スキップ: ${notes.join(" / ")}`, { duration: 8000 });
       setShowEntryModal(false);
       setSelectedIds(new Set());
       onEntryCreated?.();
@@ -1674,14 +1758,24 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 >
                   {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
                 </button>
-                {selectedSiteApplyIds.length > 0 && (
+                {selectedIntroducibleIds.length > 0 && (
+                  <button
+                    onClick={handleMarkIntroduced}
+                    disabled={markingIntroduced}
+                    className="text-[13px] text-teal-600 hover:text-teal-800 font-medium disabled:opacity-50"
+                    title="求人票を出力せずに紹介済みにします（求人紹介一覧に載り、実績集計でも紹介に数えます。求人ツールへの送信は行いません）"
+                  >
+                    {markingIntroduced ? "✅ 処理中..." : `✅ 紹介済みにする（${selectedIntroducibleIds.length}件）`}
+                  </button>
+                )}
+                {selectedEntryRegistrableIds.length > 0 && (
                   <button
                     onClick={() => setShowEntryModal(true)}
                     disabled={registeringEntry}
                     className="text-[13px] text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50"
-                    title="サイト応募（求職者本人がマイページで応募した求人）を求人紹介を経由せずエントリー管理へ直接登録します"
+                    title="サイト応募（本人がマイページで応募した求人）と紹介済み（出力なし）の求人を、求人ツールを経由せずエントリー管理へ直接登録します"
                   >
-                    {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedSiteApplyIds.length}件）`}
+                    {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedEntryRegistrableIds.length}件）`}
                   </button>
                 )}
                 {/* 社名コピー: エントリー管理（EntryBoard.tsx「社名をコピー」）と同一挙動。
@@ -1899,6 +1993,13 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                       title={`${file.lastExportedTo === "circus" ? "Circus" : "HITO-Link"} に送信済（${new Date(file.lastExportedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）`}
                     >出力済</span>
                   )}
+                  {/* T-161: 出力なしの紹介済み。出力済とは別バッジ（出力済が立てばそちらが優先表示） */}
+                  {!file.lastExportedAt && file.introducedAt && (
+                    <span
+                      className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-100 text-teal-800 border border-teal-200"
+                      title={`求人票を出力せずに紹介済みにした求人（${new Date(file.introducedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）。実績集計では紹介に数えます`}
+                    >紹介済み</span>
+                  )}
                 </div>
                 {(() => {
                   // サイト経由（PDF未保管）は AI評価対象外。空「—」だと「未分析」と紛らわしいので明示する。
@@ -2005,7 +2106,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       {/* Send to job tool modal */}
       {showEntryModal && (
         <EntryDateModal
-          count={selectedSiteApplyIds.length}
+          count={selectedEntryRegistrableIds.length}
           onConfirm={handleRegisterEntry}
           onCancel={() => setShowEntryModal(false)}
         />
@@ -2982,6 +3083,12 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
   // Derive entered external job ids for cross-referencing
   const enteredJobIds = new Set(entries.map((e) => e.externalJobId));
+  // T-161: portal 由来行（site/introduced）は externalJobId を持たないため、求人参照キーで判定する。
+  const enteredJobRefs = new Set(entries.map((e) => e.externalJobRef).filter(Boolean) as string[]);
+  const isJobEntered = (j: Job) =>
+    j.source === "site" || j.source === "introduced"
+      ? !!j.external_job_ref && enteredJobRefs.has(j.external_job_ref)
+      : enteredJobIds.has(j.id);
 
   // Job candidate responses for cross-referencing with bookmarks
   const jobResponseMap = useMemo(() => {
@@ -3142,7 +3249,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   };
 
   const selectableJobIds = (jobsData?.jobs || [])
-    .filter((j) => !enteredJobIds.has(j.id))
+    .filter((j) => !isJobEntered(j))
     .map((j) => j.id);
 
   const allSelectableChecked =
@@ -3161,7 +3268,11 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
     if (!jobsData) return;
     setSubmitting(true);
 
-    const selectedJobs = jobsData.jobs.filter((j) => selectedJobIds.has(j.id));
+    const allSelected = jobsData.jobs.filter((j) => selectedJobIds.has(j.id));
+    // T-161 R3: portal 由来行（site/introduced・id 負数）は kyuujin の求人IDを持たないため、
+    // 従来の POST /entries ではなく to-entry（fileIds 指定）で登録する。kyuujin 行は従来どおり。
+    const selectedJobs = allSelected.filter((j) => j.source !== "site" && j.source !== "introduced");
+    const portalJobs = allSelected.filter((j) => (j.source === "site" || j.source === "introduced") && j.file_id);
     const payload = {
       entries: selectedJobs.map((j) => {
         // T-128 Phase2-1: 元ブックマークが job-platform 由来なら jobDb/externalJobNo を正値化する。
@@ -3194,18 +3305,43 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
     };
 
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/entries`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("エントリーの登録に失敗しました");
-      const data = await res.json();
+      let created = 0;
+      let skipped = 0;
+      const skippedNotes: string[] = [];
 
-      if (data.skipped > 0) {
-        toast.success(`${data.created}件登録、${data.skipped}件は登録済みのためスキップ`);
+      if (selectedJobs.length > 0) {
+        const res = await fetch(`/api/candidates/${candidateId}/entries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("エントリーの登録に失敗しました");
+        const data = await res.json();
+        created += data.created ?? 0;
+        skipped += data.skipped ?? 0;
+      }
+
+      // T-161: portal 由来行は to-entry で登録。スキップは黙らせず理由つきで表示する。
+      if (portalJobs.length > 0) {
+        const res = await fetch(`/api/candidates/${candidateId}/bookmarks/to-entry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds: portalJobs.map((j) => j.file_id), entryDate }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "エントリーの登録に失敗しました");
+        created += data.created ?? 0;
+        skipped += data.skipped ?? 0;
+        for (const d of data.skippedDetails ?? []) {
+          skippedNotes.push(`${d.companyName}（${d.reason}）`);
+        }
+      }
+
+      if (skipped > 0) {
+        toast.success(`${created}件登録、${skipped}件はスキップ`);
+        if (skippedNotes.length > 0) toast.info(`スキップ: ${skippedNotes.join(" / ")}`, { duration: 8000 });
       } else {
-        toast.success(`${data.created}件のエントリーを登録しました`);
+        toast.success(`${created}件のエントリーを登録しました`);
       }
 
       setSelectedJobIds(new Set());
@@ -3323,7 +3459,17 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
   /* ---------- Job Delete Handlers ---------- */
   const openDeleteModal = (jobIds: number[]) => {
-    setDeleteTargetIds(jobIds);
+    // T-161: portal 由来行（id 負数）は hidden_job_introductions（kyuujin 求人ID前提）で消せないため除外。
+    // ブックマークタブ側（紹介保留・アーカイブ）で管理する。
+    const kyuujinIds = jobIds.filter((id) => id > 0);
+    if (kyuujinIds.length === 0) {
+      toast.info("本人応募・紹介済みの行はここでは削除できません（ブックマークタブで操作してください）");
+      return;
+    }
+    if (kyuujinIds.length < jobIds.length) {
+      toast.info(`本人応募・紹介済みの${jobIds.length - kyuujinIds.length}件は削除対象から除外しました`);
+    }
+    setDeleteTargetIds(kyuujinIds);
     setShowDeleteModal(true);
   };
 
@@ -3576,8 +3722,10 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
               </div>
               <div className="divide-y divide-gray-100">
                 {jobs.map((job) => {
-                  const isEntered = enteredJobIds.has(job.id);
+                  const isEntered = isJobEntered(job);
                   const isSelected = selectedJobIds.has(job.id);
+                  // T-161 R3: portal 由来行（本人応募/紹介済み・未出力）。kyuujin 前提の操作（非表示削除）は不可。
+                  const isPortalRow = job.source === "site" || job.source === "introduced";
                   const axis = findBookmarkRating(job.company_name);
                   const badge = (v: string | undefined) => {
                     if (!v || v === "—") return <span className="text-[10px] text-gray-300">—</span>;
@@ -3605,6 +3753,17 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                       <div className="flex-1 min-w-0 group/job relative">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-[13px] font-medium text-[#374151] truncate">{job.company_name}</span>
+                          {/* T-161 R3: 出所バッジ。本人応募（サイト経由）と出力なし紹介済みを kyuujin 行と見分ける */}
+                          {job.source === "site" && (
+                            <span className="shrink-0 text-[10px] rounded px-1.5 py-0 font-medium bg-purple-100 text-purple-700" title="求職者本人が求人サイトで見つけて応募・気になるした求人（CA紹介実績には数えません）">
+                              本人応募
+                            </span>
+                          )}
+                          {job.source === "introduced" && (
+                            <span className="shrink-0 text-[10px] rounded px-1.5 py-0 font-medium bg-teal-100 text-teal-700" title="求人票を出力せずに紹介済みにした求人（CA紹介実績に数えます）">
+                              紹介済み
+                            </span>
+                          )}
                           {job.candidate_response && RESPONSE_BADGE[job.candidate_response] && (
                             <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${RESPONSE_BADGE[job.candidate_response].cls}`}>
                               {RESPONSE_BADGE[job.candidate_response].label}
@@ -3618,7 +3777,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                       <span className="w-[56px] shrink-0 text-center">{badge(axis?.overall)}</span>
                       <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{job.job_db || "—"}</span>
                       <span className="w-[52px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{formatDateJST(job.created_at).slice(5)}</span>
-                      {!isEntered ? (
+                      {!isEntered && !isPortalRow ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); openDeleteModal([job.id]); }}
                           className="w-[28px] shrink-0 p-1 text-gray-400 hover:text-red-500 transition-colors rounded"

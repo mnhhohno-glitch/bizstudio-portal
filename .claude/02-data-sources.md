@@ -136,3 +136,22 @@ T-067 以降、面談ログ・添付ファイルを含む全ての求職者関�
    - HITO-Link / マイナビ / Bee: PDF → Gemini Vision で詳細住所抽出可能
    - Circus: PDF も Gemini に投げるがレイアウト由来で精度低、真の住所は URL の `__NEXT_DATA__.addressDetail` にある（未活用）
    - 詳細マトリクスは `13-data-source-paths.md` 参照
+
+## サイト経由ブックマーク（origin="candidate"）の source of truth と欠落列（T-161）
+
+`candidate_files.origin='candidate'` は求職者本人の操作で生まれたブックマーク。2系統ある。
+
+| 系統 | 作成元 | external_job_ref | kyuujin_job_id | 求人紹介一覧 |
+|--|--|--|--|--|
+| 新サイト `/site/` お気に入り | `api/external/candidate-site/favorites` POST | あり（job-platform source_job_id） | NULL | 出る（portal 行・「本人応募」バッジ） |
+| 旧マイページ回答 webhook | `lib/mypage-response-sync.ts` | NULL | あり | 出る（kyuujin 行として） |
+
+**source of truth**: 求人の実体（タイトル・職種・勤務地・年収）= bizstudio-job-platform。portal はスナップショットのみ保持。
+
+**保持列（T-161 以降の新規行）**: `job_title` / `job_category`（favorites POST が保存）・求人URL（`memo` 列）・会社名（`file_name` 埋め込み）。
+**欠落（T-161 以前の既存行）**: `job_title` / `job_category` は全行 NULL（旧実装が受信値を破棄）。`memo` も
+バックフィル生成行（T-140期）は空。**portal 内から復元不能**で、埋めるなら job-platform へ ref で再照会が必要。
+
+**実績集計の扱い（R1）**: 本人応募（origin='candidate' AND drive_file_id IS NULL）は CA の紹介実績に数えない。
+集計述語は「非サイト行 かつ COALESCE(last_exported_at, introduced_at) 非NULL」で統一
+（jobSearch.ts / metrics.ts / weeklyMatrix.ts / performance/detail / support-sub-status / dashboard）。

@@ -3,11 +3,20 @@
 // T-147: セキュアファイル送信の新規作成画面。
 // - ファイルはブラウザから Supabase へ直接アップロード（署名付きアップロードURL・XHRで進捗表示）。
 //   ファイル本体を portal サーバー経由で流さない（確定仕様）。
-// - 2026-08-06 改修: 宛先（TO）と CC を分けた通常のメール1通を送る方式に変更。
-//   URL・パスワードは1組だけ発行され、TO・CC の全受信者で共通になる（TO+CC 合計 最大10件）。
-// - 送信ボタン → 実際に送られるメール本文の確認画面 → 送信、の2段階。
-//   確認画面の本文は実送信と同じ buildTransferNoticeBody（secure-transfer-shared.ts）で組み立てる。
-//   TO と CC にドメインが混在していたら確認画面で警告する（表示のみ・送信はブロックしない）。
+// - 宛先（TO）と CC を分けた通常のメール1通を送る。URL・パスワードは1組で全受信者共通（TO+CC 合計 最大10件）。
+//
+// 2026-08-06 改修（2カラム化）:
+//   左＝入力欄 / 右＝メール全文プレビュー。右のプレビュー上で（1）本文と（4）署名を直接編集する。
+//   固定ブロック（案内文・URL・パスワード・有効期限・ファイル）と注意書きは編集不可のまま。
+//   プレビューは実送信と同じ buildTransferNoticeBody 系（secure-transfer-shared.ts）で組み立てる。
+//   画面が狭いときは grid が1カラムに落ちて上下2段になる。
+//
+//   本文の初期値は空（添え書きが入力されていればそれのみ）。固定の挨拶文は廃止した。
+//   添え書きは「本文をまだ触っていない間だけ」本文へ反映する（bodyTouched）。
+//   一度でも本文を編集したら添え書きでは上書きしない＝手入力を消さない。
+//
+// - 送信ボタン → 確認画面（編集不可・最終確認のみ）→ 送信、の2段階。
+//   確認画面から戻っても本文・署名は再合成しない（編集内容が保持される）。
 // - 送信完了画面で URL とパスワードを一度だけ表示する（再表示不可・DBに平文なし）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +25,7 @@ import { toast } from "sonner";
 import {
   buildDefaultTransferBodyIntro,
   buildTransferFixedBlock,
+  buildTransferNoticeBody,
   buildTransferSignature,
   calcExpiresAt,
   hasMixedEmailDomains,
@@ -28,6 +38,10 @@ const MAX_FILES = 10;
 const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB（サーバー側と同値）
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// プレビューでは実値がまだ無いのでプレースホルダを出す（実送信時に置き換わる）
+const URL_PLACEHOLDER = "（送信時に自動発行されます）";
+const PW_PLACEHOLDER = "（送信時に自動生成されます）";
 
 type UploadState = {
   file: File;
@@ -45,6 +59,8 @@ type SendResult = {
   files: { fileName: string; fileSize: number }[];
   url: string;
   password: string;
+  copyRequested: boolean;
+  copySent: boolean;
 };
 
 function formatFileSize(bytes: number): string {
@@ -118,19 +134,23 @@ export default function NewTransferPage() {
   const [recipientsText, setRecipientsText] = useState("");
   const [ccText, setCcText] = useState("");
   const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(""); // 添え書き（本文の下書き）
   const [expiresDays, setExpiresDays] = useState(30);
   const [passwordInEmail, setPasswordInEmail] = useState(true);
+  const [sendCopyToSender, setSendCopyToSender] = useState(true); // 既定ON
   const [step, setStep] = useState<"form" | "confirm">("form");
-  // 確認画面で編集する（1）本文と（4）署名。確認画面に入るたびに既定文面から再合成する
+  // 右カラムのプレビュー上で直接編集する（1）本文と（4）署名。確認画面へ行き来しても再合成しない
   const [editableBody, setEditableBody] = useState("");
   const [editableSignature, setEditableSignature] = useState("");
+  // 本文を手入力したら添え書きでの上書きを止める（ヒント文言の出し分けにも使うので state）
+  const [bodyTouched, setBodyTouched] = useState(false);
+  const signatureInitialized = useRef(false); // 署名の既定値投入は1回だけ
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [senderInfo, setSenderInfo] = useState<{ name: string; email: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 確認画面の本文プレビューに署名（送信者名・メール）を出すため、ログイン中ユーザーを取得する
+  // 署名の既定値に送信者名・メールが要るのでログイン中ユーザーを取得する
   useEffect(() => {
     fetch("/api/auth/session")
       .then((r) => (r.ok ? r.json() : null))
@@ -140,6 +160,19 @@ export default function NewTransferPage() {
       .catch(() => {});
   }, []);
 
+  // 署名の初期値は一度だけ入れる（以降はユーザーの編集を尊重して上書きしない）
+  useEffect(() => {
+    if (!senderInfo || signatureInitialized.current) return;
+    signatureInitialized.current = true;
+    setEditableSignature(buildTransferSignature(senderInfo.name, senderInfo.email));
+  }, [senderInfo]);
+
+  // 添え書きは「本文をまだ触っていない間だけ」本文へ反映する
+  useEffect(() => {
+    if (bodyTouched) return;
+    setEditableBody(buildDefaultTransferBodyIntro(message));
+  }, [message, bodyTouched]);
+
   // 宛先・CC: 改行・カンマ・セミコロン区切りで複数入力（空要素は無視・重複はそのまま許容）
   const recipients = useMemo(() => parseEmailList(recipientsText), [recipientsText]);
   const ccRecipients = useMemo(() => parseEmailList(ccText), [ccText]);
@@ -147,10 +180,7 @@ export default function NewTransferPage() {
     () => recipients.filter((r) => !EMAIL_RE.test(r)),
     [recipients]
   );
-  const invalidCc = useMemo(
-    () => ccRecipients.filter((r) => !EMAIL_RE.test(r)),
-    [ccRecipients]
-  );
+  const invalidCc = useMemo(() => ccRecipients.filter((r) => !EMAIL_RE.test(r)), [ccRecipients]);
   // 上限は TO + CC の合計（1通のメールに載る受信者の総数）
   const totalRecipients = recipients.length + ccRecipients.length;
   const tooManyRecipients = totalRecipients > MAX_TRANSFER_RECIPIENTS;
@@ -158,6 +188,38 @@ export default function NewTransferPage() {
   const mixedDomains = useMemo(
     () => hasMixedEmailDomains([...recipients, ...ccRecipients]),
     [recipients, ccRecipients]
+  );
+
+  const fileNames = useMemo(() => uploads.map((u) => u.file.name), [uploads]);
+  const previewExpiresAt = useMemo(() => calcExpiresAt(expiresDays), [expiresDays]);
+  const resolvedSubject = subject.trim() || TRANSFER_MAIL_SUBJECT;
+
+  // （2）（3）は自動挿入・編集不可。実送信と同じ関数で組み立てる
+  const fixedPreview = useMemo(
+    () =>
+      buildTransferFixedBlock({
+        url: URL_PLACEHOLDER,
+        password: PW_PLACEHOLDER,
+        passwordInEmail,
+        expiresAt: previewExpiresAt,
+        fileNames,
+      }),
+    [passwordInEmail, previewExpiresAt, fileNames]
+  );
+
+  // 確認画面で見せるメール全文（実送信と同じ組み立て）
+  const fullPreview = useMemo(
+    () =>
+      buildTransferNoticeBody({
+        body: editableBody,
+        signature: editableSignature,
+        url: URL_PLACEHOLDER,
+        password: PW_PLACEHOLDER,
+        passwordInEmail,
+        expiresAt: previewExpiresAt,
+        fileNames,
+      }),
+    [editableBody, editableSignature, passwordInEmail, previewExpiresAt, fileNames]
   );
 
   const addFiles = (fileList: FileList | null) => {
@@ -199,11 +261,7 @@ export default function NewTransferPage() {
 
   const handleProceed = () => {
     if (!canProceed) return;
-    // 添え書きを下書きとして既定文面に合成する（確認画面に入り直すたびに再合成 = 添え書きの変更を反映）
-    setEditableBody(buildDefaultTransferBodyIntro(message));
-    setEditableSignature(
-      buildTransferSignature(senderInfo?.name ?? "", senderInfo?.email ?? "")
-    );
+    // ★本文・署名は再合成しない（確認画面から戻っても編集内容が残る）
     setStep("confirm");
     window.scrollTo({ top: 0 });
   };
@@ -243,11 +301,12 @@ export default function NewTransferPage() {
           recipientEmails: recipients,
           ccEmails: ccRecipients,
           subject: subject.trim() || undefined,
-          // 確認画面で編集された（1）本文・（4）署名の最終形をそのまま送る（message 列に署名込みで保存される）
+          // プレビューで編集された（1）本文・（4）署名の最終形をそのまま送る
           message: editableBody.trim() || undefined,
           signature: editableSignature.trim(), // 空文字 = 署名なしの明示指定
           expiresDays,
           passwordInEmail,
+          sendCopyToSender,
           files: uploaded,
         }),
       });
@@ -260,6 +319,9 @@ export default function NewTransferPage() {
           );
         }
         throw new Error(data.error || "送信に失敗しました");
+      }
+      if ((data as SendResult).copyRequested && !(data as SendResult).copySent) {
+        toast.error("相手へは送信できましたが、控えメールの送信に失敗しました");
       }
       setResult(data);
     } catch (e) {
@@ -300,6 +362,14 @@ export default function NewTransferPage() {
                 {result.ccEmails.join(", ")}
               </p>
             )}
+            <p className="text-gray-600">
+              <span className="text-xs font-semibold text-gray-500">送信控え: </span>
+              {!result.copyRequested
+                ? "送信しない設定です"
+                : result.copySent
+                  ? "ご自身宛に送信しました（パスワードは含まれません）"
+                  : "⚠ 送信に失敗しました"}
+            </p>
           </div>
 
           {!result.passwordInEmail && (
@@ -360,9 +430,7 @@ export default function NewTransferPage() {
 
           <div className="text-xs text-gray-500">
             <p>有効期限: {formatJst(result.expiresAt)} まで（日本時間）</p>
-            <p className="mt-1">
-              ファイル: {result.files.map((f) => f.fileName).join(" / ")}
-            </p>
+            <p className="mt-1">ファイル: {result.files.map((f) => f.fileName).join(" / ")}</p>
           </div>
 
           <div className="flex gap-2 pt-2">
@@ -378,20 +446,10 @@ export default function NewTransferPage() {
     );
   }
 
-  // ---------- 送信前の確認画面 ----------
+  // ---------- 送信前の確認画面（編集不可・最終確認のみ） ----------
   if (step === "confirm") {
-    // （2）（3）は自動挿入・編集不可。プレビューは実送信と同じ関数で組み立てる
-    // （署名（4）は下の署名欄で編集可能になったためここには含めない）
-    const fixedPreview = buildTransferFixedBlock({
-      url: "（送信時に自動発行されます）",
-      password: "（送信時に自動生成されます）",
-      passwordInEmail,
-      expiresAt: calcExpiresAt(expiresDays),
-      fileNames: uploads.map((u) => u.file.name),
-    });
-
     return (
-      <div className="max-w-xl">
+      <div className="max-w-2xl">
         <h1 className="mb-4 text-xl font-bold text-[#374151]">送信内容の確認</h1>
         <div className="rounded-xl bg-white p-6 shadow-sm space-y-5">
           <div className="rounded-lg bg-blue-50 px-4 py-3">
@@ -400,7 +458,7 @@ export default function NewTransferPage() {
               {ccRecipients.length > 0 && ` / CC ${ccRecipients.length}件`}）
             </p>
             <p className="mt-1 text-xs text-blue-700">
-              ダウンロードURL とパスワードは1組だけ発行され、受信者全員で共通になります。
+              ここでは編集できません。修正する場合は「戻って修正する」を押してください。
             </p>
           </div>
 
@@ -415,35 +473,38 @@ export default function NewTransferPage() {
             </div>
           )}
 
-          <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">宛先（{recipients.length}件）</p>
-            <ul className="space-y-1">
-              {recipients.map((r, i) => (
-                <li key={`${r}-${i}`} className="text-sm text-gray-800">
-                  ・{r}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {ccRecipients.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <p className="text-xs font-semibold text-gray-500 mb-1">
-                CC（{ccRecipients.length}件）
-              </p>
+              <p className="text-xs font-semibold text-gray-500 mb-1">宛先（{recipients.length}件）</p>
               <ul className="space-y-1">
-                {ccRecipients.map((r, i) => (
+                {recipients.map((r, i) => (
                   <li key={`${r}-${i}`} className="text-sm text-gray-800">
                     ・{r}
                   </li>
                 ))}
               </ul>
             </div>
-          )}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">
+                CC（{ccRecipients.length}件）
+              </p>
+              {ccRecipients.length === 0 ? (
+                <p className="text-sm text-gray-400">なし</p>
+              ) : (
+                <ul className="space-y-1">
+                  {ccRecipients.map((r, i) => (
+                    <li key={`${r}-${i}`} className="text-sm text-gray-800">
+                      ・{r}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
 
           <div>
             <p className="text-xs font-semibold text-gray-500 mb-1">メール件名</p>
-            <p className="text-sm text-gray-800">{subject.trim() || TRANSFER_MAIL_SUBJECT}</p>
+            <p className="text-sm text-gray-800">{resolvedSubject}</p>
             {!subject.trim() && (
               <p className="mt-0.5 text-xs text-gray-400">
                 件名が未入力のため既定の件名を使用します
@@ -451,49 +512,55 @@ export default function NewTransferPage() {
             )}
           </div>
 
-          <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">
-              メール本文（この欄は自由に編集できます）
-            </p>
-            <textarea
-              value={editableBody}
-              onChange={(e) => setEditableBody(e.target.value)}
-              disabled={sending}
-              rows={Math.min(16, Math.max(6, editableBody.split("\n").length + 1))}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              宛名・挨拶を含めて全文を書き換えできます。編集した内容がそのまま送信されます。
-            </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">ファイル</p>
+              <ul className="space-y-0.5">
+                {uploads.map((u) => (
+                  <li key={`${u.file.name}-${u.file.size}`} className="text-sm text-gray-700">
+                    📄 {u.file.name}
+                    <span className="ml-1 text-xs text-gray-400">
+                      {formatFileSize(u.file.size)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">有効期限</p>
+              <p className="text-sm text-gray-800">
+                {previewExpiresAt.toLocaleString("ja-JP", {
+                  timeZone: "Asia/Tokyo",
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                })}{" "}
+                まで
+              </p>
+              <p className="mt-2 text-xs font-semibold text-gray-500">送信控え</p>
+              <p className="text-sm text-gray-800">
+                {sendCopyToSender ? "自分にも送る" : "送らない"}
+              </p>
+            </div>
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">
-              以下は自動で挿入されます（編集不可）
-            </p>
-            <pre className="whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-xs leading-5 text-gray-500 font-sans">
-              {fixedPreview}
+            <p className="text-xs font-semibold text-gray-500 mb-1">メール本文（全文）</p>
+            <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-700 font-sans">
+              {fullPreview}
             </pre>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold text-gray-500 mb-1">署名（編集できます）</p>
-            <textarea
-              value={editableSignature}
-              onChange={(e) => setEditableSignature(e.target.value)}
-              disabled={sending}
-              rows={Math.min(10, Math.max(3, editableSignature.split("\n").length + 1))}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              役職・住所・電話番号などを自由に追記できます。空にすると署名なしで送信されます。
-            </p>
           </div>
 
           {sending && uploads.some((u) => u.status === "uploading") && (
             <ul className="space-y-2">
               {uploads.map((u) => (
-                <li key={`${u.file.name}-${u.file.size}`} className="rounded border border-gray-100 px-3 py-2">
+                <li
+                  key={`${u.file.name}-${u.file.size}`}
+                  className="rounded border border-gray-100 px-3 py-2"
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm text-gray-700">📄 {u.file.name}</span>
                     <span className="w-10 text-right text-xs text-gray-400">
@@ -526,9 +593,9 @@ export default function NewTransferPage() {
     );
   }
 
-  // ---------- 入力フォーム ----------
+  // ---------- 入力フォーム（左＝入力 / 右＝プレビュー） ----------
   return (
-    <div className="max-w-xl">
+    <div className="max-w-6xl">
       <div className="mb-4 flex items-center gap-3">
         <Link href="/transfers" className="text-sm text-gray-400 hover:text-gray-600">
           ← 一覧へ
@@ -536,219 +603,315 @@ export default function NewTransferPage() {
         <h1 className="text-xl font-bold text-[#374151]">ファイルを送信</h1>
       </div>
 
-      <div className="rounded-xl bg-white p-6 shadow-sm space-y-5">
-        {/* ファイル選択 */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">
-            ファイル（複数可・1件1GBまで）
-          </label>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={(e) => addFiles(e.target.files)}
-            disabled={sending}
-            className="block w-full text-sm text-gray-500 file:mr-3 file:rounded file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:text-gray-700 hover:file:bg-gray-200"
-          />
-          {uploads.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {uploads.map((u, i) => (
-                <li key={`${u.file.name}-${u.file.size}`} className="rounded border border-gray-100 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm text-gray-700">
-                      📄 {u.file.name}
-                      <span className="ml-2 text-xs text-gray-400">
-                        {formatFileSize(u.file.size)}
+      {/* lg 未満（タブレット・スマホ）は1カラムに落ちて上下2段になる */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* ============================ 左: 入力欄 ============================ */}
+        <div className="rounded-xl bg-white p-6 shadow-sm space-y-5">
+          {/* ファイル選択 */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              ファイル（複数可・1件1GBまで）
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={(e) => addFiles(e.target.files)}
+              disabled={sending}
+              className="block w-full text-sm text-gray-500 file:mr-3 file:rounded file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:text-gray-700 hover:file:bg-gray-200"
+            />
+            {uploads.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {uploads.map((u, i) => (
+                  <li
+                    key={`${u.file.name}-${u.file.size}`}
+                    className="rounded border border-gray-100 px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-gray-700">
+                        📄 {u.file.name}
+                        <span className="ml-2 text-xs text-gray-400">
+                          {formatFileSize(u.file.size)}
+                        </span>
                       </span>
-                    </span>
-                    {!sending && u.status !== "done" && (
-                      <button
-                        onClick={() => removeFile(i)}
-                        className="shrink-0 text-xs text-gray-400 hover:text-red-500"
-                      >
-                        削除
-                      </button>
-                    )}
-                  </div>
-                  {(u.status === "uploading" || u.status === "done") && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded bg-gray-100">
-                        <div
-                          className={`h-full transition-all ${u.status === "done" ? "bg-green-500" : "bg-[#2563EB]"}`}
-                          style={{ width: `${u.progress}%` }}
-                        />
-                      </div>
-                      <span className="w-10 text-right text-xs text-gray-400">
-                        {u.status === "done" ? "完了" : `${u.progress}%`}
-                      </span>
+                      {!sending && u.status !== "done" && (
+                        <button
+                          onClick={() => removeFile(i)}
+                          className="shrink-0 text-xs text-gray-400 hover:text-red-500"
+                        >
+                          削除
+                        </button>
+                      )}
                     </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    {(u.status === "uploading" || u.status === "done") && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded bg-gray-100">
+                          <div
+                            className={`h-full transition-all ${u.status === "done" ? "bg-green-500" : "bg-[#2563EB]"}`}
+                            style={{ width: `${u.progress}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right text-xs text-gray-400">
+                          {u.status === "done" ? "完了" : `${u.progress}%`}
+                        </span>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
-        {/* 宛先（TO） */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">
-            宛先（TO） <span className="text-red-500">*</span>
-            <span className="ml-2 text-xs font-normal text-gray-400">
-              改行またはカンマ区切りで複数可
-            </span>
-          </label>
-          <textarea
-            value={recipientsText}
-            onChange={(e) => setRecipientsText(e.target.value)}
-            disabled={sending}
-            rows={2}
-            placeholder={"example1@client.co.jp\nexample2@client.co.jp"}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          />
-          <EmailChips emails={recipients} tone="blue" />
-          {invalidRecipients.length > 0 && (
-            <p className="mt-1 text-xs text-red-500">
-              形式が正しくないアドレスがあります: {invalidRecipients.join(", ")}
-            </p>
-          )}
-        </div>
-
-        {/* CC */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">
-            CC（任意）
-            <span className="ml-2 text-xs font-normal text-gray-400">
-              改行またはカンマ区切りで複数可
-            </span>
-          </label>
-          <textarea
-            value={ccText}
-            onChange={(e) => setCcText(e.target.value)}
-            disabled={sending}
-            rows={2}
-            placeholder={"cc@client.co.jp"}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          />
-          <EmailChips emails={ccRecipients} tone="gray" />
-          {invalidCc.length > 0 && (
-            <p className="mt-1 text-xs text-red-500">
-              形式が正しくないアドレスがあります: {invalidCc.join(", ")}
-            </p>
-          )}
-          {tooManyRecipients && (
-            <p className="mt-1 text-xs text-red-500">
-              宛先とCCの合計は最大{MAX_TRANSFER_RECIPIENTS}件までです（現在 {totalRecipients}件）
-            </p>
-          )}
-          <p className="mt-1 text-xs text-gray-400">
-            宛先とCCを含めた1通のメールを送信します。ダウンロードURL
-            とパスワードは1組で、受信者全員が同じものを使います。
-            CCのアドレスは受信者全員に表示されます。
-          </p>
-        </div>
-
-        {/* 件名 */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">件名（任意）</label>
-          <input
-            type="text"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            disabled={sending}
-            placeholder="例: ご契約書類の送付"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          />
-          <p className="mt-1 text-xs text-gray-400">
-            そのままメールの件名になります。空欄の場合は「{TRANSFER_MAIL_SUBJECT}」が使われます。
-          </p>
-        </div>
-
-        {/* 添え書き */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">添え書き（任意）</label>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            disabled={sending}
-            rows={3}
-            placeholder="メール本文に追記するメッセージ"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
-          />
-          <p className="mt-1 text-xs text-gray-400">
-            ここに書いた内容は、次の確認画面で全文を編集できます。URL・パスワード・有効期限・署名は自動で入ります。
-          </p>
-        </div>
-
-        {/* パスワード送付方式 */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">パスワードの伝え方</label>
-          <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="radio"
-                name="passwordInEmail"
-                checked={passwordInEmail}
-                onChange={() => setPasswordInEmail(true)}
-                disabled={sending}
-                className="mt-0.5"
-              />
-              <span>
-                パスワードをメールに記載する（既定）
-                <span className="block text-xs text-gray-400">
-                  URLと同じメールにパスワードも記載されます
-                </span>
+          {/* 宛先（TO） */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              宛先（TO） <span className="text-red-500">*</span>
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                改行またはカンマ区切りで複数可
               </span>
             </label>
+            <textarea
+              value={recipientsText}
+              onChange={(e) => setRecipientsText(e.target.value)}
+              disabled={sending}
+              rows={2}
+              placeholder={"example1@client.co.jp\nexample2@client.co.jp"}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <EmailChips emails={recipients} tone="blue" />
+            {invalidRecipients.length > 0 && (
+              <p className="mt-1 text-xs text-red-500">
+                形式が正しくないアドレスがあります: {invalidRecipients.join(", ")}
+              </p>
+            )}
+          </div>
+
+          {/* CC */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              CC（任意）
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                改行またはカンマ区切りで複数可
+              </span>
+            </label>
+            <textarea
+              value={ccText}
+              onChange={(e) => setCcText(e.target.value)}
+              disabled={sending}
+              rows={2}
+              placeholder={"cc@client.co.jp"}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <EmailChips emails={ccRecipients} tone="gray" />
+            {invalidCc.length > 0 && (
+              <p className="mt-1 text-xs text-red-500">
+                形式が正しくないアドレスがあります: {invalidCc.join(", ")}
+              </p>
+            )}
+            {tooManyRecipients && (
+              <p className="mt-1 text-xs text-red-500">
+                宛先とCCの合計は最大{MAX_TRANSFER_RECIPIENTS}件までです（現在 {totalRecipients}件）
+              </p>
+            )}
+            <p className="mt-1 text-xs text-gray-400">
+              宛先とCCを含めた1通のメールを送信します。CCのアドレスは受信者全員に表示されます。
+            </p>
+          </div>
+
+          {/* 件名 */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">件名（任意）</label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              disabled={sending}
+              placeholder="例: ご契約書類の送付"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              そのままメールの件名になります。空欄の場合は「{TRANSFER_MAIL_SUBJECT}」が使われます。
+            </p>
+          </div>
+
+          {/* 添え書き */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">添え書き（任意）</label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              disabled={sending}
+              rows={3}
+              placeholder="メール本文に入れるメッセージ"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              {bodyTouched
+                ? "本文を直接編集済みのため、ここの変更は本文へ反映されません。"
+                : "プレビューの本文欄に反映されます。本文欄で直接書いても構いません。"}
+            </p>
+          </div>
+
+          {/* パスワード送付方式 */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">パスワードの伝え方</label>
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="passwordInEmail"
+                  checked={passwordInEmail}
+                  onChange={() => setPasswordInEmail(true)}
+                  disabled={sending}
+                  className="mt-0.5"
+                />
+                <span>
+                  パスワードをメールに記載する（既定）
+                  <span className="block text-xs text-gray-400">
+                    URLと同じメールにパスワードも記載されます
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="passwordInEmail"
+                  checked={!passwordInEmail}
+                  onChange={() => setPasswordInEmail(false)}
+                  disabled={sending}
+                  className="mt-0.5"
+                />
+                <span>
+                  メールに記載しない
+                  <span className="block text-xs text-gray-400">
+                    送信完了画面にパスワードが表示されるので、SMS・電話など別の方法で伝えます
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* 有効期限 */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">有効期限</label>
+            <select
+              value={expiresDays}
+              onChange={(e) => setExpiresDays(parseInt(e.target.value, 10))}
+              disabled={sending}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
+            >
+              {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>
+                  {d}日{d === 30 ? "（推奨）" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              期限日の23:59（日本時間）まで有効。期限を過ぎるとファイルは自動削除されます。
+            </p>
+          </div>
+
+          {/* 送信控え */}
+          <div>
             <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
               <input
-                type="radio"
-                name="passwordInEmail"
-                checked={!passwordInEmail}
-                onChange={() => setPasswordInEmail(false)}
+                type="checkbox"
+                checked={sendCopyToSender}
+                onChange={(e) => setSendCopyToSender(e.target.checked)}
                 disabled={sending}
                 className="mt-0.5"
               />
               <span>
-                メールに記載しない
+                自分にも控えを送る
                 <span className="block text-xs text-gray-400">
-                  送信完了画面にパスワードが表示されるので、SMS・電話など別の方法で伝えます
+                  送信内容とメール本文の控えが自分宛に届きます（パスワードは含まれません）
                 </span>
               </span>
             </label>
           </div>
         </div>
 
-        {/* 有効期限 */}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">有効期限</label>
-          <select
-            value={expiresDays}
-            onChange={(e) => setExpiresDays(parseInt(e.target.value, 10))}
-            disabled={sending}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
-          >
-            {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>
-                {d}日{d === 30 ? "（推奨）" : ""}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-gray-400">
-            期限日の23:59（日本時間）まで有効。期限を過ぎるとファイルは自動削除されます。
-          </p>
-        </div>
+        {/* ============================ 右: メール全文プレビュー ============================ */}
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <div className="rounded-xl bg-white p-6 shadow-sm space-y-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-700">メールプレビュー</p>
+              <p className="mt-0.5 text-xs text-gray-400">
+                実際に送られる全文です。本文と署名はこの画面で直接編集できます。
+              </p>
+            </div>
 
-        <div className="pt-2">
-          <button
-            onClick={handleProceed}
-            disabled={!canProceed}
-            className="w-full rounded-lg bg-[#2563EB] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-50"
-          >
-            パスワードを発行してメール送信
-          </button>
-          <p className="mt-2 text-center text-xs text-gray-400">
-            次の画面で、実際に送信されるメール本文を確認してから送信します
-          </p>
+            <div className="rounded-lg bg-gray-50 px-3 py-2">
+              <p className="text-xs text-gray-500">
+                <span className="font-semibold">件名: </span>
+                {resolvedSubject}
+              </p>
+              <p className="mt-0.5 text-xs text-gray-500">
+                <span className="font-semibold">宛先: </span>
+                {recipients.length > 0 ? recipients.join(", ") : "（未入力）"}
+              </p>
+              {ccRecipients.length > 0 && (
+                <p className="mt-0.5 text-xs text-gray-500">
+                  <span className="font-semibold">CC: </span>
+                  {ccRecipients.join(", ")}
+                </p>
+              )}
+            </div>
+
+            {/* （1）本文: 自由入力・初期値なし */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">本文（編集できます）</p>
+              <textarea
+                value={editableBody}
+                onChange={(e) => {
+                  setBodyTouched(true);
+                  setEditableBody(e.target.value);
+                }}
+                disabled={sending}
+                rows={12}
+                placeholder="宛名・挨拶・本題を自由にご記入ください（空のままでも送信できます）"
+                className="w-full resize-y rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+              />
+            </div>
+
+            {/* （2）（3）: 編集不可 */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">
+                以下は自動で挿入されます（編集不可）
+              </p>
+              <pre className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-xs leading-5 text-gray-500 font-sans">
+                {fixedPreview}
+              </pre>
+            </div>
+
+            {/* （4）署名: 編集可能 */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">署名（編集できます）</p>
+              <textarea
+                value={editableSignature}
+                onChange={(e) => setEditableSignature(e.target.value)}
+                disabled={sending}
+                rows={Math.min(10, Math.max(4, editableSignature.split("\n").length + 1))}
+                className="w-full resize-y rounded-lg border border-gray-300 px-4 py-3 text-xs leading-5 text-gray-700 focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                役職・住所・電話番号などを自由に追記できます。空にすると署名なしで送信されます。
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-white p-6 shadow-sm">
+            <button
+              onClick={handleProceed}
+              disabled={!canProceed}
+              className="w-full rounded-lg bg-[#2563EB] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-50"
+            >
+              パスワードを発行してメール送信
+            </button>
+            <p className="mt-2 text-center text-xs text-gray-400">
+              次の画面で最終確認してから送信します
+            </p>
+          </div>
         </div>
       </div>
     </div>
