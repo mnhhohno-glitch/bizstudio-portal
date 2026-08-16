@@ -53,6 +53,7 @@ interface CandidateHeaderProps {
   onGoogleFormCreate?: () => void;
   googleFormDisabled?: boolean;
   googleFormDisabledReason?: string;
+  oneDriveFolderUrl?: string | null;
 }
 
 function genderLabel(g: string | null) {
@@ -138,6 +139,7 @@ export default function CandidateHeader({
   onGoogleFormCreate,
   googleFormDisabled,
   googleFormDisabledReason,
+  oneDriveFolderUrl,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
@@ -145,6 +147,12 @@ export default function CandidateHeader({
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
   }, [candidate.birthday]);
+
+  // T-158: 保存時に https:// のみ許可しているが、開く側でも念のため確認する
+  const oneDriveUrl =
+    oneDriveFolderUrl && oneDriveFolderUrl.trim().startsWith("https://")
+      ? oneDriveFolderUrl.trim()
+      : null;
 
   const handleGuideUrlCopy = () => {
     onGuideUrlCopy();
@@ -387,6 +395,16 @@ export default function CandidateHeader({
               Google フォーム作成
             </button>
           )}
+          <button
+            onClick={() => {
+              if (oneDriveUrl) window.open(oneDriveUrl, "_blank", "noopener,noreferrer");
+            }}
+            disabled={!oneDriveUrl}
+            title={!oneDriveUrl ? "OneDriveフォルダURLが未登録です（基本情報編集から登録してください）" : undefined}
+            className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            OneDrive
+          </button>
         </div>
       </div>
     </div>

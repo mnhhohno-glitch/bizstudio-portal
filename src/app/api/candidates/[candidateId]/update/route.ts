@@ -110,6 +110,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.desiredSalaryMin !== undefined) {
     updateData.desiredSalaryMin = typeof body.desiredSalaryMin === "number" ? body.desiredSalaryMin : null;
   }
+  // T-158: OneDrive フォルダURL。javascript: 等のスキームを保存させないため https:// 始まりのみ許可。
+  if (body.oneDriveFolderUrl !== undefined) {
+    const raw = typeof body.oneDriveFolderUrl === "string" ? body.oneDriveFolderUrl.trim() : "";
+    if (!raw) {
+      updateData.oneDriveFolderUrl = null;
+    } else if (!raw.startsWith("https://")) {
+      return NextResponse.json(
+        { error: "OneDriveのURLは https:// から始まる必要があります" },
+        { status: 400 }
+      );
+    } else if (raw.length > 2000) {
+      return NextResponse.json(
+        { error: "OneDriveのURLが長すぎます（2000文字以内）" },
+        { status: 400 }
+      );
+    } else {
+      updateData.oneDriveFolderUrl = raw;
+    }
+  }
   if (body.birthday !== undefined) {
     updateData.birthday = body.birthday ? new Date(body.birthday) : null;
   }

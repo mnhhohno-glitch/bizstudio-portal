@@ -100,6 +100,7 @@ type Candidate = {
   desiredIndustry2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
+  oneDriveFolderUrl: string | null;
   guideEntries: GuideEntry[];
   notes: Note[];
   createdAt: string;
@@ -220,6 +221,8 @@ function EditModal({
   const [desiredSalaryMin, setDesiredSalaryMin] = useState<string>(
     candidate.desiredSalaryMin != null ? String(candidate.desiredSalaryMin) : ""
   );
+  const [oneDriveFolderUrl, setOneDriveFolderUrl] = useState(candidate.oneDriveFolderUrl || "");
+  const [oneDriveError, setOneDriveError] = useState("");
   const [saving, setSaving] = useState(false);
   const overlayClose = useOverlayClose(onClose);
 
@@ -235,6 +238,13 @@ function EditModal({
 
   const handleSave = async () => {
     if (!name.trim() || !furigana.trim()) return;
+    // T-158: サーバ側と二重で持つ（javascript: 等のスキーム防止）
+    const oneDriveTrimmed = oneDriveFolderUrl.trim();
+    if (oneDriveTrimmed && !oneDriveTrimmed.startsWith("https://")) {
+      setOneDriveError("OneDriveのURLは https:// から始まる必要があります");
+      return;
+    }
+    setOneDriveError("");
     setSaving(true);
     try {
       const res = await fetch(`/api/candidates/${candidate.id}/update`, {
@@ -265,6 +275,7 @@ function EditModal({
           desiredPrefecture2: desiredPrefecture2 || null,
           desiredEmploymentType: desiredEmploymentType || null,
           desiredSalaryMin: desiredSalaryMin.trim() ? parseInt(desiredSalaryMin, 10) : null,
+          oneDriveFolderUrl: oneDriveTrimmed || null,
         }),
       });
       if (!res.ok) throw new Error();
@@ -419,6 +430,21 @@ function EditModal({
                   <option value="">選択してください</option>
                   {MEDIA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#374151] mb-1">OneDriveフォルダURL</label>
+                <input
+                  type="url"
+                  value={oneDriveFolderUrl}
+                  onChange={(e) => { setOneDriveFolderUrl(e.target.value); if (oneDriveError) setOneDriveError(""); }}
+                  placeholder="https://..."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                />
+                <p className="text-[12px] text-gray-500 mt-1">OneDriveでフォルダを開き、アドレスバーのURLを貼り付けてください</p>
+                {oneDriveError && <p className="text-[12px] text-red-500 mt-1">{oneDriveError}</p>}
               </div>
             </div>
           </div>
@@ -1927,6 +1953,7 @@ function CandidateDetailPageBody() {
         onGoogleFormCreate={() => setGoogleFormModalOpen(true)}
         googleFormDisabled={googleFormDisabled}
         googleFormDisabledReason={googleFormDisabledReason}
+        oneDriveFolderUrl={candidate.oneDriveFolderUrl}
       />
       )}
 

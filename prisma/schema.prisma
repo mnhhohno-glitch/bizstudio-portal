@@ -524,6 +524,11 @@ model Candidate {
   scoutLinkedById     String?            @map("scout_linked_by_id")
   mynaviScoutSentAt   DateTime?          @map("mynavi_scout_sent_at") // マイナビPDFから取れる「スカウト送信時刻」（将来自動取得用）
 
+  // T-158: 求職者ごとの OneDrive 資料フォルダURL（CAが基本情報編集で手貼り）。
+  //   保存時に https:// 始まりのみ許可（javascript: 等のスキーム混入によるXSS防止）。
+  //   URLを保持して開くだけで、OneDrive へのファイル書き込み・フォルダ自動作成は行わない。
+  oneDriveFolderUrl String? @map("onedrive_folder_url")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   contactLogs            ContactLog[]
