@@ -3,9 +3,12 @@
 
     py scripts/t158_rollback_onedrive_url.py --dry-run
     py scripts/t158_rollback_onedrive_url.py --execute
+    py scripts/t158_rollback_onedrive_url.py --csv docs/reports/T-158c_backup_before_update.csv --execute
 
-docs/reports/T-158_backup_before_update.csv（t158_match_onedrive.py が UPDATE 前に書き出す）
-を読み、そこに載っている内部ID のレコードの onedrive_folder_url を「更新前の値」に戻す。
+t158_match_onedrive.py が UPDATE 前に書き出すバックアップCSVを読み、
+そこに載っている内部ID のレコードの onedrive_folder_url を「更新前の値」に戻す。
+既定は Phase 2-B の T-158_backup_before_update.csv。Phase 2-C 分を戻すときは
+--csv で T-158c_backup_before_update.csv を指定する。
 更新前の値が空文字なら NULL に戻す。
 
 何度実行しても結果は同じ（既に更新前の値になっている行は 0 件更新になるだけ）。
@@ -28,7 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 ROOT = Path(__file__).resolve().parents[1]
-BACKUP = ROOT / "docs" / "reports" / "T-158_backup_before_update.csv"
+DEFAULT_BACKUP = ROOT / "docs" / "reports" / "T-158_backup_before_update.csv"
 
 
 def load_database_url() -> str:
@@ -49,20 +52,25 @@ def load_database_url() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default=str(DEFAULT_BACKUP),
+                    help=f"戻す対象のバックアップCSV（既定: {DEFAULT_BACKUP.name}）")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--dry-run", action="store_true", help="戻す件数を数えるだけ")
     g.add_argument("--execute", action="store_true", help="実際に戻す")
     args = ap.parse_args()
 
-    if not BACKUP.exists():
-        print(f"[NG] バックアップCSVがありません: {BACKUP}")
+    backup = Path(args.csv)
+    if not backup.is_absolute():
+        backup = (ROOT / backup) if not backup.exists() else backup
+    if not backup.exists():
+        print(f"[NG] バックアップCSVがありません: {backup}")
         return 1
-    with BACKUP.open("r", encoding="utf-8-sig", newline="") as f:
+    with backup.open("r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
     if not rows:
         print("[i] バックアップCSVが空です。戻すものはありません。")
         return 0
-    print(f"[OK] バックアップ {len(rows)} 行を読み込みました: {BACKUP}")
+    print(f"[OK] バックアップ {len(rows)} 行を読み込みました: {backup}")
 
     conn = psycopg2.connect(load_database_url())
     try:

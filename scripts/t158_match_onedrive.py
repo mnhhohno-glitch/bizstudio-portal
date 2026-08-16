@@ -48,7 +48,8 @@ REPORTS = ROOT / "docs" / "reports"
 IN_FOLDERS = REPORTS / "T-158_onedrive_folders.csv"
 OUT_PORTAL = REPORTS / "T-158_portal_candidates.csv"
 OUT_MATCH = REPORTS / "T-158_onedrive_match_dryrun.csv"
-OUT_BACKUP = REPORTS / "T-158_backup_before_update.csv"
+OUT_BACKUP = REPORTS / "T-158_backup_before_update.csv"     # Phase 2-B（番号一致）
+OUT_BACKUP_C = REPORTS / "T-158c_backup_before_update.csv"  # Phase 2-C（番号なし・氏名＋担当CA）
 
 URL_BASE = "https://bizstudio-my.sharepoint.com/my?id="
 PERSONAL_PREFIX = "/personal/masayuki_oono_bizstudio_co_jp/Documents/"
@@ -88,6 +89,35 @@ def norm_name(s: str) -> str:
     for ch in NAKAGURO:
         s = s.replace(ch, "")
     return s
+
+
+# Phase 2-C: 番号なしフォルダの氏名完全一致で落とす、末尾の業務上の付記
+SUFFIX_TOKENS = ("_close", "close", "クローズ", "支援終了", "終了", "済", "様", "さん")
+
+
+def strip_suffix_tokens(normalized: str) -> str:
+    """正規化済み文字列の末尾から付記を落とす（末尾のみ・複数回）。"""
+    changed = True
+    while changed:
+        changed = False
+        for tok in SUFFIX_TOKENS:
+            if len(normalized) > len(tok) and normalized.lower().endswith(tok.lower()):
+                normalized = normalized[: -len(tok)]
+                changed = True
+    return normalized
+
+
+def surname_of(full_name: str) -> str:
+    """「安藤 嘉富」→「安藤」。空白が無ければ全体を返す。"""
+    s = unicodedata.normalize("NFKC", (full_name or "").strip())
+    parts = [p for p in RE_WS.split(s) if p]
+    return parts[0] if parts else ""
+
+
+def ca_folder_surname(ca_folder: str) -> str:
+    """「4.安藤」→「安藤」。"""
+    s = unicodedata.normalize("NFKC", (ca_folder or "").strip())
+    return re.sub(r"^\d+\s*\.\s*", "", s)
 
 
 def name_matches(portal_name: str, folder_name_part: str) -> bool:
@@ -254,18 +284,82 @@ def main() -> int:
                 "registrable": "1" if registrable else "0",
             })
 
+        # ---------------- Phase 2-C: NO_NUMBER を氏名＋担当CA姓で再分類 ----------------
+        # 番号が無い分キーが弱いので、氏名は部分一致ではなく完全一致で判定し、
+        # さらに「フォルダが置かれている CA フォルダの姓 == 担当CAの姓」を必須にする。
+        portal_by_norm_name: dict[str, list[dict]] = defaultdict(list)
+        for c in portal:
+            portal_by_norm_name[norm_name(c["name"])].append(c)
+
+        no_number_rows = [r for r in results if r["status"] == "NO_NUMBER"]
+        # まず氏名一致者を引き当て、同じ求職者を指すフォルダが複数ないかを数える
+        hits: dict[int, list[dict]] = {}
+        claims: dict[str, int] = defaultdict(int)
+        for r in no_number_rows:
+            key = strip_suffix_tokens(norm_name(r["folder_name_part"]))
+            found = portal_by_norm_name.get(key, []) if key else []
+            hits[id(r)] = found
+            if len(found) == 1:
+                claims[found[0]["id"]] += 1
+
+        for r in no_number_rows:
+            found = hits[id(r)]
+            if not found:
+                r["status"] = "NAME_NOT_FOUND"
+                r["reason"] = "氏名が一致する求職者なし"
+                continue
+            if len(found) > 1:
+                r["status"] = "NAME_AMBIGUOUS"
+                r["reason"] = f"氏名一致者が複数({len(found)}人)"
+                continue
+
+            cand = found[0]
+            folder_sn = ca_folder_surname(r["ca_folder"])
+            emp_sn = surname_of(cand.get("employee_name") or "")
+            r["portal_candidate_id"] = cand["id"]
+            r["candidate_no"] = cand["candidate_number"]
+            r["portal_name"] = cand["name"]
+            r["portal_employee"] = cand.get("employee_name") or ""
+            r["portal_support_status"] = cand.get("support_status") or ""
+            r["portal_created_at"] = (cand["created_at"].strftime("%Y-%m-%d")
+                                      if cand.get("created_at") else "")
+            r["portal_onedrive_url_current"] = cand.get("onedrive_folder_url") or ""
+            r["is_focus"] = "1" if is_focus(cand) else "0"
+            r["generated_url"] = build_url(r["relative_path"])
+
+            if claims[cand["id"]] > 1:
+                r["status"] = "NAME_AMBIGUOUS"
+                r["reason"] = f"同じ求職者を指す候補フォルダが複数({claims[cand['id']]}件)"
+            elif not emp_sn:
+                r["status"] = "NAME_AMBIGUOUS"
+                r["reason"] = "担当CA未設定"
+            elif emp_sn != folder_sn:
+                r["status"] = "NAME_AMBIGUOUS"
+                r["reason"] = f"担当CA姓不一致(portal={emp_sn} / フォルダ={folder_sn})"
+            elif cand.get("onedrive_folder_url"):
+                r["status"] = "NAME_AMBIGUOUS"
+                r["reason"] = "既にURL登録済み"
+            else:
+                r["status"] = "NAME_CA_MATCH"
+                r["reason"] = f"氏名完全一致＋担当CA姓一致({emp_sn})"
+                r["registrable"] = "1"
+
+        for r in results:
+            r.setdefault("reason", "")
+
         write_csv(OUT_MATCH, list(results[0].keys()), results)
 
         counts: dict[str, int] = defaultdict(int)
         for r in results:
             counts[r["status"]] += 1
         order = ["MATCH_NAME_OK", "MATCH_NAME_MISMATCH", "DUPLICATE_FOLDER",
-                 "NO_NUMBER", "NOT_IN_PORTAL"]
+                 "NAME_CA_MATCH", "NAME_AMBIGUOUS", "NAME_NOT_FOUND", "NOT_IN_PORTAL"]
+        registrable_statuses = ("MATCH_NAME_OK", "NAME_CA_MATCH")
 
         print()
         print("=== 突合サマリ（全体） ===")
         for k in order:
-            mark = "  ← 登録対象" if k == "MATCH_NAME_OK" else ""
+            mark = "  ← 登録対象" if k in registrable_statuses else ""
             print(f"  {k:<20} {counts.get(k, 0):>5}{mark}")
         print(f"  {'合計':<18} {len(results):>5}")
 
@@ -273,6 +367,43 @@ def main() -> int:
             print()
             print("[NG] MATCH_NAME_OK が 0 件です。氏名正規化ロジックの不具合を疑ってください。")
             return 1
+
+        # ---------------- Phase 2-C の内訳 ----------------
+        print()
+        print("=== Phase 2-C: 番号なしフォルダ（旧 NO_NUMBER）の再分類 ===")
+        ca_match = [r for r in results if r["status"] == "NAME_CA_MATCH"]
+        ambiguous = [r for r in results if r["status"] == "NAME_AMBIGUOUS"]
+        not_found = [r for r in results if r["status"] == "NAME_NOT_FOUND"]
+        print(f"  NAME_CA_MATCH   {len(ca_match):>5}  ← 登録対象")
+        print(f"  NAME_AMBIGUOUS  {len(ambiguous):>5}")
+        print(f"  NAME_NOT_FOUND  {len(not_found):>5}")
+        print(f"  {'合計':<14} {len(ca_match) + len(ambiguous) + len(not_found):>5}")
+
+        if not ca_match:
+            print()
+            print("[NG] NAME_CA_MATCH が 0 件です。氏名正規化・付記除去ロジックの不具合を疑ってください。")
+            return 1
+
+        print()
+        print(f"--- NAME_CA_MATCH 全件（{len(ca_match)} 件・登録する） ---")
+        print("  {:<16} {:<12} {:<10} {}".format("portal氏名", "担当CA", "ステータス", "フォルダパス"))
+        for r in sorted(ca_match, key=lambda x: x["relative_path"]):
+            print("  {:<16} {:<12} {:<10} {}".format(
+                r["portal_name"], r["portal_employee"], r["portal_support_status"],
+                r["relative_path"]))
+
+        print()
+        print(f"--- NAME_AMBIGUOUS 全件（{len(ambiguous)} 件・登録しない） ---")
+        print("  {:<40} {}".format("除外理由", "フォルダパス"))
+        for r in sorted(ambiguous, key=lambda x: (x["reason"], x["relative_path"])):
+            print("  {:<40} {}".format(r["reason"], r["relative_path"]))
+
+        print()
+        print(f"--- NAME_NOT_FOUND（{len(not_found)} 件・登録しない） ---")
+        for r in not_found[:20]:
+            print(f"  {r['folder_name']}    ({r['relative_path']})")
+        if len(not_found) > 20:
+            print(f"  ... 他 {len(not_found) - 20} 件（総件数 {len(not_found)}）")
 
         per_ca: dict[str, int] = defaultdict(int)
         for r in results:
@@ -284,8 +415,13 @@ def main() -> int:
             print(f"  {ca:<10} {per_ca[ca]:>5}")
 
         # ---------------- 重点対象 ----------------
-        ok_by_number = {r["candidate_no"]: r for r in results if r["status"] == "MATCH_NAME_OK"}
-        any_folder_numbers = set(folders_by_number.keys())
+        # 登録される（＝URLが付く）求職者番号。Phase 2-C の氏名＋担当CA一致も含める
+        ok_by_number = {r["candidate_no"]: r for r in results
+                        if r["status"] in registrable_statuses and r["candidate_no"]}
+        any_folder_numbers = set(folders_by_number.keys()) | {
+            r["candidate_no"] for r in results
+            if r["status"] in ("NAME_CA_MATCH", "NAME_AMBIGUOUS") and r["candidate_no"]
+        }
 
         def focus_report(label: str, pred) -> None:
             focus = [c for c in portal if pred(c)]
@@ -342,26 +478,41 @@ def main() -> int:
                        lambda c: c.get("support_status") == ACTIVE_STATUS, limit=40)
 
         # ---------------- 更新対象 / バックアップ ----------------
-        targets = []
-        for r in results:
-            if r["status"] != "MATCH_NAME_OK":
-                continue
-            cand = by_number[r["candidate_no"]]
-            if cand.get("onedrive_folder_url"):
-                continue  # 既に値がある行は触らない
-            targets.append({
-                "id": cand["id"],
-                "candidate_number": cand["candidate_number"],
-                "onedrive_folder_url_before": cand.get("onedrive_folder_url") or "",
-                "onedrive_folder_url_after": r["generated_url"],
-            })
+        # Phase 2-B（番号一致＋氏名検証）と Phase 2-C（番号なし・氏名完全一致＋担当CA姓一致）で
+        # バックアップCSVを分ける。空のときは書き出さない（過去フェーズのCSVを潰さないため）。
+        by_id = {c["id"]: c for c in portal}
 
-        write_csv(OUT_BACKUP,
-                  ["id", "candidate_number", "onedrive_folder_url_before", "onedrive_folder_url_after"],
-                  targets)
+        def collect(status: str) -> list[dict]:
+            out = []
+            for r in results:
+                if r["status"] != status or not r["portal_candidate_id"]:
+                    continue
+                cand = by_id[r["portal_candidate_id"]]
+                if cand.get("onedrive_folder_url"):
+                    continue  # 既に値がある行は触らない
+                out.append({
+                    "id": cand["id"],
+                    "candidate_number": cand["candidate_number"],
+                    "onedrive_folder_url_before": cand.get("onedrive_folder_url") or "",
+                    "onedrive_folder_url_after": r["generated_url"],
+                })
+            return out
+
+        fields_bk = ["id", "candidate_number",
+                     "onedrive_folder_url_before", "onedrive_folder_url_after"]
+        targets_b = collect("MATCH_NAME_OK")
+        targets_c = collect("NAME_CA_MATCH")
+        targets = targets_b + targets_c
+
         print()
-        print(f"[OK] 更新対象 {len(targets)} 件（うち更新前が非nullのもの 0 件になるよう除外済み）")
-        print(f"[OK] バックアップ: {OUT_BACKUP}")
+        for label, tg, path in (("Phase 2-B (MATCH_NAME_OK)", targets_b, OUT_BACKUP),
+                                ("Phase 2-C (NAME_CA_MATCH)", targets_c, OUT_BACKUP_C)):
+            if tg:
+                write_csv(path, fields_bk, tg)
+                print(f"[OK] {label} 更新対象 {len(tg)} 件 / バックアップ: {path}")
+            else:
+                print(f"[i] {label} 更新対象 0 件（登録済み）。バックアップCSVは書き換えていません。")
+        print(f"[OK] 今回の更新対象 合計 {len(targets)} 件")
 
         if not args.execute:
             print()
@@ -369,7 +520,7 @@ def main() -> int:
             return 0
 
         # ---------------- 本番 UPDATE ----------------
-        updated = 0
+        before_cnt = sum(1 for c in portal if c.get("onedrive_folder_url"))
         with conn:
             with conn.cursor() as cur:
                 psycopg2.extras.execute_batch(
@@ -380,10 +531,39 @@ def main() -> int:
                     page_size=500,
                 )
                 cur.execute("SELECT count(*) FROM candidates WHERE onedrive_folder_url IS NOT NULL")
-                updated = cur.fetchone()[0]
+                after_cnt = cur.fetchone()[0]
+        expected = before_cnt + len(targets)
         print()
-        print(f"[OK] UPDATE 実行。onedrive_folder_url が非null のレコード: {updated} 件")
-        print(f"     更新対象件数 {len(targets)} 件と{'一致' if updated == len(targets) else '不一致（要確認）'}")
+        print(f"[OK] UPDATE 実行。非null レコード: {before_cnt} → {after_cnt} 件")
+        print(f"     期待値 {before_cnt} + {len(targets)} = {expected} と"
+              f"{'一致' if after_cnt == expected else '不一致（要確認）'}")
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT count(*) FILTER (WHERE onedrive_folder_url IS NOT NULL) AS with_url, "
+                "count(*) AS total FROM candidates WHERE support_status = %s",
+                (ACTIVE_STATUS,),
+            )
+            row = cur.fetchone()
+            rate = row["with_url"] / row["total"] * 100 if row["total"] else 0.0
+            print()
+            print("=== 支援中(ACTIVE) カバー率（更新後・DB実測） ===")
+            print(f"  {row['with_url']} / {row['total']} = {rate:.1f} %")
+
+            cur.execute(
+                "SELECT c.candidate_number, c.name, e.name AS employee_name, c.support_status "
+                "FROM candidates c LEFT JOIN employees e ON e.id = c.employee_id "
+                "WHERE c.support_status = %s AND c.onedrive_folder_url IS NULL "
+                "ORDER BY c.candidate_number",
+                (ACTIVE_STATUS,),
+            )
+            rest = cur.fetchall()
+            print()
+            print(f"=== 支援中でまだURLが付いていない人 全件（{len(rest)} 件） ===")
+            print("  {:<10} {:<16} {:<12} {}".format("番号", "portal氏名", "担当CA", "ステータス"))
+            for c in rest:
+                print("  {:<10} {:<16} {:<12} {}".format(
+                    c["candidate_number"], c["name"], c["employee_name"] or "-", c["support_status"]))
         return 0
     finally:
         conn.close()
