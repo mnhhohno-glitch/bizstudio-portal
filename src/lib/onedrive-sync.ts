@@ -26,6 +26,7 @@ import {
   GraphError,
   ONEDRIVE_WRITE_ROOT,
   assertOneDriveWritePath,
+  getDriveItemByPath,
   listChildrenByPath,
   uploadFileByPath,
 } from "@/lib/microsoft-graph";
@@ -369,6 +370,48 @@ export interface RunOneDriveSyncParams {
   mimeType?: string | null;
 }
 
+/**
+ * 外部 I/O（Graph / Google Drive）の差し替え口。既定は実物。
+ * テストから「アップロードが呼ばれないこと」を確かめるためだけに存在する差し込み点であり、
+ * 本番コードから deps を渡す想定は無い。
+ */
+export interface OneDriveSyncDeps {
+  getDriveItemByPath: typeof getDriveItemByPath;
+  listChildrenByPath: typeof listChildrenByPath;
+  uploadFileByPath: typeof uploadFileByPath;
+  downloadFileFromDrive: typeof downloadFileFromDrive;
+}
+
+const DEFAULT_ONEDRIVE_SYNC_DEPS: OneDriveSyncDeps = {
+  getDriveItemByPath,
+  listChildrenByPath,
+  uploadFileByPath,
+  downloadFileFromDrive,
+};
+
+/** attemptOneDriveSync に渡す CandidateFile の必要項目（DB 依存を切り離すためのフラットな形）。 */
+export interface OneDriveSyncFile {
+  id: string;
+  candidateId: string;
+  category: CandidateFileCategory | string;
+  fileName: string;
+  mimeType: string | null;
+  driveFileId: string | null;
+  oneDriveFolderUrl: string | null;
+}
+
+/** attemptOneDriveSync の結果。record=false なら OneDriveSyncLog を一切触らない。 */
+export interface OneDriveSyncAttempt {
+  record: boolean;
+  status: OneDriveSyncStatus;
+  skipReason: OneDriveSyncSkipReason | null;
+  targetPath: string | null;
+  targetItemId: string | null;
+  siblingFolders?: string[];
+  countAttempt?: boolean;
+  errorMessage: string | null;
+}
+
 export interface OneDriveSyncOutcome {
   status: OneDriveSyncStatus;
   skipReason: OneDriveSyncSkipReason | null;
@@ -394,17 +437,33 @@ function outcome(
 
 /**
  * Graph の例外 → (status, skipReason) の対応。
- *   409 nameAlreadyExists → SKIPPED   上書きしないのが仕様。再試行しても同じ結果
+ *
+ * ★分け方の基準は「再試行すれば直る見込みがあるか」の一点。
+ *   FAILED は夜間処理（Phase 2-c）が最大 ONEDRIVE_SYNC_MAX_ATTEMPTS 回まで拾い直す対象になり、
+ *   SKIPPED は二度と拾わない。何度送っても同じ結果になるものを FAILED にすると、
+ *   5回試して GIVEN_UP になるだけの無駄な往復を毎晩発生させる。
+ *
+ *   400 bad request       → SKIPPED   壊れたファイル名など。同じ入力を送る限り永遠に 400
  *   404 itemNotFound      → SKIPPED   サブフォルダが無い。フォルダは作らない（確定仕様）
+ *   409 nameAlreadyExists → SKIPPED   上書きしないのが仕様。再試行しても同じ結果
  *   401 / 403             → FAILED    シークレット失効・権限剥奪。直せば通るので再試行対象
- *   429                   → FAILED    スロットリング
- *   その他                 → FAILED    5xx 等
+ *   429                   → FAILED    スロットリング。時間を空ければ通る
+ *   その他                 → FAILED    5xx・ネットワーク断。時間を空ければ通る
+ *
+ *   skipReason は status と直交する（GRAPH_ERROR は SKIPPED 側にも FAILED 側にも出る）。
+ *   「恒久的な Graph エラー」と「一時的な Graph エラー」の区別は status 側が持つ。
  */
 function classifyGraphError(e: unknown): {
   status: OneDriveSyncStatus;
   skipReason: OneDriveSyncSkipReason;
 } {
   if (e instanceof GraphError) {
+    if (e.status === 400) {
+      return {
+        status: OneDriveSyncStatus.SKIPPED,
+        skipReason: OneDriveSyncSkipReason.GRAPH_ERROR,
+      };
+    }
     if (e.status === 409) {
       return {
         status: OneDriveSyncStatus.SKIPPED,
@@ -441,13 +500,180 @@ function classifyGraphError(e: unknown): {
  * 「2.求人 が無い」と言われた CA が、ではどこへ手で入れればよいかを画面で判断できるようにするため。
  * ここで更に失敗しても本流には影響させない（空配列で返す）。
  */
-async function fetchSiblingFolders(upn: string, candidateFolderPath: string): Promise<string[]> {
+async function fetchSiblingFolders(
+  deps: OneDriveSyncDeps,
+  upn: string,
+  candidateFolderPath: string,
+): Promise<string[]> {
   try {
-    const children = await listChildrenByPath(upn, candidateFolderPath);
+    // 求職者フォルダ自体が無いときは listChildrenByPath が null を返す → 空配列。
+    // 「フォルダ階層がまるごと無い」も NO_SUBFOLDER として、siblingFolders 空で記録する。
+    const children = await deps.listChildrenByPath(upn, candidateFolderPath);
     return (children ?? []).filter((c) => c.folder).map((c) => c.name);
   } catch (e) {
     console.error("[onedrive-sync] 兄弟フォルダの列挙に失敗（記録は続行）:", e);
     return [];
+  }
+}
+
+function attempt(
+  record: boolean,
+  status: OneDriveSyncStatus,
+  skipReason: OneDriveSyncSkipReason | null,
+  extra: Partial<OneDriveSyncAttempt> = {},
+): OneDriveSyncAttempt {
+  return {
+    record,
+    status,
+    skipReason,
+    targetPath: null,
+    targetItemId: null,
+    errorMessage: null,
+    ...extra,
+  };
+}
+
+/**
+ * 1件ぶんのコピー判断と実行。DB には一切触らない（記録は呼び出し元 runOneDriveSyncForFile の責務）。
+ *
+ * 処理順は「通信しない判定 → キルスイッチ → **投入先フォルダの実在確認** → 本体取得 → アップロード」。
+ *
+ * ★フォルダ実在確認を省いてはいけない（T-159 有効化テストで判明した最重要の前提）。
+ *   当初は「サブフォルダが無ければ Graph が 404 を返す」と考えていたが、これは**誤り**だった。
+ *   Graph のパス指定アップロード（PUT :/content）は、**存在しない中間フォルダを暗黙に作成する**。
+ *   実際に `2.求人` が無い求職者へ送ったところ、Graph が `2.求人` を新規作成してそこへ格納した
+ *   （作成されたフォルダの createdBy.application.id が MS_GRAPH_CLIENT_ID と一致）。
+ *   404 itemNotFound が返るのは**読み取りのみ**であり、conflictBehavior=fail は**同名ファイルにしか効かない**。
+ *   したがって「送ってから 404 を見る」方式では OneDrive を汚す。必ず送る前に GET で確かめる。
+ *   この確認で Graph への往復が1回増えるが、意図しないフォルダ作成を防ぐために必須とする。
+ */
+export async function attemptOneDriveSync(
+  file: OneDriveSyncFile,
+  params: { content?: Buffer | null; mimeType?: string | null } = {},
+  depsOverride: Partial<OneDriveSyncDeps> = {},
+): Promise<OneDriveSyncAttempt> {
+  const deps: OneDriveSyncDeps = { ...DEFAULT_ONEDRIVE_SYNC_DEPS, ...depsOverride };
+
+  // --- 1) 書き込み先の決定（通信しない） ---
+  let target: OneDriveTargetResult;
+  try {
+    target = buildOneDriveTargetPath({
+      oneDriveFolderUrl: file.oneDriveFolderUrl,
+      category: file.category,
+      fileName: file.fileName,
+    });
+  } catch (e) {
+    // 書き込み先ガードに当たったケース（ファイル名に ".." が含まれる等）。Graph へは 1 バイトも送っていない。
+    // ★SKIPPED にする。同じ CandidateFile を再試行しても入力（ファイル名）が変わらない以上、
+    //   何度やっても同じガードに当たる。FAILED にすると夜間処理が5回無駄に拾う。
+    return attempt(true, OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.GRAPH_ERROR, {
+      errorMessage: `書き込み先ガードで中止: ${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
+  if (!target.ok) {
+    return attempt(true, OneDriveSyncStatus.SKIPPED, target.skipReason, {
+      errorMessage: target.detail,
+    });
+  }
+
+  // --- 2) キルスイッチ ---
+  // ★false のときは PENDING のまま何もしない（SKIPPED にはしない）。有効化後に夜間処理が拾えるようにするため。
+  //   ここで return するので Graph へは 1 バイトも送らない。
+  if (!isOneDriveSyncEnabled()) {
+    return attempt(false, OneDriveSyncStatus.PENDING, null, { targetPath: target.targetPath });
+  }
+
+  const upn = process.env.ONEDRIVE_OWNER_UPN;
+  if (!upn) {
+    return attempt(true, OneDriveSyncStatus.FAILED, OneDriveSyncSkipReason.AUTH_ERROR, {
+      targetPath: target.targetPath,
+      errorMessage: "ONEDRIVE_OWNER_UPN が未設定です",
+    });
+  }
+
+  // --- 3) 投入先フォルダの実在確認（アップロードより前・必須） ---
+  //   本体取得より前に置く。無いと分かっているのに Google Drive から数MB落とすのは無駄なため。
+  let folderItem: Awaited<ReturnType<typeof getDriveItemByPath>>;
+  try {
+    folderItem = await deps.getDriveItemByPath(upn, target.folderPath);
+  } catch (e) {
+    // 読み取りで 404 以外（401/429/5xx 等）。getDriveItemByPath は 404 だけ null に畳んでいる。
+    const { status, skipReason } = classifyGraphError(e);
+    return attempt(true, status, skipReason, {
+      targetPath: target.targetPath,
+      countAttempt: true,
+      errorMessage: `投入先フォルダの確認に失敗: ${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
+  // 無い（求職者フォルダごと無い場合も含む）／同名の非フォルダがある → 書かない。フォルダは作らない。
+  if (!folderItem || !folderItem.folder) {
+    const siblingFolders = await fetchSiblingFolders(deps, upn, target.candidateFolderPath);
+    return attempt(true, OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_SUBFOLDER, {
+      targetPath: target.targetPath,
+      siblingFolders,
+      countAttempt: true,
+      errorMessage: folderItem
+        ? `投入先パスがフォルダではありません: ${target.folderPath}`
+        : `投入先フォルダが存在しません: ${target.folderPath}`,
+    });
+  }
+
+  // --- 4) ファイル本体 ---
+  let content = params.content ?? null;
+  let mimeType = params.mimeType ?? file.mimeType ?? "application/octet-stream";
+  if (!content) {
+    if (!file.driveFileId) {
+      return attempt(true, OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
+        targetPath: target.targetPath,
+        errorMessage: "driveFileId が null（実体を持たない行）",
+      });
+    }
+    try {
+      const downloaded = await deps.downloadFileFromDrive(file.driveFileId);
+      content = Buffer.from(downloaded.base64, "base64");
+      mimeType = downloaded.mimeType || mimeType;
+    } catch (e) {
+      return attempt(true, OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
+        targetPath: target.targetPath,
+        errorMessage: `Google Drive から本体を取得できません: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }
+  if (content.length === 0) {
+    return attempt(true, OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
+      targetPath: target.targetPath,
+      errorMessage: "ファイル本体が0バイトです",
+    });
+  }
+
+  // --- 5) アップロード（同名は上書きせず 409 で弾かれる） ---
+  try {
+    const item = await deps.uploadFileByPath({
+      upn,
+      folderPath: target.folderPath,
+      fileName: file.fileName,
+      content,
+      mimeType,
+      conflictBehavior: "fail",
+    });
+    return attempt(true, OneDriveSyncStatus.SUCCESS, null, {
+      targetPath: target.targetPath,
+      targetItemId: item.id,
+      countAttempt: true,
+    });
+  } catch (e) {
+    const { status, skipReason } = classifyGraphError(e);
+    // 4) で実在を確かめた直後の 404 は、確認とアップロードの間にフォルダが消えた場合のみ起こる。
+    const siblingFolders =
+      skipReason === OneDriveSyncSkipReason.NO_SUBFOLDER
+        ? await fetchSiblingFolders(deps, upn, target.candidateFolderPath)
+        : undefined;
+    return attempt(true, status, skipReason, {
+      targetPath: target.targetPath,
+      siblingFolders,
+      countAttempt: true,
+      errorMessage: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
@@ -456,13 +682,10 @@ async function fetchSiblingFolders(upn: string, candidateFolderPath: string): Pr
  *
  * ★この関数は例外を投げない。すべて内部で捕捉して OneDriveSyncLog に記録し、正常終了する。
  *   呼び出し元（アップロード API）の成否に影響してはならないのが T-159 の最優先要件。
- *
- * 処理順は「通信しない判定 → キルスイッチ → 本体取得 → アップロード」。
- * キルスイッチをカテゴリ・URL判定より後ろに置いているのは、停止中でも「そもそも対象外」だけは
- * 確定させておけるため（どちらも通信を伴わない）。
  */
 export async function runOneDriveSyncForFile(
   params: RunOneDriveSyncParams,
+  depsOverride: Partial<OneDriveSyncDeps> = {},
 ): Promise<OneDriveSyncOutcome> {
   const { candidateFileId } = params;
 
@@ -487,122 +710,39 @@ export async function runOneDriveSyncForFile(
       });
     }
 
-    const record = async (
-      status: OneDriveSyncStatus,
-      skipReason: OneDriveSyncSkipReason | null,
-      extra: {
-        targetPath?: string | null;
-        targetItemId?: string | null;
-        siblingFolders?: string[];
-        countAttempt?: boolean;
-        errorMessage?: string | null;
-      } = {},
-    ): Promise<OneDriveSyncOutcome> => {
+    const result = await attemptOneDriveSync(
+      {
+        id: file.id,
+        candidateId: file.candidateId,
+        category: file.category,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        driveFileId: file.driveFileId,
+        oneDriveFolderUrl: file.candidate.oneDriveFolderUrl,
+      },
+      { content: params.content, mimeType: params.mimeType },
+      depsOverride,
+    );
+
+    if (result.record) {
       await upsertOneDriveSyncLog({
         candidateFileId: file.id,
         candidateId: file.candidateId,
-        status,
-        skipReason,
-        ...extra,
-      });
-      return outcome(status, skipReason, {
-        targetPath: extra.targetPath ?? null,
-        targetItemId: extra.targetItemId ?? null,
-        errorMessage: extra.errorMessage ?? null,
-      });
-    };
-
-    // --- 1) 書き込み先の決定（通信しない） ---
-    let target: OneDriveTargetResult;
-    try {
-      target = buildOneDriveTargetPath({
-        oneDriveFolderUrl: file.candidate.oneDriveFolderUrl,
-        category: file.category,
-        fileName: file.fileName,
-      });
-    } catch (e) {
-      // 書き込み先ガードに当たったケース（ファイル名に ".." が含まれる等）。Graph へは 1 バイトも送っていない。
-      return record(OneDriveSyncStatus.FAILED, OneDriveSyncSkipReason.GRAPH_ERROR, {
-        errorMessage: `書き込み先ガードで中止: ${e instanceof Error ? e.message : String(e)}`,
-      });
-    }
-    if (!target.ok) {
-      return record(OneDriveSyncStatus.SKIPPED, target.skipReason, {
-        errorMessage: target.detail,
+        status: result.status,
+        skipReason: result.skipReason,
+        targetPath: result.targetPath,
+        targetItemId: result.targetItemId,
+        siblingFolders: result.siblingFolders,
+        countAttempt: result.countAttempt,
+        errorMessage: result.errorMessage,
       });
     }
 
-    // --- 2) キルスイッチ ---
-    // ★false のときは PENDING のまま何もしない（SKIPPED にはしない）。有効化後に夜間処理が拾えるようにするため。
-    //   ここで return するので Graph へは 1 バイトも送らない。
-    if (!isOneDriveSyncEnabled()) {
-      return outcome(OneDriveSyncStatus.PENDING, null, { targetPath: target.targetPath });
-    }
-
-    const upn = process.env.ONEDRIVE_OWNER_UPN;
-    if (!upn) {
-      return record(OneDriveSyncStatus.FAILED, OneDriveSyncSkipReason.AUTH_ERROR, {
-        targetPath: target.targetPath,
-        errorMessage: "ONEDRIVE_OWNER_UPN が未設定です",
-      });
-    }
-
-    // --- 3) ファイル本体 ---
-    let content = params.content ?? null;
-    let mimeType = params.mimeType ?? file.mimeType ?? "application/octet-stream";
-    if (!content) {
-      if (!file.driveFileId) {
-        return record(OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
-          targetPath: target.targetPath,
-          errorMessage: "driveFileId が null（実体を持たない行）",
-        });
-      }
-      try {
-        const downloaded = await downloadFileFromDrive(file.driveFileId);
-        content = Buffer.from(downloaded.base64, "base64");
-        mimeType = downloaded.mimeType || mimeType;
-      } catch (e) {
-        return record(OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
-          targetPath: target.targetPath,
-          errorMessage: `Google Drive から本体を取得できません: ${e instanceof Error ? e.message : String(e)}`,
-        });
-      }
-    }
-    if (content.length === 0) {
-      return record(OneDriveSyncStatus.SKIPPED, OneDriveSyncSkipReason.NO_FILE_BODY, {
-        targetPath: target.targetPath,
-        errorMessage: "ファイル本体が0バイトです",
-      });
-    }
-
-    // --- 4) アップロード（同名は上書きせず 409 で弾かれる） ---
-    try {
-      const item = await uploadFileByPath({
-        upn,
-        folderPath: target.folderPath,
-        fileName: file.fileName,
-        content,
-        mimeType,
-        conflictBehavior: "fail",
-      });
-      return record(OneDriveSyncStatus.SUCCESS, null, {
-        targetPath: target.targetPath,
-        targetItemId: item.id,
-        countAttempt: true,
-      });
-    } catch (e) {
-      const { status, skipReason } = classifyGraphError(e);
-      const siblingFolders =
-        skipReason === OneDriveSyncSkipReason.NO_SUBFOLDER
-          ? await fetchSiblingFolders(upn, target.candidateFolderPath)
-          : undefined;
-      return record(status, skipReason, {
-        targetPath: target.targetPath,
-        siblingFolders,
-        countAttempt: true,
-        errorMessage: e instanceof Error ? e.message : String(e),
-      });
-    }
+    return outcome(result.status, result.skipReason, {
+      targetPath: result.targetPath,
+      targetItemId: result.targetItemId,
+      errorMessage: result.errorMessage,
+    });
   } catch (e) {
     // 記録そのものに失敗した場合（DB断など）。ここで throw すると呼び出し元に波及するので握り潰す。
     console.error("[onedrive-sync] 同期処理で想定外の例外（呼び出し元には影響させない）:", e);

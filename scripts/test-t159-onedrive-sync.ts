@@ -14,14 +14,22 @@
  * 終了コード: 全件パス=0 / 1件でも失敗=1
  */
 
-import { CandidateFileCategory, OneDriveSyncSkipReason } from "@prisma/client";
 import {
+  CandidateFileCategory,
+  OneDriveSyncSkipReason,
+  OneDriveSyncStatus,
+} from "@prisma/client";
+import type { DriveItem } from "@/lib/microsoft-graph";
+import {
+  GraphError,
   ONEDRIVE_WRITE_ROOT,
   assertOneDriveWritePath,
   drivePathFromParentReference,
 } from "@/lib/microsoft-graph";
+import type { OneDriveSyncDeps, OneDriveSyncFile } from "@/lib/onedrive-sync";
 import {
   ONEDRIVE_SYNC_MAX_ATTEMPTS,
+  attemptOneDriveSync,
   buildOneDriveTargetPath,
   isOneDriveSyncEnabled,
   nextOneDriveRetryAt,
@@ -334,5 +342,245 @@ eq("1000文字ちょうどはそのまま", truncateErrorMessage("あ".repeat(10
 eq("1001文字は1000文字に切る", truncateErrorMessage("あ".repeat(1001))?.length, 1000);
 
 // ============================================================
-console.log(`\n===== 結果: ${passed} passed / ${failed} failed =====\n`);
-process.exit(failed === 0 ? 0 : 1);
+// 以降は attemptOneDriveSync（実行本体）のテスト。
+// Graph / Google Drive はすべて差し替える。ネットワーク・DB には触らない。
+// ============================================================
+
+/** 呼び出し回数を数えられる差し替え deps。 */
+function makeDeps(overrides: {
+  folder?: DriveItem | null | (() => never);
+  children?: DriveItem[] | null;
+  upload?: () => DriveItem;
+}) {
+  const calls = { getDriveItemByPath: 0, listChildrenByPath: 0, uploadFileByPath: 0, download: 0 };
+  const deps: Partial<OneDriveSyncDeps> = {
+    getDriveItemByPath: async () => {
+      calls.getDriveItemByPath++;
+      const f = overrides.folder;
+      return typeof f === "function" ? f() : (f ?? null);
+    },
+    listChildrenByPath: async () => {
+      calls.listChildrenByPath++;
+      return overrides.children ?? null;
+    },
+    uploadFileByPath: async () => {
+      calls.uploadFileByPath++;
+      if (overrides.upload) return overrides.upload();
+      return { id: "ITEM-OK", name: "uploaded.pdf" };
+    },
+    downloadFileFromDrive: async () => {
+      calls.download++;
+      throw new Error("テストでは Google Drive を叩かない（content を渡すこと）");
+    },
+  };
+  return { deps, calls };
+}
+
+const FOLDER_ITEM: DriveItem = { id: "FOLDER-1", name: "2.求人", folder: { childCount: 3 } };
+
+function testFile(overrides: Partial<OneDriveSyncFile> = {}): OneDriveSyncFile {
+  return {
+    id: "cf_test",
+    candidateId: "cand_test",
+    category: CandidateFileCategory.BOOKMARK,
+    fileName: "求人票_テスト.pdf",
+    mimeType: "application/pdf",
+    driveFileId: "drive_1",
+    oneDriveFolderUrl: URL_5008266,
+    ...overrides,
+  };
+}
+
+const CONTENT = Buffer.from("%PDF-1.4 test");
+
+function graphError(status: number, code: string): GraphError {
+  return new GraphError(status, code, `Graph ${status} ${code}`, "{}");
+}
+
+async function main() {
+  // 実行本体のテストは有効化状態が前提。終わったら元に戻す。
+  const savedEnabled = process.env.ONEDRIVE_SYNC_ENABLED;
+  const savedUpn = process.env.ONEDRIVE_OWNER_UPN;
+  process.env.ONEDRIVE_SYNC_ENABLED = "true";
+  process.env.ONEDRIVE_OWNER_UPN = "test_owner@bizstudio.co.jp";
+
+  // ============================================================
+  console.log("\n[13] 投入先フォルダの実在確認 — 無ければ Graph へアップロードしない（最重要）");
+  console.log("     ※Graph のパス指定アップロードは存在しない中間フォルダを暗黙に作る。送る前に確かめる。");
+  // ============================================================
+  {
+    // 「2.求人 が無い」求職者。求職者フォルダ自体はあり、直下に別のフォルダが並んでいる。
+    const { deps, calls } = makeDeps({
+      folder: null,
+      children: [
+        { id: "a", name: "1.提案求人", folder: { childCount: 0 } },
+        { id: "b", name: "3.BS作成書類", folder: { childCount: 0 } },
+        { id: "c", name: "履歴書.pdf", file: { mimeType: "application/pdf" } },
+      ],
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("フォルダ404 → アップロードは呼ばれない", calls.uploadFileByPath, 0);
+    eq("フォルダ404 → 実在確認は1回だけ", calls.getDriveItemByPath, 1);
+    eq("フォルダ404 → status", r.status, OneDriveSyncStatus.SKIPPED);
+    eq("フォルダ404 → skipReason", r.skipReason, OneDriveSyncSkipReason.NO_SUBFOLDER);
+    eq("フォルダ404 → siblingFolders はフォルダのみ（ファイルは除く）", r.siblingFolders, [
+      "1.提案求人",
+      "3.BS作成書類",
+    ]);
+    eq("フォルダ404 → 記録は残す", r.record, true);
+  }
+  {
+    // 求職者フォルダ自体が存在しない（Phase 2-0 で404件確認）。listChildrenByPath は null を返す。
+    const { deps, calls } = makeDeps({ folder: null, children: null });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("求職者フォルダごと無い → アップロードは呼ばれない", calls.uploadFileByPath, 0);
+    eq("求職者フォルダごと無い → skipReason", r.skipReason, OneDriveSyncSkipReason.NO_SUBFOLDER);
+    eq("求職者フォルダごと無い → siblingFolders は空配列", r.siblingFolders, []);
+  }
+  {
+    // 同名の「ファイル」が置かれている場合もフォルダ扱いしない。
+    const { deps, calls } = makeDeps({
+      folder: { id: "x", name: "2.求人", file: { mimeType: "text/plain" } },
+      children: [],
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("投入先がフォルダでない → アップロードは呼ばれない", calls.uploadFileByPath, 0);
+    eq("投入先がフォルダでない → skipReason", r.skipReason, OneDriveSyncSkipReason.NO_SUBFOLDER);
+  }
+  {
+    // フォルダがあるときだけアップロードへ進む。
+    const { deps, calls } = makeDeps({ folder: FOLDER_ITEM });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("フォルダあり → アップロード1回", calls.uploadFileByPath, 1);
+    eq("フォルダあり → status", r.status, OneDriveSyncStatus.SUCCESS);
+    eq("フォルダあり → targetItemId", r.targetItemId, "ITEM-OK");
+    eq(
+      "フォルダあり → targetPath",
+      r.targetPath,
+      `${FOLDER_5008266}/2.求人/求人票_テスト.pdf`,
+    );
+    eq("フォルダあり → 兄弟フォルダの列挙はしない", calls.listChildrenByPath, 0);
+  }
+
+  // ============================================================
+  console.log("\n[14] 恒久失敗の分類 — 再試行しても直らないものは SKIPPED（夜間処理に拾わせない）");
+  // ============================================================
+  {
+    const { deps, calls } = makeDeps({
+      folder: FOLDER_ITEM,
+      upload: () => {
+        throw graphError(400, "invalidRequest");
+      },
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("400 → status は SKIPPED", r.status, OneDriveSyncStatus.SKIPPED);
+    eq("400 → skipReason は GRAPH_ERROR", r.skipReason, OneDriveSyncSkipReason.GRAPH_ERROR);
+    eq("400 → errorMessage に原因が残る", r.errorMessage?.includes("invalidRequest"), true);
+    eq("400 → 試行としては数える", r.countAttempt, true);
+    eq("400 → アップロードは1回試している", calls.uploadFileByPath, 1);
+  }
+  {
+    // ファイル名に ".." → buildOneDriveTargetPath 内の書き込み先ガードで中止。
+    const { deps, calls } = makeDeps({ folder: FOLDER_ITEM });
+    const r = await attemptOneDriveSync(
+      testFile({ fileName: "求人..pdf" }),
+      { content: CONTENT },
+      deps,
+    );
+    eq("ガード中止 → status は SKIPPED", r.status, OneDriveSyncStatus.SKIPPED);
+    eq("ガード中止 → skipReason は GRAPH_ERROR", r.skipReason, OneDriveSyncSkipReason.GRAPH_ERROR);
+    eq("ガード中止 → errorMessage にガード由来と分かる文言", r.errorMessage?.includes("書き込み先ガードで中止"), true);
+    eq("ガード中止 → Graph へは 1 バイトも送らない（実在確認すらしない）", calls.getDriveItemByPath, 0);
+    eq("ガード中止 → アップロードは呼ばれない", calls.uploadFileByPath, 0);
+  }
+  {
+    const { deps } = makeDeps({
+      folder: FOLDER_ITEM,
+      upload: () => {
+        throw graphError(409, "nameAlreadyExists");
+      },
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("409 → SKIPPED", r.status, OneDriveSyncStatus.SKIPPED);
+    eq("409 → NAME_ALREADY_EXISTS", r.skipReason, OneDriveSyncSkipReason.NAME_ALREADY_EXISTS);
+  }
+
+  // ============================================================
+  console.log("\n[15] 一時失敗の分類 — 再試行で直りうるものは FAILED のまま");
+  // ============================================================
+  for (const [status, code, expectedSkip] of [
+    [500, "generalException", OneDriveSyncSkipReason.GRAPH_ERROR],
+    [503, "serviceNotAvailable", OneDriveSyncSkipReason.GRAPH_ERROR],
+    [401, "unauthenticated", OneDriveSyncSkipReason.AUTH_ERROR],
+    [403, "accessDenied", OneDriveSyncSkipReason.AUTH_ERROR],
+    [429, "activityLimitReached", OneDriveSyncSkipReason.RATE_LIMITED],
+  ] as const) {
+    const { deps } = makeDeps({
+      folder: FOLDER_ITEM,
+      upload: () => {
+        throw graphError(status, code);
+      },
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq(`${status} ${code} → FAILED`, r.status, OneDriveSyncStatus.FAILED);
+    eq(`${status} ${code} → skipReason`, r.skipReason, expectedSkip);
+  }
+  {
+    // ネットワーク断（GraphError ではない素の Error）。
+    const { deps } = makeDeps({
+      folder: FOLDER_ITEM,
+      upload: () => {
+        throw new Error("fetch failed");
+      },
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("ネットワークエラー → FAILED", r.status, OneDriveSyncStatus.FAILED);
+    eq("ネットワークエラー → GRAPH_ERROR", r.skipReason, OneDriveSyncSkipReason.GRAPH_ERROR);
+  }
+  {
+    // 実在確認そのものが 5xx で落ちた場合。アップロードには進まないが FAILED（後で拾い直す）。
+    const { deps, calls } = makeDeps({
+      folder: () => {
+        throw graphError(503, "serviceNotAvailable");
+      },
+    });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("実在確認が5xx → FAILED", r.status, OneDriveSyncStatus.FAILED);
+    eq("実在確認が5xx → アップロードは呼ばれない", calls.uploadFileByPath, 0);
+  }
+
+  // ============================================================
+  console.log("\n[16] キルスイッチ停止中は Graph へ一切通信しない（PENDING 据え置き）");
+  // ============================================================
+  {
+    process.env.ONEDRIVE_SYNC_ENABLED = "false";
+    const { deps, calls } = makeDeps({ folder: FOLDER_ITEM });
+    const r = await attemptOneDriveSync(testFile(), { content: CONTENT }, deps);
+    eq("停止中 → PENDING", r.status, OneDriveSyncStatus.PENDING);
+    eq("停止中 → 記録も触らない", r.record, false);
+    eq("停止中 → 実在確認もしない", calls.getDriveItemByPath, 0);
+    eq("停止中 → アップロードもしない", calls.uploadFileByPath, 0);
+    process.env.ONEDRIVE_SYNC_ENABLED = "true";
+  }
+  {
+    // 対象外カテゴリ・URL未登録は停止中かどうかに関わらず通信前に確定する。
+    const { deps, calls } = makeDeps({ folder: FOLDER_ITEM });
+    const r = await attemptOneDriveSync(
+      testFile({ oneDriveFolderUrl: null }),
+      { content: CONTENT },
+      deps,
+    );
+    eq("URL未登録 → SKIPPED/NO_FOLDER_URL", r.skipReason, OneDriveSyncSkipReason.NO_FOLDER_URL);
+    eq("URL未登録 → 通信しない", calls.getDriveItemByPath + calls.uploadFileByPath, 0);
+  }
+
+  if (savedEnabled === undefined) delete process.env.ONEDRIVE_SYNC_ENABLED;
+  else process.env.ONEDRIVE_SYNC_ENABLED = savedEnabled;
+  if (savedUpn === undefined) delete process.env.ONEDRIVE_OWNER_UPN;
+  else process.env.ONEDRIVE_OWNER_UPN = savedUpn;
+
+  console.log(`\n===== 結果: ${passed} passed / ${failed} failed =====\n`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+void main();
