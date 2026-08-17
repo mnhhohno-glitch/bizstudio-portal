@@ -2005,7 +2005,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                   )}
                   {/* T-159 Phase 2-c: OneDrive に入っていない場合だけ出す（SUCCESS・ログ行なしは無音） */}
                   {(() => {
-                    const od = oneDriveSyncBadge(file.oneDriveSyncLog);
+                    const od = oneDriveSyncBadge(file.oneDriveSyncLog, {
+                      hasFileBody: file.driveFileId !== null,
+                    });
                     return od ? (
                       <span
                         className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${od.cls}`}

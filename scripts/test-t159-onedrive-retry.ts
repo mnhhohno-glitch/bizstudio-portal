@@ -271,6 +271,28 @@ eq(
   oneDriveSyncBadge({ status: "SKIPPED", skipReason: "GRAPH_ERROR" }),
   null,
 );
+// ★PDF実体を持たない行（サイト経由でPDF未保管の求人）は夜間処理の対象外なので、
+//   「反映待ち」を出すと永久に来ない処理を待たせることになる。黙るのが正しい。
+eq(
+  "PDF実体なし + PENDING → 何も出さない（夜間処理が拾わないので待たせない）",
+  oneDriveSyncBadge({ status: "PENDING" }, { hasFileBody: false }),
+  null,
+);
+eq(
+  "PDF実体なし + FAILED → 何も出さない",
+  oneDriveSyncBadge({ status: "FAILED" }, { hasFileBody: false }),
+  null,
+);
+eq(
+  "PDF実体あり + PENDING → 反映待ちを出す",
+  oneDriveSyncBadge({ status: "PENDING" }, { hasFileBody: true })?.label,
+  "OneDrive反映待ち",
+);
+eq(
+  "hasFileBody 未指定なら従来どおり出す（既存呼び出しの互換）",
+  oneDriveSyncBadge({ status: "PENDING" })?.label,
+  "OneDrive反映待ち",
+);
 
 console.log("\n[6] 画面バッジ — 文言と色");
 eq(

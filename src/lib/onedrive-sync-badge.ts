@@ -27,6 +27,16 @@ const YELLOW = "bg-yellow-100 text-yellow-800 border-yellow-300";
 const GRAY = "bg-gray-100 text-gray-500 border-gray-300";
 const RED = "bg-red-100 text-red-800 border-red-300";
 
+export interface OneDriveSyncBadgeOptions {
+  /**
+   * そのファイルが実体（PDF等）を持っているか。`CandidateFile.driveFileId !== null`。
+   * false のときは「反映待ち」を出さない。夜間処理は driveFileId が null の行を対象から外すので、
+   * 待っても永久にコピーされず、「そのままお待ちください」が嘘になるため
+   * （サイト経由で PDF を保管していない求人がこれに当たる）。
+   */
+  hasFileBody?: boolean;
+}
+
 /**
  * 1ファイルぶんのバッジ。出すものが無ければ null。
  *
@@ -37,11 +47,15 @@ const RED = "bg-red-100 text-red-800 border-red-300";
  */
 export function oneDriveSyncBadge(
   sync: OneDriveSyncBadgeSource | null | undefined,
+  opts: OneDriveSyncBadgeOptions = {},
 ): OneDriveSyncBadge | null {
   // ログ行が無い＝同期対象として受け付けていない（対象外カテゴリ・機能稼働前のファイル）。何も出さない。
   if (!sync) return null;
 
   if (sync.status === "SUCCESS") return null;
+
+  // コピーする実体が無い。CA に打つ手も無く、夜間処理の対象にもならないので黙る。
+  if (opts.hasFileBody === false) return null;
 
   if (sync.status === "GIVEN_UP") {
     return {

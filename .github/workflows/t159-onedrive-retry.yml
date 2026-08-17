@@ -20,10 +20,10 @@
 name: T-159 OneDrive retry (JST 02:00)
 
 on:
-  # ★スケジュールは workflow_dispatch での確認が済むまで無効。確認後にこの2行を有効化する。
-  # schedule:
-  #   # JST 02:00 = 17:00 UTC（前日）。GitHub 側の混雑で数分〜数十分遅れることがある（仕様）。
-  #   - cron: "0 17 * * *"
+  schedule:
+    # JST 02:00 = 17:00 UTC（前日）。GitHub 側の混雑で数分〜数十分遅れることがある（仕様）。
+    # ★"0 2 * * *" と書くと JST 11:00（業務時間の真ん中）に走る。UTC/JST のズレに注意。
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
