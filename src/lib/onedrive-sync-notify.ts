@@ -17,6 +17,11 @@
 import { OneDriveSyncSkipReason } from "@prisma/client";
 import { sendBotMessage } from "@/lib/lineworks";
 import type { OneDriveSyncRetrySummary } from "@/lib/onedrive-sync-retry";
+import type { OneDriveFolderUrlSyncSummary } from "@/lib/onedrive-folder-url-sync";
+import {
+  type GraphSecretExpiryEvaluation,
+  buildGraphSecretExpiryNotification,
+} from "@/lib/onedrive-graph-secret";
 
 /** 通知の送信結果。呼び出し元（API）がレスポンスに載せて GitHub Actions のログから追えるようにする。 */
 export type OneDriveNotifyResult =
@@ -88,12 +93,128 @@ export function buildOneDriveSyncNotification(
   ].join("\n");
 }
 
+// ============================================================
+// T-159 Phase 3: 夜間処理まるごと1通にまとめる
+// ============================================================
+
+/**
+ * 夜間処理の全フェーズをまとめた通知の入力。
+ *
+ * ★1通にまとめる。フェーズごとに送ると同じ深夜に3通並び、どれが本題か分からなくなる。
+ */
+export interface OneDriveNightlyNotifyInput {
+  /** 既存の拾い直し（フェーズ3）の結果。 */
+  retry: OneDriveSyncRetrySummary;
+  /** 機能1・機能2（フェーズ1・2）の結果。実行しなかった場合は null。 */
+  folderUrl: OneDriveFolderUrlSyncSummary | null;
+  /** 機能3（鍵の期限）の評価。 */
+  secret: GraphSecretExpiryEvaluation | null;
+}
+
+/**
+ * 「自動で片付いたこと」の行。0件の項目は出さない。
+ *
+ * ★これは good news だが黙らない。CA から見ると「昨日まで出ていた対応依頼が消えた」理由が
+ *   分からないため、URLが自動で付いたことは伝える必要がある。
+ */
+function autoActionLines(folderUrl: OneDriveFolderUrlSyncSummary | null): string[] {
+  if (!folderUrl) return [];
+  const lines: string[] = [];
+  if (folderUrl.register.registered > 0) {
+    lines.push(`・OneDriveフォルダの場所を自動で登録しました: ${folderUrl.register.registered}名`);
+  }
+  if (folderUrl.move.updated > 0) {
+    lines.push(
+      `・フォルダの移動に合わせてリンクを付け替えました: ${folderUrl.move.updated}名`,
+    );
+  }
+  return lines;
+}
+
+/** 人間の判断が必要な行（安全弁の作動・走査の異常）。 */
+function autoWarningLines(folderUrl: OneDriveFolderUrlSyncSummary | null): string[] {
+  if (!folderUrl) return [];
+  const lines: string[] = [];
+  if (folderUrl.abortedReason) {
+    lines.push("・OneDriveフォルダの自動確認ができませんでした（設定の確認が必要です）");
+    return lines;
+  }
+  if (folderUrl.move.blocked === "TOO_MANY_UPDATES") {
+    lines.push(
+      `・リンクの付け替えが一度に多すぎるため保留しました: ${folderUrl.move.planned}名` +
+        `（上限 ${folderUrl.move.maxUpdates}名）`,
+    );
+  }
+  if (folderUrl.move.blocked === "SCAN_UNTRUSTWORTHY" || folderUrl.scan?.trustworthy === false) {
+    lines.push("・OneDriveのフォルダ一覧が想定より少ないため、リンクの確認を見送りました");
+  }
+  return lines;
+}
+
+/**
+ * 夜間処理1回ぶんの通知文。出すものが何も無ければ null（＝送らない）。
+ *
+ * 送る条件は「CA か運用者が読んで何かが変わること」がある晩だけ:
+ *   - 対応が必要なものがある（既存の判定）
+ *   - 自動で登録・付け替えが起きた
+ *   - 安全弁が作動した
+ *   - 鍵の期限が節目に来た／切れている
+ */
+export function buildOneDriveNightlyNotification(
+  input: OneDriveNightlyNotifyInput,
+  at: Date = new Date(),
+): string | null {
+  const blocks: string[] = [];
+
+  const retryBlock = buildOneDriveSyncNotification(input.retry, at);
+  const autoLines = autoActionLines(input.folderUrl);
+  const warnLines = autoWarningLines(input.folderUrl);
+
+  if (retryBlock) {
+    blocks.push(retryBlock);
+  } else if (autoLines.length > 0 || warnLines.length > 0) {
+    // 対応依頼が無い晩でも、自動で動いたことだけは日付つきで伝える。
+    blocks.push(
+      [
+        `OneDriveへの書類コピー（${jstMonthDay(at)} 深夜分）`,
+        "",
+        `コピー完了: ${input.retry.success}件`,
+      ].join("\n"),
+    );
+  }
+
+  if (autoLines.length > 0) {
+    blocks.push(["自動で対応したこと", ...autoLines].join("\n"));
+  }
+  if (warnLines.length > 0) {
+    blocks.push(["確認が必要です", ...warnLines].join("\n"));
+  }
+
+  const secretBlock = input.secret ? buildGraphSecretExpiryNotification(input.secret) : null;
+  if (secretBlock) blocks.push(secretBlock);
+
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
+}
+
+/** 夜間処理まるごとの結果を1通送る。例外は投げず結果を返す。 */
+export async function notifyOneDriveNightlyResult(
+  input: OneDriveNightlyNotifyInput,
+  at: Date = new Date(),
+): Promise<{ result: OneDriveNotifyResult; message: string | null }> {
+  return sendIfPossible(buildOneDriveNightlyNotification(input, at));
+}
+
 /** 通知を送る。送信の失敗で夜間処理そのものを失敗扱いにしないよう、例外は投げず結果を返す。 */
 export async function notifyOneDriveSyncResult(
   summary: OneDriveSyncRetrySummary,
   at: Date = new Date(),
 ): Promise<{ result: OneDriveNotifyResult; message: string | null }> {
-  const message = buildOneDriveSyncNotification(summary, at);
+  return sendIfPossible(buildOneDriveSyncNotification(summary, at));
+}
+
+async function sendIfPossible(
+  message: string | null,
+): Promise<{ result: OneDriveNotifyResult; message: string | null }> {
   if (!message) return { result: "SKIPPED_NO_ACTION", message: null };
 
   const botId = process.env.LINEWORKS_TASK_BOT_ID;

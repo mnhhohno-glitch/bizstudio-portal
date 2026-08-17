@@ -536,6 +536,8 @@ model Candidate {
   tasks                  Task[]
   files                  CandidateFile[]
   oneDriveSyncLogs       OneDriveSyncLog[]
+  // T-159 Phase 3: 「oneDriveFolderUrl を自動処理が設定した」ことの台帳（手貼りを守るため）
+  oneDriveFolderUrlLedger OneDriveFolderUrlLedger?
   advisorSessions        AdvisorChatSession[]
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
@@ -3188,4 +3190,37 @@ model OneDriveSyncLog {
   @@index([status]) // 拾い直し cron が PENDING / FAILED を拾うため
   @@index([candidateId]) // 求職者ごとの状態表示のため
   @@map("onedrive_sync_logs")
+}
+
+/// T-159 Phase 3: `Candidate.oneDriveFolderUrl` を**自動処理が設定した**という台帳。
+///
+/// ★存在理由は1つだけ。「CA が基本情報編集から手で貼ったURLを、自動処理が二度と書き換えないこと」。
+///   フォルダ移動追随（機能2）は、この台帳に行があり、かつ `autoUrl` が
+///   `Candidate.oneDriveFolderUrl` と **byte 一致する** 求職者だけを対象にする。
+///
+/// ★列の追加（`Candidate.onedrive_folder_url_source` のような enum 1列）ではなく別テーブルにした理由:
+///   守るべきは「手貼りかどうか」ではなく「今入っている値が自動処理の産物のままかどうか」。
+///   自動登録された後で CA が手で貼り替えた場合、enum 1列だと値は AUTO のまま残り、
+///   自動処理が CA の手作業を上書きしてしまう。設定した URL 自体を控えておき、
+///   現在値との一致を都度確かめる方式なら、貼り替えは一致しなくなるので自動的に保護される。
+///   加えて、どこへ向けて設定したか（drivePath）と何回移動追随したか（moveCount）が残り、
+///   異常な書き換えに後から気付ける。
+model OneDriveFolderUrlLedger {
+  id          String    @id @default(cuid())
+  candidateId String    @unique @map("candidate_id")
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  /// 自動処理が設定した URL そのもの。現在値と食い違ったら「CA が手で貼り替えた」とみなして触らない。
+  autoUrl     String    @map("auto_url")
+  /// autoUrl が指すドライブ相対パス（監査用。URL から復元できるが、目視で追える方が事故に気付ける）。
+  drivePath   String    @map("drive_path")
+  /// 経路: "T158_BACKFILL"（T-158 一括登録分の遡り記録）/ "AUTO_SCAN"（夜間の自動登録）/ "AUTO_MOVE"（移動追随）。
+  /// enum にしないのは、値が増えるのが運用の都度でありマイグレーションを伴わせたくないため。
+  source      String
+  /// 移動追随で書き換えた回数。異常に多い行はフォルダ整理の最中か実装不具合のサイン。
+  moveCount   Int       @default(0) @map("move_count")
+  lastMovedAt DateTime? @map("last_moved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("onedrive_folder_url_ledger")
 }

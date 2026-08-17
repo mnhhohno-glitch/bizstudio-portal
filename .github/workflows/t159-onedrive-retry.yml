@@ -8,7 +8,14 @@
 #    ★ここを "0 2 * * *" と書くと JST 11:00（業務時間の真ん中）に走る。UTC/JST のズレに注意。
 #  - portal 側の /api/internal/onedrive-sync/retry を叩くだけ。処理本体は portal に置く
 #    （Graph の認証情報・Google Drive の認証情報を Actions 側に持たせないため）。
+#  - Phase 3 で同じエンドポイントに3つの処理が追加されている（★ワークフローは1本のまま）:
+#      1. OneDrive フォルダURLの自動登録（未登録の求職者のフォルダを Graph で探す）
+#      2. フォルダ移動への追随（404 のときだけ現在地を探して張り替える）
+#      4. Azure クライアントシークレットの期限通知（残り60/30/14/7/3/1日と期限超過後）
+#    順序は 1 → 2 → 3(拾い直し) → 4 → 5(通知)。1 を先に置くことで、その夜のうちに
+#    URLが付いた求職者のファイルが 3 でコピーされる（分けると丸1日遅れる）。
 #  - 二段ガード: 定時実行は dry_run=false&confirm=true。手動実行は既定 dry_run=true（件数だけ見る）。
+#    ★Phase 3 の DRY-RUN は Graph の**読み取り**は行う（フォルダの有無を確かめるため）。DBは書かない。
 #  - CA 向けの結果通知（コピー完了件数・対応が必要な件数）は portal 側が LINE WORKS の
 #    CA チャンネルへ送る。対応が必要なものが0件の晩は送らない。
 #  - この workflow 自身が失敗した（= 夜間処理が動かなかった）時だけ、死活監視と同じ経路で
@@ -111,6 +118,8 @@ jobs:
             jq -r '"mode=\(.mode) syncEnabled=\(.syncEnabled) eligible=\(.eligible) picked=\(.picked) processed=\(.processed) success=\(.success) givenUp=\(.givenUp) deferred=\(.deferred) notification=\(.notification) duration_ms=\(.durationMs)"' response.json || true
             echo "=== byStatus / bySkipReason ==="
             jq -c '{byStatus, bySkipReason, needsAttention}' response.json || true
+            echo "=== Phase 3: フォルダURLの自動登録 / 移動追随 / 鍵の期限 ==="
+            jq -c '{scan: .folderUrl.scan, register: (.folderUrl.register | del(.details)), move: (.folderUrl.move | del(.details)), folderUrlError, secret}' response.json || true
           fi
 
       # 夜間処理が動かなかったことを運用者に知らせる。CA チャンネルではなく DM。
