@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 
 export const maxDuration = 300;
 
@@ -57,19 +58,33 @@ export async function POST(
       );
 
       // Create CandidateFile record
-      await prisma.candidateFile.create({
-        data: {
-          candidateId,
-          category: category as "ORIGINAL" | "BS_DOCUMENT" | "APPLICATION" | "INTERVIEW_PREP" | "MEETING",
-          fileName: att.fileName,
-          fileSize: att.fileSize,
-          mimeType: att.mimeType,
-          driveFileId: fileId,
-          driveViewUrl: webViewLink,
-          driveFolderId: candidateFolderId,
-          uploadedByUserId: user.id,
-        },
+      // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+      const { fileRecordId, enqueued } = await prisma.$transaction(async (tx) => {
+        const created = await tx.candidateFile.create({
+          data: {
+            candidateId,
+            category: category as "ORIGINAL" | "BS_DOCUMENT" | "APPLICATION" | "INTERVIEW_PREP" | "MEETING",
+            fileName: att.fileName,
+            fileSize: att.fileSize,
+            mimeType: att.mimeType,
+            driveFileId: fileId,
+            driveViewUrl: webViewLink,
+            driveFolderId: candidateFolderId,
+            uploadedByUserId: user.id,
+          },
+          select: { id: true, category: true },
+        });
+        const accepted = await enqueueOneDriveSync(
+          { candidateFileId: created.id, candidateId, category: created.category },
+          tx,
+        );
+        return { fileRecordId: created.id, enqueued: accepted };
       });
+
+      // T-159: OneDrive へのコピーを起動する。★await しない。本体は手元の buffer をそのまま渡す。
+      if (enqueued) {
+        triggerOneDriveSync({ candidateFileId: fileRecordId, content: buffer, mimeType: att.mimeType });
+      }
 
       saved++;
     } catch (e) {

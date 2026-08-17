@@ -5,6 +5,7 @@
 // 挙動は webhook 従来実装から不変（移動のみ）。
 import { prisma } from "@/lib/prisma";
 import { sendBotMessage } from "@/lib/lineworks";
+import { enqueueOneDriveSync } from "@/lib/onedrive-sync";
 
 // 旧: タスクの重複排除窓。現在はタスク集約が未着手タスクの有無で決まるため、
 // 「既存タスク更新時に LINE 通知を再送するまでのクールダウン」として使う。
@@ -485,25 +486,35 @@ export async function ensureBookmarkForMypageResponse(params: {
   const responseStatus = RESPONSE_TO_STATUS[response];
 
   try {
-    await prisma.candidateFile.create({
-      data: {
-        candidateId,
-        category: "BOOKMARK",
-        fileName,
-        fileSize: 0,
-        mimeType: "text/plain",
-        driveFileId: null,
-        driveViewUrl: null,
-        driveFolderId: null,
-        sourceType: null, // kyuujin PDF 由来の行（externalJobRef 無し）。既存の legacy ブックマーク慣例に一致
-        externalJobRef: null,
-        kyuujinJobId,
-        origin: "candidate",
-        responseStatus,
-        responseStatusUpdatedAt: respondedAt,
-        responseSubmittedAt: respondedAt, // 旧マイページ由来＝送信済み扱い（未送信差分を作らない）
-        uploadedByUserId: systemUserId,
-      },
+    // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+    //        この行も実体（driveFileId）を持たないため、ここでは同期を起動しない
+    //        （起動しても SKIPPED(NO_FILE_BODY) にしかならない）。判定は Phase 2-c の夜間処理に委ねる。
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.candidateFile.create({
+        data: {
+          candidateId,
+          category: "BOOKMARK",
+          fileName,
+          fileSize: 0,
+          mimeType: "text/plain",
+          driveFileId: null,
+          driveViewUrl: null,
+          driveFolderId: null,
+          sourceType: null, // kyuujin PDF 由来の行（externalJobRef 無し）。既存の legacy ブックマーク慣例に一致
+          externalJobRef: null,
+          kyuujinJobId,
+          origin: "candidate",
+          responseStatus,
+          responseStatusUpdatedAt: respondedAt,
+          responseSubmittedAt: respondedAt, // 旧マイページ由来＝送信済み扱い（未送信差分を作らない）
+          uploadedByUserId: systemUserId,
+        },
+        select: { id: true },
+      });
+      await enqueueOneDriveSync(
+        { candidateFileId: row.id, candidateId, category: "BOOKMARK" },
+        tx,
+      );
     });
     return "created";
   } catch (e) {

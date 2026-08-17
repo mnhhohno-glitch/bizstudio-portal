@@ -21,10 +21,13 @@ import {
   drivePathFromParentReference,
 } from "@/lib/microsoft-graph";
 import {
+  ONEDRIVE_SYNC_MAX_ATTEMPTS,
   buildOneDriveTargetPath,
   isOneDriveSyncEnabled,
+  nextOneDriveRetryAt,
   oneDriveSubfolderForCategory,
   restoreDrivePathFromFolderUrl,
+  skipReasonForRestoreFailure,
   truncateErrorMessage,
 } from "@/lib/onedrive-sync";
 
@@ -257,13 +260,50 @@ const badUrl = buildOneDriveTargetPath({
   category: CandidateFileCategory.BOOKMARK,
   fileName: "a.pdf",
 });
-eq("URL 形式不正 → NO_FOLDER_URL", !badUrl.ok && badUrl.skipReason, OneDriveSyncSkipReason.NO_FOLDER_URL);
+// T-159 Phase 2-b: 未登録（NO_FOLDER_URL）と不正URL（BAD_FOLDER_URL）を分ける。
+// CAに求める行動が「登録してください」と「貼り直してください」で違うため。
+eq("URL 形式不正 → BAD_FOLDER_URL", !badUrl.ok && badUrl.skipReason, OneDriveSyncSkipReason.BAD_FOLDER_URL);
 const outside = buildOneDriveTargetPath({
   oneDriveFolderUrl: toFolderUrl("/ビズスタジオ/1.経理"),
   category: CandidateFileCategory.BOOKMARK,
   fileName: "a.pdf",
 });
-eq("許可プレフィックス外 → NO_FOLDER_URL", !outside.ok && outside.skipReason, OneDriveSyncSkipReason.NO_FOLDER_URL);
+eq("許可プレフィックス外 → BAD_FOLDER_URL", !outside.ok && outside.skipReason, OneDriveSyncSkipReason.BAD_FOLDER_URL);
+eq(
+  "URL としてパースできない → BAD_FOLDER_URL",
+  (() => {
+    const r = buildOneDriveTargetPath({
+      oneDriveFolderUrl: "これはURLではない",
+      category: CandidateFileCategory.BOOKMARK,
+      fileName: "a.pdf",
+    });
+    return !r.ok && r.skipReason;
+  })(),
+  OneDriveSyncSkipReason.BAD_FOLDER_URL,
+);
+eq("空文字 → NO_FOLDER_URL（未登録扱い）", skipReasonForRestoreFailure("EMPTY"), OneDriveSyncSkipReason.NO_FOLDER_URL);
+eq("NOT_A_URL → BAD_FOLDER_URL", skipReasonForRestoreFailure("NOT_A_URL"), OneDriveSyncSkipReason.BAD_FOLDER_URL);
+eq("NO_ID_PARAM → BAD_FOLDER_URL", skipReasonForRestoreFailure("NO_ID_PARAM"), OneDriveSyncSkipReason.BAD_FOLDER_URL);
+eq(
+  "UNEXPECTED_ID_FORMAT → BAD_FOLDER_URL",
+  skipReasonForRestoreFailure("UNEXPECTED_ID_FORMAT"),
+  OneDriveSyncSkipReason.BAD_FOLDER_URL,
+);
+eq(
+  "OUTSIDE_WRITE_ROOT → BAD_FOLDER_URL",
+  skipReasonForRestoreFailure("OUTSIDE_WRITE_ROOT"),
+  OneDriveSyncSkipReason.BAD_FOLDER_URL,
+);
+
+// ============================================================
+console.log("\n[10-2] 再試行バックオフ（Phase 2-c 用の定数・本 Phase では未使用）");
+// ============================================================
+const base = new Date("2026-08-17T00:00:00.000Z");
+eq("1回失敗後は5分後", nextOneDriveRetryAt(1, base)?.toISOString(), new Date(base.getTime() + 5 * 60000).toISOString());
+eq("2回失敗後は15分後", nextOneDriveRetryAt(2, base)?.toISOString(), new Date(base.getTime() + 15 * 60000).toISOString());
+eq("3回失敗後は1時間後", nextOneDriveRetryAt(3, base)?.toISOString(), new Date(base.getTime() + 60 * 60000).toISOString());
+eq("4回失敗後は6時間後", nextOneDriveRetryAt(4, base)?.toISOString(), new Date(base.getTime() + 360 * 60000).toISOString());
+eq("上限(5回)到達で null（＝GIVEN_UP）", nextOneDriveRetryAt(ONEDRIVE_SYNC_MAX_ATTEMPTS, base), null);
 
 // ============================================================
 console.log("\n[11] キルスイッチ isOneDriveSyncEnabled");

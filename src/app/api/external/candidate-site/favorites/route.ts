@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 import { extractRecommendationForDisplay } from "@/lib/comment-split";
+import { enqueueOneDriveSync } from "@/lib/onedrive-sync";
 
 // T-128 T2: 求職者サイト向け お気に入り（ブックマーク）API。
 // 台帳は CandidateFile（category="BOOKMARK"）。origin で CA追加(null|"ca") と 本人追加("candidate") を区別。
@@ -264,29 +265,42 @@ export async function POST(request: Request) {
 
   // 記録のみ: PDF生成・Drive保管・会社説明生成・AI分析は一切起動しない（driveFileId=null のまま）。
   // extractedText があれば保存し extractedAt を立てる（将来CAが分析する際の材料。ここでは分析しない）。
-  const created = await prisma.candidateFile.create({
-    data: {
-      candidateId: candidate.id,
-      category: "BOOKMARK",
-      fileName,
-      fileSize: extractedText ? Buffer.byteLength(extractedText, "utf8") : 0,
-      mimeType: "text/plain",
-      driveFileId: null,
-      driveViewUrl: null,
-      driveFolderId: null,
-      sourceType: "job-platform",
-      externalJobRef,
-      origin: "candidate",
-      memo: jobUrl,
-      // T-161: 求人スナップショットを保存する（旧実装は jobTitle を受信しつつ void で破棄していた）。
-      // 下流のエントリー化（to-entry）で JobEntry.jobTitle / jobCategory へ引き継ぐための保管。
-      jobTitle,
-      jobCategory,
-      candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
-      ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
-      uploadedByUserId: systemUserId,
-    },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+  // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+  //        この経路の行は実体（driveFileId）を持たないため、実際のコピーは走らず
+  //        SKIPPED(NO_FILE_BODY) になる。後から from-job-platform 経由でPDFが付いたときに
+  //        同経路が PENDING へ戻し、そこで初めてコピー対象になる。
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.candidateFile.create({
+      data: {
+        candidateId: candidate.id,
+        category: "BOOKMARK",
+        fileName,
+        fileSize: extractedText ? Buffer.byteLength(extractedText, "utf8") : 0,
+        mimeType: "text/plain",
+        driveFileId: null,
+        driveViewUrl: null,
+        driveFolderId: null,
+        sourceType: "job-platform",
+        externalJobRef,
+        origin: "candidate",
+        memo: jobUrl,
+        // T-161: 求人スナップショットを保存する（旧実装は jobTitle を受信しつつ void で破棄していた）。
+        // 下流のエントリー化（to-entry）で JobEntry.jobTitle / jobCategory へ引き継ぐための保管。
+        jobTitle,
+        jobCategory,
+        candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
+        ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
+        uploadedByUserId: systemUserId,
+      },
+      select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    });
+    // 実体が無い行なのでここでは同期を起動しない（起動しても SKIPPED(NO_FILE_BODY) にしかならない）。
+    // PENDING のまま残し、判定は Phase 2-c の夜間処理に委ねる。
+    await enqueueOneDriveSync(
+      { candidateFileId: row.id, candidateId: candidate.id, category: "BOOKMARK" },
+      tx,
+    );
+    return row;
   });
 
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });

@@ -3117,24 +3117,30 @@ model RpaScoutPlan {
 ///   SUCCESS : コピー成功
 ///   SKIPPED : 仕様上コピーしない。再試行しない
 ///   FAILED  : 一時的な失敗。再試行対象
+///   GIVEN_UP: 再試行上限（ONEDRIVE_SYNC_MAX_ATTEMPTS）に達して諦めた。以後拾わない
 enum OneDriveSyncStatus {
   PENDING
   SUCCESS
   SKIPPED
   FAILED
+  GIVEN_UP
 }
 
 /// スキップ・失敗の理由。HTTPステータスだけでは原因が判別できないため理由を明示的に持つ。
 /// 再試行対象（status=FAILED と組むもの）は AUTH_ERROR / RATE_LIMITED / GRAPH_ERROR の3つだけ。
 /// それ以外は status=SKIPPED として再試行しない。
 enum OneDriveSyncSkipReason {
-  /// 求職者に oneDriveFolderUrl が未登録、または URL からパスを復元できない（フェイルクローズ）
+  /// 求職者に oneDriveFolderUrl が未登録（null / 空）。CAへの案内は「URLを登録してください」
   NO_FOLDER_URL
+  /// URL はあるが復元不能、または書き込み許可プレフィックス外。CAへの案内は「URLを貼り直してください」
+  /// NO_FOLDER_URL と分けるのは、CAに求める行動が「登録」か「貼り直し」かで違うため。
+  BAD_FOLDER_URL
   /// OneDrive 側に 2.求人 / 3.BS作成書類 が無い。★フォルダは作らない（確定仕様）
   NO_SUBFOLDER
   /// 同名ファイルが既にある（Graph 409）。上書きしない
   NAME_ALREADY_EXISTS
-  /// ONEDRIVE_SYNC_ENABLED が false
+  /// ONEDRIVE_SYNC_ENABLED が false。★T-159 Phase 2-b 以降は使用しない
+  /// （無効時は SKIPPED にせず PENDING のまま残し、有効化後に夜間処理が拾えるようにする）
   SYNC_DISABLED
   /// BOOKMARK / BS_DOCUMENT 以外のカテゴリ
   UNSUPPORTED_CATEGORY
@@ -3171,6 +3177,9 @@ model OneDriveSyncLog {
   siblingFolders  String[]                @map("sibling_folders")
   attemptCount    Int                     @default(0) @map("attempt_count")
   lastAttemptedAt DateTime?               @map("last_attempted_at")
+  /// 次に再試行してよい日時（指数バックオフ）。null は「即座に拾ってよい」。
+  /// 使うのは Phase 2-c の夜間処理。列だけ先に置いてあるのは後追いマイグレーションを避けるため。
+  nextRetryAt     DateTime?               @map("next_retry_at")
   /// エラー本文（Graph の error.code + error.message）。先頭1000文字までに切り詰めて保存する。
   errorMessage    String?                 @map("error_message") @db.Text
   createdAt       DateTime                @default(now()) @map("created_at")

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 
 // D-3: 求人検索由来PDFの生成元（Railway pdf-service）。本番は環境変数で上書き可。
 const PDF_SERVICE_URL = process.env.PDF_SERVICE_URL || "https://bizstudio-job-platform-production.up.railway.app";
@@ -10,13 +11,16 @@ const PDF_GEN_TIMEOUT_MS = 30000;
  * D-3: pdf-service でPDFを生成 → 既存のGoogle Drive保管プラミングで求職者フォルダへ保管
  *      → CandidateFile の driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新。
  * 失敗時は throw（呼び出し側で try/catch 隔離＝保存自体は巻き込まない）。extractedText は触らない。
+ *
+ * T-159: 生成した PDF 本体を返す。呼び出し側が OneDrive へのコピーにそのまま渡し、
+ *        Google Drive から取り直す往復を省くため。
  */
 async function generateAndStorePdf(params: {
   fileId: string;
   candidateId: string;
   sid: string;
   fileName: string;
-}): Promise<void> {
+}): Promise<Buffer> {
   const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
   if (!parentFolderId) throw new Error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID 未設定");
 
@@ -52,6 +56,8 @@ async function generateAndStorePdf(params: {
       fileSize: pdfBuffer.length,
     },
   });
+
+  return pdfBuffer;
 }
 
 /**
@@ -225,27 +231,35 @@ export async function POST(request: Request) {
         fileId = existing.id;
         needsPdf = !existing.driveFileId; // 既にPDF保管済みなら再生成しない
       } else {
-        const createdRow = await prisma.candidateFile.create({
-          data: {
-            candidateId: candidate.id,
-            category: "BOOKMARK",
-            fileName,
-            fileSize,
-            mimeType: "text/plain",
-            driveFileId: null,
-            driveViewUrl: null,
-            driveFolderId: null,
-            extractedText,
-            // テキスト化済みシグナル: 保存時点で求人本文を受領済み＝AI分析フィルタ(extractedAt必須)を通すため立てる。
-            extractedAt: new Date(),
-            sourceType: "job-platform",
-            externalJobRef,
-            // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
-            sourceMedia,
-            memo,
-            uploadedByUserId: uploaderUserId,
-          },
-          select: { id: true },
+        // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+        const createdRow = await prisma.$transaction(async (tx) => {
+          const row = await tx.candidateFile.create({
+            data: {
+              candidateId: candidate.id,
+              category: "BOOKMARK",
+              fileName,
+              fileSize,
+              mimeType: "text/plain",
+              driveFileId: null,
+              driveViewUrl: null,
+              driveFolderId: null,
+              extractedText,
+              // テキスト化済みシグナル: 保存時点で求人本文を受領済み＝AI分析フィルタ(extractedAt必須)を通すため立てる。
+              extractedAt: new Date(),
+              sourceType: "job-platform",
+              externalJobRef,
+              // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
+              sourceMedia,
+              memo,
+              uploadedByUserId: uploaderUserId,
+            },
+            select: { id: true },
+          });
+          await enqueueOneDriveSync(
+            { candidateFileId: row.id, candidateId: candidate.id, category: "BOOKMARK" },
+            tx,
+          );
+          return row;
         });
         created++;
         fileId = createdRow.id;
@@ -256,8 +270,20 @@ export async function POST(request: Request) {
       // 失敗しても保存(CandidateFile作成/更新)は成功扱いのまま（PDFは後で再生成可能）＝失敗隔離。
       if (needsPdf) {
         try {
-          await generateAndStorePdf({ fileId, candidateId: candidate.id, sid: externalJobRef, fileName });
+          // T-159: 既存行に後からPDFが付く経路（サイトのお気に入り由来＝実体なしで作られた行など）を拾う。
+          //        新規作成分は上のトランザクションで受付済みなので、ここで足すのは既存行のときだけ。
+          if (existing) {
+            await enqueueOneDriveSync({
+              candidateFileId: fileId,
+              candidateId: candidate.id,
+              category: "BOOKMARK",
+            });
+          }
+          const pdfBuffer = await generateAndStorePdf({ fileId, candidateId: candidate.id, sid: externalJobRef, fileName });
           pdfStored++;
+          // T-159: PDF実体が揃ったこの時点でコピーを起動する。★await しない。
+          //        本文は手元にあるので Google Drive から取り直さない。
+          triggerOneDriveSync({ candidateFileId: fileId, content: pdfBuffer, mimeType: "application/pdf" });
         } catch (pdfErr) {
           console.error(`[external/bookmarks/from-job-platform] PDF gen/store failed (sid=${externalJobRef}):`, pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
           pdfFailed++;
