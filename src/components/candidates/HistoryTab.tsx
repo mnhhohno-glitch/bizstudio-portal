@@ -8,6 +8,7 @@ import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } f
 import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
+import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
 
 /* ---------- Types ---------- */
 type Job = {
@@ -333,6 +334,8 @@ type BookmarkFile = {
   archivedReason?: string | null;
   archivedNote?: string | null;
   archivedBy?: { id: string; name: string } | null;
+  // T-159 Phase 2-c: OneDrive コピー状況。null / 未定義なら何も表示しない（正常時は無音）。
+  oneDriveSyncLog?: OneDriveSyncBadgeSource | null;
 };
 
 const ARCHIVE_REASONS = [
@@ -2000,6 +2003,16 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                       title={`求人票を出力せずに紹介済みにした求人（${new Date(file.introducedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）。実績集計では紹介に数えます`}
                     >紹介済み</span>
                   )}
+                  {/* T-159 Phase 2-c: OneDrive に入っていない場合だけ出す（SUCCESS・ログ行なしは無音） */}
+                  {(() => {
+                    const od = oneDriveSyncBadge(file.oneDriveSyncLog);
+                    return od ? (
+                      <span
+                        className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${od.cls}`}
+                        title={od.title}
+                      >{od.label}</span>
+                    ) : null;
+                  })()}
                 </div>
                 {(() => {
                   // サイト経由（PDF未保管）は AI評価対象外。空「—」だと「未分析」と紛らわしいので明示する。

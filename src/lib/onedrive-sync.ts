@@ -292,7 +292,7 @@ export async function upsertOneDriveSyncLog(
 }
 
 // ============================================================
-// 再試行制御（列と定数のみ。実際に拾うのは Phase 2-c の夜間処理）
+// 再試行制御（実際に拾うのは src/lib/onedrive-sync-retry.ts の夜間処理）
 // ============================================================
 
 /** 再試行の上限回数。これに達したら status=GIVEN_UP にして以後拾わない。 */
@@ -301,13 +301,11 @@ export const ONEDRIVE_SYNC_MAX_ATTEMPTS = 5;
 /**
  * 指数バックオフの間隔（分）。attemptCount 回目の失敗の後に待つ時間。
  * 5分 → 15分 → 1時間 → 6時間 → 24時間。
- * ★本 Phase（2-b）では夜間処理を実装しないため、この定数はまだ使われない。
  */
 export const ONEDRIVE_SYNC_BACKOFF_MINUTES = [5, 15, 60, 360, 1440] as const;
 
 /**
  * attemptCount 回試行した後の次回再試行時刻。上限に達していれば null（＝GIVEN_UP）。
- * 呼び出すのは Phase 2-c の夜間処理。
  */
 export function nextOneDriveRetryAt(attemptCount: number, from: Date): Date | null {
   if (attemptCount >= ONEDRIVE_SYNC_MAX_ATTEMPTS) return null;
@@ -368,6 +366,16 @@ export interface RunOneDriveSyncParams {
   content?: Buffer | null;
   /** content を渡すときの MIME タイプ。未指定なら CandidateFile.mimeType を使う。 */
   mimeType?: string | null;
+  /**
+   * true なら再試行制御の2列（attemptCount / lastAttemptedAt）を**この関数では触らない**。
+   *
+   * 夜間の拾い直し（src/lib/onedrive-sync-retry.ts）専用。拾い直しは
+   *   - SKIPPED から拾ったものは attemptCount を増やさない（状況待ちであり失敗ではない）
+   *   - Graph に届かなかった回でも lastAttemptedAt は進める（24時間クールダウンの起点にするため）
+   * という、アップロード直後の1回目とは別の勘定をする。2箇所で書くと食い違うので、
+   * 拾い直し時は記録をこちらで止めて呼び出し側にまとめて確定させる。
+   */
+  deferAttemptBookkeeping?: boolean;
 }
 
 /**
@@ -418,6 +426,12 @@ export interface OneDriveSyncOutcome {
   targetPath: string | null;
   targetItemId: string | null;
   errorMessage: string | null;
+  /**
+   * Graph へ実際に1往復以上したか（＝試行として数えるべき回か）。
+   * URL未登録・対象外カテゴリのように通信前に確定したものは false。
+   * 拾い直し側が attemptCount を増やすかどうかの判断に使う。
+   */
+  countAttempt: boolean;
 }
 
 function outcome(
@@ -431,6 +445,7 @@ function outcome(
     targetPath: null,
     targetItemId: null,
     errorMessage: null,
+    countAttempt: false,
     ...extra,
   };
 }
@@ -733,7 +748,8 @@ export async function runOneDriveSyncForFile(
         targetPath: result.targetPath,
         targetItemId: result.targetItemId,
         siblingFolders: result.siblingFolders,
-        countAttempt: result.countAttempt,
+        // 拾い直し時は attemptCount / lastAttemptedAt を呼び出し側がまとめて確定させる。
+        countAttempt: params.deferAttemptBookkeeping ? false : result.countAttempt,
         errorMessage: result.errorMessage,
       });
     }
@@ -742,6 +758,7 @@ export async function runOneDriveSyncForFile(
       targetPath: result.targetPath,
       targetItemId: result.targetItemId,
       errorMessage: result.errorMessage,
+      countAttempt: result.countAttempt === true,
     });
   } catch (e) {
     // 記録そのものに失敗した場合（DB断など）。ここで throw すると呼び出し元に波及するので握り潰す。

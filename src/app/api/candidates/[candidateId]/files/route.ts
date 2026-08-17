@@ -109,6 +109,11 @@ export async function GET(
       archivedById: true,
       uploadedBy: { select: { id: true, name: true } },
       archivedBy: { select: { id: true, name: true } },
+      // T-159 Phase 2-c: OneDrive コピー状況のバッジ用。1 CandidateFile につき 0..1 行。
+      // 行が無い＝同期対象として受け付けていない（対象外カテゴリ・機能稼働前）→ 画面は何も出さない。
+      oneDriveSyncLog: {
+        select: { status: true, skipReason: true, siblingFolders: true },
+      },
     },
   });
 
