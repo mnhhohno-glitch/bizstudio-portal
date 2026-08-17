@@ -223,6 +223,53 @@ export function assertPathUnmodified(path: string): string {
 }
 
 // ============================================================
+// 書き込み先ガード（T-159 Phase 2-a）
+// ============================================================
+
+/**
+ * 書き込みを許可する唯一のドライブ相対プレフィックス。
+ *
+ * アプリの権限は `Files.ReadWrite.All`＝テナント内の全 OneDrive に書ける。実装のバグや将来の
+ * 改修で「求職者フォルダ以外」へ書く余地を、権限ではなくコードで塞ぐのがこの定数の役目。
+ * 末尾の "/" は意図的。プレフィックス自身（`6.求職者書類関連` 直下そのもの）への書き込みは
+ * 許可しない＝必ず配下のどこかであることを要求する。
+ *
+ * Phase 2-0 で本番の求職者フォルダ 1,734 件すべてがこのプレフィックス配下であることを確認済み。
+ */
+export const ONEDRIVE_WRITE_ROOT = "/ビズスタジオ/6.求職者書類関連/";
+
+/**
+ * 書き込み系（アップロード・削除）の入口で必ず通すガード。
+ * 許可プレフィックス配下でなければ Graph へ 1 バイトも送らずに例外にする。
+ *
+ * 検証は「先頭スラッシュの有無を揃える」以外に文字列を一切加工しない。
+ * NFKC / toLowerCase / trim を挟むと実データが壊れる（assertPathUnmodified の注記を参照）。
+ * 先頭スラッシュの補完は文字の置換ではなく区切りの正規化であり、指す場所は変わらない。
+ *
+ * `..` は 1 箇所でも含まれたら拒否する。プレフィックス一致をすり抜けて上位へ抜ける経路
+ * （`/ビズスタジオ/6.求職者書類関連/../他部署/`）を塞ぐため。実データのフォルダ名・ファイル名に
+ * 連続ドットは存在しない。
+ */
+export function assertOneDriveWritePath(path: string): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+
+  if (normalized.includes("..")) {
+    throw new Error(
+      `OneDrive 書き込み先ガード: パスに ".." が含まれています。意図しない場所への書き込みを防ぐため中止しました: ${normalized}`,
+    );
+  }
+
+  if (!normalized.startsWith(ONEDRIVE_WRITE_ROOT)) {
+    throw new Error(
+      `OneDrive 書き込み先ガード: 書き込みが許可されるのは "${ONEDRIVE_WRITE_ROOT}" 配下のみです。` +
+        `意図しない場所への書き込みを防ぐため中止しました: ${normalized}`,
+    );
+  }
+
+  return normalized;
+}
+
+// ============================================================
 // ユーザー / ドライブ
 // ============================================================
 
@@ -277,6 +324,8 @@ export interface DriveItem {
   folder?: { childCount?: number };
   file?: { mimeType?: string };
   lastModifiedDateTime?: string;
+  /** 親フォルダ。path は "/drive/root:/ビズスタジオ/..." または "/drives/{id}/root:/..." の形。 */
+  parentReference?: { driveId?: string; id?: string; path?: string };
 }
 
 function itemUrl(upn: string, path: string, suffix = ""): string {
@@ -336,6 +385,8 @@ export type ConflictBehavior = "fail" | "replace" | "rename";
  * 実測の最大は 2.03MB だが upload route の上限は 20MB のため、境界越えは起こりうる。
  *
  * folderPath は「親フォルダまで」のドライブ相対パス。文字列は加工しない（上の正規化の注記を参照）。
+ *
+ * ★書き込み先ガード: 実際に書く先が ONEDRIVE_WRITE_ROOT 配下でなければ、Graph へ通信する前に例外。
  */
 export async function uploadFileByPath(params: {
   upn: string;
@@ -353,7 +404,9 @@ export async function uploadFileByPath(params: {
     conflictBehavior = "fail",
   } = params;
 
-  const fullPath = `${assertPathUnmodified(params.folderPath).replace(/\/$/, "")}/${fileName}`;
+  const fullPath = assertOneDriveWritePath(
+    `${assertPathUnmodified(params.folderPath).replace(/\/$/, "")}/${fileName}`,
+  );
 
   if (content.length <= SIMPLE_UPLOAD_MAX_BYTES) {
     const url = `${itemUrl(upn, fullPath, ":/content")}?@microsoft.graph.conflictBehavior=${conflictBehavior}`;
@@ -369,14 +422,18 @@ export async function uploadFileByPath(params: {
   return uploadLargeFile({ upn, fullPath, content, conflictBehavior });
 }
 
-/** 4MB 超のアップロード。createUploadSession → uploadUrl へチャンク PUT。 */
+/**
+ * 4MB 超のアップロード。createUploadSession → uploadUrl へチャンク PUT。
+ * private だが、将来ここが別経路から呼ばれても効くようガードを再掲する（多層防御）。
+ */
 async function uploadLargeFile(params: {
   upn: string;
   fullPath: string;
   content: Buffer;
   conflictBehavior: ConflictBehavior;
 }): Promise<DriveItem> {
-  const { upn, fullPath, content, conflictBehavior } = params;
+  const { upn, content, conflictBehavior } = params;
+  const fullPath = assertOneDriveWritePath(params.fullPath);
 
   const session = await graphJson<{ uploadUrl: string }>(
     itemUrl(upn, fullPath, ":/createUploadSession"),
@@ -420,13 +477,45 @@ async function uploadLargeFile(params: {
 // ============================================================
 
 /**
+ * `parentReference.path`（"/drive/root:/ビズスタジオ/..." 形式）からドライブ相対パスを取り出す。
+ * Graph の返却値をそのまま切り出すだけで、文字列の中身は加工しない。
+ */
+export function drivePathFromParentReference(parentPath: string | undefined): string | null {
+  if (!parentPath) return null;
+  const m = parentPath.match(/root:(.*)$/);
+  if (!m) return null;
+  // ルート直下のとき path は ".../root:" で終わり、m[1] は空文字になる
+  if (m[1] === "") return "/";
+  // Graph は parentReference.path を percent-encode して返すことがある。ここでの decode は
+  // Graph が掛けたエンコードを戻すだけで、文字そのものの変換（NFKC 等）は行っていない。
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/**
  * ドライブアイテムを ID 指定で削除する。
  *
  * ★ portal → OneDrive は一方向コピーであり、portal 側の削除を OneDrive へ伝播させることは
  *   確定で対象外。この関数は疎通確認で自分が置いたテストファイルを片付ける用途にのみ使うこと。
+ *
+ * ★書き込み先ガード: ID 指定は「どこを消すか」がパスから読み取れないため、DELETE の前に
+ *   実アイテムを1回読んで親パスを確定させ、ONEDRIVE_WRITE_ROOT 配下であることを確認する。
+ *   読み取りは無制限なのでこの GET 自体はガードにかからない。
  */
 export async function deleteDriveItemById(upn: string, itemId: string): Promise<void> {
-  await graphFetch(`${GRAPH_BASE}/users/${encodeURIComponent(upn)}/drive/items/${itemId}`, {
-    method: "DELETE",
-  });
+  const itemBase = `${GRAPH_BASE}/users/${encodeURIComponent(upn)}/drive/items/${itemId}`;
+
+  const item = await graphJson<DriveItem>(`${itemBase}?$select=id,name,parentReference`);
+  const parentPath = drivePathFromParentReference(item.parentReference?.path);
+  if (!parentPath) {
+    throw new Error(
+      `OneDrive 書き込み先ガード: 削除対象の親パスを特定できませんでした。意図しない削除を防ぐため中止しました（itemId=${itemId}）`,
+    );
+  }
+  assertOneDriveWritePath(`${parentPath.replace(/\/$/, "")}/${item.name}`);
+
+  await graphFetch(itemBase, { method: "DELETE" });
 }

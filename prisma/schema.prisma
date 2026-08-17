@@ -535,6 +535,7 @@ model Candidate {
   jimuSessions           JimuSession[]
   tasks                  Task[]
   files                  CandidateFile[]
+  oneDriveSyncLogs       OneDriveSyncLog[]
   advisorSessions        AdvisorChatSession[]
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
@@ -1543,6 +1544,10 @@ model CandidateFile {
   archivedBy        User?                 @relation("CandidateFileArchivedBy", fields: [archivedById], references: [id])
   createdAt         DateTime              @default(now()) @map("created_at")
   updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  // T-159: OneDrive への一方向コピーの記録（1ファイル1行・別テーブル）。
+  //   CandidateFile は既に50列あるため列を足さない。行が無い＝同期対象として受け付けていない。
+  oneDriveSyncLog   OneDriveSyncLog?
 
   @@unique([candidateId, kyuujinJobId]) // T-133 P1: 同一候補者×同一kyuujin Jobの重複行防止（NULLは重複扱いされない）
   @@index([candidateId, category, archivedAt])
@@ -3101,4 +3106,77 @@ model RpaScoutPlan {
   @@index([planDate])
   @@index([machineNo, planDate])
   @@map("rpa_scout_plans")
+}
+
+// ============================================================
+// T-159: portal → OneDrive 一方向コピーの記録
+// ============================================================
+
+/// コピーの帰結。SKIPPED と FAILED の区別は「再試行するか」。
+///   PENDING : 受付済み・未処理（レコード作成直後）
+///   SUCCESS : コピー成功
+///   SKIPPED : 仕様上コピーしない。再試行しない
+///   FAILED  : 一時的な失敗。再試行対象
+enum OneDriveSyncStatus {
+  PENDING
+  SUCCESS
+  SKIPPED
+  FAILED
+}
+
+/// スキップ・失敗の理由。HTTPステータスだけでは原因が判別できないため理由を明示的に持つ。
+/// 再試行対象（status=FAILED と組むもの）は AUTH_ERROR / RATE_LIMITED / GRAPH_ERROR の3つだけ。
+/// それ以外は status=SKIPPED として再試行しない。
+enum OneDriveSyncSkipReason {
+  /// 求職者に oneDriveFolderUrl が未登録、または URL からパスを復元できない（フェイルクローズ）
+  NO_FOLDER_URL
+  /// OneDrive 側に 2.求人 / 3.BS作成書類 が無い。★フォルダは作らない（確定仕様）
+  NO_SUBFOLDER
+  /// 同名ファイルが既にある（Graph 409）。上書きしない
+  NAME_ALREADY_EXISTS
+  /// ONEDRIVE_SYNC_ENABLED が false
+  SYNC_DISABLED
+  /// BOOKMARK / BS_DOCUMENT 以外のカテゴリ
+  UNSUPPORTED_CATEGORY
+  /// ファイル本体を取得できない（driveFileId が null 等）
+  NO_FILE_BODY
+  /// 認証失敗（シークレット期限切れ等）
+  AUTH_ERROR
+  /// 429
+  RATE_LIMITED
+  /// その他の Graph エラー
+  GRAPH_ERROR
+}
+
+/// portal にアップされたファイルを OneDrive の求職者フォルダへコピーした記録。1 CandidateFile につき1行。
+/// 行の存在自体が「同期対象として受け付けた」ことを意味する（行が無い＝稼働開始前 or 対象外）。
+/// これにより拾い直し cron は本テーブルだけを見ればよく、candidate_files（10万行超）を全走査しない。
+model OneDriveSyncLog {
+  id              String                  @id @default(cuid())
+  candidateFileId String                  @unique @map("candidate_file_id")
+  candidateFile   CandidateFile           @relation(fields: [candidateFileId], references: [id], onDelete: Cascade)
+  /// 集計・求職者ごとの画面表示用（candidateFile 経由の JOIN を省くための非正規化ではなく検索キー）
+  candidateId     String                  @map("candidate_id")
+  candidate       Candidate               @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  status          OneDriveSyncStatus      @default(PENDING)
+  skipReason      OneDriveSyncSkipReason? @map("skip_reason")
+  /// 実際に書き込んだ／書き込もうとした OneDrive のドライブ相対パス（監査記録）。
+  ///   例: /ビズスタジオ/6.求職者書類関連/1.大野/2026/202607/5008266_吉川 祐樹/2.求人/求人票_◯◯.pdf
+  ///   真実は Candidate.oneDriveFolderUrl 側。ここは「何をしたか」の記録であって設定値ではない。
+  targetPath      String?                 @map("target_path")
+  /// 成功時に Graph が返した driveItem.id
+  targetItemId    String?                 @map("target_item_id")
+  /// スキップ時に、その求職者フォルダ直下に実在した子フォルダ名の一覧。
+  ///   「2.求人 が無い」と言われた CA が、ではどこに入れればよいかを画面上で判断できるようにする。
+  siblingFolders  String[]                @map("sibling_folders")
+  attemptCount    Int                     @default(0) @map("attempt_count")
+  lastAttemptedAt DateTime?               @map("last_attempted_at")
+  /// エラー本文（Graph の error.code + error.message）。先頭1000文字までに切り詰めて保存する。
+  errorMessage    String?                 @map("error_message") @db.Text
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  @@index([status]) // 拾い直し cron が PENDING / FAILED を拾うため
+  @@index([candidateId]) // 求職者ごとの状態表示のため
+  @@map("onedrive_sync_logs")
 }
