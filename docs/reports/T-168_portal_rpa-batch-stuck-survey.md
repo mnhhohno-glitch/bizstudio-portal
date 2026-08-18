@@ -1419,9 +1419,33 @@ AFTER  last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
 
 **⑦ `batch-start` 内の掃除処理ログ（NO_TARGET / FAILED 両方）** — 11-6 に本番デプロイ後の実測を記載。
 
-## 11-6. 本番デプロイ後の実機確認
+## 11-6. 本番デプロイ後の実機確認（コミット `d302482` / 2026-08-18 16:26 UTC デプロイ完了）
 
-（デプロイ後に追記）
+Railway デプロイ `7a1f858c-331a-4772-adf8-4dae7133c68d` = `d3024829961aa4c4d55919afbc446356f8646461` / status SUCCESS を GraphQL で確認（webhook 取りこぼしの罠対策として commitHash を照合）。
+
+**① `batch-start` 内の掃除処理ログ（NO_TARGET / FAILED の両方が出ること）** — デプロイ後1回目の PAD 起動（2026-08-18 16:30:21 UTC）の実測:
+
+```
+[rpa/mynavi/batch-start] no-target cleanup: closed=0 staleMinutes=30 limit=500 threshold=2026-08-18T16:00:13.841Z
+[rpa/mynavi/batch-start] failed cleanup: closed=0 staleMinutes=30 limit=500 threshold=2026-08-18T16:00:13.866Z
+```
+
+**2系統が独立して出力されている。** どちらも `closed=0`（0件でもログを出す仕様どおり）。FAILED 側が 0 なのは過去分を全て畳んだ直後で新たな異常終了が無いため。NO_TARGET 側が 0 なのは残っていた空振り6件がまだ 30分ウィンドウ内（threshold 16:00 より後の開始）だったため。
+
+**② LINE WORKS 通知が飛んでいないこと（ログ実測）** — デプロイ後の `deploymentLogs` を filter で全数確認:
+
+| filter | ヒット件数 | 内容 |
+|--|--|--|
+| `batch` | 2件 | 上記の cleanup ログのみ。**`[rpa/mynavi/batch-finish]` は0件** |
+| `notify` | **0件** | `[mynavi-rpa/notify]` の出力なし＝通知処理に入っていない |
+
+**③ `last-execution`（デプロイ後）**
+
+```
+{"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+```
+
+一括更新前・後・デプロイ後の3時点で**完全一致**。
 
 ## 11-7. 残る課題・未確認事項
 
