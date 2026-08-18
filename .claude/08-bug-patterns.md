@@ -213,6 +213,36 @@ Postgres 側の劣化の見え方:
 **関連ケース**:
 - 2026-08-10: 03:08 UTC（JST 12:08）に checkpoint 停止、05:05 UTC（JST 14:05）頃までに DB 応答が回復（`/api/health` の DB 往復 3〜99ms を実測）。利用者からは半日規模の停止として報告された。切り分け手順は罠 #41、監視実装は T-160（`4f49d46`）
 
+## カテゴリM: 通知の宛先欠落系
+
+### M-1. タスク通知が「先頭1名」にしか届かない（担当者配列が [0] で潰される）
+
+**症状**: `/tasks/new` で担当者を3名選んで「応募書類3点セット」を作成しても、LINE WORKS の通知が最初の1名にしか飛ばない。通知本文の「■ 担当者」欄も1名しか出ず、メンション（`@...`）も1つだけ。
+
+**真因（T-162 / 2026-08-18 実測）**: 通知の問題ではなく **保存の問題**だった。
+
+- `src/app/(app)/tasks/new/page.tsx` の `handle3ptSubmit` が `assigneeId: assigneeIds[0]` を送っていた
+- `src/app/api/tasks/bulk-create-3point/route.ts` が単数 `assigneeId` しか受け取らず、`TaskAssignee` を1行しか作っていなかった
+- 結果、通知の宛先解決に渡る担当者が最初から1名しかなく、通知テンプレート側（`notifyTaskCreated` / `sendBulkNotification`）は複数対応済みなのに1名分しか組み立てられなかった
+
+**紛らわしい点**: 通常の `/tasks/new`（3点セット以外）→ `POST /api/tasks` は最初から複数対応。実データでも `[佐藤 葵,大野 望,見ル野 未来,道西 未来]` の4名タスクが存在する。**「複数担当者が全く動かない」わけではなく、3点セットの経路だけが落ちていた**。UI（Step3 のチェックボックス）は3点セットでも複数選択でき「3名 選択中」と表示されるため、画面上は正常に見える。
+
+**確認手順**:
+
+1. まず「そもそも `TaskAssignee` が3行あるか」を SELECT で確認する。通知コードを読む前にこれをやる。1行しかなければ通知ではなく保存のバグ。
+   ```
+   task.findMany({ include: { assignees: { select: { employee: { select: { name: true } } } } } })
+   ```
+2. 同じ期間の他タスクで `assignees.length > 1` の実例があるかを数える。あるなら共通経路は無実で、特定の起票経路が疑わしい。
+3. 起票経路ごとにクライアントの `fetch` body を確認する。専用一括起票 API（`bulk-create-3point` 等）は単数フィールドを持っていることがある。
+
+**修正（T-162）**:
+- クライアントは `assigneeIds`（配列）と `completionType` を送る
+- `bulk-create-3point` は配列を受けて全員分の `TaskAssignee` を作る（旧 `assigneeId` も後方互換で受理）
+- 宛先解決を `resolveAssigneeNotifyTargets()`（`src/lib/task-notification.ts`）に統一し、送信時に `[task-notify:*]` ログで「選択人数 / メンション可能人数 / 落ちた人」を必ず出す
+
+**関連**: 罠 #45（`lineworksId` 未登録者は黙って落ちる / 宛先解決を名前一致でやる危険）
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認

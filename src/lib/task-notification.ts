@@ -1,4 +1,5 @@
 import { sendBotMessage } from "./lineworks";
+import { prisma } from "./prisma";
 
 type TaskNotificationParams = {
   taskId: string;
@@ -84,6 +85,10 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     ];
     try {
       await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      // T-162: 「1名にしか届かない」を後から切り分けられるよう実送信の宛先数を残す
+      console.log(
+        `[task-notify:create] task=${params.taskId} sent mentions=${mentionLines.length}/${params.assigneeNames.length}`,
+      );
       return;
     } catch (e) {
       console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
@@ -100,6 +105,9 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
       ...baseLines.slice(2),
     ];
     await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+    console.log(
+      `[task-notify:create] task=${params.taskId} sent fallback(no-mention) recipients=${params.assigneeNames.length}`,
+    );
     return;
   }
 
@@ -484,4 +492,100 @@ export async function notifyAiTaskDueReminder(params: AiTaskDueReminderParams): 
 
   // 3) 素の本文
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}
+
+export type AssigneeNotifyTarget = {
+  employeeId: string;
+  /** 通知本文の「■ 担当者」に出す表示名（Employee.name） */
+  name: string;
+  userId: string | null;
+  /** メンション可能な場合のみ非 null（User が active かつ lineworksId 登録済み） */
+  lineworksId: string | null;
+};
+
+/**
+ * T-162: 担当者 Employee → User → lineworksId を解決する共通ヘルパー。
+ *
+ * 従来は各所で User.name の文字列一致だけで引いていたため
+ *  - 同名 User がいると別人に飛ぶ
+ *  - Employee と User で表記が1文字でも違うとメンションが黙って落ちる
+ * という穴があった。Employee.userId のリレーションを第一手段にし、
+ * User 未リンクの Employee（本番実測 2名: 藤本 夏海 / 上原 千遥）だけ
+ * 従来どおり名前一致でフォールバックする。
+ *
+ * 返り値は employeeIds の順序を保持する（本文の担当者順とメンション順を一致させるため）。
+ * 退職・無効化された User（status !== "active"）は lineworksId を null 扱いにする。
+ */
+export async function resolveAssigneeNotifyTargets(
+  employeeIds: string[],
+): Promise<AssigneeNotifyTarget[]> {
+  if (employeeIds.length === 0) return [];
+
+  const employees = await prisma.employee.findMany({
+    where: { id: { in: employeeIds } },
+    select: {
+      id: true,
+      name: true,
+      user: { select: { id: true, name: true, status: true, lineworksId: true } },
+    },
+  });
+
+  // User 未リンクの Employee だけ名前一致でフォールバック
+  const unlinkedNames = employees.filter((e) => !e.user).map((e) => e.name);
+  const fallbackUsers =
+    unlinkedNames.length > 0
+      ? await prisma.user.findMany({
+          where: { name: { in: unlinkedNames }, status: "active" },
+          select: { id: true, name: true, lineworksId: true },
+        })
+      : [];
+
+  const byId = new Map(employees.map((e) => [e.id, e]));
+
+  return employeeIds
+    .map((employeeId) => {
+      const emp = byId.get(employeeId);
+      if (!emp) return null;
+      if (emp.user) {
+        return {
+          employeeId,
+          name: emp.name,
+          userId: emp.user.id,
+          lineworksId: emp.user.status === "active" ? (emp.user.lineworksId ?? null) : null,
+        };
+      }
+      const fb = fallbackUsers.find((u) => u.name === emp.name) ?? null;
+      return {
+        employeeId,
+        name: emp.name,
+        userId: fb?.id ?? null,
+        lineworksId: fb?.lineworksId ?? null,
+      };
+    })
+    .filter((t): t is AssigneeNotifyTarget => t !== null);
+}
+
+/**
+ * T-162: 通知の宛先解決結果をログに残す。
+ * 「通知が1名にしか届かない」を後から切り分けられるよう、
+ * 選択された担当者数・メンションできた人数・落ちた人を必ず1行で出す。
+ */
+export function logAssigneeNotifyTargets(
+  scope: string,
+  taskRef: string,
+  targets: AssigneeNotifyTarget[],
+): void {
+  const mentionable = targets.filter((t) => t.lineworksId);
+  const skipped = targets.filter((t) => !t.lineworksId);
+  console.log(
+    `[${scope}] task=${taskRef} assignees=${targets.length} mentionable=${mentionable.length}` +
+      ` names=[${targets.map((t) => t.name).join(",")}]`,
+  );
+  if (skipped.length > 0) {
+    console.warn(
+      `[${scope}] task=${taskRef} lineworksId 未登録のためメンション対象外: ${skipped
+        .map((t) => `${t.name}(user=${t.userId ?? "未リンク"})`)
+        .join("、")}`,
+    );
+  }
 }

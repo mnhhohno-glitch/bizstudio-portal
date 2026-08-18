@@ -833,7 +833,10 @@ export default function TaskNewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           candidateId: candidateId,
-          assigneeId: assigneeIds[0],
+          // T-162: 以前は assigneeIds[0] だけを送っていたため、Step3 で3名選んでも
+          // 先頭1名しか TaskAssignee に入らず、LINE WORKS 通知も1名分しか飛ばなかった。
+          assigneeIds,
+          completionType: assigneeIds.length > 1 ? completionType : "any",
           dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           priority,
           fieldValues: {

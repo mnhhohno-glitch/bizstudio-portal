@@ -478,6 +478,54 @@ supportSubStatus 自動判定、求職者ダッシュボードの最終提案日
 **実在した事故**: 旧 send-to-job-tool がサイト経由行にも last_exported_at を立てており、
 「出力済バッジは付くのに求人紹介に出ない」表示矛盾と日報出力数の水増し（本番9件）が起きていた（T-161 で修正・データもクリア済み）。
 
+## 45. 通知の宛先解決は「名前一致」でやらない。`lineworksId` 未登録者は黙って落ちる
+
+LINE WORKS のタスク通知は `Employee`（担当者） → `User` → `User.lineworksId` を解決して
+`<m userId="...">` のメンションを組み立てる。ここに2つの罠がある。
+
+**罠1: 名前一致で `User` を引くと黙って落ちる／誤爆する**
+
+T-162 以前は各所で `prisma.user.findMany({ where: { name: { in: assigneeNames }, status: "active" } })`
+と **`User.name` の文字列一致**で引いていた。`Employee.userId` というリレーションが存在するのに使っていない。
+
+- `Employee` と `User` で氏名表記が1文字でも違えば、その担当者のメンションだけが無言で消える
+- 同名の `User` がいると別人にメンションが飛ぶ（`ai-task-create.ts` のコメントでも既に指摘されていた既知の穴）
+
+→ T-162 で `resolveAssigneeNotifyTargets()`（`src/lib/task-notification.ts`）に統一。
+`Employee.userId` のリレーションを第一手段にし、**User 未リンクの Employee だけ**名前一致でフォールバックする。
+`User.status !== "active"` は `lineworksId` を null 扱い（＝メンションしない）にする。
+
+**罠2: `lineworksId` 未登録者はコードでは救えない。ログに出さないと気づけない**
+
+2026-08-18 時点の本番実測（active な Employee 13名）:
+
+| 状態 | 人数 | 該当 |
+|--|--|--|
+| `User` にリンク済み・`lineworksId` あり | 9 | 大野 将幸 / 大野 望 / 安藤 嘉富 / 南條 雄三 / 佐藤 葵 / 奥村 裕司 / 見ル野 未来 / 藤田 愛 / 道西 未来 |
+| `User` 自体が無い | 2 | 藤本 夏海（1000003） / 上原 千遥（1000005） |
+| `User` が disabled | 2 | 岡田 愛子（1000007） / 仮予約（9000） |
+
+未登録者を担当者に含めると、その人**だけ**がメンションから抜けた通知が飛ぶ。
+本文の「■ 担当者」には名前が出るので**画面上は正常に見える**のが厄介。
+T-162 で `logAssigneeNotifyTargets()` を追加し、送信時に必ず
+
+```
+[task-notify:create] task=<id> assignees=3 mentionable=2 names=[A,B,C]
+[task-notify:create] task=<id> lineworksId 未登録のためメンション対象外: C(user=未リンク)
+```
+
+を出すようにした。**登録は運用作業（DB への UPDATE）であってコード修正では直らない。**
+
+**罠3: 送信の直列 await（この経路では該当しないが、混同しやすい）**
+
+タスク通知は「担当者ごとに個別 DM」ではなく **共通トークルームへ1通＋本文中で全員をメンション**する方式
+（`LINEWORKS_TASK_BOT_ID` / `LINEWORKS_TASK_CHANNEL_ID`）。
+つまり送信は常に1回であり、「1人目の送信で例外が出て2人目以降が止まる」型の障害は**この経路では起きない**。
+「先頭1名にしか届かない」を見たら、直列ループを疑う前に**宛先配列がそもそも1要素になっていないか**を先に見ること
+（T-162 の真因は保存側で `assigneeIds[0]` に潰れていたこと。バグ辞書 M-1 参照）。
+担当者ごとに個別送信する経路を今後作る場合は `Promise.allSettled` にして、
+1名の失敗が他名の送信を止めないようにすること。
+
 ## （採番待ち・T-163）AIアドバイザーのチャット履歴テーブルは、求人の全件分析の出力と共用されている
 
 `analyze-batch` はバッチごとに user/assistant 1組を `advisor_chat_messages` に書き込んでいた。

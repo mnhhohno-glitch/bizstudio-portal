@@ -671,3 +671,55 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
 - to-entry の重複判定は **externalJobRef（求人単位）**。ref 無し行のみ会社名一致で判定。スキップは `skippedDetails`（会社名＋理由）で返り、UI が必ず表示する。
 - エントリー編集モーダルに「職種」入力欄あり（自動で埋まらなかった行を人が補う）。
 - サイト経由ブックマークの job_title / job_category は favorites POST が保存（T-161 新設列）。**T-161 以前の行は NULL のまま**（portal に元データが無い）。
+
+## タスク作成時の LINE WORKS 通知仕様（T-162 で整理, 2026-08-18）
+
+### 送信単位
+
+**共通トークルームへ1通・本文中で全担当者をメンション**する方式。担当者ごとの個別 DM は行わない。
+
+- Bot / チャンネル: `LINEWORKS_TASK_BOT_ID` / `LINEWORKS_TASK_CHANNEL_ID`（未設定なら warn を出して no-op）
+- 通知の粒度は「1タスク = 1通」。ただし**応募書類3点セットだけは3タスクで1通**（`bulk-create-3point` が3件のリンクを1通にまとめる）
+- 送信の実体は `sendBotMessage()`（`src/lib/lineworks.ts`）。1通あたり POST 1回
+
+| 起票経路 | エンドポイント | 通知関数 | 通数 |
+|--|--|--|--|
+| 通常のタスク作成ウィザード | `POST /api/tasks` | `notifyTaskCreated` | タスク1件につき1通 |
+| 応募書類3点セット | `POST /api/tasks/bulk-create-3point` | `sendBulkNotification`（同ファイル内） | 3タスクで1通 |
+| タスク複製 | `POST /api/tasks/[taskId]`（clone） | `notifyTaskCreated` | 1通 |
+| AI 起票（T-150/T-151） | `src/lib/ai-task-create.ts` | `notifyAiTaskCreated` | 1通 |
+
+### 宛先解決
+
+`resolveAssigneeNotifyTargets(employeeIds)`（`src/lib/task-notification.ts`）に統一。
+
+1. `Employee.userId` のリレーションで `User` を引く（**第一手段**）
+2. `User` が未リンクの `Employee` に限り、`User.name` の完全一致でフォールバック
+3. `User.status !== "active"` の場合は `lineworksId` を null 扱い（＝メンションしない）
+4. 返り値は**渡した `employeeIds` の順序を保持**する（本文の担当者順とメンション順を一致させるため）
+
+`User.name` の文字列一致だけで引く旧実装は、表記ゆれによる欠落と同名ユーザーへの誤爆があるため使わないこと（罠 #45）。
+
+### 本文とフォールバック（3段）
+
+1. `lineworksId` を持つ担当者が1人以上 → `<m userId="...">` を人数分（各行）並べ、続けて割り当てヘッダ＋本文
+2. 1 が送信失敗、または全員 `lineworksId` 未登録 → 「○○さん、△△さん <ヘッダ>」の**名前プレフィックス付き・メンションなし**で再送
+3. 担当者名も無い → 素の本文
+
+「■ 担当者」欄には `lineworksId` の有無に関わらず**全担当者名**を出す。
+つまり**未登録者は本文に名前が出るのにメンションだけ飛ばない**（画面上は正常に見えるので、切り分けはログで行う）。
+
+### 失敗時の扱い
+
+- 通知失敗は**タスク作成を失敗させない**（fire & forget）。`POST /api/tasks` は try/catch で握りつぶし、`bulk-create-3point` は `.catch()` で握りつぶす
+- 送信のたびに `[task-notify:create]` / `[task-notify:3point]` / `[task-notify:clone]` のログを1行出す
+  - `assignees=<選択人数> mentionable=<メンション可能人数> names=[...]`
+  - `lineworksId` 未登録者がいれば warn を追加で1行（氏名と `user=<userId|未リンク>`）
+  - 送信成功時に `sent mentions=N/M` または `sent fallback(no-mention) recipients=M`
+
+### 複数担当者
+
+- Step3 の担当者選択はチェックボックスで**全カテゴリ複数選択可**（3点セット含む）
+- 2名以上選ぶと Step4 に「完了条件」（`any` = 誰か1人 / `all` = 全員完了）が出る
+- `completionType === "all"` のとき `TaskAssigneeStatus` を担当者の `User` 分だけ生成する
+  （3点セットは3タスク×人数分）。未生成でも `PATCH /api/tasks/[taskId]/status` 側で自動生成される
