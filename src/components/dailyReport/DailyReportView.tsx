@@ -497,11 +497,12 @@ export default function DailyReportView({
           <CalendarConnectButton
             isConnected={calConnected}
             onConnect={async () => {
-              try {
-                const res = await fetch("/api/calendar/auth");
-                const data = await res.json();
-                if (data.authUrl) window.location.href = data.authUrl;
-              } catch { /* */ }
+              // T-167: 例外は握りつぶさず CalendarConnectButton に投げてエラー表示させる
+              const res = await fetch("/api/calendar/auth");
+              if (!res.ok) throw new Error(`/api/calendar/auth failed: ${res.status}`);
+              const data = await res.json();
+              if (!data.authUrl) throw new Error("/api/calendar/auth returned no authUrl");
+              window.location.href = data.authUrl;
             }}
             onDisconnect={() => { setCalConnected(false); void fetchCalendar(); }}
           />

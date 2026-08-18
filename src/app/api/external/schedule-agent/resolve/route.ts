@@ -201,10 +201,32 @@ export async function POST(request: Request) {
   // ---- 以降は両モード共通 ----
 
   // env 未設定なら枠取り・カレンダー登録を一切行わず「返信不要」で安全終了（誤送信防止・Q5）
-  if (!getReservationConfig()) return noReply();
+  const cfg = getReservationConfig();
+  if (!cfg) return noReply();
 
   const targets = getTargetUserIds();
   if (targets.length === 0) return simpleResponse("unavailable", candidateName, method);
+
+  // ---- 連携状態プローブ＋アラート（T-167: fetchReservedEvents より前に実行する）----
+  //   従来はこの処理が fetchReservedEvents の後ろにあり、writer（仮予約カレンダーの名義人）の
+  //   連携が切れると L211 相当の early return に阻まれてアラートに永久到達しなかった。
+  //   実際 ScheduleAgentAlertLog は累計0件＝検知メールが一通も飛んでいなかった。
+  //   - 通知は完全に副作用: 失敗しても resolve 応答は正常に返す（例外は内部で握りつぶす）。
+  //   - 壊れた CA は枠探索の対象から明示除外し、「空き」と誤判定されるのを防ぐ。
+  //   - writer が targets に含まれていない構成でも検知できるよう、writer を明示的にプローブ対象へ足す。
+  const probeTargets = targets.includes(cfg.writerUserId) ? targets : [...targets, cfg.writerUserId];
+  const probe = await probeCalendarConnections(probeTargets);
+  const brokenAll = brokenUserIds(probe);
+  const writerBroken = brokenAll.includes(cfg.writerUserId);
+  if (brokenAll.length > 0) {
+    try {
+      await sendBrokenCalendarAlert(brokenAll, { writerBroken });
+    } catch (e) {
+      console.error("[resolve] alert dispatch failed:", e);
+    }
+  }
+  // 枠探索の除外対象は「空き判定の対象CA」のみ（writer は枠の持ち主ではない）
+  const broken = brokenAll.filter((uid) => targets.includes(uid));
 
   // 仮予約カレンダーを1回だけ走査（二重予約チェック＋枠占有カウントの両方に使う）
   const reserved = await fetchReservedEvents(now);
@@ -214,19 +236,6 @@ export async function POST(request: Request) {
   const existing = findExistingReservation(reserved.events, candidateName, now);
   if (existing) {
     return reservedResponse(candidateName, existing.slot, existing.method, true);
-  }
-
-  // 対象CAの連携状態プローブ。壊れているCAがあればメール通知（重複抑止付き）を副作用で発火。
-  //   - 通知は完全に副作用: 失敗しても resolve 応答は正常に返す（例外は内部で握りつぶす）。
-  //   - 壊れた CA は枠探索の対象から明示除外し、「空き」と誤判定されるのを防ぐ。
-  const probe = await probeCalendarConnections(targets);
-  const broken = brokenUserIds(probe);
-  if (broken.length > 0) {
-    try {
-      await sendBrokenCalendarAlert(broken);
-    } catch (e) {
-      console.error("[resolve] alert dispatch failed:", e);
-    }
   }
 
   // 枠探索（壊れたCAは除外）
