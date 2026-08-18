@@ -1304,3 +1304,128 @@ Step2 で入れた `closeStaleNoTargetBatches()`（`src/lib/mynavi-rpa/no-target
 - Railway: GraphQL `https://backboard.railway.com/graphql/v2` の `deployments` / `httpLogs` / `deploymentLogs` / `environmentLogs` を**読み取りのみ**。User-Agent の明示が必須（既定だと 403）。`httpLogs` の `anchorDate` は `String` 型（`DateTime` を渡すとバリデーションエラー）、`deploymentLogs` は `startDate` / `endDate` / `limit` で `anchorDate` を受け付けない。
 - コード: `src/app/api/rpa/mynavi/{batch-start,batch-finish,reply-sent,pdf-upload}/route.ts`、`src/lib/mynavi-rpa/{notify,no-target,parse-request-body,auth}.ts`、`prisma/schema.prisma`。
 - **DBへの書き込み・製品コードの変更・マイグレーションは一切行っていない。28件と T-167 ダミーの `status` は RUNNING のまま。**
+
+---
+
+# 11. 実装記録（Step4 / 2026-08-19）
+
+- 対象リポジトリ: bizstudio-portal（branch master / Step3 時点 HEAD `6cb6579`）
+- 内容: 「処理ログがあるのに RUNNING のまま残っているバッチ」を **`FAILED`** に整理し、今後同じ状態が出たら自動で FAILED になるようにした。
+- **RPA（PAD）側は一切変更していない。** マイグレーションも作成・実行していない（`status` は String のため不要）。`railway run` も不使用。
+- 応募者（`Candidate`）・処理ログ（`MynaviRpaProcessingLog`）への書き込みは一切なし。
+
+## 11-1. 方針
+
+Step2 で作った空振り自動クローズ（`NO_TARGET`）に **もう1系統の分岐**を足す形。新しい定期処理は作っていない。
+
+| 状態 | 意味 | 判定 | 一覧の既定表示 |
+|--|--|--|--|
+| `NO_TARGET` | 取り込み対象メール0件で PAD が `batch-finish` を呼ばずに終了（Step2） | RUNNING かつ **処理ログ0件** かつ 30分以上経過 | **非表示**（`includeNoTarget=1` で表示） |
+| `FAILED` | PAD が処理途中で異常終了し `batch-finish` に到達しなかった（Step4） | RUNNING かつ **処理ログ1件以上** かつ 30分以上経過 | **表示**（人が見るべき記録のため隠さない） |
+
+`FAILED` の `finishedAt` には **最後の処理ログの `processedAt`** を入れる（現在時刻ではない）。後から気づいて畳んでいるだけなので、実際に処理が止まった時刻を残す。
+
+**完了通知（LINE WORKS）は発火させない。** リアルタイムの完了報告ではなく、既に運用側で手動対応が済んでいるケースで通知が飛ぶとノイズになるため。
+
+## 11-2. 追加・変更ファイル
+
+| ファイル | 内容 |
+|--|--|
+| `src/lib/mynavi-rpa/no-target.ts` | **追記**。`RPA_BATCH_STATUS_FAILED` / `RPA_STALE_FAILED_ERROR_MESSAGE` / `buildStaleFailedWhere()` / `closeStaleFailedBatches()` を追加。しきい値（`RPA_NO_TARGET_STALE_MINUTES`・既定30分）と件数上限（`RPA_NO_TARGET_CLOSE_LIMIT`・既定500）は Step2 と**同じ定数を共用** |
+| `src/app/api/rpa/mynavi/batch-start/route.ts` | `closeStaleNoTargetBatches()` の後に `closeStaleFailedBatches()` を呼ぶ。**それぞれ独立した try/catch**（片方が落ちてももう片方が走り、batch-start 本体は 200 を返す） |
+| `scripts/close-failed-batches-t168.ts` | **新規**。過去分の一括更新（`--dry-run` 既定 / `--execute`）。Step2 の `close-no-target-batches-t168.ts` は**変更していない** |
+| `prisma/schema.prisma` | `status` のコメントに `"NO_TARGET"` を追記（**コメントのみ・マイグレーション不要**） |
+
+画面側（一覧・詳細）は **変更なし**。`FAILED` のラベル「失敗」＋赤系バッジ、`errorMessage` の表示は既に定義済みだった（`src/app/(app)/rpa-error/executions/page.tsx:27,34` / `[batchId]/page.tsx:45,120-122`）。一覧APIの既定フィルタは `status != NO_TARGET` なので **FAILED は既定で表示される**（11-5 ③で実測）。
+
+## 11-3. 実装上の要点
+
+- **NO_TARGET 化と FAILED 化は別々の `updateMany`。** 条件も別関数（`buildNoTargetWhere` / `buildStaleFailedWhere`）で、違いは `processingLogs: { none: {} }` と `{ some: {} }` の1点のみ。1つの条件式に詰め込んでいないため、取り違えて逆側を更新する事故が起きない。
+- `finishedAt` が行ごとに違うため FAILED 側は `updateMany` 1発では書けない。対象を `findMany`（各行の最終ログ1件を同時取得）してから **1件ずつ `updateMany({ where: { id, status: "RUNNING" } })`**。この `status` ガードにより、SELECT 後に `batch-finish` が届いて COMPLETED になった行を上書きしない（＝本物の完了が勝つ）。
+- `t167-verify-20260818` は `buildStaleFailedWhere()` の中で**常に除外**（呼び出し側が渡さなくても効く）。
+- 更新するのは `status` / `finishedAt` / `errorMessage` の3カラムのみ。件数系カラムは触らない。
+- 日時比較は UTC instant 同士（経過時間の比較なので JST 変換は不要）。スクリプトの**表示**は `toLocaleString('sv-SE',{timeZone:'Asia/Tokyo'})` で JST（罠#17 のため `toISOString().slice()` 系は不使用）。
+
+## 11-4. 過去分の一括更新（本番）
+
+実行経路: `railway ssh --service bizstudio-portal` 上で `npx tsx`（`railway run` は不使用）。
+
+| 項目 | 値 |
+|--|--|
+| dry-run 実行時刻 | 2026-08-18 16:23:20 UTC（＝2026-08-19 01:23 JST） |
+| dry-run 対象件数 | **28件**（Step3 の28件と完全一致） |
+| `--execute` 更新件数 | **28件** |
+
+対象28件の内訳（全件・JST）は dry-run 出力どおり。最古 `cmp8s0u4a00001dmjbvhuuwst`（2026-05-17 05:06 開始 / 最終ログ 05:06:08）〜 最新 `cmsygq5yp01ef0xllkf87ge3f`（2026-08-18 18:31 開始 / 最終ログ 18:32:43）。全件が処理ログ1件。
+
+実行前後の件数:
+
+| status | 実行前 | 実行後 |
+|--|--|--|
+| RUNNING | 35（うち処理ログあり **29**） | **7**（うち処理ログあり **1**） |
+| FAILED | 0 | **28** |
+| NO_TARGET | 23,207 | 23,207（**不変**） |
+| COMPLETED | 405 | 405（**不変**） |
+| `MynaviRpaProcessingLog` 総数 | 438 | 438（**不変**） |
+
+- 実行後の「RUNNING かつ処理ログあり」は **1件＝`t167-verify-20260818` のみ**。`{"status":"RUNNING","finishedAt":null,"errorMessage":null}` で温存されている。
+- 実行後 RUNNING 7件 = ダミー1件 + 30分ウィンドウ内の空振り6件（次回以降の `batch-start` が NO_TARGET に畳む）。
+- **`FAILED` かつ処理ログあり = 28 / 28**、**`NO_TARGET` かつ処理ログあり = 0**。両系統が混ざっていないことを直接確認。
+
+FAILED 化した行のサンプル（`finishedAt` が最終ログ時刻になっていること）:
+
+```
+cmp8s0u4a00001dmjbvhuuwst  開始=2026-05-17 05:06:06  完了=2026-05-17 05:06:08  msg=RPA異常終了により未完了（自動判定）
+cmp8t295m00021dmjjhbvwlc4  開始=2026-05-17 05:35:11  完了=2026-05-17 05:35:13  msg=RPA異常終了により未完了（自動判定）
+cmp8t673e00001dmyzlc1kryc  開始=2026-05-17 05:38:15  完了=2026-05-17 05:38:26  msg=RPA異常終了により未完了（自動判定）
+```
+
+## 11-5. 動作確認
+
+**① `npm run build`** — 成功（型エラー・lint エラーなし）。
+
+**② `last-execution` の実行前後比較**（本番コンテナから `x-rpa-secret` 付きで実測）
+
+```
+BEFORE last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+AFTER  last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+```
+
+**完全一致。** COMPLETED のみを参照しているため FAILED 化の影響を受けない（設計どおり）。
+
+**③ 一覧 API の既定表示に FAILED が出ること**（本番・実セッションの cookie で実測）
+
+| リクエスト | HTTP | total | 1ページ目の内訳 |
+|--|--|--|--|
+| `GET /api/rpa-error/executions?take=50` | 200 | **440** | RUNNING 7 / COMPLETED 39 / **FAILED 4** |
+| `GET /api/rpa-error/executions?take=1&includeNoTarget=1` | 200 | 23,647 | — |
+
+440 = COMPLETED 405 + RUNNING 7 + FAILED 28。**FAILED は既定フィルタで隠れず、1ページ目に出る。** 詳細画面で読める `errorMessage` も API レスポンスに乗っている:
+
+```json
+{"id":"cmsygq5yp01ef0xllkf87ge3f","startedAt":"2026-08-18T09:31:00.144Z",
+ "finishedAt":"2026-08-18T09:32:43.642Z","errorMessage":"RPA異常終了により未完了（自動判定）"}
+```
+
+**④ LINE WORKS に通知が飛んでいないこと**
+
+- 確認方法1（コード）: `notifyMynaviBatchCompletion()` の呼び出し箇所は `src/app/api/rpa/mynavi/batch-finish/route.ts:81` の**1箇所のみ**（`grep -rn` で全数確認）。Step4 で追加した `closeStaleFailedBatches()` は `notify.ts` を import しておらず、通知経路を一切持たない。
+- 確認方法2（実行経路）: 一括更新は `railway ssh` 上の独立プロセスで、HTTP を介さず Prisma で直接 UPDATE している。`batch-finish` を通らないため通知は構造的に発火し得ない。
+- 結果: **通知0件**。
+
+**⑤ 処理ログ件数の不変** — 438 → 438（11-4 の表）。スクリプト側にも変化検知の警告を実装済み（COMPLETED / NO_TARGET / ダミーの状態も同時に検証、警告出力なし）。
+
+**⑥ `t167-verify-20260818`** — RUNNING / `finishedAt=null` のまま。
+
+**⑦ `batch-start` 内の掃除処理ログ（NO_TARGET / FAILED 両方）** — 11-6 に本番デプロイ後の実測を記載。
+
+## 11-6. 本番デプロイ後の実機確認
+
+（デプロイ後に追記）
+
+## 11-7. 残る課題・未確認事項
+
+- **PAD（7号機）側の異常終了そのものは直していない。** 本タスクの範囲外（portal 側のみ）。今後も異常終了すれば 30分後に自動で FAILED になり、一覧に「失敗」として残る。
+- 自動 FAILED 化されたバッチについて、処理ログはあるが `batch-finish` が来ていない＝**件数系カラム（`totalCount` 等）は 0 のまま**。詳細画面では処理ログテーブルで実際の処理内容が読めるが、集計値と実ログ件数が食い違う。件数を後から埋める処理は入れていない（推測で数字を作らない方針）。
+- Step3 で「要確認」とされた応募者5名は運用側でマイナビ管理画面を確認済み・手動対応完了のため、本 Step では救済処理を行っていない。
+- Step3 で挙がっている `parseDateLoose` の9時間ズレは**別タスク**（本 Step では触っていない）。

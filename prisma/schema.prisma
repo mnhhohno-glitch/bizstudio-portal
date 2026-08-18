@@ -1366,7 +1366,7 @@ model RpaExecutionBatch {
   flowName           String                   @map("flow_name")
   startedAt          DateTime                 @map("started_at")
   finishedAt         DateTime?                @map("finished_at")
-  status             String                   @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED"
+  status             String                   @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED" | "NO_TARGET"
   totalCount         Int                      @default(0) @map("total_count")
   normalCount        Int                      @default(0) @map("normal_count")
   ageNgCount         Int                      @default(0) @map("age_ng_count")

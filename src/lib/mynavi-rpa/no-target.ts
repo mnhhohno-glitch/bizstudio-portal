@@ -116,3 +116,109 @@ export async function closeStaleNoTargetBatches(
     threshold: noTargetThreshold(now, staleMinutes),
   };
 }
+
+// ---------------------------------------------------------------------------
+// T-168 Step4: 処理ログがあるのに RUNNING のまま残ったバッチの FAILED 化
+// ---------------------------------------------------------------------------
+
+/**
+ * 「処理ログが1件以上あるのに RUNNING のまま」＝ PAD（RPA）が処理途中で異常終了し
+ * `batch-finish` を呼べなかったケース。空振り（NO_TARGET）とは原因も意味も違うため、
+ * 別の状態値 FAILED に畳む。人が見るべき記録なので一覧の既定フィルタでは隠さない。
+ *
+ * 完了日時には「最後の処理ログの processedAt」を入れる（現在時刻ではない）。
+ * 後から気づいて畳んでいるだけなので、実際に処理が止まった時刻を残す。
+ */
+export const RPA_BATCH_STATUS_FAILED = "FAILED";
+
+/** 自動 FAILED 化したバッチに入れる固定文言 */
+export const RPA_STALE_FAILED_ERROR_MESSAGE = "RPA異常終了により未完了（自動判定）";
+
+/**
+ * 異常終了バッチの判定条件。NO_TARGET 側と唯一違うのは processingLogs の有無。
+ * 誤って逆側を更新しないよう、WHERE も updateMany も NO_TARGET とは完全に分けている。
+ *
+ * - status = RUNNING
+ * - 紐づく処理ログが1件以上
+ * - startedAt が staleMinutes 以上前
+ * - T-167 検証用ダミー および excludeBatchIds に含まれない
+ */
+export function buildStaleFailedWhere(
+  opts: NoTargetWhereOptions = {},
+): Prisma.RpaExecutionBatchWhereInput {
+  const now = opts.now ?? new Date();
+  const staleMinutes = opts.staleMinutes ?? getNoTargetStaleMinutes();
+  const threshold = noTargetThreshold(now, staleMinutes);
+  const exclude = Array.from(
+    new Set([...(opts.excludeBatchIds ?? []).filter(Boolean), T167_VERIFY_BATCH_ID]),
+  );
+
+  return {
+    status: "RUNNING",
+    startedAt: { lt: threshold },
+    processingLogs: { some: {} },
+    id: { notIn: exclude },
+  };
+}
+
+export type CloseStaleFailedResult = {
+  count: number;
+  staleMinutes: number;
+  limit: number;
+  threshold: Date;
+};
+
+/**
+ * 異常終了バッチを FAILED にクローズする。
+ *
+ * finishedAt が行ごとに違う（最後の処理ログの processedAt）ため updateMany 1発では書けない。
+ * 対象を引いてから1件ずつ `updateMany({ where: { id, status: "RUNNING" } })` で更新することで、
+ * 引いた後に `batch-finish` が届いて COMPLETED になった行を上書きしないようにしている。
+ *
+ * 完了通知（LINE WORKS）は発火させない。リアルタイムの完了報告ではなく、
+ * 後から気づいて畳んでいるだけなので通知はノイズにしかならない。
+ */
+export async function closeStaleFailedBatches(
+  client: BatchClient,
+  opts: NoTargetWhereOptions & { limit?: number } = {},
+): Promise<CloseStaleFailedResult> {
+  const now = opts.now ?? new Date();
+  const staleMinutes = opts.staleMinutes ?? getNoTargetStaleMinutes();
+  const limit = opts.limit ?? getNoTargetCloseLimit();
+
+  const targets = await client.rpaExecutionBatch.findMany({
+    where: buildStaleFailedWhere({ ...opts, now, staleMinutes }),
+    orderBy: { startedAt: "asc" },
+    take: limit,
+    select: {
+      id: true,
+      processingLogs: {
+        orderBy: { processedAt: "desc" },
+        take: 1,
+        select: { processedAt: true },
+      },
+    },
+  });
+
+  let count = 0;
+  for (const t of targets) {
+    const lastProcessedAt = t.processingLogs[0]?.processedAt;
+    if (!lastProcessedAt) continue; // 条件上ありえないが念のため
+    const res = await client.rpaExecutionBatch.updateMany({
+      where: { id: t.id, status: "RUNNING" },
+      data: {
+        status: RPA_BATCH_STATUS_FAILED,
+        finishedAt: lastProcessedAt,
+        errorMessage: RPA_STALE_FAILED_ERROR_MESSAGE,
+      },
+    });
+    count += res.count;
+  }
+
+  return {
+    count,
+    staleMinutes,
+    limit,
+    threshold: noTargetThreshold(now, staleMinutes),
+  };
+}

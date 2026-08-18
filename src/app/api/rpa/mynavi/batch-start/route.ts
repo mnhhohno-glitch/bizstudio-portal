@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { notifyMynaviError } from "@/lib/mynavi-rpa/notify";
-import { closeStaleNoTargetBatches } from "@/lib/mynavi-rpa/no-target";
+import {
+  closeStaleFailedBatches,
+  closeStaleNoTargetBatches,
+} from "@/lib/mynavi-rpa/no-target";
 
 export const runtime = "nodejs";
 
@@ -46,6 +49,22 @@ export async function POST(req: Request) {
       );
     } catch (e) {
       console.error("[rpa/mynavi/batch-start] no-target cleanup failed:", e);
+    }
+
+    // T-168 Step4: 処理ログはあるのに RUNNING のまま残った＝PAD が異常終了したバッチを
+    // FAILED として畳む。空振り側とは別の updateMany で、条件も完全に分けている。
+    // 完了通知（LINE WORKS）は意図的に発火させない（リアルタイムの完了報告ではないため）。
+    try {
+      const failed = await closeStaleFailedBatches(prisma, {
+        excludeBatchIds: [batch.id],
+      });
+      console.log(
+        `[rpa/mynavi/batch-start] failed cleanup: closed=${failed.count} ` +
+          `staleMinutes=${failed.staleMinutes} limit=${failed.limit} ` +
+          `threshold=${failed.threshold.toISOString()}`,
+      );
+    } catch (e) {
+      console.error("[rpa/mynavi/batch-start] failed cleanup failed:", e);
     }
 
     return NextResponse.json({ batchId: batch.id });
