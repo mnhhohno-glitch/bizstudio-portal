@@ -731,3 +731,267 @@ CandidateSettingsHistory.sendResult: SUCCESS=159              （Step1 と同一
 - そのログ ID に対して `sendResult` を `"FAILED"` / 省略 / `""` / `"SUCCESS"` の4パターンで POST。
 - SELECT で `replySentAt` / `replyResult` を確認。
 - テスト行は削除せず残し、`batchId` を報告書に記載する。
+
+---
+
+## 12. 送信失敗時のDB書き込み実確認（2026-08-18 / Step3）
+
+第11章 11-6 で「本番DB書き込みを伴うため未実施」としていた確認を、**本番にテスト専用レコードを新規 INSERT** して実施した。
+既存レコードの UPDATE / DELETE は一切行っていない。LINE WORKS への実送信も行っていない。
+
+対象コミット: `4f23319`（Step2 実装）。**製品コードの変更は一切していない（本章は確認のみ）。**
+
+### 12-1. 作成したテストレコード（削除せず残置）
+
+**⚠️ このバッチは T-167 検証用のダミーである。実運用の応募取り込みではない。**
+実績集計・RPA実行一覧・求職者「大野 テスト」の設定履歴に紛れ込むため、集計時は除外すること。
+識別子は `batchId` / `processingLogId` ともに `t167-verify-` 始まり。
+
+| 種別 | ID | 作成日時 (UTC) |
+|--|--|--|
+| `RpaExecutionBatch` | `t167-verify-20260818` | 2026-08-18T14:07:13.411Z |
+| `MynaviRpaProcessingLog` #1 | `t167-verify-log1` | 2026-08-18T14:07:13.419Z |
+| `MynaviRpaProcessingLog` #2 | `t167-verify-log2` | 2026-08-18T14:07:13.423Z |
+| `MynaviRpaProcessingLog` #3 | `t167-verify-log3` | 2026-08-18T14:07:13.428Z |
+| `MynaviRpaProcessingLog` #4 | `t167-verify-log4` | 2026-08-18T14:07:13.432Z |
+
+バッチの内容（既存レコードの実値に倣って組み立て。`flowName` のみ、画面一覧で識別できるよう末尾に印を付けた）:
+
+```
+machineNumber : 7
+flowName      : 01.応募者一次返信・情報取り込み【T-167検証用ダミー】
+startedAt     : 2026-08-18T13:57:13.406Z
+finishedAt    : null   （status = RUNNING のまま。batch-finish は叩いていない）
+totalCount=4 / normalCount=4 / 他カウンタ=0
+```
+
+処理ログ4件の初期状態（4件とも共通）:
+
+```
+candidateId  : cmmn4jipg00011dqt23w1q3bk （大野 テスト / 求職者番号 5999999 ＝テスト用求職者）
+candidateName: 大野 テスト
+status       : NORMAL
+canSendReply : true
+replySentAt  : NULL
+replyResult  : NULL
+```
+
+`candidateId` に実在の求職者は一切使っていない。`CandidateSettingsHistory` への insert 分岐を確認するため、テスト用求職者を指定した。
+
+### 12-2. 4パターンの POST（本番 `bizstudio-portal-production.up.railway.app`）
+
+`POST /api/rpa/mynavi/reply-sent`（`x-rpa-secret` 付き）。生の実行結果:
+
+```
+{"case":1,"label":"\"FAILED\"","sentBody":{"processingLogId":"t167-verify-log1","sendResult":"FAILED","sentAt":"2026/08/18 23:10:00"},"status":200,"response":"{\"ok\":true,\"sendResult\":\"FAILED\"}"}
+{"case":2,"label":"フィールドごと省略","sentBody":{"processingLogId":"t167-verify-log2","sentAt":"2026/08/18 23:11:00"},"status":200,"response":"{\"ok\":true,\"sendResult\":\"FAILED\"}"}
+{"case":3,"label":"空文字","sentBody":{"processingLogId":"t167-verify-log3","sendResult":"","sentAt":"2026/08/18 23:12:00"},"status":200,"response":"{\"ok\":true,\"sendResult\":\"FAILED\"}"}
+{"case":4,"label":"\"SUCCESS\"","sentBody":{"processingLogId":"t167-verify-log4","sendResult":"SUCCESS","sentAt":"2026/08/18 23:13:00"},"status":200,"response":"{\"ok\":true,\"sendResult\":\"SUCCESS\"}"}
+```
+
+**4件とも HTTP 200。** 失敗3件も 200 を返しており、「失敗でも RPA 側のフローを止めない」設計どおり。
+レスポンスボディに `sendResult` が入るため、RPA 側のログからも portal の解釈（FAILED / SUCCESS）が読める。
+
+### 12-3. SELECT の生の出力
+
+```sql
+SELECT id, batch_id, candidate_id, reply_sent_at, reply_result, updated_at
+  FROM mynavi_rpa_processing_logs
+ WHERE batch_id = 't167-verify-20260818' ORDER BY id;
+```
+
+```json
+[
+  {
+    "id": "t167-verify-log1",
+    "batch_id": "t167-verify-20260818",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "reply_sent_at": null,
+    "reply_result": "FAILED",
+    "updated_at": "2026-08-18T14:07:40.370Z"
+  },
+  {
+    "id": "t167-verify-log2",
+    "batch_id": "t167-verify-20260818",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "reply_sent_at": null,
+    "reply_result": "FAILED",
+    "updated_at": "2026-08-18T14:07:40.946Z"
+  },
+  {
+    "id": "t167-verify-log3",
+    "batch_id": "t167-verify-20260818",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "reply_sent_at": null,
+    "reply_result": "FAILED",
+    "updated_at": "2026-08-18T14:07:41.509Z"
+  },
+  {
+    "id": "t167-verify-log4",
+    "batch_id": "t167-verify-20260818",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "reply_sent_at": "2026-08-18T23:13:00.000Z",
+    "reply_result": "SUCCESS",
+    "updated_at": "2026-08-18T14:07:42.072Z"
+  }
+]
+```
+
+```sql
+SELECT id, candidate_id, sent_at, send_type, send_result, template_name, sender_name, created_at
+  FROM candidate_settings_histories
+ WHERE candidate_id = 'cmmn4jipg00011dqt23w1q3bk' ORDER BY created_at;
+```
+
+```json
+[
+  {
+    "id": "cmsyqlyzq00010xmsy6kgqt8s",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "sent_at": "2026-08-18T23:10:00.000Z",
+    "send_type": "MYNAVI_FIRST_REPLY",
+    "send_result": "FAILED",
+    "template_name": "【日程調整】初回メッセージ",
+    "sender_name": "藤本 夏海",
+    "created_at": "2026-08-18T14:07:40.646Z"
+  },
+  {
+    "id": "cmsyqlzfp00020xmsetggmvs2",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "sent_at": "2026-08-18T23:11:00.000Z",
+    "send_type": "MYNAVI_FIRST_REPLY",
+    "send_result": "FAILED",
+    "template_name": "【日程調整】初回メッセージ",
+    "sender_name": "藤本 夏海",
+    "created_at": "2026-08-18T14:07:41.221Z"
+  },
+  {
+    "id": "cmsyqlzvb00030xms30gf7w4u",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "sent_at": "2026-08-18T23:12:00.000Z",
+    "send_type": "MYNAVI_FIRST_REPLY",
+    "send_result": "FAILED",
+    "template_name": "【日程調整】初回メッセージ",
+    "sender_name": "藤本 夏海",
+    "created_at": "2026-08-18T14:07:41.783Z"
+  },
+  {
+    "id": "cmsyqm0ay00040xmsbc8xg0oi",
+    "candidate_id": "cmmn4jipg00011dqt23w1q3bk",
+    "sent_at": "2026-08-18T23:13:00.000Z",
+    "send_type": "MYNAVI_FIRST_REPLY",
+    "send_result": "SUCCESS",
+    "template_name": "【日程調整】初回メッセージ",
+    "sender_name": "藤本 夏海",
+    "created_at": "2026-08-18T14:07:42.346Z"
+  }
+]
+```
+
+（この求職者の設定履歴は今回作成した4件が全件。既存行は無かったため、上の SELECT 結果＝今回の insert 分そのもの。）
+
+### 12-4. 期待値との突き合わせ
+
+| # | 送った `sendResult` | `replySentAt` | `replyResult` | 設定履歴 `sendResult` | HTTP | 期待どおり |
+|--|--|--|--|--|--|--|
+| 1 | `"FAILED"` | **NULL のまま** | `FAILED` | 1行あり・`FAILED` | 200 | ✅ |
+| 2 | フィールドごと省略 | **NULL のまま** | `FAILED` | 1行あり・`FAILED` | 200 | ✅ |
+| 3 | `""`（空文字） | **NULL のまま** | `FAILED` | 1行あり・`FAILED` | 200 | ✅ |
+| 4 | `"SUCCESS"` | `2026-08-18T23:13:00.000Z` | `SUCCESS` | 1行あり・`SUCCESS` | 200 | ✅ |
+
+**失敗3件は `replySentAt` が NULL のまま据え置かれ、`replyResult` にだけ `FAILED` が入る。**
+「送っていないのに送信日時が残る」ことは起きていない。
+
+`sendType` / `templateName` / `senderName` は**成功時と失敗時で差が無く、4件とも同一の固定値**:
+
+```
+sendType     : MYNAVI_FIRST_REPLY        （route.ts で固定）
+templateName : 【日程調整】初回メッセージ  （route.ts の TEMPLATE_NAME 定数で固定）
+senderName   : 藤本 夏海                  （route.ts の SENDER_NAME 定数で固定）
+```
+
+つまり成功／失敗を区別する情報は `sendResult` 列だけに乗る。設定履歴タブで失敗を見分ける手掛かりは「送信結果」列のみ。
+
+### 12-5. 画面での見え方（求職者詳細 ＞ 設定履歴タブ）
+
+URL: `/candidates/cmmn4jipg00011dqt23w1q3bk?view=settings-history`
+
+画面から抜いた実際の表示文言（そのまま貼り付け）:
+
+```
+全4件
+
+送信日時 送信種別 送信結果 送信文章名 送信担当者
+2026/08/19 08:13 マイナビ一次返信 成功 【日程調整】初回メッセージ 藤本 夏海
+2026/08/19 08:12 マイナビ一次返信 失敗 【日程調整】初回メッセージ 藤本 夏海
+2026/08/19 08:11 マイナビ一次返信 失敗 【日程調整】初回メッセージ 藤本 夏海
+2026/08/19 08:10 マイナビ一次返信 失敗 【日程調整】初回メッセージ 藤本 夏海
+```
+
+- **失敗3件は「失敗」と表示された**（赤系のバッジ: `border-red-200 bg-red-50 text-red-700`）。
+- **成功1件は「成功」と表示された**（緑系のバッジ: `border-green-200 bg-green-50 text-green-700`）。
+- 空欄・`undefined`・エラー表示は**無し**。件数表示も「全4件」で正しい。
+
+DB の値は `"FAILED"` だが、`SettingsHistoryTab.tsx` の判定は
+`h.sendResult === "SUCCESS" ? "成功" : "失敗"` という **SUCCESS 以外は全部「失敗」** の2値判定のため、
+第9章で挙げた `FAILURE` / `FAILED` の表記ズレがあっても画面表示は壊れない。**表記ズレの影響が画面に出ないことを実データで確認した。**
+
+### 12-6. 通知の集計（オフライン実行・LINE WORKS へは未送信）
+
+`notify.ts` の `notifyMynaviBatchCompletion` の本文生成部分だけをコンテナ上で再現し、
+**今回作成した本番のテストレコードを読ませて**集計させた。`sendBotMessage` は呼んでいないため、
+本番トークルーム「マイナビ転職応募取り込み」へメッセージは飛んでいない。
+
+集計結果:
+
+```
+failedCount = 3
+```
+
+生成された本文（そのまま）:
+
+```
+📊 マイナビ転職応募取り込み 完了
+2026/8/18 23:03 大野 テスト
+2026/8/18 23:04 大野 テスト
+2026/8/18 23:05 大野 テスト
+2026/8/18 23:06 大野 テスト
+処理時刻: 2026/08/18 22:57-23:08 (12分)
+処理件数: 4件
+　取り込み: 4件
+　年齢NG: 0件
+　外国籍NG: 0件
+　AI解析失敗: 0件
+　二重処理スキップ: 0件
+　エラー: 0件
+送信失敗: 3件
+　大野 テスト / 会員No: -
+　大野 テスト / 会員No: -
+　大野 テスト / 会員No: -
+詳細: https://bizstudio-portal-production.up.railway.app/rpa-error/executions/t167-verify-20260818
+```
+
+**「送信失敗: 3件」が出力され、失敗した応募者3名が氏名付きで列挙された。**
+会員Noが `-` なのは、テスト用求職者「大野 テスト」の `mynaviMemberNo` が NULL のため（`notify.ts` のフォールバック `|| "-"` が効いている）。実応募者では会員Noが入る。
+
+### 12-7. 期待値と違った点
+
+Step3 で確認対象としていた項目については **期待どおり（相違なし）**。
+
+ただし付随して、**本チケットの対象外だが T-167 以前から存在する不具合を1件確認した（未修正・報告のみ）**。
+
+**`sentAt` の +9時間ズレ**
+
+- RPA から `sentAt: "2026/08/18 23:10:00"`（JST の壁時計値）を送ったが、DB には `2026-08-18T23:10:00.000Z`（＝UTC の23:10）として保存され、画面には JST 変換されて **`2026/08/19 08:10`** と表示された。9時間先にズレている。
+- 原因は `route.ts` の `parseDateLoose()`。`yyyy/M/d H:mm:ss` 形式を `new Date(y, mo-1, d, h, mi, s)` で**実行環境のローカルタイム**として解釈するが、Railway のコンテナは **UTC 稼働**のため、JST の壁時計値がそのまま UTC として取り込まれる。
+- **実データにも同じズレが出ている。** 例: 実運用の処理ログ `cmsykj1nq01pr0xll2mdinb2a` は `processedAt = 2026-08-18T11:17:26Z`（＝JST 20:17）に対し `replySentAt = 2026-08-18T20:18:49Z`（＝JST 翌 05:18）。取り込みの1分後に送信しているはずが、記録上は約9時間後になっている。
+- 影響: 設定履歴タブの「送信日時」と `replySentAt` を使う集計が全て +9時間。**成功／失敗の判定そのものには影響しない**ため、T-167 の目的（送信失敗の検知）は達成できている。
+- Step2 の実装で入れた分岐が原因ではなく、`parseDateLoose` は Step2 で手を入れていない既存関数。CLAUDE.md `12-pitfalls.md` の JST タイムゾーン罠に該当する。
+- **本タスクは確認のみのため修正していない。** 別チケットでの対応要否を判断されたい。
+
+### 12-8. 未確認事項
+
+1. **`batch-finish` API を実際に叩いた場合の通知**。12-6 はオフライン再現であり、`batch-finish` エンドポイント経由の実行はしていない（叩くと本番トークルームへ実送信されるため）。集計ロジック（`notify.ts`）は本番データで確認済みだが、`batch-finish` の受け口からこの関数までの経路は未通し。
+2. **失敗が21件以上あった場合の `他 N件` 表示**。今回のテストは失敗3件のため、`FAILURE_LIST_LIMIT = 20` の超過分の畳み込みは未確認（コード上の分岐のみ）。
+3. **RPA 実機からの送信**。今回の POST は portal コンテナから発行した。RPA（Power Automate Desktop）が実際に `"FAILED"` を送ってきたときの end-to-end は、次に本番で失敗が発生したときに Railway ログと DB で確認する必要がある。
+4. **`replySentAt` が NULL のまま残る行の運用上の扱い**。第6章 E-2 で挙げた「未処理」と「送信失敗」の区別は、`replyResult` が入るようになった今後の分は可能だが、**Step2 以前の既存 254件（`replyResult=NULL`）は依然として区別できない**（今回のテストで作った4件はこの254件には含まれない）。
