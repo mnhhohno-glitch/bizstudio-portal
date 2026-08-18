@@ -674,16 +674,56 @@ true（型違い）                  -> FAILED
 
 `npx tsc --noEmit -p tsconfig.json` → エラー0件。
 
-### 11-5. 未実施の確認（本番DB書き込みを伴うため停止）
+### 11-5. 本番デプロイ後の実機確認（DB書き込みなしで実施）
+
+- デプロイ済みコミット: `4f23319ad784a03f9afb33c5949e4ca6d3f6ea4d` / Railway status `SUCCESS` / 2026-08-18T13:54:42Z（Railway API で commitHash を確認）
+
+**存在しない `processingLogId` を送ると 404 で返り、DB には何も書かれない**（Step1 A-4 で確認済みの挙動）。
+これを利用して、本番の DB を一切書き換えずに、デプロイ済みコードの正規化ロジックを実機で検証した。
+
+実行方法: `railway ssh --service bizstudio-portal` でコンテナ内から `127.0.0.1:$PORT` へ POST（`railway run` 不使用。シークレットはコンテナ外に出していない）。
+`processingLogId` は `"t167_nonexistent_probe"`（実在しない ID）。
+
+レスポンス（5パターンとも 404・DB 書き込みなし）:
+
+```
+FAILED   -> 404 {"error":"指定された処理ログが見つかりません"}
+omitted  -> 404 {"error":"指定された処理ログが見つかりません"}
+empty    -> 404 {"error":"指定された処理ログが見つかりません"}
+SUCCESS  -> 404 {"error":"指定された処理ログが見つかりません"}
+pad-var  -> 404 {"error":"指定された処理ログが見つかりません"}
+```
+
+本番 Railway ログ（新規追加した生値ログ。**これが今回の改修で「事後検証可能」になった部分**）:
+
+```
+[rpa/mynavi/reply-sent] received: {"processingLogId":"t167_nonexistent_probe","rawSendResult":"FAILED","rawSendResultType":"string","normalized":"FAILED","rawSentAt":"2026/08/18 23:00:00"}
+[rpa/mynavi/reply-sent] received: {"processingLogId":"t167_nonexistent_probe","rawSendResult":"(missing)","rawSendResultType":"undefined","normalized":"FAILED","rawSentAt":"2026/08/18 23:00:00"}
+[rpa/mynavi/reply-sent] received: {"processingLogId":"t167_nonexistent_probe","rawSendResult":"","rawSendResultType":"string","normalized":"FAILED","rawSentAt":"2026/08/18 23:00:00"}
+[rpa/mynavi/reply-sent] received: {"processingLogId":"t167_nonexistent_probe","rawSendResult":"SUCCESS","rawSendResultType":"string","normalized":"SUCCESS","rawSentAt":"2026/08/18 23:00:00"}
+[rpa/mynavi/reply-sent] received: {"processingLogId":"t167_nonexistent_probe","rawSendResult":"%送信結果%","rawSendResultType":"string","normalized":"FAILED","rawSentAt":"2026/08/18 23:00:00"}
+```
+
+**本番稼働中のコードで `"FAILED"` / 欠落 / 空文字 / `"%送信結果%"` が `FAILED` に、`"SUCCESS"` だけが `SUCCESS` に正規化されることを実機で確認した。**
+
+確認後の本番DB（SELECT のみ）— Step1 第6章の値から**1件も増減していない**:
+
+```
+probe row exists: NO
+MynaviRpaProcessingLog.replyResult : NULL=254 / SUCCESS=180   （Step1 と同一）
+CandidateSettingsHistory.sendResult: SUCCESS=159              （Step1 と同一）
+```
+
+### 11-6. 未実施の確認（本番DB書き込みを伴うため停止）
 
 以下は**実施していない**。依頼の禁止事項「本番DBへの書き込み（UPDATE / DELETE / INSERT すべて禁止。既存レコードの値の書き換えもしない）」に該当するため。
 
-1. デプロイ済み `reply-sent` へ `sendResult: "FAILED"` を実際に POST し、`MynaviRpaProcessingLog.replySentAt` が NULL のまま `replyResult="FAILED"` になることを DB で確認する。
+1. **DB書き込みを伴う経路**（実在する `processingLogId` を指定した場合）の確認。11-5 で判定ロジックそのものは実機確認できたが、`replySentAt` を更新せず `replyResult="FAILED"` を書く分岐と、`CandidateSettingsHistory` に `sendResult="FAILED"` が1行入ることは、DB を書き換えないと確認できないため未実施。
    - このテストは**既存の処理ログ行を UPDATE する**（`processingLogId` が実在しないと 404 で終わり、何も検証できない）。テスト用の行を新規作成する場合も `RpaExecutionBatch` + `MynaviRpaProcessingLog` の INSERT が必要。
    - さらに `candidateId` が付いていれば `CandidateSettingsHistory` にテスト行が1行増え、その求職者の設定履歴タブに「失敗」として表示される。
 2. 実際の LINE WORKS への通知送信（`batch-finish` の実行）。本番トークルーム「マイナビ転職応募取り込み」へ実メッセージが飛ぶため未実施。通知本文は 11-4 のオフライン実行で代替確認した。
 
-**テストで作成した本番レコードは0件。**
+**テストで作成した本番レコードは0件。**（11-5 の SELECT で件数が Step1 から変化していないことを確認済み）
 
 実施する場合の推奨手順（要承認）:
 
