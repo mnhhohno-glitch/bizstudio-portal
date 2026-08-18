@@ -639,3 +639,43 @@ AFTER  last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
 
 - **処理ログありで RUNNING の 28件は未解決のまま。** 本改修の対象外（原因調査のため意図的に温存）。この28件に紐づく応募者の完了通知は今後も飛ばない。
 - 空振り時に `batch-finish` を呼ばない PAD 側の挙動そのものは直していない。portal 側で毎回1件ずつ NO_TARGET が積み上がる（1日約288件）が、一覧の既定フィルタで隠れるため実用性は損なわれない。
+
+### 9-9. 本番デプロイ後の実機確認（コミット `52d5ddf` / 2026-08-18 15:0x UTC）
+
+**① `batch-start` 内の自動クローズが実際に動いた（Railway ログ実測）**
+
+```
+[rpa/mynavi/batch-start] no-target cleanup: closed=2 staleMinutes=30 limit=500 threshold=2026-08-18T14:30:18.797Z
+[rpa/mynavi/batch-start] no-target cleanup: closed=0 staleMinutes=30 limit=500 threshold=2026-08-18T14:35:12.290Z
+```
+
+デプロイ後の1回目の PAD 起動で、30分しきい値を超えた空振り2件を畳んだ。2回目は対象なしで `closed=0`（0件でもログを出す仕様どおり）。以降は毎回1件ずつ畳まれ、RUNNING が溜まらなくなる。
+
+**② デプロイ後の DB 状態**
+
+| status | 件数 |
+|--|--|
+| COMPLETED | **405**（変化なし） |
+| RUNNING | **36**（うち処理ログあり **29** / 処理ログなし 7 = 30分ウィンドウ内） |
+| NO_TARGET | **23,191**（一括 23,189 + 自動クローズ 2） |
+| FAILED | 0 |
+
+- `NO_TARGET` かつ処理ログありの件数 = **0件**。処理ログのあるバッチは一切触れていないことを直接確認。
+- `t167-verify-20260818` → `{"status":"RUNNING","finishedAt":null}`。**RUNNING のまま温存されている。**
+
+**③ 一覧 API の既定フィルタ（本番・実セッションで実測）**
+
+| リクエスト | HTTP | total |
+|--|--|--|
+| `GET /api/rpa-error/executions?take=1` | 200 | **441** |
+| `GET /api/rpa-error/executions?take=1&includeNoTarget=1` | 200 | **23,632** |
+
+441 = COMPLETED 405 + RUNNING 36。**総ページ数 1,182 → 23 ページに縮小**し、1ページ目に意味のあるバッチが並ぶようになった。トグルONで従来どおり全件（23,632）が見える。
+
+**④ `last-execution`（デプロイ後）**
+
+```
+{"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+```
+
+一括クリーンアップ前・後・デプロイ後の3時点で完全一致。
