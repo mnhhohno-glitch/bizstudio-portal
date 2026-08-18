@@ -15,6 +15,8 @@
  *   NORMAL  : 差が −10分 〜 +10分
  *   SHIFTED : 差が +8時間50分 〜 +9時間10分  ← これだけが補正対象
  *   UNKNOWN : 上記以外すべて（判定不能・**触らない**）
+ *   SENTINEL: 値が 1990-01-01 より前（RPA が送った不正値。実データでは 1901-01-01 の3件）。
+ *             **判定不能ではなく「除外」**として母数から外す。触らない（T-169 案A / 2026-08-19 承認）
  *   対象外  : sentAt / replySentAt が NULL（母数から外す）
  *
  * 補正内容: SHIFTED と判定したレコードの当該カラムから **9時間を減算**する。
@@ -66,13 +68,22 @@ const SHIFTED_HI = 9 * HOUR + 10 * MIN;
 
 const CHUNK = 500;
 
+/**
+ * T-169 案A: RPA が不正な `sentAt` を送った痕跡（実データでは `1901-01-01T00:00:00Z` の3件）。
+ * 9時間引いても意味のある値にならないため、**「判定不能」ではなく「除外（センチネル値）」**として
+ * 判定の母数から外す。UPDATE / DELETE は一切しない（触らずに残す）。
+ */
+const SENTINEL_BEFORE = new Date("1990-01-01T00:00:00Z");
+
 const T167_VERIFY_BATCH_ID = "t167-verify-20260818";
 const T167_VERIFY_LOG_PREFIX = "t167-verify-log";
 const TEST_CANDIDATE_NUMBER = "5999999";
 
-type Klass = "NORMAL" | "SHIFTED" | "UNKNOWN";
+type Klass = "NORMAL" | "SHIFTED" | "UNKNOWN" | "SENTINEL";
 
-function classify(diffMs: number): Klass {
+function classify(value: Date, diffMs: number): Klass {
+  // センチネル値は差を見る前に除外する（母数から外す）。
+  if (value.getTime() < SENTINEL_BEFORE.getTime()) return "SENTINEL";
   if (diffMs >= NORMAL_LO && diffMs <= NORMAL_HI) return "NORMAL";
   if (diffMs >= SHIFTED_LO && diffMs <= SHIFTED_HI) return "SHIFTED";
   return "UNKNOWN";
@@ -149,7 +160,7 @@ async function collect(): Promise<Row[]> {
       oldValue: h.sentAt,
       newValue: new Date(h.sentAt.getTime() - SHIFT_MS),
       diffMs,
-      klass: classify(diffMs),
+      klass: classify(h.sentAt, diffMs),
       excluded,
       excludeReason: excluded ? "大野テスト/T-167ダミー" : "",
     });
@@ -175,7 +186,7 @@ async function collect(): Promise<Row[]> {
       oldValue: l.replySentAt,
       newValue: new Date(l.replySentAt.getTime() - SHIFT_MS),
       diffMs,
-      klass: classify(diffMs),
+      klass: classify(l.replySentAt, diffMs),
       excluded,
       excludeReason: excluded ? "大野テスト/T-167ダミー" : "",
     });
@@ -193,6 +204,8 @@ function summarize(rows: Row[], table: Row["table"]) {
     shifted: by("SHIFTED").length,
     unknown: by("UNKNOWN").length,
     unknownRows: by("UNKNOWN"),
+    sentinel: by("SENTINEL").length,
+    sentinelRows: by("SENTINEL"),
     excludedShifted: by("SHIFTED").filter((r) => r.excluded).length,
     targets: by("SHIFTED").filter((r) => !r.excluded),
   };
@@ -279,7 +292,7 @@ async function main() {
   console.log(`=== T-169 送信日時9時間ずれ補正 [${MODE}] ===`);
   console.log(`開始: ${jst(startedAt)} / container TZ = ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
   console.log(
-    `判定基準: NORMAL=[-10分,+10分] / SHIFTED=[8h50m,9h10m] / それ以外=UNKNOWN(触らない) / 補正=-9時間`,
+    `判定基準: NORMAL=[-10分,+10分] / SHIFTED=[8h50m,9h10m] / <1990-01-01=SENTINEL(除外) / それ以外=UNKNOWN(触らない) / 補正=-9時間`,
   );
 
   const { testCandidates } = await loadExclusions();
@@ -296,12 +309,22 @@ async function main() {
   for (const s of summaries) {
     const tableTotal = s.table === "CandidateSettingsHistory" ? totalCsh : totalLog;
     console.log(`\n########## ${s.table} ##########`);
-    console.log(`テーブル総件数: ${tableTotal} / 対象外(NULL): ${tableTotal - s.total} / 判定対象: ${s.total}`);
+    console.log(
+      `テーブル総件数: ${tableTotal} / 対象外(NULL): ${tableTotal - s.total} / 除外(センチネル値<1990): ${s.sentinel} / 判定対象: ${s.total - s.sentinel}`,
+    );
     console.log(`  SHIFTED(約9時間ずれ): ${s.shifted}  NORMAL(正常): ${s.normal}  UNKNOWN(判定不能): ${s.unknown}`);
     console.log(`  うち除外対象で SHIFTED: ${s.excludedShifted} / 補正対象: ${s.targets.length}`);
-    console.log("  --- 差の分布（10分刻み） ---");
-    for (const h of histogram(rows.filter((r) => r.table === s.table))) {
+    console.log("  --- 差の分布（10分刻み・センチネル値を除く） ---");
+    for (const h of histogram(rows.filter((r) => r.table === s.table && r.klass !== "SENTINEL"))) {
       console.log(`  | ${h.label} | ${h.count} |`);
+    }
+    if (s.sentinelRows.length) {
+      console.log("  --- SENTINEL（1990年より前の不正値・母数から除外・触らない） ---");
+      for (const r of s.sentinelRows) {
+        console.log(
+          `  id=${r.id} ${r.column}=${r.oldValue.toISOString()} (${jst(r.oldValue)}) ${r.baseColumn}=${r.baseValue.toISOString()}`,
+        );
+      }
     }
     if (s.unknownRows.length) {
       console.log("  --- UNKNOWN（判定不能・補正対象外） ---");
@@ -324,7 +347,7 @@ async function main() {
   }
 
   // idempotent 性の検証: 補正後の差が全件 NORMAL に入り SHIFTED から外れるか
-  const afterKlass = targets.map((r) => classify(r.diffMs - SHIFT_MS));
+  const afterKlass = targets.map((r) => classify(r.newValue, r.diffMs - SHIFT_MS));
   const notNormal = afterKlass.filter((k) => k !== "NORMAL").length;
   const stillShifted = afterKlass.filter((k) => k === "SHIFTED").length;
   console.log(

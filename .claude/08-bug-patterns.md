@@ -280,7 +280,21 @@ new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec
 4. **パーサ修正を先に本番反映してから**過去分を補正する。逆順にすると補正後に旧コードが書いた新規レコードがまたずれて混在が再発する。
 5. 補正後の差が全件 ±10分に収まる（＝再実行時に対象0件）ことを検証してから実行する（idempotent）。
 
-**罠**: 外れ値が混ざる。T-169 では `replySentAt = 1901-01-01T00:00:00Z` の行が3件あり（RPA が不正な `sentAt` を送った痕跡・2026-05 に集中）、差が **−125年**になるため「9時間ずれ」にも「正常」にも入らない。**これがあると自動判定ゲートが止まる**。9時間引いても意味のある値にならないので、機械的な一括補正の対象にしてはいけない。
+**罠**: 外れ値（センチネル値）が混ざる。T-169 では `replySentAt = 1901-01-01T00:00:00Z` の行が3件あり（RPA が不正な `sentAt` を送った痕跡・2026-05 に集中）、差が **−125年**になるため「9時間ずれ」にも「正常」にも入らない。9時間引いても意味のある値にならないので、機械的な一括補正の対象にしてはいけない。
+
+**外れ値の畳み方（T-169 で採った形）**: 「判定不能（UNKNOWN）」のまま放置すると自動判定ゲートが永久に止まる。かといって判定基準を広げて飲み込むのは危険。**「不正値（SENTINEL）」という明示的な第4分類を足して母数から外す**のが正解。
+
+```ts
+const SENTINEL_BEFORE = new Date("1990-01-01T00:00:00Z");
+function classify(value: Date, diffMs: number): Klass {
+  if (value.getTime() < SENTINEL_BEFORE.getTime()) return "SENTINEL"; // 差を見る前に除外
+  if (diffMs >= NORMAL_LO && diffMs <= NORMAL_HI) return "NORMAL";
+  if (diffMs >= SHIFTED_LO && diffMs <= SHIFTED_HI) return "SHIFTED";
+  return "UNKNOWN"; // ここが0件でないと --execute は自分で止まる
+}
+```
+
+要点は3つ。**(1) NORMAL / SHIFTED の数値基準は一切動かさない**（広げて通したことにならない）。**(2) SENTINEL は UPDATE も DELETE もしない**（分類を変えて触らないだけ）。**(3) 除外した id は毎回ログに出す**（黙って減らさない）。実際 T-169 ではこれで UNKNOWN が 0件になり、336件を補正、実行後の再 dry-run で対象0件（idempotent）を実証できた。
 
 **関連**: 罠#17（Railway UTC 環境での JST 日付ずれ）、T-167 E-4、T-168 Step3、報告書 `docs/reports/T-169_portal_sent-at-timezone-fix.md`
 
