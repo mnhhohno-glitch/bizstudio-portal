@@ -540,3 +540,102 @@ COMPLETED バッチ間の間隔が12時間を超えたケース（上位）:
 6. **直近2日全体の HTTP リクエスト履歴。** Railway は REMOVED デプロイの `httpLogs` を返さず（過去5デプロイで COUNT 0 を確認）、2026-08-18 だけで7回デプロイしているため、**取得できたのは 14:16:04〜14:32:53 UTC の16分50秒分のみ**。「直近2日で `batch-finish` が何回・どのステータスで届いたか」は HTTP ログとしては未確認（DB からの逆算では成功11回）。
 7. **LINE WORKS トークルーム「マイナビ転職応募取り込み」の実メッセージ。** portal 側から確認できるのは `sendBotMessage` を呼んだかどうかまで。`notify.ts:131-133` は送信例外を `console.error` で握るため、送信自体が失敗していても DB 上は COMPLETED になる。実際にメッセージが届いているかはトークルームを目視する必要がある。
 8. **`RpaExecutionBatch.machineNumber` が常に 7 である理由。** `batch-start/route.ts:19-20` は body の `machineNumber` を読むが、実データは全件7。PAD が送っていないため既定値7になっているのか、実際に7を送っているのかは未確認。
+
+---
+
+## 9. 実装記録（Step2 / 2026-08-18）
+
+### 9-1. 方針
+
+**portal 側のみで完結。RPA（PAD）側は一切変更していない。**
+「一定時間経っても RUNNING で、かつ処理ログが0件」のバッチを新しい状態値 **`NO_TARGET`（対象なし）** に畳む。
+
+`COMPLETED` にはしない。`last-execution` が「最新 COMPLETED の `startedAt`」をメール取得ウィンドウの基点として返すため（6-3）、空振りバッチを COMPLETED にすると取りこぼしが発生する。
+
+### 9-2. 状態カラムの型とマイグレーションの有無
+
+**`RpaExecutionBatch.status` は Prisma enum ではなく `String`（`prisma/schema.prisma:1369`、`@default("RUNNING")`、DB制約なし）。**
+したがって **マイグレーションは不要**。スキーマ変更も行っていない（コメント上の宣言値のみ `NO_TARGET` を追加）。
+
+### 9-3. 追加・変更ファイル
+
+| ファイル | 内容 |
+|--|--|
+| `src/lib/mynavi-rpa/no-target.ts` | **新規**。状態値定数 `RPA_BATCH_STATUS_NO_TARGET`、しきい値の env 読み取り、判定条件ビルダ `buildNoTargetWhere()`、クローズ実行 `closeStaleNoTargetBatches()` |
+| `src/app/api/rpa/mynavi/batch-start/route.ts` | バッチ作成直後に `closeStaleNoTargetBatches()` を呼ぶ。try/catch で隔離し、掃除が失敗しても batch-start 本体は 200 を返す |
+| `src/app/api/rpa-error/executions/route.ts` | 既定で `status != NO_TARGET` に絞る。`?includeNoTarget=1` で解除 |
+| `src/app/(app)/rpa-error/executions/page.tsx` | `NO_TARGET` → ラベル「対象なし」・グレーバッジ。「対象なし（空振り）も表示」チェックボックス追加（既定OFF）。件数表示に「（対象なしを除く）」を併記 |
+| `src/app/(app)/rpa-error/executions/[batchId]/page.tsx` | 詳細画面のバッジラベルに「対象なし」を追加 |
+| `scripts/close-no-target-batches-t168.ts` | **新規**。過去分の一括クリーンアップ（`--dry-run` 既定 / `--execute`） |
+
+### 9-4. 自動クローズの判定条件と設定値
+
+発火場所は **`batch-start` 内**（新規 cron を増やさない／5分に1回必ず呼ばれるので実質リアルタイム）。
+
+判定条件（全て AND、`updateMany` 1発の WHERE に全部含めて SELECT→UPDATE のレースを回避）:
+
+- `status = "RUNNING"`
+- `processingLogs: { none: {} }`（処理ログ0件）
+- `startedAt < now - staleMinutes`
+- `id NOT IN (今作成したバッチ)`
+
+更新内容は `status = "NO_TARGET"` / `finishedAt = now` のみ。他カラムは触らない。
+
+| 設定 | 環境変数 | 既定 |
+|--|--|--|
+| 経過時間しきい値（分） | `RPA_NO_TARGET_STALE_MINUTES` | 30 |
+| 1回の掃除の上限件数 | `RPA_NO_TARGET_CLOSE_LIMIT` | 500 |
+
+日時比較は UTC instant 同士（経過時間の比較なので JST 変換は不要。罠#17 は表示・暦日比較の話）。
+掃除件数は 0件でも `[rpa/mynavi/batch-start] no-target cleanup: closed=N ...` としてログ出力する。
+
+### 9-5. 過去分一括クリーンアップの実行結果（本番）
+
+実行経路: `railway ssh --service bizstudio-portal` 上で `npx tsx`（`railway run` は不使用）。
+
+| 項目 | 値 |
+|--|--|
+| dry-run 実行時刻 | 2026-08-18 14:54:19 UTC |
+| dry-run 対象件数 | **23,189 件**（Step1 の 23,190件と一致。差分は 30分ウィンドウ内の直近6件） |
+| `--execute` 更新件数 | **23,189 件**（1,000件チャンク × 24回 + 空振り確認1回） |
+
+実行前後の件数:
+
+| status | 実行前 | 実行後 |
+|--|--|--|
+| RUNNING | 23,224（うち処理ログあり **29**） | **35**（うち処理ログあり **29**） |
+| NO_TARGET | 0 | **23,189** |
+| COMPLETED | 405 | 405 |
+| FAILED | 0 | 0 |
+
+- **処理ログありの RUNNING は 29件のまま不変**（実運用28件 + T-167 検証ダミー1件）。28件の原因調査対象は温存されている。
+- **`t167-verify-20260818` は `RUNNING` / `finishedAt=NULL` のまま**残っている（実行後スナップショットで確認）。
+- 実行後 RUNNING 35件 = 処理ログあり29件 + 30分ウィンドウ内の直近6件。後者は次回以降の `batch-start` が畳む。
+
+### 9-6. `last-execution` の実行前後比較
+
+```
+BEFORE last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+AFTER  last-execution: {"lastStartedAt":"2026-08-18T11:15:16.268Z"}
+```
+
+**完全一致。** COMPLETED のみを参照しており、NO_TARGET 化はウィンドウに影響しない（設計どおり）。
+
+### 9-7. D-2（6-2）の status 参照箇所への影響確認
+
+| # | 場所 | NO_TARGET 追加の影響 | 対応 |
+|--|--|--|--|
+| 1 | `last-execution` | なし（`status: "COMPLETED"` 固定） | 対応不要（9-6 で実測確認） |
+| 2 | `rpa-error/executions` API | 一覧・総件数に 23,189件が混ざる | **修正**（既定で除外・`includeNoTarget=1` で表示） |
+| 3 | `rpa-error/executions/[batchId]` API | なし（単一取得・status 非依存） | 対応不要 |
+| 4 | 一覧画面 `page.tsx` | ラベル未定義だと生の `NO_TARGET` が出る | **修正**（「対象なし」＋グレーバッジ） |
+| 5 | 詳細画面 `[batchId]/page.tsx` | 同上 | **修正**（「対象なし」） |
+| 6 | `batch-finish` | `where: { id }` のみで status 不問。NO_TARGET 化後に PAD が遅れて `batch-finish` を呼べば COMPLETED に上書きされる | **対応不要・むしろ正しい挙動**。PAD は5分間隔・しきい値は30分なので実運用で起こらない。起きた場合も「本物の完了が勝つ」で整合 |
+| 7 | `pdf-upload` | なし（存在確認のみ・status 不問） | 対応不要 |
+
+件数系の集計（`totalCount` 等）は NO_TARGET バッチでは全て 0 のままなので合計値を汚さない。`/rpa-error/stats` と `/rpa-error/logs` は `RpaErrorLog` 系のみを見ており `RpaExecutionBatch` を参照していない。
+
+### 9-8. 残る課題
+
+- **処理ログありで RUNNING の 28件は未解決のまま。** 本改修の対象外（原因調査のため意図的に温存）。この28件に紐づく応募者の完了通知は今後も飛ばない。
+- 空振り時に `batch-finish` を呼ばない PAD 側の挙動そのものは直していない。portal 側で毎回1件ずつ NO_TARGET が積み上がる（1日約288件）が、一覧の既定フィルタで隠れるため実用性は損なわれない。

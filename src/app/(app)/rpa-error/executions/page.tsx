@@ -25,12 +25,14 @@ const STATUS_STYLE: Record<string, string> = {
   RUNNING: "border-[#2563EB]/30 bg-[#2563EB]/10 text-[#2563EB]",
   COMPLETED: "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]",
   FAILED: "border-[#DC2626]/30 bg-[#DC2626]/10 text-[#DC2626]",
+  NO_TARGET: "border-[#D1D5DB] bg-[#F3F4F6] text-[#6B7280]",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   RUNNING: "実行中",
   COMPLETED: "完了",
   FAILED: "失敗",
+  NO_TARGET: "対象なし",
 };
 
 const TAKE = 20;
@@ -41,6 +43,8 @@ export default function RpaExecutionsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [machineNumber, setMachineNumber] = useState("");
+  // T-168: 空振りバッチ（NO_TARGET）は既定で非表示
+  const [includeNoTarget, setIncludeNoTarget] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -49,6 +53,7 @@ export default function RpaExecutionsPage() {
     params.set("skip", String((page - 1) * TAKE));
     params.set("take", String(TAKE));
     if (machineNumber) params.set("machineNumber", machineNumber);
+    if (includeNoTarget) params.set("includeNoTarget", "1");
 
     const res = await fetch(`/api/rpa-error/executions?${params}`);
     if (res.ok) {
@@ -57,7 +62,7 @@ export default function RpaExecutionsPage() {
       setTotal(data.total);
     }
     setLoading(false);
-  }, [page, machineNumber]);
+  }, [page, machineNumber, includeNoTarget]);
 
   useEffect(() => {
     load();
@@ -71,7 +76,9 @@ export default function RpaExecutionsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-[20px] font-bold text-[#374151]">RPA実行履歴</h1>
-          <p className="text-[13px] text-[#6B7280]">全{total}件</p>
+          <p className="text-[13px] text-[#6B7280]">
+            全{total}件{includeNoTarget ? "" : "（対象なしを除く）"}
+          </p>
         </div>
       </div>
 
@@ -92,6 +99,19 @@ export default function RpaExecutionsPage() {
             </option>
           ))}
         </select>
+
+        <label className="flex items-center gap-2 text-[13px] text-[#6B7280]">
+          <input
+            type="checkbox"
+            checked={includeNoTarget}
+            onChange={(e) => {
+              setIncludeNoTarget(e.target.checked);
+              setPage(1);
+            }}
+            className="h-4 w-4"
+          />
+          対象なし（空振り）も表示
+        </label>
       </div>
 
       {/* テーブル */}
