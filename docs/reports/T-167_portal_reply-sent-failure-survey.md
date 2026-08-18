@@ -551,3 +551,143 @@ DB 側も `"FAILED"` を `"SUCCESS"` に潰して保存するため、**事後�
 6. **`RpaExecutionBatch` が RUNNING のまま残る条件**（直近2日で 558件中 547件が未完了）。RPA 側で batch-finish を呼ぶ条件が portal からは不明。
 7. **`MYNAVI_RESEND` の運用実態。** UI にラベル定義があるが書き込むコードが repo に無く、本番データにも0件。過去仕様の名残か将来用かは未確認。
 8. **「一次返信済み」が bizstudio-mypage / kyuujin-pdf-tool など他リポジトリで参照されているか。** 本調査は portal リポジトリ内に限定した。
+
+---
+
+## 11. Step2 実装記録（2026-08-18）
+
+Step1 の調査結果に基づき、以下を実装した。**スキーマ変更なし（マイグレーション不要）。本番DBへの書き込みも一切行っていない。**
+
+### 11-1. 変更ファイル
+
+| ファイル | 変更内容 |
+|--|--|
+| `src/app/api/rpa/mynavi/reply-sent/route.ts` | 送信結果判定をフェイルクローズ化。生値のサーバーログ出力を追加。失敗時は `replySentAt` を更新しない。レスポンスに正規化後の結果値を含める |
+| `src/lib/mynavi-rpa/notify.ts` | バッチ完了通知に「送信失敗: N件」＋失敗した応募者（氏名 / 会員No）の列挙を追加。「通常送信」→「取り込み」へラベル変更 |
+
+`src/app/api/rpa/mynavi/batch-finish/route.ts` は**変更していない**。送信失敗の集計は同一 `batchId` の処理ログを引いている `notifyMynaviBatchCompletion` の中で完結するため、既存の `findMany` の `select` を拡張するだけで済み、クエリ追加も batch-finish 側の改修も不要だった。
+
+### 11-2. `reply-sent` の呼び出し元
+
+repo 全体（`.git` / `node_modules` / `.next` を除く）を `reply-sent` で grep した結果、**src 配下の呼び出し元は0件**。ヒットしたのは以下のみで、いずれも実行コードではない。
+
+- `src/app/api/rpa/mynavi/reply-sent/route.ts`（実装本体）
+- 各種調査報告書（`.claude/T-063-phase1-report.md` / `docs/reports/T-167_...` / `T-062_...` / `T-064_...` / `tmp/scout_status_investigation_report.md`）
+- `tsconfig.tsbuildinfo` / `tsconfig.verify.tsbuildinfo`（ビルドキャッシュ）
+
+**このエンドポイントを叩いているのは RPA のみ。**他に `sendResult` を送らない呼び出し元は存在しないため、フェイルクローズ化による巻き添えは発生しない。
+
+### 11-3. 判定テーブル（変更後）
+
+保存値は必ず `"SUCCESS"` / `"FAILED"` のどちらかに正規化し、生値は保存しない。
+
+| RPA が送る `sendResult` | 変更前 | **変更後** | `replySentAt` | HTTP |
+|--|--|--|--|--|
+| `"SUCCESS"` | SUCCESS | **SUCCESS** | 更新 | 200 |
+| `"FAILED"` | SUCCESS（誤記録） | **FAILED** | 更新しない | 200 |
+| `"FAILURE"` | FAILURE | **FAILED** | 更新しない | 200 |
+| `""`（空文字） | SUCCESS（誤記録） | **FAILED** | 更新しない | 200 |
+| `"%送信結果%"` | SUCCESS（誤記録） | **FAILED** | 更新しない | 200 |
+| フィールド欠落 / null | SUCCESS（誤記録） | **FAILED** | 更新しない | 200 |
+
+失敗時も `CandidateSettingsHistory` は1行 insert され `sendResult="FAILED"` が入る。`SettingsHistoryTab.tsx` は `=== "SUCCESS"` の2値判定のため「失敗」と表示される（Step1 で確認済み）。
+
+### 11-4. オフライン動作確認（実施済み）
+
+DB / LINE WORKS に触れずに検証するため、**製品コードの本文をそのまま**取り出して実行した。
+
+- `normalizeSendResult` は `route.ts` から関数定義をそのまま抽出して実行。
+- 通知本文は `notify.ts` を丸ごとコピーし、**import 3行だけ**をスタブに差し替えて実行（`diff` で import 3行以外に差分がないことを確認済み）。
+
+#### (1) `normalizeSendResult` の真理値表（実行結果）
+
+```
+"SUCCESS"                      -> SUCCESS
+"success"（小文字）             -> SUCCESS
+" SUCCESS "（前後空白）          -> SUCCESS
+"FAILED"（RPAが実際に送る値）    -> FAILED
+"FAILURE"（旧仕様の値）          -> FAILED
+""（空文字）                    -> FAILED
+"%送信結果%"（変数展開失敗）      -> FAILED
+undefined（フィールド欠落）      -> FAILED
+null                           -> FAILED
+true（型違い）                  -> FAILED
+0（型違い）                     -> FAILED
+```
+
+#### (2) 通知本文 — 送信失敗0件（行が出ないこと）
+
+```
+📊 マイナビ転職応募取り込み 完了
+2026/8/18 09:10 山田 太郎
+2026/8/18 09:10 鈴木 花子
+処理時刻: 2026/08/18 09:05-09:22 (17分)
+処理件数: 4件
+　取り込み: 3件
+　年齢NG: 1件
+　外国籍NG: 0件
+　AI解析失敗: 0件
+　二重処理スキップ: 0件
+　エラー: 0件
+詳細: https://portal.example/rpa-error/executions/batch_test
+```
+
+→ 「送信失敗」行は出ない。「通常送信」が「取り込み」に変わっている。
+
+#### (3) 通知本文 — 送信失敗2件（氏名・会員No が取れないレコードを含む）
+
+```
+📊 マイナビ転職応募取り込み 完了
+2026/8/18 09:10 山田 太郎
+2026/8/18 09:10 鈴木 花子
+2026/8/18 09:10 （氏名不明）
+2026/8/18 09:10 佐藤 次郎
+処理時刻: 2026/08/18 09:05-09:22 (17分)
+処理件数: 4件
+　取り込み: 3件
+　年齢NG: 1件
+　外国籍NG: 0件
+　AI解析失敗: 0件
+　二重処理スキップ: 0件
+　エラー: 0件
+送信失敗: 2件
+　鈴木 花子 / 会員No: M002
+　- / 会員No: -
+詳細: https://portal.example/rpa-error/executions/batch_test
+```
+
+→ `candidateId` が NULL（Step1 で実データ23件を確認）のレコードでも通知は落ちず、`-` で出力される。
+
+#### (4) 通知本文 — 送信失敗23件（上限20件 + 「他 N件」）
+
+末尾のみ抜粋。
+
+```
+送信失敗: 23件
+　失敗 1 / 会員No: M100
+　（…20行目まで…）
+　失敗 20 / 会員No: M119
+　他 3件
+```
+
+#### (5) 型チェック
+
+`npx tsc --noEmit -p tsconfig.json` → エラー0件。
+
+### 11-5. 未実施の確認（本番DB書き込みを伴うため停止）
+
+以下は**実施していない**。依頼の禁止事項「本番DBへの書き込み（UPDATE / DELETE / INSERT すべて禁止。既存レコードの値の書き換えもしない）」に該当するため。
+
+1. デプロイ済み `reply-sent` へ `sendResult: "FAILED"` を実際に POST し、`MynaviRpaProcessingLog.replySentAt` が NULL のまま `replyResult="FAILED"` になることを DB で確認する。
+   - このテストは**既存の処理ログ行を UPDATE する**（`processingLogId` が実在しないと 404 で終わり、何も検証できない）。テスト用の行を新規作成する場合も `RpaExecutionBatch` + `MynaviRpaProcessingLog` の INSERT が必要。
+   - さらに `candidateId` が付いていれば `CandidateSettingsHistory` にテスト行が1行増え、その求職者の設定履歴タブに「失敗」として表示される。
+2. 実際の LINE WORKS への通知送信（`batch-finish` の実行）。本番トークルーム「マイナビ転職応募取り込み」へ実メッセージが飛ぶため未実施。通知本文は 11-4 のオフライン実行で代替確認した。
+
+**テストで作成した本番レコードは0件。**
+
+実施する場合の推奨手順（要承認）:
+
+- テスト専用の `RpaExecutionBatch` を1件 INSERT し、そこに `MynaviRpaProcessingLog` を `candidateId=NULL` で数件 INSERT する（求職者の設定履歴を汚さない）。
+- そのログ ID に対して `sendResult` を `"FAILED"` / 省略 / `""` / `"SUCCESS"` の4パターンで POST。
+- SELECT で `replySentAt` / `replyResult` を確認。
+- テスト行は削除せず残し、`batchId` を報告書に記載する。
