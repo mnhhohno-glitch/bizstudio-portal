@@ -1,13 +1,23 @@
 /**
- * T-029 Phase D-2: Google Form 自動生成で使用する 21 サブカテゴリ
+ * T-029 Phase D-2 / T-170: Google Form 自動生成で使用する 36 サブカテゴリ
+ * （`other`（その他・自由記述）を含めた選択肢は 37、大項目は 10）
  *
  * このファイルは candidate-intake 側の specs/generate_form_prompt.yaml の
- * subcategories 定義と内容を同期する必要がある。
- * candidate-intake 側を更新したら portal 側も同期更新すること。
+ * target_subcategories 定義と内容を同期する必要がある。
+ * candidate-intake 側を更新したら portal 側も同期更新すること（逆も同じ）。
+ * candidate-intake は未知コードを黙って default にフォールバックするため、
+ * コードのタイポは画面上では気づけない（ログの `Unknown subcategory` 警告のみ）。
+ * 追加・変更時は両リポジトリ同時更新＋コード文字列の突合を必須とする。
+ *
+ * 大項目（グループ）の定義は candidate-intake 側には存在せず、このファイルにのみ存在する。
+ * グループのキーは label（日本語文字列）そのもの（GoogleFormRequestData.groupKey に保存される）。
+ *
+ * サブカテゴリのコードは全グループを通して一意（T-170 で `service_cs` の重複を解消）。
  *
  * 関連ファイル:
  * - candidate-intake: specs/generate_form_prompt.yaml
  * - portal: src/components/candidates/GoogleFormCreatorModal.tsx
+ * - portal: src/app/(app)/tasks/new/page.tsx（Googleフォーム作成依頼タスク）
  */
 
 export type GoogleFormCategoryOption = {
@@ -16,7 +26,7 @@ export type GoogleFormCategoryOption = {
 };
 
 export type GoogleFormCategoryGroup = {
-  label: string; // 大項目ラベル（例: "営業職"）
+  label: string; // 大項目ラベル（例: "営業職"）。groupKey としても使う
   options: GoogleFormCategoryOption[];
 };
 
@@ -60,11 +70,15 @@ export const GOOGLE_FORM_CATEGORY_GROUPS: GoogleFormCategoryGroup[] = [
     ],
   },
   {
+    // T-170: `service_cs`（カスタマーサポート）は事務職側に一本化したためここには置かない
     label: "サービス業",
     options: [
       { value: "service_sales", label: "販売・接客" },
-      { value: "service_cs", label: "カスタマーサポート" },
       { value: "service_ground_staff", label: "空港グランドスタッフ" },
+      { value: "service_food", label: "飲食（ホール・店長）" },
+      { value: "service_cooking", label: "調理・製菓（調理師・パティシエ）" },
+      { value: "service_beauty", label: "美容・理容・エステ" },
+      { value: "service_hotel", label: "ホテル・旅行・ブライダル" },
     ],
   },
   {
@@ -74,6 +88,32 @@ export const GOOGLE_FORM_CATEGORY_GROUPS: GoogleFormCategoryGroup[] = [
       { value: "care_welfare", label: "介護福祉士・ケアマネジャー" },
       { value: "care_nurse", label: "看護師" },
       { value: "care_other", label: "その他医療福祉" },
+    ],
+  },
+  {
+    // T-170 追加
+    label: "製造・技術",
+    options: [
+      { value: "mfg_production", label: "製造・工場（ライン・品質管理）" },
+      { value: "mfg_construction", label: "施工管理・建築・設備" },
+      { value: "mfg_design", label: "機械・電気設計" },
+    ],
+  },
+  {
+    // T-170 追加
+    label: "物流・運輸",
+    options: [
+      { value: "logi_driver", label: "ドライバー・配送" },
+      { value: "logi_warehouse", label: "倉庫・物流管理" },
+    ],
+  },
+  {
+    // T-170 追加
+    label: "教育・専門",
+    options: [
+      { value: "pro_instructor", label: "講師・塾・インストラクター" },
+      { value: "pro_finance", label: "金融・保険（窓口・事務）" },
+      { value: "pro_public", label: "公務員・団体職員" },
     ],
   },
   {
@@ -91,4 +131,24 @@ export function getGoogleFormCategoryLabel(value: string): string | undefined {
     if (option) return option.label;
   }
   return undefined;
+}
+
+/**
+ * T-170: value からその大項目ラベル（groupKey）を引く。コードは全グループで一意。
+ */
+export function getGoogleFormCategoryGroupLabel(value: string): string | undefined {
+  return GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.options.some((o) => o.value === value))?.label;
+}
+
+/**
+ * T-170: 保存済みの groupKey を現在の定義に合わせて解決する。
+ * 依頼タスク等に保存された groupKey は、定義変更（サブカテゴリの所属グループ変更・削除）で
+ * value と食い違うことがある。value の実所属を優先し、value 側が未知のときのみ保存値を返す。
+ */
+export function resolveGoogleFormGroupKey(
+  savedGroupKey: string | undefined | null,
+  value: string | undefined | null,
+): string {
+  if (!value) return savedGroupKey ?? "";
+  return getGoogleFormCategoryGroupLabel(value) ?? savedGroupKey ?? "";
 }

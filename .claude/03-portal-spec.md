@@ -723,3 +723,21 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
 - 2名以上選ぶと Step4 に「完了条件」（`any` = 誰か1人 / `all` = 全員完了）が出る
 - `completionType === "all"` のとき `TaskAssigneeStatus` を担当者の `User` 分だけ生成する
   （3点セットは3タスク×人数分）。未生成でも `PATCH /api/tasks/[taskId]/status` 側で自動生成される
+
+
+## Google Form 経験職種カテゴリの定義（T-170 / 2026-08-19）
+
+- 選択肢の実体は portal の `src/constants/google-form-categories.ts`（`GOOGLE_FORM_CATEGORY_GROUPS`）。
+  参照元は `GoogleFormCreatorModal.tsx` と `/tasks/new`（Googleフォーム作成依頼タスク）の2箇所で、
+  どちらも定数から動的生成しているため**定数を直せば両方に反映される**。
+- **大項目（グループ）の定義は portal にしか無い**。candidate-intake 側 `specs/generate_form_prompt.yaml`
+  の `target_subcategories` はサブカテゴリのコード一覧のみ。したがって
+  「サブカテゴリ＝両リポジトリ同期／大項目＝portal 単独」。
+- T-170 で サービス業4（`service_food` / `service_cooking` / `service_beauty` / `service_hotel`）と
+  大項目3つ（製造・技術 `mfg_*` 3 / 物流・運輸 `logi_*` 2 / 教育・専門 `pro_*` 3）を追加し、
+  `service_cs` の重複（事務職とサービス業に同一コード）を解消して**事務職側に一本化**。
+  現在 36 サブカテゴリ（`other` を含む選択肢 37）・大項目 10。「その他」は常に最後。
+- `GoogleFormRequestData.groupKey` は大項目の**日本語ラベルそのもの**を保存する。
+  依頼保存後に定義が変わりうるため、読込側は `resolveGoogleFormGroupKey(savedGroupKey, categoryValue)`
+  で「サブカテゴリの実所属」を優先して復元する。
+- 今後サブカテゴリを追加・変更するときは**両リポジトリ同時更新＋コード文字列の突合を必須**とする。

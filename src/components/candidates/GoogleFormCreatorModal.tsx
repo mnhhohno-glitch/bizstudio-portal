@@ -2,7 +2,10 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { GOOGLE_FORM_CATEGORY_GROUPS } from "@/constants/google-form-categories";
+import {
+  GOOGLE_FORM_CATEGORY_GROUPS,
+  resolveGoogleFormGroupKey,
+} from "@/constants/google-form-categories";
 import type { GoogleFormRequestData } from "@/constants/google-form-request";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 
@@ -296,7 +299,10 @@ export default function GoogleFormCreatorModal({
             setRequestInfo(loadedRequest);
             setRequestIgnored(false);
             const d = loadedRequest.data;
-            if (d.groupKey) setGroupKey(d.groupKey);
+            // T-170: 依頼保存時と定義が変わっている場合があるため、
+            // サブカテゴリの実所属から大項目を解決する（コードは全グループで一意）。
+            const resolvedGroupKey = resolveGoogleFormGroupKey(d.groupKey, d.categoryValue);
+            if (resolvedGroupKey) setGroupKey(resolvedGroupKey);
             if (d.categoryValue) setCategoryValue(d.categoryValue);
             setOtherLabel(d.otherLabel ?? "");
             if (d.pdfFileId && meetingFiles.some((f) => f.id === d.pdfFileId)) {
@@ -469,8 +475,6 @@ export default function GoogleFormCreatorModal({
       return;
     }
     const norm = (s: string | undefined | null) => (s ?? "").replace(/\s+/g, "");
-    const groupLabelForCategory = (value: string) =>
-      GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.options.some((o) => o.value === value))?.label ?? "";
     const mapPatch: Record<string, string> = {};
     const groupPatch: Record<string, string> = {};
     const detailMap: Record<string, string> = {};
@@ -482,7 +486,8 @@ export default function GoogleFormCreatorModal({
       if (!match) return;
       if (match.categoryValue) {
         mapPatch[key] = match.categoryValue;
-        groupPatch[key] = match.groupKey || groupLabelForCategory(match.categoryValue);
+        // T-170: 保存済み groupKey より、サブカテゴリの実所属を優先する
+        groupPatch[key] = resolveGoogleFormGroupKey(match.groupKey, match.categoryValue);
       }
       if (match.detail) detailMap[key] = match.detail;
     });
