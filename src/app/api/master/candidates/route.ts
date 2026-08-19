@@ -5,6 +5,8 @@ import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+// T-170: 求職者管理一覧の追加5列（include=metrics 指定時のみ付与）
+import { computeCandidateListMetrics, EMPTY_CANDIDATE_LIST_METRICS } from "@/lib/candidates/list-metrics";
 
 // GET: 求職者一覧取得
 export async function GET(request: NextRequest) {
@@ -15,7 +17,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const includeEmployee = searchParams.get("include") === "employee";
+    // include はカンマ区切り（例: "employee,metrics"）。従来の "employee" 単独指定も同じ挙動。
+    const includeSet = new Set(
+      (searchParams.get("include") || "").split(",").map((s) => s.trim()).filter(Boolean),
+    );
+    const includeEmployee = includeSet.has("employee");
+    const includeMetrics = includeSet.has("metrics");
     const search = searchParams.get("search")?.trim() || "";
     const limitParam = parseInt(searchParams.get("limit") || "", 10);
     const limit = Number.isFinite(limitParam) && limitParam > 0
@@ -55,9 +62,16 @@ export async function GET(request: NextRequest) {
       entryCounts.map((e) => [e.candidateId, e._count.id])
     );
 
+    // T-170: 一覧専用の追加5列。他の呼び出し元（面談一覧の検索サジェスト等）に
+    // 余計なクエリを走らせないよう include=metrics のときだけ集計する。
+    const metrics = includeMetrics
+      ? await computeCandidateListMetrics(candidateIds)
+      : null;
+
     const candidatesWithStatus = candidates.map((c) => ({
       ...c,
       jobStatus: entryCountMap.has(c.id) ? "entry" : null,
+      ...(metrics ? (metrics.get(c.id) ?? EMPTY_CANDIDATE_LIST_METRICS) : {}),
     }));
 
     return NextResponse.json({ candidates: candidatesWithStatus, total });

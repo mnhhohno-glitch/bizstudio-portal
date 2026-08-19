@@ -51,6 +51,22 @@ type CandidateRow = {
   supportSubStatus: string | null;
   supportEndReason: string | null;
   jobStatus?: "entry" | "introduced" | "before" | null;
+  // T-170: 追加5列（サーバ側 computeCandidateListMetrics の戻り値をそのまま持つ）
+  desiredJobType?: string | null;
+  desiredJobTypeFull?: string | null;
+  desiredArea?: string | null;
+  desiredAreaFull?: string | null;
+  referralCount?: number;
+  entryCount?: number;
+  idleDays?: number | null;
+  idleLevel?: "ok" | "warn" | "alert" | null;
+};
+
+// T-170: 放置日数の文字色。DashboardTab の idleSignal と同じ閾値・同じ色を使う。
+const IDLE_LEVEL_COLOR: Record<string, string> = {
+  ok: "#16A34A",
+  warn: "#CA8A04",
+  alert: "#DC2626",
 };
 
 const SUB_STATUS_BADGE: Record<string, string> = {
@@ -313,7 +329,7 @@ export default function CandidateListClient({
 
   const refreshCandidates = useCallback(async () => {
     try {
-      const res = await fetch("/api/master/candidates?include=employee");
+      const res = await fetch("/api/master/candidates?include=employee,metrics");
       if (res.ok) {
         const data = await res.json();
         setCandidates(data.candidates);
@@ -763,20 +779,26 @@ export default function CandidateListClient({
       <div className="mt-4 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <div className="p-4">
           <TableWrap>
-            <Table className="table-fixed w-full">
+            <Table className="table-fixed w-full min-w-[1776px]">
               <colgroup>
-                <col style={{ width: "3%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "4%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "11%" }} />
+                <col style={{ width: 44 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 56 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 100 }} />
+                {/* T-170 */}
+                <col style={{ width: 150 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 120 }} />
+                <col style={{ width: 120 }} />
               </colgroup>
               <thead>
                 <tr>
@@ -797,6 +819,12 @@ export default function CandidateListClient({
                   <Th>応募日 / 配信日</Th>
                   <Th>経路</Th>
                   <Th>担当RC</Th>
+                  {/* T-170 */}
+                  <Th>希望職種</Th>
+                  <Th>希望エリア</Th>
+                  <Th className="text-right">求人紹介数</Th>
+                  <Th className="text-right">エントリー数</Th>
+                  <Th className="text-right">放置日数</Th>
                   <Th>登録日時</Th>
                   <Th>支援状況</Th>
                   <Th>ステータス</Th>
@@ -864,6 +892,37 @@ export default function CandidateListClient({
                         );
                       })()}
                     </Td>
+                    {/* T-170: 希望職種 / 希望エリア / 求人紹介数 / エントリー数 / 放置日数 */}
+                    <Td className="overflow-hidden">
+                      <div
+                        className="truncate whitespace-nowrap text-[13px]"
+                        title={cand.desiredJobTypeFull || ""}
+                      >
+                        {cand.desiredJobType || "-"}
+                      </div>
+                    </Td>
+                    <Td className="overflow-hidden">
+                      <div
+                        className="truncate whitespace-nowrap text-[13px]"
+                        title={cand.desiredAreaFull || ""}
+                      >
+                        {cand.desiredArea || "-"}
+                      </div>
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span className="text-[13px]">{cand.referralCount ?? 0}</span>
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span className="text-[13px]">{cand.entryCount ?? 0}</span>
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span
+                        className="text-[13px]"
+                        style={cand.idleLevel ? { color: IDLE_LEVEL_COLOR[cand.idleLevel] } : undefined}
+                      >
+                        {cand.idleDays == null ? "-" : `${cand.idleDays}日`}
+                      </span>
+                    </Td>
                     <Td className="overflow-hidden">
                       <div className="truncate font-mono text-[12px] text-[#374151]/70">
                         {formatDate(cand.createdAt)}
@@ -907,7 +966,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={12}
+                      colSpan={17}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()
