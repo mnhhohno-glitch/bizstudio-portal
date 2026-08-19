@@ -62,6 +62,11 @@ type CandidateRow = {
   idleLevel?: "ok" | "warn" | "alert" | null;
 };
 
+// T-170追補: 「希望職種 / 希望エリア」列の並び替え状態。上段（職種）と下段（エリア）で別キー、
+// 各キーは 昇順 → 降順 → 解除 の3状態。null は並び替えなし（＝求職者番号降順の元の並び）。
+type DesiredSortKey = "job" | "area";
+type DesiredSort = { key: DesiredSortKey; dir: "asc" | "desc" };
+
 // T-170: 放置日数の文字色。DashboardTab の idleSignal と同じ閾値・同じ色を使う。
 const IDLE_LEVEL_COLOR: Record<string, string> = {
   ok: "#16A34A",
@@ -230,6 +235,8 @@ export default function CandidateListClient({
   const [appDateTo, setAppDateTo] = useState("");
   const [delDateFrom, setDelDateFrom] = useState("");
   const [delDateTo, setDelDateTo] = useState("");
+  // T-170追補: 希望職種 / 希望エリアの並び替え（この列のみ）
+  const [desiredSort, setDesiredSort] = useState<DesiredSort | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
@@ -296,6 +303,35 @@ export default function CandidateListClient({
     return result;
   }, [baseRows, supportTab, endReasonFilter]);
 
+  // T-170追補: 希望職種 / 希望エリアの並び替え。フィルタ・支援タブ・フリー検索の結果（filtered）に
+  // 後段で掛けるだけなので、絞り込み条件やタブ件数には一切影響しない。
+  // 空欄（null）は昇順・降順どちらでも末尾に固定する（sign を掛けない）。
+  const sorted = useMemo(() => {
+    if (!desiredSort) return filtered;
+    const pick = (c: CandidateRow) =>
+      (desiredSort.key === "job" ? c.desiredJobType : c.desiredArea) || "";
+    const sign = desiredSort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const va = pick(a);
+      const vb = pick(b);
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return sign * va.localeCompare(vb, "ja");
+    });
+  }, [filtered, desiredSort]);
+
+  // 昇順 → 降順 → 解除。別キーを押したときは、そのキーの昇順から始める（他方は解除）。
+  const toggleDesiredSort = (key: DesiredSortKey) => {
+    setDesiredSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+  const desiredSortMark = (key: DesiredSortKey) =>
+    desiredSort?.key === key ? (desiredSort.dir === "asc" ? "▲" : "▼") : "";
+
   const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
     if (newStatus === "ENDED") {
       setEndModalCandidateId(candidateId);
@@ -321,11 +357,11 @@ export default function CandidateListClient({
     } catch { toast.error("更新に失敗しました"); }
   };
 
-  const totalFiltered = filtered.length;
+  const totalFiltered = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const skip = (safePage - 1) * PAGE_SIZE;
-  const pageData = filtered.slice(skip, skip + PAGE_SIZE);
+  const pageData = sorted.slice(skip, skip + PAGE_SIZE);
 
   const refreshCandidates = useCallback(async () => {
     try {
@@ -779,7 +815,7 @@ export default function CandidateListClient({
       <div className="mt-4 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <div className="p-4">
           <TableWrap>
-            <Table className="table-fixed w-full min-w-[1776px]">
+            <Table className="table-fixed w-full min-w-[1686px]">
               <colgroup>
                 <col style={{ width: 44 }} />
                 <col style={{ width: 100 }} />
@@ -791,8 +827,7 @@ export default function CandidateListClient({
                 <col style={{ width: 100 }} />
                 <col style={{ width: 100 }} />
                 {/* T-170 */}
-                <col style={{ width: 150 }} />
-                <col style={{ width: 130 }} />
+                <col style={{ width: 190 }} />
                 <col style={{ width: 72 }} />
                 <col style={{ width: 72 }} />
                 <col style={{ width: 72 }} />
@@ -819,9 +854,28 @@ export default function CandidateListClient({
                   <Th>応募日 / 配信日</Th>
                   <Th>経路</Th>
                   <Th>担当RC</Th>
-                  {/* T-170 */}
-                  <Th>希望職種</Th>
-                  <Th>希望エリア</Th>
+                  {/* T-170追補: 上段=希望職種 / 下段=希望エリア。見出しの「職種」「エリア」で個別に並び替え */}
+                  <Th>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleDesiredSort("job")}
+                        title="希望職種で並び替え（昇順→降順→解除）"
+                        className={`cursor-pointer hover:underline ${desiredSort?.key === "job" ? "text-[#2563EB]" : ""}`}
+                      >
+                        職種{desiredSortMark("job")}
+                      </button>
+                      <span className="text-[#374151]/40">/</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleDesiredSort("area")}
+                        title="希望エリアで並び替え（昇順→降順→解除）"
+                        className={`cursor-pointer hover:underline ${desiredSort?.key === "area" ? "text-[#2563EB]" : ""}`}
+                      >
+                        エリア{desiredSortMark("area")}
+                      </button>
+                    </div>
+                  </Th>
                   <Th className="text-right">求人紹介数</Th>
                   <Th className="text-right">エントリー数</Th>
                   <Th className="text-right">放置日数</Th>
@@ -892,22 +946,26 @@ export default function CandidateListClient({
                         );
                       })()}
                     </Td>
-                    {/* T-170: 希望職種 / 希望エリア / 求人紹介数 / エントリー数 / 放置日数 */}
+                    {/* T-170: 希望職種(上段) / 希望エリア(下段) / 求人紹介数 / エントリー数 / 放置日数 */}
                     <Td className="overflow-hidden">
-                      <div
-                        className="truncate whitespace-nowrap text-[13px]"
-                        title={cand.desiredJobTypeFull || ""}
-                      >
-                        {cand.desiredJobType || "-"}
-                      </div>
-                    </Td>
-                    <Td className="overflow-hidden">
-                      <div
-                        className="truncate whitespace-nowrap text-[13px]"
-                        title={cand.desiredAreaFull || ""}
-                      >
-                        {cand.desiredArea || "-"}
-                      </div>
+                      {!cand.desiredJobType && !cand.desiredArea ? (
+                        <div className="text-[13px]">-</div>
+                      ) : (
+                        <>
+                          <div
+                            className="truncate whitespace-nowrap text-[13px]"
+                            title={cand.desiredJobTypeFull || ""}
+                          >
+                            {cand.desiredJobType || "-"}
+                          </div>
+                          <div
+                            className="truncate whitespace-nowrap text-[11px] text-gray-500"
+                            title={cand.desiredAreaFull || ""}
+                          >
+                            {cand.desiredArea || "-"}
+                          </div>
+                        </>
+                      )}
                     </Td>
                     <Td className="text-right tabular-nums whitespace-nowrap">
                       <span className="text-[13px]">{cand.referralCount ?? 0}</span>
@@ -966,7 +1024,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={17}
+                      colSpan={16}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

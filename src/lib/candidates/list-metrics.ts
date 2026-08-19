@@ -50,8 +50,10 @@ export const EMPTY_CANDIDATE_LIST_METRICS: CandidateListMetrics = {
 
 type Item = { label: string; full: string };
 
+// 旧データの自由記述には改行が混ざることがあるため、連続する空白・改行は 1 スペースに畳む。
+// （1行 truncate の列に出すのと、title のフル文字列を読みやすくするため）
 function str(v: unknown): string {
-  return typeof v === "string" ? v.trim() : "";
+  return typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
 }
 
 // desiredJobTypes: SearchableMultiSelect が保存する [{large, medium, small}]（最大3件）
