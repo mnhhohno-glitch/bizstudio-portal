@@ -741,3 +741,18 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   依頼保存後に定義が変わりうるため、読込側は `resolveGoogleFormGroupKey(savedGroupKey, categoryValue)`
   で「サブカテゴリの実所属」を優先して復元する。
 - 今後サブカテゴリを追加・変更するときは**両リポジトリ同時更新＋コード文字列の突合を必須**とする。
+
+## Googleフォーム作成依頼タスクの簡素化（T-172 / 2026-08-20）
+
+- T-171 で作った依頼カテゴリ（id `cmt004eu000003hr0mrvmi7hg`）は作り込みすぎで依頼が手軽に出せなかったため、
+  **依頼内容を「メイン経験職種カテゴリ」＋「その他メモ」の2項目だけに簡素化**した。
+  依頼時の**履歴書AI読み取り（extract-resume 呼び出し）と会社ごとの職種指定は廃止**。
+  履歴書の解析は受け取った担当者が `GoogleFormCreatorModal` で1回だけ行う（従来動作に復帰）。
+- 会社ごとの補足は「その他メモ」に自由記述する運用へ寄せた。メモはモーダル上部のバナーに全文表示される。
+- 依頼JSON は **v2**（`{ v: 2, groupKey, categoryValue, otherLabel, memo }`）。
+  本番に v1 の依頼タスクが残っているため**読み取り互換のみ維持**し、
+  `normalizeGoogleFormRequestData()`（`src/constants/google-form-request.ts`）で v1/v2 を v2 形へ正規化してから使う。
+  v1 の `companies` / `resumeData` / `pdfFileId` / `txtFileId` は読み捨てる。
+- テンプレート項目「会社別職種分類」は廃止したが、`TaskTemplateField` に **isActive 相当のフラグが無い**ため
+  **物理削除せず** `GOOGLE_FORM_REQUEST_HIDDEN_LABELS` による UI 非表示で新規作成時に出さない方式を採った
+  （既存タスクの `TaskFieldValue` は温存される。タスク作成 API 側に required 検証は無いので `isRequired` は無害）。
