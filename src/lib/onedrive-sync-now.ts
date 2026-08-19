@@ -70,6 +70,16 @@ export const ONEDRIVE_SYNC_NOW_FILE_LIMIT = 100;
 /** 同時に走らせる件数。夜間処理と同じく Graph の 429 を誘発しない範囲。 */
 export const ONEDRIVE_SYNC_NOW_CONCURRENCY = 3;
 
+/**
+ * 走査で1フォルダの中を何本まで並行に降りるか。
+ *
+ * ★1 だと本番実測で 37.5秒かかりボタンとして成立しなかった（担当CA 4.安藤 の配下だけで
+ *   listChildren が200回超。夜間処理は CA フォルダ単位で3本並行にしているが、
+ *   1人分に絞ると対象が1 CA しか無いので並行の余地がそこに無い）。
+ *   中を6本並行にして畳む。夜間処理は既定の直列のままで、この値は即時同期だけに効く。
+ */
+export const ONEDRIVE_SYNC_NOW_SCAN_CONCURRENCY = 6;
+
 /** 同一求職者に対する連打防止の間隔（ミリ秒）。 */
 export const ONEDRIVE_SYNC_NOW_COOLDOWN_MS = 60_000;
 
@@ -625,7 +635,10 @@ async function findFolderByScan(params: {
     scan = await scanOneDriveCandidateFolders(
       upn,
       {},
-      { selectCaFolders: (all) => selectCaFoldersForEmployee(employeeName, all) },
+      {
+        selectCaFolders: (all) => selectCaFoldersForEmployee(employeeName, all),
+        walkConcurrency: ONEDRIVE_SYNC_NOW_SCAN_CONCURRENCY,
+      },
     );
   } catch (e) {
     log(`[onedrive-sync-now] 走査に失敗: ${e instanceof Error ? e.message : String(e)}`);

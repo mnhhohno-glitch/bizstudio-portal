@@ -142,6 +142,22 @@ async function main() {
       true,
     );
 
+    // 並行に降りても拾う集合は変わらないこと（順序は変わりうるので番号の集合で比べる）。
+    const parallelScan = await scanOneDriveCandidateFolders(
+      "upn",
+      { listChildrenByPath: fakeDrive(TREE).fn },
+      {
+        selectCaFolders: (all) => selectCaFoldersForEmployee("安藤 嘉富", all),
+        walkConcurrency: 6,
+      },
+    );
+    eq(
+      "★中を並行に降りても拾う求職者番号は同じ",
+      [...parallelScan.byNumber.keys()].sort(),
+      [...scopedScan.byNumber.keys()].sort(),
+    );
+    eq("並行でも listChildren の回数は同じ", parallelScan.listCalls, scopedScan.listCalls);
+
     eq("完走していれば絞り込み走査は信用してよい", isScopedScanTrustworthy(scopedScan), true);
     const broken = async (): Promise<DriveItem[] | null> => {
       throw new Error("Graph 500");

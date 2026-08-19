@@ -237,6 +237,16 @@ export interface OneDriveFolderScanOptions {
    *   `matchCandidateFolder` の DUPLICATE_FOLDER 判定は走査範囲内でしか効かない。
    */
   selectCaFolders?: (allCaFolders: string[]) => string[];
+
+  /**
+   * 1つの CA フォルダの中を降りるときに、子フォルダを何本まで並行に見るか（既定 1 = 直列）。
+   *
+   * ★夜間処理は既定のまま（1）にしておく。夜間は CA フォルダ単位で3本並行に走っており、
+   *   そこを更に太らせると Graph の 429 を誘発しうる。一方、担当CA1人分に絞った即時同期は
+   *   並行の余地が CA 単位に無い（対象が1フォルダ）ので、直列だと実測37秒かかり
+   *   ボタンとして成立しなかった。**絞り込んだときだけ**中を並行にして往復時間を畳む。
+   */
+  walkConcurrency?: number;
 }
 
 /** 並列度つき map。Graph への同時接続数を抑えるためだけの小道具。 */
@@ -272,6 +282,7 @@ export async function scanOneDriveCandidateFolders(
 ): Promise<OneDriveFolderScanResult> {
   const deps: OneDriveFolderScanDeps = { listChildrenByPath, ...depsOverride };
   const startedAt = Date.now();
+  const walkConcurrency = Math.max(1, options.walkConcurrency ?? 1);
 
   const folders: ScannedCandidateFolder[] = [];
   const errors: string[] = [];
@@ -311,9 +322,10 @@ export async function scanOneDriveCandidateFolders(
     const children = await listFolders(currentPath);
     if (!children) return;
 
-    for (const child of children) {
+    // walkConcurrency=1 なら1件ずつ順に処理する（＝従来の for ループと同じ挙動）。
+    await mapWithConcurrency(children, walkConcurrency, async (child) => {
       const name = child.name;
-      if (TEMPLATE_DIR_NAMES.has(name)) continue;
+      if (TEMPLATE_DIR_NAMES.has(name)) return;
 
       const childPath = `${currentPath}/${name}`;
       const isContainer = RE_YEAR_FOLDER.test(name) || RE_YYYYMM_FOLDER.test(name);
@@ -323,7 +335,7 @@ export async function scanOneDriveCandidateFolders(
       // 当たるため、コンテナ判定を先に置く（T-158 と同じ順序）。
       if (isContainer) {
         await walk(caFolder, childPath, [...containers, name]);
-        continue;
+        return;
       }
 
       const inMonthContainer =
@@ -343,7 +355,7 @@ export async function scanOneDriveCandidateFolders(
           );
           if (numbered.length > 0 && numbered.length * 2 >= kids.length) {
             await walk(caFolder, childPath, [...containers, name]);
-            continue;
+            return;
           }
         }
       }
@@ -359,7 +371,7 @@ export async function scanOneDriveCandidateFolders(
           drivePath: childPath,
           caFolder,
         });
-        continue;
+        return;
       }
 
       // それ以外（テンプレ・資料フォルダ等）は降りるだけ。ただし CA 直下の非数値フォルダは
@@ -367,7 +379,7 @@ export async function scanOneDriveCandidateFolders(
       if (containers.length > 0) {
         await walk(caFolder, childPath, [...containers, name]);
       }
-    }
+    });
   };
 
   // --- CA フォルダの特定 ---
