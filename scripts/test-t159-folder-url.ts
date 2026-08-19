@@ -333,6 +333,7 @@ async function runRemainingTests(smallScan: OneDriveFolderScanResult) {
       })),
       byNumber: new Map(),
       caFolders: [],
+      allCaFolders: [],
       listCalls: 0,
       cacheHits: 0,
       errors: [],

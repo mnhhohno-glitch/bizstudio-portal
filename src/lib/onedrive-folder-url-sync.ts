@@ -356,25 +356,21 @@ export async function runOneDriveFolderUrlSync(
     };
   }
 
-  const derivedSegment = ownerSegmentFromUpn(upn);
-  const existingSegment = await findExistingOwnerSegment();
-  if (existingSegment && existingSegment !== derivedSegment) {
+  const segment = await resolveOwnerSegment(upn);
+  if (!segment.ok) {
     // 既存データと食い違うセグメントで URL を作ると、開けないURLを量産する。
-    log(
-      `[onedrive-folder-url] 所有者セグメントが既存データと不一致のため中止 ` +
-        `(derived=${derivedSegment} existing=${existingSegment})`,
-    );
+    log(`[onedrive-folder-url] 所有者セグメントが既存データと不一致のため中止: ${segment.reason}`);
     return {
       mode,
-      abortedReason: `所有者セグメントが既存URLと一致しません（derived=${derivedSegment} / existing=${existingSegment}）`,
-      ownerSegment: derivedSegment,
+      abortedReason: segment.reason,
+      ownerSegment: ownerSegmentFromUpn(upn),
       scan: null,
       register: emptyRegister(),
       move: { ...emptyMove(), maxUpdates: maxMoveUpdates },
       durationMs: Date.now() - startedAt,
     };
   }
-  const ownerSegment = existingSegment ?? derivedSegment;
+  const ownerSegment = segment.ownerSegment;
 
   // ---------- 走査（1回だけ・機能1と機能2で共有） ----------
   const scanResult = await scanOneDriveCandidateFolders(upn);
@@ -426,6 +422,121 @@ export async function runOneDriveFolderUrlSync(
     move,
     durationMs: Date.now() - startedAt,
   };
+}
+
+// ============================================================
+// 機能1の1人分（夜間の全件処理と T-159 Phase 4 の即時同期で共有する）
+// ============================================================
+
+export type RegisterFolderUrlOutcome =
+  | { result: "REGISTERED"; url: string; drivePath: string }
+  | { result: "RACED_MANUAL"; detail: string }
+  | { result: FolderMatchRejection; detail: string };
+
+/**
+ * 走査結果から1人分の `oneDriveFolderUrl` を登録する（照合 → null限定の書き込み → 台帳）。
+ *
+ * ★夜間の全件処理（runFolderUrlAutoRegister）と即時同期（onedrive-sync-now.ts）の**唯一の実装**。
+ *   突合ルール・手貼り保護・台帳の書き方をここ1箇所に閉じ込める。2箇所に写すと、
+ *   片方だけ緩めた版が生まれて他人のフォルダを紐付ける事故につながる。
+ *
+ * ★`oneDriveFolderUrl: null` の行にしか書かない。既に値が入っている（手貼り・自動登録済みの）
+ *   求職者の URL をこの関数が書き換えることは無い。
+ */
+export async function registerOneDriveFolderUrlForCandidate(params: {
+  candidateId: string;
+  candidateNumber: string;
+  candidateName: string | null;
+  ownerSegment: string;
+  scan: OneDriveFolderScanResult;
+  source: string;
+}): Promise<RegisterFolderUrlOutcome> {
+  const match = matchCandidateFolder({
+    candidateNumber: params.candidateNumber,
+    candidateName: params.candidateName,
+    ownerSegment: params.ownerSegment,
+    scan: params.scan,
+  });
+  if (!match.ok) return { result: match.reason, detail: match.detail };
+
+  // ★null のときだけ書く。走査中に CA が手で貼っていたら負ける（＝手作業を上書きしない）。
+  const updated = await prisma.candidate.updateMany({
+    where: { id: params.candidateId, oneDriveFolderUrl: null },
+    data: { oneDriveFolderUrl: match.url },
+  });
+  if (updated.count !== 1) {
+    return { result: "RACED_MANUAL", detail: "処理中に URL が登録されたため書き込みを見送り" };
+  }
+
+  await prisma.oneDriveFolderUrlLedger.upsert({
+    where: { candidateId: params.candidateId },
+    create: {
+      candidateId: params.candidateId,
+      autoUrl: match.url,
+      drivePath: match.folder.drivePath,
+      source: params.source,
+    },
+    update: {
+      autoUrl: match.url,
+      drivePath: match.folder.drivePath,
+      source: params.source,
+    },
+  });
+
+  return { result: "REGISTERED", url: match.url, drivePath: match.folder.drivePath };
+}
+
+/**
+ * 移動追随の書き込み1件分（現在値の確認 → 張り替え → 台帳更新）。
+ *
+ * ★呼ぶ前に **必ず** `isAutoManagedFolderUrl` で自動管理下だと確かめること。
+ *   この関数自体は台帳を見ない（夜間処理は事前に一括で絞っており、二度引くのが無駄なため）。
+ *   `fromUrl` と現在値が一致する間だけ書くので、途中で CA が貼り替えたら負ける。
+ *
+ * @returns 実際に書き換えたら true。false なら処理中に URL が変わったので見送った。
+ */
+export async function applyFolderUrlRelocation(params: {
+  candidateId: string;
+  fromUrl: string;
+  toUrl: string;
+  drivePath: string;
+  now: Date;
+}): Promise<boolean> {
+  const updated = await prisma.candidate.updateMany({
+    where: { id: params.candidateId, oneDriveFolderUrl: params.fromUrl },
+    data: { oneDriveFolderUrl: params.toUrl },
+  });
+  if (updated.count !== 1) return false;
+
+  await prisma.oneDriveFolderUrlLedger.update({
+    where: { candidateId: params.candidateId },
+    data: {
+      autoUrl: params.toUrl,
+      drivePath: params.drivePath,
+      source: LEDGER_SOURCE.AUTO_MOVE,
+      moveCount: { increment: 1 },
+      lastMovedAt: params.now,
+    },
+  });
+  return true;
+}
+
+/**
+ * 既に登録されている URL から所有者セグメントを決める（未登録なら UPN から導く）。
+ * 既存データと食い違ったら null を返して呼び出し側に中止させる（開けないURLを量産しないため）。
+ */
+export async function resolveOwnerSegment(
+  upn: string,
+): Promise<{ ok: true; ownerSegment: string } | { ok: false; reason: string }> {
+  const derived = ownerSegmentFromUpn(upn);
+  const existing = await findExistingOwnerSegment();
+  if (existing && existing !== derived) {
+    return {
+      ok: false,
+      reason: `所有者セグメントが既存URLと一致しません（derived=${derived} / existing=${existing}）`,
+    };
+  }
+  return { ok: true, ownerSegment: existing ?? derived };
 }
 
 // ============================================================
@@ -507,35 +618,24 @@ async function runFolderUrlAutoRegister(params: {
       continue;
     }
 
-    // ★null のときだけ書く。走査中に CA が手で貼っていたら負ける（＝手作業を上書きしない）。
-    const updated = await prisma.candidate.updateMany({
-      where: { id: c.id, oneDriveFolderUrl: null },
-      data: { oneDriveFolderUrl: match.url },
+    // 照合は上で済んでいるが、書き込みは共有実装に通す（手貼り保護と台帳の書き方を1箇所に保つ）。
+    const registered = await registerOneDriveFolderUrlForCandidate({
+      candidateId: c.id,
+      candidateNumber: c.candidateNumber,
+      candidateName: c.name,
+      ownerSegment: params.ownerSegment,
+      scan: params.scan,
+      source: LEDGER_SOURCE.AUTO_SCAN,
     });
-    if (updated.count !== 1) {
-      summary.byRejection["RACED_MANUAL"] = (summary.byRejection["RACED_MANUAL"] ?? 0) + 1;
+    if (registered.result !== "REGISTERED") {
+      summary.byRejection[registered.result] = (summary.byRejection[registered.result] ?? 0) + 1;
       summary.details.push({
         candidateNumber: c.candidateNumber,
-        result: "RACED_MANUAL",
-        detail: "処理中に URL が登録されたため書き込みを見送り",
+        result: registered.result,
+        detail: "detail" in registered ? registered.detail : undefined,
       });
       continue;
     }
-
-    await prisma.oneDriveFolderUrlLedger.upsert({
-      where: { candidateId: c.id },
-      create: {
-        candidateId: c.id,
-        autoUrl: match.url,
-        drivePath: match.folder.drivePath,
-        source: LEDGER_SOURCE.AUTO_SCAN,
-      },
-      update: {
-        autoUrl: match.url,
-        drivePath: match.folder.drivePath,
-        source: LEDGER_SOURCE.AUTO_SCAN,
-      },
-    });
 
     summary.registered++;
     summary.details.push({
@@ -710,11 +810,14 @@ async function runFolderUrlMoveFollow(params: {
     }
 
     // ★現在値が確認時と同じ間だけ書く（その間に CA が手で貼り替えていたら負ける）。
-    const updated = await prisma.candidate.updateMany({
-      where: { id: p.id, oneDriveFolderUrl: p.fromUrl },
-      data: { oneDriveFolderUrl: p.toUrl },
+    const applied = await applyFolderUrlRelocation({
+      candidateId: p.id,
+      fromUrl: p.fromUrl,
+      toUrl: p.toUrl,
+      drivePath: p.drivePath,
+      now: params.now,
     });
-    if (updated.count !== 1) {
+    if (!applied) {
       summary.details.push({
         candidateNumber: p.candidateNumber,
         result: "NOT_RELOCATED",
@@ -722,17 +825,6 @@ async function runFolderUrlMoveFollow(params: {
       });
       continue;
     }
-
-    await prisma.oneDriveFolderUrlLedger.update({
-      where: { candidateId: p.id },
-      data: {
-        autoUrl: p.toUrl,
-        drivePath: p.drivePath,
-        source: LEDGER_SOURCE.AUTO_MOVE,
-        moveCount: { increment: 1 },
-        lastMovedAt: params.now,
-      },
-    });
 
     summary.updated++;
     summary.details.push({

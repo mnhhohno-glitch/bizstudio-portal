@@ -1705,6 +1705,10 @@ function CandidateDetailPageBody() {
   const [scheduleCopiedType, setScheduleCopiedType] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState("");
   const [jobOutputLoading, setJobOutputLoading] = useState(false);
+  // T-159 Phase 4: 即時同期の完了後に書類タブ・紹介履歴タブを取り直させるためのキー。
+  //   両タブは自前でファイル一覧を取得しており外から更新できないので、key を変えて作り直す。
+  //   押した本人が結果を見に行くタイミングでしか変わらないため、作り直しの副作用は問題にならない。
+  const [fileRefreshKey, setFileRefreshKey] = useState(0);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
   const [mypageUrl, setMypageUrl] = useState<string | null>(null);
   const [mypageAdminUrl, setMypageAdminUrl] = useState<string | null>(null);
@@ -1954,6 +1958,10 @@ function CandidateDetailPageBody() {
         googleFormDisabled={googleFormDisabled}
         googleFormDisabledReason={googleFormDisabledReason}
         oneDriveFolderUrl={candidate.oneDriveFolderUrl}
+        onOneDriveSynced={() => {
+          fetchCandidate();
+          setFileRefreshKey((k) => k + 1);
+        }}
       />
       )}
 
@@ -2000,7 +2008,7 @@ function CandidateDetailPageBody() {
           {/* サブタブコンテンツ */}
           <div className="mt-6">
             {activeTab === "documents" && (
-              <DocumentsTab candidateId={candidateId} />
+              <DocumentsTab key={`docs-${fileRefreshKey}`} candidateId={candidateId} />
             )}
             {activeTab === "support" && (
               <SupportTab
@@ -2014,7 +2022,7 @@ function CandidateDetailPageBody() {
               <CandidateTasksTab candidateId={candidateId} employees={employees} />
             )}
             {activeTab === "history" && (
-              <HistoryTab candidateId={candidateId} candidateName={candidate.name} initialSubTab={historyInitialSubTab} />
+              <HistoryTab key={`history-${fileRefreshKey}`} candidateId={candidateId} candidateName={candidate.name} initialSubTab={historyInitialSubTab} />
             )}
             {activeTab === "notes" && (
               <NotesTab

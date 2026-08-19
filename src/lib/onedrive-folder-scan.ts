@@ -211,8 +211,10 @@ export interface OneDriveFolderScanResult {
   folders: ScannedCandidateFolder[];
   /** 求職者番号 → 該当フォルダ（複数ありうる。複数なら登録しない）。番号なしフォルダは入らない。 */
   byNumber: Map<string, ScannedCandidateFolder[]>;
-  /** 走査した CA フォルダ名。 */
+  /** 実際に降りた CA フォルダ名（絞り込み後）。 */
   caFolders: string[];
+  /** ルート直下で CA フォルダと判定できたもの全部（絞り込み前）。夜間処理では caFolders と同一。 */
+  allCaFolders: string[];
   /** Graph の listChildren 実行回数（キャッシュヒットは数えない）。 */
   listCalls: number;
   /** キャッシュで省けた listChildren の回数。 */
@@ -223,6 +225,18 @@ export interface OneDriveFolderScanResult {
 
 export interface OneDriveFolderScanDeps {
   listChildrenByPath: typeof listChildrenByPath;
+}
+
+export interface OneDriveFolderScanOptions {
+  /**
+   * ルート直下で見つけた CA フォルダのうち、実際に降りるものを選ぶ（T-159 Phase 4）。
+   *
+   * ★夜間処理は渡さない（＝全 CA フォルダを降りる）。渡すのは求職者1人分の即時同期だけで、
+   *   全走査 34秒をボタンの待ち時間にしないための絞り込み専用。
+   *   絞り込むと「別 CA のフォルダ配下にある同番号のフォルダ」が見えなくなるため、
+   *   `matchCandidateFolder` の DUPLICATE_FOLDER 判定は走査範囲内でしか効かない。
+   */
+  selectCaFolders?: (allCaFolders: string[]) => string[];
 }
 
 /** 並列度つき map。Graph への同時接続数を抑えるためだけの小道具。 */
@@ -254,6 +268,7 @@ async function mapWithConcurrency<T>(
 export async function scanOneDriveCandidateFolders(
   upn: string,
   depsOverride: Partial<OneDriveFolderScanDeps> = {},
+  options: OneDriveFolderScanOptions = {},
 ): Promise<OneDriveFolderScanResult> {
   const deps: OneDriveFolderScanDeps = { listChildrenByPath, ...depsOverride };
   const startedAt = Date.now();
@@ -378,7 +393,13 @@ export async function scanOneDriveCandidateFolders(
     errors.push(`${ONEDRIVE_SCAN_ROOT}: 走査の起点を列挙できませんでした`);
   }
 
-  await mapWithConcurrency(caFolders, ONEDRIVE_SCAN_CONCURRENCY, (ca) =>
+  // ★絞り込みは「どの CA フォルダへ降りるか」だけに効く。ルート直下の列挙は必ず行う
+  //   （CA フォルダの実名を知らないと絞り込みようがないため）。
+  const targetCaFolders = options.selectCaFolders
+    ? options.selectCaFolders(caFolders).filter((n) => caFolders.includes(n))
+    : caFolders;
+
+  await mapWithConcurrency(targetCaFolders, ONEDRIVE_SCAN_CONCURRENCY, (ca) =>
     walk(ca, `${ONEDRIVE_SCAN_ROOT}/${ca}`, []),
   );
 
@@ -394,7 +415,8 @@ export async function scanOneDriveCandidateFolders(
     complete,
     folders,
     byNumber,
-    caFolders,
+    caFolders: targetCaFolders,
+    allCaFolders: caFolders,
     listCalls,
     cacheHits,
     errors,
@@ -405,6 +427,68 @@ export async function scanOneDriveCandidateFolders(
 /** 索引が「URLを書き換える判断に使えるほど信用できるか」。安全弁1。 */
 export function isScanTrustworthy(scan: OneDriveFolderScanResult): boolean {
   return scan.complete && scan.folders.length >= ONEDRIVE_SCAN_MIN_EXPECTED_FOLDERS;
+}
+
+/**
+ * 担当CAで絞り込んだ走査（T-159 Phase 4）が信用できるか。
+ *
+ * ★件数の下限（ONEDRIVE_SCAN_MIN_EXPECTED_FOLDERS = 1000）は当てられない。
+ *   1CA分しか降りていないので数百件で正常であり、この閾値を使うと必ず不合格になる。
+ *   代わりに「完走したか」だけを見る。走査に穴があるまま登録すると
+ *   「候補が1件だけ」の判定が崩れる、という懸念は全走査と同じなので complete は必須。
+ */
+export function isScopedScanTrustworthy(scan: OneDriveFolderScanResult): boolean {
+  return scan.complete;
+}
+
+// ============================================================
+// 担当CA → 走査する CA フォルダ（T-159 Phase 4）
+// ============================================================
+
+/**
+ * CA フォルダ名（`4.安藤`）から `{連番}.` を落とした部分（`安藤`）。
+ * CA フォルダでなければ null。
+ */
+export function caFolderLabel(folderName: string): string | null {
+  const m = /^\d+\.(.+)$/.exec(folderName);
+  if (!m) return null;
+  const label = m[1].trim();
+  return label ? label : null;
+}
+
+/**
+ * 担当CA名（`安藤 嘉富`）と CA フォルダ名（`4.安藤`）が同一人物を指すか。
+ *
+ * ★姓で一致させる。フォルダ側は姓だけ（`4.安藤`）が実データだが、将来フルネームの
+ *   フォルダ（`7.大野将幸`）が現れても拾えるよう「空白を除いた氏名がラベルで始まるか」で見る。
+ *   照合は normalizeNameForMatch（NFKC + 空白除去）を通す — **比較用の文字列であり
+ *   Graph へ送るパスには使わない**（送ると 404 になる）。
+ */
+export function caFolderMatchesEmployee(
+  employeeName: string | null | undefined,
+  caFolderName: string,
+): boolean {
+  const label = caFolderLabel(caFolderName);
+  if (!label) return false;
+  const name = normalizeNameForMatch(employeeName);
+  const normalizedLabel = normalizeNameForMatch(label);
+  if (!name || !normalizedLabel) return false;
+  return name.startsWith(normalizedLabel);
+}
+
+/**
+ * 担当CAのフォルダだけに絞る。**該当が1つも無ければ全 CA フォルダを返す（フォールバック）。**
+ *
+ * ★フォールバックを「0件」にしてはいけない。担当CA未設定・フォルダ名が姓と食い違うといった
+ *   運用上ありふれた状態で「フォルダが見つかりません」と嘘を返すことになるため。
+ *   遅くなっても正しい答えを返す側に倒す。
+ */
+export function selectCaFoldersForEmployee(
+  employeeName: string | null | undefined,
+  caFolders: string[],
+): string[] {
+  const matched = caFolders.filter((f) => caFolderMatchesEmployee(employeeName, f));
+  return matched.length > 0 ? matched : caFolders;
 }
 
 // ============================================================

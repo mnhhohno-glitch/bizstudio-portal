@@ -54,6 +54,8 @@ interface CandidateHeaderProps {
   googleFormDisabled?: boolean;
   googleFormDisabledReason?: string;
   oneDriveFolderUrl?: string | null;
+  /** T-159 Phase 4: 即時同期の完了後に呼ぶ。求職者データとファイル一覧を取り直す。 */
+  onOneDriveSynced?: () => void;
 }
 
 function genderLabel(g: string | null) {
@@ -140,9 +142,11 @@ export default function CandidateHeader({
   googleFormDisabled,
   googleFormDisabledReason,
   oneDriveFolderUrl,
+  onOneDriveSynced,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
+  const [oneDriveSyncing, setOneDriveSyncing] = useState(false);
 
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
@@ -153,6 +157,34 @@ export default function CandidateHeader({
     oneDriveFolderUrl && oneDriveFolderUrl.trim().startsWith("https://")
       ? oneDriveFolderUrl.trim()
       : null;
+
+  // T-159 Phase 4: この求職者1人分だけを今すぐ OneDrive と同期する。
+  //   結果は日本語のメッセージがサーバから返るので、そのままトーストに出す（既存の sonner を使う）。
+  //   完了後に onOneDriveSynced を呼び、OneDrive ボタンの活性と書類バッジを取り直させる。
+  const handleOneDriveSyncNow = async () => {
+    if (oneDriveSyncing) return;
+    setOneDriveSyncing(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/onedrive-sync-now`, {
+        method: "POST",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      const message = data.message || "同期に失敗しました。時間をおいてお試しください。";
+      if (res.ok && data.ok) {
+        toast.success(message, { duration: 8000 });
+      } else {
+        toast.error(message, { duration: 8000 });
+      }
+      onOneDriveSynced?.();
+    } catch {
+      toast.error("同期に失敗しました。時間をおいてお試しください。", { duration: 8000 });
+    } finally {
+      setOneDriveSyncing(false);
+    }
+  };
 
   const handleGuideUrlCopy = () => {
     onGuideUrlCopy();
@@ -404,6 +436,16 @@ export default function CandidateHeader({
             className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             OneDrive
+          </button>
+          {/* T-159 Phase 4: つながっていない人（登録のため）にも、つながっている人
+              （未反映の書類を送るため）にも要るので、常に押せる状態で置く。 */}
+          <button
+            onClick={handleOneDriveSyncNow}
+            disabled={oneDriveSyncing}
+            title="この求職者の書類を今すぐ OneDrive にコピーします"
+            className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {oneDriveSyncing ? "同期中..." : "同期"}
           </button>
         </div>
       </div>
