@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { GOOGLE_FORM_CATEGORY_GROUPS } from "@/constants/google-form-categories";
+import type { GoogleFormRequestData } from "@/constants/google-form-request";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 export type GoogleFormMeetingFile = {
@@ -70,6 +71,17 @@ const ITEM_TYPE_LABEL: Record<string, string> = {
   multi_select: "複数選択",
   dropdown: "プルダウン",
   section_header: "見出し",
+};
+
+// T-171: 「Googleフォーム作成依頼」タスク（未完了・最新1件）の受け取り型。
+// GET /api/candidates/[id]/google-form/request の request をそのまま持つ。
+type GoogleFormRequestInfo = {
+  taskId: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  createdByName: string | null;
+  data: GoogleFormRequestData;
 };
 
 // T-038: モーダル open 時に既存 URL チェックで使う最小型
@@ -206,6 +218,13 @@ export default function GoogleFormCreatorModal({
   const [regenerateInstruction, setRegenerateInstruction] = useState<string>("");
   const [regenerateNotice, setRegenerateNotice] = useState<string | null>(null);
 
+  // T-171: 「Googleフォーム作成依頼」タスク由来の依頼内容。
+  // requestIgnored=true は「依頼内容を使わずに最初からやり直す」を押した状態。
+  const [requestInfo, setRequestInfo] = useState<GoogleFormRequestInfo | null>(null);
+  const [requestIgnored, setRequestIgnored] = useState(false);
+  // T-171: selectCompany の会社カードに出す職種詳細ヒント（キー=work_history index 文字列）。
+  const [requestDetailMap, setRequestDetailMap] = useState<Record<string, string>>({});
+
   // 改修③（途中保存）: 開いた時に見つかった下書き（復元プロンプト用）と保存状態。
   const [draftPrompt, setDraftPrompt] = useState<{ questionsJson: unknown; updatedAt: string | null } | null>(null);
   // 自動保存の3状態表示（保存中 / 保存しました / 保存に失敗しました）。
@@ -264,6 +283,34 @@ export default function GoogleFormCreatorModal({
     setHasCheckedExistingUrl(true);
 
     (async () => {
+      // T-171: 未完了の「Googleフォーム作成依頼」タスク（最新1件）を取得。
+      // 見つかったら初期選択（大項目/サブカテゴリ/自由記述/PDF・txt）を依頼値で埋める。
+      // 既存フォームありでも requestInfo は保持する（完了画面の「依頼タスクへ」リンク用）。
+      let loadedRequest: GoogleFormRequestInfo | null = null;
+      try {
+        const rres = await fetch(`/api/candidates/${candidateId}/google-form/request`);
+        if (rres.ok) {
+          const rdata = await rres.json();
+          if (rdata?.request?.data) {
+            loadedRequest = rdata.request as GoogleFormRequestInfo;
+            setRequestInfo(loadedRequest);
+            setRequestIgnored(false);
+            const d = loadedRequest.data;
+            if (d.groupKey) setGroupKey(d.groupKey);
+            if (d.categoryValue) setCategoryValue(d.categoryValue);
+            setOtherLabel(d.otherLabel ?? "");
+            if (d.pdfFileId && meetingFiles.some((f) => f.id === d.pdfFileId)) {
+              setSelectedPdfFileId(d.pdfFileId);
+            }
+            if (d.txtFileId && meetingFiles.some((f) => f.id === d.txtFileId)) {
+              setSelectedTxtFileId(d.txtFileId);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[GoogleFormCreatorModal] Failed to check request task:", err);
+      }
+
       try {
         const res = await fetch(`/api/candidates/${candidateId}/interviews`);
         if (!res.ok) return;
@@ -315,7 +362,7 @@ export default function GoogleFormCreatorModal({
         console.warn("[GoogleFormCreatorModal] Failed to check draft:", err);
       }
     })();
-  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId, questionsJson]);
+  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId, questionsJson, meetingFiles]);
 
   const groups = GOOGLE_FORM_CATEGORY_GROUPS;
   const selectedGroup = groups.find((g) => g.label === groupKey) ?? null;
@@ -350,10 +397,21 @@ export default function GoogleFormCreatorModal({
     setAutoSaveStatus("idle");
     setShowCreateConfirm(false);
     setLastAppliedInstruction("");
+    setRequestDetailMap({});
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+  };
+
+  // T-171: 「依頼内容を使わずに最初からやり直す」。依頼由来の初期選択をすべて解除して
+  // 通常の新規作成フローに戻す（handleResetAll 相当＋カテゴリ選択のクリア）。
+  const handleIgnoreRequest = () => {
+    setRequestIgnored(true);
+    handleResetAll();
+    setGroupKey("");
+    setCategoryValue("");
+    setOtherLabel("");
   };
 
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
@@ -397,6 +455,42 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryMap(initialMap);
     setCompanyGroupMap(initialGroupMap);
     setCompanyCategoryLabelMap(initialLabelMap);
+  };
+
+  // T-171: デフォルト適用後、依頼（Googleフォーム作成依頼タスク）の会社別分類で上書きする。
+  // useIndex=true: 依頼 JSON の index で work_history に対応付け（依頼時の resumeData を再利用する場合）。
+  // useIndex=false: 会社名一致（空白除去の完全一致）で対応付け。当たらない会社は既定カテゴリのまま。
+  // あわせて会社カードのヒント用に職種詳細（detail）マップも組み立てる。
+  const initializeCompanyMapsWithRequest = (workHistory: WorkHistoryEntry[], useIndex: boolean) => {
+    initializeCompanyCategoryMap(workHistory, groupKey, categoryValue, otherLabel);
+    const req = !requestIgnored ? requestInfo : null;
+    if (!req || !Array.isArray(req.data.companies)) {
+      setRequestDetailMap({});
+      return;
+    }
+    const norm = (s: string | undefined | null) => (s ?? "").replace(/\s+/g, "");
+    const groupLabelForCategory = (value: string) =>
+      GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.options.some((o) => o.value === value))?.label ?? "";
+    const mapPatch: Record<string, string> = {};
+    const groupPatch: Record<string, string> = {};
+    const detailMap: Record<string, string> = {};
+    workHistory.forEach((w, i) => {
+      const key = String(i);
+      const match = useIndex
+        ? req.data.companies.find((c) => c.index === i)
+        : req.data.companies.find((c) => norm(c.name) !== "" && norm(c.name) === norm(w.company));
+      if (!match) return;
+      if (match.categoryValue) {
+        mapPatch[key] = match.categoryValue;
+        groupPatch[key] = match.groupKey || groupLabelForCategory(match.categoryValue);
+      }
+      if (match.detail) detailMap[key] = match.detail;
+    });
+    if (Object.keys(mapPatch).length > 0) {
+      setCompanyCategoryMap((prev) => ({ ...prev, ...mapPatch }));
+      setCompanyGroupMap((prev) => ({ ...prev, ...groupPatch }));
+    }
+    setRequestDetailMap(detailMap);
   };
 
   // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
@@ -556,12 +650,43 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryMap({});
     setCompanyGroupMap({});
 
+    // T-171: 依頼の resumeData を再利用できる場合は extract（30〜75秒の解析）を省略する。
+    // 条件: 依頼が extract 方式・resumeData あり・依頼時と同じ PDF が現存し選択中。
+    // 面談ログ（.txt）はローカル DL で読めるため candidate-intake を呼ぶ必要がない。
+    const req = !requestIgnored ? requestInfo : null;
+    const canReuseRequestResume =
+      !!req &&
+      req.data.inputMode === "extract" &&
+      req.data.resumeData != null &&
+      !!req.data.pdfFileId &&
+      selectedPdfFileId === req.data.pdfFileId &&
+      meetingFiles.some((f) => f.id === req.data.pdfFileId);
+    if (canReuseRequestResume && req && selectedTxtFileId) {
+      setStageStatus((s) => ({ ...s, extract: "running" }));
+      try {
+        const tres = await fetch(`/api/candidates/${candidateId}/files/${selectedTxtFileId}?download=true`);
+        if (!tres.ok) throw new Error(`面談ログの取得に失敗しました (HTTP ${tres.status})`);
+        const logText = await tres.text();
+        setResumeData(req.data.resumeData);
+        setInterviewLogText(logText);
+        setStageStatus((s) => ({ ...s, extract: "done" }));
+        initializeCompanyMapsWithRequest(getWorkHistory(req.data.resumeData), true);
+        setStep("selectCompany");
+        return;
+      } catch (err) {
+        // 再利用に失敗したら通常の extract にフォールバック
+        console.warn("[GoogleFormCreatorModal] request resume reuse failed, fallback to extract:", err);
+        setStageStatus((s) => ({ ...s, extract: "pending" }));
+      }
+    }
+
     const e1 = await runExtract();
     if (!e1) {
       setStep("error");
       return;
     }
-    initializeCompanyCategoryMap(getWorkHistory(e1.resumeData), groupKey, categoryValue, otherLabel);
+    // 依頼あり（手入力方式・PDF 変更時など）は会社名一致で依頼の分類を当てる
+    initializeCompanyMapsWithRequest(getWorkHistory(e1.resumeData), false);
     setStep("selectCompany");
   };
 
@@ -867,7 +992,7 @@ export default function GoogleFormCreatorModal({
         setStep("error");
         return;
       }
-      initializeCompanyCategoryMap(getWorkHistory(r.resumeData), groupKey, categoryValue, otherLabel);
+      initializeCompanyMapsWithRequest(getWorkHistory(r.resumeData), false);
       setStep("selectCompany");
       return;
     }
@@ -952,6 +1077,34 @@ export default function GoogleFormCreatorModal({
         {/* Step 1: idle - 入力 */}
         {step === "idle" && (
           <>
+            {/* T-171: 依頼タスクの内容を読み込んだバナー（日時は JST 表示） */}
+            {requestInfo && !requestIgnored && (
+              <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-200 px-3 py-2.5 text-[12px] text-indigo-900">
+                <p className="font-medium">
+                  📋 依頼内容を読み込みました（タスク: {requestInfo.title}／依頼者: {requestInfo.createdByName ?? "不明"}／
+                  {new Date(requestInfo.createdAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })}{" "}
+                  {new Date(requestInfo.createdAt).toLocaleTimeString("ja-JP", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "Asia/Tokyo",
+                  })}）
+                </p>
+                <p className="mt-0.5 text-indigo-700">
+                  経験職種カテゴリ・対象ファイル・会社別の職種分類を依頼内容から初期設定しています。
+                  {requestInfo.data.memo && (
+                    <span className="block mt-0.5">依頼メモ: {requestInfo.data.memo}</span>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleIgnoreRequest}
+                  className="mt-1.5 text-[12px] font-medium text-indigo-700 underline hover:text-indigo-900"
+                >
+                  依頼内容を使わずに最初からやり直す
+                </button>
+              </div>
+            )}
+
             {/* PDF ファイル選択 */}
             <div className="mb-4">
               <label className="block text-[13px] font-medium text-[#374151] mb-2">
@@ -1100,6 +1253,12 @@ export default function GoogleFormCreatorModal({
           <div>
             <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-[13px] text-blue-800">
               この求職者の <span className="font-semibold">フォーム質問の下書き</span> が保存されています。
+              {/* T-171: 依頼タスクもあるが FormDraft を優先している旨の表示 */}
+              {requestInfo && (
+                <span className="block text-[12px] text-blue-700 mt-1 font-medium">
+                  依頼内容あり（途中保存を優先表示中）: {requestInfo.title}
+                </span>
+              )}
               {draftPrompt?.updatedAt && (
                 <span className="block text-[12px] text-blue-700 mt-1">
                   保存日時: {new Date(draftPrompt.updatedAt).toLocaleDateString("sv-SE")}{" "}
@@ -1247,6 +1406,12 @@ export default function GoogleFormCreatorModal({
                             ))}
                           </select>
                         </div>
+                        {/* T-171: 依頼タスクに書かれた職種詳細のヒント表示（この会社分） */}
+                        {requestDetailMap[key] && (
+                          <p className="mt-1.5 rounded bg-indigo-50 border border-indigo-100 px-2 py-1 text-[11px] text-indigo-800">
+                            💡 依頼の職種詳細: {requestDetailMap[key]}
+                          </p>
+                        )}
                         {/* T-035 step2: その他系のときだけ、会社別の自由記入欄（任意） */}
                         {isOtherTypeCategory(currentCategory) && (
                           <div className="mt-2">
@@ -1669,12 +1834,25 @@ export default function GoogleFormCreatorModal({
               >
                 新しく作り直す
               </button>
-              <button
-                onClick={handleClose}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-5 py-2 text-[13px] font-medium hover:bg-gray-50"
-              >
-                閉じる
-              </button>
+              <div className="flex items-center gap-2">
+                {/* T-171: 依頼タスクへのリンク（完了操作は担当者の手動。ステータスは変更しない） */}
+                {requestInfo && (
+                  <a
+                    href={`/tasks/${requestInfo.taskId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="border border-[#2563EB] bg-white text-[#2563EB] rounded-md px-4 py-2 text-[13px] font-medium hover:bg-blue-50"
+                  >
+                    依頼タスクへ ↗
+                  </a>
+                )}
+                <button
+                  onClick={handleClose}
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-5 py-2 text-[13px] font-medium hover:bg-gray-50"
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
           </div>
         )}

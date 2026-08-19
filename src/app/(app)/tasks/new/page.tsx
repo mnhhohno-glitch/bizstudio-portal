@@ -6,6 +6,13 @@ import Link from "next/link";
 import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 import PointsModal from "@/components/tasks/PointsModal";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
+import { GOOGLE_FORM_CATEGORY_GROUPS, getGoogleFormCategoryLabel } from "@/constants/google-form-categories";
+import {
+  GOOGLE_FORM_REQUEST_CATEGORY,
+  GOOGLE_FORM_REQUEST_HIDDEN_LABELS,
+  CATEGORY_DEFAULT_ASSIGNEE_NUMBERS,
+  type GoogleFormRequestData,
+} from "@/constants/google-form-request";
 
 /* ---------- types ---------- */
 
@@ -69,6 +76,17 @@ const THREE_POINT_LABELS = ["履歴書作成", "職務経歴書作成", "推薦�
 const HIDDEN_CATEGORY_ID = "cmoal05cp002r1dsxyokhti3i";
 
 const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
+
+/** T-171: Googleフォーム作成依頼の会社別職種分類 1行分。
+ * whIndex は extract 由来行の work_history 配列インデックス（手入力・追加行は undefined）。 */
+type GfCompanyRow = {
+  name: string;
+  period: string;
+  groupKey: string;
+  categoryValue: string;
+  detail: string;
+  whIndex?: number;
+};
 const MENSETSU_TAISAKU_CATEGORY = "面接対策依頼";
 const NAITEI_CATEGORY = "内定承諾報告";
 const NYUSHA_CATEGORY = "入社報告";
@@ -231,6 +249,21 @@ export default function TaskNewPage() {
   const [templateDragOver, setTemplateDragOver] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement>(null);
 
+  // step 2 - カテゴリ固有: Googleフォーム作成依頼（T-171）
+  const [gfGroupKey, setGfGroupKey] = useState("");
+  const [gfCategoryValue, setGfCategoryValue] = useState("");
+  const [gfOtherLabel, setGfOtherLabel] = useState("");
+  const [gfMeetingPdfs, setGfMeetingPdfs] = useState<{ id: string; fileName: string; createdAt: string }[]>([]);
+  const [gfMeetingTxts, setGfMeetingTxts] = useState<{ id: string; fileName: string; createdAt: string }[]>([]);
+  const [gfPdfFileId, setGfPdfFileId] = useState<string | null>(null);
+  const [gfTxtFileId, setGfTxtFileId] = useState<string | null>(null);
+  const [gfExtracting, setGfExtracting] = useState(false);
+  // extract=履歴書読み取り / manual=手入力。PDF か面談ログが無い場合は自動で manual。
+  const [gfInputMode, setGfInputMode] = useState<"extract" | "manual">("extract");
+  const [gfResumeData, setGfResumeData] = useState<unknown | null>(null);
+  const [gfCompanies, setGfCompanies] = useState<GfCompanyRow[]>([]);
+  const [gfMemo, setGfMemo] = useState("");
+
   // step 2 - カテゴリ固有: 求人検索
   const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [aiOrganizing, setAiOrganizing] = useState(false);
@@ -299,6 +332,7 @@ export default function TaskNewPage() {
   const isRAEntry = selectedCategory?.name === RA_ENTRY_CATEGORY;
   const isFmTouroku = selectedCategory?.name === FM_TOUROKU_CATEGORY;
   const isKyujinKensaku = selectedCategory?.name === KYUJIN_KENSAKU_CATEGORY;
+  const isGformRequest = selectedCategory?.name === GOOGLE_FORM_REQUEST_CATEGORY;
   const hideStep5Attachment = HIDE_STEP5_ATTACHMENT_CATEGORIES.includes(selectedCategory?.name ?? "");
 
   /** 職務経歴書: 「実績なし」チェックがONか */
@@ -568,6 +602,56 @@ export default function TaskNewPage() {
     setFieldValues((prev) => (prev[targetField.id] === value ? prev : { ...prev, [targetField.id]: value }));
   }, [isNaitei, selectedCategory, selectedCandidate]);
 
+  /* ----- Googleフォーム作成依頼（T-171）: 面談ファイル取得・既定担当者 ----- */
+  // 求職者の面談（MEETING）ファイルから PDF / .txt を取得し最新を初期選択。
+  // どちらかが無い場合は手入力モードへフォールバック。
+  useEffect(() => {
+    if (!isGformRequest || !candidateId) return;
+    let cancelled = false;
+    fetch(`/api/candidates/${candidateId}/files?category=MEETING`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        const files = (d.files || []) as { id: string; fileName: string; createdAt: string }[];
+        const pdfs = files.filter((f) => f.fileName.toLowerCase().endsWith(".pdf"));
+        const txts = files.filter((f) => f.fileName.toLowerCase().endsWith(".txt"));
+        setGfMeetingPdfs(pdfs);
+        setGfMeetingTxts(txts);
+        setGfPdfFileId((prev) => prev ?? pdfs[0]?.id ?? null);
+        setGfTxtFileId((prev) => prev ?? txts[0]?.id ?? null);
+        if (pdfs.length === 0 || txts.length === 0) setGfInputMode("manual");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isGformRequest, candidateId]);
+
+  // 手入力モードで行が空なら1行足す（メインカテゴリ選択済みなら初期値に流用）。
+  useEffect(() => {
+    if (!isGformRequest || gfInputMode !== "manual" || gfCompanies.length > 0) return;
+    setGfCompanies([{ name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" }]);
+  }, [isGformRequest, gfInputMode, gfCompanies.length, gfGroupKey, gfCategoryValue]);
+
+  // カテゴリ既定担当者（CATEGORY_DEFAULT_ASSIGNEE_NUMBERS）を選択時に一度だけ自動チェック。
+  // 手動での外し・追加を上書きしないよう、同一カテゴリ選択中は再適用しない。
+  const defaultAssigneesApplied = useRef(false);
+  useEffect(() => {
+    const defaults = CATEGORY_DEFAULT_ASSIGNEE_NUMBERS[selectedCategory?.name ?? ""];
+    if (!defaults) {
+      defaultAssigneesApplied.current = false;
+      return;
+    }
+    if (defaultAssigneesApplied.current || employees.length === 0) return;
+    const ids = defaults
+      .map((num) => employees.find((e) => e.employeeNo === num)?.id)
+      .filter((id): id is string => !!id);
+    if (ids.length > 0) {
+      setAssigneeIds((prev) => Array.from(new Set([...prev, ...ids])));
+      defaultAssigneesApplied.current = true;
+    }
+  }, [selectedCategory, employees]);
+
   /* ----- job category cascading ----- */
   useEffect(() => {
     if (!selectedMajorId) {
@@ -693,6 +777,78 @@ export default function TaskNewPage() {
     }
   }, [step, is3pointSet, selectedCategory, selectedCandidate]);
 
+  /* ----- Googleフォーム作成依頼（T-171）: 履歴書読み取り・行操作 ----- */
+  const handleGfExtract = async () => {
+    if (!candidateId || !gfPdfFileId || !gfTxtFileId || gfExtracting) return;
+    setGfExtracting(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/google-form/extract-resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfFileId: gfPdfFileId, interviewLogFileId: gfTxtFileId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `履歴書の読み取りに失敗しました (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const wh = (data.resumeData as { work_history?: unknown } | null)?.work_history;
+      const workHistory = Array.isArray(wh) ? (wh as { company?: string; period?: string }[]) : [];
+      setGfResumeData(data.resumeData ?? null);
+      if (workHistory.length === 0) {
+        alert("履歴書から職歴が抽出できませんでした。会社を手入力してください。");
+        setGfCompanies([{ name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" }]);
+      } else {
+        setGfCompanies(
+          workHistory.map((w, i) => ({
+            name: w.company ?? "",
+            period: w.period ?? "",
+            groupKey: gfGroupKey,
+            categoryValue: gfCategoryValue,
+            detail: "",
+            whIndex: i,
+          })),
+        );
+      }
+    } catch (e) {
+      alert(`${e instanceof Error ? e.message : String(e)}\n\n手入力モードに切り替えます。`);
+      setGfInputMode("manual");
+    } finally {
+      setGfExtracting(false);
+    }
+  };
+
+  const gfUpdateCompany = (idx: number, patch: Partial<GfCompanyRow>) => {
+    setGfCompanies((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+  const gfAddCompany = () => {
+    setGfCompanies((prev) => [
+      ...prev,
+      { name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" },
+    ]);
+  };
+  const gfRemoveCompany = (idx: number) => {
+    setGfCompanies((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // 表示用: メイン経験職種カテゴリ「大項目 ＞ サブカテゴリ（自由記述）」
+  const gfMainCategoryText = (() => {
+    if (!gfGroupKey || !gfCategoryValue) return "";
+    const sub = getGoogleFormCategoryLabel(gfCategoryValue) ?? gfCategoryValue;
+    const other = gfOtherLabel.trim() ? `（${gfOtherLabel.trim()}）` : "";
+    return `${gfGroupKey} ＞ ${sub}${other}`;
+  })();
+
+  // 表示用: 会社別職種分類「会社名（期間）：大項目 ＞ サブカテゴリ／職種詳細」1社1行
+  const gfCompaniesText = gfCompanies
+    .map((c) => {
+      const sub = getGoogleFormCategoryLabel(c.categoryValue) ?? c.categoryValue;
+      const period = c.period.trim() ? `（${c.period.trim()}）` : "";
+      const detail = c.detail.trim() ? `／${c.detail.trim()}` : "";
+      return `${c.name.trim()}${period}：${c.groupKey} ＞ ${sub}${detail}`;
+    })
+    .join("\n");
+
   /* ----- step validation ----- */
   const canProceed = (): boolean => {
     switch (step) {
@@ -705,6 +861,14 @@ export default function TaskNewPage() {
         if (!cat) return false;
         // 内定承諾報告: 対象者（求職者）必須。未選択では先へ進めない。
         if (isNaitei && !candidateId) return false;
+        // Googleフォーム作成依頼（T-171）: 求職者・メインカテゴリ・会社別分類が必須
+        if (isGformRequest) {
+          if (!candidateId) return false;
+          if (!gfGroupKey || !gfCategoryValue) return false;
+          if (gfCategoryValue === "other" && !gfOtherLabel.trim()) return false;
+          if (gfCompanies.length === 0) return false;
+          if (!gfCompanies.every((c) => c.name.trim() && c.categoryValue)) return false;
+        }
         // 履歴書作成: 志望動機の大中小必須
         if (isRirekisho) {
           if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
@@ -775,6 +939,11 @@ export default function TaskNewPage() {
       return cat.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
+    // Googleフォーム作成依頼（T-171）: 全項目カスタムUI（機械用 JSON 含む）で代替
+    if (isGformRequest) {
+      return cat.fields.filter((f) => !GOOGLE_FORM_REQUEST_HIDDEN_LABELS.includes(f.label));
+    }
+
     if (!isShokumu) return cat.fields;
 
     return cat.fields.filter((f) => {
@@ -786,7 +955,7 @@ export default function TaskNewPage() {
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
     });
-  }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku]);
+  }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku, isGformRequest]);
 
   /* ----- submit (3point set) ----- */
   const handle3ptSubmit = async () => {
@@ -896,6 +1065,12 @@ export default function TaskNewPage() {
       setStep(0);
       return;
     }
+    // Googleフォーム作成依頼（T-171）: 求職者必須（依頼データは求職者に紐づく）
+    if (isGformRequest && !candidateId) {
+      alert("求職者を選択してください。Googleフォーム作成依頼では「求職者選択」での指定が必要です。");
+      setStep(0);
+      return;
+    }
     setSubmitting(true);
     try {
       // 追加のfieldValues
@@ -948,6 +1123,49 @@ export default function TaskNewPage() {
         const feeField = selectedCategory.fields.find((f) => f.label === "紹介手数料（税抜き）");
         if (feeField && naiteiComputedFee != null) {
           extraFieldValues.push({ fieldId: feeField.id, value: String(naiteiComputedFee) });
+        }
+      }
+
+      // Googleフォーム作成依頼（T-171）: 表示用3項目＋機械用 JSON をセット
+      if (isGformRequest && selectedCategory) {
+        const mainField = selectedCategory.fields.find((f) => f.label === "メイン経験職種カテゴリ");
+        if (mainField && gfMainCategoryText) {
+          extraFieldValues.push({ fieldId: mainField.id, value: gfMainCategoryText });
+        }
+        const compField = selectedCategory.fields.find((f) => f.label === "会社別職種分類");
+        if (compField && gfCompaniesText) {
+          extraFieldValues.push({ fieldId: compField.id, value: gfCompaniesText });
+        }
+        const memoField = selectedCategory.fields.find((f) => f.label === "その他メモ");
+        if (memoField && gfMemo.trim()) {
+          extraFieldValues.push({ fieldId: memoField.id, value: gfMemo.trim() });
+        }
+        const dataField = selectedCategory.fields.find((f) => f.label === "フォーム作成指定データ");
+        if (dataField) {
+          const usedExtract = gfInputMode === "extract" && gfResumeData != null;
+          const requestData: GoogleFormRequestData = {
+            v: 1,
+            inputMode: usedExtract ? "extract" : "manual",
+            pdfFileId: usedExtract ? gfPdfFileId : null,
+            txtFileId: usedExtract ? gfTxtFileId : null,
+            resumeData: usedExtract ? gfResumeData : null,
+            groupKey: gfGroupKey,
+            categoryValue: gfCategoryValue,
+            otherLabel: gfOtherLabel.trim(),
+            // extract 由来行は work_history のインデックス（whIndex）を index に持たせ、
+            // 受け取り側（フォーム作成モーダル）が会社カードへ対応付けられるようにする。
+            // 追加行・手入力行は -1（モーダル側は会社名一致で拾う）。
+            companies: gfCompanies.map((c, i) => ({
+              index: usedExtract ? (c.whIndex ?? -1) : i,
+              name: c.name.trim(),
+              period: c.period.trim(),
+              groupKey: c.groupKey,
+              categoryValue: c.categoryValue,
+              detail: c.detail.trim(),
+            })),
+            memo: gfMemo.trim(),
+          };
+          extraFieldValues.push({ fieldId: dataField.id, value: JSON.stringify(requestData) });
         }
       }
 
@@ -1457,6 +1675,14 @@ export default function TaskNewPage() {
                 setMotivMiddleId("");
                 setMotivMiddleName("");
                 setSelectedMotivMinors([]);
+                // T-171: Googleフォーム作成依頼のカスタム state もカテゴリ切替でリセット
+                setGfGroupKey("");
+                setGfCategoryValue("");
+                setGfOtherLabel("");
+                setGfInputMode("extract");
+                setGfResumeData(null);
+                setGfCompanies([]);
+                setGfMemo("");
               };
 
               const select3pointSet = () => {
@@ -1719,7 +1945,7 @@ export default function TaskNewPage() {
             {/* テンプレートフィールド */}
             {(() => {
               const visibleFields = getVisibleFields();
-              if (visibleFields.length === 0 && !isShokumu && !isKyujinKensaku) {
+              if (visibleFields.length === 0 && !isShokumu && !isKyujinKensaku && !isGformRequest) {
                 return (
                   <p className="text-[14px] text-[#6B7280]">
                     テンプレート項目はありません。次へ進んでください。
@@ -2044,6 +2270,203 @@ export default function TaskNewPage() {
                             <input type="text" inputMode="numeric" value={naiteiFixedFee} onChange={(e) => setNaiteiFixedFee(e.target.value)} placeholder="例: 1200000" className={selectCls} />
                           </div>
                         )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ===== Googleフォーム作成依頼（T-171）: カスタムUI ===== */}
+                  {isGformRequest && (
+                    <>
+                      {/* 求職者必須（Step0 未選択のまま進んだ場合の案内） */}
+                      {!selectedCandidate && (
+                        <div className="flex items-center justify-between gap-2 rounded-[6px] border border-red-300 bg-red-50 px-3 py-2 text-[13px] text-red-600">
+                          <span>求職者が未選択です。このカテゴリでは最初の「求職者選択」で対象者の指定が必要です。</span>
+                          <button type="button" onClick={() => setStep(0)} className="shrink-0 rounded-[6px] bg-white px-2 py-1 text-[12px] font-medium text-[#2563EB] border border-[#2563EB] hover:bg-[#EEF2FF]">
+                            求職者を選択
+                          </button>
+                        </div>
+                      )}
+
+                      {/* メイン経験職種カテゴリ（2段ドロップダウン・フォーム作成モーダルと同じ定数） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">メイン経験職種カテゴリ<span className="ml-1 text-red-500">*</span></p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <select
+                            value={gfGroupKey}
+                            onChange={(e) => { setGfGroupKey(e.target.value); setGfCategoryValue(""); setGfOtherLabel(""); }}
+                            className={selectCls}
+                          >
+                            <option value="">大項目を選択...</option>
+                            {GOOGLE_FORM_CATEGORY_GROUPS.map((g) => <option key={g.label} value={g.label}>{g.label}</option>)}
+                          </select>
+                          <select
+                            value={gfCategoryValue}
+                            onChange={(e) => setGfCategoryValue(e.target.value)}
+                            disabled={!gfGroupKey}
+                            className={`${selectCls} disabled:bg-gray-50 disabled:text-gray-400`}
+                          >
+                            <option value="">サブカテゴリを選択...</option>
+                            {(GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === gfGroupKey)?.options ?? []).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {gfCategoryValue === "other" && (
+                          <div>
+                            <label className="mb-1 block text-[12px] text-[#6B7280]">自由記述<span className="ml-1 text-red-500">*</span></label>
+                            <input
+                              type="text"
+                              value={gfOtherLabel}
+                              onChange={(e) => setGfOtherLabel(e.target.value)}
+                              placeholder="例: トラック運転手、職人 など"
+                              className={selectCls}
+                            />
+                          </div>
+                        )}
+                        {gfMainCategoryText && <p className="text-[12px] text-[#2563EB]">選択中: {gfMainCategoryText}</p>}
+                      </div>
+
+                      {/* 会社ごとの職種分類 */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-[13px] font-bold text-[#374151]">会社ごとの職種分類<span className="ml-1 text-red-500">*</span></p>
+                          {gfInputMode === "extract" ? (
+                            <button type="button" onClick={() => setGfInputMode("manual")} className="text-[12px] font-medium text-[#2563EB] hover:underline">
+                              手入力に切り替える
+                            </button>
+                          ) : (
+                            gfMeetingPdfs.length > 0 && gfMeetingTxts.length > 0 && (
+                              <button type="button" onClick={() => setGfInputMode("extract")} className="text-[12px] font-medium text-[#2563EB] hover:underline">
+                                履歴書読み取りに切り替える
+                              </button>
+                            )
+                          )}
+                        </div>
+
+                        {gfInputMode === "extract" && (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-[12px] text-[#6B7280]">履歴書PDF（面談サブタブ）</label>
+                              {gfMeetingPdfs.length === 0 ? (
+                                <p className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">面談サブタブに PDF がありません。手入力モードをご利用ください。</p>
+                              ) : (
+                                <div className="space-y-1.5 max-h-32 overflow-y-auto rounded-[6px] border border-[#E5E7EB] bg-white p-2">
+                                  {gfMeetingPdfs.map((f) => (
+                                    <label key={f.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                                      <input type="radio" name="gfPdfFile" checked={gfPdfFileId === f.id} onChange={() => setGfPdfFileId(f.id)} className="accent-[#2563EB]" />
+                                      <span className="text-[12px] text-gray-700 truncate flex-1" title={f.fileName}>📄 {f.fileName}</span>
+                                      <span className="text-[10px] text-gray-400">{new Date(f.createdAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[12px] text-[#6B7280]">面談ログ（.txt・読み取りに必要）</label>
+                              {gfMeetingTxts.length === 0 ? (
+                                <p className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[12px] text-yellow-800">面談サブタブに .txt がありません。手入力モードをご利用ください。</p>
+                              ) : (
+                                <div className="space-y-1.5 max-h-32 overflow-y-auto rounded-[6px] border border-[#E5E7EB] bg-white p-2">
+                                  {gfMeetingTxts.map((f) => (
+                                    <label key={f.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                                      <input type="radio" name="gfTxtFile" checked={gfTxtFileId === f.id} onChange={() => setGfTxtFileId(f.id)} className="accent-[#2563EB]" />
+                                      <span className="text-[12px] text-gray-700 truncate flex-1" title={f.fileName}>📝 {f.fileName}</span>
+                                      <span className="text-[10px] text-gray-400">{new Date(f.createdAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleGfExtract}
+                              disabled={gfExtracting || !gfPdfFileId || !gfTxtFileId || !gfGroupKey || !gfCategoryValue}
+                              className="w-full rounded-[6px] bg-[#2563EB] px-3 py-2 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {gfExtracting ? "読み取り中...（30〜75秒）" : "履歴書を読み取る"}
+                            </button>
+                            {(!gfGroupKey || !gfCategoryValue) && (
+                              <p className="text-[11px] text-[#9CA3AF]">先にメイン経験職種カテゴリを選択してください（全社の初期値になります）。</p>
+                            )}
+                          </>
+                        )}
+
+                        {/* 会社カード（extract 結果 / 手入力 共通。行の追加・削除可） */}
+                        {gfCompanies.length > 0 && (
+                          <div className="space-y-2">
+                            {gfCompanies.map((c, idx) => {
+                              const rowGroup = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === c.groupKey);
+                              return (
+                                <div key={idx} className="rounded-[6px] border border-[#E5E7EB] bg-white p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={c.name}
+                                      onChange={(e) => gfUpdateCompany(idx, { name: e.target.value })}
+                                      placeholder="会社名"
+                                      className="flex-1 rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={c.period}
+                                      onChange={(e) => gfUpdateCompany(idx, { period: e.target.value })}
+                                      placeholder="在籍期間"
+                                      className="w-[160px] rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <button type="button" onClick={() => gfRemoveCompany(idx)} className="shrink-0 text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <select
+                                      value={c.groupKey}
+                                      onChange={(e) => {
+                                        const newGroup = e.target.value;
+                                        const firstSub = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === newGroup)?.options[0]?.value ?? "";
+                                        gfUpdateCompany(idx, { groupKey: newGroup, categoryValue: firstSub });
+                                      }}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    >
+                                      <option value="">大項目を選択...</option>
+                                      {GOOGLE_FORM_CATEGORY_GROUPS.map((g) => <option key={g.label} value={g.label}>{g.label}</option>)}
+                                    </select>
+                                    <select
+                                      value={c.categoryValue}
+                                      onChange={(e) => gfUpdateCompany(idx, { categoryValue: e.target.value })}
+                                      disabled={!c.groupKey}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+                                    >
+                                      <option value="">サブカテゴリを選択...</option>
+                                      {(rowGroup?.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={c.detail}
+                                    onChange={(e) => gfUpdateCompany(idx, { detail: e.target.value })}
+                                    placeholder="職種詳細（この会社での職種の補足・任意）"
+                                    className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[12px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {(gfInputMode === "manual" || gfCompanies.length > 0) && (
+                          <button type="button" onClick={gfAddCompany} className="text-[13px] font-medium text-[#2563EB] hover:underline">
+                            ＋ 会社を追加
+                          </button>
+                        )}
+                      </div>
+
+                      {/* その他メモ */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">その他メモ（任意）</label>
+                        <textarea
+                          rows={3}
+                          value={gfMemo}
+                          onChange={(e) => setGfMemo(e.target.value)}
+                          placeholder="フォーム作成にあたっての申し送り事項があれば入力してください"
+                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                        />
                       </div>
                     </>
                   )}
@@ -2491,6 +2914,14 @@ export default function TaskNewPage() {
                     </dd>
                   </div>
                 )
+              )}
+              {/* Googleフォーム作成依頼（T-171）: カスタム入力の確認表示 */}
+              {!is3pointSet && isGformRequest && (
+                <>
+                  <ConfirmRow label="メイン経験職種カテゴリ" value={gfMainCategoryText || "-"} />
+                  <ConfirmRow label="会社ごとの職種分類" value={gfCompaniesText || "-"} />
+                  {gfMemo.trim() && <ConfirmRow label="その他メモ" value={gfMemo.trim()} />}
+                </>
               )}
               <ConfirmRow
                 label="担当者"

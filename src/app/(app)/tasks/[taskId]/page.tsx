@@ -7,6 +7,7 @@ import TaskAttachments from "@/components/tasks/TaskAttachments";
 import TaskComments from "@/components/tasks/TaskComments";
 import { JobCategoryDisplay } from "@/components/tasks/JobCategorySelector";
 import PointsModal from "@/components/tasks/PointsModal";
+import { GOOGLE_FORM_REQUEST_DATA_LABEL } from "@/constants/google-form-request";
 
 type Option = { id: string; label: string; value: string };
 type FieldValue = {
@@ -191,9 +192,10 @@ export default function TaskDetailPage() {
   const isMyCompleted = myStatus?.isCompleted ?? false;
 
   // Sort field values by field sortOrder
-  const sortedFieldValues = [...task.fieldValues].sort(
-    (a, b) => a.field.sortOrder - b.field.sortOrder
-  );
+  // T-171: 「フォーム作成指定データ」は機械用 JSON（フォーム作成モーダルが読む）のため人には見せない
+  const sortedFieldValues = [...task.fieldValues]
+    .filter((fv) => fv.field.label !== GOOGLE_FORM_REQUEST_DATA_LABEL)
+    .sort((a, b) => a.field.sortOrder - b.field.sortOrder);
 
   return (
     <div className="mx-auto max-w-3xl">

@@ -327,6 +327,9 @@ export default function TaskEditPage() {
             </h2>
             <div className="space-y-4">
               {categoryFields.map((field) => {
+                // T-171: 「フォーム作成指定データ」は機械用 JSON。編集で壊さないよう入力欄を出さない
+                // （fieldValues state には読み込み済みのため、保存時は元の値がそのまま送られる）。
+                if (field.label === "フォーム作成指定データ") return null;
                 // 求人検索: 職種はカスタムUI
                 if (field.label === "職種" && task.category?.name === "求人検索") {
                   return (
