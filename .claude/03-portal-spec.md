@@ -756,3 +756,25 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
 - テンプレート項目「会社別職種分類」は廃止したが、`TaskTemplateField` に **isActive 相当のフラグが無い**ため
   **物理削除せず** `GOOGLE_FORM_REQUEST_HIDDEN_LABELS` による UI 非表示で新規作成時に出さない方式を採った
   （既存タスクの `TaskFieldValue` は温存される。タスク作成 API 側に required 検証は無いので `isRequired` は無害）。
+
+## Googleフォーム作成依頼: 会社別指定の復活（T-172追補 / 2026-08-20）
+
+- T-172 でメインカテゴリ1本に絞ったが**会社単位の指定ができず不十分**だったため、**会社カードを復活**させた。
+  ただし**依頼時の履歴書AI読み取り（extract-resume・10〜30秒待ち）は復活させない**。
+- 会社名・在籍期間の取得元は **`WorkHistory`（`work_histories`）**。面談ログ解析（`/api/interviews/[id]/analyze-with-intake`）と
+  面談入力フォーム（`InterviewForm`）が既に構造化保存しているため、**AI呼び出し無し・同期のDB読み取りだけ**で初期表示できる。
+  新設 API: `GET /api/candidates/[candidateId]/work-histories`
+  （`isLatest` 優先＋面談日降順で「会社名が1件でも入っている」`InterviewRecord` を1本選ぶ。空の下書きに引っ張られない）。
+  在籍期間は `hire_date`〜`leave_date`（在籍中は「〜現在」）、無ければ `tenure_year`/`tenure_month` にフォールバック。
+- カバー率（2026-08-20 本番実測）: 全求職者 4346 中 277（6.4%）だが、**直近90日に面談レコードがある327名では232名＝70.9%**。
+  依頼は面談直後に出すものなので実運用の母集団ではほぼ埋まっている。`InterviewDetail.companyName` は現職1社のみ・
+  対象276名とほぼ同集合なので採用しない。職歴0件の求職者は空の手入力行を1行出す（会社カードは**任意入力**）。
+- 依頼JSON は **v3**（`{ v: 3, groupKey, categoryValue, otherLabel, memo, companies: [{ name, period, groupKey, categoryValue, detail }] }`）。
+  `resumeData` / `pdfFileId` / `txtFileId` / `inputMode` は持たない。`normalizeGoogleFormRequestData()` が v1（companies あり）/
+  v2（companies なし）/ v3 のすべてを v3 形へ正規化する。
+- モーダル側は extract 実行後、**会社名一致**（`normalizeCompanyNameForMatch` = NFKC＋空白全除去の完全一致）で
+  依頼の指定職種を `companyCategoryMap` / `companyGroupMap` へ上書きし、一致しない社は既定値のまま。`detail` は各社カードにヒント表示。
+- テンプレート項目「会社別職種分類」は T-172 で `sort_order=99` に退避させていたものを **`sort_order=2` に戻して再利用**
+  （`is_required` は false のまま＝任意）。`GOOGLE_FORM_REQUEST_HIDDEN_LABELS` には**入れたまま**にする点に注意:
+  このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
+  「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。

@@ -17,11 +17,11 @@ const GROUP_NAME = "求職者対応";
 
 // 値はタスク作成ウィザードのカスタムUIが組み立てて格納する（generic 入力では使わない）。
 // 「フォーム作成指定データ」は機械用 JSON。ウィザード・タスク詳細の両方でラベル一致により非表示。
-// T-172: 「会社別職種分類」は廃止（依頼内容はメイン経験職種カテゴリ＋その他メモの2項目のみ）。
-// 既存環境の TaskTemplateField は既存タスクの TaskFieldValue 保全のため物理削除せず、
-// src/constants/google-form-request.ts の GOOGLE_FORM_REQUEST_HIDDEN_LABELS で UI から隠している。
+// T-172 で「会社別職種分類」を一旦廃止したが、T-172追補で復活（任意入力なので isRequired=false）。
+// 会社名・在籍期間はウィザードが WorkHistory から自動表示し、CA が職種を指定して整形テキストを格納する。
 const FIELDS: { sortOrder: number; label: string; fieldType: TaskFieldType; isRequired: boolean }[] = [
   { sortOrder: 1, label: "メイン経験職種カテゴリ", fieldType: "TEXT", isRequired: true },
+  { sortOrder: 2, label: "会社別職種分類", fieldType: "TEXT", isRequired: false },
   { sortOrder: 3, label: "その他メモ", fieldType: "TEXT", isRequired: false },
   { sortOrder: 4, label: "フォーム作成指定データ", fieldType: "TEXT", isRequired: false },
 ];

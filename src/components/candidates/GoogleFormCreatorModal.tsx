@@ -8,6 +8,7 @@ import {
 } from "@/constants/google-form-categories";
 import {
   normalizeGoogleFormRequestData,
+  normalizeCompanyNameForMatch,
   type GoogleFormRequestData,
 } from "@/constants/google-form-request";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -228,6 +229,8 @@ export default function GoogleFormCreatorModal({
   // requestIgnored=true は「依頼内容を使わずに最初からやり直す」を押した状態。
   const [requestInfo, setRequestInfo] = useState<GoogleFormRequestInfo | null>(null);
   const [requestIgnored, setRequestIgnored] = useState(false);
+  // T-172追補: selectCompany の会社カードに出す職種詳細ヒント（キー=work_history index 文字列）。
+  const [requestDetailMap, setRequestDetailMap] = useState<Record<string, string>>({});
 
   // 改修③（途中保存）: 開いた時に見つかった下書き（復元プロンプト用）と保存状態。
   const [draftPrompt, setDraftPrompt] = useState<{ questionsJson: unknown; updatedAt: string | null } | null>(null);
@@ -402,6 +405,7 @@ export default function GoogleFormCreatorModal({
     setAutoSaveStatus("idle");
     setShowCreateConfirm(false);
     setLastAppliedInstruction("");
+    setRequestDetailMap({});
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
@@ -461,10 +465,39 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryLabelMap(initialLabelMap);
   };
 
-  // T-172: 依頼由来の会社別分類の事前適用は廃止（依頼は「メイン経験職種カテゴリ」＋メモの2項目のみ）。
-  // 全社に 1画面目で選んだカテゴリを配るだけの初期化に統一する。
+  // T-172追補: 全社に 1画面目のカテゴリを配ったうえで、依頼タスクの会社別指定を
+  // **会社名一致**（NFKC 正規化＋空白除去の完全一致）で上書きする。一致しない会社は既定値のまま。
+  // 依頼側に resumeData は無い（依頼時のAI読み取りは廃止したまま）ので、対応付けは名前だけで行う。
+  // あわせて会社カードのヒント用に職種詳細（detail）マップも組み立てる。
   const applyDefaultCompanyMaps = (workHistory: WorkHistoryEntry[]) => {
     initializeCompanyCategoryMap(workHistory, groupKey, categoryValue, otherLabel);
+    const req = !requestIgnored ? requestInfo : null;
+    const companies = req?.data.companies;
+    if (!companies || companies.length === 0) {
+      setRequestDetailMap({});
+      return;
+    }
+    const mapPatch: Record<string, string> = {};
+    const groupPatch: Record<string, string> = {};
+    const detailMap: Record<string, string> = {};
+    workHistory.forEach((w, i) => {
+      const key = String(i);
+      const target = normalizeCompanyNameForMatch(w.company);
+      if (!target) return;
+      const match = companies.find((c) => normalizeCompanyNameForMatch(c.name) === target);
+      if (!match) return;
+      if (match.categoryValue) {
+        mapPatch[key] = match.categoryValue;
+        // T-170: 保存済み groupKey より、サブカテゴリの実所属を優先する
+        groupPatch[key] = resolveGoogleFormGroupKey(match.groupKey, match.categoryValue);
+      }
+      if (match.detail) detailMap[key] = match.detail;
+    });
+    if (Object.keys(mapPatch).length > 0) {
+      setCompanyCategoryMap((prev) => ({ ...prev, ...mapPatch }));
+      setCompanyGroupMap((prev) => ({ ...prev, ...groupPatch }));
+    }
+    setRequestDetailMap(detailMap);
   };
 
   // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
@@ -1036,8 +1069,14 @@ export default function GoogleFormCreatorModal({
                 </p>
                 <p className="mt-0.5 text-indigo-700">
                   メイン経験職種カテゴリを依頼内容から初期設定しています。履歴書の読み取りはこの画面から実行してください。
+                  {requestInfo.data.companies.length > 0 && (
+                    <>
+                      <br />
+                      会社別の職種指定 {requestInfo.data.companies.length} 件は、読み取り後に会社名が一致した会社へ自動適用します。
+                    </>
+                  )}
                 </p>
-                {/* T-172: 会社ごとの職種指定は廃止したため、その代替として依頼メモを全文表示する */}
+                {/* 会社カードに収まらない全体の申し送りとして、依頼メモは常に全文表示する */}
                 {requestInfo.data.memo && (
                   <div className="mt-1.5 rounded border border-indigo-200 bg-white px-2 py-1.5">
                     <p className="text-[11px] font-medium text-indigo-700">依頼メモ</p>
@@ -1357,6 +1396,12 @@ export default function GoogleFormCreatorModal({
                             ))}
                           </select>
                         </div>
+                        {/* T-172追補: 依頼タスクに書かれた職種詳細のヒント表示（この会社分） */}
+                        {requestDetailMap[key] && (
+                          <p className="mt-1.5 rounded bg-indigo-50 border border-indigo-100 px-2 py-1 text-[11px] text-indigo-800">
+                            💡 依頼の職種詳細: {requestDetailMap[key]}
+                          </p>
+                        )}
                         {/* T-035 step2: その他系のときだけ、会社別の自由記入欄（任意） */}
                         {isOtherTypeCategory(currentCategory) && (
                           <div className="mt-2">

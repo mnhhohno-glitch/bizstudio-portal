@@ -78,6 +78,18 @@ const HIDDEN_CATEGORY_ID = "cmoal05cp002r1dsxyokhti3i";
 
 const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
 
+/** T-172 追補: Googleフォーム作成依頼の会社別職種分類 1行分。
+ * name/period は面談ログ解析済みの WorkHistory 由来（AI呼び出しなし）か手入力。 */
+type GfCompanyRow = {
+  name: string;
+  period: string;
+  groupKey: string;
+  categoryValue: string;
+  detail: string;
+  /** 面談ログ解析由来の職種メモ（カテゴリ選択の判断材料。表示のみで保存しない） */
+  jobTypeHint?: string;
+};
+
 const MENSETSU_TAISAKU_CATEGORY = "面接対策依頼";
 const NAITEI_CATEGORY = "内定承諾報告";
 const NYUSHA_CATEGORY = "入社報告";
@@ -240,11 +252,15 @@ export default function TaskNewPage() {
   const [templateDragOver, setTemplateDragOver] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement>(null);
 
-  // step 2 - カテゴリ固有: Googleフォーム作成依頼（T-171 / T-172 で2項目に簡素化）
+  // step 2 - カテゴリ固有: Googleフォーム作成依頼（T-171 → T-172 で2項目に簡素化 → T-172追補で会社別指定を復活）
   const [gfGroupKey, setGfGroupKey] = useState("");
   const [gfCategoryValue, setGfCategoryValue] = useState("");
   const [gfOtherLabel, setGfOtherLabel] = useState("");
   const [gfMemo, setGfMemo] = useState("");
+  const [gfCompanies, setGfCompanies] = useState<GfCompanyRow[]>([]);
+  const [gfWhLoading, setGfWhLoading] = useState(false);
+  /** 職歴の自動取得が済んだ求職者ID（同じ求職者で二重取得・入力上書きをしない） */
+  const gfWhLoadedFor = useRef<string | null>(null);
 
   // step 2 - カテゴリ固有: 求人検索
   const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
@@ -584,9 +600,84 @@ export default function TaskNewPage() {
     setFieldValues((prev) => (prev[targetField.id] === value ? prev : { ...prev, [targetField.id]: value }));
   }, [isNaitei, selectedCategory, selectedCandidate]);
 
-  /* ----- Googleフォーム作成依頼（T-171 / T-172）: 既定担当者 ----- */
-  // T-172: 依頼時の履歴書読み取り・会社別職種指定は廃止したため、
-  // ここで面談ファイル（PDF / .txt）を取得する処理は無い。解析はフォーム作成モーダル側で行う。
+  /* ----- Googleフォーム作成依頼（T-172追補）: 職歴の即時取得・行操作 ----- */
+  // 面談ログ解析などで既に DB へ入っている WorkHistory を同期取得して会社カードを初期生成する。
+  // T-172 で廃止した「履歴書を読み取る」（extract-resume / 30〜75秒の AI 解析）は復活させない。
+  // ここは単なる DB 読み取りなので待ち時間はほぼ無い。職歴が無い求職者は空の手入力行を1行出す。
+  useEffect(() => {
+    if (!isGformRequest || !candidateId) return;
+    if (gfWhLoadedFor.current === candidateId) return;
+    gfWhLoadedFor.current = candidateId;
+    let cancelled = false;
+    setGfWhLoading(true);
+    fetch(`/api/candidates/${candidateId}/work-histories`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        const rows = (d?.workHistories ?? []) as {
+          companyName: string;
+          period: string;
+          jobTypeHint: string;
+        }[];
+        setGfCompanies(
+          rows.map((w) => ({
+            name: w.companyName,
+            period: w.period ?? "",
+            groupKey: gfGroupKey,
+            categoryValue: gfCategoryValue,
+            detail: "",
+            jobTypeHint: w.jobTypeHint || undefined,
+          })),
+        );
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setGfWhLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // gfGroupKey / gfCategoryValue は初期値としてのみ参照する（変更で再取得しない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGformRequest, candidateId]);
+
+  // 職歴が0件（または取得失敗）なら、手入力用の空行を1行だけ用意する。
+  useEffect(() => {
+    if (!isGformRequest || gfWhLoading || gfCompanies.length > 0) return;
+    setGfCompanies([{ name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" }]);
+  }, [isGformRequest, gfWhLoading, gfCompanies.length, gfGroupKey, gfCategoryValue]);
+
+  // メイン経験職種カテゴリを選び直したら、CA が個別に触っていない行へ一括適用する。
+  // 「触っていない」= 未選択、もしくは直前のメインカテゴリと同じ値のまま の行。
+  const gfPrevMain = useRef<{ groupKey: string; categoryValue: string }>({ groupKey: "", categoryValue: "" });
+  useEffect(() => {
+    if (!isGformRequest) return;
+    const prev = gfPrevMain.current;
+    gfPrevMain.current = { groupKey: gfGroupKey, categoryValue: gfCategoryValue };
+    if (!gfCategoryValue || (prev.groupKey === gfGroupKey && prev.categoryValue === gfCategoryValue)) return;
+    setGfCompanies((rows) =>
+      rows.map((c) =>
+        !c.categoryValue || c.categoryValue === prev.categoryValue
+          ? { ...c, groupKey: gfGroupKey, categoryValue: gfCategoryValue }
+          : c,
+      ),
+    );
+  }, [isGformRequest, gfGroupKey, gfCategoryValue]);
+
+  const gfUpdateCompany = (idx: number, patch: Partial<GfCompanyRow>) => {
+    setGfCompanies((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+  const gfAddCompany = () => {
+    setGfCompanies((prev) => [
+      ...prev,
+      { name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" },
+    ]);
+  };
+  const gfRemoveCompany = (idx: number) => {
+    setGfCompanies((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  /* ----- Googleフォーム作成依頼: 既定担当者 ----- */
   // カテゴリ既定担当者（CATEGORY_DEFAULT_ASSIGNEE_NUMBERS）を選択時に一度だけ自動チェック。
   // 手動での外し・追加を上書きしないよう、同一カテゴリ選択中は再適用しない。
   const defaultAssigneesApplied = useRef(false);
@@ -739,6 +830,18 @@ export default function TaskNewPage() {
     const other = gfOtherLabel.trim() ? `（${gfOtherLabel.trim()}）` : "";
     return `${gfGroupKey} ＞ ${sub}${other}`;
   })();
+
+  // 表示用: 会社別職種分類「会社名（期間）：大項目 ＞ サブカテゴリ／職種詳細」1社1行。
+  // 会社名が空の行（手入力の空行）は捨てる。1行も無ければ空文字＝フィールドに書き込まない。
+  const gfCompaniesText = gfCompanies
+    .filter((c) => c.name.trim() && c.categoryValue)
+    .map((c) => {
+      const sub = getGoogleFormCategoryLabel(c.categoryValue) ?? c.categoryValue;
+      const period = c.period.trim() ? `（${c.period.trim()}）` : "";
+      const detail = c.detail.trim() ? `／${c.detail.trim()}` : "";
+      return `${c.name.trim()}${period}：${c.groupKey} ＞ ${sub}${detail}`;
+    })
+    .join("\n");
 
   /* ----- step validation ----- */
   const canProceed = (): boolean => {
@@ -1015,12 +1118,16 @@ export default function TaskNewPage() {
         }
       }
 
-      // Googleフォーム作成依頼（T-172）: 表示用2項目＋機械用 JSON（v2）をセット。
-      // 「会社別職種分類」フィールドは廃止したので値を書かない（既存タスクの値は温存）。
+      // Googleフォーム作成依頼（T-172追補）: 表示用3項目＋機械用 JSON（v3）をセット。
+      // 「会社別職種分類」は会社カードが1行も無ければ書き込まない（任意入力のため）。
       if (isGformRequest && selectedCategory) {
         const mainField = selectedCategory.fields.find((f) => f.label === "メイン経験職種カテゴリ");
         if (mainField && gfMainCategoryText) {
           extraFieldValues.push({ fieldId: mainField.id, value: gfMainCategoryText });
+        }
+        const compField = selectedCategory.fields.find((f) => f.label === "会社別職種分類");
+        if (compField && gfCompaniesText) {
+          extraFieldValues.push({ fieldId: compField.id, value: gfCompaniesText });
         }
         const memoField = selectedCategory.fields.find((f) => f.label === "その他メモ");
         if (memoField && gfMemo.trim()) {
@@ -1029,11 +1136,21 @@ export default function TaskNewPage() {
         const dataField = selectedCategory.fields.find((f) => f.label === GOOGLE_FORM_REQUEST_DATA_LABEL);
         if (dataField) {
           const requestData: GoogleFormRequestData = {
-            v: 2,
+            v: 3,
             groupKey: gfGroupKey,
             categoryValue: gfCategoryValue,
             otherLabel: gfOtherLabel.trim(),
             memo: gfMemo.trim(),
+            // 会社名が空 / カテゴリ未選択の行は落とす。モーダル側は会社名一致で対応付ける。
+            companies: gfCompanies
+              .filter((c) => c.name.trim() && c.categoryValue)
+              .map((c) => ({
+                name: c.name.trim(),
+                period: c.period.trim(),
+                groupKey: c.groupKey,
+                categoryValue: c.categoryValue,
+                detail: c.detail.trim(),
+              })),
           };
           extraFieldValues.push({ fieldId: dataField.id, value: JSON.stringify(requestData) });
         }
@@ -1550,6 +1667,8 @@ export default function TaskNewPage() {
                 setGfCategoryValue("");
                 setGfOtherLabel("");
                 setGfMemo("");
+                setGfCompanies([]);
+                gfWhLoadedFor.current = null;
               };
 
               const select3pointSet = () => {
@@ -2193,7 +2312,86 @@ export default function TaskNewPage() {
                         {gfMainCategoryText && <p className="text-[12px] text-[#2563EB]">選択中: {gfMainCategoryText}</p>}
                       </div>
 
-                      {/* その他メモ（T-172: 会社ごとの職種指定の代替。フォーム作成モーダルのバナーに全文表示される） */}
+                      {/* 会社ごとの職種分類（T-172追補で復活。任意入力）
+                          会社名・在籍期間は面談ログ解析済みの職歴（WorkHistory）から即時取得。AI呼び出しは無し。 */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-[13px] font-bold text-[#374151]">会社ごとの職種分類<span className="ml-1 text-[11px] font-normal text-[#9CA3AF]">（任意）</span></p>
+                          {gfWhLoading && <span className="text-[12px] text-[#6B7280]">経歴を取得中…</span>}
+                        </div>
+                        <p className="text-[11px] text-[#6B7280]">
+                          面談ログの解析結果から会社名・在籍期間を自動表示しています。会社ごとに職種が違う場合はここで指定してください（未指定でも依頼は作成できます）。
+                        </p>
+
+                        {gfCompanies.length > 0 && (
+                          <div className="space-y-2">
+                            {gfCompanies.map((c, idx) => {
+                              const rowGroup = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === c.groupKey);
+                              return (
+                                <div key={idx} className="rounded-[6px] border border-[#E5E7EB] bg-white p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={c.name}
+                                      onChange={(e) => gfUpdateCompany(idx, { name: e.target.value })}
+                                      placeholder="会社名"
+                                      className="flex-1 rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={c.period}
+                                      onChange={(e) => gfUpdateCompany(idx, { period: e.target.value })}
+                                      placeholder="在籍期間"
+                                      className="w-[160px] rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <button type="button" onClick={() => gfRemoveCompany(idx)} className="shrink-0 text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                                  </div>
+                                  {c.jobTypeHint && (
+                                    <p className="truncate text-[11px] text-[#6B7280]" title={c.jobTypeHint}>
+                                      面談ログの職種メモ: {c.jobTypeHint}
+                                    </p>
+                                  )}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <select
+                                      value={c.groupKey}
+                                      onChange={(e) => {
+                                        const newGroup = e.target.value;
+                                        const firstSub = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === newGroup)?.options[0]?.value ?? "";
+                                        gfUpdateCompany(idx, { groupKey: newGroup, categoryValue: firstSub });
+                                      }}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    >
+                                      <option value="">大項目を選択...</option>
+                                      {GOOGLE_FORM_CATEGORY_GROUPS.map((g) => <option key={g.label} value={g.label}>{g.label}</option>)}
+                                    </select>
+                                    <select
+                                      value={c.categoryValue}
+                                      onChange={(e) => gfUpdateCompany(idx, { categoryValue: e.target.value })}
+                                      disabled={!c.groupKey}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+                                    >
+                                      <option value="">サブカテゴリを選択...</option>
+                                      {(rowGroup?.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={c.detail}
+                                    onChange={(e) => gfUpdateCompany(idx, { detail: e.target.value })}
+                                    placeholder="職種詳細（この会社での職種の補足・任意）"
+                                    className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[12px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <button type="button" onClick={gfAddCompany} className="text-[13px] font-medium text-[#2563EB] hover:underline">
+                          ＋ 会社を追加
+                        </button>
+                      </div>
+
+                      {/* その他メモ（会社カードに書ききれない全体の申し送り。フォーム作成モーダルのバナーに全文表示される） */}
                       <div>
                         <label className="mb-1 block text-[13px] font-medium text-[#374151]">その他メモ（任意）</label>
                         <textarea
@@ -2655,6 +2853,7 @@ export default function TaskNewPage() {
               {!is3pointSet && isGformRequest && (
                 <>
                   <ConfirmRow label="メイン経験職種カテゴリ" value={gfMainCategoryText || "-"} />
+                  <ConfirmRow label="会社ごとの職種分類" value={gfCompaniesText || "-"} />
                   {gfMemo.trim() && <ConfirmRow label="その他メモ" value={gfMemo.trim()} />}
                 </>
               )}
