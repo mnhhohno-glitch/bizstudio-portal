@@ -264,16 +264,28 @@ export default function GoogleFormCreatorModal({
     [meetingFiles],
   );
 
+  // 業務ルール「基本は初回面談のログを使う」に合わせ、面談ログの初期選択は最も古いファイルにする。
+  // 比較は一覧表示と同じ createdAt。ファイル名の「新規 / 既存」等の文字列では判定しない
+  // （ファイル名の表記と実際の日付が逆転しているケースがあるため）。
+  // 同着（createdAt が完全一致）のときは現状の並び順（createdAt 降順）の先頭を採用する。
+  const oldestTxtFileId = useMemo(() => {
+    if (txtCandidates.length === 0) return null;
+    return txtCandidates.reduce((oldest, f) =>
+      +new Date(f.createdAt) < +new Date(oldest.createdAt) ? f : oldest,
+    ).id;
+  }, [txtCandidates]);
+
   // 初期選択（モーダル開いた瞬間 / ファイル一覧変更時）
+  // PDF は従来どおり最新、面談ログのみ最古を初期選択にする。どちらも手動で切り替え可能。
   useEffect(() => {
     if (!isOpen) return;
     if (selectedPdfFileId === null && pdfCandidates.length > 0) {
       setSelectedPdfFileId(pdfCandidates[0].id);
     }
-    if (selectedTxtFileId === null && txtCandidates.length > 0) {
-      setSelectedTxtFileId(txtCandidates[0].id);
+    if (selectedTxtFileId === null && oldestTxtFileId) {
+      setSelectedTxtFileId(oldestTxtFileId);
     }
-  }, [isOpen, pdfCandidates, txtCandidates, selectedPdfFileId, selectedTxtFileId]);
+  }, [isOpen, pdfCandidates, oldestTxtFileId, selectedPdfFileId, selectedTxtFileId]);
 
   // T-038: モーダル open 時に既存 Google フォーム URL をチェック → あれば completed へジャンプ
   useEffect(() => {
@@ -1069,6 +1081,7 @@ export default function GoogleFormCreatorModal({
                 </p>
                 <p className="mt-0.5 text-indigo-700">
                   メイン経験職種カテゴリを依頼内容から初期設定しています。履歴書の読み取りはこの画面から実行してください。
+                  面談ログは基本的に初回面談のログを選択してください（初期選択は最も古いファイルです）。
                   {requestInfo.data.companies.length > 0 && (
                     <>
                       <br />
@@ -1163,6 +1176,10 @@ export default function GoogleFormCreatorModal({
                   ))}
                 </div>
               )}
+              {/* 業務ルールの常時表示（ファイル数に関わらず出す） */}
+              <p className="mt-1 text-[11px] text-gray-500">
+                基本は初回面談のログを選択してください（初期選択は最も古いファイルです）
+              </p>
             </div>
 
             {/* カテゴリ選択 */}
