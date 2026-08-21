@@ -23,6 +23,9 @@ function NavItem({ href, label, icon, collapsed }: Item & { collapsed: boolean }
   return (
     <Link
       href={href}
+      // 運用判断でサイドバーのメニューは新しいタブで開く（一覧行からの遷移は同一タブのまま）
+      target="_blank"
+      rel="noopener noreferrer"
       title={collapsed ? label : undefined}
       className={[
         "relative flex h-12 items-center text-[14px] transition-colors",
