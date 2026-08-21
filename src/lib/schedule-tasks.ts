@@ -12,6 +12,21 @@ export const SCHEDULE_FIELD_LABELS = ["希望日時", "面談形式", "備考"] 
 /** Task.status の許可値（Prisma enum TaskStatus と一致）。 */
 export const VALID_TASK_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] as const;
 
+/**
+ * T-177: 外部API（RPA）から来た status を、実際にDBへ保存する値へ読み替える。
+ *
+ * RPA は返信を送り終えた時点で COMPLETED を送ってくるが、「AIが返信を送った」≠「面談日程が確定した」。
+ * 完了にすると一覧API（/api/tasks）が includeCompleted 未指定時に無条件で除外するため、
+ * 事務担当から見てタスクが黙って消える。人が中身を確認してから完了にする運用に合わせ、
+ * **COMPLETED は IN_PROGRESS（対応中）へ読み替えて保存する**。
+ *
+ * NOT_STARTED / IN_PROGRESS はそのまま。画面からの完了操作（/api/tasks/[taskId]/status）は
+ * この読み替えの対象外＝人手では従来どおり COMPLETED にできる。
+ */
+export function resolveStoredStatus(requested: TaskStatus): TaskStatus {
+  return requested === "COMPLETED" ? "IN_PROGRESS" : requested;
+}
+
 /** AIが書いたコメントを人間の目で判別するための接頭辞。 */
 export const AI_COMMENT_PREFIX = "【日程調整AI】";
 
@@ -81,12 +96,18 @@ export type SerializedScheduleTask = {
   assignees: { id: string; name: string }[];
   candidateId: string | null;
   hasExemptComment: boolean;
+  /**
+   * T-177: このタスクに【日程調整AI】コメント（AI_COMMENT_PREFIX）が1件でもあるか。
+   * AIが完了化しなくなった結果、返信済みのタスクも「対応中」でポーリング対象に残り続けるため、
+   * RPA側が再処理をスキップする判定に使う。hasExemptComment（人手の対象外指定）とは用途が別。
+   */
+  hasAiReplyComment: boolean;
 };
 
 /** Task 行を RPA機向けJSON形状へ変換する。fields は生テキストを加工せず、無いキーは null。 */
 export function serializeScheduleTask(
   task: ScheduleTaskRow,
-  opts?: { hasExemptComment?: boolean },
+  opts?: { hasExemptComment?: boolean; hasAiReplyComment?: boolean },
 ): SerializedScheduleTask {
   const byLabel = new Map<string, string>();
   for (const fv of task.fieldValues) {
@@ -105,5 +126,49 @@ export function serializeScheduleTask(
     assignees: task.assignees.map((a) => ({ id: a.employee.id, name: a.employee.name })),
     candidateId: task.candidateId ?? null,
     hasExemptComment: opts?.hasExemptComment ?? false,
+    hasAiReplyComment: opts?.hasAiReplyComment ?? false,
   };
+}
+
+/** T-177: 1タスク分のコメント由来フラグ。 */
+export type ScheduleCommentFlags = {
+  hasExemptComment: boolean;
+  hasAiReplyComment: boolean;
+};
+
+/** 両フラグ false の既定値（クエリに現れなかった taskId 用）。 */
+export const EMPTY_SCHEDULE_COMMENT_FLAGS: ScheduleCommentFlags = {
+  hasExemptComment: false,
+  hasAiReplyComment: false,
+};
+
+/**
+ * T-177: 複数タスクぶんの「対象外コメント有無」「AI返信コメント有無」を1クエリでまとめて引く。
+ * GET一覧 / PATCH単体の両方から使う（判定ロジックを2箇所に散らさないため）。
+ * 返り値に現れない taskId は EMPTY_SCHEDULE_COMMENT_FLAGS 扱い。
+ */
+export async function loadScheduleCommentFlags(
+  taskIds: string[],
+): Promise<Map<string, ScheduleCommentFlags>> {
+  const flags = new Map<string, ScheduleCommentFlags>();
+  if (taskIds.length === 0) return flags;
+
+  const comments = await prisma.taskComment.findMany({
+    where: {
+      taskId: { in: taskIds },
+      OR: [
+        { content: { contains: SCHEDULE_EXEMPT_COMMENT_MARKER } },
+        { content: { contains: AI_COMMENT_PREFIX } },
+      ],
+    },
+    select: { taskId: true, content: true },
+  });
+
+  for (const c of comments) {
+    const cur = flags.get(c.taskId) ?? { ...EMPTY_SCHEDULE_COMMENT_FLAGS };
+    if (c.content.includes(SCHEDULE_EXEMPT_COMMENT_MARKER)) cur.hasExemptComment = true;
+    if (c.content.includes(AI_COMMENT_PREFIX)) cur.hasAiReplyComment = true;
+    flags.set(c.taskId, cur);
+  }
+  return flags;
 }

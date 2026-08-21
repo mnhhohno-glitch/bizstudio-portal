@@ -589,3 +589,123 @@ export function logAssigneeNotifyTargets(
     );
   }
 }
+
+/**
+ * T-177: 日程調整AI（外部RPA）が PATCH /api/external/schedule-tasks/[taskId] で
+ * タスクを更新したときの通知に必要な情報。
+ */
+export type ScheduleAiTaskUpdatedParams = {
+  taskId: string;
+  title: string;
+  candidateName: string | null;
+  /** 更新後に **実際にDBへ保存されている** status（読み替え後の値）。 */
+  storedStatus: string;
+  /** AIが今回追加したコメント本文（AI接頭辞を除いた素の本文）。status のみの更新なら null。 */
+  commentContent: string | null;
+  assigneeNames: string[];
+  assigneeLineworksIds: (string | null)[];
+};
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  NOT_STARTED: "未着手",
+  IN_PROGRESS: "対応中",
+  COMPLETED: "完了",
+};
+
+/**
+ * 通知内リンクは常に **本番ドメイン** へ。PORTAL_BASE_URL はサービスごとに staging/本番 が
+ * 異なるため使わない（dailyReport/lineworks-notify.ts と同じ流儀）。
+ */
+const PORTAL_PROD_URL =
+  process.env.PORTAL_PUBLIC_URL || "https://bizstudio-portal-production.up.railway.app";
+
+/**
+ * T-177: 日程調整AIがタスクを更新したことを LINE WORKS のタスク通知トークルームへ知らせる。
+ *
+ * 従来この外部PATCHルートは通知を一切出さない設計だったため、AIが完了化してもCA・事務は
+ * 気づけず、一覧から消えたようにしか見えなかった。AIは完了にしなくなった（対応中で残す）ので、
+ * 「返信は送った / 完了操作は人がやる」ことを能動的に伝える必要がある。
+ *
+ * 呼び出し側（PATCHルート）が「そのタスクへのAIの初回更新時のみ」に絞って呼ぶ前提。
+ * ここでは二重通知の判定はしない（判定に必要な更新前の状態を持っているのは呼び出し側のため）。
+ *
+ * @returns 送信したら true / env 未設定でスキップしたら false。送信エラーは throw する
+ *          （呼び出し側で握りつぶして 200 を返す＝フェイルソフト）。
+ */
+export async function notifyScheduleAiTaskUpdated(
+  params: ScheduleAiTaskUpdatedParams,
+): Promise<boolean> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return false;
+  }
+
+  const statusLabel = TASK_STATUS_LABEL[params.storedStatus] ?? params.storedStatus;
+  const commentDisplay = params.commentContent
+    ? params.commentContent.length > 200
+      ? params.commentContent.slice(0, 200) + "..."
+      : params.commentContent
+    : "（コメントなし）";
+
+  const header = "日程調整AIが応募者へ返信を送りました（要確認）";
+
+  const baseLines = [
+    "🤖 " + header,
+    "",
+    "■ タスク",
+    params.title,
+    "",
+    "■ 求職者",
+    params.candidateName ? params.candidateName + " 様" : "なし",
+    "",
+    "■ AIのコメント",
+    commentDisplay,
+    "",
+    "■ 現在のステータス",
+    statusLabel + "（AIは完了にしません）",
+    "",
+    "■ お願い",
+    "返信内容と日程の確定状況を確認し、問題なければタスクを「完了」にしてください。",
+    "AIが返信を送っただけで、面談日程が確定したとは限りません。",
+    "",
+    "■ 担当者",
+    params.assigneeNames.join("、") || "未設定",
+    "",
+    "🔗 詳細はこちら",
+    PORTAL_PROD_URL + "/tasks/" + params.taskId,
+  ];
+
+  // 1) lineworksId が登録されている担当者へメンション付き
+  const mentionLines = params.assigneeLineworksIds
+    .filter((id): id is string => !!id)
+    .map((id) => `<m userId="${id}">`);
+  if (mentionLines.length > 0) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [...mentionLines, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return true;
+    } catch (e) {
+      console.warn("日程調整AI更新通知のメンションに失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名プレフィックス付き（lineworksId 未登録 or メンション送信失敗）
+  if (params.assigneeNames.length > 0) {
+    const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${namePrefix} ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return true;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+  return true;
+}
