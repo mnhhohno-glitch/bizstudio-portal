@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { BankAccountData } from "./detail-types";
 import {
   FormField,
@@ -10,9 +10,21 @@ import {
   ResumeAiButton,
   useSectionAutoSave,
   AutoSaveIndicator,
+  PendingAiSaveBar,
 } from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
+
+// AI読み取りの未保存バーに出す項目ラベル（BANK_AI_KEYS と対応）。
+const BANK_AI_LABELS: Record<string, string> = {
+  bankName: "銀行名",
+  bankCode: "銀行コード",
+  branchName: "支店名",
+  branchCode: "支店コード",
+  accountType: "口座種別",
+  accountNumber: "口座番号",
+  accountHolderKana: "口座名義（カナ）",
+};
 
 const BANK_AI_KEYS = [
   "bankName",
@@ -60,9 +72,25 @@ export default function BankAccountTab({
   };
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）
-  const ai = useResumeAiFill(employeeId, setForm, BANK_AI_KEYS);
+  // AI解析はネットワーク待ちを挟むため、判定は ref で「現在の form」を読む（stale 回避）。
+  const formRef = useRef(form);
+  formRef.current = form;
+  const ai = useResumeAiFill(employeeId, setForm, BANK_AI_KEYS, formRef);
   // T-098 追補: 全画面D&Dの解析結果配布（口座項目の空欄のみマージ）
-  const dropFill = useAiFillData(aiFillData, setForm, BANK_AI_KEYS);
+  const dropFill = useAiFillData(aiFillData, setForm, BANK_AI_KEYS, formRef);
+
+  // T-098 追補2: AI 仮入力は自動保存が走らないので、未保存キーを保持して明示保存させる。
+  const pendingAiKeys = useMemo(
+    () => Array.from(new Set([...ai.pendingKeys, ...dropFill.pendingKeys])),
+    [ai.pendingKeys, dropFill.pendingKeys],
+  );
+  const saveAiFilled = () => {
+    for (const key of pendingAiKeys) {
+      autoSave.save(key, form[key as keyof typeof form]);
+    }
+    ai.clearPending();
+    dropFill.clearPending();
+  };
 
   // T-097: 銀行コード→銀行名 自動補完。404/通信失敗時は既存値を消さない（手入力尊重）。
   // 名称が新たに埋まった場合は自動保存も走らせる。
@@ -121,6 +149,12 @@ export default function BankAccountTab({
           <ResumeAiButton {...ai} />
         </div>
       </div>
+      <PendingAiSaveBar
+        pendingKeys={pendingAiKeys}
+        labels={BANK_AI_LABELS}
+        onSave={saveAiFilled}
+        status={autoSave.status}
+      />
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="銀行コード">
           <TextInput
