@@ -588,3 +588,33 @@ candidate-intake は知らないコードを受け取ってもエラーにせず
 サブカテゴリのコードは**全グループを通して一意**であることが逆引きの前提。
 保存済み `groupKey` を持つデータ（Googleフォーム作成依頼タスクの JSON）は定義変更で食い違うため、
 読込時は `resolveGoogleFormGroupKey()` でサブカテゴリの実所属を優先して解決する。
+
+## 46. setState の updater 内で件数を数えて直後に読むと常に 0 になる
+
+**症状**: 社員詳細（`/admin/users/[id]`）の「履歴書・書類をAI読み取り」で、**初回の読み取りでも**
+「新たに埋まる空欄はありませんでした」と表示される。画面には実際に値が入っているのに件数だけ 0 になる。
+
+**原因**: 埋めた件数を `setForm` の updater 内で数え、その直後に外側で読んでいた。
+
+```ts
+let filled = 0;
+setForm((prev) => { const r = mergeEmptyOnly(prev, data, keys); filled = r.filled; return r.next; });
+setFilledCount(filled);   // ← ここでは常に 0
+```
+
+React は同一ハンドラで**先に別の setState が走っていると updater を即時実行しない**（eager state 計算が使われない）ため、
+`setFilledCount(filled)` の時点では updater 未実行＝初期値のまま。AI解析は `await fetch` を挟み、
+その前に `setLoading(true)` / `setError(null)` 等が走っているので、この条件に必ず当たる。
+
+**対処**: 件数・キー一覧などの判定は updater に依存せず、`formRef.current` のような**確定済みの値**を参照して行う。
+updater 内では state の更新のみを行い、副作用（カウント・ログ・通知・別の state 更新）を書かない。
+
+```ts
+const r = mergeEmptyOnly(formRef.current, data, keys);   // 判定は ref の現在値で
+setForm((f) => applyOnly(f, r.next, r.filledKeys));      // updater は更新だけ
+setFilledCount(r.filled);
+```
+
+**実例**: `src/app/(app)/admin/users/[id]/useResumeAiFill.ts`（コミット 888a75c で修正）。
+同コミットでは、この誤表示に隠れて「AI読み取り結果が一度も保存されない」不具合も併せて修正している
+（社員詳細は保存ボタンを持たない自動保存方式。`14-ui-component-map.md`「社員詳細の保存方式」節を参照）。
