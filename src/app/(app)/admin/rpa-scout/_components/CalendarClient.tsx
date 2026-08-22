@@ -385,8 +385,9 @@ export default function CalendarClient() {
                               >
                                 {timeSlotLabel(p.timeSlot)}
                               </span>
-                              {/* 反映者nullは外部API（RPA）からの反映＝人が押していない */}
-                              {weekend && p.reflectedAt && (
+                              {/* 反映済みバッジは曜日を問わず出す（平日はRPAが外部APIで反映するため）。
+                                  反映者nullは外部API（RPA）からの反映＝人が押していない */}
+                              {p.reflectedAt && (
                                 <span
                                   title={`${p.reflectedByName ?? "RPA自動"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
                                   className="rounded bg-[#DCFCE7] px-1 text-[10px] font-medium text-[#166534]"
