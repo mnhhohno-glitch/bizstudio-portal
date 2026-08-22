@@ -294,8 +294,9 @@ export default function PlanModal({
                           ）
                         </>
                       )}
-                      {plan!.executedByName ? <br /> : null}
-                      {plan!.executedByName ? `記録者: ${plan!.executedByName}` : null}
+                      <br />
+                      {/* 記録者nullは外部API（RPA）が書き戻した実績。人の記録は従来どおり氏名 */}
+                      {`記録者: ${plan!.executedByName ?? "RPA自動"}`}
                     </div>
                   </div>
                   <button

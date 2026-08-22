@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { jstStringToDbDate } from "@/lib/rpa-scout/jst";
 import { attachPlanNamesOne } from "@/lib/rpa-scout/plan-serialize";
+import { createLogFromPlan } from "@/lib/rpa-scout/plan-log";
 
 // 配信計画をそのまま実績化する。計画の号機・パターン・件名を使って RpaScoutLog を1件作成し、
 // 計画側に executedAt / executedLogId / executedByUserId を記録する（計画自体は削除しない）
@@ -41,17 +42,11 @@ export async function POST(
     return NextResponse.json({ error: "この計画は既に実績として記録済みです" }, { status: 409 });
 
   const plan = await prisma.$transaction(async (tx) => {
-    const log = await tx.rpaScoutLog.create({
-      data: {
-        machineNo: existing.machineNo,
-        patternId: existing.patternId,
-        patternName: existing.patternName, // 計画のスナップショットをそのまま引き継ぐ
-        subjectTemplateId: existing.subjectTemplateId,
-        subjectName: existing.subjectName,
-        searchCount,
-        recordedAt,
-        recordedByUserId: actor.id,
-      },
+    // ログの形は外部API（RPAの反映書き込み）と共通化してある
+    const log = await createLogFromPlan(tx, existing, {
+      searchCount,
+      recordedAt,
+      recordedByUserId: actor.id,
     });
     // 二重記録の防止（executedAt が既にある行は更新しない＝並行実行時は片方が0件更新で失敗する）
     const updated = await tx.rpaScoutPlan.updateMany({

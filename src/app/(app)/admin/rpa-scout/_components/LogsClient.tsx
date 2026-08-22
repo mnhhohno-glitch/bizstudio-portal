@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { PageTitle } from "@/components/ui/PageTitle";
 import { Table, TableWrap, Th, Td } from "@/components/ui/Table";
-import { fmtJstDateTime, type RpaLog } from "./types";
+import { fmtJstDateTime, recordedByLabel, type RpaLog } from "./types";
 
 type SortKey = "recordedAt" | "machineNo" | "searchCount";
 
@@ -165,7 +165,7 @@ export default function LogsClient() {
                     <Td className="whitespace-nowrap text-right">
                       {l.searchCount != null ? l.searchCount.toLocaleString() : "-"}
                     </Td>
-                    <Td className="whitespace-nowrap">{l.recordedByName ?? "-"}</Td>
+                    <Td className="whitespace-nowrap">{recordedByLabel(l) ?? "-"}</Td>
                   </tr>
                 ))
               )}

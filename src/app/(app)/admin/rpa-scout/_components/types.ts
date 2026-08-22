@@ -163,3 +163,12 @@ export function lastUsedSuffix(p: {
   const machine = p.lastUsedMachineNo != null ? ` ${p.lastUsedMachineNo}号機` : "";
   return `（最終: ${fmtJstShortDateTime(p.lastUsedAt)}${machine}）`;
 }
+
+// 実績ログの記録者表示。計画由来なのに記録者が空＝外部API（RPA）が書き戻した実績。
+// 計画に紐づかない記録者なしは移行データなので、従来どおり氏名なし扱い（null）。
+export function recordedByLabel(
+  log: Pick<RpaLog, "recordedByName" | "sourcePlan">
+): string | null {
+  if (log.recordedByName) return log.recordedByName;
+  return log.sourcePlan ? "RPA自動" : null;
+}

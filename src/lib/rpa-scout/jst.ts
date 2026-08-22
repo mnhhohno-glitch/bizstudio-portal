@@ -56,3 +56,15 @@ export function mondayOfWeek(ymd: string): string {
   const diff = wd === 0 ? -6 : 1 - wd;
   return addDaysYmd(ymd, diff);
 }
+
+// 現在時刻を「JST壁時計値のまま」DB格納用Dateへ（秒まで保持）。
+// サーバのTZに依存せず nowJstDateTimeLocal と同じ規約で書き込むための共通口。
+export function nowJstDbDate(): Date {
+  return jstStringToDbDate(new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }));
+}
+
+// DBから読んだDate（JST壁時計をUTC欄に保持）→ 外部API用の "+09:00" 付きISO文字列。
+// 中身は既にJST壁時計なので、末尾のZをそのまま +09:00 に置き換えるのが正しい変換。
+export function dbDateToJstOffsetIso(d: Date): string {
+  return `${d.toISOString().slice(0, 19)}+09:00`;
+}

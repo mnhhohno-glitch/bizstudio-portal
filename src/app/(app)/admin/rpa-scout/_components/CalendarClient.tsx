@@ -9,6 +9,7 @@ import {
   fmtJstDate,
   fmtJstDateTime,
   fmtJstTime,
+  recordedByLabel,
   type RpaLog,
   type RpaMachine,
   type RpaPattern,
@@ -302,6 +303,7 @@ export default function CalendarClient() {
                         {/* 実績チップ（表示専用・グレー系）。クリックしても編集モーダルは開かない */}
                         {cellLogs.map((l) => {
                           const expanded = expandedLogId === l.id;
+                          const recordedBy = recordedByLabel(l);
                           return (
                             <div
                               key={l.id}
@@ -311,7 +313,7 @@ export default function CalendarClient() {
                               }}
                               title={`${fmtJstDateTime(l.recordedAt)}｜${l.patternName}｜${l.subjectName}｜${
                                 l.searchCount != null ? `${l.searchCount.toLocaleString()}件` : "停止"
-                              }${l.recordedByName ? `｜${l.recordedByName}` : ""}`}
+                              }${recordedBy ? `｜${recordedBy}` : ""}`}
                               className="rounded border border-[#D1D5DB] bg-[#F3F4F6] p-1"
                             >
                               <div className="flex items-center gap-1">
@@ -336,7 +338,7 @@ export default function CalendarClient() {
                               {expanded && (
                                 <div className="mt-0.5 break-all text-[10px] text-[#6B7280]">
                                   {l.subjectName}
-                                  {l.recordedByName ? `（${l.recordedByName}）` : ""}
+                                  {recordedBy ? `（${recordedBy}）` : ""}
                                 </div>
                               )}
                               {/* 計画から記録された実績のみ、取り消し導線を出す（計画チップは非表示のため） */}
@@ -383,9 +385,10 @@ export default function CalendarClient() {
                               >
                                 {timeSlotLabel(p.timeSlot)}
                               </span>
+                              {/* 反映者nullは外部API（RPA）からの反映＝人が押していない */}
                               {weekend && p.reflectedAt && (
                                 <span
-                                  title={`${p.reflectedByName ?? "?"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
+                                  title={`${p.reflectedByName ?? "RPA自動"} が ${fmtJstDateTime(p.reflectedAt)} に反映`}
                                   className="rounded bg-[#DCFCE7] px-1 text-[10px] font-medium text-[#166534]"
                                 >
                                   ✓反映済
