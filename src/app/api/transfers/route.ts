@@ -269,6 +269,7 @@ export async function POST(req: NextRequest) {
     to: toEmails,
     cc: ccEmails,
     senderEmail: user.email,
+    senderName: user.name, // From の表示名（本人アドレスで出せるときのみ使われる）
     url,
     password,
     passwordInEmail,

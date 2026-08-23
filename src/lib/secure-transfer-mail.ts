@@ -2,7 +2,7 @@
 // パスワードは本文中で独立した行に置く（コピーしやすくする・確定仕様）。
 // 有効期限は必ず JST 表記（formatJstDateTime）。
 
-import { sendResendEmail, SendMailResult } from "@/lib/resend-mail";
+import { sendResendEmail, buildSenderFrom, SendMailResult } from "@/lib/resend-mail";
 import {
   buildTransferNoticeBody,
   formatJstDateTime,
@@ -28,11 +28,21 @@ export function buildTransferUrl(token: string): string {
  *   staging の【検証】プレフィックスは sendResendEmail 側で入力件名にも付与される。
  * - body: 確認画面で編集された（1）本文の最終形（■件名 欄は廃止・本文には出さない）。
  * - signature: 確認画面で編集された（4）署名の最終形（空なら署名なし）。
+ *
+ * 差出人（2026-08-24 改修）: 企業への候補者紹介メールが noreply 名義だと先方の受信一覧で
+ * 機械メールに見えるため、**送信操作した本人のアドレスを From にする**。
+ * - senderEmail が @bizstudio.co.jp → From = 「送信者名 <本人アドレス>」。Reply-To は不要
+ *   （From 自体が本人なので返信は本人に届く）。
+ * - それ以外（他ドメイン・未設定）→ From は従来どおり noreply のまま、Reply-To に本人を入れる。
+ *   Resend のドメイン認証は bizstudio.co.jp 単位で、他ドメインを From にすると SPF/DKIM 不一致で
+ *   不達・迷惑メール行きになるため。
+ * 控え・期限切れ予告・自動無効化の通知（送信者本人宛のシステムメール）は noreply のまま変更しない。
  */
 export async function sendTransferNoticeEmail(params: {
   to: string[];
   cc?: string[];
   senderEmail: string;
+  senderName?: string | null; // From の表示名に使う（未指定ならアドレスのみ）
   url: string;
   password: string;
   passwordInEmail: boolean;
@@ -42,12 +52,15 @@ export async function sendTransferNoticeEmail(params: {
   body: string;
   signature: string;
 }): Promise<SendMailResult> {
+  const senderFrom = buildSenderFrom(params.senderEmail, params.senderName);
   return sendResendEmail({
     to: params.to,
     cc: params.cc,
     subject: params.subject?.trim() || TRANSFER_MAIL_SUBJECT,
     text: buildTransferNoticeBody(params),
-    replyTo: params.senderEmail, // 受信者が返信すると送信者本人に届く
+    // 本人名義で出せるときは From が本人なので Reply-To は付けない。
+    // noreply へフォールバックしたときだけ、返信先として本人を入れる。
+    ...(senderFrom ? { from: senderFrom } : { replyTo: params.senderEmail }),
   });
 }
 
