@@ -8,7 +8,10 @@ import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
-import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+
+// T-181: 担当CAフィルタで「担当CA未設定」を表す特別値（Employee.id と衝突しない固定文字列）
+const UNASSIGNED_CA = "__UNASSIGNED__";
 
 const SUPPORT_TABS = [
   { key: "ACTIVE", label: "支援中" },
@@ -157,7 +160,8 @@ function formatGender(gender: string | null) {
 // 罠#17: 登録日・応募日・配信日はいずれも jstDateStr() で JST の暦日文字列に揃えてから比較する。
 type NonTabFilters = {
   search: string;
-  caId: string;
+  /** T-181: 担当CAの複数選択。空配列 ＝ 絞り込みなし。UNASSIGNED_CA は担当CA未設定を表す */
+  caIds: string[];
   dateFrom: string;
   dateTo: string;
   gender: string;
@@ -180,7 +184,12 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
         (!!c.employee?.name && c.employee.name.toLowerCase().includes(q));
       if (!hit) return false;
     }
-    if (f.caId !== "ALL" && c.employee?.id !== f.caId) return false;
+    // T-181: 担当CA（複数選択・OR）。判定は行データの employee.id で行う（表示整形は使わない）
+    if (f.caIds.length > 0) {
+      const empId = c.employee?.id || "";
+      const hitCa = empId ? f.caIds.includes(empId) : f.caIds.includes(UNASSIGNED_CA);
+      if (!hitCa) return false;
+    }
     if (f.gender !== "ALL" && c.gender !== f.gender) return false;
     if (f.route !== "ALL" && (c.applicationRoute || "") !== f.route) return false;
     if (f.media !== "ALL" && (c.mediaSource || "") !== f.media) return false;
@@ -209,10 +218,11 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
   });
 }
 
+// T-181: currentEmployeeId は担当CAフィルタの初期値に使っていたが、複数選択化に伴い
+// 初期状態は「絞り込みなし（ALL）」に統一したため参照していない（page.tsx が渡すので型のみ残す）。
 export default function CandidateListClient({
   initialCandidates,
   employees,
-  currentEmployeeId,
   isAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
@@ -222,7 +232,8 @@ export default function CandidateListClient({
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ACTIVE");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
-  const [caFilter, setCaFilter] = useState(currentEmployeeId || "ALL");
+  // T-181: 担当CAは複数選択。空配列＝絞り込みなし（従来の "ALL" と同じ意味）
+  const [caFilter, setCaFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
@@ -268,7 +279,7 @@ export default function CandidateListClient({
     () =>
       applyNonTabFilters(candidates, {
         search: debouncedSearch,
-        caId: caFilter,
+        caIds: caFilter,
         dateFrom,
         dateTo,
         gender: genderFilter,
@@ -281,6 +292,24 @@ export default function CandidateListClient({
       }),
     [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]
   );
+
+  // T-181: 担当CAの選択肢。社員一覧（active・employeeNumber順）に加えて、
+  // 行データに担当CAとして居るのに社員一覧に無い人（退職・無効化された社員）も末尾に足す。
+  // これを足さないと「全選択（＝担当あり）」にも「未設定」にも入らない行が生まれ、件数が合わなくなる。
+  const caOptions = useMemo(() => {
+    const base = employees.map((e) => ({ value: e.id, label: e.name }));
+    const known = new Set(base.map((o) => o.value));
+    const extra = new Map<string, string>();
+    for (const c of candidates) {
+      if (c.employee?.id && !known.has(c.employee.id)) extra.set(c.employee.id, c.employee.name);
+    }
+    return [
+      ...base,
+      ...[...extra]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "ja")),
+    ];
+  }, [employees, candidates]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<string, number> = { ALL: 0, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0, ARCHIVED: 0 };
@@ -609,7 +638,8 @@ export default function CandidateListClient({
           {SUPPORT_TABS.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
+              // T-181: 担当CAの選択はタブ切替でリセットしない（タブ側の絞り込みだけ変える）
+              onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 supportTab === tab.key
                   ? "text-[#2563EB] border-[#2563EB]"
@@ -635,18 +665,17 @@ export default function CandidateListClient({
         <FilterTopRow>
           {/* 担当者 */}
           <FilterGroup label="担当者">
-            <FilterField label="担当CA">
-              <select
-                value={caFilter}
-                onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
-                className={`w-40 ${FILTER_INPUT_CLS}`}
-              >
-                <option value="ALL">ALL</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </FilterField>
+            {/* T-181: 複数選択。「全選択」＝CA名を全部ON（未設定はOFF）＝担当CAが設定されている人のみ */}
+            <FilterMultiSelectField
+              label="担当CA"
+              options={caOptions}
+              specialOption={{ value: UNASSIGNED_CA, label: "未設定" }}
+              selected={caFilter}
+              onChange={(next) => { setCaFilter(next); setCurrentPage(1); }}
+              width="w-44"
+              allSelectedLabel="担当あり（全員）"
+              moreUnit="名"
+            />
           </FilterGroup>
 
           {/* 期間 */}
@@ -673,9 +702,9 @@ export default function CandidateListClient({
                 className={`w-56 ${FILTER_INPUT_CLS}`}
               />
             </FilterField>
-            {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
+            {(caFilter.length > 0 || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
               <FilterClearButton onClick={() => {
-                setCaFilter("ALL");
+                setCaFilter([]);
                 setDateFrom("");
                 setDateTo("");
                 setGenderFilter("ALL");
@@ -749,6 +778,11 @@ export default function CandidateListClient({
               </FilterField>
             )}
           </FilterGroup>
+
+          {/* T-181: 絞り込み後の該当件数（数える作業をなくすのが目的。タブのバッジ件数は従来どおり） */}
+          <span className="ml-auto self-end inline-flex items-center rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] text-[#374151]">
+            <span className="font-medium">該当 <span className="text-[#2563EB]">{filtered.length.toLocaleString()}</span> 件</span>
+          </span>
         </FilterTopRow>
       </FilterShell>
 
