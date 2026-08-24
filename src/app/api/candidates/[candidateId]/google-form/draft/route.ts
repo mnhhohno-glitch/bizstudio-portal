@@ -6,7 +6,9 @@ export const runtime = "nodejs";
 
 // 改修③（途中保存）: 面談前フォームの質問下書きの取得/保存/削除。
 // - candidateId はルートパラメータ＝Candidate.id。FormDraft.candidateId（@unique）に一致させる。
-// - 求職者ごとに1件・PUT で upsert・フォーム作成成功時に DELETE される（モーダル側）。
+// - 求職者ごとに1件・PUT で upsert。
+// - T-179: フォーム作成成功でも削除せず、create-form 側が consumedAt に作成日時を入れる（使用済み）。
+//   PUT（途中保存）は consumedAt を null に戻す＝「作りかけ」に戻す。DELETE は明示操作のみ。
 
 export async function GET(
   _req: NextRequest,
@@ -24,6 +26,8 @@ export async function GET(
       draft: {
         questionsJson: draft.questionsJson,
         updatedAt: draft.updatedAt.toISOString(),
+        // T-179: null = 作りかけ（未使用）。値あり = この内容でフォームを作成済み。
+        consumedAt: draft.consumedAt ? draft.consumedAt.toISOString() : null,
       },
     });
   } catch (e) {
@@ -59,10 +63,11 @@ export async function PUT(
       return NextResponse.json({ error: "求職者が見つかりません" }, { status: 404 });
     }
 
+    // T-179: 途中保存は「作りかけ」に戻す操作。使用済み印（consumedAt）を必ず落とす。
     const draft = await prisma.formDraft.upsert({
       where: { candidateId },
-      create: { candidateId, questionsJson },
-      update: { questionsJson },
+      create: { candidateId, questionsJson, consumedAt: null },
+      update: { questionsJson, consumedAt: null },
     });
 
     return NextResponse.json({ ok: true, updatedAt: draft.updatedAt.toISOString() });

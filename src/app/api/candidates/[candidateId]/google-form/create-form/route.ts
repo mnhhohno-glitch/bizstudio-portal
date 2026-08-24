@@ -125,6 +125,17 @@ export async function POST(
       console.error("[google-form/create-form] persistence failed (non-fatal):", e);
     }
 
+    // T-179: 下書きは削除せず「使用済み」にする（作成後も「前回の内容から作り直す」ができるように内容を残す）。
+    // consumedAt が入っている＝作りかけではない、の判定材料。失敗してもフォーム作成は成功扱い。
+    try {
+      await prisma.formDraft.updateMany({
+        where: { candidateId },
+        data: { consumedAt: new Date() },
+      });
+    } catch (e) {
+      console.error("[google-form/create-form] draft consume failed (non-fatal):", e);
+    }
+
     const latency = Date.now() - t0;
     console.log(
       `[google-form/create-form] done formId=${formId} persisted=${persisted} latency_ms=${latency} upstream_latency_ms=${data?.latency_ms}`,
