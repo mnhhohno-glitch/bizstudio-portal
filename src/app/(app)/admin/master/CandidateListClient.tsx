@@ -218,11 +218,10 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
   });
 }
 
-// T-181: currentEmployeeId は担当CAフィルタの初期値に使っていたが、複数選択化に伴い
-// 初期状態は「絞り込みなし（ALL）」に統一したため参照していない（page.tsx が渡すので型のみ残す）。
 export default function CandidateListClient({
   initialCandidates,
   employees,
+  currentEmployeeId,
   isAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
@@ -232,8 +231,10 @@ export default function CandidateListClient({
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ACTIVE");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
-  // T-181: 担当CAは複数選択。空配列＝絞り込みなし（従来の "ALL" と同じ意味）
-  const [caFilter, setCaFilter] = useState<string[]>([]);
+  // T-181: 担当CAは複数選択。空配列＝絞り込みなし（従来の "ALL" と同じ意味）。
+  // 初期値は従来どおり「ログイン中の自分の担当のみ」（社員未紐付け等で null なら ALL）。
+  // クリアボタンは自分に戻すのではなく全解除（集計時に一発で全体へ戻せるようにするため）。
+  const [caFilter, setCaFilter] = useState<string[]>(currentEmployeeId ? [currentEmployeeId] : []);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
