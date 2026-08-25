@@ -757,6 +757,14 @@ EntryBoard (1083 行)
 - **「全件」の人数は各タブ人数の合計ではない**。entryFlag 絞り込みなしの `COUNT(DISTINCT candidateId)` を別集計する（同一求職者が複数ステータスにまたがるため単純合算は過大になる）。実測: 全件 183人（各タブ人数合計 198 > DISTINCT 183）。
 - レスポンスに `peopleCounts` を追加（`counts` と同型 `Record<string, number>`）。
 
+#### 選考終了系レコードの除外（タブの数字のみ）
+
+- タブの**件数・人数は、`entryFlagDetail` が選考終了系のレコードを除外して集計する**（「いま動いている案件数」を読めるようにするため）。
+- 除外する値: `選考落ち` / `書類見送り` / `面接見送り` / `本人辞退` / `本人辞退_他社決` / `本人辞退_自社他` / `クローズ` / `求人クローズ`。`NULL`・空文字は**除外しない**（未入力＝生存扱い）。
+- 実装: `src/app/api/entries/route.ts` の `CLOSED_FLAG_DETAILS` と `NOT_CLOSED`（`{ OR: [{ entryFlagDetail: null }, { entryFlagDetail: { notIn: [...] } }] }`。`notIn` 単体だと NULL 行まで落ちるため NULL を明示的に残す）。タブ別 `count` / 全件 `count` / `groupBy`（peopleCounts）に `activeCountBase` として効かせる。担当RC 経路は JS 側 `rcOpen = rcAll.filter(e => !isClosedDetail(...))` で同条件を適用（ここを漏らすと担当RC 検索時だけ数字が変わる）。
+- **一覧テーブル本体（`where`）と右上「全 N 件」（`total`）・ページネーションには効かせない**。終了系の行は従来どおりグレーアウトで一覧に残る → **タブの数字と一覧の行数は一致しない（仕様）**。
+- 除外リストは `entry-flag-rules.ts`（`SELECTION_ENDED_DETAILS`）や `EntryBoard.tsx` の `END_FLAG_DETAILS` とは**独立コピー**（変更禁止ファイル回避＋用途が別）。フラグ詳細の選択肢を増やしたときは `CLOSED_FLAG_DETAILS` も見直すこと。
+
 ### EntryTable: 本人辞退時の対応フラグ表示フィルタ
 
 - `EntryTable.tsx` の `companyFlag`（企業対応）／`personFlag`（本人対応）dropdown は、`entryFlagDetail` が「本人辞退」系（`本人辞退` / `本人辞退_他社決` / `本人辞退_自社他`、`startsWith("本人辞退")` で判定）のとき、ラベルに「辞退」を含む選択肢のみ表示。それ以外のときは「辞退」を含む選択肢を非表示にする

@@ -4,6 +4,28 @@ import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
 
+// 選考終了系のフラグ詳細（タブ件数・人数の集計から除外する）。
+// 「もう前に進まない案件」をタブの数字から外すのが目的。一覧テーブル本体と右上「全 N 件」には効かせない。
+// ※ entry-flag-rules.ts / candidate-flags.ts は変更禁止ファイルのため、ここに独立コピーとして持つ。
+//    EntryBoard.tsx の END_FLAG_DETAILS（一括終了モーダル用）とは用途が違うので共通化しない。
+const CLOSED_FLAG_DETAILS = [
+  "選考落ち",
+  "書類見送り",
+  "面接見送り", // 現データには未出現だが選択肢として存在するため含める
+  "本人辞退",
+  "本人辞退_他社決",
+  "本人辞退_自社他",
+  "クローズ",
+  "求人クローズ",
+];
+
+// entryFlagDetail が終了系の行を除外する条件。
+// notIn 単体だと NULL 行まで落ちるため、NULL は明示的に残す（未入力＝生存扱い）。
+const NOT_CLOSED: Prisma.JobEntryWhereInput = {
+  OR: [{ entryFlagDetail: null }, { entryFlagDetail: { notIn: CLOSED_FLAG_DETAILS } }],
+};
+const isClosedDetail = (v: string | null | undefined) => !!v && CLOSED_FLAG_DETAILS.includes(v);
+
 export async function GET(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -87,6 +109,11 @@ export async function GET(req: NextRequest) {
   // countBase = entryFlag を除いた全条件（タブ別件数用）。where = countBase + entryFlag。
   const countBase: Prisma.JobEntryWhereInput = andClauses.length > 0 ? { ...singleClauses, AND: andClauses } : { ...singleClauses };
   const where: Prisma.JobEntryWhereInput = entryFlag ? { ...countBase, entryFlag } : countBase;
+  // タブ件数・人数用。countBase に「選考終了系を除く」を足したもの（一覧の where には足さない）。
+  const activeCountBase: Prisma.JobEntryWhereInput = {
+    ...countBase,
+    AND: [...andClauses, NOT_CLOSED],
+  };
 
   const include = {
     candidate: { select: { id: true, name: true, candidateNumber: true, employeeId: true, recruiterName: true, employee: { select: { name: true } } } },
@@ -111,12 +138,14 @@ export async function GET(req: NextRequest) {
     const rcAll = all.filter((e) =>
       normalizeRecruiterName(formatRecruiterName(e.candidate.recruiterName)).includes(q),
     );
-    flagValues.forEach((f) => { counts[f] = rcAll.filter((e) => e.entryFlag === f).length; });
-    counts["全件"] = rcAll.length;
+    // 件数・人数だけ選考終了系を除外（一覧・total は rcAll のまま）。通常経路の activeCountBase と同条件。
+    const rcOpen = rcAll.filter((e) => !isClosedDetail(e.entryFlagDetail));
+    flagValues.forEach((f) => { counts[f] = rcOpen.filter((e) => e.entryFlag === f).length; });
+    counts["全件"] = rcOpen.length;
     flagValues.forEach((f) => {
-      peopleCounts[f] = new Set(rcAll.filter((e) => e.entryFlag === f).map((e) => e.candidateId)).size;
+      peopleCounts[f] = new Set(rcOpen.filter((e) => e.entryFlag === f).map((e) => e.candidateId)).size;
     });
-    peopleCounts["全件"] = new Set(rcAll.map((e) => e.candidateId)).size;
+    peopleCounts["全件"] = new Set(rcOpen.map((e) => e.candidateId)).size;
     const filtered = entryFlag ? rcAll.filter((e) => e.entryFlag === entryFlag) : rcAll;
     total = filtered.length;
     entries = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
@@ -124,11 +153,11 @@ export async function GET(req: NextRequest) {
     const countResults = await Promise.all([
       prisma.jobEntry.findMany({ where, include, orderBy, skip: (page - 1) * limit, take: limit }),
       prisma.jobEntry.count({ where }),
-      ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...countBase, entryFlag: f } })),
-      prisma.jobEntry.count({ where: countBase }),
+      ...flagValues.map((f) => prisma.jobEntry.count({ where: { ...activeCountBase, entryFlag: f } })),
+      prisma.jobEntry.count({ where: activeCountBase }),
       // T-120: 人数（DISTINCT candidateId）。groupBy は distinct count 非対応のため、
       // (entryFlag, candidateId) の一意ペアを取得し、JS でタブ別・全件を数える。
-      prisma.jobEntry.groupBy({ by: ["entryFlag", "candidateId"], where: countBase }),
+      prisma.jobEntry.groupBy({ by: ["entryFlag", "candidateId"], where: activeCountBase }),
     ]);
     entries = countResults[0] as Prisma.JobEntryGetPayload<{ include: typeof include }>[];
     total = countResults[1] as number;
