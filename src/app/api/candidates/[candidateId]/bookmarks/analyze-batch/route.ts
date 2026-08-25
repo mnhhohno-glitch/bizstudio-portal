@@ -6,9 +6,15 @@ import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
+import { CA_MARK_CLASS, matchCaItemLine } from "@/lib/ca-analysis-format";
 import { extractCompanyNameCandidates } from "@/lib/normalize-filename";
 
 export const maxDuration = 300; // 5 minutes
+
+// T-180: 選考分析（CA向け）の項目見出し行「【固定残業】▲」を、求人セクション見出し
+// 「【会社名】求人タイトル」と区別するための否定先読み。
+// 【…】の直後が「判定記号1文字だけで行末」なら項目行なのでセクション区切りとして扱わない。
+const NOT_CA_ITEM = `(?!\\s*${CA_MARK_CLASS}\\s*(?:\\n|$))`;
 
 function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   if (!comment) return false;
@@ -29,6 +35,8 @@ function compressBatchResultForSummary(content: string): string {
     const t = rawLine.trim();
     if (t === "") continue;
     const noBold = t.replace(/\*\*/g, "");
+    // T-180: 選考分析の項目見出し（【固定残業】▲）は会社名見出しではないので落とす。
+    if (matchCaItemLine(noBold)) continue;
     // 会社名見出し（## 【…】 / **【…】** / 裸【…】 / 求人N:）
     if (/^(?:#{1,3}\s*)?【[^】]+】/.test(noBold) || /^(?:#{1,3}\s*)?求人\d+[：:]/.test(noBold)) {
       kept.push(t);
@@ -152,10 +160,15 @@ function extractRatingsAndComments(
 
       // セクション終端: 次の会社セクション（## 【】 / **【】 / 空行後の裸【】）・総合まとめ・旧求人N:
       // ※ \n--- は求人内部の区切りにも使われるため終端に含めない（推薦本文まで取り込む）
+      // ※ T-180: 選考分析（CA向け）の項目見出し「【固定残業】▲」も空行後の裸【】に見えるため、
+      //   NOT_CA_ITEM（記号1文字で行末＝項目行 を否定先読みで除外）を付けないと、
+      //   1件目の項目行で求人セクションが打ち切られ選考分析が丸ごと欠落する。
       const afterStart = analysisText.substring(startIndex);
       const nextSection = afterStart
         .slice(1)
-        .match(/\n##\s+【[^】]+】|\n\*\*\s*【[^】]+】|\n\n【[^】]+】|\n(?:###?\s*)?求人\d+[：:]|\n━━━/);
+        .match(new RegExp(
+          `\\n##\\s+【[^】]+】${NOT_CA_ITEM}|\\n\\*\\*\\s*【[^】]+】|\\n\\n【[^】]+】${NOT_CA_ITEM}|\\n(?:###?\\s*)?求人\\d+[：:]|\\n━━━`
+        ));
       const endIndex = nextSection
         ? startIndex + 1 + (nextSection.index || afterStart.length)
         : startIndex + Math.min(afterStart.length, 3000);
@@ -581,7 +594,48 @@ export async function POST(
 キャリアアドバイザーが選考を進める上で把握すべき現実的な評価を、事実ベースで簡潔に記載。
 この内容はマイページには表示されず、CAのみが閲覧する。
 
-【CA向けに含める内容】
+■ 出力形式（必須・T-180）
+このセクションは必ず「項目ごとの判定」形式で書くこと。1項目 = 見出し行1行 + コメント行。
+項目と項目の間には空行を1行入れる。
+
+書式:
+
+【項目名】記号
+（その項目のコメント。1〜3文で簡潔に）
+
+（空行）
+
+【項目名】記号
+（コメント）
+
+判定記号は次の3種のみを使う。他の記号（◎ △ ー 等）や記号なしは不可:
+- 〇 … 問題なし・要件を満たす・希望と合致
+- ▲ … 懸念あり・要確認・条件が一部合わない
+- × … 不適合・選考上の大きな障害
+
+書式の絶対ルール:
+- 見出し行は「【項目名】記号」だけで完結させ、記号の後ろに文章・句読点・補足を書かない（コメントは必ず次の行）
+- 記号は必ず 〇 / ▲ / × のいずれか1文字
+- コメントは見出し行の次の行から書く。見出し行と同じ行に続けない
+- 項目名は【】で囲む。項目名の中に【】を入れない
+- 「- 」等の箇条書き記号でこの見出し行を始めない
+- 全体で4〜7項目程度に収める
+
+項目名は求人ごとに適切なものをAIが立ててよい（固定リストではない）。
+典型例: 必須要件充足 / 経験・スキル / 年収 / 固定残業 / 勤務地 / 選考難易度 / 推薦時の注意点 / 志望動機の作り込み
+
+出力例:
+
+【必須要件充足】〇
+4大卒〇、ライター職への志望度〇。選考ではライターへの志望度・意欲がメインの確認事項であり、経験・志向と合致。
+
+【年収】〇
+300万〜400万円。現年収約300万円からの微増〜上昇が見込める。
+
+【固定残業】▲
+45時間が最大の懸念。希望は月11〜15時間。安定志向の求職者にはD評価相当。
+
+【CA向けに含める内容】（上記の項目として立てる）
 - 必須要件の充足状況（大卒要件、経験年数、資格等）。未達項目があれば明示
 - 経験・スキルの強みと不足を率直に記載
 - 書類選考・面接で想定される懸念点
@@ -592,7 +646,6 @@ export async function POST(
 【CA向けの文体ルール】
 - 事実ベースで簡潔に
 - 「〜が懸念点です」「〜の確認が必要です」「〜でカバーが必要」等、率直な表現で構わない
-- 箇条書き可
 
 ---
 

@@ -8,6 +8,7 @@ import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } f
 import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
+import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
 
 /* ---------- Types ---------- */
@@ -539,6 +540,50 @@ function parse3AxisRatings(comment: string | null): { wish: string; pass: string
   const o = extractAxis(comment, "総合");
   if (!w && !p && !o) return null;
   return { wish: w || "—", pass: p || "—", overall: o || "—" };
+}
+
+// T-180: 評価コメント本文の表示。
+// 新フォーマット（選考分析が「【項目名】〇▲×」+ 次行コメント）は項目見出しを色付きで強調表示し、
+// それ以外の行は従来どおりのプレーンテキスト表示にする。
+// 過去に評価済みの旧フォーマットは項目見出し行を含まないため、text ブロック1つ＝従来表示のまま崩れない。
+const CA_MARK_STYLES: Record<CaMark, string> = {
+  ok: "bg-green-50 text-green-700 border-green-300",
+  warn: "bg-amber-50 text-amber-700 border-amber-300",
+  ng: "bg-red-50 text-red-700 border-red-300",
+};
+
+function cleanAnalysisComment(comment: string): string {
+  return comment
+    .replace(/\*\*/g, "")
+    .replace(/^###?\s+/gm, "")
+    .replace(/^-{3,}\s*$/gm, "")
+    .split("\n")
+    .filter((line) => !/^\s*■\s*(本人希望|通過率|総合)[：:]/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function AnalysisCommentBody({ comment }: { comment: string }) {
+  const blocks = useMemo(() => parseCaAnalysisBlocks(cleanAnalysisComment(comment)), [comment]);
+  return (
+    <div className="text-sm text-gray-700 leading-relaxed">
+      {blocks.map((b, i) =>
+        b.kind === "item" ? (
+          <div key={i} className={`flex items-center gap-2 ${i === 0 ? "" : "mt-3"} mb-1`}>
+            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full border text-sm font-bold shrink-0 ${CA_MARK_STYLES[b.mark]}`}>
+              {b.symbol}
+            </span>
+            <span className="font-semibold text-gray-900">{b.label}</span>
+          </div>
+        ) : (
+          <div key={i} className="whitespace-pre-wrap">
+            {b.text}
+          </div>
+        )
+      )}
+    </div>
+  );
 }
 
 /* ---------- Bookmark sort helpers (pure functions) ---------- */
@@ -2334,7 +2379,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       {/* Analysis comment modal */}
       {selectedAnalysis && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" {...overlayCloseAnalysis}>
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+          {/* T-180: 長文の選考分析を読みやすくするため幅を拡大（スマホは従来どおりほぼ全幅） */}
+          <div className="bg-white rounded-lg shadow-xl w-[92vw] max-w-5xl mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 {selectedAnalysis.rating && RATING_STYLES[selectedAnalysis.rating] && (
@@ -2382,17 +2428,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                   className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
                 />
               ) : (
-                <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {selectedAnalysis.comment
-                    .replace(/\*\*/g, "")
-                    .replace(/^###?\s+/gm, "")
-                    .replace(/^-{3,}\s*$/gm, "")
-                    .split("\n")
-                    .filter((line) => !/^\s*■\s*(本人希望|通過率|総合)[：:]/.test(line))
-                    .join("\n")
-                    .replace(/\n{3,}/g, "\n\n")
-                    .trim()}
-                </div>
+                <AnalysisCommentBody comment={selectedAnalysis.comment} />
               )}
             </div>
             <div className="p-3 border-t flex justify-end gap-2 shrink-0">
