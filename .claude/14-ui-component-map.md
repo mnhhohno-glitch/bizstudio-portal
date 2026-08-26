@@ -60,7 +60,8 @@ CandidateDetailPage (100% width, no max-width)
                            ├─ "desired": 希望条件
                            ├─ "rank": ランク評価
                            ├─ "action": アクション
-                           └─ "attachments": 添付（ファイル数バッジあり）
+                           ├─ "attachments": 添付（ファイル数バッジあり）
+                           └─ "support": 面談サポート（T-183 Phase 2。求職者単位のセッション一覧・閲覧・削除・新規作成。中身は InterviewSupportLogTab.tsx）
 ```
 
 ### メモセクション（line ~1290-1333）

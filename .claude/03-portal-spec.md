@@ -778,3 +778,26 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   （`is_required` は false のまま＝任意）。`GOOGLE_FORM_REQUEST_HIDDEN_LABELS` には**入れたまま**にする点に注意:
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
+
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27）
+
+面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
+要件の正: `docs/mendan-support/requirements.md`（v3）。
+
+- **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
+  `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
+  1分ごとの定期保存は同一 id への upsert（丸ごと上書き）＝冪等。
+  `transcript` = `[{ t: ISO, text }]` / `explanations` = `[{ t, mode: "recent"|"selection", sourceText, resultText }]`。
+  `endedAt` null は「記録中/中断」（タブを閉じた等）で、一覧の長さ表示は transcript 最終時刻から概算する。
+- **API**（すべて `getSessionUser` 認証）:
+  - `POST /api/interview-support/explain` … AI解説（Haiku・SSEストリーミング・prompt cache・usage は AdvisorUsageLog へ記録）
+  - `POST /api/interview-support/[interviewId]/session` … 保存（upsert・endedAt 未指定は null 扱い＝再開対応）
+  - `GET /api/interview-support/sessions?candidateId=` … **求職者単位**の軽量一覧（本文は返さない）
+  - `GET/DELETE /api/interview-support/sessions/[sessionId]` … 内容取得 / セッション単位削除
+- **画面**:
+  - 支援画面 `/interview-support/[interviewId]`（`InterviewSupportScreen.tsx`）。Web Speech API（`useSpeechTranscription.ts`）で
+    文字起こし→1分ごと＋停止時＋解説完了直後にDB保存。beforeunload では keepalive 保存（ベストエフォート）。
+    sessionStorage 退避は保存成功の有無に関わらず継続（最後の砦）。
+  - 振り返り: `InterviewForm` 右カラム「面談サポート」タブ（`InterviewSupportLogTab.tsx`）。求職者に紐づく全セッションの
+    一覧（回次タイトル・開始日時・長さ・作成CA）・行クリックで時系列閲覧（解説は amber カードでログと区別）・
+    confirm つき削除・「＋ 新規面談サポート」（支援画面を別タブで開く。ヘッダーボタンと併存）。

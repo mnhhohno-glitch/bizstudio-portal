@@ -7,6 +7,8 @@ export type ExplainCard = {
   mode: "recent" | "selection";
   /** 解説対象の元テキスト抜粋（先頭30字程度）。 */
   excerpt: string;
+  /** 解説対象の元テキスト全文。DB保存（explanations.sourceText）用で、カード表示には excerpt を使う。 */
+  source: string;
   /** ストリーミングで流し込まれる解説文。 */
   text: string;
   status: "streaming" | "done" | "error";

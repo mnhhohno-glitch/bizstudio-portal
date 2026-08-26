@@ -247,6 +247,8 @@ model Employee {
   // 面談履歴
   interviewsConducted InterviewRecord[] @relation("interviewConductedBy")
   interviewsCreated   InterviewRecord[] @relation("interviewCreatedBy")
+  // T-183 Phase 2: 面談サポートセッション（実施CA）
+  interviewSupportSessions InterviewSupportSession[] @relation("interviewSupportCreatedBy")
 
   // 勤怠管理
   dailyAttendances DailyAttendance[]
@@ -2236,6 +2238,8 @@ model InterviewRecord {
   workHistories WorkHistory[]
   // T-152: この面談に紐づく面談ログ等（CandidateFile.interviewId 経由）
   meetingFiles  CandidateFile[]       @relation("InterviewMeetingFiles")
+  // T-183 Phase 2: 面談サポート（文字起こし+AI解説）のセッション
+  supportSessions InterviewSupportSession[]
   createdAt     DateTime              @default(now()) @map("created_at")
   updatedAt     DateTime              @updatedAt @map("updated_at")
 
@@ -2247,6 +2251,28 @@ model InterviewRecord {
   // T-080: 取り込み済み判定・追跡用
   @@index([legacyFmInterviewNo])
   @@map("interview_records")
+}
+
+// T-183 Phase 2: 面談サポート（リアルタイム文字起こし+AI解説）のセッション保存。
+// - id はクライアント側で生成（「開始」押下時に確定）。1分ごとの定期保存は同一 id への upsert（丸ごと上書き）で冪等。
+// - transcript: [{ t: ISO文字列, text: string }, ...] / explanations: [{ t, mode: "recent"|"selection", sourceText, resultText }, ...]
+// - endedAt null = 記録中または中断（タブを閉じた等）。振り返りタブでは transcript 最終時刻から長さを概算表示する。
+// - 純粋追加（既存テーブル・カラムは一切変更しない）。
+model InterviewSupportSession {
+  id                String          @id @default(cuid())
+  interviewRecordId String          @map("interview_record_id")
+  interviewRecord   InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+  createdByUserId   String          @map("created_by_user_id")
+  createdBy         Employee        @relation("interviewSupportCreatedBy", fields: [createdByUserId], references: [id])
+  startedAt         DateTime        @map("started_at")
+  endedAt           DateTime?       @map("ended_at")
+  transcript        Json
+  explanations      Json
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@index([interviewRecordId])
+  @@map("interview_support_sessions")
 }
 
 // 改修③（途中保存）: 面談前フォームの質問下書き。

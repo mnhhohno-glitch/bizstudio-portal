@@ -20,6 +20,8 @@ import SuggestedTaskCard, {
   type SuggestedTask,
   type SuggestedTaskDone,
 } from "@/components/common/SuggestedTaskCard";
+// T-183 Phase 2: 面談サポートタブ（記録一覧・閲覧・削除）。
+import InterviewSupportLogTab from "@/components/interview-support/InterviewSupportLogTab";
 
 // 専用欄アップロード成功の中央通知の表示時間。既存トースト（約3秒）より長め＝
 // 「解析ボタンを押す」という次の操作に気づける時間を確保する。
@@ -126,6 +128,8 @@ const RIGHT_TABS = [
   { id: "rating", label: "ランク評価" },
   { id: "action", label: "アクション" },
   { id: "attachments", label: "添付" },
+  // T-183 Phase 2: 面談サポート（文字起こし+AI解説）の記録一覧・閲覧・削除
+  { id: "support", label: "面談サポート" },
 ] as const;
 
 const AUTOSAVE_DEBOUNCE = 3_000;
@@ -1940,6 +1944,11 @@ export default function InterviewForm({
                   <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} style={{ flex: "1 1 auto", minHeight: 560 }} isMissing={miss.has("d.nextAction") && miss.has("d.freeMemo") && miss.has("d.initialSummary")} />
                 </div>
               </div>
+            )}
+
+            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる ===== */}
+            {rightTab === "support" && (
+              <InterviewSupportLogTab candidateId={candidateId} interviewId={interviewId} />
             )}
 
             {/* ===== 添付タブ ===== */}

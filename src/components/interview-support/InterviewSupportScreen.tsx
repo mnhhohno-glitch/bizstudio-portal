@@ -1,9 +1,11 @@
 "use client";
 
-// T-183: 面談サポート画面（Phase 1）。リアルタイム文字起こし＋AI解説。
+// T-183: 面談サポート画面。リアルタイム文字起こし＋AI解説。
 // - 文字起こしは useSpeechTranscription（Web Speech API）に分離。将来の外部API差し替え境界。
 // - 解説は /api/interview-support/explain（SSE）。押下の瞬間にカード枠を即描画し、受信文字を逐次流し込む。
-// - ログは sessionStorage に逐次退避（Phase 2 のDB保存の前段）。DB保存・振り返り表示は Phase 2。
+// - ログは sessionStorage に逐次退避（保存失敗時の最後の砦として Phase 2 以降も継続）。
+// - Phase 2: DB保存。「開始」でクライアント生成の sessionId を確定し、認識中は1分ごと＋停止時＋
+//   解説完了直後に同一 sessionId へ upsert（冪等）。失敗しても UI は止めず次回保存でリトライ。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
@@ -15,6 +17,8 @@ import ExplainCards, { type ExplainCard } from "./ExplainCards";
 const RECENT_WINDOW_MS = 30_000;
 // 解説カードに表示する元テキスト抜粋の長さ。
 const EXCERPT_CHARS = 30;
+// Phase 2: DB定期保存の間隔(ms)。認識中はこの間隔で upsert する。
+const AUTOSAVE_INTERVAL_MS = 60_000;
 
 type InterviewInfo = {
   candidateName: string;
@@ -35,6 +39,78 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const [selectionText, setSelectionText] = useState("");
   const [cards, setCards] = useState<ExplainCard[]>([]);
   const cardSeqRef = useRef(0);
+
+  /* ---- Phase 2: DBへの自動保存 ---- */
+  // 「開始」初回押下で確定するセッション識別子。以後の保存はすべてこのIDへの upsert（冪等）。
+  const dbSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
+  const endedAtRef = useRef<number | null>(null);
+  // interval / beforeunload から常に最新の entries・cards を読むための鏡（stale closure 回避）。
+  // render 中の ref 書き込みは React Compiler 系 lint に反するため effect で退避する。
+  const latestRef = useRef({ entries, cards });
+  useEffect(() => {
+    latestRef.current = { entries, cards };
+  }, [entries, cards]);
+  const saveFailedRef = useRef(false);
+
+  const saveSession = useCallback(
+    (opts?: { keepalive?: boolean }) => {
+      const session = dbSessionRef.current;
+      if (!session) return;
+      const { entries: curEntries, cards: curCards } = latestRef.current;
+      const doneCards = curCards.filter((c) => c.status === "done");
+      if (curEntries.length === 0 && doneCards.length === 0) return;
+      const payload = {
+        sessionId: session.id,
+        startedAt: new Date(session.startedAt).toISOString(),
+        endedAt: endedAtRef.current ? new Date(endedAtRef.current).toISOString() : null,
+        transcript: curEntries.map((e) => ({ t: new Date(e.timestamp).toISOString(), text: e.text })),
+        // cards は新しい順で持っているため、保存は時系列（古い順）に直す。streaming/error は保存しない。
+        explanations: doneCards
+          .map((c) => ({ t: new Date(c.createdAt).toISOString(), mode: c.mode, sourceText: c.source, resultText: c.text }))
+          .reverse(),
+      };
+      void fetch(`/api/interview-support/${interviewId}/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: opts?.keepalive ?? false,
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`save failed: ${res.status}`);
+          saveFailedRef.current = false;
+        })
+        .catch(() => {
+          // 失敗してもUIは止めない（sessionStorage 退避は継続・次の保存でリトライ）。連続失敗の初回だけ軽く通知。
+          if (!saveFailedRef.current) {
+            saveFailedRef.current = true;
+            toast.warning("記録の自動保存に失敗しました。次回の保存で再試行します");
+          }
+        });
+    },
+    [interviewId]
+  );
+
+  // 認識中は1分ごとに定期保存。
+  useEffect(() => {
+    if (!listening) return;
+    const timer = setInterval(() => saveSession(), AUTOSAVE_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [listening, saveSession]);
+
+  const handleStart = useCallback(() => {
+    if (!dbSessionRef.current) {
+      dbSessionRef.current = { id: crypto.randomUUID(), startedAt: Date.now() };
+    }
+    // 停止→再開は同一セッションの続きとして扱う（「終了済み」を取り消す）。
+    endedAtRef.current = null;
+    start();
+  }, [start]);
+
+  const handleStop = useCallback(() => {
+    stop();
+    endedAtRef.current = Date.now();
+    saveSession();
+  }, [stop, saveSession]);
 
   /* ---- 面談情報の取得（既存 GET /api/interviews/[id] を流用） ---- */
   useEffect(() => {
@@ -88,12 +164,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   useEffect(() => {
     if (entries.length === 0) return;
     const handler = (e: BeforeUnloadEvent) => {
+      // Phase 2: 離脱直前のベストエフォート保存（keepalive）。離脱警告そのものは従来どおり維持。
+      saveSession({ keepalive: true });
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [entries.length]);
+  }, [entries.length, saveSession]);
 
   /* ---- AI解説（SSEストリーミング） ---- */
   const runExplain = useCallback(async (mode: "recent" | "selection", text: string) => {
@@ -102,7 +180,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     const excerpt = text.replace(/\s+/g, " ").slice(0, EXCERPT_CHARS);
     // 押下の瞬間にカード枠＋「解説中…」を即描画（通信開始前）。
     setCards((prev) => [
-      { id: cardId, mode, excerpt, text: "", status: "streaming", createdAt: Date.now() },
+      { id: cardId, mode, excerpt, source: text, text: "", status: "streaming", createdAt: Date.now() },
       ...prev,
     ]);
 
@@ -171,6 +249,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     runExplain("selection", selectionText);
   }, [selectionText, runExplain]);
 
+  // Phase 2: 解説カードの完成直後にも保存する（1分待たずに解説を確実に残す）。
+  // 完成数を描画側で数えて effect で反応する（setState updater 内で数えない）。
+  const doneCardCount = cards.filter((c) => c.status === "done").length;
+  useEffect(() => {
+    if (doneCardCount === 0) return;
+    saveSession();
+  }, [doneCardCount, saveSession]);
+
   const interviewDateLabel = info?.interviewDate
     ? new Date(info.interviewDate).toLocaleDateString("ja-JP")
     : null;
@@ -212,7 +298,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           {listening ? (
             <button
               type="button"
-              onClick={stop}
+              onClick={handleStop}
               className="rounded-lg border border-red-200 bg-red-50 px-6 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 cursor-pointer"
             >
               ■ 停止
@@ -220,7 +306,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           ) : (
             <button
               type="button"
-              onClick={start}
+              onClick={handleStart}
               disabled={!supported}
               className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
