@@ -6,7 +6,7 @@
 // - ログは sessionStorage に逐次退避（Phase 2 のDB保存の前段）。DB保存・振り返り表示は Phase 2。
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
 import { useSpeechTranscription, type TranscriptEntry } from "./useSpeechTranscription";
 import TranscriptLog from "./TranscriptLog";
 import ExplainCards, { type ExplainCard } from "./ExplainCards";
@@ -177,6 +177,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
 
   return (
     <div className="flex flex-col gap-3" style={{ height: "calc(100vh - 120px)" }}>
+      <Toaster position="top-center" richColors />
       {/* ============ 上部バー ============ */}
       <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
         <div className="flex items-baseline gap-3 min-w-0">
