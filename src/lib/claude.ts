@@ -11,6 +11,8 @@ export const CLAUDE_MODEL_DEFAULT = "claude-sonnet-4-6";
 export const CLAUDE_MODEL_ANALYSIS = "claude-opus-4-6";
 // 軽処理用（画像OCR等の定型抽出）: Haiku で十分。
 export const CLAUDE_MODEL_LIGHT = "claude-haiku-4-5";
+// T-183: 面談サポートのリアルタイム解説用（体感速度優先の最速モデル）。
+export const CLAUDE_MODEL_FAST = "claude-haiku-4-5";
 
 // T-126: モデル別の $/1M トークン単価。costUsd 算出の単一ソース。
 // モデルIDをキーにするため、退役でモデルを差し替える際はここも更新する。
