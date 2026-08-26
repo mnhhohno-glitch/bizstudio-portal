@@ -1085,6 +1085,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
   const [openingRef, setOpeningRef] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const extractTriggered = useRef(false);
+  // 求人票詳細モーダルの本文スクロール領域（◀▶ 移動時に先頭へ戻すため）
+  const analysisBodyRef = useRef<HTMLDivElement>(null);
 
   // T-136: オーバーレイ誤クローズ防止（handleCloseSendModal は後方定義のため arrow で遅延参照）
   const overlayCloseSend = useOverlayClose(() => handleCloseSendModal());
@@ -1180,6 +1182,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     setWishRating(axis?.wish && axis.wish !== "—" ? axis.wish : "");
     setPassRating(axis?.pass && axis.pass !== "—" ? axis.pass : "");
     setOverallRating(axis?.overall && axis.overall !== "—" ? axis.overall : selectedAnalysis.rating || "");
+    // ◀▶ で別の求人へ移動したときは本文を先頭から読ませたいのでスクロール位置を戻す
+    analysisBodyRef.current?.scrollTo({ top: 0 });
   }, [selectedAnalysis?.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateRatingMarker = (axis: "wish" | "pass" | "overall", newValue: string) => {
@@ -1379,6 +1383,54 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     });
     return [...result].sort(makeCompositeComparator(sortKeys, bookmarkAccessors));
   })();
+
+  // ---- 求人票詳細モーダルの前後ナビゲーション ----
+  // 移動順は「一覧に表示されている順序」そのまま（filteredFiles = ソート・フィルタ適用後）。
+  // ただしこのモーダルは AI評価コメントを表示するものなので、コメントを持たない行
+  //（未分析／AI評価対象外）は移動先から除く。開いても中身が空になり、行クリックでも開けないため。
+  const analysisNavFiles = filteredFiles.filter((f) => f.aiAnalysisComment);
+  const analysisIndex = selectedAnalysis
+    ? analysisNavFiles.findIndex((f) => f.id === selectedAnalysis.fileId)
+    : -1;
+
+  const openAnalysis = (f: BookmarkFile) => {
+    if (!f.aiAnalysisComment) return;
+    setSelectedAnalysis({ fileId: f.id, fileName: f.fileName, rating: f.aiMatchRating || "", comment: f.aiAnalysisComment });
+  };
+
+  // delta: -1=前 / +1=次。編集中の未保存分は確認してから破棄する（評価セレクトの変更も編集扱い＝未保存）。
+  const gotoAnalysis = (delta: number) => {
+    if (!selectedAnalysis || analysisIndex < 0) return;
+    const next = analysisIndex + delta;
+    if (next < 0 || next >= analysisNavFiles.length) return;
+    if (editingComment) {
+      const dirty = editedCommentText !== selectedAnalysis.comment;
+      if (dirty && !window.confirm("編集内容が保存されていません。移動しますか？")) return;
+      setEditingComment(false);
+      setEditedCommentText("");
+    }
+    openAnalysis(analysisNavFiles[next]);
+  };
+
+  // ←→ キーで前後の求人へ。ハンドラは毎レンダの最新版を ref 経由で参照する
+  //（依存に入れると毎レンダで addEventListener し直しになるため）。
+  const gotoAnalysisRef = useRef(gotoAnalysis);
+  useEffect(() => { gotoAnalysisRef.current = gotoAnalysis; });
+  const analysisOpen = Boolean(selectedAnalysis);
+  useEffect(() => {
+    if (!analysisOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      // 評価セレクトやテキストエリアの操作を邪魔しない
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || t?.isContentEditable) return;
+      e.preventDefault();
+      gotoAnalysisRef.current(e.key === "ArrowLeft" ? -1 : 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [analysisOpen]);
 
   // T-146 P2-6: 評価内訳（絞り込み後の表示中の件数を集計）。
   //   ※「選定率」とは呼ばない。日報側に同名で別定義の指標（出力数÷(BM数+紹介保留数)）があり、
@@ -2078,15 +2130,15 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                     const s = RATING_STYLES[v];
                     return s ? <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${s}`}>{v}</span> : <span className="text-[10px] text-gray-300">—</span>;
                   };
-                  const openAnalysis = (e: React.MouseEvent) => {
+                  const onOpenAnalysis = (e: React.MouseEvent) => {
                     e.stopPropagation();
-                    if (file.aiAnalysisComment) setSelectedAnalysis({ fileId: file.id, fileName: file.fileName, rating: file.aiMatchRating || "", comment: file.aiAnalysisComment });
+                    openAnalysis(file);
                   };
                   return (
                     <>
-                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.wish)}</span>
-                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.pass)}</span>
-                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={openAnalysis}>{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={onOpenAnalysis}>{badge(axis?.wish)}</span>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={onOpenAnalysis}>{badge(axis?.pass)}</span>
+                      <span className="w-[56px] shrink-0 text-center cursor-pointer hover:opacity-80" onClick={onOpenAnalysis}>{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
                     </>
                   );
                 })()}
@@ -2390,9 +2442,33 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 )}
                 <h3 className="font-semibold text-sm truncate">{selectedAnalysis.fileName}</h3>
               </div>
-              <button onClick={() => { setSelectedAnalysis(null); setEditingComment(false); }} className="text-gray-400 hover:text-gray-600 text-xl shrink-0 ml-2">✕</button>
+              <div className="flex items-center gap-0.5 shrink-0 ml-2">
+                {analysisNavFiles.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => gotoAnalysis(-1)}
+                      disabled={analysisIndex <= 0}
+                      title="前の求人（←キー）"
+                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded px-1.5 py-1 text-sm leading-none transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                    >◀</button>
+                    <span className="text-[11px] text-gray-500 tabular-nums whitespace-nowrap px-0.5">
+                      {analysisIndex + 1} / {analysisNavFiles.length}
+                    </span>
+                    <button
+                      onClick={() => gotoAnalysis(1)}
+                      disabled={analysisIndex < 0 || analysisIndex >= analysisNavFiles.length - 1}
+                      title="次の求人（→キー）"
+                      className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded px-1.5 py-1 text-sm leading-none transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                    >▶</button>
+                  </>
+                )}
+                <button
+                  onClick={() => { setSelectedAnalysis(null); setEditingComment(false); }}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded px-1.5 text-xl leading-none transition-colors"
+                >✕</button>
+              </div>
             </div>
-            <div className="p-4 overflow-y-auto flex-1">
+            <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
               <div className="font-mono text-sm mb-3 space-y-1">
                 {(["wish", "pass", "overall"] as const).map((axis) => {
                   const label = axis === "wish" ? "本人希望：" : axis === "pass" ? "通過率　：" : "総合　　：";
