@@ -1250,31 +1250,42 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     triggerExtraction(uploadedFileIds, ":upload");
   };
 
+  // 単一ブックマークの紹介保留化。一覧行の「保留」ボタンと AI評価モーダルの「紹介保留」で共有する。
+  // 成功したら true。呼び出し側は戻り値で後処理（AI評価モーダルの次求人送り等）を分岐する。
+  const archiveSingleFile = async (fileId: string, reason: string | null, note: string | null): Promise<boolean> => {
+    setArchivingId(fileId);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, note }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "保留化に失敗しました");
+      }
+      toast.success("紹介保留に移動しました");
+      setSelectedIds((prev) => { const n = new Set(prev); n.delete(fileId); return n; });
+      setArchiveTarget(null);
+      fetchFiles();
+      onArchivedChange?.();
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保留化に失敗しました");
+      return false;
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
   const handleArchiveConfirm = async (reason: string | null, note: string | null) => {
     if (!archiveTarget) return;
     if (archiveTarget.kind === "single") {
       const fileId = archiveTarget.file.id;
-      setArchivingId(fileId);
-      try {
-        const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/archive`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason, note }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => null);
-          throw new Error(data?.error || "保留化に失敗しました");
-        }
-        toast.success("紹介保留に移動しました");
-        setSelectedIds((prev) => { const n = new Set(prev); n.delete(fileId); return n; });
-        setArchiveTarget(null);
-        fetchFiles();
-        onArchivedChange?.();
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "保留化に失敗しました");
-      } finally {
-        setArchivingId(null);
-      }
+      const ok = await archiveSingleFile(fileId, reason, note);
+      // AI評価モーダルで表示中の求人を保留にした場合は、閉じずに同じ位置の次の求人へ送る。
+      // 失敗時（ok=false）はモーダルを動かさない。
+      if (ok) advanceAnalysisAfterArchive(fileId);
     } else {
       const ids = archiveTarget.ids;
       setBulkArchiving(true);
@@ -1309,7 +1320,10 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     }
   };
 
-  const handleArchive = (file: BookmarkFile) => {
+  // 紹介保留モーダル（ArchiveModal）を開く。一覧行の「保留」ボタンと AI評価モーダルの「紹介保留」で共有。
+  const openArchiveModal = (fileId: string) => {
+    const file = files.find((f) => f.id === fileId);
+    if (!file) return;
     setArchiveTarget({ kind: "single", file });
   };
 
@@ -1401,6 +1415,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
   // delta: -1=前 / +1=次。編集中の未保存分は確認してから破棄する（評価セレクトの変更も編集扱い＝未保存）。
   const gotoAnalysis = (delta: number) => {
     if (!selectedAnalysis || analysisIndex < 0) return;
+    if (archiveTarget) return; // 紹介保留モーダルを重ねている間は背後を動かさない
     const next = analysisIndex + delta;
     if (next < 0 || next >= analysisNavFiles.length) return;
     if (editingComment) {
@@ -1410,6 +1425,31 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       setEditedCommentText("");
     }
     openAnalysis(analysisNavFiles[next]);
+  };
+
+  // AI評価モーダルの「紹介保留」。編集中の未保存分は ◀▶ と同じ確認を出してから破棄する。
+  // AI評価モーダルは閉じず、その上に ArchiveModal を重ねる（キャンセルすれば元の表示に戻るだけ）。
+  const handleArchiveFromAnalysis = () => {
+    if (!selectedAnalysis) return;
+    if (editingComment && editedCommentText !== selectedAnalysis.comment
+        && !window.confirm("編集内容が保存されていません。移動しますか？")) return;
+    setEditingComment(false);
+    setEditedCommentText("");
+    openArchiveModal(selectedAnalysis.fileId);
+  };
+
+  // 保留化で一覧から消えた行を AI評価モーダルが表示中だった場合、閉じずに同じ位置の次の求人へ送る。
+  // files の更新は fetchFiles() 経由で非同期に届くため、ここでは現時点の一覧から当該行を除いた並びで
+  // 次を決める（インデックスは明示的に補正する。放置すると analysisIndex が -1 になり件数表示が崩れる）。
+  const advanceAnalysisAfterArchive = (fileId: string) => {
+    if (selectedAnalysis?.fileId !== fileId) return;
+    const idx = analysisNavFiles.findIndex((f) => f.id === fileId);
+    const remaining = analysisNavFiles.filter((f) => f.id !== fileId);
+    setEditingComment(false);
+    setEditedCommentText("");
+    if (remaining.length === 0) { setSelectedAnalysis(null); return; }
+    // 末尾だった場合は1つ前に寄せる（Math.min で自然に落ちる）
+    openAnalysis(remaining[Math.min(idx < 0 ? 0 : idx, remaining.length - 1)]);
   };
 
   // ←→ キーで前後の求人へ。ハンドラは毎レンダの最新版を ref 経由で参照する
@@ -2201,7 +2241,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                     {file.caComment ? "💬" : "🗨️"}
                   </button>
                   <button
-                    onClick={() => handleArchive(file)}
+                    onClick={() => openArchiveModal(file.id)}
                     disabled={archivingId === file.id}
                     className="text-gray-400 hover:text-amber-600 text-[16px] p-1.5 rounded hover:bg-gray-100 transition-colors disabled:opacity-50"
                     title="紹介保留に移動"
@@ -2507,7 +2547,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 <AnalysisCommentBody comment={selectedAnalysis.comment} />
               )}
             </div>
-            <div className="p-3 border-t flex justify-end gap-2 shrink-0">
+            <div className="p-3 border-t flex items-center justify-between gap-2 shrink-0">
+              {/* 左端: 読んだあとそのまま紹介保留へ。AI評価モーダルは閉じず ArchiveModal を重ねる */}
+              <button
+                onClick={handleArchiveFromAnalysis}
+                disabled={archivingId === selectedAnalysis.fileId}
+                className="text-sm text-amber-600 hover:text-amber-800 px-2 disabled:opacity-50"
+                title="この求人を紹介保留に移動する"
+              >
+                📦 紹介保留
+              </button>
+              <div className="flex items-center gap-2">
               {editingComment ? (
                 <>
                   <button
@@ -2568,6 +2618,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                   </button>
                 </>
               )}
+              </div>
             </div>
           </div>
         </div>
