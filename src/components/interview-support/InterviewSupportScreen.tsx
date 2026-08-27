@@ -70,6 +70,9 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     latestRef.current = { entries, cards, jobCards, reasonCard };
   }, [entries, cards, jobCards, reasonCard]);
   const saveFailedRef = useRef(false);
+  // 保存が失敗している間は上部バーに出しっぱなしにする（toast 1回だけだと気づけないため）。
+  // 次の保存が1回成功したら消える。
+  const [saveFailed, setSaveFailed] = useState(false);
 
   const saveSession = useCallback(
     (opts?: { keepalive?: boolean }) => {
@@ -118,9 +121,12 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         .then((res) => {
           if (!res.ok) throw new Error(`save failed: ${res.status}`);
           saveFailedRef.current = false;
+          setSaveFailed(false);
         })
         .catch(() => {
-          // 失敗してもUIは止めない（sessionStorage 退避は継続・次の保存でリトライ）。連続失敗の初回だけ軽く通知。
+          // 失敗してもUIは止めない（sessionStorage 退避は継続・次の保存でリトライ）。連続失敗の初回だけ軽く通知し、
+          // 失敗が続いている間は上部バーのインジケーターを出し続ける。
+          setSaveFailed(true);
           if (!saveFailedRef.current) {
             saveFailedRef.current = true;
             toast.warning("記録の自動保存に失敗しました。次回の保存で再試行します");
@@ -444,6 +450,12 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           )}
         </div>
         <div className="flex items-center gap-3">
+          {saveFailed && (
+            <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              保存エラー（自動で再試行します）
+            </span>
+          )}
           <span className="flex items-center gap-1.5 text-sm">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${
