@@ -25,7 +25,8 @@ export type AdvisorEndpoint =
   | "diagnosis-extract" // T-132: 診断散文→希望条件の構造化抽出（Gemini）
   | "interview-task-detect" // T-151: 面談ログからのタスク約束検出（Anthropic）
   | "advisor-log-ingest" // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
-  | "interview-support-explain"; // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
+  | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
+  | "interview-support-auto-scan"; // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
 
 type TokenBreakdown = {
   inputTokens: number;

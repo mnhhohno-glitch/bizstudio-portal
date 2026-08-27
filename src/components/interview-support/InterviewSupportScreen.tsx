@@ -6,12 +6,19 @@
 // - ログは sessionStorage に逐次退避（保存失敗時の最後の砦として Phase 2 以降も継続）。
 // - Phase 2: DB保存。「開始」でクライアント生成の sessionId を確定し、認識中は1分ごと＋停止時＋
 //   解説完了直後に同一 sessionId へ upsert（冪等）。失敗しても UI は止めず次回保存でリトライ。
+// - Phase 3: 自動検知。認識中は30秒ごとに新規確定発話を /api/interview-support/auto-scan へ送り、
+//   用語（時系列に積む）/ 業務内容（職務ごと更新型）/ 転職理由（1枚更新型）のカードを自動生成する。
+//   自動フローのエラーは画面に出さず沈黙（失敗区間は次回スキャンでリトライ）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { useSpeechTranscription, type TranscriptEntry } from "./useSpeechTranscription";
 import TranscriptLog from "./TranscriptLog";
-import ExplainCards, { type ExplainCard } from "./ExplainCards";
+import ExplainCards, {
+  type ExplainCard,
+  type AutoJobCard,
+  type AutoReasonCard,
+} from "./ExplainCards";
 
 // 「直近30秒」の切り出し幅(ms)。実測を見て調整する設定値。
 const RECENT_WINDOW_MS = 30_000;
@@ -19,6 +26,14 @@ const RECENT_WINDOW_MS = 30_000;
 const EXCERPT_CHARS = 30;
 // Phase 2: DB定期保存の間隔(ms)。認識中はこの間隔で upsert する。
 const AUTOSAVE_INTERVAL_MS = 60_000;
+// Phase 3: 自動検知スキャンの間隔(ms)。実測を見て調整する設定値。
+const AUTO_SCAN_INTERVAL_MS = 30_000;
+// Phase 3: 新規発話がこの文字数未満ならスキャンをスキップ（無言・相槌のみの区間は呼ばない＝コストゼロ）。
+const AUTO_SCAN_MIN_CHARS = 20;
+// Phase 3: 再解説防止のためAPIに渡す解説済み用語の保持上限（直近N件）。
+const EXPLAINED_TERMS_MAX = 30;
+// Phase 3: 更新型カードのハイライト表示時間(ms)。
+const AUTO_CARD_HIGHLIGHT_MS = 1500;
 
 type InterviewInfo = {
   candidateName: string;
@@ -40,34 +55,59 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const [cards, setCards] = useState<ExplainCard[]>([]);
   const cardSeqRef = useRef(0);
 
+  /* ---- Phase 3: 自動検知の更新型カード（業務内容=職務ごと / 転職理由=1枚） ---- */
+  const [jobCards, setJobCards] = useState<AutoJobCard[]>([]);
+  const [reasonCard, setReasonCard] = useState<AutoReasonCard | null>(null);
+
   /* ---- Phase 2: DBへの自動保存 ---- */
   // 「開始」初回押下で確定するセッション識別子。以後の保存はすべてこのIDへの upsert（冪等）。
   const dbSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
   const endedAtRef = useRef<number | null>(null);
   // interval / beforeunload から常に最新の entries・cards を読むための鏡（stale closure 回避）。
   // render 中の ref 書き込みは React Compiler 系 lint に反するため effect で退避する。
-  const latestRef = useRef({ entries, cards });
+  const latestRef = useRef({ entries, cards, jobCards, reasonCard });
   useEffect(() => {
-    latestRef.current = { entries, cards };
-  }, [entries, cards]);
+    latestRef.current = { entries, cards, jobCards, reasonCard };
+  }, [entries, cards, jobCards, reasonCard]);
   const saveFailedRef = useRef(false);
 
   const saveSession = useCallback(
     (opts?: { keepalive?: boolean }) => {
       const session = dbSessionRef.current;
       if (!session) return;
-      const { entries: curEntries, cards: curCards } = latestRef.current;
+      const { entries: curEntries, cards: curCards, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
       const doneCards = curCards.filter((c) => c.status === "done");
       if (curEntries.length === 0 && doneCards.length === 0) return;
+      // Phase 3: 更新型カード（業務内容・転職理由）は保存時点の最新版のみを乗せる（更新のたびに履歴を積まない）。
+      const explanations = [
+        // 手動解説＋自動用語カード。streaming/error は保存しない。
+        ...doneCards.map((c) => ({
+          t: new Date(c.createdAt).toISOString(),
+          mode: c.mode,
+          sourceText: c.source,
+          resultText: c.text,
+        })),
+        ...curJobs.map((j) => ({
+          t: new Date(j.updatedAt).toISOString(),
+          mode: "auto-job" as const,
+          sourceText: j.title,
+          resultText: j.text,
+        })),
+        ...(curReason
+          ? [{
+              t: new Date(curReason.updatedAt).toISOString(),
+              mode: "auto-reason" as const,
+              sourceText: "転職理由",
+              resultText: curReason.text,
+            }]
+          : []),
+      ].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
       const payload = {
         sessionId: session.id,
         startedAt: new Date(session.startedAt).toISOString(),
         endedAt: endedAtRef.current ? new Date(endedAtRef.current).toISOString() : null,
         transcript: curEntries.map((e) => ({ t: new Date(e.timestamp).toISOString(), text: e.text })),
-        // cards は新しい順で持っているため、保存は時系列（古い順）に直す。streaming/error は保存しない。
-        explanations: doneCards
-          .map((c) => ({ t: new Date(c.createdAt).toISOString(), mode: c.mode, sourceText: c.source, resultText: c.text }))
-          .reverse(),
+        explanations,
       };
       void fetch(`/api/interview-support/${interviewId}/session`, {
         method: "POST",
@@ -249,6 +289,125 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     runExplain("selection", selectionText);
   }, [selectionText, runExplain]);
 
+  /* ---- Phase 3: 自動検知（30秒ごとに新規発話をスキャンし、用語/業務内容/転職理由カードを自動生成） ---- */
+  // スキャン済み entries 件数。API成功時のみ進める（失敗時は同じ発話を次回リトライ）。
+  const scannedCountRef = useRef(0);
+  // 多重実行防止（API応答が間隔より遅い場合に重ねて呼ばない）。
+  const scanInFlightRef = useRef(false);
+  // 再解説防止のための解説済み用語リスト（直近 EXPLAINED_TERMS_MAX 件）。
+  const explainedTermsRef = useRef<string[]>([]);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runAutoScan = useCallback(async () => {
+    if (scanInFlightRef.current) return;
+    const { entries: curEntries, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
+    const newEntries = curEntries.slice(scannedCountRef.current);
+    const text = newEntries.map((e) => e.text).join("\n");
+    if (text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
+    const scannedCount = curEntries.length;
+    scanInFlightRef.current = true;
+    try {
+      const res = await fetch("/api/interview-support/auto-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          explainedTerms: explainedTermsRef.current,
+          existingJobs: curJobs.map((j) => ({ key: j.key, title: j.title, text: j.text })),
+          existingReason: curReason?.text ?? null,
+        }),
+      });
+      if (!res.ok) return; // 自動フローはエラーを画面に出さない（次回スキャンで回復）
+      const data = (await res.json()) as {
+        terms?: Array<{ term?: string; text?: string }>;
+        jobs?: Array<{ key?: string; title?: string; text?: string }>;
+        reason?: { text?: string } | null;
+      };
+      scannedCountRef.current = scannedCount;
+
+      let applied = false;
+      const now = Date.now();
+
+      // ①用語: 時系列エリアに完成カードとして積む。解説済みは再解説しない。
+      const newTermCards: ExplainCard[] = [];
+      for (const t of (data.terms ?? []).slice(0, 2)) {
+        if (!t?.term || !t?.text) continue;
+        if (explainedTermsRef.current.includes(t.term)) continue;
+        explainedTermsRef.current = [...explainedTermsRef.current, t.term].slice(-EXPLAINED_TERMS_MAX);
+        cardSeqRef.current += 1;
+        newTermCards.push({
+          id: `c-${now}-${cardSeqRef.current}`,
+          mode: "auto-term",
+          excerpt: t.term,
+          source: t.term,
+          text: t.text,
+          status: "done",
+          createdAt: now,
+        });
+      }
+      if (newTermCards.length > 0) {
+        applied = true;
+        setCards((prev) => [...newTermCards, ...prev]);
+      }
+
+      // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
+      const jobs = (data.jobs ?? []).flatMap((j) =>
+        j?.key && j?.text ? [{ key: j.key, title: j.title ?? "", text: j.text }] : []
+      );
+      if (jobs.length > 0) {
+        applied = true;
+        setJobCards((prev) => {
+          const next = [...prev];
+          for (const j of jobs) {
+            const idx = next.findIndex((c) => c.key === j.key);
+            if (idx >= 0) {
+              next[idx] = { ...next[idx], title: j.title || next[idx].title, text: j.text, updatedAt: now, highlight: true };
+            } else {
+              next.push({ key: j.key, title: j.title || "業務内容", text: j.text, updatedAt: now, highlight: true });
+            }
+          }
+          return next;
+        });
+      }
+
+      // ③転職理由: 全体で1枚の更新型（統合済みの最新版で置き換え）。
+      if (data.reason?.text) {
+        applied = true;
+        setReasonCard({ text: data.reason.text, updatedAt: now, highlight: true });
+      }
+
+      if (applied) {
+        // 更新ハイライトを一定時間で消す（transition で背景色が戻る）。
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = setTimeout(() => {
+          setJobCards((prev) => (prev.some((c) => c.highlight) ? prev.map((c) => ({ ...c, highlight: false })) : prev));
+          setReasonCard((prev) => (prev?.highlight ? { ...prev, highlight: false } : prev));
+        }, AUTO_CARD_HIGHLIGHT_MS);
+        saveSession();
+      }
+    } catch {
+      // 通信失敗も沈黙（scannedCount を進めていないので次回同じ発話でリトライ）
+    } finally {
+      scanInFlightRef.current = false;
+    }
+  }, [saveSession]);
+
+  // 認識中のみ30秒間隔で自動スキャン。「停止」中は止まる。
+  useEffect(() => {
+    if (!listening) return;
+    const timer = setInterval(() => {
+      void runAutoScan();
+    }, AUTO_SCAN_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [listening, runAutoScan]);
+
+  // アンマウント時にハイライト解除タイマーを破棄。
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
   // Phase 2: 解説カードの完成直後にも保存する（1分待たずに解説を確実に残す）。
   // 完成数を描画側で数えて effect で反応する（setState updater 内で数えない）。
   const doneCardCount = cards.filter((c) => c.status === "done").length;
@@ -352,9 +511,9 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           </div>
         </div>
 
-        {/* 右: 解説カード（新しい順） */}
+        {/* 右: 上段=固定エリア（業務内容・転職理由）＋下段=時系列カード（新しい順） */}
         <div className="w-[380px] shrink-0 min-h-0">
-          <ExplainCards cards={cards} />
+          <ExplainCards cards={cards} jobCards={jobCards} reasonCard={reasonCard} />
         </div>
       </div>
     </div>

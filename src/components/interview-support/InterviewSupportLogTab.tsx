@@ -21,7 +21,17 @@ type SessionRow = {
 };
 
 type TranscriptItem = { t: string; text: string };
-type ExplanationItem = { t: string; mode: "recent" | "selection"; sourceText: string; resultText: string };
+// mode: recent/selection = 手動解説（Phase 1）/ auto-term/auto-job/auto-reason = 自動検知3種（Phase 3）
+type ExplanationMode = "recent" | "selection" | "auto-term" | "auto-job" | "auto-reason";
+type ExplanationItem = { t: string; mode: ExplanationMode; sourceText: string; resultText: string };
+
+const EXPLANATION_LABEL: Record<ExplanationMode, string> = {
+  recent: "直近30秒",
+  selection: "選択部分",
+  "auto-term": "自動・用語",
+  "auto-job": "業務内容",
+  "auto-reason": "転職理由",
+};
 
 type SessionDetail = {
   id: string;
@@ -214,22 +224,48 @@ export default function InterviewSupportLogTab({
   );
 }
 
-/** 文字起こしログと解説履歴を時系列にマージして表示する（読み取り専用）。解説はログと区別できる見た目にする。 */
+/** 文字起こしログと解説履歴を時系列にマージして表示する（読み取り専用）。解説はログと区別できる見た目にする。
+ * Phase 3: 更新型カード（業務内容・転職理由。保存されるのは最新版のみ）はサマリーとして先頭にまとめ、
+ * 用語・手動解説は従来どおり時系列に混ぜる。 */
 function SessionTimeline({ detail }: { detail: SessionDetail }) {
+  const pinned = detail.explanations.filter((e) => e.mode === "auto-job" || e.mode === "auto-reason");
+  const timelineExplanations = detail.explanations.filter(
+    (e) => e.mode !== "auto-job" && e.mode !== "auto-reason"
+  );
   const items: Array<
     | { kind: "log"; t: string; item: TranscriptItem }
     | { kind: "explain"; t: string; item: ExplanationItem }
   > = [
     ...detail.transcript.map((item) => ({ kind: "log" as const, t: item.t, item })),
-    ...detail.explanations.map((item) => ({ kind: "explain" as const, t: item.t, item })),
+    ...timelineExplanations.map((item) => ({ kind: "explain" as const, t: item.t, item })),
   ].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
 
-  if (items.length === 0) {
+  if (items.length === 0 && pinned.length === 0) {
     return <p style={{ fontSize: 12, color: "var(--im-fg3)" }}>記録がありません</p>;
   }
 
   return (
     <div className="flex flex-col gap-1.5">
+      {pinned.map((item, idx) => (
+        <div
+          key={`pinned-${idx}`}
+          style={{
+            border: "0.5px solid #c7d2fe", background: "#eef2ff", borderRadius: 6,
+            padding: "6px 8px", fontSize: 12,
+          }}
+        >
+          <div className="flex items-center gap-2" style={{ marginBottom: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 500, color: "#4338ca", background: "#e0e7ff", borderRadius: 3, padding: "1px 5px" }}>
+              {EXPLANATION_LABEL[item.mode] ?? item.mode}
+            </span>
+            {item.mode === "auto-job" && (
+              <span style={{ fontSize: 11, fontWeight: 500, color: "var(--im-fg)" }}>{item.sourceText}</span>
+            )}
+            <span className="font-mono" style={{ fontSize: 10.5, color: "var(--im-fg3)" }}>{formatTime(item.t)}</span>
+          </div>
+          <div style={{ color: "var(--im-fg)", whiteSpace: "pre-wrap" }}>{item.resultText}</div>
+        </div>
+      ))}
       {items.map((entry, idx) =>
         entry.kind === "log" ? (
           <div key={idx} className="flex gap-2" style={{ fontSize: 12 }}>
@@ -248,7 +284,7 @@ function SessionTimeline({ detail }: { detail: SessionDetail }) {
           >
             <div className="flex items-center gap-2" style={{ marginBottom: 3 }}>
               <span style={{ fontSize: 10, fontWeight: 500, color: "#b45309", background: "#fef3c7", borderRadius: 3, padding: "1px 5px" }}>
-                AI解説（{entry.item.mode === "selection" ? "選択部分" : "直近30秒"}）
+                AI解説（{EXPLANATION_LABEL[entry.item.mode] ?? entry.item.mode}）
               </span>
               <span className="font-mono" style={{ fontSize: 10.5, color: "var(--im-fg3)" }}>{formatTime(entry.t)}</span>
             </div>

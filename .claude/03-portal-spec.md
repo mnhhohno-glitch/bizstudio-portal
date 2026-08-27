@@ -779,15 +779,16 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v3）。
+要件の正: `docs/mendan-support/requirements.md`（v5。Phase 3 で自動検知3種カード方式に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
   1分ごとの定期保存は同一 id への upsert（丸ごと上書き）＝冪等。
-  `transcript` = `[{ t: ISO, text }]` / `explanations` = `[{ t, mode: "recent"|"selection", sourceText, resultText }]`。
+  `transcript` = `[{ t: ISO, text }]` / `explanations` = `[{ t, mode, sourceText, resultText }]`
+  （mode: `recent`/`selection`=手動、Phase 3 で `auto-term`/`auto-job`/`auto-reason` を追加）。
   `endedAt` null は「記録中/中断」（タブを閉じた等）で、一覧の長さ表示は transcript 最終時刻から概算する。
 - **API**（すべて `getSessionUser` 認証）:
   - `POST /api/interview-support/explain` … AI解説（Haiku・SSEストリーミング・prompt cache・usage は AdvisorUsageLog へ記録）
@@ -801,3 +802,19 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   - 振り返り: `InterviewForm` 右カラム「面談サポート」タブ（`InterviewSupportLogTab.tsx`）。求職者に紐づく全セッションの
     一覧（回次タイトル・開始日時・長さ・作成CA）・行クリックで時系列閲覧（解説は amber カードでログと区別）・
     confirm つき削除・「＋ 新規面談サポート」（支援画面を別タブで開く。ヘッダーボタンと併存）。
+    Phase 3 の更新型カード（auto-job/auto-reason）は閲覧では時系列に混ぜず、indigo のサマリーカードとして先頭に表示。
+- **自動検知（Phase 3）**: 「ボタンを押して解説」は押すタイミングの判断が現場で難しいため、AIの会話自動監視が主役。
+  既存ボタン2つ（直近30秒/選択部分）は「今すぐ知りたい」時の即時フォローとして併存。
+  - `POST /api/interview-support/auto-scan` … 非ストリーミング（Haiku・max_tokens 600・system 固定で prompt cache・
+    usage は endpoint `interview-support-auto-scan` で AdvisorUsageLog へ）。リクエスト =
+    `{ text（前回スキャン以降の新規確定発話）, explainedTerms, existingJobs, existingReason }`、
+    レスポンス = `{ terms, jobs, reason }`。JSONパース失敗は空結果扱い（エラーを画面に出さない）。
+  - クライアント（`InterviewSupportScreen.tsx`）は**認識中のみ30秒間隔**（`AUTO_SCAN_INTERVAL_MS`）でスキャン。
+    新規発話が**20字未満ならスキップ**（`AUTO_SCAN_MIN_CHARS`。無言・相槌区間はコストゼロ）。
+    API失敗時はスキャン済み位置を進めず次回同じ発話でリトライ（自動フローは沈黙）。
+  - 3種カード: ①用語 `auto-term` = 時系列エリアに積む（「自動・用語」バッジ。解説済み直近30件を毎回渡し再解説しない。
+    最大2件/回）／②業務内容 `auto-job` = **会社/職務ごとに1枚の更新型**（AIが同一職務判定に使う `key` で突き合わせ、
+    統合済み全文で置き換え）／③転職理由 `auto-reason` = **全体で1枚の更新型**。②③は右カラム上段の固定エリアに表示し、
+    更新時は背景色 transition で1.5秒ハイライト。希望条件・日程調整・雑談は検知しない（沈黙が正解）。
+  - 保存は既存 explanations（Json）に相乗り。用語=1件ずつ、②③=**保存時点の最新版のみ**（更新履歴は積まない。
+    定期保存時にクライアントが最新状態から組み立てる）。保存API・テーブルは無変更。
