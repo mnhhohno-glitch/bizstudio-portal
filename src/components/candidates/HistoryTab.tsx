@@ -3235,6 +3235,10 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   const [deleteTargetIds, setDeleteTargetIds] = useState<number[]>([]);
   const [jobDeleting, setJobDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // T-182追補: 紹介求人区分からの紹介保留化。対象は portal 由来の紹介済み行（source="introduced"・file_id あり）のみ。
+  // kyuujin 行は従来どおり「紹介リストから削除」（非表示）、本人応募行は本人操作のため対象外。
+  const [jobsArchiveTarget, setJobsArchiveTarget] = useState<{ files: { fileId: string; jobId: number; fileName: string }[] } | null>(null);
+  const [jobsArchiving, setJobsArchiving] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
   const [responseFilter, setResponseFilter] = useState<"ALL" | "WANT_TO_APPLY" | "INTERESTED" | "NONE">("ALL");
   // 求人紹介(Jobs)の2段クロスソート（BM と独立の sortKeys）。初期表示は紹介日 降順。
@@ -3417,10 +3421,11 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   }, [fetchJobs, fetchEntries, fetchBookmarkRatings, fetchArchivedCount]);
 
   useEffect(() => {
-    const handler = () => fetchArchivedCount();
+    // T-182追補: 復元は introducedAt 付き行なら紹介求人区分に戻るため、保留数と合わせて jobs も更新する。
+    const handler = () => { fetchArchivedCount(); fetchJobs(); };
     window.addEventListener("bookmark-archived-changed", handler);
     return () => window.removeEventListener("bookmark-archived-changed", handler);
-  }, [fetchArchivedCount]);
+  }, [fetchArchivedCount, fetchJobs]);
 
   useEffect(() => {
     const handler = () => fetchBookmarkRatings();
@@ -3451,6 +3456,58 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       setSelectedJobIds(new Set());
     } else {
       setSelectedJobIds(new Set(selectableJobIds));
+    }
+  };
+
+  // T-182追補: 選択中の行のうち紹介保留に移動できるもの（紹介済み行のみ）。
+  const selectedArchivableJobs = (jobsData?.jobs || []).filter(
+    (j) => selectedJobIds.has(j.id) && j.source === "introduced" && j.file_id && !isJobEntered(j)
+  );
+
+  const openJobsArchiveModal = (targets: Job[]) => {
+    const files = targets
+      .filter((j) => j.file_id)
+      .map((j) => ({ fileId: j.file_id!, jobId: j.id, fileName: j.company_name }));
+    if (files.length === 0) return;
+    setJobsArchiveTarget({ files });
+  };
+
+  // BM区分と同じ archive API を1件ずつ叩く（BookmarkSection の一括保留と同じ方式・新規APIなし）。
+  const handleJobsArchiveConfirm = async (reason: string | null, note: string | null) => {
+    if (!jobsArchiveTarget) return;
+    const files = jobsArchiveTarget.files;
+    setJobsArchiving(true);
+    try {
+      const results = await Promise.allSettled(
+        files.map((f) =>
+          fetch(`/api/candidates/${candidateId}/files/${f.fileId}/archive`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason, note }),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => null);
+              throw new Error(data?.error || `failed: ${f.fileId}`);
+            }
+          })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        toast.error(`${failed}件の保留化に失敗しました`);
+      } else {
+        toast.success(files.length === 1 ? "紹介保留に移動しました" : `${files.length}件を紹介保留に移動しました`);
+      }
+      setSelectedJobIds((prev) => {
+        const n = new Set(prev);
+        files.forEach((f) => n.delete(f.jobId));
+        return n;
+      });
+      setJobsArchiveTarget(null);
+      fetchJobs();
+      fetchArchivedCount();
+    } finally {
+      setJobsArchiving(false);
     }
   };
 
@@ -3841,6 +3898,17 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
               </button>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {/* T-182追補: 紹介済み行の一括保留。BM区分の「紹介保留に移動」と同じ操作感 */}
+              {selectedArchivableJobs.length > 0 && (
+                <button
+                  onClick={() => openJobsArchiveModal(selectedArchivableJobs)}
+                  disabled={jobsArchiving}
+                  className="text-[13px] text-amber-600 hover:text-amber-800 font-medium disabled:opacity-50"
+                  title="選択した紹介済み求人を紹介保留に移動します（求職者サイトに表示されなくなります）"
+                >
+                  📦 紹介保留に移動（{selectedArchivableJobs.length}件）
+                </button>
+              )}
               {selectedJobIds.size > 0 && (
                 <button
                   onClick={() => openDeleteModal(Array.from(selectedJobIds))}
@@ -3976,6 +4044,16 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
+                        </button>
+                      ) : !isEntered && job.source === "introduced" && job.file_id ? (
+                        /* T-182追補: 紹介済み行は kyuujin の非表示削除が使えないため、BM区分と同じ紹介保留への導線を置く */
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openJobsArchiveModal([job]); }}
+                          disabled={jobsArchiving}
+                          className="w-[28px] shrink-0 p-1 text-gray-400 hover:text-amber-600 transition-colors rounded disabled:opacity-50"
+                          title="紹介保留に移動（求職者サイトに表示されなくなります）"
+                        >
+                          📦
                         </button>
                       ) : <span className="w-[28px] shrink-0" />}
                     </div>
@@ -4184,6 +4262,17 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
           onConfirm={handleDeleteJobs}
           onCancel={() => { setShowDeleteModal(false); setDeleteTargetIds([]); }}
           deleting={jobDeleting}
+        />
+      )}
+
+      {/* T-182追補: 紹介求人区分からの紹介保留モーダル（BM区分と同じ ArchiveModal を共用） */}
+      {jobsArchiveTarget && (
+        <ArchiveModal
+          count={jobsArchiveTarget.files.length}
+          fileName={jobsArchiveTarget.files.length === 1 ? jobsArchiveTarget.files[0].fileName : undefined}
+          onConfirm={handleJobsArchiveConfirm}
+          onCancel={() => { if (!jobsArchiving) setJobsArchiveTarget(null); }}
+          busy={jobsArchiving}
         />
       )}
     </div>
