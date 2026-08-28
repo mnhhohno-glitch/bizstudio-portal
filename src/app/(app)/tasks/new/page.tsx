@@ -137,6 +137,9 @@ const REGIONS = [
 
 const EMPLOYMENT_TYPES = ["正社員", "契約社員", "派遣社員", "アルバイト", "業務委託"];
 
+// 数字以外（全角数字・記号・マイナス・小数点など）を落とす。金額入力の正規化用。
+const onlyDigits = (s: string): string => (s ?? "").replace(/[^\d]/g, "");
+
 // 内定承諾報告の紹介手数料（税抜き）算出。
 // 理論年収方式: round(理論年収 × 手数料% / 100)。固定方式: 入力金額（整数丸め）。
 // 値が揃っていなければ null（"-" 表示・未保存）。
@@ -569,13 +572,14 @@ export default function TaskNewPage() {
       if (Object.keys(updates).length > 0) setFieldValues((prev) => ({ ...prev, ...updates }));
     }
 
-    // 課金方式ラジオの初期値（feeType）と算出用入力
+    // 課金方式ラジオの初期値（feeType）と算出用入力。
+    // 理論年収は課金方式に関係なく入力・保存する項目なので、FIXED でもプリセットする。
+    const ti = searchParams.get("theoreticalAnnualIncome");
+    if (ti) setNaiteiTheoryIncome(onlyDigits(ti));
     const feeType = searchParams.get("feeType"); // ANNUAL_RATE / FIXED
     if (feeType === "ANNUAL_RATE") {
       setNaiteiFeeMode("ANNUAL_RATE");
-      const ti = searchParams.get("theoreticalAnnualIncome");
       const fr = searchParams.get("feeRatePercent");
-      if (ti) setNaiteiTheoryIncome(ti);
       if (fr) setNaiteiFeeRate(fr);
     } else {
       setNaiteiFeeMode("FIXED");
@@ -1106,10 +1110,11 @@ export default function TaskNewPage() {
         if (locField && naiteiPrefecture) extraFieldValues.push({ fieldId: locField.id, value: `${naiteiRegion} ${naiteiPrefecture}` });
         const empField = selectedCategory.fields.find((f) => f.label === "雇用形態");
         if (empField && naiteiEmploymentType) extraFieldValues.push({ fieldId: empField.id, value: naiteiEmploymentType });
-        // 課金方式: 理論年収方式のときのみ理論年収を保存。紹介手数料（税抜き）は算出値を保存。
+        // 理論年収は課金方式に関係なく（固定方式でも）保存する。空なら従来どおり未保存。
+        // 紹介手数料（税抜き）は算出値を保存（固定方式では理論年収を計算に使わない）。
         const theoryField = selectedCategory.fields.find((f) => f.label === "理論年収");
-        const theoryDigits = naiteiTheoryIncome.replace(/[^\d]/g, "");
-        if (theoryField && naiteiFeeMode === "ANNUAL_RATE" && theoryDigits) {
+        const theoryDigits = onlyDigits(naiteiTheoryIncome);
+        if (theoryField && theoryDigits) {
           extraFieldValues.push({ fieldId: theoryField.id, value: theoryDigits });
         }
         const feeField = selectedCategory.fields.find((f) => f.label === "紹介手数料（税抜き）");
@@ -2220,6 +2225,22 @@ export default function TaskNewPage() {
                         </select>
                       </div>
 
+                      {/* 理論年収（課金方式に関係なく常時入力・保存する。数字のみ） */}
+                      <div>
+                        <label className="mb-1.5 block text-[13px] font-medium text-[#374151]">理論年収（円）</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          step={1}
+                          value={naiteiTheoryIncome}
+                          onChange={(e) => setNaiteiTheoryIncome(onlyDigits(e.target.value))}
+                          onKeyDown={(e) => { if (["e", "E", "+", "-", "."].includes(e.key)) e.preventDefault(); }}
+                          placeholder="例: 4000000"
+                          className={selectCls}
+                        />
+                      </div>
+
                       {/* 紹介手数料（課金方式: 固定 / 理論年収） */}
                       <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
                         <p className="text-[13px] font-bold text-[#374151]">紹介手数料（税抜き）<span className="ml-1 text-red-500">*</span></p>
@@ -2235,15 +2256,9 @@ export default function TaskNewPage() {
                         </div>
                         {naiteiFeeMode === "ANNUAL_RATE" ? (
                           <>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="mb-1 block text-[12px] text-[#6B7280]">理論年収（円）</label>
-                                <input type="text" inputMode="numeric" value={naiteiTheoryIncome} onChange={(e) => setNaiteiTheoryIncome(e.target.value)} placeholder="例: 4000000" className={selectCls} />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[12px] text-[#6B7280]">手数料%</label>
-                                <input type="text" inputMode="decimal" value={naiteiFeeRate} onChange={(e) => setNaiteiFeeRate(e.target.value)} placeholder="例: 35" className={selectCls} />
-                              </div>
+                            <div className="max-w-[240px]">
+                              <label className="mb-1 block text-[12px] text-[#6B7280]">手数料%</label>
+                              <input type="text" inputMode="decimal" value={naiteiFeeRate} onChange={(e) => setNaiteiFeeRate(e.target.value)} placeholder="例: 35" className={selectCls} />
                             </div>
                             <p className="text-[13px] text-[#374151]">
                               紹介手数料（税抜き）: <span className="font-bold text-[#16A34A]">{naiteiComputedFee != null ? `¥${naiteiComputedFee.toLocaleString("ja-JP")}` : "—"}</span>
