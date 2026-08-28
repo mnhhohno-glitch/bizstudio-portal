@@ -377,13 +377,16 @@ export async function POST(
   const { searchParams } = new URL(req.url);
   const mode = searchParams.get("mode");
   const body = await req.json();
-  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate } = body as {
+  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate, dryRun } = body as {
     sessionId: string;
     batchIndex: number;
     batchSize: number;
     totalFiles: number;
     isLastBatch: boolean;
     sinceDate?: string;
+    // T-182: 判定基準の精度検証用。true なら AI 評価だけ行い DB へ一切書き戻さない
+    //（CandidateFile の評価上書き・完了カードのチャット書き込みを両方スキップ）。既定 false。
+    dryRun?: boolean;
   };
 
   if (!sessionId || batchIndex == null || !batchSize || !totalFiles) {
@@ -930,14 +933,18 @@ ${skillContent}
           );
           continue;
         }
-        await prisma.candidateFile.update({
-          where: { id: fileId },
-          data: {
-            aiAnalyzedAt: new Date(),
-            aiMatchRating: rating,
-            aiAnalysisComment: comment,
-          },
-        });
+        // T-182 dryRun: 精度検証時は評価を DB へ書き戻さない
+        //（レスポンスの analysisText だけ返し、既存の評価値は温存する）。
+        if (!dryRun) {
+          await prisma.candidateFile.update({
+            where: { id: fileId },
+            data: {
+              aiAnalyzedAt: new Date(),
+              aiMatchRating: rating,
+              aiAnalysisComment: comment,
+            },
+          });
+        }
       } catch (updateErr) {
         skippedFileIds.push(fileId);
         console.error(`[AnalyzeBatch] Update failed for fileId=${fileId}:`, updateErr);
@@ -956,7 +963,7 @@ ${skillContent}
     //     （このバッチの保存が終わった step 9 の後に再取得するため、run 全体の最新値になる）。
     //   - 総合まとめ本文は最終バッチのAI出力から抽出。失敗時は件数のみのカード（AIは再度呼ばない）。
     //   - カード作成の失敗で分析本体（評価保存・レスポンス）を落とさない。
-    if (isLastBatch) {
+    if (isLastBatch && !dryRun) {
       try {
         // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
         // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
