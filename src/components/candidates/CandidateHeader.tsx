@@ -6,6 +6,10 @@ import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import IssueSiteTokenButton from "@/components/candidates/IssueSiteTokenButton";
 import SitePreviewButton from "@/components/candidates/SitePreviewButton";
 
+// T-182: 求人出力（kyuujinPDF）廃止に伴い「求人マイページ」「求人出力」ボタンを非表示。
+// コードは残し描画だけ止める。復活時はここを true に戻す。
+const SHOW_LEGACY_KYUUJIN_UI = false;
+
 type Candidate = {
   id: string;
   candidateNumber: string;
@@ -384,7 +388,7 @@ export default function CandidateHeader({
           <span className="text-[12px] text-gray-400 mr-1">URL・資料:</span>
           <IssueSiteTokenButton candidateId={candidate.id} candidateName={candidate.name} hasBirthday={!!candidate.birthday} />
           <SitePreviewButton candidateId={candidate.id} hasBirthday={!!candidate.birthday} />
-          {mypageLoading ? (
+          {SHOW_LEGACY_KYUUJIN_UI && (mypageLoading ? (
             <span className="inline-block border border-gray-200 bg-gray-50 rounded-md px-3 py-1 text-[12px] text-gray-400 animate-pulse">
               求人マイページ
             </span>
@@ -395,7 +399,7 @@ export default function CandidateHeader({
             >
               求人マイページ
             </button>
-          )}
+          ))}
           {hasGuideUrl && (
             <button
               onClick={handleGuideUrlCopy}
@@ -410,13 +414,15 @@ export default function CandidateHeader({
           >
             日程調整URL
           </button>
-          <button
-            onClick={onJobOutput}
-            disabled={jobOutputLoading}
-            className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            {jobOutputLoading ? "読み込み中..." : "求人出力"}
-          </button>
+          {SHOW_LEGACY_KYUUJIN_UI && (
+            <button
+              onClick={onJobOutput}
+              disabled={jobOutputLoading}
+              className="border border-gray-200 bg-white text-gray-600 rounded-md px-3 py-1 text-[12px] hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {jobOutputLoading ? "読み込み中..." : "求人出力"}
+            </button>
+          )}
           {onGoogleFormCreate && (
             <button
               onClick={onGoogleFormCreate}

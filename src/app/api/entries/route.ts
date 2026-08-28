@@ -197,7 +197,8 @@ export async function POST(req: NextRequest) {
       externalJobId: 0,
       entryDate: entryDate ? new Date(entryDate) : new Date(),
       introducedAt: new Date(),
-      entryFlag: entryFlag || "求人紹介",
+      // T-182: 既定を「エントリー」へ（「求人紹介」タブ非表示化とセット。旧既定だと作成行がどのタブにも出ない）
+      entryFlag: entryFlag || "エントリー",
       entryFlagDetail: entryFlagDetail || "検討中",
       externalJobNo: externalJobNo || null,
       jobDb: jobDb || null,

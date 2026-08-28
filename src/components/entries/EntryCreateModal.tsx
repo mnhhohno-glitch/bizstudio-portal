@@ -31,8 +31,10 @@ export default function EntryCreateModal({ flagData, onClose, onCreated }: Props
   const [jobDb, setJobDb] = useState("");
   const [jobType, setJobType] = useState("");
   const [prefecture, setPrefecture] = useState("");
-  const [entryFlag, setEntryFlag] = useState("求人紹介");
-  const [entryFlagDetail, setEntryFlagDetail] = useState("検討中");
+  // T-182: 「求人紹介」タブ非表示に伴い既定を「エントリー」へ。旧既定のままだと作成行がどのタブにも出ない。
+  // 詳細の既定は空（未選択）。API 側の既定（検討中）は to-entry と同じ扱い。
+  const [entryFlag, setEntryFlag] = useState("エントリー");
+  const [entryFlagDetail, setEntryFlagDetail] = useState("");
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const overlayClose = useOverlayClose(onClose);

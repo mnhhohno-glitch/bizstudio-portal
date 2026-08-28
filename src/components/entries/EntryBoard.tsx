@@ -140,8 +140,12 @@ export type FlagData = {
   companyFlags: Record<string, string[]>;
 };
 
+// T-182: 「求人紹介」タブは非表示（既定 where=isActive:true で常時0件・依存機能なし）。
+// FileMaker 移行由来の entryFlag="求人紹介" 行は「全件」タブから到達できる。復活時は true に戻す。
+const SHOW_LEGACY_INTRO_TAB = false;
+
 const TABS = [
-  { key: "求人紹介", label: "求人紹介" },
+  ...(SHOW_LEGACY_INTRO_TAB ? [{ key: "求人紹介", label: "求人紹介" }] : []),
   { key: "エントリー", label: "エントリー" },
   { key: "書類選考", label: "書類選考" },
   { key: "面接", label: "面接" },

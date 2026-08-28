@@ -11,6 +11,10 @@ import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-r
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
 
+// T-182: 求人出力（kyuujinPDF 送信）の廃止。旧導線（求人出力へ送信・求人紹介へ移動・
+// 出力済バッジ・未出力選択）はコードを残したまま描画だけ止める。復活時はここを true に戻す。
+const SHOW_LEGACY_KYUUJIN_UI = false;
+
 /* ---------- Types ---------- */
 type Job = {
   id: number;
@@ -1147,7 +1151,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
       if (res.ok) {
         const data = await res.json();
-        const f = data.files || [];
+        // T-182: BM区分は未紹介行のみ。紹介済み（introducedAt あり）は「紹介求人」サブタブへ移動して見せる。
+        const f = ((data.files || []) as BookmarkFile[]).filter((x) => !x.introducedAt);
         setFiles(f);
         onCountChange?.(f.length);
       }
@@ -1637,7 +1642,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "紹介済みへの変更に失敗しました");
-      const parts = [`${data.marked ?? 0}件を紹介済みにしました`];
+      const parts = [`${data.marked ?? 0}件を紹介求人へ移動しました`];
       if (data.skippedExported > 0) parts.push(`${data.skippedExported}件は出力済のため対象外`);
       if (data.skippedSite > 0) parts.push(`${data.skippedSite}件は本人応募のため対象外`);
       toast.success(parts.join("、"));
@@ -1860,15 +1865,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
               />
               全選択
             </label>
-            <label className="flex items-center gap-1.5 text-[13px] text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={unexportedAllChecked}
-                onChange={toggleUnexported}
-                className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
-              />
-              未出力を選択
-            </label>
+            {SHOW_LEGACY_KYUUJIN_UI && (
+              <label className="flex items-center gap-1.5 text-[13px] text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={unexportedAllChecked}
+                  onChange={toggleUnexported}
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                />
+                未出力を選択
+              </label>
+            )}
             {selectedIds.size > 0 && (
               <>
                 <button
@@ -1885,27 +1892,32 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 >
                   {bulkDownloading ? "⬇ ダウンロード中..." : `⬇ 一括DL（${selectedIds.size}件）`}
                 </button>
-                <button
-                  onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setOtherSearch(""); setShowOtherDropdown(false); setShowSendModal(true); }}
-                  className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
-                >
-                  📤 求人出力へ送信（{selectedIds.size}件）
-                </button>
-                <button
-                  onClick={handleMoveToJobs}
-                  disabled={movingToJobs}
-                  className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
-                >
-                  {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
-                </button>
+                {SHOW_LEGACY_KYUUJIN_UI && (
+                  <button
+                    onClick={() => { setSendResult(null); setSendStep(0); setSendDbType("hito_mynavi"); setSendAreas(new Set()); setOtherSearch(""); setShowOtherDropdown(false); setShowSendModal(true); }}
+                    className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium"
+                  >
+                    📤 求人出力へ送信（{selectedIds.size}件）
+                  </button>
+                )}
+                {SHOW_LEGACY_KYUUJIN_UI && (
+                  <button
+                    onClick={handleMoveToJobs}
+                    disabled={movingToJobs}
+                    className="text-[13px] text-[#2563EB] hover:text-[#1D4ED8] font-medium disabled:opacity-50"
+                  >
+                    {movingToJobs ? "📋 送信中..." : `📋 求人紹介へ移動（${selectedIds.size}件）`}
+                  </button>
+                )}
+                {/* T-182: 本線ボタン。introducedAt を立てるだけ（kyuujin 送信なし）。旧「求人出力へ送信」の位置に置く */}
                 {selectedIntroducibleIds.length > 0 && (
                   <button
                     onClick={handleMarkIntroduced}
                     disabled={markingIntroduced}
                     className="text-[13px] text-teal-600 hover:text-teal-800 font-medium disabled:opacity-50"
-                    title="求人票を出力せずに紹介済みにします（求人紹介一覧に載り、実績集計でも紹介に数えます。求人ツールへの送信は行いません）"
+                    title="選択した求人を紹介求人へ移動します（紹介求人タブと求職者サイトに表示され、実績集計で紹介に数えます）"
                   >
-                    {markingIntroduced ? "✅ 処理中..." : `✅ 紹介済みにする（${selectedIntroducibleIds.length}件）`}
+                    {markingIntroduced ? "📨 移動中..." : `📨 紹介求人へ移動（${selectedIntroducibleIds.length}件）`}
                   </button>
                 )}
                 {selectedEntryRegistrableIds.length > 0 && (
@@ -2127,7 +2139,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                       </span>
                     ) : null;
                   })()}
-                  {file.lastExportedAt && (
+                  {SHOW_LEGACY_KYUUJIN_UI && file.lastExportedAt && (
                     <span
                       className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-800 border border-green-200"
                       title={`${file.lastExportedTo === "circus" ? "Circus" : "HITO-Link"} に送信済（${new Date(file.lastExportedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）`}
@@ -2264,7 +2276,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
         />
       )}
 
-      {showSendModal && (
+      {SHOW_LEGACY_KYUUJIN_UI && showSendModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" {...overlayCloseSend}>
           <div className="bg-white rounded-xl max-w-md w-full mx-4 p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
@@ -3570,7 +3582,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   };
 
   const handleRevertEntry = async (entryId: string) => {
-    if (!confirm("このエントリーを求人紹介に戻しますか？")) return;
+    if (!confirm("このエントリーを紹介求人に戻しますか？")) return;
     setRevertingId(entryId);
     try {
       const res = await fetch(
@@ -3582,7 +3594,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         }
       );
       if (!res.ok) throw new Error("戻す処理に失敗しました");
-      toast.success("求人紹介に戻しました");
+      toast.success("紹介求人に戻しました");
       fetchEntries();
       fetchJobs();
     } catch (err) {
@@ -3594,7 +3606,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
   const handleBulkRevertEntries = async () => {
     if (selectedEntryIds.size === 0) return;
-    if (!confirm(`${selectedEntryIds.size}件を求人紹介に戻しますか？`)) return;
+    if (!confirm(`${selectedEntryIds.size}件を紹介求人に戻しますか？`)) return;
     setBulkReverting(true);
     try {
       const res = await fetch(
@@ -3607,7 +3619,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       );
       if (!res.ok) throw new Error("一括戻す処理に失敗しました");
       const data = await res.json();
-      toast.success(data.message || `${selectedEntryIds.size}件を求人紹介に戻しました`);
+      toast.success(data.message || `${selectedEntryIds.size}件を紹介求人に戻しました`);
       setSelectedEntryIds(new Set());
       fetchEntries();
       fetchJobs();
@@ -3742,7 +3754,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
               : "text-gray-500 hover:text-gray-700"
           }`}
         >
-          求人紹介
+          紹介求人
           {totalJobs > 0 && (
             <span className="ml-1.5 text-xs text-gray-400">({totalJobs})</span>
           )}
@@ -3791,7 +3803,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
           {/* ヘッダー */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <h3 className="text-[14px] font-semibold text-[#374151] shrink-0">
-              抽出結果（{jobSearch ? `${jobs.length}件 / ${totalJobs}件` : `${totalJobs}件`}）
+              紹介求人（{jobSearch ? `${jobs.length}件 / ${totalJobs}件` : `${totalJobs}件`}）
             </h3>
             <div className="relative">
               <input
@@ -3843,7 +3855,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                 disabled={selectedJobIds.size === 0 || submitting}
                 className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ☑ 選択してエントリー
+                ➡ エントリーへ登録
                 {selectedJobIds.size > 0 && ` (${selectedJobIds.size})`}
               </button>
             </div>
@@ -3864,7 +3876,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
             <div className="py-8 text-center text-[13px] text-red-500">{jobsError}</div>
           ) : allJobs.length === 0 ? (
             <div className="py-8 text-center text-[13px] text-gray-400">
-              この求職者の求人紹介データはまだありません
+              この求職者の紹介求人はまだありません
             </div>
           ) : jobs.length === 0 ? (
             <div className="py-8 text-center text-[13px] text-gray-400">
@@ -4006,7 +4018,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                 disabled={bulkReverting}
                 className="shrink-0 rounded-md bg-amber-50 border border-amber-300 px-3 py-1 text-[12px] font-medium text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
               >
-                {bulkReverting ? "処理中..." : `選択を求人紹介に戻す（${selectedEntryIds.size}件）`}
+                {bulkReverting ? "処理中..." : `選択を紹介求人に戻す（${selectedEntryIds.size}件）`}
               </button>
             )}
             <a
@@ -4024,7 +4036,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
             <div className="py-8 text-center text-[13px] text-red-500">{entriesError}</div>
           ) : entries.length === 0 ? (
             <div className="py-8 text-center text-[13px] text-gray-400">
-              エントリーはまだありません。求人紹介タブから求人を選択してエントリーできます。
+              エントリーはまだありません。紹介求人タブから求人を選択してエントリーできます。
             </div>
           ) : filteredEntries.length === 0 ? (
             <div className="py-8 text-center text-[13px] text-gray-400">
@@ -4120,7 +4132,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
                           onClick={() => handleRevertEntry(entry.id)}
                           disabled={revertingId === entry.id}
                           className="text-xs text-amber-600 hover:text-amber-800 border border-amber-300 rounded px-1.5 py-0.5 hover:bg-amber-50 transition-colors disabled:opacity-50"
-                          title="求人紹介に戻す"
+                          title="紹介求人に戻す"
                         >
                           {revertingId === entry.id ? "..." : "戻す"}
                         </button>

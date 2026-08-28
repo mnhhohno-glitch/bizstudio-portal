@@ -124,9 +124,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
   }
 
-  // 全ブックマーク（CA追加・本人追加・旧PDF経路すべて）を候補者スコープで取得。
+  // T-182: サイトに出すのは「CAが紹介した求人（introducedAt あり）」と「本人がサイトで追加した
+  // お気に入り（origin="candidate"）」のみ。CAがブックマークしただけの未紹介行は本人に見せない。
+  // origin 条件を外すと本人追加のお気に入りが全員分消えるため必ず残すこと。
   const files = await prisma.candidateFile.findMany({
-    where: { candidateId: candidate.id, category: "BOOKMARK", archivedAt: null },
+    where: {
+      candidateId: candidate.id,
+      category: "BOOKMARK",
+      archivedAt: null,
+      OR: [
+        { introducedAt: { not: null } },
+        { origin: "candidate" },
+      ],
+    },
     select: {
       id: true,
       externalJobRef: true,
