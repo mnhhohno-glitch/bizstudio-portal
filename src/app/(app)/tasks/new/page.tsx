@@ -74,6 +74,8 @@ const THREE_POINT_CATEGORY_IDS = [
   "cmmolxxtl002xpo4f1mf6srei", // 推薦状作成
 ] as const;
 const THREE_POINT_LABELS = ["履歴書作成", "職務経歴書作成", "推薦状作成"];
+/** 3カテゴリ共通のテンプレート項目ラベル。3点セット経路では1回だけ聞いて3タスクへ同値で格納する。 */
+const DELIVERY_FORMAT_LABEL = "納品形式";
 const HIDDEN_CATEGORY_ID = "cmoal05cp002r1dsxyokhti3i";
 
 const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
@@ -193,6 +195,8 @@ export default function TaskNewPage() {
   const [is3pointSet, setIs3pointSet] = useState(false);
   const [subStep3pt, setSubStep3pt] = useState(0); // 0=履歴書, 1=職務経歴書, 2=推薦状
   const [fieldValues3pt, setFieldValues3pt] = useState<Record<string, string>[]>([{}, {}, {}]);
+  /** 3点セット共通の納品形式（履歴書/職務経歴書/推薦状の3タスクへ同じ値で保存）。既定は先頭の選択肢（Word）。 */
+  const [deliveryFormat3pt, setDeliveryFormat3pt] = useState("");
   const [motivState3pt, setMotivState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] as string[] });
   const [jobAxes3pt, setJobAxes3pt] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [careerSummary3pt, setCareerSummary3pt] = useState("");
@@ -317,6 +321,18 @@ export default function TaskNewPage() {
     () => THREE_POINT_CATEGORY_IDS.map((id) => categories.find((c) => c.id === id) ?? null),
     [categories]
   );
+  /** 3点セット共通の納品形式の選択肢。DBマスタ（履歴書作成の納品形式）から引くのでUIにハードコードしない。 */
+  const deliveryFormatOptions = useMemo(
+    () => threePointCategories[0]?.fields.find((f) => f.label === DELIVERY_FORMAT_LABEL)?.options ?? [],
+    [threePointCategories]
+  );
+
+  // 既定値カラムがスキーマに無いため、既定 "Word"（選択肢の先頭）はマスタ読み込み後にクライアントで補う。
+  useEffect(() => {
+    if (deliveryFormatOptions.length === 0) return;
+    setDeliveryFormat3pt((prev) => (prev ? prev : deliveryFormatOptions[0].value));
+  }, [deliveryFormatOptions]);
+
   const active3ptCategory = is3pointSet ? threePointCategories[subStep3pt] : null;
   const effectiveCategory = is3pointSet ? active3ptCategory : selectedCategory;
 
@@ -875,6 +891,8 @@ export default function TaskNewPage() {
         }
         // 求人検索: 第1軸の大項目は必須
         if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
+        // 3点セット: 共通の納品形式（generic 描画から外しているのでここで必須チェック）
+        if (is3pointSet && deliveryFormatOptions.length > 0 && !deliveryFormat3pt) return false;
         // テンプレート必須フィールドのバリデーション
         const visibleFields = getVisibleFields();
         const vals = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
@@ -903,13 +921,17 @@ export default function TaskNewPage() {
     const cat = is3pointSet ? active3ptCategory : selectedCategory;
     if (!cat) return [];
 
+    // 3点セット経路: 納品形式は3タスク共通のカスタムUI（1回入力）で制御するため generic 描画から除外。
+    // 単体依頼（履歴書作成 / 職務経歴書作成 / 推薦状作成）では従来どおりカテゴリの項目として表示する。
+    const stripShared = (fs: Field[]) => (is3pointSet ? fs.filter((f) => f.label !== DELIVERY_FORMAT_LABEL) : fs);
+
     // 履歴書作成: 志望動機フィールドはカスケードUIで代替するので非表示
     if (isRirekisho) {
-      return cat.fields.filter((f) =>
+      return stripShared(cat.fields.filter((f) =>
         f.label !== "志望動機（大分類）" &&
         f.label !== "志望動機（中分類）" &&
         f.label !== "志望動機（小分類）"
-      );
+      ));
     }
 
     // 内定承諾報告: カスタムUIで代替するフィールドを非表示
@@ -940,9 +962,9 @@ export default function TaskNewPage() {
       return cat.fields.filter((f) => !GOOGLE_FORM_REQUEST_HIDDEN_LABELS.includes(f.label));
     }
 
-    if (!isShokumu) return cat.fields;
+    if (!isShokumu) return stripShared(cat.fields);
 
-    return cat.fields.filter((f) => {
+    return stripShared(cat.fields.filter((f) => {
       if (f.label === "応募職種") return false;
       if (isSalesJob) {
         if (noNumbersChecked && SALES_ONLY_LABELS.includes(f.label)) return false;
@@ -950,7 +972,7 @@ export default function TaskNewPage() {
       }
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
-    });
+    }));
   }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku, isGformRequest]);
 
   /* ----- submit (3point set) ----- */
@@ -989,6 +1011,12 @@ export default function TaskNewPage() {
             const otherField = cat.fields.find((f) => f.label === "その他実績");
             if (otherField) extra.push({ fieldId: otherField.id, value: careerSummary3pt.trim() });
           }
+        }
+
+        // 納品形式は1回だけ入力させ、3カテゴリすべてへ同じ値で格納する（fieldId はカテゴリごとに別）。
+        const deliveryField = cat.fields.find((f) => f.label === DELIVERY_FORMAT_LABEL);
+        if (deliveryField && deliveryFormat3pt) {
+          extra.push({ fieldId: deliveryField.id, value: deliveryFormat3pt });
         }
         return [...normalFvs, ...extra];
       };
@@ -2107,6 +2135,25 @@ export default function TaskNewPage() {
                     </div>
                   );
                   })}
+
+                  {/* 3点セット共通: 納品形式（1回だけ入力し3タスクへ同値で保存）。1/3 のサブステップにのみ表示。 */}
+                  {is3pointSet && subStep3pt === 0 && deliveryFormatOptions.length > 0 && (
+                    <div className="rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        {DELIVERY_FORMAT_LABEL}<span className="ml-1 text-red-500">*</span>
+                      </label>
+                      <p className="mb-2 text-[12px] text-[#9CA3AF]">3点セット共通です。履歴書・職務経歴書・推薦状の3タスクに同じ内容で登録されます。</p>
+                      <select
+                        value={deliveryFormat3pt}
+                        onChange={(e) => setDeliveryFormat3pt(e.target.value)}
+                        className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      >
+                        {deliveryFormatOptions.map((opt) => (
+                          <option key={opt.id} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* 非営業: 経歴・実績の概要 */}
                   {isShokumu && shokumuJobAxes[0]?.major && !isSalesJob && (
