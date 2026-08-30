@@ -1048,7 +1048,12 @@ function formatFileDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCountChange, onSwitchToJobs, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
+// T-182 追補2: 紹介求人区分は BM区分と「完全に同一の行表示・同一の機能」にするため、このコンポーネントを
+// variant で共有する（専用の簡略レンダラーを別に持たない＝今後の機能追加が片方だけに入る事故を防ぐ）。
+//   variant="bookmark"  … 未紹介行のみ（introducedAt なし）。従来どおりアップロード可。
+//   variant="introduced" … 紹介済み行のみ（introducedAt あり）。アップロード不可・「ブックマークに戻す」あり。
+// 区分による差分は「振り分けフィルタ・ヘッダー文言・紹介日列の値・フッターのボタン構成」だけに限定する。
+function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -1151,14 +1156,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       const res = await fetch(`/api/candidates/${candidateId}/files?category=BOOKMARK`);
       if (res.ok) {
         const data = await res.json();
-        // T-182: BM区分は未紹介行のみ。紹介済み（introducedAt あり）は「紹介求人」サブタブへ移動して見せる。
-        const f = ((data.files || []) as BookmarkFile[]).filter((x) => !x.introducedAt);
+        // T-182: BM区分は未紹介行のみ。紹介済み（introducedAt あり）は「紹介求人」サブタブへ振り分ける。
+        // 振り分けは introducedAt の有無だけ（両区分のフィルタは互いに補集合＝行の取りこぼし・二重表示なし）。
+        const f = ((data.files || []) as BookmarkFile[]).filter((x) =>
+          variant === "introduced" ? !!x.introducedAt : !x.introducedAt
+        );
         setFiles(f);
         onCountChange?.(f.length);
       }
     } catch { /* */ }
     finally { setLoading(false); }
-  }, [candidateId, onCountChange]);
+  }, [candidateId, variant, onCountChange]);
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
@@ -1220,6 +1228,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
   };
 
   const uploadFiles = async (fileList: File[]) => {
+    // 紹介求人区分では新規追加しない（アップロードした行は introducedAt が無く BM区分に落ちて混乱するため）。
+    if (variant === "introduced") return;
     const valid = fileList.filter((f) => ALLOWED_TYPES.has(f.type) && f.size <= 20 * 1024 * 1024);
     if (valid.length === 0) return;
 
@@ -1380,13 +1390,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     });
   };
 
-  // BM の基準別値取得（accessor）。会社名=ファイル名、ランク=AIコメントの3軸パース、応募状況=罠#6解決済、紹介日=createdAt、担当=uploadedBy.name。
+  // 紹介日列の値。BM区分=追加日(createdAt)、紹介求人区分=紹介日時(introducedAt)。
+  // 表示・並び替え・日付フィルタの3箇所で必ず同じ値を使う（列に見えている日付と挙動を一致させる）。
+  const rowDate = (f: BookmarkFile) => (variant === "introduced" ? f.introducedAt ?? f.createdAt : f.createdAt);
+
+  // BM の基準別値取得（accessor）。会社名=ファイル名、ランク=AIコメントの3軸パース、応募状況=罠#6解決済、紹介日=rowDate、担当=uploadedBy.name。
   const bookmarkAccessors: SortAccessors<BookmarkFile> = {
     getCompanyName: (f) => f.fileName,
     getRank: (f, axis) => parse3AxisRatings(f.aiAnalysisComment)?.[axis] ?? null,
     // 修正2: 本人回答（responseStatus・「本人回答」列と同じ値）を優先し、無ければ従来値へフォールバック。
     getResponse: (f) => resolveResponseForSort(f.responseStatus, findJobResponse(f.fileName)),
-    getDate: (f) => f.createdAt,
+    getDate: (f) => rowDate(f),
     getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
   };
 
@@ -1395,7 +1409,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     const result = files.filter((f) => {
       if (searchQuery && !f.fileName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       if (filterDate) {
-        const fileDate = new Date(f.createdAt).toISOString().slice(0, 10);
+        const fileDate = new Date(rowDate(f)).toISOString().slice(0, 10);
         if (fileDate !== filterDate) return false;
       }
       return true;
@@ -1656,6 +1670,39 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     }
   };
 
+  // T-182追補2: 「ブックマークに戻す」対象 = 紹介済み・未出力（unmark-introduced のサーバー側条件と同一）。
+  // 出力済行（lastExportedAt あり）は introducedAt を消すと mark-introduced で再紹介できず片道になるため対象外。
+  const isRevertible = (f: BookmarkFile) => !!f.introducedAt && !f.lastExportedAt;
+  const selectedRevertibleIds = [...selectedIds].filter((id) => {
+    const f = files.find((x) => x.id === id);
+    return f ? isRevertible(f) : false;
+  });
+
+  const [revertingIntroduced, setRevertingIntroduced] = useState(false);
+  const handleUnmarkIntroduced = async () => {
+    if (selectedRevertibleIds.length === 0) return;
+    setRevertingIntroduced(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/bookmarks/unmark-introduced`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileIds: selectedRevertibleIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "ブックマークへの巻き戻しに失敗しました");
+      const parts = [`${data.reverted ?? 0}件をブックマークに戻しました（求職者サイトの表示からも外れます）`];
+      if (data.skippedExported > 0) parts.push(`${data.skippedExported}件は出力済のため対象外`);
+      toast.success(parts.join("、"));
+      setSelectedIds(new Set());
+      fetchFiles();
+      onSwitchToBookmark?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
+    } finally {
+      setRevertingIntroduced(false);
+    }
+  };
+
   const [movingToJobs, setMovingToJobs] = useState(false);
   const handleMoveToJobs = async () => {
     if (selectedIds.size === 0) return;
@@ -1824,7 +1871,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
     <div
       className="bg-white rounded-lg border border-gray-200"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); if (variant === "bookmark") setIsDragging(true); }}
       onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setIsDragging(false); }}
       onDrop={(e) => {
         e.preventDefault(); e.stopPropagation(); setIsDragging(false);
@@ -1834,24 +1881,34 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
       {/* Fixed header */}
       <div className="px-4 py-3 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-[14px] font-semibold text-[#374151]">📁 ブックマーク</h3>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-          >
-            {uploading ? `アップロード中 (${uploadProgress.current}/${uploadProgress.total})` : "+ アップロード"}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
-            onChange={(e) => { if (e.target.files?.length) uploadFiles(Array.from(e.target.files)); e.target.value = ""; }}
-          />
+          <h3 className="text-[14px] font-semibold text-[#374151]">
+            {variant === "introduced" ? `📨 紹介求人${files.length > 0 ? `（${files.length}件）` : ""}` : "📁 ブックマーク"}
+          </h3>
+          {variant === "bookmark" && (
+            <>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="bg-[#2563EB] text-white rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
+              >
+                {uploading ? `アップロード中 (${uploadProgress.current}/${uploadProgress.total})` : "+ アップロード"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt"
+                onChange={(e) => { if (e.target.files?.length) uploadFiles(Array.from(e.target.files)); e.target.value = ""; }}
+              />
+            </>
+          )}
         </div>
-        <p className="text-[12px] text-gray-500">求人票PDFを保管します</p>
+        <p className="text-[12px] text-gray-500">
+          {variant === "introduced"
+            ? "紹介済みの求人です（求職者サイトに表示されます）"
+            : "求人票PDFを保管します"}
+        </p>
 
         {/* Select all + bulk delete */}
         {files.length > 0 && (
@@ -1928,6 +1985,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                     title="サイト応募（本人がマイページで応募した求人）と紹介済み（出力なし）の求人を、求人ツールを経由せずエントリー管理へ直接登録します"
                   >
                     {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedEntryRegistrableIds.length}件）`}
+                  </button>
+                )}
+                {/* T-182追補2: 誤操作の巻き戻し。introducedAt を null に戻すだけ（紹介求人区分のみ表示） */}
+                {variant === "introduced" && selectedRevertibleIds.length > 0 && (
+                  <button
+                    onClick={handleUnmarkIntroduced}
+                    disabled={revertingIntroduced}
+                    className="text-[13px] text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                    title="選択した求人をブックマーク区分に戻します（求職者サイトにも表示されなくなります）"
+                  >
+                    {revertingIntroduced ? "↩ 戻し中..." : `↩ ブックマークに戻す（${selectedRevertibleIds.length}件）`}
                   </button>
                 )}
                 {/* 社名コピー: エントリー管理（EntryBoard.tsx「社名をコピー」）と同一挙動。
@@ -2084,9 +2152,15 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
         {loading ? (
           <div className="py-8 text-center text-[13px] text-gray-400">読み込み中...</div>
         ) : files.length === 0 && !isDragging ? (
-          <div className="mx-4 my-4 border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
-            <p className="text-sm text-gray-400">ファイルをドラッグ＆ドロップ、または「アップロード」ボタンをクリック</p>
-          </div>
+          variant === "introduced" ? (
+            <div className="py-8 text-center text-[13px] text-gray-400">
+              この求職者の紹介求人はまだありません。ブックマークタブから「紹介求人へ移動」で追加できます。
+            </div>
+          ) : (
+            <div className="mx-4 my-4 border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
+              <p className="text-sm text-gray-400">ファイルをドラッグ＆ドロップ、または「アップロード」ボタンをクリック</p>
+            </div>
+          )
         ) : (
           <div className="divide-y divide-gray-100">
             {filteredFiles.length === 0 ? (
@@ -2230,7 +2304,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 ) : (
                   <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 )}
-                <span className="w-[68px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(file.createdAt)}</span>
+                <span className="w-[68px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(rowDate(file))}</span>
                 <span className="w-[100px] shrink-0 flex items-center gap-0.5 justify-end">
                   {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}
                   {file.driveFileId && (
@@ -3265,6 +3339,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
   const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries" | "archived">(initialSubTab ?? "bookmark");
   const [bookmarkCount, setBookmarkCount] = useState(0);
   const [archivedCount, setArchivedCount] = useState(0);
+  // T-182追補2: 紹介求人区分（introducedAt あり行）の件数。タブバッジ用。
+  // 初期値は fetchBookmarkRatings（全 BOOKMARK 行の取得に相乗り）で立て、区分を開いたら onCountChange で追随する。
+  const [introducedCount, setIntroducedCount] = useState(0);
 
   // Jobs state
   const [jobsData, setJobsData] = useState<JobsResponse | null>(null);
@@ -3349,7 +3426,10 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       // 修正2: 本人回答（responseStatus）の会社名別マップ。意向として意味のある値だけ入れる
       //（UNANSWERED 等で実回答を上書きしない＝未登録なら従来値へフォールバックできる）。
       const respMap = new Map<string, string>();
+      // T-182追補2: 紹介求人タブのバッジ件数（introducedAt あり・非アーカイブは API 既定で除外済み）。
+      let introduced = 0;
       for (const f of data.files || []) {
+        if (f.introducedAt) introduced++;
         const key = normalize(
           (f.fileName as string)
             .replace(/\.pdf$/i, "")
@@ -3378,6 +3458,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       setBookmarkRatings(map);
       setBookmarkResponses(respMap);
       setBookmarkSourceMap(srcMap);
+      setIntroducedCount(introduced);
     } catch { /* silent */ }
   }, [candidateId]);
 
@@ -3463,10 +3544,11 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
   useEffect(() => {
     // T-182追補: 復元は introducedAt 付き行なら紹介求人区分に戻るため、保留数と合わせて jobs も更新する。
-    const handler = () => { fetchArchivedCount(); fetchJobs(); };
+    // 追補2: 紹介求人タブのバッジ件数（introducedCount）は fetchBookmarkRatings が立てるためこれも更新。
+    const handler = () => { fetchArchivedCount(); fetchJobs(); fetchBookmarkRatings(); };
     window.addEventListener("bookmark-archived-changed", handler);
     return () => window.removeEventListener("bookmark-archived-changed", handler);
-  }, [fetchArchivedCount, fetchJobs]);
+  }, [fetchArchivedCount, fetchJobs, fetchBookmarkRatings]);
 
   useEffect(() => {
     const handler = () => fetchBookmarkRatings();
@@ -3853,8 +3935,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
           }`}
         >
           紹介求人
-          {totalJobs > 0 && (
-            <span className="ml-1.5 text-xs text-gray-400">({totalJobs})</span>
+          {/* T-182追補2: 区分の実体は CandidateFile（introducedAt あり）に変更。件数もそちらに合わせる。 */}
+          {(SHOW_LEGACY_KYUUJIN_UI ? totalJobs : introducedCount) > 0 && (
+            <span className="ml-1.5 text-xs text-gray-400">({SHOW_LEGACY_KYUUJIN_UI ? totalJobs : introducedCount})</span>
           )}
         </button>
         <button
@@ -3895,8 +3978,23 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         <ArchivedBookmarkSection candidateId={candidateId} onCountChange={setArchivedCount} />
       )}
 
-      {/* ===== 求人紹介サブタブ ===== */}
-      {activeSubTab === "jobs" && (
+      {/* ===== 紹介求人サブタブ ===== */}
+      {/* T-182追補2: BM区分と同一のレンダリング経路（BookmarkSection）を variant="introduced" で共有する。
+          行の見た目・PDFリンク・AI評価コメント・本人回答・検索/並び替えがBM区分と完全に一致し、
+          今後の機能追加が片方だけに入る事故を防ぐ。旧 kyuujin∪portal 統合ビューは legacy フラグ配下に温存。 */}
+      {activeSubTab === "jobs" && !SHOW_LEGACY_KYUUJIN_UI && (
+        <BookmarkSection
+          candidateId={candidateId}
+          jobResponseMap={jobResponseMap}
+          archivedCount={archivedCount}
+          variant="introduced"
+          onCountChange={setIntroducedCount}
+          onSwitchToBookmark={() => setActiveSubTab("bookmark")}
+          onArchivedChange={fetchArchivedCount}
+          onEntryCreated={fetchEntries}
+        />
+      )}
+      {activeSubTab === "jobs" && SHOW_LEGACY_KYUUJIN_UI && (
         <div className="bg-white rounded-lg border border-gray-200 p-6 min-w-0">
           {/* ヘッダー */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
