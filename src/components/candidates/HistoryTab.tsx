@@ -2125,11 +2125,26 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, onCou
                 })()}
                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
                   <span className="shrink-0 text-sm">{getFileIcon(file.mimeType)}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
-                    className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
-                    title={file.fileName}
-                  >{file.fileName}</button>
+                  {/* T-181: PDF実体あり→プレビュー / 無し+DBNOあり→求人詳細へフォールバック / どちらも無し→押せない表示 */}
+                  {file.driveViewUrl ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
+                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
+                      title={file.fileName}
+                    >{file.fileName}</button>
+                  ) : file.externalJobRef ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(file.externalJobRef!); }}
+                      disabled={openingRef === file.externalJobRef}
+                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left disabled:opacity-50 disabled:cursor-wait"
+                      title={`${file.fileName} — PDF未保管のため求人ページを開きます`}
+                    >{openingRef === file.externalJobRef ? "⏳ " : ""}{file.fileName}</button>
+                  ) : (
+                    <span
+                      className="text-[13px] font-medium text-gray-700 truncate"
+                      title={`${file.fileName} — PDF未保管（自社求人ツール由来）`}
+                    >{file.fileName}</span>
+                  )}
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                   {(() => {
                     const resp = findJobResponse(file.fileName);
@@ -2745,6 +2760,17 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  // T-181: PDF未保管行のフォールバック（求人詳細を開く）用 in-flight ガード。
+  const [openingRef, setOpeningRef] = useState<string | null>(null);
+  const handleOpenJobPlatformDetail = async (externalJobRef: string) => {
+    if (openingRef) return;
+    setOpeningRef(externalJobRef);
+    try {
+      await openJobPlatformDetail(externalJobRef);
+    } finally {
+      setOpeningRef(null);
+    }
+  };
 
   // T-136: オーバーレイ誤クローズ防止
   const overlayCloseRestore = useOverlayClose(() => setConfirmRestore(null));
@@ -3086,11 +3112,26 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
                   </span>
                   <div className="flex-1 min-w-0 flex items-center gap-1.5">
                     <span className="shrink-0 text-sm">📄</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
-                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
-                      title={file.fileName}
-                    >{file.fileName}</button>
+                    {/* T-181: PDF実体あり→プレビュー / 無し+DBNOあり→求人詳細へフォールバック / どちらも無し→押せない表示 */}
+                    {file.driveViewUrl ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setPreviewFile(file); }}
+                        className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
+                        title={file.fileName}
+                      >{file.fileName}</button>
+                    ) : file.externalJobRef ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(file.externalJobRef!); }}
+                        disabled={openingRef === file.externalJobRef}
+                        className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left disabled:opacity-50 disabled:cursor-wait"
+                        title={`${file.fileName} — PDF未保管のため求人ページを開きます`}
+                      >{openingRef === file.externalJobRef ? "⏳ " : ""}{file.fileName}</button>
+                    ) : (
+                      <span
+                        className="text-[13px] font-medium text-gray-700 truncate"
+                        title={`${file.fileName} — PDF未保管（自社求人ツール由来）`}
+                      >{file.fileName}</span>
+                    )}
                   </div>
                   <span className="w-[44px] shrink-0 text-center">{badge(axis?.wish)}</span>
                   <span className="w-[44px] shrink-0 text-center">{badge(axis?.pass)}</span>

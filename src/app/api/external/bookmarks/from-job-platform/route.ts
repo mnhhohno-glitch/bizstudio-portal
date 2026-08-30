@@ -1,64 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
-
-// D-3: 求人検索由来PDFの生成元（Railway pdf-service）。本番は環境変数で上書き可。
-const PDF_SERVICE_URL = process.env.PDF_SERVICE_URL || "https://bizstudio-job-platform-production.up.railway.app";
-const PDF_GEN_TIMEOUT_MS = 30000;
-
-/**
- * D-3: pdf-service でPDFを生成 → 既存のGoogle Drive保管プラミングで求職者フォルダへ保管
- *      → CandidateFile の driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新。
- * 失敗時は throw（呼び出し側で try/catch 隔離＝保存自体は巻き込まない）。extractedText は触らない。
- *
- * T-159: 生成した PDF 本体を返す。呼び出し側が OneDrive へのコピーにそのまま渡し、
- *        Google Drive から取り直す往復を省くため。
- */
-async function generateAndStorePdf(params: {
-  fileId: string;
-  candidateId: string;
-  sid: string;
-  fileName: string;
-}): Promise<Buffer> {
-  const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
-  if (!parentFolderId) throw new Error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID 未設定");
-
-  // 1) pdf-service からPDFバイナリ取得（タイムアウト付き）
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PDF_GEN_TIMEOUT_MS);
-  let pdfBuffer: Buffer;
-  try {
-    const token = process.env.PDF_SERVICE_TOKEN; // 将来用・設定時のみ送信（現状 /generate は未要求）
-    const res = await fetch(`${PDF_SERVICE_URL}/generate?sid=${encodeURIComponent(params.sid)}`, {
-      signal: controller.signal,
-      ...(token ? { headers: { "x-api-token": token } } : {}),
-    });
-    if (!res.ok) throw new Error(`pdf-service responded ${res.status}`);
-    pdfBuffer = Buffer.from(await res.arrayBuffer());
-    if (pdfBuffer.length === 0) throw new Error("pdf-service returned empty body");
-  } finally {
-    clearTimeout(timer);
-  }
-
-  // 2) 既存の保管プラミングで求職者フォルダ（candidateId 名）へアップロード（既存ブックマークと同一場所）
-  const folderId = await getOrCreateFolder(params.candidateId, parentFolderId);
-  const { fileId: driveFileId, webViewLink } = await uploadFileToDrive(params.fileName, pdfBuffer, folderId, "application/pdf");
-
-  // 3) CandidateFile を更新（fileName/extractedText/sourceType 等は維持・PDF実体情報のみ追加）
-  await prisma.candidateFile.update({
-    where: { id: params.fileId },
-    data: {
-      driveFileId,
-      driveViewUrl: webViewLink,
-      driveFolderId: folderId,
-      mimeType: "application/pdf",
-      fileSize: pdfBuffer.length,
-    },
-  });
-
-  return pdfBuffer;
-}
+// T-181: generateAndStorePdf は本routeのローカル関数だったものを @/lib/job-platform-pdf へ
+// 切り出した（サイト経由お気に入り・バックフィルと共有）。挙動は切り出し前と同一。
+import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 
 /**
  * POST /api/external/bookmarks/from-job-platform

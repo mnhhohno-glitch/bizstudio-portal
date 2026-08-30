@@ -3,13 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 import { extractRecommendationForDisplay } from "@/lib/comment-split";
-import { enqueueOneDriveSync } from "@/lib/onedrive-sync";
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
+import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 
 // T-128 T2: 求職者サイト向け お気に入り（ブックマーク）API。
 // 台帳は CandidateFile（category="BOOKMARK"）。origin で CA追加(null|"ca") と 本人追加("candidate") を区別。
 //
 // GET    /api/external/candidate-site/favorites?candidateNumber=... （または candidateId）: 一覧
-// POST   /api/external/candidate-site/favorites: 本人お気に入り追加（記録のみ・PDF/Drive/AI起動なし）
+// POST   /api/external/candidate-site/favorites: 本人お気に入り追加（T-181: PDF生成→Drive保管を fire-and-forget で起動・AI分析は起動しない）
 // PATCH  /api/external/candidate-site/favorites: メモ(candidateNote)更新（本人/CA推薦/PDF行いずれも可・candidateNote のみ。fileId 優先、無ければ externalJobRef で特定）
 // DELETE /api/external/candidate-site/favorites: 本人お気に入り解除（origin="candidate" のみ）
 //
@@ -210,7 +211,7 @@ export async function GET(request: Request) {
   });
 }
 
-// ---- POST: 本人お気に入り追加（記録のみ） ----
+// ---- POST: 本人お気に入り追加（T-181: 保存は同期・PDF生成は fire-and-forget） ----
 export async function POST(request: Request) {
   if (!verifyCandidateSiteKey(request)) return unauthorized();
 
@@ -273,12 +274,14 @@ export async function POST(request: Request) {
   const safeCompany = (companyName ?? `求人${externalJobRef}`).replace(/[\\/:*?"<>|]/g, "").trim();
   const fileName = numericId ? `求人票_${safeCompany}_${numericId}.pdf` : `求人票_${safeCompany}.pdf`;
 
-  // 記録のみ: PDF生成・Drive保管・会社説明生成・AI分析は一切起動しない（driveFileId=null のまま）。
+  // T-181: 行の保存は従来どおり同期で行い、PDF生成（pdf-service→Drive保管）はレスポンス後に
+  //        fire-and-forget で起動する（本人の「気になる」操作を待たせない・失敗しても保存は成立）。
+  //        AI分析は起動しない（CAの手動起動のまま）。
   // extractedText があれば保存し extractedAt を立てる（将来CAが分析する際の材料。ここでは分析しない）。
   // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
-  //        この経路の行は実体（driveFileId）を持たないため、実際のコピーは走らず
-  //        SKIPPED(NO_FILE_BODY) になる。後から from-job-platform 経由でPDFが付いたときに
-  //        同経路が PENDING へ戻し、そこで初めてコピー対象になる。
+  //        PDF生成が成功した時点で triggerOneDriveSync に本体を渡して実コピーを起動する
+  //        （from-job-platform の新規作成経路と同じ扱い）。生成失敗時は PENDING のまま残り
+  //        SKIPPED(NO_FILE_BODY)（夜間判定）となる（従来挙動）。
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.candidateFile.create({
       data: {
@@ -304,14 +307,26 @@ export async function POST(request: Request) {
       },
       select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
     });
-    // 実体が無い行なのでここでは同期を起動しない（起動しても SKIPPED(NO_FILE_BODY) にしかならない）。
-    // PENDING のまま残し、判定は Phase 2-c の夜間処理に委ねる。
+    // T-181: この時点では実体が無いので同期は起動しない（PENDING受付のみ）。
+    // 実コピーは下の fire-and-forget PDF生成の成功時に triggerOneDriveSync で起動する。
     await enqueueOneDriveSync(
       { candidateFileId: row.id, candidateId: candidate.id, category: "BOOKMARK" },
       tx,
     );
     return row;
   });
+
+  // T-181: PDF生成（pdf-service→Drive保管→driveFileId等更新）。★await しない（fire-and-forget）。
+  // 本人のレスポンスは即返す。失敗しても保存済みの行はそのまま（HistoryTab 側は求人詳細への
+  // フォールバックリンクで開ける）。sid = externalJobRef（job-platform の source_job_id）。
+  void generateAndStorePdf({ fileId: created.id, candidateId: candidate.id, sid: externalJobRef, fileName })
+    .then((pdfBuffer) => {
+      // PDF実体が揃ったこの時点で OneDrive コピーを起動（本文は手元にあるので取り直さない）。
+      triggerOneDriveSync({ candidateFileId: created.id, content: pdfBuffer, mimeType: "application/pdf" });
+    })
+    .catch((err) => {
+      console.error(`[candidate-site/favorites] PDF gen/store failed (sid=${externalJobRef}):`, err instanceof Error ? err.message : String(err));
+    });
 
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
 }

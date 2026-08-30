@@ -1,21 +1,31 @@
 /**
- * D-3 遡り: 既存の求人検索由来ブックマーク（CandidateFile・sourceType="job-platform"・driveFileId=null）に
- * pdf-service でPDFを生成 → 既存の Google Drive 保管プラミングで求職者フォルダへ保管 →
- * driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新する一回限りの移行スクリプト。
+ * T-181 遡り: PDF実体の無いブックマーク行（CandidateFile・category="BOOKMARK"・driveFileId=null・
+ * externalJobRef あり）に pdf-service でPDFを生成 → 既存の Google Drive 保管プラミングで
+ * 求職者フォルダへ保管 → driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新し、
+ * OneDrive コピー（runOneDriveSyncForFile）も起動する一回限りの移行スクリプト。
  *
- * 対象: 佐藤梓(5007911)・中山ちはる(5008117) の driveFileId=null 行（D-3本体 11bd630 適用前の保存分）。
- * 冪等（driveFileId 済みは再生成しない）・失敗隔離（行単位）・既存PDF行(sourceType=null)非干渉。
+ * 対象（origin 不問）:
+ *   - サイト経由（origin="candidate"）でPDF未生成の行（T-181 本体適用前の保存分）
+ *   - CA登録（from-job-platform）だがPDF生成に失敗していた行
+ *   ※ アーカイブ済み（archivedAt 非NULL）は対象外。externalJobRef 無し（kyuujin求人由来）も対象外。
+ *
+ * 安全装置:
+ *   - where で driveFileId=null に限定 + 実行直前に行単位で再確認（既存PDF行は絶対に触らない）
+ *   - 冪等（driveFileId 済みは skip）・失敗隔離（行単位）・失敗/スキップは CSV に出力
  *
  * ⚠️ 要環境変数（本番Railwayにのみ存在・ローカル.envには無い）:
  *   GOOGLE_SERVICE_ACCOUNT_KEY（Drive認証）/ GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID（既存フォルダ再利用時は不要）/ DATABASE_URL
  * 実行（本番コンテナ上）:
  *   railway ssh  → 　npx tsx scripts/backfill-job-platform-pdf-drive.ts            # DRY-RUN
  *                    npx tsx scripts/backfill-job-platform-pdf-drive.ts --execute  # 本実行
+ *
+ * （旧版 D-3 遡り〔2026-06-29・特定2候補者のみ〕を T-181 で全件対象に差し替え）
  */
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { uploadFileToDrive, getOrCreateFolder } from "../src/lib/google-drive";
+import { runOneDriveSyncForFile } from "../src/lib/onedrive-sync";
 import * as fs from "fs";
 import "dotenv/config";
 
@@ -23,6 +33,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 const PDF_SERVICE_URL = process.env.PDF_SERVICE_URL || "https://bizstudio-job-platform-production.up.railway.app";
 const EXECUTE = process.argv.includes("--execute");
+const STAMP = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
 async function genPdf(sid: string): Promise<Buffer> {
   const controller = new AbortController();
@@ -40,16 +51,27 @@ async function genPdf(sid: string): Promise<Buffer> {
 
 async function main() {
   const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID; // 無ければ既存フォルダ再利用
+
+  const targets = await prisma.candidateFile.findMany({
+    where: {
+      category: "BOOKMARK",
+      driveFileId: null,
+      externalJobRef: { not: null },
+      archivedAt: null,
+    },
+    select: { id: true, candidateId: true, fileName: true, externalJobRef: true, origin: true },
+    orderBy: [{ candidateId: "asc" }, { createdAt: "asc" }],
+  });
+
+  // 対象候補者の既存 driveFolderId（既存ブックマークが使う求職者サブフォルダ）を解決＝同一場所に統一保管。
+  const candIds = [...new Set(targets.map((t) => t.candidateId))];
   const cands = await prisma.candidate.findMany({
-    where: { candidateNumber: { in: ["5007911", "5008117"] } },
+    where: { id: { in: candIds } },
     select: { id: true, candidateNumber: true, name: true },
   });
-  const ids = cands.map((c) => c.id);
-
-  // 各候補者の既存 driveFolderId（既存ブックマークが使う求職者サブフォルダ）を解決＝同一場所に統一保管。
-  // 親フォルダ env が無くても既存フォルダへ直接アップロードできる。
+  const candById = new Map(cands.map((c) => [c.id, c]));
   const folderByCand = new Map<string, string>();
-  for (const cid of ids) {
+  for (const cid of candIds) {
     const grp = await prisma.candidateFile.groupBy({
       by: ["driveFolderId"],
       where: { candidateId: cid, driveFolderId: { not: null } },
@@ -59,33 +81,31 @@ async function main() {
     });
     if (grp[0]?.driveFolderId) folderByCand.set(cid, grp[0].driveFolderId);
   }
-  const targets = await prisma.candidateFile.findMany({
-    where: { candidateId: { in: ids }, category: "BOOKMARK", sourceType: "job-platform", driveFileId: null },
-    select: { id: true, candidateId: true, fileName: true, externalJobRef: true },
-    orderBy: [{ candidateId: "asc" }, { createdAt: "asc" }],
-  });
-  // safety: ensure no sourceType=null sneaks in (query already filters, double-check)
-  const bad = await prisma.candidateFile.count({ where: { id: { in: targets.map(t=>t.id) }, sourceType: null } });
-  const byCand: Record<string, number> = {};
-  for (const t of targets) byCand[t.candidateId] = (byCand[t.candidateId] || 0) + 1;
-  console.log(`=== 対象 ${targets.length}件 (mode=${EXECUTE ? "EXECUTE" : "DRY-RUN"}) ===`);
-  for (const c of cands) console.log(`  ${c.candidateNumber} ${c.name}: ${byCand[c.id] || 0}件`);
-  console.log(`  既存PDF行(sourceType=null)の混入: ${bad} (expect 0)`);
+
+  const byOrigin: Record<string, number> = {};
+  for (const t of targets) byOrigin[t.origin ?? "(null=ca)"] = (byOrigin[t.origin ?? "(null=ca)"] || 0) + 1;
+  console.log(`=== 対象 ${targets.length}件・候補者 ${candIds.length}名 (mode=${EXECUTE ? "EXECUTE" : "DRY-RUN"}) ===`);
+  console.log(`  origin内訳: ${JSON.stringify(byOrigin)}`);
+  for (const c of cands) {
+    const n = targets.filter((t) => t.candidateId === c.id).length;
+    console.log(`  ${c.candidateNumber} ${c.name}: ${n}件`);
+  }
 
   if (!EXECUTE) {
     console.log("\n(DRY-RUN: 処理未実行)");
-    for (const t of targets) console.log(`  ${t.externalJobRef}  ${t.fileName}`);
+    for (const t of targets) console.log(`  ${t.externalJobRef}  ${t.fileName}  origin=${t.origin ?? "ca"}`);
     await prisma.$disconnect(); await pool.end(); return;
   }
 
-  const log: { id: string; candidateId: string; ref: string; driveFileId: string; ok: boolean; err?: string }[] = [];
-  let ok = 0, ng = 0;
+  const log: { id: string; candidateNumber: string; ref: string; driveFileId: string; ok: boolean; onedrive: string; err?: string }[] = [];
+  let ok = 0, ng = 0, skip = 0;
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
-    if (!t.externalJobRef) { ng++; log.push({ id: t.id, candidateId: t.candidateId, ref: "", driveFileId: "", ok: false, err: "no externalJobRef" }); continue; }
-    // idempotent re-check
+    const candNo = candById.get(t.candidateId)?.candidateNumber ?? t.candidateId;
+    if (!t.externalJobRef) { skip++; log.push({ id: t.id, candidateNumber: candNo, ref: "", driveFileId: "", ok: false, onedrive: "", err: "no externalJobRef" }); continue; }
+    // 冪等・安全再確認: 既に driveFileId が付いた行は絶対に触らない
     const cur = await prisma.candidateFile.findUnique({ where: { id: t.id }, select: { driveFileId: true } });
-    if (cur?.driveFileId) { console.log(`  [${i+1}/${targets.length}] skip (already has driveFileId): ${t.fileName}`); log.push({ id: t.id, candidateId: t.candidateId, ref: t.externalJobRef, driveFileId: cur.driveFileId, ok: true, err: "skipped(idempotent)" }); ok++; continue; }
+    if (cur?.driveFileId) { console.log(`  [${i + 1}/${targets.length}] skip (already has driveFileId): ${t.fileName}`); log.push({ id: t.id, candidateNumber: candNo, ref: t.externalJobRef, driveFileId: cur.driveFileId, ok: true, onedrive: "", err: "skipped(idempotent)" }); skip++; continue; }
     try {
       const pdf = await genPdf(t.externalJobRef);
       // 既存の求職者フォルダを優先（統一保管）。無ければ親env+getOrCreateFolderで作成。
@@ -100,18 +120,22 @@ async function main() {
         where: { id: t.id },
         data: { driveFileId: fileId, driveViewUrl: webViewLink, driveFolderId: folderId, mimeType: "application/pdf", fileSize: pdf.length },
       });
-      ok++; log.push({ id: t.id, candidateId: t.candidateId, ref: t.externalJobRef, driveFileId: fileId, ok: true });
-      console.log(`  [${i+1}/${targets.length}] OK ${t.fileName} (${pdf.length}B) -> ${fileId}`);
+      // T-181: OneDrive コピーも起動（既存CA登録行と同じ扱いに揃える）。本文は手元にあるので取り直さない。
+      // runOneDriveSyncForFile は例外を投げない設計（結果は OneDriveSyncLog に記録される）。
+      const od = await runOneDriveSyncForFile({ candidateFileId: t.id, content: pdf, mimeType: "application/pdf" });
+      ok++; log.push({ id: t.id, candidateNumber: candNo, ref: t.externalJobRef, driveFileId: fileId, ok: true, onedrive: `${od.status}${od.skipReason ? `(${od.skipReason})` : ""}` });
+      console.log(`  [${i + 1}/${targets.length}] OK ${t.fileName} (${pdf.length}B) -> ${fileId} onedrive=${od.status}`);
     } catch (e) {
       ng++; const msg = e instanceof Error ? e.message : String(e);
-      log.push({ id: t.id, candidateId: t.candidateId, ref: t.externalJobRef, driveFileId: "", ok: false, err: msg });
-      console.log(`  [${i+1}/${targets.length}] FAIL ${t.fileName}: ${msg}`);
+      log.push({ id: t.id, candidateNumber: candNo, ref: t.externalJobRef, driveFileId: "", ok: false, onedrive: "", err: msg });
+      console.log(`  [${i + 1}/${targets.length}] FAIL ${t.fileName}: ${msg}`);
     }
   }
-  const csv = "id,candidateId,externalJobRef,driveFileId,ok,err\n" + log.map(l => `${l.id},${l.candidateId},${l.ref},${l.driveFileId},${l.ok},"${l.err||""}"`).join("\n") + "\n";
-  fs.writeFileSync("verify/job-platform-pdf-backfill-20260629.csv", csv, "utf8");
-  console.log(`\n=== 成功 ${ok} / 失敗 ${ng} / 計 ${targets.length} ===`);
-  console.log("CSV: verify/job-platform-pdf-backfill-20260629.csv");
+  const csvPath = `verify/t181-pdf-backfill-${STAMP}.csv`;
+  const csv = "id,candidateNumber,externalJobRef,driveFileId,ok,onedrive,err\n" + log.map((l) => `${l.id},${l.candidateNumber},${l.ref},${l.driveFileId},${l.ok},${l.onedrive},"${l.err || ""}"`).join("\n") + "\n";
+  fs.writeFileSync(csvPath, csv, "utf8");
+  console.log(`\n=== 成功 ${ok} / 失敗 ${ng} / スキップ ${skip} / 計 ${targets.length} ===`);
+  console.log(`CSV: ${csvPath}`);
   await prisma.$disconnect(); await pool.end();
 }
 main().catch(async (e) => { console.error("ERR", e instanceof Error ? e.message : String(e)); await pool.end(); process.exit(1); });
