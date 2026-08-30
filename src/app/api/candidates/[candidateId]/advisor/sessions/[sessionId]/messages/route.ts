@@ -13,6 +13,15 @@ import { isAnalysisMessage } from "@/lib/advisor-message-kind";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
+// T-184: タイプ診断のついでに未読の面談ログを要約保存＋既読化する。部品は T-155 の取り込み実装と共有。
+import {
+  collectUnreadLogs,
+  buildDigestUserContent,
+  buildInlineDigestInstruction,
+  extractLogDigestBlock,
+  saveIngestedDigest,
+  type UnreadLogBundle,
+} from "@/lib/advisor/log-ingest";
 // T-150: 検出指示（TASK_DETECTION_PROMPT）は lib 側に置き、route と検証スクリプトで
 // 同じ実文言を参照する（route ファイルは Next.js の制約で任意の定数を export できないため）。
 import {
@@ -166,7 +175,9 @@ export async function POST(
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { candidateId, sessionId } = await params;
-  const { content, file } = await req.json();
+  // T-184: typeDiagnosis はパネルの「タイプ診断」ボタン経路だけが true で送る明示フラグ。
+  // 固定文の一致判定にしないのは、CA が自由入力で似た文言を打っても誤発火させないため。
+  const { content, file, typeDiagnosis } = await req.json();
 
   console.log("=== Advisor Message API ===");
   console.log("Content:", content?.substring(0, 100));
@@ -299,6 +310,25 @@ export async function POST(
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
+  // T-184: タイプ診断のときだけ、未読の面談ログ全文を「この1回のコール」に同梱する。
+  // 「未読ログ取込」ボタンを押さない限り advisorLogDigest / advisorIngestedAt が更新されず
+  // 未読が残り続けるため、診断のついでに要約＋既読化まで済ませる（AI呼び出し回数は増やさない）。
+  // 未読の判定条件・入力ガードは T-155 の取り込みと同一（collectUnreadLogs を共有）。
+  // 収集に失敗しても診断は通常どおり実行する（同梱を諦めるだけ＝次回押下で再試行できる）。
+  let digestBundle: UnreadLogBundle | null = null;
+  if (typeDiagnosis) {
+    try {
+      const collected = await collectUnreadLogs(candidateId);
+      if (!collected.ok) {
+        console.warn(`[advisor-chat] T-184 collectUnreadLogs failed (non-fatal): ${collected.error}`);
+      } else if (collected.bundle.logs.length > 0) {
+        digestBundle = collected.bundle;
+      }
+    } catch (e) {
+      console.warn("[advisor-chat] T-184 collectUnreadLogs threw (non-fatal):", e);
+    }
+  }
+
   // LIGHTモード廃止: 常にフル版スキルを注入する。
   // 旧実装はキーワード分岐（needsSkillPrompt）でFULL/LIGHTを切り替えていたが、キーワードに
   // マッチしない質問（実績値・憧れ枠等のスキル固有知識を問うもの）でスキルが完全脱落する
@@ -346,12 +376,23 @@ export async function POST(
     const isSyntheticAttachmentLabel = !!file && typed === `添付ファイル: ${file?.name ?? ""}`;
     const caInput = isSyntheticAttachmentLabel ? "" : typed;
 
+    // T-184: 未読ログ本文と要約指示は cache_control 付きの固定ブロックではなく、
+    // ここ（可変側＝ユーザーメッセージ）に載せる（罠#39: 固定ブロックに可変内容を混ぜない）。
+    // <ca_input> の外なので、タスク候補検出（TASK_DETECTION_PROMPT）の根拠にもならない。
     apiMessages[lastIdx] = {
       role: "user",
       content:
         `<ca_input>\n${caInput}\n</ca_input>\n` +
-        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : ""),
+        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : "") +
+        (digestBundle
+          ? `\n<unread_meeting_logs>\n${buildDigestUserContent(digestBundle)}</unread_meeting_logs>\n` +
+            buildInlineDigestInstruction(digestBundle.logs.length)
+          : ""),
     };
+  } else if (digestBundle) {
+    // 差し替え先が無い（想定外）ときは同梱を諦める。指示だけ出て抽出が必ず失敗するのを防ぐ。
+    console.warn("[advisor-chat] T-184 last message is not user; skip digest bundling");
+    digestBundle = null;
   }
 
   const usedModel = selectModel(content || "", !!file);
@@ -372,7 +413,10 @@ export async function POST(
       },
       body: JSON.stringify({
         model: usedModel,
-        max_tokens: 4000,
+        // T-184: ダイジェスト同梱時のみ出力上限を広げる。診断本文（従来4,000で足りている）に
+        // 最大4,000字のダイジェストが後続するため、据え置きだと本文か区切り文字が途中で切れる。
+        // 同梱しない通常のチャット・診断は従来どおり 4,000。
+        max_tokens: digestBundle ? 10000 : 4000,
         temperature: 0.7,
         system: systemBlocks,
         messages: apiMessages,
@@ -411,7 +455,8 @@ export async function POST(
       model: usedModel,
       usage: u,
       candidateId,
-      note: "skill-full",
+      // T-184: ダイジェスト同梱の有無を帳簿から識別できるようにする（費用比較のため）。
+      note: digestBundle ? `skill-full;t184-digest-${digestBundle.logs.length}` : "skill-full",
       latencyMs,
       contextBuildMs,
     });
@@ -420,11 +465,41 @@ export async function POST(
       ? rawContent
       : "応答の生成に失敗しました。もう一度お試しください。";
 
+    // T-184: 先にダイジェストブロックを剥がす。画面表示・advisorChatMessage 保存・返却の
+    // いずれにも <<<LOG_DIGEST>>> を残さない。
+    // ★fail-closed: ブロックが無い・空・保存失敗のときは advisorIngestedAt を立てない
+    //   （未読のまま残り、次回のタイプ診断か「未読ログ取込」ボタンで再試行できる）。
+    let ingestedLogCount = 0;
+    let contentForChat = aiContent;
+    if (digestBundle) {
+      const { cleanContent: strippedContent, digest } = extractLogDigestBlock(aiContent);
+      contentForChat = strippedContent;
+      if (!digest) {
+        console.warn(
+          `[advisor-chat] T-184 digest block missing or empty (fail-closed, not ingested) candidateId=${candidateId}`,
+        );
+      } else {
+        try {
+          await saveIngestedDigest({
+            candidateId,
+            digest,
+            fileIds: digestBundle.logs.map((l) => l.id),
+          });
+          ingestedLogCount = digestBundle.logs.length;
+          console.log(
+            `[advisor-chat] T-184 ingested=${ingestedLogCount} digestChars=${digest.length} candidateId=${candidateId}`,
+          );
+        } catch (e) {
+          console.warn("[advisor-chat] T-184 digest save failed (fail-closed, not ingested):", e);
+        }
+      }
+    }
+
     // T-150: 応答本文に併記されたタスク候補 JSON を剥がし、期日を JST で確定させる。
     // 失敗しても候補なしとして続行する（チャット応答は必ず成立させる＝fail-open）。
     // DB に保存するのは必ず cleanContent 側（生保存すると画面に JSON が出るうえ、
     // 次ターンの messages に乗って AI が自分の過去 JSON を模倣する）。
-    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(aiContent);
+    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(contentForChat);
 
     // 同一セッションで未処理の候補が既にある種別は落とす。
     // 検出根拠を今回の <ca_input> に限定しても、AI は履歴に残る過去ターンの約束を拾って
@@ -475,7 +550,12 @@ export async function POST(
       }).catch((e) => console.error("[advisor-chat] diagnosis extraction failed:", e));
     }
 
-    return NextResponse.json({ message: saved });
+    // T-184: 取り込めた件数を返す。UI はこれで未読件数の再取得とトースト表示を出し分ける
+    //（0件＝同梱しなかった／fail-closed のときは何も出さない）。
+    return NextResponse.json({
+      message: saved,
+      ...(ingestedLogCount > 0 ? { logIngest: { ingested: ingestedLogCount } } : {}),
+    });
   } catch (e: unknown) {
     clearTimeout(timeoutId);
 
