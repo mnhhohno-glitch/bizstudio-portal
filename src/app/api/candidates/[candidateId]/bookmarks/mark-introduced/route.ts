@@ -9,9 +9,11 @@ import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 //     ここに流用すると人事評価の数字が水増しされるため絶対に触らない。
 //   - introducedAt は既存では T-133 移行バッチ（出力済行のみ）が書くだけで、通常運用の書き込みは本APIが初。
 //     実績集計（3-8）は COALESCE(lastExportedAt, introducedAt) を提案日時として使う。
+// T-182 追補3: 出力済行（lastExportedAt != null）にも introducedAt を立てられるようにした。
+//   unmark-introduced が出力済行も戻せるようになったため、戻した行を紹介求人区分へ復帰できないと
+//   片道になる。lastExportedAt は従来どおり一切触らない（実績の分子は COALESCE で lastExportedAt 優先）。
 // 対象外（スキップ）:
 //   - サイト経由行（origin="candidate" / driveFileId=null）… 本人応募は CA紹介実績に数えない（R1）
-//   - 出力済行（lastExportedAt != null）… 既に紹介済み扱い
 //   - 紹介済み行（introducedAt != null）… 冪等
 export async function POST(
   req: Request,
@@ -39,16 +41,15 @@ export async function POST(
   // 対象行の判定をサーバー側で厳格に行う（UI の選択ミスや古い画面からの id 混入を弾く）。
   const files = await prisma.candidateFile.findMany({
     where: { id: { in: fileIds }, candidateId, category: "BOOKMARK", archivedAt: null },
-    select: { id: true, origin: true, driveFileId: true, lastExportedAt: true, introducedAt: true },
+    select: { id: true, origin: true, driveFileId: true, introducedAt: true },
   });
 
   const siteRows = files.filter((f) => f.origin === "candidate" && !f.driveFileId);
-  const alreadyExported = files.filter((f) => !(f.origin === "candidate" && !f.driveFileId) && f.lastExportedAt);
   const alreadyIntroduced = files.filter(
-    (f) => !(f.origin === "candidate" && !f.driveFileId) && !f.lastExportedAt && f.introducedAt,
+    (f) => !(f.origin === "candidate" && !f.driveFileId) && f.introducedAt,
   );
   const targets = files.filter(
-    (f) => !(f.origin === "candidate" && !f.driveFileId) && !f.lastExportedAt && !f.introducedAt,
+    (f) => !(f.origin === "candidate" && !f.driveFileId) && !f.introducedAt,
   );
 
   if (targets.length > 0) {
@@ -66,7 +67,6 @@ export async function POST(
   return NextResponse.json({
     marked: targets.length,
     skippedSite: siteRows.length,
-    skippedExported: alreadyExported.length,
     skippedAlready: alreadyIntroduced.length,
     rejected: fileIds.length - files.length,
   });

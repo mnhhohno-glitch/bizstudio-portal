@@ -7,9 +7,10 @@ import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 // CandidateFile.introducedAt を null に戻すだけの最小構成。認証・対象判定は mark-introduced と同一。
 // 戻すと紹介求人区分から消え、求職者サイトの表示条件（introducedAt あり OR origin=candidate）からも外れる。
 //   ※ origin="candidate" 行は introducedAt を消してもサイトに残る（OR 条件・意図どおり）。
+// T-182 追補3: 出力済行（lastExportedAt != null）も戻せるようにした。旧方式で出力済のまま
+//   バックフィルで introducedAt が付いた行が紹介求人区分から一切動かせなかったため。
+//   lastExportedAt 自体は触らない（実績の実測値）。mark-introduced も出力済行を受けるので往復可能。
 // 対象外（スキップ）:
-//   - 出力済行（lastExportedAt != null）… introducedAt を消しても mark-introduced が再度立てられず
-//     片道になるため触らない（mark-introduced が出力済行に introducedAt を立てないのと対称）。
 //   - 未紹介行（introducedAt == null）… 冪等
 export async function POST(
   req: Request,
@@ -37,12 +38,11 @@ export async function POST(
   // 対象行の判定をサーバー側で厳格に行う（UI の選択ミスや古い画面からの id 混入を弾く）。
   const files = await prisma.candidateFile.findMany({
     where: { id: { in: fileIds }, candidateId, category: "BOOKMARK", archivedAt: null },
-    select: { id: true, lastExportedAt: true, introducedAt: true },
+    select: { id: true, introducedAt: true },
   });
 
-  const alreadyExported = files.filter((f) => f.lastExportedAt);
-  const notIntroduced = files.filter((f) => !f.lastExportedAt && !f.introducedAt);
-  const targets = files.filter((f) => !f.lastExportedAt && f.introducedAt);
+  const notIntroduced = files.filter((f) => !f.introducedAt);
+  const targets = files.filter((f) => f.introducedAt);
 
   if (targets.length > 0) {
     await prisma.candidateFile.updateMany({
@@ -58,7 +58,6 @@ export async function POST(
 
   return NextResponse.json({
     reverted: targets.length,
-    skippedExported: alreadyExported.length,
     skippedNotIntroduced: notIntroduced.length,
     rejected: fileIds.length - files.length,
   });

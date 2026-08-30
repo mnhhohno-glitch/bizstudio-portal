@@ -1630,15 +1630,21 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
   // 求人紹介への移動対象から外し、専用の「エントリーへ登録」導線へ回す。
   const isSiteApply = (f: BookmarkFile) => f.origin === "candidate" && !f.driveFileId;
 
-  // T-161 R2: 出力なしで「紹介済み」にできる行 = 非サイト・未出力・未紹介。
-  const isIntroducible = (f: BookmarkFile) => !isSiteApply(f) && !f.lastExportedAt && !f.introducedAt;
+  // T-161 R2: 出力なしで「紹介済み」にできる行 = 非サイト・未紹介。
+  // T-182追補3: 出力済行も対象（「ブックマークに戻す」で戻した出力済行を紹介求人区分へ復帰させるため。
+  //   出力済行が BM区分に居るのは戻した後だけなので、通常運用の見え方は変わらない）。
+  const isIntroducible = (f: BookmarkFile) => !isSiteApply(f) && !f.introducedAt;
   const selectedIntroducibleIds = [...selectedIds].filter((id) => {
     const f = files.find((x) => x.id === id);
     return f ? isIntroducible(f) : false;
   });
 
-  // T-161: 「エントリーへ登録」対象 = サイト経由 + 紹介済み・未出力（to-entry のサーバー側条件と同一）。
-  const isEntryRegistrable = (f: BookmarkFile) => isSiteApply(f) || (!!f.introducedAt && !f.lastExportedAt);
+  // T-161: 「エントリーへ登録」対象 = サイト経由 + 紹介済み（to-entry のサーバー側条件と同一）。
+  // T-182追補3: 出力済（lastExportedAt あり）の紹介済み行も対象に含める。611bda8 で紹介求人区分を
+  //   BookmarkSection に一本化した結果、旧 kyuujin 一覧の「エントリーへ登録」で登録できていた
+  //   出力済の紹介求人（紹介求人区分の実データの大半）がどの画面からも登録できなくなっていた。
+  //   二重登録は to-entry 側の externalJobRef／会社名による既存 JobEntry 判定で防ぐ。
+  const isEntryRegistrable = (f: BookmarkFile) => isSiteApply(f) || !!f.introducedAt;
   const selectedEntryRegistrableIds = [...selectedIds].filter((id) => {
     const f = files.find((x) => x.id === id);
     return f ? isEntryRegistrable(f) : false;
@@ -1657,7 +1663,6 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "紹介済みへの変更に失敗しました");
       const parts = [`${data.marked ?? 0}件を紹介求人へ移動しました`];
-      if (data.skippedExported > 0) parts.push(`${data.skippedExported}件は出力済のため対象外`);
       if (data.skippedSite > 0) parts.push(`${data.skippedSite}件は本人応募のため対象外`);
       toast.success(parts.join("、"));
       setSelectedIds(new Set());
@@ -1670,9 +1675,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     }
   };
 
-  // T-182追補2: 「ブックマークに戻す」対象 = 紹介済み・未出力（unmark-introduced のサーバー側条件と同一）。
-  // 出力済行（lastExportedAt あり）は introducedAt を消すと mark-introduced で再紹介できず片道になるため対象外。
-  const isRevertible = (f: BookmarkFile) => !!f.introducedAt && !f.lastExportedAt;
+  // T-182追補2: 「ブックマークに戻す」対象 = 紹介済み行（unmark-introduced のサーバー側条件と同一）。
+  // 追補3: 出力済行も対象。mark-introduced も出力済行を受けるようにしたので往復できる（片道にならない）。
+  const isRevertible = (f: BookmarkFile) => !!f.introducedAt;
   const selectedRevertibleIds = [...selectedIds].filter((id) => {
     const f = files.find((x) => x.id === id);
     return f ? isRevertible(f) : false;
@@ -1690,9 +1695,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "ブックマークへの巻き戻しに失敗しました");
-      const parts = [`${data.reverted ?? 0}件をブックマークに戻しました（求職者サイトの表示からも外れます）`];
-      if (data.skippedExported > 0) parts.push(`${data.skippedExported}件は出力済のため対象外`);
-      toast.success(parts.join("、"));
+      toast.success(`${data.reverted ?? 0}件をブックマークに戻しました（求職者サイトの表示からも外れます）`);
       setSelectedIds(new Set());
       fetchFiles();
       onSwitchToBookmark?.();
@@ -1982,12 +1985,13 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                     onClick={() => setShowEntryModal(true)}
                     disabled={registeringEntry}
                     className="text-[13px] text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50"
-                    title="サイト応募（本人がマイページで応募した求人）と紹介済み（出力なし）の求人を、求人ツールを経由せずエントリー管理へ直接登録します"
+                    title="サイト応募（本人がマイページで応募した求人）と紹介済みの求人を、求人ツールを経由せずエントリー管理へ直接登録します（出力済の行も登録できます。既にエントリー済の求人はスキップします）"
                   >
                     {registeringEntry ? "➡ 登録中..." : `➡ エントリーへ登録（${selectedEntryRegistrableIds.length}件）`}
                   </button>
                 )}
-                {/* T-182追補2: 誤操作の巻き戻し。introducedAt を null に戻すだけ（紹介求人区分のみ表示） */}
+                {/* T-182追補2: 誤操作の巻き戻し。introducedAt を null に戻すだけ（紹介求人区分のみ表示）。
+                    追補3: 紹介求人区分の全行が対象（出力済行も戻せる。lastExportedAt は触らない）。 */}
                 {variant === "introduced" && selectedRevertibleIds.length > 0 && (
                   <button
                     onClick={handleUnmarkIntroduced}

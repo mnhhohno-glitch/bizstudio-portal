@@ -12,8 +12,11 @@ import {
 // T-161 で対象を2種類に拡張:
 //   (a) サイト経由行（origin="candidate" / driveFileId=null）
 //       求職者本人の応募履歴。route="site-apply" を印にする（実績集計では CA紹介に数えない）。
-//   (b) 紹介済み行（introducedAt != null / lastExportedAt=null / 非サイト行）
-//       CAが「紹介済みにする」で出力なしに紹介した求人。route=null（通常エントリーと同格・CA実績に数える）。
+//   (b) 紹介済み行（introducedAt != null）
+//       CAが紹介した求人。route=null（通常エントリーと同格・CA実績に数える）。
+//       T-182追補3: 出力済（lastExportedAt != null）も対象。旧 kyuujin 一覧の「エントリーへ登録」で
+//         登録できていた出力済の紹介求人が、紹介求人区分の BookmarkSection 一本化以降どこからも
+//         登録できなくなっていたため条件を外す。二重登録は下の externalJobRef／会社名判定で防ぐ。
 // T-161: 求人情報の引き継ぎ — ブックmarkが保持する jobTitle / jobCategory / 求人URL(memo) を
 //   JobEntry へそのまま写す（旧実装は jobTitle:"" 固定・jobCategory 未設定で下流の表示が空になっていた）。
 // T-161: 重複判定 — externalJobRef（求人単位）で行う。旧実装の会社名一致判定は
@@ -49,7 +52,7 @@ export async function POST(
   }
 
   // 対象を厳格に限定: 当該候補者の有効な BOOKMARK のうち、
-  //   (a) サイト経由行、または (b) 紹介済み・未出力行 のみ。
+  //   (a) サイト経由行、または (b) 紹介済み行（出力の有無は問わない） のみ。
   // それ以外の id（未紹介の通常PDF行・他候補者・アーカイブ済み）が混じっていてもサーバー側で弾く。
   const files = await prisma.candidateFile.findMany({
     where: {
@@ -59,7 +62,7 @@ export async function POST(
       archivedAt: null,
       OR: [
         { origin: "candidate", driveFileId: null },
-        { introducedAt: { not: null }, lastExportedAt: null },
+        { introducedAt: { not: null } },
       ],
     },
     select: {
@@ -82,7 +85,7 @@ export async function POST(
 
   if (files.length === 0) {
     return NextResponse.json(
-      { created: 0, skipped: 0, rejected, error: "登録対象の求人がありません（サイト経由または紹介済みのブックマークのみ登録できます）" },
+      { created: 0, skipped: 0, rejected, error: "登録対象の求人がありません（サイト経由または紹介済みの求人のみ登録できます）" },
       { status: 422 }
     );
   }
