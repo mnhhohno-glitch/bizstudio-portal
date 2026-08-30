@@ -386,7 +386,7 @@ export async function POST(
         (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : "") +
         (digestBundle
           ? `\n<unread_meeting_logs>\n${buildDigestUserContent(digestBundle)}</unread_meeting_logs>\n` +
-            buildInlineDigestInstruction(digestBundle.logs.length)
+            "" /* V-8 一時: 要約指示を無効化して fail-closed を検証する（検証後にrevert） */
           : ""),
     };
   } else if (digestBundle) {
