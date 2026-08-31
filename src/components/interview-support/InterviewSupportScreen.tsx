@@ -13,9 +13,12 @@
 //   利用可否を判定し、使えなければ Chrome 内蔵（useSpeechTranscription）へ自動フォールバック。
 //   自動検知は30秒タイマーをやめ、発話確定のたびに起動するイベント駆動（連続実行は最低5秒空ける）。
 // - Phase 5: 事前情報（キャリアシート等）。起動時に prior-info API で取得して上部バーに表示し、
-//   「開始」時に事前情報のみで下書きカードを1回生成（bootstrap）。以後の auto-scan にも毎回
-//   同じ priorInfoText を添える（byte一致で prompt cache に乗る）。カードは questions（確認ポイント）と
-//   source（事前情報/会話で確認済み）を持つ。
+//   auto-scan に毎回同じ priorInfoText を添える（byte一致で prompt cache に乗る）。カードは
+//   questions（確認ポイント）を持つ。
+// - Phase 6: 事前情報は裏方専用に変更（実面談テストで、事前情報から作った下書きカードがCAの
+//   「シート照合」を誘発し会話への集中が崩れたため）。開始時の下書き生成（bootstrap）と
+//   source ラベルを廃止し、画面は常に白紙から会話ベースで積み上げる。あわせて事前情報由来の
+//   固有名詞リスト（keyterms）を Deepgram の Keyterm Prompting に渡し、認識精度を底上げする。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
@@ -26,7 +29,6 @@ import ExplainCards, {
   type ExplainCard,
   type AutoJobCard,
   type AutoReasonCard,
-  type AutoCardSource,
 } from "./ExplainCards";
 
 // 「直近30秒」の切り出し幅(ms)。実測を見て調整する設定値。
@@ -51,14 +53,14 @@ type InterviewInfo = {
   interviewCount: number | null;
 };
 
-/* ---- Phase 5: 事前情報（キャリアシート等） ---- */
+/* ---- Phase 5: 事前情報（キャリアシート等）。Phase 6 から裏方専用（AIの読み取り補正＋認識キーターム） ---- */
 type PriorCandidateFile = { id: string; fileName: string };
 type PriorInfoState =
   // loading: prior-info API 応答待ち / none: 該当ファイルなし or 抽出不可 / off: ユーザーが「使わない」を選択
   | { status: "loading" }
   | { status: "none"; candidates: PriorCandidateFile[] }
   | { status: "off"; candidates: PriorCandidateFile[] }
-  | { status: "ready"; fileId: string; fileName: string; text: string; candidates: PriorCandidateFile[] };
+  | { status: "ready"; fileId: string; fileName: string; text: string; keyterms: string[]; candidates: PriorCandidateFile[] };
 
 function sessionStorageKey(interviewId: string): string {
   return `interview-support-log:${interviewId}`;
@@ -122,11 +124,19 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           fileId?: string;
           fileName?: string;
           text?: string;
+          keyterms?: string[];
           candidates?: PriorCandidateFile[];
         };
         const candidates = Array.isArray(data.candidates) ? data.candidates : [];
         if (data.available && data.fileId && data.fileName && data.text) {
-          setPriorInfo({ status: "ready", fileId: data.fileId, fileName: data.fileName, text: data.text, candidates });
+          setPriorInfo({
+            status: "ready",
+            fileId: data.fileId,
+            fileName: data.fileName,
+            text: data.text,
+            keyterms: Array.isArray(data.keyterms) ? data.keyterms.filter((t): t is string => typeof t === "string") : [],
+            candidates,
+          });
         } else {
           setPriorInfo({ status: "none", candidates });
         }
@@ -141,6 +151,13 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   useEffect(() => {
     void loadPriorInfo();
   }, [loadPriorInfo]);
+
+  // Phase 6: 事前情報由来の固有名詞を Deepgram の Keyterm Prompting へ渡す。
+  // ref 保持なので反映は次の WebSocket 接続から（取得完了前に「開始」した場合も再接続時に効く）。
+  const { setKeyterms } = deepgram;
+  useEffect(() => {
+    setKeyterms(priorInfo.status === "ready" ? priorInfo.keyterms : []);
+  }, [priorInfo, setKeyterms]);
 
   /* ---- Phase 2: DBへの自動保存 ---- */
   // 「開始」初回押下で確定するセッション識別子。以後の保存はすべてこのIDへの upsert（冪等）。
@@ -173,14 +190,13 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           sourceText: c.source,
           resultText: c.text,
         })),
-        // Phase 5: questions（確認ポイント）と source（事前情報/会話で確認済み）も保存する（Json相乗り・形式拡張のみ）。
+        // Phase 5: questions（確認ポイント）も保存する（Json相乗り・形式拡張のみ。Phase 6 で source は廃止）。
         ...curJobs.map((j) => ({
           t: new Date(j.updatedAt).toISOString(),
           mode: "auto-job" as const,
           sourceText: j.title,
           resultText: j.text,
           questions: j.questions,
-          source: j.source,
         })),
         ...(curReason
           ? [{
@@ -189,7 +205,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               sourceText: "転職理由",
               resultText: curReason.text,
               questions: curReason.questions,
-              source: curReason.source,
             }]
           : []),
       ].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
@@ -231,31 +246,17 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     return () => clearInterval(timer);
   }, [listening, saveSession]);
 
-  // Phase 5: 「開始」時の下書き生成（事前情報のみで auto-scan を1回呼ぶ）。実体は runAutoScan だが
-  // 定義順の都合で ref 経由で呼ぶ（scheduleAutoScanRef と同じ流儀）。セッション中1回だけ。
-  const bootstrapDoneRef = useRef(false);
-  const runBootstrapScanRef = useRef<() => void>(() => {});
-
   const handleStart = useCallback(() => {
     if (!dbSessionRef.current) {
       dbSessionRef.current = { id: crypto.randomUUID(), startedAt: Date.now() };
     }
     // 停止→再開は同一セッションの続きとして扱う（「終了済み」を取り消す）。
     endedAtRef.current = null;
-    // Phase 5: 下書き生成は sessionStarted を見る effect 側で発火する（事前情報の取得完了が
-    // 「開始」押下より遅れても取りこぼさないため）。
+    // Phase 6: 開始時の下書き生成（bootstrap）は廃止。画面は白紙のまま会話からカードが生まれる。
+    // sessionStarted は事前情報の切り替えロック用（cache とキーターム前提を面談中に変えない）。
     setSessionStarted(true);
     start();
   }, [start]);
-
-  // Phase 5: 事前情報がある場合のみ、開始後に1回だけ下書きカードを生成する。
-  // 認識開始はブロックしない（非同期で走らせ、結果はカードとして流れ込む）。
-  useEffect(() => {
-    if (!sessionStarted || bootstrapDoneRef.current) return;
-    if (priorInfo.status !== "ready") return;
-    bootstrapDoneRef.current = true;
-    runBootstrapScanRef.current();
-  }, [sessionStarted, priorInfo]);
 
   const handleStop = useCallback(() => {
     stop();
@@ -417,15 +418,12 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const explainedTermsRef = useRef<string[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runAutoScan = useCallback(async (opts?: { bootstrap?: boolean }) => {
+  const runAutoScan = useCallback(async () => {
     if (scanInFlightRef.current) return;
-    const bootstrap = opts?.bootstrap ?? false;
     const { entries: curEntries, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
-    // Phase 5 bootstrap: 会話開始前の下書き生成。新規発話なし・事前情報のみで呼ぶ。
-    const newEntries = bootstrap ? [] : curEntries.slice(scannedCountRef.current);
+    const newEntries = curEntries.slice(scannedCountRef.current);
     const text = newEntries.map((e) => e.text).join("\n");
-    if (!bootstrap && text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
-    if (bootstrap && !priorTextRef.current) return; // 下書きは事前情報がある時だけ
+    if (text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
     const scannedCount = curEntries.length;
     scanInFlightRef.current = true;
     try {
@@ -435,6 +433,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         body: JSON.stringify({
           text,
           // Phase 5: 事前情報は毎回同じ文字列を添える（byte一致で prompt cache に乗せる）。
+          // Phase 6 から裏方専用（読み取り補正・要約精度向上）。カードの根拠には使われない。
           priorInfoText: priorTextRef.current ?? undefined,
           explainedTerms: explainedTermsRef.current,
           existingJobs: curJobs.map((j) => ({
@@ -442,7 +441,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
             title: j.title,
             text: j.text,
             questions: j.questions,
-            source: j.source,
           })),
           existingReason: curReason ? { text: curReason.text, questions: curReason.questions } : null,
         }),
@@ -450,24 +448,20 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       if (!res.ok) return; // 自動フローはエラーを画面に出さない（次回スキャンで回復）
       const data = (await res.json()) as {
         terms?: Array<{ term?: string; text?: string }>;
-        jobs?: Array<{ key?: string; title?: string; text?: string; questions?: string[]; source?: string }>;
-        reason?: { text?: string; questions?: string[]; source?: string } | null;
+        jobs?: Array<{ key?: string; title?: string; text?: string; questions?: string[] }>;
+        reason?: { text?: string; questions?: string[] } | null;
       };
-      if (!bootstrap) scannedCountRef.current = scannedCount;
+      scannedCountRef.current = scannedCount;
 
       let applied = false;
       const now = Date.now();
-      // Phase 5: source の既定値。下書きは事前情報由来、通常スキャンは会話由来。
-      const fallbackSource: AutoCardSource = bootstrap ? "prior" : "conversation";
-      const asCardSource = (v: string | undefined): AutoCardSource =>
-        v === "prior" || v === "conversation" ? v : fallbackSource;
       const asQuestions = (v: string[] | undefined): string[] =>
         (Array.isArray(v) ? v : []).filter((q) => typeof q === "string" && q.trim() !== "").slice(0, 3);
 
       // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
       const jobs = (data.jobs ?? []).flatMap((j) =>
         j?.key && j?.text
-          ? [{ key: j.key, title: j.title ?? "", text: j.text, questions: asQuestions(j.questions), source: asCardSource(j.source) }]
+          ? [{ key: j.key, title: j.title ?? "", text: j.text, questions: asQuestions(j.questions) }]
           : []
       );
 
@@ -512,7 +506,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
                 title: j.title || next[idx].title,
                 text: j.text,
                 questions: j.questions,
-                source: j.source,
                 updatedAt: now,
                 highlight: true,
               };
@@ -522,7 +515,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
                 title: j.title || "業務内容",
                 text: j.text,
                 questions: j.questions,
-                source: j.source,
                 updatedAt: now,
                 highlight: true,
               });
@@ -538,7 +530,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         setReasonCard({
           text: data.reason.text,
           questions: asQuestions(data.reason.questions),
-          source: asCardSource(data.reason.source),
           updatedAt: now,
           highlight: true,
         });
@@ -584,10 +575,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   useEffect(() => {
     scheduleAutoScanRef.current = scheduleAutoScan;
   }, [scheduleAutoScan]);
-  // Phase 5: 「開始」時の下書き生成の実体（handleStart は定義順の都合で ref 経由で呼ぶ）。
-  useEffect(() => {
-    runBootstrapScanRef.current = () => void runAutoScan({ bootstrap: true });
-  }, [runAutoScan]);
 
   useEffect(() => {
     if (!listening) return;
@@ -647,7 +634,9 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               )}
             </span>
           )}
-          {/* Phase 5: 事前情報（キャリアシート等）の有無。複数候補がある時だけ選択プルダウンを出す。 */}
+          {/* Phase 5: 事前情報（キャリアシート等）の有無。複数候補がある時だけ選択プルダウンを出す。
+              Phase 6 から事前情報は裏方専用（AIの読み取り補正＋認識キーターム）。この表示は
+              「裏方が効いているか」の確認用として残す。 */}
           <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
             {priorInfo.status === "loading"
               ? "事前情報: 確認中…"

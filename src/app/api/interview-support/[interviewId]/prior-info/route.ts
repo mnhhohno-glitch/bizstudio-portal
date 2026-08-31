@@ -8,12 +8,17 @@
 //   ただしこのAPIから parsedText への書き込みはしない（advisor-context のAI解析パイプラインと混ぜない）。
 // - 該当が複数あれば candidates に全件返し、支援画面がプルダウンで切り替えられるようにする
 //   （?fileId= で明示指定）。1件なら自動採用。
+// Phase 6: 抽出テキストから固有名詞リスト（keyterms）を Haiku で1回だけ作って返す。
+//   支援画面はこれを Deepgram の Keyterm Prompting（listen の keyterm パラメータ）に渡し、
+//   病院名・学校名・資格名等の音声認識精度を底上げする。抽出失敗時は keyterms 無しで続行。
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { extractTextFromPdf } from "@/lib/ai/extract-text";
+import { anthropic, CLAUDE_MODEL_FAST } from "@/lib/claude";
+import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 // Driveダウンロード＋PDF抽出で十数秒かかる大型ファイルに備える。
 export const maxDuration = 60;
@@ -32,6 +37,50 @@ const PRIOR_FILE_CATEGORIES = ["MEETING", "ORIGINAL", "BS_DOCUMENT", "APPLICATIO
 function keywordRank(fileName: string): number {
   const idx = PRIOR_FILE_KEYWORDS.findIndex((k) => fileName.includes(k));
   return idx < 0 ? PRIOR_FILE_KEYWORDS.length : idx;
+}
+
+// Phase 6: Deepgram Keyterm Prompting 用の固有名詞リスト上限（URL長対策。クライアント側でも同値で防御）。
+const MAX_KEYTERMS = 50;
+const KEYTERM_MAX_TOKENS = 1000;
+
+const KEYTERM_SYSTEM_PROMPT = `以下に渡すテキストは求職者のキャリアシート・職務経歴書です。音声認識エンジンの固有名詞辞書に使うため、テキストに出てくる固有名詞（会社名・病院名・施設名・学校名・資格名・職種名）だけを抽出してください。
+出力は JSON の文字列配列のみ（例: ["○○病院","理学療法士"]）。前後に説明文・コードブロック記号を付けないこと。最大${MAX_KEYTERMS}語。一般的な単語・人名・地名単体は含めない。`;
+
+/** 事前情報テキストから固有名詞リストを1回だけ抽出する。失敗は空配列（本体は止めない）。 */
+async function extractKeyterms(priorText: string): Promise<string[]> {
+  if (!process.env.ANTHROPIC_API_KEY) return [];
+  const startedAt = Date.now();
+  try {
+    const message = await anthropic.messages.create({
+      model: CLAUDE_MODEL_FAST,
+      max_tokens: KEYTERM_MAX_TOKENS,
+      system: KEYTERM_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: priorText }],
+    });
+    const raw = message.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    // 指示に反して前後に文字が付いた場合に備え、最初の [ から最後の ] を対象にする。
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    if (start < 0 || end <= start) return [];
+    const parsed: unknown = JSON.parse(raw.slice(start, end + 1));
+    const keyterms = (Array.isArray(parsed) ? parsed : [])
+      .filter((t): t is string => typeof t === "string" && t.trim() !== "")
+      .map((t) => t.trim());
+    const deduped = [...new Set(keyterms)].slice(0, MAX_KEYTERMS);
+
+    // T-126: usage 永続化（失敗しても本体に影響しない）。
+    await recordAdvisorUsage({
+      endpoint: "interview-support-prior-keyterms",
+      model: CLAUDE_MODEL_FAST,
+      usage: message.usage,
+      latencyMs: Date.now() - startedAt,
+      note: `keyterms:${deduped.length}`,
+    });
+    return deduped;
+  } catch (e) {
+    console.error("[interview-support/prior-info] keyterm extraction failed:", e);
+    return [];
+  }
 }
 
 export async function GET(
@@ -88,11 +137,15 @@ export async function GET(
       // スキャンPDF等。候補一覧は返す（複数候補時にユーザーが別ファイルへ切り替えられるように）。
       return NextResponse.json({ available: false, candidates });
     }
+    const trimmed = text.slice(0, MAX_PRIOR_TEXT_CHARS);
+    // Phase 6: Deepgram Keyterm Prompting 用の固有名詞リスト（開始前の1回のみ・Haiku・失敗は空で続行）。
+    const keyterms = await extractKeyterms(trimmed);
     return NextResponse.json({
       available: true,
       fileId: selected.id,
       fileName: selected.fileName,
-      text: text.slice(0, MAX_PRIOR_TEXT_CHARS),
+      text: trimmed,
+      keyterms,
       candidates,
     });
   } catch (e) {

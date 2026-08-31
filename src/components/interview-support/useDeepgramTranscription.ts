@@ -10,6 +10,9 @@
 //   トークンは接続時のみ必要で、再接続のたびに取り直す。
 // - interim（未確定）は「現在の発話行」として都度差し替え、is_final で確定ログに積む。
 // - 接続断・エラー時は短い待機を挟んで自動再接続。ユーザーの「停止」では再接続しない。
+// - T-183 Phase 6: Keyterm Prompting。setKeyterms で渡した固有名詞（キャリアシート由来の病院名・
+//   資格名等）を listen URL の keyterm パラメータに載せ、nova-3 の固有名詞認識を底上げする。
+//   ref 保持のため接続・再接続のたびに最新のリストが使われる（接続中の変更は次の接続から反映）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranscriptEntry } from "./useSpeechTranscription";
@@ -23,6 +26,8 @@ const ENDPOINTING_MS = 300;
 const MEDIA_CHUNK_MS = 250;
 // 接続断からの自動再接続までの待機(ms)。即時リトライの連打で暴走しないための最小間隔。
 const RECONNECT_DELAY_MS = 1_000;
+// Keyterm Prompting に載せる語数の上限（URL長対策。prior-info API 側でも同値で切り詰めるが二重防御）。
+const MAX_KEYTERMS = 50;
 
 /** Deepgram の Results メッセージ（必要フィールドのみ）。 */
 type DeepgramResultMessage = {
@@ -32,7 +37,7 @@ type DeepgramResultMessage = {
   channel?: { alternatives?: Array<{ transcript?: string }> };
 };
 
-function buildListenUrl(): string {
+function buildListenUrl(keyterms: string[]): string {
   const params = new URLSearchParams({
     model: DEEPGRAM_MODEL,
     language: DEEPGRAM_LANGUAGE,
@@ -41,6 +46,11 @@ function buildListenUrl(): string {
     punctuate: "true",
     smart_format: "true",
   });
+  // Phase 6: Keyterm Prompting（nova-3）。keyterm=語1&keyterm=語2... の繰り返し形式。
+  // https://developers.deepgram.com/docs/keyterm
+  for (const term of [...new Set(keyterms)].slice(0, MAX_KEYTERMS)) {
+    params.append("keyterm", term);
+  }
   return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 }
 
@@ -66,6 +76,11 @@ export function useDeepgramTranscription() {
   // 接続失敗・トークン発行失敗・異常切断の間、上部バーに出し続けるエラー文言。回復（受信再開）で消える。
   const [engineError, setEngineError] = useState<string | null>(null);
   const idSeqRef = useRef(0);
+  // Phase 6: Keyterm Prompting の語彙。ref 保持で接続時に読む（変更しても再接続はしない）。
+  const keytermsRef = useRef<string[]>([]);
+  const setKeyterms = useCallback((terms: string[]) => {
+    keytermsRef.current = terms;
+  }, []);
 
   useEffect(() => {
     if (!listening) return;
@@ -125,7 +140,7 @@ export function useDeepgramTranscription() {
       // 3) WebSocket 接続 → 開通後に MediaRecorder 開始
       //    （webm はストリーム先頭にヘッダを持つため、接続ごとに Recorder も作り直す）
       //    認証は bearer サブプロトコル（access_token クエリは拒否される・本番実測）。
-      ws = new WebSocket(buildListenUrl(), ["bearer", accessToken]);
+      ws = new WebSocket(buildListenUrl(keytermsRef.current), ["bearer", accessToken]);
       ws.onopen = () => {
         if (cancelled || !stream) return;
         const mimeType = pickRecorderMimeType();
@@ -243,5 +258,5 @@ export function useDeepgramTranscription() {
     setEntries((prev) => (prev.length > 0 ? prev : saved));
   }, []);
 
-  return { entries, interimText, listening, supported, start, stop, restore, receiving, engineError };
+  return { entries, interimText, listening, supported, start, stop, restore, receiving, engineError, setKeyterms };
 }

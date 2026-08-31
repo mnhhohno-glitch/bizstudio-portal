@@ -26,7 +26,8 @@ export type AdvisorEndpoint =
   | "interview-task-detect" // T-151: 面談ログからのタスク約束検出（Anthropic）
   | "advisor-log-ingest" // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
   | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
-  | "interview-support-auto-scan"; // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
+  | "interview-support-auto-scan" // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
+  | "interview-support-prior-keyterms"; // T-183 Phase 6: 事前情報からの固有名詞抽出（Deepgram Keyterm 用・画面起動時1回）
 
 type TokenBreakdown = {
   inputTokens: number;
