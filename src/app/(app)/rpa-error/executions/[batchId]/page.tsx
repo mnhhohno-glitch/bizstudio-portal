@@ -43,6 +43,7 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
   RUNNING: "実行中",
   COMPLETED: "完了",
   FAILED: "失敗",
+  NO_TARGET: "対象なし",
 };
 
 const LOG_STATUS: Record<string, { label: string; style: string }> = {

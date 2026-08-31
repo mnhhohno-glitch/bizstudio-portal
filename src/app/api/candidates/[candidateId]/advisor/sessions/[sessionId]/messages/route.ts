@@ -8,9 +8,20 @@ import {
   parseTextFile,
 } from "@/lib/file-parser";
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
+import { computeContextFingerprint } from "@/lib/advisor-context";
+import { isAnalysisMessage } from "@/lib/advisor-message-kind";
 import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
+// T-184: タイプ診断のついでに未読の面談ログを要約保存＋既読化する。部品は T-155 の取り込み実装と共有。
+import {
+  collectUnreadLogs,
+  buildDigestUserContent,
+  buildInlineDigestInstruction,
+  extractLogDigestBlock,
+  saveIngestedDigest,
+  type UnreadLogBundle,
+} from "@/lib/advisor/log-ingest";
 // T-150: 検出指示（TASK_DETECTION_PROMPT）は lib 側に置き、route と検証スクリプトで
 // 同じ実文言を参照する（route ファイルは Next.js の制約で任意の定数を export できないため）。
 import {
@@ -97,9 +108,14 @@ const CANDIDATE_DATA_HEADER = `
 
 `;
 
-const CACHE_TTL = 30 * 60 * 1000;
+// T-164: contextキャッシュの主判定は contextFingerprint（材料が変わったか）。
+// この定数は指紋計算に漏れがあっても1日で必ず作り直すための上限TTL（安全弁）。
+const CACHE_TTL = 24 * 60 * 60 * 1000;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_PAST_MESSAGES = 20;
+// T-163: API送信用の1メッセージ本文クランプ。面談ログ全文貼り付け（実測 max 32,104字）等への防御。
+// analyze-batch 側の MAX_CHAT_MESSAGE_CHARS とは独立に定義する。DB・画面表示には影響させない。
+const MAX_PAST_MESSAGE_CHARS = 4000;
 const MAX_TEXT_FILE_CHARS = 8000;
 const API_TIMEOUT_MS = 120000; // 2分
 
@@ -159,7 +175,9 @@ export async function POST(
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { candidateId, sessionId } = await params;
-  const { content, file } = await req.json();
+  // T-184: typeDiagnosis はパネルの「タイプ診断」ボタン経路だけが true で送る明示フラグ。
+  // 固定文の一致判定にしないのは、CA が自由入力で似た文言を打っても誤発火させないため。
+  const { content, file, typeDiagnosis } = await req.json();
 
   console.log("=== Advisor Message API ===");
   console.log("Content:", content?.substring(0, 100));
@@ -215,11 +233,16 @@ export async function POST(
   });
 
   // 過去メッセージ取得（直近20件に制限）
+  // T-163: 求人全件分析の産物（完了カード・旧バッチ出力）は AI への送信窓から除外して
+  // 「直近20件」を数える。除外は API 送信のみで、DB・画面表示には一切影響しない。
+  // 分析結果そのものは候補者context の評価一覧（advisor-context.ts）経由で AI に届く。
   const allMessages = await prisma.advisorChatMessage.findMany({
     where: { sessionId },
     orderBy: { createdAt: "asc" },
   });
-  const pastMessages = allMessages.slice(-MAX_PAST_MESSAGES);
+  const pastMessages = allMessages
+    .filter((m) => !isAnalysisMessage(m))
+    .slice(-MAX_PAST_MESSAGES);
 
   // セッションタイトル自動更新（初回メッセージ時）
   const displayTitle = (content || file?.name || "").trim();
@@ -233,14 +256,26 @@ export async function POST(
   // コンテキスト取得（キャッシュ対応）
   const session = await prisma.advisorChatSession.findUnique({
     where: { id: sessionId },
-    select: { contextCache: true, contextCachedAt: true },
+    select: { contextCache: true, contextCachedAt: true, contextFingerprint: true },
   });
 
   let context = session?.contextCache || "";
+
+  // T-164: 失効判定を「経過時間」から「材料の指紋一致」に変更。
+  //   旧30分TTLは (1) 材料が変わらなくても30分ごとに再ビルド（従来15.5秒の待ち）
+  //   (2) 逆に30分以内は全件分析直後でも古い評価のまま、の両方の問題があった。
+  //   指紋が一致すれば経過時間に関係なくキャッシュを使い、変わっていれば即再ビルドする。
+  //   CACHE_TTL(24h) は指紋計算の漏れがあっても1日で必ず作り直すための安全弁。
+  const fingerprint = await computeContextFingerprint(candidateId);
   const cacheExpired = !session?.contextCachedAt ||
     Date.now() - new Date(session.contextCachedAt).getTime() > CACHE_TTL;
+  const fingerprintChanged = session?.contextFingerprint !== fingerprint;
 
-  if (!context || cacheExpired) {
+  // T-163: contextビルド所要時間の実測。キャッシュヒット（再ビルドなし）は 0 のまま。
+  let contextBuildMs = 0;
+
+  if (!context || cacheExpired || fingerprintChanged) {
+    const contextT0 = Date.now();
     try {
       const baseUrl = process.env.PORTAL_BASE_URL || (req.headers.get("origin") ?? "");
       const contextRes = await fetch(`${baseUrl}/api/candidates/${candidateId}/advisor/context`, {
@@ -251,12 +286,17 @@ export async function POST(
         context = contextData.context || "";
         await prisma.advisorChatSession.update({
           where: { id: sessionId },
-          data: { contextCache: context, contextCachedAt: new Date() },
+          data: {
+            contextCache: context,
+            contextCachedAt: new Date(),
+            contextFingerprint: fingerprint,
+          },
         });
       }
     } catch (e) {
       console.error("Context fetch error:", e);
     }
+    contextBuildMs = Date.now() - contextT0;
   }
 
   // コンテキストが長すぎる場合は切り詰め
@@ -268,6 +308,25 @@ export async function POST(
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicApiKey) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
+  }
+
+  // T-184: タイプ診断のときだけ、未読の面談ログ全文を「この1回のコール」に同梱する。
+  // 「未読ログ取込」ボタンを押さない限り advisorLogDigest / advisorIngestedAt が更新されず
+  // 未読が残り続けるため、診断のついでに要約＋既読化まで済ませる（AI呼び出し回数は増やさない）。
+  // 未読の判定条件・入力ガードは T-155 の取り込みと同一（collectUnreadLogs を共有）。
+  // 収集に失敗しても診断は通常どおり実行する（同梱を諦めるだけ＝次回押下で再試行できる）。
+  let digestBundle: UnreadLogBundle | null = null;
+  if (typeDiagnosis) {
+    try {
+      const collected = await collectUnreadLogs(candidateId);
+      if (!collected.ok) {
+        console.warn(`[advisor-chat] T-184 collectUnreadLogs failed (non-fatal): ${collected.error}`);
+      } else if (collected.bundle.logs.length > 0) {
+        digestBundle = collected.bundle;
+      }
+    } catch (e) {
+      console.warn("[advisor-chat] T-184 collectUnreadLogs threw (non-fatal):", e);
+    }
   }
 
   // LIGHTモード廃止: 常にフル版スキルを注入する。
@@ -283,8 +342,13 @@ export async function POST(
       cache_control: { type: "ephemeral" as const },
     },
     {
+      // T-164: 候補者contextにも cache_control を付与（従来は毎ターン満額処理＝取りこぼし）。
+      //   指紋方式（T-164）で context のバイト列が安定する時間が延びたため read 化が見込める。
+      //   TTL は既定の5分のまま（1時間TTLは 60分以内再コール率 54.0% < 損益分岐 57.5% のため不採用）。
+      //   第2ブロック単体の損益分岐はヒット率 21.7%超（write 1.25x / read 0.1x）。実測 37.4% で黒字見込み。
       type: "text" as const,
       text: CANDIDATE_DATA_HEADER + context,
+      cache_control: { type: "ephemeral" as const },
     },
   ];
 
@@ -293,9 +357,13 @@ export async function POST(
   // 別枠で追加すると同じ発言が2回 API に乗る（費用増＋検出の不安定化）ので、最終要素を差し替える。
   // content（CA打鍵分）と fileContext（添付解析結果）は別変数のまま存在するため、
   // 添付ファイルの中身が <ca_input> に入る経路自体が存在しなくなる（プロンプトの指示に頼らない分離）。
+  // T-163: API送信用に限り 1メッセージ 4,000字でクランプ（DB・画面表示には影響しない）。
   const apiMessages = pastMessages.map((m) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content:
+      m.content.length > MAX_PAST_MESSAGE_CHARS
+        ? m.content.substring(0, MAX_PAST_MESSAGE_CHARS) + "\n…（長いため省略）"
+        : m.content,
   }));
 
   const lastIdx = apiMessages.length - 1;
@@ -308,18 +376,32 @@ export async function POST(
     const isSyntheticAttachmentLabel = !!file && typed === `添付ファイル: ${file?.name ?? ""}`;
     const caInput = isSyntheticAttachmentLabel ? "" : typed;
 
+    // T-184: 未読ログ本文と要約指示は cache_control 付きの固定ブロックではなく、
+    // ここ（可変側＝ユーザーメッセージ）に載せる（罠#39: 固定ブロックに可変内容を混ぜない）。
+    // <ca_input> の外なので、タスク候補検出（TASK_DETECTION_PROMPT）の根拠にもならない。
     apiMessages[lastIdx] = {
       role: "user",
       content:
         `<ca_input>\n${caInput}\n</ca_input>\n` +
-        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : ""),
+        (fileContext ? `\n<attachment name="${attachedFileName}">\n${fileContext}\n</attachment>\n` : "") +
+        (digestBundle
+          ? `\n<unread_meeting_logs>\n${buildDigestUserContent(digestBundle)}</unread_meeting_logs>\n` +
+            buildInlineDigestInstruction(digestBundle.logs.length)
+          : ""),
     };
+  } else if (digestBundle) {
+    // 差し替え先が無い（想定外）ときは同梱を諦める。指示だけ出て抽出が必ず失敗するのを防ぐ。
+    console.warn("[advisor-chat] T-184 last message is not user; skip digest bundling");
+    digestBundle = null;
   }
 
   const usedModel = selectModel(content || "", !!file);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  // T-163: Anthropic API 呼び出しの所要時間の実測。
+  const apiT0 = Date.now();
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -331,7 +413,10 @@ export async function POST(
       },
       body: JSON.stringify({
         model: usedModel,
-        max_tokens: 4000,
+        // T-184: ダイジェスト同梱時のみ出力上限を広げる。診断本文（従来4,000で足りている）に
+        // 最大4,000字のダイジェストが後続するため、据え置きだと本文か区切り文字が途中で切れる。
+        // 同梱しない通常のチャット・診断は従来どおり 4,000。
+        max_tokens: digestBundle ? 10000 : 4000,
         temperature: 0.7,
         system: systemBlocks,
         messages: apiMessages,
@@ -351,6 +436,8 @@ export async function POST(
         usage: null,
         candidateId,
         note: `error-${response.status}`,
+        latencyMs: Date.now() - apiT0,
+        contextBuildMs,
       });
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
@@ -360,25 +447,59 @@ export async function POST(
 
     const data = await response.json();
     const u = data.usage ?? {};
-    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
+    const latencyMs = Date.now() - apiT0;
+    console.log(`[advisor usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs} context_build_ms=${contextBuildMs}`);
     // T-126: usage を永続化。LIGHTモード廃止後は常に skill-full。
     await recordAdvisorUsage({
       endpoint: "advisor-chat",
       model: usedModel,
       usage: u,
       candidateId,
-      note: "skill-full",
+      // T-184: ダイジェスト同梱の有無を帳簿から識別できるようにする（費用比較のため）。
+      note: digestBundle ? `skill-full;t184-digest-${digestBundle.logs.length}` : "skill-full",
+      latencyMs,
+      contextBuildMs,
     });
     const rawContent = data.content?.[0]?.text;
     const aiContent = rawContent && rawContent.trim() !== ""
       ? rawContent
       : "応答の生成に失敗しました。もう一度お試しください。";
 
+    // T-184: 先にダイジェストブロックを剥がす。画面表示・advisorChatMessage 保存・返却の
+    // いずれにも <<<LOG_DIGEST>>> を残さない。
+    // ★fail-closed: ブロックが無い・空・保存失敗のときは advisorIngestedAt を立てない
+    //   （未読のまま残り、次回のタイプ診断か「未読ログ取込」ボタンで再試行できる）。
+    let ingestedLogCount = 0;
+    let contentForChat = aiContent;
+    if (digestBundle) {
+      const { cleanContent: strippedContent, digest } = extractLogDigestBlock(aiContent);
+      contentForChat = strippedContent;
+      if (!digest) {
+        console.warn(
+          `[advisor-chat] T-184 digest block missing or empty (fail-closed, not ingested) candidateId=${candidateId}`,
+        );
+      } else {
+        try {
+          await saveIngestedDigest({
+            candidateId,
+            digest,
+            fileIds: digestBundle.logs.map((l) => l.id),
+          });
+          ingestedLogCount = digestBundle.logs.length;
+          console.log(
+            `[advisor-chat] T-184 ingested=${ingestedLogCount} digestChars=${digest.length} candidateId=${candidateId}`,
+          );
+        } catch (e) {
+          console.warn("[advisor-chat] T-184 digest save failed (fail-closed, not ingested):", e);
+        }
+      }
+    }
+
     // T-150: 応答本文に併記されたタスク候補 JSON を剥がし、期日を JST で確定させる。
     // 失敗しても候補なしとして続行する（チャット応答は必ず成立させる＝fail-open）。
     // DB に保存するのは必ず cleanContent 側（生保存すると画面に JSON が出るうえ、
     // 次ターンの messages に乗って AI が自分の過去 JSON を模倣する）。
-    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(aiContent);
+    const { cleanContent, suggestedTasks: detectedTasks } = extractSuggestedTasks(contentForChat);
 
     // 同一セッションで未処理の候補が既にある種別は落とす。
     // 検出根拠を今回の <ca_input> に限定しても、AI は履歴に残る過去ターンの約束を拾って
@@ -429,7 +550,12 @@ export async function POST(
       }).catch((e) => console.error("[advisor-chat] diagnosis extraction failed:", e));
     }
 
-    return NextResponse.json({ message: saved });
+    // T-184: 取り込めた件数を返す。UI はこれで未読件数の再取得とトースト表示を出し分ける
+    //（0件＝同梱しなかった／fail-closed のときは何も出さない）。
+    return NextResponse.json({
+      message: saved,
+      ...(ingestedLogCount > 0 ? { logIngest: { ingested: ingestedLogCount } } : {}),
+    });
   } catch (e: unknown) {
     clearTimeout(timeoutId);
 

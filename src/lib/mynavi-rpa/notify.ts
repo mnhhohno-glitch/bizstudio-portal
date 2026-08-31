@@ -52,6 +52,9 @@ function formatApplyDateTime(date: Date): string {
   }).format(date);
 }
 
+/** T-167: 送信失敗の応募者を通知本文に列挙する上限。超過分は「他 N件」でまとめる。 */
+const FAILURE_LIST_LIMIT = 20;
+
 /**
  * バッチ完了通知
  */
@@ -79,7 +82,12 @@ export async function notifyMynaviBatchCompletion(
     // フォールバックし、processedAt 昇順（取り込み順 ≒ 応募順）で並べる。
     const logs = await prisma.mynaviRpaProcessingLog.findMany({
       where: { batchId: batch.id },
-      select: { candidateName: true, processedAt: true },
+      select: {
+        candidateName: true,
+        processedAt: true,
+        replyResult: true,
+        candidate: { select: { name: true, mynaviMemberNo: true } },
+      },
       orderBy: { processedAt: "asc" },
     });
     const applicantLines = logs.map((l) => {
@@ -87,17 +95,35 @@ export async function notifyMynaviBatchCompletion(
       return `${formatApplyDateTime(l.processedAt)} ${name}`;
     });
 
+    // T-167: 一次返信の送信失敗（reply-sent が FAILED を記録したもの）を別軸で集計する。
+    // 上の「取り込み / エラー」は PDF取り込み時点の判定であって送信の成否ではないため、
+    // 送信失敗はここで replyResult から数え、氏名と会員Noを列挙する。
+    const failedLogs = logs.filter((l) => l.replyResult === "FAILED");
+    const failureLines: string[] = [];
+    if (failedLogs.length > 0) {
+      failureLines.push(`送信失敗: ${failedLogs.length}件`);
+      for (const l of failedLogs.slice(0, FAILURE_LIST_LIMIT)) {
+        const name = l.candidate?.name?.trim() || l.candidateName?.trim() || "-";
+        const memberNo = l.candidate?.mynaviMemberNo?.trim() || "-";
+        failureLines.push(`　${name} / 会員No: ${memberNo}`);
+      }
+      if (failedLogs.length > FAILURE_LIST_LIMIT) {
+        failureLines.push(`　他 ${failedLogs.length - FAILURE_LIST_LIMIT}件`);
+      }
+    }
+
     const message = [
       "📊 マイナビ転職応募取り込み 完了",
       ...applicantLines,
       `処理時刻: ${timeRange}`,
       `処理件数: ${batch.totalCount}件`,
-      `　通常送信: ${batch.normalCount}件`,
+      `　取り込み: ${batch.normalCount}件`,
       `　年齢NG: ${batch.ageNgCount}件`,
       `　外国籍NG: ${batch.foreignNgCount}件`,
       `　AI解析失敗: ${batch.aiFailedCount}件`,
       `　二重処理スキップ: ${batch.duplicateSkipCount}件`,
       `　エラー: ${batch.errorCount}件`,
+      ...failureLines,
       `詳細: ${baseUrl}/rpa-error/executions/${batch.id}`,
     ].join("\n");
 
@@ -131,7 +157,22 @@ export async function notifyMynaviDuplicateSkip(
 }
 
 /**
+ * エラー通知の context キー → 表示ラベル。
+ * 未知のキーはキー名のまま出す（載せ忘れても情報が消えないように）。
+ */
+const ERROR_CONTEXT_LABELS: Record<string, string> = {
+  batchId: "バッチID",
+  detail: "詳細",
+  diagnostics: "診断",
+  failedPdf: "失敗PDF",
+};
+
+/**
  * エラー通知
+ *
+ * context は JSON のベタ書きではなく1項目1行で出す。
+ * 「AI解析失敗」だけでは原因に辿り着けず切り分けに時間がかかったため、
+ * finishReason・試行回数・退避PDFのリンクをこの本文から読めるようにしている。
  */
 export async function notifyMynaviError(
   message: string,
@@ -142,8 +183,13 @@ export async function notifyMynaviError(
 
   try {
     const lines = ["🚨 マイナビ転職応募取り込み エラー", message];
-    if (context && Object.keys(context).length > 0) {
-      lines.push(JSON.stringify(context));
+    if (context) {
+      for (const [key, value] of Object.entries(context)) {
+        if (value === null || value === undefined || value === "") continue;
+        const label = ERROR_CONTEXT_LABELS[key] ?? key;
+        const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+        lines.push(`${label}: ${text}`);
+      }
     }
     await sendBotMessage(ch.botId, ch.channelId, lines.join("\n"));
   } catch (e) {

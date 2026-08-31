@@ -98,6 +98,11 @@ export type Entry = {
   externalJobRef?: string | null;
 };
 
+// エントリー対応タスクの既定担当者（社員番号）。
+// T-120: 佐藤 葵(1000025) ＋ 見ル野 未来(1000027)。T-171: 道西 未来(1000029) を追加。
+// 単数経路（URLクエリ）と複数経路（API直叩き）の両方から参照する。
+const ENTRY_TASK_DEFAULT_ASSIGNEES = ["1000025", "1000027", "1000029"];
+
 // 選考終了系の entryFlagDetail 値（BulkEndFlagModal と一致）
 const END_FLAG_DETAILS = new Set(["書類見送り", "面接見送り", "本人辞退", "求人クローズ"]);
 function isEndFlagDetail(value: unknown): boolean {
@@ -135,8 +140,12 @@ export type FlagData = {
   companyFlags: Record<string, string[]>;
 };
 
+// T-182: 「求人紹介」タブは非表示（既定 where=isActive:true で常時0件・依存機能なし）。
+// FileMaker 移行由来の entryFlag="求人紹介" 行は「全件」タブから到達できる。復活時は true に戻す。
+const SHOW_LEGACY_INTRO_TAB = false;
+
 const TABS = [
-  { key: "求人紹介", label: "求人紹介" },
+  ...(SHOW_LEGACY_INTRO_TAB ? [{ key: "求人紹介", label: "求人紹介" }] : []),
   { key: "エントリー", label: "エントリー" },
   { key: "書類選考", label: "書類選考" },
   { key: "面接", label: "面接" },
@@ -844,8 +853,7 @@ export default function EntryBoard() {
         prefill: "entry",
         candidateId,
         categoryName: CATEGORY_NAME,
-        // T-120: デフォルト担当者を佐藤 葵(1000025) ＋ 見ル野 未来(1000027) の2名に。
-        assignees: "1000025,1000027",
+        assignees: ENTRY_TASK_DEFAULT_ASSIGNEES.join(","),
         title: `エントリー対応依頼 - ${info.name}`,
         entryDate: latestEntryDate(info.entries),
         entryCount: String(info.entries.length),
@@ -879,8 +887,7 @@ export default function EntryBoard() {
         toast.error("カテゴリ「エントリー対応（求職者対応）」が見つかりません");
         return;
       }
-      // T-120: デフォルト担当者を佐藤 葵(1000025) ＋ 見ル野 未来(1000027) の2名に。
-      const assigneeIds = ["1000025", "1000027"]
+      const assigneeIds = ENTRY_TASK_DEFAULT_ASSIGNEES
         .map((num) => employees.find((e) => e.employeeNo === num)?.id)
         .filter((id): id is string => !!id);
       if (assigneeIds.length === 0) {

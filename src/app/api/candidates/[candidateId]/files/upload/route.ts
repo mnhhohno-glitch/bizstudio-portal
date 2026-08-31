@@ -6,6 +6,7 @@ import { uploadFileToDrive, getOrCreateFolder, convertDocxToPdf } from "@/lib/go
 import { handleCorsOptions, withCors } from "@/lib/cors";
 import { CandidateFileCategory } from "@prisma/client";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -158,22 +159,31 @@ export async function POST(
     );
 
     // DB保存
-    const record = await prisma.candidateFile.create({
-      data: {
-        candidateId,
-        category: category as CandidateFileCategory,
-        folderId,
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type,
-        driveFileId: fileId,
-        driveViewUrl: webViewLink,
-        driveFolderId: candidateFolderId,
-        memo: memo?.trim() || null,
-        interviewId,
-        uploadedByUserId: userId,
-      },
-      include: { uploadedBy: { select: { id: true, name: true } } },
+    // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+    //        「onedrive_sync_logs に行が無い＝そもそも受け付けていない」を保証するため。
+    const { record, enqueued } = await prisma.$transaction(async (tx) => {
+      const created = await tx.candidateFile.create({
+        data: {
+          candidateId,
+          category: category as CandidateFileCategory,
+          folderId,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          driveFileId: fileId,
+          driveViewUrl: webViewLink,
+          driveFolderId: candidateFolderId,
+          memo: memo?.trim() || null,
+          interviewId,
+          uploadedByUserId: userId,
+        },
+        include: { uploadedBy: { select: { id: true, name: true } } },
+      });
+      const accepted = await enqueueOneDriveSync(
+        { candidateFileId: created.id, candidateId, category: created.category },
+        tx,
+      );
+      return { record: created, enqueued: accepted };
     });
 
     // DOCX→PDF自動変換は無効化（品質問題のため）
@@ -195,6 +205,13 @@ export async function POST(
       } catch (e) {
         console.error("[files.upload] recalculateSubStatusIfAuto failed:", e);
       }
+    }
+
+    // T-159: OneDrive へのコピーを起動する。★await しない（レスポンスを待たせない・失敗を波及させない）。
+    //        アップロード直後は本体が手元にあるので Google Drive から取り直さず渡す。
+    //        triggerOneDriveSync は void を返し、内部で catch 済みのため例外は出ない＝500 に化けない。
+    if (enqueued) {
+      triggerOneDriveSync({ candidateFileId: record.id, content: fileBuffer, mimeType: file.type });
     }
 
     return withCors(

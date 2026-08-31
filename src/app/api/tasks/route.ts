@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
-import { notifyTaskCreated } from "@/lib/task-notification";
+import {
+  notifyTaskCreated,
+  resolveAssigneeNotifyTargets,
+  logAssigneeNotifyTargets,
+} from "@/lib/task-notification";
 
 export async function GET(request: Request) {
   const actor = await getSessionUser();
@@ -208,53 +212,42 @@ export async function POST(request: Request) {
       }
     }
 
+    // T-162: 担当者 Employee → User → lineworksId の解決は共通ヘルパーに統一。
+    // 以前は User.name の文字列一致で引いていたため、同名ユーザーの誤爆と
+    // 表記ゆれによるメンション欠落のリスクがあった。
+    // 選択された担当者の順序（=画面の選択順）を保持する。
+    const notifyTargets = await resolveAssigneeNotifyTargets(
+      task.assignees.map((a) => a.employeeId),
+    );
+
     // completionType="all" の場合、全担当者分の TaskAssigneeStatus を生成
     if ((completionType || "any") === "all" && assigneeIds.length > 1) {
-      const assigneeEmployees = await prisma.employee.findMany({
-        where: { id: { in: assigneeIds }, status: "active" },
-        select: { id: true, name: true },
-      });
-      const assigneeNames = assigneeEmployees.map((e) => e.name);
-      const assigneeUsers = assigneeNames.length > 0
-        ? await prisma.user.findMany({
-            where: { name: { in: assigneeNames }, status: "active" },
-            select: { id: true, name: true },
-          })
-        : [];
-      const statusRecords = assigneeUsers.map((u) => ({
+      const statusRecords = Array.from(
+        new Set(notifyTargets.map((t) => t.userId).filter((id): id is string => !!id)),
+      ).map((userId) => ({
         taskId: task.id,
-        userId: u.id,
+        userId,
         isCompleted: false,
       }));
       if (statusRecords.length > 0) {
-        await prisma.taskAssigneeStatus.createMany({ data: statusRecords });
+        await prisma.taskAssigneeStatus.createMany({
+          data: statusRecords,
+          skipDuplicates: true,
+        });
       }
     }
 
     // LINE WORKS通知（失敗してもタスク作成には影響させない）
     try {
-      // 担当者名からUserのlineworksIdを取得（メンション用）
-      const assigneeNames = task.assignees.map((a) => a.employee.name);
-      const assigneeUsers = assigneeNames.length > 0
-        ? await prisma.user.findMany({
-            where: { name: { in: assigneeNames }, status: "active" },
-            select: { name: true, lineworksId: true },
-          })
-        : [];
-
-      // 担当者名の順序に合わせてlineworksIdを対応付け
-      const assigneeLineworksIds = assigneeNames.map((name) => {
-        const user = assigneeUsers.find((u) => u.name === name);
-        return user?.lineworksId ?? null;
-      });
+      logAssigneeNotifyTargets("task-notify:create", task.id, notifyTargets);
 
       await notifyTaskCreated({
         taskId: task.id,
         title: task.title,
         categoryName: task.category?.name ?? null,
         candidateName: task.candidate?.name ?? null,
-        assigneeNames,
-        assigneeLineworksIds,
+        assigneeNames: notifyTargets.map((t) => t.name),
+        assigneeLineworksIds: notifyTargets.map((t) => t.lineworksId),
         priority: priority || null,
         dueDate: task.dueDate,
         creatorName: actor.name,

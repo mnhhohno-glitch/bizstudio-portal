@@ -173,6 +173,131 @@
 **関連ケース**:
 - T-135 step9（2026/7/6）: stats API + candidates API 修正。修正コミット: `1fb40ff`
 
+## カテゴリL: インフラ起因の全体停止系
+
+### L-1. 全ページ502 / Application failed to respond（Railway ホスト機の I/O 飽和）
+
+**症状**: 本番の**全ページ**が 502「Application failed to respond」。Railway の画面上は ACTIVE デプロイが「Deployment successful」、サービスは「Online」のまま変わらない。先行して Next.js の Digest 付き `Application error: a server-side exception has occurred` が出ることもある（今回の実例: Digest `1411427761`）。
+
+**最重要の判定**: **全ページが一斉に死ぬなら、原因はほぼコードではない**。
+
+- Digest `1411427761` の正体は共通レイアウトの入口にあるセッション照会 `prisma.user.findUnique()` が DB 応答なしで落ちているだけ。**これは原因ではなく結果**。全ページで同じ Digest が出るのは、全ページがこのセッション照会を通るからにすぎない
+- 直近コミットを疑って revert するのは**時間の無駄になりやすい**。クライアント側 UI の変更（画面の見た目・文言・一覧の列幅など）は全ページ 502 を引き起こさない。サーバ側で全リクエストに乗るもの（middleware・共通レイアウト・DB 接続層）以外は容疑者にならない
+
+**原因の構造**: Railway の同一ホスト機に同居する他テナントがディスク I/O を占有していた（noisy neighbor）。**こちら側のコード・データ・リソースはすべて正常値**だった。
+
+| 確認項目 | 実測値 | 判定 |
+|--|--|--|
+| ホスト load average（48 コア機） | 944 / 949 / 897 | 約 20 倍の過負荷 |
+| `/proc/pressure/io` | some avg10=99 / avg60=99 / avg300=99 | I/O 待ちで停止が 5 分以上継続 |
+| 自コンテナの CPU throttle | `nr_throttled 0` | **制限されていない** |
+| 自コンテナのメモリ | 341MB / 32GB | 余裕 |
+| データ用ディスク | 399MB / 46GB（1%） | 満杯ではない |
+| DB 接続数 | 55 / max_connections=100 | 枯渇していない |
+
+Postgres 側の劣化の見え方:
+
+- checkpoint の書き込みが段階的に劣化。通常 0.4〜2 秒だったものが、02:45 に **1,339 バッファ（約 10MB）の書き込みに 133.8 秒**（≒ 80KB/s）
+- **03:08:25 UTC 開始の checkpoint はついに一度も完了しなかった**（checkpointer が I/O で刺さった状態）
+- uninterruptible D state のプロセスが 2 本残留
+- OOM・FATAL・`too many connections`・Postgres の再起動は**ログに一切無い**（＝自分の使い方の問題ではない証拠）
+
+**対処**: **コード修正では直らない**。
+
+- Railway サポートへエスカレーション（**別ホストノードへの移設要請**）、または負荷が収まるのを待つ
+- Postgres サービスの再起動は試す価値があるが、ホスト機が過負荷だと**新コンテナ自体を起動できない**。今回は redeploy を 3 回試行して**全て FAILED・ビルドログもデプロイログも空**。`railway restart` も「Deployment is not restartable」で拒否された
+- 最終的に Railway 側の負荷が収まって**自然復旧**した（こちらの操作で復旧させたわけではない）
+
+**検知**: T-160 で GitHub Actions による 5 分ごとの死活監視 + LINE WORKS 通知を実装済み（`.github/workflows/uptime-monitor.yml` / `src/app/api/health/route.ts`）。本障害は**社員からの報告でしか気づけなかった**ため。
+
+**関連ケース**:
+- 2026-08-10: 03:08 UTC（JST 12:08）に checkpoint 停止、05:05 UTC（JST 14:05）頃までに DB 応答が回復（`/api/health` の DB 往復 3〜99ms を実測）。利用者からは半日規模の停止として報告された。切り分け手順は罠 #41、監視実装は T-160（`4f49d46`）
+
+## カテゴリM: 通知の宛先欠落系
+
+### M-1. タスク通知が「先頭1名」にしか届かない（担当者配列が [0] で潰される）
+
+**症状**: `/tasks/new` で担当者を3名選んで「応募書類3点セット」を作成しても、LINE WORKS の通知が最初の1名にしか飛ばない。通知本文の「■ 担当者」欄も1名しか出ず、メンション（`@...`）も1つだけ。
+
+**真因（T-162 / 2026-08-18 実測）**: 通知の問題ではなく **保存の問題**だった。
+
+- `src/app/(app)/tasks/new/page.tsx` の `handle3ptSubmit` が `assigneeId: assigneeIds[0]` を送っていた
+- `src/app/api/tasks/bulk-create-3point/route.ts` が単数 `assigneeId` しか受け取らず、`TaskAssignee` を1行しか作っていなかった
+- 結果、通知の宛先解決に渡る担当者が最初から1名しかなく、通知テンプレート側（`notifyTaskCreated` / `sendBulkNotification`）は複数対応済みなのに1名分しか組み立てられなかった
+
+**紛らわしい点**: 通常の `/tasks/new`（3点セット以外）→ `POST /api/tasks` は最初から複数対応。実データでも `[佐藤 葵,大野 望,見ル野 未来,道西 未来]` の4名タスクが存在する。**「複数担当者が全く動かない」わけではなく、3点セットの経路だけが落ちていた**。UI（Step3 のチェックボックス）は3点セットでも複数選択でき「3名 選択中」と表示されるため、画面上は正常に見える。
+
+**確認手順**:
+
+1. まず「そもそも `TaskAssignee` が3行あるか」を SELECT で確認する。通知コードを読む前にこれをやる。1行しかなければ通知ではなく保存のバグ。
+   ```
+   task.findMany({ include: { assignees: { select: { employee: { select: { name: true } } } } } })
+   ```
+2. 同じ期間の他タスクで `assignees.length > 1` の実例があるかを数える。あるなら共通経路は無実で、特定の起票経路が疑わしい。
+3. 起票経路ごとにクライアントの `fetch` body を確認する。専用一括起票 API（`bulk-create-3point` 等）は単数フィールドを持っていることがある。
+
+**修正（T-162）**:
+- クライアントは `assigneeIds`（配列）と `completionType` を送る
+- `bulk-create-3point` は配列を受けて全員分の `TaskAssignee` を作る（旧 `assigneeId` も後方互換で受理）
+- 宛先解決を `resolveAssigneeNotifyTargets()`（`src/lib/task-notification.ts`）に統一し、送信時に `[task-notify:*]` ログで「選択人数 / メンション可能人数 / 落ちた人」を必ず出す
+
+**関連**: 罠 #45（`lineworksId` 未登録者は黙って落ちる / 宛先解決を名前一致でやる危険）
+
+## カテゴリN: タイムゾーン解釈系（罠#17）
+
+### N-1. 外部から届いた「JST の壁時計値」をローカル時刻としてパースし、DB に +9時間ずれて保存される
+
+**症状**: 求職者詳細＞設定履歴タブの「送信日時」が実際より **9時間進んで**表示される。RPA が 20:18 に送った一次返信が「翌日 05:18」と出る。日付をまたぐため、パッと見では「9時間ずれ」ではなく「日付がおかしい」と報告されがち。
+
+**真因（T-169 / 2026-08-19 実測）**: `src/app/api/rpa/mynavi/reply-sent/route.ts` の `parseDateLoose()`。
+
+RPA（PAD）は送信日時を **JST の壁時計値**（`"2026/08/18 23:10:00"`。TZ 表記なし）で POST してくる。旧実装はこれを
+
+```ts
+new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec));
+```
+
+＝ **サーバーのローカル時刻**として構築していた。ローカル開発機（JST）では正しく動くが、**Railway 本番コンテナは `TZ=UTC`** なので JST の壁時計値がそのまま UTC 値になり、真の instant より 9時間進んだ値が保存される。
+
+**構造**: 「TZ 表記のない日時文字列」＋「`new Date(y, m, d, ...)` / `new Date("2026/08/18 23:10:00")` などのローカル時刻解釈」＋「本番だけ UTC」の3点が揃うと発生する。**ローカルでは絶対に再現しない**のがこのバグの厄介なところ。
+
+**対処**:
+
+- TZ 表記を持たない入力は **JST(+09:00) として明示的に解釈**する。文字列に `+09:00` を付けて `new Date()` に渡すのが portal の既定パターン（`src/lib/schedule-tasks.ts` の `parseJstDefaultDate()`、`src/lib/schedule-agent/jst.ts`）。
+- TZ 表記（末尾 `Z` / `+09:00` / `+0900`）を含む入力は**その表記に従う**。勝手に JST を足さない。
+  ```ts
+  const hasTz = /([zZ])$|([+-]\d{2}:?\d{2})$/.test(s);
+  const d = new Date(hasTz ? s : `${s}+09:00`);
+  ```
+- `toISOString().slice(0,10)` 系の変換は使わない（罠#17）。表示は `toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" })`。
+- **表示側（`SettingsHistoryTab.tsx` 等）で9時間を足し引きして辻褄を合わせてはいけない。** 原因はデータ側なので、パーサを直すと新規レコードだけが正しくなり、表示側の補正が入っていると**新旧混在で今度は新しい方が9時間ずれる**。
+
+**過去データの補正手順（T-169 で確立）**:
+
+1. **正しい instant が入っている隣のカラムを基準にする**。`CandidateSettingsHistory` は `createdAt`（`@default(now())`）、`MynaviRpaProcessingLog` は `processedAt`。RPA は返信直後に API を叩くので、正常なら差は数秒〜数分。
+2. 差の**ヒストグラムを 10分刻みで全件**出す。「約0分」と「約9時間」の2つの山に割れ、中間帯が空になることを実データで示してから補正する。中間帯にレコードがあれば判定基準が間違っている。
+3. 判定は数値で固定する（T-169: 正常 = −10分〜+10分 / ずれ = +8時間50分〜+9時間10分 / それ以外は**判定不能として触らない**）。**通したいからといって基準を広げない。**
+4. **パーサ修正を先に本番反映してから**過去分を補正する。逆順にすると補正後に旧コードが書いた新規レコードがまたずれて混在が再発する。
+5. 補正後の差が全件 ±10分に収まる（＝再実行時に対象0件）ことを検証してから実行する（idempotent）。
+
+**罠**: 外れ値（センチネル値）が混ざる。T-169 では `replySentAt = 1901-01-01T00:00:00Z` の行が3件あり（RPA が不正な `sentAt` を送った痕跡・2026-05 に集中）、差が **−125年**になるため「9時間ずれ」にも「正常」にも入らない。9時間引いても意味のある値にならないので、機械的な一括補正の対象にしてはいけない。
+
+**外れ値の畳み方（T-169 で採った形）**: 「判定不能（UNKNOWN）」のまま放置すると自動判定ゲートが永久に止まる。かといって判定基準を広げて飲み込むのは危険。**「不正値（SENTINEL）」という明示的な第4分類を足して母数から外す**のが正解。
+
+```ts
+const SENTINEL_BEFORE = new Date("1990-01-01T00:00:00Z");
+function classify(value: Date, diffMs: number): Klass {
+  if (value.getTime() < SENTINEL_BEFORE.getTime()) return "SENTINEL"; // 差を見る前に除外
+  if (diffMs >= NORMAL_LO && diffMs <= NORMAL_HI) return "NORMAL";
+  if (diffMs >= SHIFTED_LO && diffMs <= SHIFTED_HI) return "SHIFTED";
+  return "UNKNOWN"; // ここが0件でないと --execute は自分で止まる
+}
+```
+
+要点は3つ。**(1) NORMAL / SHIFTED の数値基準は一切動かさない**（広げて通したことにならない）。**(2) SENTINEL は UPDATE も DELETE もしない**（分類を変えて触らないだけ）。**(3) 除外した id は毎回ログに出す**（黙って減らさない）。実際 T-169 ではこれで UNKNOWN が 0件になり、336件を補正、実行後の再 dry-run で対象0件（idempotent）を実証できた。
+
+**関連**: 罠#17（Railway UTC 環境での JST 日付ずれ）、T-167 E-4、T-168 Step3、報告書 `docs/reports/T-169_portal_sent-at-timezone-fix.md`
+
 ## バグ調査の標準フロー
 
 1. このパターン辞書を確認

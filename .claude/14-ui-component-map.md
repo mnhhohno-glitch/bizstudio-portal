@@ -60,7 +60,8 @@ CandidateDetailPage (100% width, no max-width)
                            ├─ "desired": 希望条件
                            ├─ "rank": ランク評価
                            ├─ "action": アクション
-                           └─ "attachments": 添付（ファイル数バッジあり）
+                           ├─ "attachments": 添付（ファイル数バッジあり）
+                           └─ "support": 面談サポート（T-183 Phase 2。求職者単位のセッション一覧・閲覧・削除・新規作成。中身は InterviewSupportLogTab.tsx）
 ```
 
 ### メモセクション（line ~1290-1333）
@@ -757,6 +758,14 @@ EntryBoard (1083 行)
 - **「全件」の人数は各タブ人数の合計ではない**。entryFlag 絞り込みなしの `COUNT(DISTINCT candidateId)` を別集計する（同一求職者が複数ステータスにまたがるため単純合算は過大になる）。実測: 全件 183人（各タブ人数合計 198 > DISTINCT 183）。
 - レスポンスに `peopleCounts` を追加（`counts` と同型 `Record<string, number>`）。
 
+#### 選考終了系レコードの除外（タブの数字のみ）
+
+- タブの**件数・人数は、`entryFlagDetail` が選考終了系のレコードを除外して集計する**（「いま動いている案件数」を読めるようにするため）。
+- 除外する値: `選考落ち` / `書類見送り` / `面接見送り` / `本人辞退` / `本人辞退_他社決` / `本人辞退_自社他` / `クローズ` / `求人クローズ`。`NULL`・空文字は**除外しない**（未入力＝生存扱い）。
+- 実装: `src/app/api/entries/route.ts` の `CLOSED_FLAG_DETAILS` と `NOT_CLOSED`（`{ OR: [{ entryFlagDetail: null }, { entryFlagDetail: { notIn: [...] } }] }`。`notIn` 単体だと NULL 行まで落ちるため NULL を明示的に残す）。タブ別 `count` / 全件 `count` / `groupBy`（peopleCounts）に `activeCountBase` として効かせる。担当RC 経路は JS 側 `rcOpen = rcAll.filter(e => !isClosedDetail(...))` で同条件を適用（ここを漏らすと担当RC 検索時だけ数字が変わる）。
+- **一覧テーブル本体（`where`）と右上「全 N 件」（`total`）・ページネーションには効かせない**。終了系の行は従来どおりグレーアウトで一覧に残る → **タブの数字と一覧の行数は一致しない（仕様）**。
+- 除外リストは `entry-flag-rules.ts`（`SELECTION_ENDED_DETAILS`）や `EntryBoard.tsx` の `END_FLAG_DETAILS` とは**独立コピー**（変更禁止ファイル回避＋用途が別）。フラグ詳細の選択肢を増やしたときは `CLOSED_FLAG_DETAILS` も見直すこと。
+
 ### EntryTable: 本人辞退時の対応フラグ表示フィルタ
 
 - `EntryTable.tsx` の `companyFlag`（企業対応）／`personFlag`（本人対応）dropdown は、`entryFlagDetail` が「本人辞退」系（`本人辞退` / `本人辞退_他社決` / `本人辞退_自社他`、`startsWith("本人辞退")` で判定）のとき、ラベルに「辞退」を含む選択肢のみ表示。それ以外のときは「辞退」を含む選択肢を非表示にする
@@ -1277,8 +1286,23 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - EquipmentTab（PasswordField: マスク→「表示」クリックで /secrets fetch、空入力=変更しない）
   - LeaveTab（残日数編集は既存勤怠API、履歴は閲覧のみ）
 - 共有: detail-types.ts（型＋calcAge/calcTenure/patchEmployeeSection）、detail-ui.tsx（FormField等）
-- 主要handler: 各タブ handleSave → PATCH /api/admin/employees/[employeeId] {section, data} → router.refresh()
+- 主要handler: 各タブは**保存ボタンを持たない**。onBlur / onChange 起点の自動保存（`useSectionAutoSave`）→ PATCH /api/admin/employees/[employeeId] {section, data} をフィールド単位で送る（詳細は「社員詳細の保存方式」節）
+  - （旧記載・T-096 追補で廃止）「各タブ handleSave → PATCH /api/admin/employees/[employeeId] {section, data} → router.refresh()」
 - 一覧 UserListClient.tsx の操作列に「詳細」リンク（/admin/users/[u.id]）を追加（既存挙動無変更）
+
+## 社員詳細の保存方式（T-096 追補で自動保存化 / 888a75c で追記, 2026-08-21）
+
+- **各タブに保存ボタンは無い**（T-096 追補で保存・キャンセルボタンを撤去）。テキスト・日付・数値・textarea は **onBlur**、select は **onChange** で即保存する
+  - 実装: `detail-ui.tsx` の `useAutoSave`(L168) / `useSectionAutoSave`(L219)。保存状態は `AutoSaveIndicator`(L232) が「保存中... / ✓ 保存しました / エラー」を控えめに表示（旧「保存」ボタンの位置）
+  - 各タブ側の closure: `BasicInfoTab.tsx` の `blurSave`(L115) / `selectSave`(L119)。他タブ（Bank / Insurance / Salary / Equipment）も同型
+- 送信先は従来どおり `PATCH /api/admin/employees/[employeeId]` の `{section, data}`。**data は「変更した1フィールドだけ」**を送る（サーバ側 `buildXxxData` がホワイトリスト方式で「送られたキーだけ」を書き換えるため部分更新で安全）
+- 同値の多重発火は `savedRef` でガードし、保存はキュー化されて順次実行される
+- **AI読み取り経路だけは例外（自動保存されない）**: `useResumeAiFill` / `useAiFillData` は `setForm` するだけで `autoSave.save` を呼ばない。人が欄を触らない限り一度も保存されない
+  - そのため `PendingAiSaveBar`(`detail-ui.tsx` L430) で「AI読み取り結果は未保存です。内容を確認して保存してください。（項目名…）」＋「AI読み取り結果を保存」ボタンを出し、**人が押して初めて保存**される（自動保存にしないのは AI の誤読をそのまま DB に入れないため）
+  - 未保存バーを持つタブ = AI読み取りボタンを持つ3タブ: **基本情報**(`BasicInfoTab.tsx` L159) / **口座**(`BankAccountTab.tsx` L152) / **社会保険**(`InsuranceTab.tsx` L102)
+  - 保存時に送るのは `formRef.current` の**現在値**（AI仮入力後に人が直した値が反映される）。対象キーは `pendingAiKeys`(`BasicInfoTab.tsx` L97) に集約し、`saveAiFilled`(L101) が1キーずつ `autoSave.save` へ流す
+  - 保存後は `clearPending()` でバーが消える
+- 「画面を開き直すと AI読み取りの値が消える」は**この経路の未保存が原因**（保存ボタンが無いこと自体は仕様）。888a75c 以前は保存する手段が画面上に存在しなかった
 
 ## 社員詳細 自動補完（T-097, 2026-06-11）
 
@@ -1292,7 +1316,9 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - 全画面D&D（追補）: EmployeeDetailClient が document レベルで dragenter/over/leave/drop（カウンタでチラつき防止）、ドラッグ中/解析中はfixed全画面オーバーレイ。Employee未登録ブランチは無効
   - 解析結果は親 state aiFillData（新参照=新ドロップ）として 基本情報/社会保険/口座 タブへ配布
   - 配布マージ useAiFillData(aiFillData, setForm, allowedKeys): aiFillData参照変化時＋タブのマウント時に1回だけ空欄マージ（後から開いたタブも埋まる）、同一参照は再マージしない(appliedRef)
-- 共通マージ: resume-ai-merge.ts の mergeEmptyOnly（ボタン経路・D&D経路の両方が使用）
+- 共通マージ: resume-ai-merge.ts の mergeEmptyOnly（ボタン経路・D&D経路の両方が使用）。返り値は `{ next, filled, filledKeys }` で、**filledKeys（実際に埋めたキー一覧）** を未保存バーの対象キーに使う（888a75c で追加）
+- 888a75c 以降のフック引数: `useResumeAiFill(employeeId, setForm, allowedKeys, formRef)` / `useAiFillData(aiFillData, setForm, allowedKeys, formRef)`。**マージ判定は `formRef.current`（現在値）を読む**（setForm の updater 内で数えると件数が常に0になる。罠#46 参照）
+- 戻り値に `pendingKeys` / `clearPending` が追加され、タブ側が `PendingAiSaveBar` へ渡す（保存方式は「社員詳細の保存方式」節）
 - タブ別 allowedKeys: Basic=name/furigana/birthday/gender/postalCode/address/phone/emergencyContact{Name,Relation,Phone}、Insurance=pensionNumber/employmentInsuranceNumber、Bank=bankName/bankCode/branchName/branchCode/accountType/accountNumber/accountHolderKana
 
 ---
@@ -1452,3 +1478,18 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 ### タブを閉じると消える仕様
 - 両画面とも **localStorage ではなく sessionStorage** を使う。日をまたいだ古い絞り込みが残り続ける問題や、他タブに絞り込みが漏れる問題を避けるための設計判断（プロンプト指定）。
 
+
+## エントリー管理画面（EntryBoard）の更新経路と state 更新の構造（T-161）
+
+`EntryBoard.tsx` は一覧を `entries` state（`GET /api/entries` の戻り）で保持し、更新後の反映方法が経路ごとに3種類ある。
+
+| 反映方法 | 該当経路 | 危険度 |
+|--|--|--|
+| **丸ごと差替**（`prev.map(e => e.id===id ? data.entry : e)`） | フラグ変更（PATCH /flags）/ 各種フィールド更新・求人種別セレクト（PATCH [entryId]）/ アーカイブ解除 / EntryEditModal / EntryRouteSwitchModal | **高**。PATCH レスポンスの `include` が一覧の `include` より狭いと、その差分が更新直後の画面から消える（リロードで復活） |
+| 部分マージ（`{...e, 特定列}`） | 求人DB URL 保存 | 低 |
+| 全件再取得（`fetchEntries()`） | EntryDetailModal / 一括フラグ / 一括選考終了 / お見送り通知 | なし |
+
+**不変条件**: `PATCH /api/entries/[entryId]` と `PATCH /api/entries/[entryId]/flags` の `include.candidate.select` は、
+`GET /api/entries` の include（`api/entries/route.ts`）と**常に同一に保つ**こと。現在は
+`id / name / candidateNumber / employeeId / recruiterName / employee.name` の6項目（recruiterName は T-161 で追加）。
+一覧に candidate 由来の列を増やすときは、**更新API 2本のレスポンスにも同時に足す**こと。

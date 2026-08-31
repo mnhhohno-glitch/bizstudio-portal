@@ -24,7 +24,9 @@ export type AdvisorEndpoint =
   | "daily-report-chat"
   | "diagnosis-extract" // T-132: 診断散文→希望条件の構造化抽出（Gemini）
   | "interview-task-detect" // T-151: 面談ログからのタスク約束検出（Anthropic）
-  | "advisor-log-ingest"; // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
+  | "advisor-log-ingest" // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
+  | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
+  | "interview-support-auto-scan"; // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
 
 type TokenBreakdown = {
   inputTokens: number;
@@ -69,6 +71,9 @@ export type RecordAdvisorUsageParams = {
   fileCount?: number | null;
   isRetry?: boolean;
   note?: string | null;
+  // T-163: 所要時間の実測（optional。渡さない既存呼び出し元は null 記録のまま壊れない）。
+  latencyMs?: number | null; // Anthropic API 呼び出しの所要時間(ms)
+  contextBuildMs?: number | null; // 候補者contextビルドの所要時間(ms)。キャッシュヒット時は 0
 };
 
 /**
@@ -98,6 +103,8 @@ export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Prom
         costUsd,
         isRetry: params.isRetry ?? false,
         note,
+        latencyMs: params.latencyMs ?? null,
+        contextBuildMs: params.contextBuildMs ?? null,
       },
     });
   } catch (e) {

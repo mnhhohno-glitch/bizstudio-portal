@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,7 +23,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   "include": [
@@ -33,5 +39,8 @@
   // "scripts/_*.ts" は使い捨ての調査スクリプト（`_` 接頭辞が目印）。
   // 1回限りの実行が目的で保守しないため、型チェック対象から外して `npm run build` を守る。
   // 運用スクリプト（接頭辞なし）は従来どおり型チェックする。
-  "exclude": ["node_modules", "scripts/_*.ts"]
+  "exclude": [
+    "node_modules",
+    "scripts/_*.ts"
+  ]
 }

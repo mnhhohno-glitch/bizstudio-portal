@@ -641,3 +641,180 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   ただし `status="active"` の Employee 一覧（`/api/employees`・社員マスター・勤怠の従業員リスト・各画面の担当CAフィルタ）
   には面談担当と同じ `status:"active"` 条件で**表示される**（面談担当に出すための必須条件と同一のため排除不可）。
   実害は表示のみ（候補者の担当CAとして選ばれることはなく、実績・通知・打刻には現れない）。
+
+## 求人紹介タブの成立条件（T-161 改修後）
+
+紹介履歴タブの「求人紹介」一覧は **2つのデータ源の結合**（`src/app/api/candidates/[candidateId]/jobs/route.ts`）。
+
+1. **kyuujin-pdf-tool 側の求人**（`GET {KYUUJIN_PDF_TOOL_URL}/api/projects/by-job-seeker-id/{candidateNumber}/jobs`）
+   - CAが求人PDFを出力（send-to-job-tool）したときに作られる行。`source="kyuujin"`。
+   - 同一会社名×同一求人タイトルの重複 job は portal 側で排除（ブックマーク kyuujinJobId 紐付き優先→作成が古い方）。
+   - `hidden_job_introductions` に載る job.id は除外。
+2. **portal 側ブックマーク**（`candidate_files` category=BOOKMARK・`archivedAt IS NULL`・`kyuujinJobId IS NULL`）
+   - サイト経由（`origin='candidate' AND drive_file_id IS NULL`）… `source="site"`・バッジ「本人応募」
+   - 出力なし紹介済み（`introduced_at IS NOT NULL AND last_exported_at IS NULL`）… `source="introduced"`・バッジ「紹介済み」
+   - id は負数（kyuujin と衝突しない選択キー）。`file_id` に CandidateFile.id。非表示削除は不可（ブックマークタブで管理）。
+
+**一覧に出ることと実績に数えることは別**（R1/R2/R3）:
+- 実績（日報の紹介数・週次実績の提案）に数える = 非サイト行 かつ `COALESCE(last_exported_at, introduced_at) IS NOT NULL`
+- 本人応募（site）は一覧に出るが実績には数えない。
+- 紹介保留（archivedAt != null）は一覧にも出ない。
+
+## エントリーの求人情報の入り方（T-161 改修後）
+
+| 作成経路 | job_category | job_title | 求人URL | external_job_id | route |
+|--|--|--|--|--|--|
+| 求人紹介タブ（kyuujin 行）→ 選択してエントリー | kyuujin `job_category` | kyuujin `job_title` | `original_url` | kyuujin jobs.id | null |
+| 求人紹介タブ（portal 行）/ ブックマーク →「エントリーへ登録」（to-entry） | BM `job_category` | BM `job_title` | BM `memo`（URL形式のみ） | BM `kyuujin_job_id` ?? 0 | site行="site-apply" / 紹介済み行=null |
+| エントリー管理 → 新規登録（手動） | 入力欄なし=NULL | 手入力 | NULL | 0 | null |
+
+- to-entry の重複判定は **externalJobRef（求人単位）**。ref 無し行のみ会社名一致で判定。スキップは `skippedDetails`（会社名＋理由）で返り、UI が必ず表示する。
+- エントリー編集モーダルに「職種」入力欄あり（自動で埋まらなかった行を人が補う）。
+- サイト経由ブックマークの job_title / job_category は favorites POST が保存（T-161 新設列）。**T-161 以前の行は NULL のまま**（portal に元データが無い）。
+
+## タスク作成時の LINE WORKS 通知仕様（T-162 で整理, 2026-08-18）
+
+### 送信単位
+
+**共通トークルームへ1通・本文中で全担当者をメンション**する方式。担当者ごとの個別 DM は行わない。
+
+- Bot / チャンネル: `LINEWORKS_TASK_BOT_ID` / `LINEWORKS_TASK_CHANNEL_ID`（未設定なら warn を出して no-op）
+- 通知の粒度は「1タスク = 1通」。ただし**応募書類3点セットだけは3タスクで1通**（`bulk-create-3point` が3件のリンクを1通にまとめる）
+- 送信の実体は `sendBotMessage()`（`src/lib/lineworks.ts`）。1通あたり POST 1回
+
+| 起票経路 | エンドポイント | 通知関数 | 通数 |
+|--|--|--|--|
+| 通常のタスク作成ウィザード | `POST /api/tasks` | `notifyTaskCreated` | タスク1件につき1通 |
+| 応募書類3点セット | `POST /api/tasks/bulk-create-3point` | `sendBulkNotification`（同ファイル内） | 3タスクで1通 |
+| タスク複製 | `POST /api/tasks/[taskId]`（clone） | `notifyTaskCreated` | 1通 |
+| AI 起票（T-150/T-151） | `src/lib/ai-task-create.ts` | `notifyAiTaskCreated` | 1通 |
+
+### 宛先解決
+
+`resolveAssigneeNotifyTargets(employeeIds)`（`src/lib/task-notification.ts`）に統一。
+
+1. `Employee.userId` のリレーションで `User` を引く（**第一手段**）
+2. `User` が未リンクの `Employee` に限り、`User.name` の完全一致でフォールバック
+3. `User.status !== "active"` の場合は `lineworksId` を null 扱い（＝メンションしない）
+4. 返り値は**渡した `employeeIds` の順序を保持**する（本文の担当者順とメンション順を一致させるため）
+
+`User.name` の文字列一致だけで引く旧実装は、表記ゆれによる欠落と同名ユーザーへの誤爆があるため使わないこと（罠 #45）。
+
+### 本文とフォールバック（3段）
+
+1. `lineworksId` を持つ担当者が1人以上 → `<m userId="...">` を人数分（各行）並べ、続けて割り当てヘッダ＋本文
+2. 1 が送信失敗、または全員 `lineworksId` 未登録 → 「○○さん、△△さん <ヘッダ>」の**名前プレフィックス付き・メンションなし**で再送
+3. 担当者名も無い → 素の本文
+
+「■ 担当者」欄には `lineworksId` の有無に関わらず**全担当者名**を出す。
+つまり**未登録者は本文に名前が出るのにメンションだけ飛ばない**（画面上は正常に見えるので、切り分けはログで行う）。
+
+### 失敗時の扱い
+
+- 通知失敗は**タスク作成を失敗させない**（fire & forget）。`POST /api/tasks` は try/catch で握りつぶし、`bulk-create-3point` は `.catch()` で握りつぶす
+- 送信のたびに `[task-notify:create]` / `[task-notify:3point]` / `[task-notify:clone]` のログを1行出す
+  - `assignees=<選択人数> mentionable=<メンション可能人数> names=[...]`
+  - `lineworksId` 未登録者がいれば warn を追加で1行（氏名と `user=<userId|未リンク>`）
+  - 送信成功時に `sent mentions=N/M` または `sent fallback(no-mention) recipients=M`
+
+### 複数担当者
+
+- Step3 の担当者選択はチェックボックスで**全カテゴリ複数選択可**（3点セット含む）
+- 2名以上選ぶと Step4 に「完了条件」（`any` = 誰か1人 / `all` = 全員完了）が出る
+- `completionType === "all"` のとき `TaskAssigneeStatus` を担当者の `User` 分だけ生成する
+  （3点セットは3タスク×人数分）。未生成でも `PATCH /api/tasks/[taskId]/status` 側で自動生成される
+
+
+## Google Form 経験職種カテゴリの定義（T-170 / 2026-08-19）
+
+- 選択肢の実体は portal の `src/constants/google-form-categories.ts`（`GOOGLE_FORM_CATEGORY_GROUPS`）。
+  参照元は `GoogleFormCreatorModal.tsx` と `/tasks/new`（Googleフォーム作成依頼タスク）の2箇所で、
+  どちらも定数から動的生成しているため**定数を直せば両方に反映される**。
+- **大項目（グループ）の定義は portal にしか無い**。candidate-intake 側 `specs/generate_form_prompt.yaml`
+  の `target_subcategories` はサブカテゴリのコード一覧のみ。したがって
+  「サブカテゴリ＝両リポジトリ同期／大項目＝portal 単独」。
+- T-170 で サービス業4（`service_food` / `service_cooking` / `service_beauty` / `service_hotel`）と
+  大項目3つ（製造・技術 `mfg_*` 3 / 物流・運輸 `logi_*` 2 / 教育・専門 `pro_*` 3）を追加し、
+  `service_cs` の重複（事務職とサービス業に同一コード）を解消して**事務職側に一本化**。
+  現在 36 サブカテゴリ（`other` を含む選択肢 37）・大項目 10。「その他」は常に最後。
+- `GoogleFormRequestData.groupKey` は大項目の**日本語ラベルそのもの**を保存する。
+  依頼保存後に定義が変わりうるため、読込側は `resolveGoogleFormGroupKey(savedGroupKey, categoryValue)`
+  で「サブカテゴリの実所属」を優先して復元する。
+- 今後サブカテゴリを追加・変更するときは**両リポジトリ同時更新＋コード文字列の突合を必須**とする。
+
+## Googleフォーム作成依頼タスクの簡素化（T-172 / 2026-08-20）
+
+- T-171 で作った依頼カテゴリ（id `cmt004eu000003hr0mrvmi7hg`）は作り込みすぎで依頼が手軽に出せなかったため、
+  **依頼内容を「メイン経験職種カテゴリ」＋「その他メモ」の2項目だけに簡素化**した。
+  依頼時の**履歴書AI読み取り（extract-resume 呼び出し）と会社ごとの職種指定は廃止**。
+  履歴書の解析は受け取った担当者が `GoogleFormCreatorModal` で1回だけ行う（従来動作に復帰）。
+- 会社ごとの補足は「その他メモ」に自由記述する運用へ寄せた。メモはモーダル上部のバナーに全文表示される。
+- 依頼JSON は **v2**（`{ v: 2, groupKey, categoryValue, otherLabel, memo }`）。
+  本番に v1 の依頼タスクが残っているため**読み取り互換のみ維持**し、
+  `normalizeGoogleFormRequestData()`（`src/constants/google-form-request.ts`）で v1/v2 を v2 形へ正規化してから使う。
+  v1 の `companies` / `resumeData` / `pdfFileId` / `txtFileId` は読み捨てる。
+- テンプレート項目「会社別職種分類」は廃止したが、`TaskTemplateField` に **isActive 相当のフラグが無い**ため
+  **物理削除せず** `GOOGLE_FORM_REQUEST_HIDDEN_LABELS` による UI 非表示で新規作成時に出さない方式を採った
+  （既存タスクの `TaskFieldValue` は温存される。タスク作成 API 側に required 検証は無いので `isRequired` は無害）。
+
+## Googleフォーム作成依頼: 会社別指定の復活（T-172追補 / 2026-08-20）
+
+- T-172 でメインカテゴリ1本に絞ったが**会社単位の指定ができず不十分**だったため、**会社カードを復活**させた。
+  ただし**依頼時の履歴書AI読み取り（extract-resume・10〜30秒待ち）は復活させない**。
+- 会社名・在籍期間の取得元は **`WorkHistory`（`work_histories`）**。面談ログ解析（`/api/interviews/[id]/analyze-with-intake`）と
+  面談入力フォーム（`InterviewForm`）が既に構造化保存しているため、**AI呼び出し無し・同期のDB読み取りだけ**で初期表示できる。
+  新設 API: `GET /api/candidates/[candidateId]/work-histories`
+  （`isLatest` 優先＋面談日降順で「会社名が1件でも入っている」`InterviewRecord` を1本選ぶ。空の下書きに引っ張られない）。
+  在籍期間は `hire_date`〜`leave_date`（在籍中は「〜現在」）、無ければ `tenure_year`/`tenure_month` にフォールバック。
+- カバー率（2026-08-20 本番実測）: 全求職者 4346 中 277（6.4%）だが、**直近90日に面談レコードがある327名では232名＝70.9%**。
+  依頼は面談直後に出すものなので実運用の母集団ではほぼ埋まっている。`InterviewDetail.companyName` は現職1社のみ・
+  対象276名とほぼ同集合なので採用しない。職歴0件の求職者は空の手入力行を1行出す（会社カードは**任意入力**）。
+- 依頼JSON は **v3**（`{ v: 3, groupKey, categoryValue, otherLabel, memo, companies: [{ name, period, groupKey, categoryValue, detail }] }`）。
+  `resumeData` / `pdfFileId` / `txtFileId` / `inputMode` は持たない。`normalizeGoogleFormRequestData()` が v1（companies あり）/
+  v2（companies なし）/ v3 のすべてを v3 形へ正規化する。
+- モーダル側は extract 実行後、**会社名一致**（`normalizeCompanyNameForMatch` = NFKC＋空白全除去の完全一致）で
+  依頼の指定職種を `companyCategoryMap` / `companyGroupMap` へ上書きし、一致しない社は既定値のまま。`detail` は各社カードにヒント表示。
+- テンプレート項目「会社別職種分類」は T-172 で `sort_order=99` に退避させていたものを **`sort_order=2` に戻して再利用**
+  （`is_required` は false のまま＝任意）。`GOOGLE_FORM_REQUEST_HIDDEN_LABELS` には**入れたまま**にする点に注意:
+  このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
+  「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
+
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28）
+
+面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
+要件の正: `docs/mendan-support/requirements.md`（v5。Phase 3 で自動検知3種カード方式に改訂）。
+
+- **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
+  `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
+  1分ごとの定期保存は同一 id への upsert（丸ごと上書き）＝冪等。
+  `transcript` = `[{ t: ISO, text }]` / `explanations` = `[{ t, mode, sourceText, resultText }]`
+  （mode: `recent`/`selection`=手動、Phase 3 で `auto-term`/`auto-job`/`auto-reason` を追加）。
+  `endedAt` null は「記録中/中断」（タブを閉じた等）で、一覧の長さ表示は transcript 最終時刻から概算する。
+- **API**（すべて `getSessionUser` 認証）:
+  - `POST /api/interview-support/explain` … AI解説（Haiku・SSEストリーミング・prompt cache・usage は AdvisorUsageLog へ記録）
+  - `POST /api/interview-support/[interviewId]/session` … 保存（upsert・endedAt 未指定は null 扱い＝再開対応）
+  - `GET /api/interview-support/sessions?candidateId=` … **求職者単位**の軽量一覧（本文は返さない）
+  - `GET/DELETE /api/interview-support/sessions/[sessionId]` … 内容取得 / セッション単位削除
+- **画面**:
+  - 支援画面 `/interview-support/[interviewId]`（`InterviewSupportScreen.tsx`）。Web Speech API（`useSpeechTranscription.ts`）で
+    文字起こし→1分ごと＋停止時＋解説完了直後にDB保存。beforeunload では keepalive 保存（ベストエフォート）。
+    sessionStorage 退避は保存成功の有無に関わらず継続（最後の砦）。
+  - 振り返り: `InterviewForm` 右カラム「面談サポート」タブ（`InterviewSupportLogTab.tsx`）。求職者に紐づく全セッションの
+    一覧（回次タイトル・開始日時・長さ・作成CA）・行クリックで時系列閲覧（解説は amber カードでログと区別）・
+    confirm つき削除・「＋ 新規面談サポート」（支援画面を別タブで開く。ヘッダーボタンと併存）。
+    Phase 3 の更新型カード（auto-job/auto-reason）は閲覧では時系列に混ぜず、indigo のサマリーカードとして先頭に表示。
+- **自動検知（Phase 3）**: 「ボタンを押して解説」は押すタイミングの判断が現場で難しいため、AIの会話自動監視が主役。
+  既存ボタン2つ（直近30秒/選択部分）は「今すぐ知りたい」時の即時フォローとして併存。
+  - `POST /api/interview-support/auto-scan` … 非ストリーミング（Haiku・max_tokens 600・system 固定で prompt cache・
+    usage は endpoint `interview-support-auto-scan` で AdvisorUsageLog へ）。リクエスト =
+    `{ text（前回スキャン以降の新規確定発話）, explainedTerms, existingJobs, existingReason }`、
+    レスポンス = `{ terms, jobs, reason }`。JSONパース失敗は空結果扱い（エラーを画面に出さない）。
+  - クライアント（`InterviewSupportScreen.tsx`）は**認識中のみ30秒間隔**（`AUTO_SCAN_INTERVAL_MS`）でスキャン。
+    新規発話が**20字未満ならスキップ**（`AUTO_SCAN_MIN_CHARS`。無言・相槌区間はコストゼロ）。
+    API失敗時はスキャン済み位置を進めず次回同じ発話でリトライ（自動フローは沈黙）。
+  - 3種カード: ①用語 `auto-term` = 時系列エリアに積む（「自動・用語」バッジ。解説済み直近30件を毎回渡し再解説しない。
+    最大2件/回）／②業務内容 `auto-job` = **会社/職務ごとに1枚の更新型**（AIが同一職務判定に使う `key` で突き合わせ、
+    統合済み全文で置き換え）／③転職理由 `auto-reason` = **全体で1枚の更新型**。②③は右カラム上段の固定エリアに表示し、
+    更新時は背景色 transition で1.5秒ハイライト。希望条件・日程調整・雑談は検知しない（沈黙が正解）。
+  - 保存は既存 explanations（Json）に相乗り。用語=1件ずつ、②③=**保存時点の最新版のみ**（更新履歴は積まない。
+    定期保存時にクライアントが最新状態から組み立てる）。保存API・テーブルは無変更。

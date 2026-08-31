@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { notifyTaskCreated } from "@/lib/task-notification";
+import {
+  notifyTaskCreated,
+  resolveAssigneeNotifyTargets,
+  logAssigneeNotifyTargets,
+} from "@/lib/task-notification";
 
 export async function GET(
   _request: Request,
@@ -227,35 +231,26 @@ async function sendCloneNotification(
   });
   if (!saved) return;
 
-  const assigneeNames = saved.assignees.map((a) => a.employee.name);
-
-  // 複製者自身のみが担当者の場合は通知不要
-  const assigneeUsers =
-    assigneeNames.length > 0
-      ? await prisma.user.findMany({
-          where: { name: { in: assigneeNames }, status: "active" },
-          select: { id: true, name: true, lineworksId: true },
-        })
-      : [];
+  // T-162: 担当者 → User の解決は Employee.userId 経由の共通ヘルパーに統一。
+  const notifyTargets = await resolveAssigneeNotifyTargets(
+    saved.assignees.map((a) => a.employeeId),
+  );
 
   // 複製者（作成者）以外の担当者がいなければ通知しない
-  const otherAssignees = assigneeUsers.filter((u) => u.id !== actor.id);
-  if (otherAssignees.length === 0) return;
+  if (notifyTargets.filter((t) => t.userId !== actor.id).length === 0) return;
 
-  const assigneeLineworksIds = assigneeNames.map((name) => {
-    const user = assigneeUsers.find((u) => u.name === name);
-    // 複製者自身のlineworksIdは除外（自分には通知しない）
-    if (user && user.id === actor.id) return null;
-    return user?.lineworksId ?? null;
-  });
+  logAssigneeNotifyTargets("task-notify:clone", saved.id, notifyTargets);
 
   await notifyTaskCreated({
     taskId: saved.id,
     title: saved.title,
     categoryName: saved.category?.name ?? null,
     candidateName: saved.candidate?.name ?? null,
-    assigneeNames,
-    assigneeLineworksIds,
+    assigneeNames: notifyTargets.map((t) => t.name),
+    // 複製者自身のlineworksIdは除外（自分には通知しない）
+    assigneeLineworksIds: notifyTargets.map((t) =>
+      t.userId === actor.id ? null : t.lineworksId,
+    ),
     priority: saved.priority ?? null,
     dueDate: saved.dueDate,
     creatorName: actor.name,

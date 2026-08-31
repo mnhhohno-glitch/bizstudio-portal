@@ -1,4 +1,5 @@
 import { sendBotMessage } from "./lineworks";
+import { prisma } from "./prisma";
 
 type TaskNotificationParams = {
   taskId: string;
@@ -84,6 +85,10 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
     ];
     try {
       await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      // T-162: 「1名にしか届かない」を後から切り分けられるよう実送信の宛先数を残す
+      console.log(
+        `[task-notify:create] task=${params.taskId} sent mentions=${mentionLines.length}/${params.assigneeNames.length}`,
+      );
       return;
     } catch (e) {
       console.warn("メンション付き通知に失敗、メンションなしで再送します:", e);
@@ -100,6 +105,9 @@ export async function notifyTaskCreated(params: TaskNotificationParams): Promise
       ...baseLines.slice(2),
     ];
     await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+    console.log(
+      `[task-notify:create] task=${params.taskId} sent fallback(no-mention) recipients=${params.assigneeNames.length}`,
+    );
     return;
   }
 
@@ -484,4 +492,220 @@ export async function notifyAiTaskDueReminder(params: AiTaskDueReminderParams): 
 
   // 3) 素の本文
   await sendBotMessage(botId, channelId, baseLines.join("\n"));
+}
+
+export type AssigneeNotifyTarget = {
+  employeeId: string;
+  /** 通知本文の「■ 担当者」に出す表示名（Employee.name） */
+  name: string;
+  userId: string | null;
+  /** メンション可能な場合のみ非 null（User が active かつ lineworksId 登録済み） */
+  lineworksId: string | null;
+};
+
+/**
+ * T-162: 担当者 Employee → User → lineworksId を解決する共通ヘルパー。
+ *
+ * 従来は各所で User.name の文字列一致だけで引いていたため
+ *  - 同名 User がいると別人に飛ぶ
+ *  - Employee と User で表記が1文字でも違うとメンションが黙って落ちる
+ * という穴があった。Employee.userId のリレーションを第一手段にし、
+ * User 未リンクの Employee（本番実測 2名: 藤本 夏海 / 上原 千遥）だけ
+ * 従来どおり名前一致でフォールバックする。
+ *
+ * 返り値は employeeIds の順序を保持する（本文の担当者順とメンション順を一致させるため）。
+ * 退職・無効化された User（status !== "active"）は lineworksId を null 扱いにする。
+ */
+export async function resolveAssigneeNotifyTargets(
+  employeeIds: string[],
+): Promise<AssigneeNotifyTarget[]> {
+  if (employeeIds.length === 0) return [];
+
+  const employees = await prisma.employee.findMany({
+    where: { id: { in: employeeIds } },
+    select: {
+      id: true,
+      name: true,
+      user: { select: { id: true, name: true, status: true, lineworksId: true } },
+    },
+  });
+
+  // User 未リンクの Employee だけ名前一致でフォールバック
+  const unlinkedNames = employees.filter((e) => !e.user).map((e) => e.name);
+  const fallbackUsers =
+    unlinkedNames.length > 0
+      ? await prisma.user.findMany({
+          where: { name: { in: unlinkedNames }, status: "active" },
+          select: { id: true, name: true, lineworksId: true },
+        })
+      : [];
+
+  const byId = new Map(employees.map((e) => [e.id, e]));
+
+  return employeeIds
+    .map((employeeId) => {
+      const emp = byId.get(employeeId);
+      if (!emp) return null;
+      if (emp.user) {
+        return {
+          employeeId,
+          name: emp.name,
+          userId: emp.user.id,
+          lineworksId: emp.user.status === "active" ? (emp.user.lineworksId ?? null) : null,
+        };
+      }
+      const fb = fallbackUsers.find((u) => u.name === emp.name) ?? null;
+      return {
+        employeeId,
+        name: emp.name,
+        userId: fb?.id ?? null,
+        lineworksId: fb?.lineworksId ?? null,
+      };
+    })
+    .filter((t): t is AssigneeNotifyTarget => t !== null);
+}
+
+/**
+ * T-162: 通知の宛先解決結果をログに残す。
+ * 「通知が1名にしか届かない」を後から切り分けられるよう、
+ * 選択された担当者数・メンションできた人数・落ちた人を必ず1行で出す。
+ */
+export function logAssigneeNotifyTargets(
+  scope: string,
+  taskRef: string,
+  targets: AssigneeNotifyTarget[],
+): void {
+  const mentionable = targets.filter((t) => t.lineworksId);
+  const skipped = targets.filter((t) => !t.lineworksId);
+  console.log(
+    `[${scope}] task=${taskRef} assignees=${targets.length} mentionable=${mentionable.length}` +
+      ` names=[${targets.map((t) => t.name).join(",")}]`,
+  );
+  if (skipped.length > 0) {
+    console.warn(
+      `[${scope}] task=${taskRef} lineworksId 未登録のためメンション対象外: ${skipped
+        .map((t) => `${t.name}(user=${t.userId ?? "未リンク"})`)
+        .join("、")}`,
+    );
+  }
+}
+
+/**
+ * T-177: 日程調整AI（外部RPA）が PATCH /api/external/schedule-tasks/[taskId] で
+ * タスクを更新したときの通知に必要な情報。
+ */
+export type ScheduleAiTaskUpdatedParams = {
+  taskId: string;
+  title: string;
+  candidateName: string | null;
+  /** 更新後に **実際にDBへ保存されている** status（読み替え後の値）。 */
+  storedStatus: string;
+  /** AIが今回追加したコメント本文（AI接頭辞を除いた素の本文）。status のみの更新なら null。 */
+  commentContent: string | null;
+  assigneeNames: string[];
+  assigneeLineworksIds: (string | null)[];
+};
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  NOT_STARTED: "未着手",
+  IN_PROGRESS: "対応中",
+  COMPLETED: "完了",
+};
+
+/**
+ * 通知内リンクは常に **本番ドメイン** へ。PORTAL_BASE_URL はサービスごとに staging/本番 が
+ * 異なるため使わない（dailyReport/lineworks-notify.ts と同じ流儀）。
+ */
+const PORTAL_PROD_URL =
+  process.env.PORTAL_PUBLIC_URL || "https://bizstudio-portal-production.up.railway.app";
+
+/**
+ * T-177: 日程調整AIがタスクを更新したことを LINE WORKS のタスク通知トークルームへ知らせる。
+ *
+ * 従来この外部PATCHルートは通知を一切出さない設計だったため、AIが完了化してもCA・事務は
+ * 気づけず、一覧から消えたようにしか見えなかった。AIは完了にしなくなった（対応中で残す）ので、
+ * 「返信は送った / 完了操作は人がやる」ことを能動的に伝える必要がある。
+ *
+ * 呼び出し側（PATCHルート）が「そのタスクへのAIの初回更新時のみ」に絞って呼ぶ前提。
+ * ここでは二重通知の判定はしない（判定に必要な更新前の状態を持っているのは呼び出し側のため）。
+ *
+ * @returns 送信したら true / env 未設定でスキップしたら false。送信エラーは throw する
+ *          （呼び出し側で握りつぶして 200 を返す＝フェイルソフト）。
+ */
+export async function notifyScheduleAiTaskUpdated(
+  params: ScheduleAiTaskUpdatedParams,
+): Promise<boolean> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return false;
+  }
+
+  const statusLabel = TASK_STATUS_LABEL[params.storedStatus] ?? params.storedStatus;
+  const commentDisplay = params.commentContent
+    ? params.commentContent.length > 200
+      ? params.commentContent.slice(0, 200) + "..."
+      : params.commentContent
+    : "（コメントなし）";
+
+  const header = "日程調整AIが応募者へ返信を送りました（要確認）";
+
+  const baseLines = [
+    "🤖 " + header,
+    "",
+    "■ タスク",
+    params.title,
+    "",
+    "■ 求職者",
+    params.candidateName ? params.candidateName + " 様" : "なし",
+    "",
+    "■ AIのコメント",
+    commentDisplay,
+    "",
+    "■ 現在のステータス",
+    statusLabel + "（AIは完了にしません）",
+    "",
+    "■ お願い",
+    "返信内容と日程の確定状況を確認し、問題なければタスクを「完了」にしてください。",
+    "AIが返信を送っただけで、面談日程が確定したとは限りません。",
+    "",
+    "■ 担当者",
+    params.assigneeNames.join("、") || "未設定",
+    "",
+    "🔗 詳細はこちら",
+    PORTAL_PROD_URL + "/tasks/" + params.taskId,
+  ];
+
+  // 1) lineworksId が登録されている担当者へメンション付き
+  const mentionLines = params.assigneeLineworksIds
+    .filter((id): id is string => !!id)
+    .map((id) => `<m userId="${id}">`);
+  if (mentionLines.length > 0) {
+    try {
+      await sendBotMessage(
+        botId,
+        channelId,
+        [...mentionLines, ` ${header}`, "", ...baseLines.slice(2)].join("\n"),
+      );
+      return true;
+    } catch (e) {
+      console.warn("日程調整AI更新通知のメンションに失敗、メンションなしで再送します:", e);
+    }
+  }
+
+  // 2) 担当者名プレフィックス付き（lineworksId 未登録 or メンション送信失敗）
+  if (params.assigneeNames.length > 0) {
+    const namePrefix = params.assigneeNames.map((n) => `${n}さん`).join("、");
+    await sendBotMessage(
+      botId,
+      channelId,
+      [`${namePrefix} ${header}`, "", ...baseLines.slice(2)].join("\n"),
+    );
+    return true;
+  }
+
+  // 3) 素の本文
+  await sendBotMessage(botId, channelId, baseLines.join("\n"));
+  return true;
 }

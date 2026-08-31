@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import CandidateListClient from "./CandidateListClient";
+// T-170: 希望職種 / 希望エリア / 求人紹介数 / エントリー数 / 放置日数（一括集計・N+1なし）
+import { computeCandidateListMetrics, EMPTY_CANDIDATE_LIST_METRICS } from "@/lib/candidates/list-metrics";
 
 export const metadata: Metadata = { title: "求職者管理" };
 
@@ -22,7 +24,7 @@ export default async function CandidateMasterPage() {
 
   // Job status determination
   const candidateIds = candidates.map((c) => c.id);
-  const [entryCounts, bookmarkCounts] = await Promise.all([
+  const [entryCounts, bookmarkCounts, metrics] = await Promise.all([
     prisma.jobEntry.groupBy({
       by: ["candidateId"],
       where: { candidateId: { in: candidateIds } },
@@ -33,6 +35,8 @@ export default async function CandidateMasterPage() {
       where: { candidateId: { in: candidateIds }, category: "BOOKMARK" },
       _count: { id: true },
     }),
+    // T-170: 一覧の追加5列（内部で固定6本のクエリを Promise.all）
+    computeCandidateListMetrics(candidateIds),
   ]);
   const entryCountMap = new Map(entryCounts.map((e) => [e.candidateId, e._count.id]));
   const bookmarkCountMap = new Map(bookmarkCounts.map((b) => [b.candidateId, b._count.id]));
@@ -44,6 +48,7 @@ export default async function CandidateMasterPage() {
   }
 
   const serialized = candidates.map((c) => ({
+    ...(metrics.get(c.id) ?? EMPTY_CANDIDATE_LIST_METRICS), // T-170
     id: c.id,
     candidateNumber: c.candidateNumber,
     name: c.name,

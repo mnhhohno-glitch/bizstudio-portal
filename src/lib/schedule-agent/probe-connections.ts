@@ -5,11 +5,13 @@
 // このプローブは 3状態を明確に返す:
 //   - "ok"             : 接続あり・トークン有効・events.list 成功
 //   - "no_connection"  : GoogleCalendarConnection レコード自体が無い
-//   - "refresh_failed" : レコードはあったが refresh に失敗（既存ヘルパが自動削除する）
+//   - "refresh_failed" : レコードはあったが refresh に失敗し、接続レコードが削除された
 //   - "fetch_failed"   : 認証は通ったが events.list が例外（権限剥奪・一時障害等）
 //
-// 判定手順の副作用: refresh_failed は既存 getAuthenticatedOAuth2Client 内で
-//   接続レコードが自動削除される（本タスクで新たに削除する処理は追加しない）。
+// 判定手順の副作用（T-167 以降）: getAuthenticatedOAuth2Client が接続レコードを削除するのは
+//   invalid_grant 等の**永久失効エラーのときだけ**。一時障害（5xx・ネットワーク断・判別不能）では
+//   レコードを温存するため、この関数からは "fetch_failed" として見える。
+//   どちらも brokenUserIds では「壊れている」扱いなので、アラート／枠探索除外の挙動は変わらない。
 import { prisma } from "@/lib/prisma";
 import { listCalendarEventsRange } from "@/lib/googleCalendar";
 import { jstIso, jstYmd } from "./jst";

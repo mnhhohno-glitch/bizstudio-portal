@@ -112,16 +112,20 @@ export async function computeWeeklyMatrix(params: {
       WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
       GROUP BY je.candidate_id, je.external_job_id, (je.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
       UNION ALL
-      SELECT cf.candidate_id, MIN(cf.last_exported_at) AS pdate
+      -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)。出力せず紹介済みにした行（introduced_at のみ）も提案に数える。
+      -- 本人応募（origin='candidate' かつ drive_file_id IS NULL）は CA提案に数えない。
+      -- 既存データは introduced_at 保有行が全件出力済のため COALESCE は従来値と同一（数字は動かない）。
+      SELECT cf.candidate_id, MIN(COALESCE(cf.last_exported_at, cf.introduced_at)) AS pdate
       FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
-      WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+      WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
+        AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
         AND NOT EXISTS (
           SELECT 1 FROM job_entries je2
           WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
             AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
-              = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+              = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
         )
-      GROUP BY cf.candidate_id, cf.file_name, (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
+      GROUP BY cf.candidate_id, cf.file_name, (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
   const ENTRY_EVENTS = `
       SELECT je.candidate_id, MIN(je.entry_date) AS pdate
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
@@ -177,14 +181,16 @@ export async function computeWeeklyMatrix(params: {
         FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
         WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
         UNION ALL
-        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)・本人応募は除外（PROPOSAL_EVENTS と同条件）。
+        SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
-        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
+        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2
             WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
               AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
-                = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+                = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
           )
       ),
       props AS (
@@ -341,15 +347,17 @@ export async function computeDayStageDetails(params: {
         WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
           AND je.job_intro_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
         UNION ALL
-        SELECT cf.candidate_id, cf.last_exported_at AS pdate
+        -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)・本人応募は除外（PROPOSAL_EVENTS と同条件）。
+        SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
-        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND cf.last_exported_at IS NOT NULL
-          AND cf.last_exported_at BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
+        WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
+          AND COALESCE(cf.last_exported_at, cf.introduced_at) BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2
             WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
               AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
-                = (cf.last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
+                = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
           )
       )
       SELECT c2.name AS name, COUNT(*)::int AS cnt

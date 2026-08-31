@@ -3,12 +3,16 @@ import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 import { extractRecommendationForDisplay } from "@/lib/comment-split";
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
+import { generateAndStorePdf } from "@/lib/job-platform-pdf";
+// T-185: mypage が jobTitle/jobCategory を送ってこないときに求人本文から補う。
+import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
 
 // T-128 T2: 求職者サイト向け お気に入り（ブックマーク）API。
 // 台帳は CandidateFile（category="BOOKMARK"）。origin で CA追加(null|"ca") と 本人追加("candidate") を区別。
 //
 // GET    /api/external/candidate-site/favorites?candidateNumber=... （または candidateId）: 一覧
-// POST   /api/external/candidate-site/favorites: 本人お気に入り追加（記録のみ・PDF/Drive/AI起動なし）
+// POST   /api/external/candidate-site/favorites: 本人お気に入り追加（T-181: PDF生成→Drive保管を fire-and-forget で起動・AI分析は起動しない）
 // PATCH  /api/external/candidate-site/favorites: メモ(candidateNote)更新（本人/CA推薦/PDF行いずれも可・candidateNote のみ。fileId 優先、無ければ externalJobRef で特定）
 // DELETE /api/external/candidate-site/favorites: 本人お気に入り解除（origin="candidate" のみ）
 //
@@ -123,9 +127,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
   }
 
-  // 全ブックマーク（CA追加・本人追加・旧PDF経路すべて）を候補者スコープで取得。
+  // T-182: サイトに出すのは「CAが紹介した求人（introducedAt あり）」と「本人がサイトで追加した
+  // お気に入り（origin="candidate"）」のみ。CAがブックマークしただけの未紹介行は本人に見せない。
+  // origin 条件を外すと本人追加のお気に入りが全員分消えるため必ず残すこと。
   const files = await prisma.candidateFile.findMany({
-    where: { candidateId: candidate.id, category: "BOOKMARK", archivedAt: null },
+    where: {
+      candidateId: candidate.id,
+      category: "BOOKMARK",
+      archivedAt: null,
+      OR: [
+        { introducedAt: { not: null } },
+        { origin: "candidate" },
+      ],
+    },
     select: {
       id: true,
       externalJobRef: true,
@@ -199,7 +213,7 @@ export async function GET(request: Request) {
   });
 }
 
-// ---- POST: 本人お気に入り追加（記録のみ） ----
+// ---- POST: 本人お気に入り追加（T-181: 保存は同期・PDF生成は fire-and-forget） ----
 export async function POST(request: Request) {
   if (!verifyCandidateSiteKey(request)) return unauthorized();
 
@@ -248,8 +262,12 @@ export async function POST(request: Request) {
   }
 
   const companyName = str(body.companyName);
-  const jobTitle = str(body.jobTitle);
   const extractedText = str(body.extractedText);
+  // T-161: 職種。mypage が送ってくれば保存する（jobCategory / jobType 両方の名前を受け付ける）。
+  // T-185: 送られてこない場合は求人本文（extractedText）から抽出する。どちらでも取れなければ
+  //        null のまま（捏造しない）。to-entry 側でも同一求人の他行から解決を試みる。
+  const jobTitle = str(body.jobTitle) ?? extractJobTitleFromText(extractedText);
+  const jobCategory = str(body.jobCategory ?? body.jobType) ?? extractJobCategoryFromText(extractedText);
   const jobUrl = str(body.jobUrl);
   // 本人メモ（任意）。candidateNote / note 両方受け付ける。空文字・未指定は null。
   const candidateNote = str(body.candidateNote ?? body.note);
@@ -259,31 +277,59 @@ export async function POST(request: Request) {
   const safeCompany = (companyName ?? `求人${externalJobRef}`).replace(/[\\/:*?"<>|]/g, "").trim();
   const fileName = numericId ? `求人票_${safeCompany}_${numericId}.pdf` : `求人票_${safeCompany}.pdf`;
 
-  // 記録のみ: PDF生成・Drive保管・会社説明生成・AI分析は一切起動しない（driveFileId=null のまま）。
+  // T-181: 行の保存は従来どおり同期で行い、PDF生成（pdf-service→Drive保管）はレスポンス後に
+  //        fire-and-forget で起動する（本人の「気になる」操作を待たせない・失敗しても保存は成立）。
+  //        AI分析は起動しない（CAの手動起動のまま）。
   // extractedText があれば保存し extractedAt を立てる（将来CAが分析する際の材料。ここでは分析しない）。
-  const created = await prisma.candidateFile.create({
-    data: {
-      candidateId: candidate.id,
-      category: "BOOKMARK",
-      fileName,
-      fileSize: extractedText ? Buffer.byteLength(extractedText, "utf8") : 0,
-      mimeType: "text/plain",
-      driveFileId: null,
-      driveViewUrl: null,
-      driveFolderId: null,
-      sourceType: "job-platform",
-      externalJobRef,
-      origin: "candidate",
-      memo: jobUrl,
-      candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
-      ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
-      uploadedByUserId: systemUserId,
-    },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+  // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+  //        PDF生成が成功した時点で triggerOneDriveSync に本体を渡して実コピーを起動する
+  //        （from-job-platform の新規作成経路と同じ扱い）。生成失敗時は PENDING のまま残り
+  //        SKIPPED(NO_FILE_BODY)（夜間判定）となる（従来挙動）。
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.candidateFile.create({
+      data: {
+        candidateId: candidate.id,
+        category: "BOOKMARK",
+        fileName,
+        fileSize: extractedText ? Buffer.byteLength(extractedText, "utf8") : 0,
+        mimeType: "text/plain",
+        driveFileId: null,
+        driveViewUrl: null,
+        driveFolderId: null,
+        sourceType: "job-platform",
+        externalJobRef,
+        origin: "candidate",
+        memo: jobUrl,
+        // T-161: 求人スナップショットを保存する（旧実装は jobTitle を受信しつつ void で破棄していた）。
+        // 下流のエントリー化（to-entry）で JobEntry.jobTitle / jobCategory へ引き継ぐための保管。
+        jobTitle,
+        jobCategory,
+        candidateNote, // 本人メモ（null 可）。caComment は本人追加時に触れない（CA専用列）。
+        ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
+        uploadedByUserId: systemUserId,
+      },
+      select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    });
+    // T-181: この時点では実体が無いので同期は起動しない（PENDING受付のみ）。
+    // 実コピーは下の fire-and-forget PDF生成の成功時に triggerOneDriveSync で起動する。
+    await enqueueOneDriveSync(
+      { candidateFileId: row.id, candidateId: candidate.id, category: "BOOKMARK" },
+      tx,
+    );
+    return row;
   });
 
-  // jobTitle は現状 CandidateFile に専用列が無いため保持しない（会社名は fileName に含める）。
-  void jobTitle;
+  // T-181: PDF生成（pdf-service→Drive保管→driveFileId等更新）。★await しない（fire-and-forget）。
+  // 本人のレスポンスは即返す。失敗しても保存済みの行はそのまま（HistoryTab 側は求人詳細への
+  // フォールバックリンクで開ける）。sid = externalJobRef（job-platform の source_job_id）。
+  void generateAndStorePdf({ fileId: created.id, candidateId: candidate.id, sid: externalJobRef, fileName })
+    .then((pdfBuffer) => {
+      // PDF実体が揃ったこの時点で OneDrive コピーを起動（本文は手元にあるので取り直さない）。
+      triggerOneDriveSync({ candidateFileId: created.id, content: pdfBuffer, mimeType: "application/pdf" });
+    })
+    .catch((err) => {
+      console.error(`[candidate-site/favorites] PDF gen/store failed (sid=${externalJobRef}):`, err instanceof Error ? err.message : String(err));
+    });
 
   return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
 }

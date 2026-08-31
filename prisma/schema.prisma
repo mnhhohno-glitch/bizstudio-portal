@@ -247,6 +247,8 @@ model Employee {
   // 面談履歴
   interviewsConducted InterviewRecord[] @relation("interviewConductedBy")
   interviewsCreated   InterviewRecord[] @relation("interviewCreatedBy")
+  // T-183 Phase 2: 面談サポートセッション（実施CA）
+  interviewSupportSessions InterviewSupportSession[] @relation("interviewSupportCreatedBy")
 
   // 勤怠管理
   dailyAttendances DailyAttendance[]
@@ -524,12 +526,20 @@ model Candidate {
   scoutLinkedById     String?            @map("scout_linked_by_id")
   mynaviScoutSentAt   DateTime?          @map("mynavi_scout_sent_at") // マイナビPDFから取れる「スカウト送信時刻」（将来自動取得用）
 
+  // T-158: 求職者ごとの OneDrive 資料フォルダURL（CAが基本情報編集で手貼り）。
+  //   保存時に https:// 始まりのみ許可（javascript: 等のスキーム混入によるXSS防止）。
+  //   URLを保持して開くだけで、OneDrive へのファイル書き込み・フォルダ自動作成は行わない。
+  oneDriveFolderUrl String? @map("onedrive_folder_url")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   contactLogs            ContactLog[]
   jimuSessions           JimuSession[]
   tasks                  Task[]
   files                  CandidateFile[]
+  oneDriveSyncLogs       OneDriveSyncLog[]
+  // T-159 Phase 3: 「oneDriveFolderUrl を自動処理が設定した」ことの台帳（手貼りを守るため）
+  oneDriveFolderUrlLedger OneDriveFolderUrlLedger?
   advisorSessions        AdvisorChatSession[]
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
@@ -1358,7 +1368,7 @@ model RpaExecutionBatch {
   flowName           String                   @map("flow_name")
   startedAt          DateTime                 @map("started_at")
   finishedAt         DateTime?                @map("finished_at")
-  status             String                   @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED"
+  status             String                   @default("RUNNING") // "RUNNING" | "COMPLETED" | "FAILED" | "NO_TARGET"
   totalCount         Int                      @default(0) @map("total_count")
   normalCount        Int                      @default(0) @map("normal_count")
   ageNgCount         Int                      @default(0) @map("age_ng_count")
@@ -1394,6 +1404,11 @@ model MynaviRpaProcessingLog {
   pdfFileName       String?           @map("pdf_file_name")
   pdfFileId         String?           @map("pdf_file_id")
   errorMessage      String?           @map("error_message") @db.Text
+  /// AI解析失敗時に退避したPDFの Drive ファイルID / 閲覧URL。
+  /// 失敗したPDFが現存しないと原因の再現ができないため 2026-08-12 に追加。
+  /// 成功時は CandidateFile 側に入るのでここは null。
+  failedPdfFileId   String?           @map("failed_pdf_file_id")
+  failedPdfUrl      String?           @map("failed_pdf_url")
   // T-064: 自動紐付け結果（matched / no_recruiter_name / no_machine_master / no_candidate_today / no_candidate_yesterday / error）
   scoutLinkResult   String?           @map("scout_link_result")
   scoutLinkedSlotId String?           @map("scout_linked_slot_id")
@@ -1480,6 +1495,11 @@ model CandidateFile {
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
   sourceMedia       String?               @map("source_media") // "hito_link" / "circus" / "bee" / "mynavi_job_sharing"
+  // T-161: サイト経由（favorites POST）で受信する求人スナップショット。従来は jobTitle を受信しつつ破棄していた
+  //   （void jobTitle）ため、下流のエントリー化で求人タイトル・職種が空になっていた。会社名は従来どおり fileName に
+  //   埋め込み（変えない）。受信できなかった項目は null のまま（捏造しない）。エントリー化（to-entry）で JobEntry へ引き継ぐ。
+  jobTitle          String?               @map("job_title")
+  jobCategory       String?               @map("job_category")
   // T-131: 手動アップPDFの job-platform 自動投入（フルデータ化）。投入試行時刻。
   //   externalJobRef が入れば紐付け完了。null のまま2h超過は滞留として拾い直し対象。
   platformSubmittedAt DateTime?           @map("platform_submitted_at")
@@ -1507,6 +1527,13 @@ model CandidateFile {
   memo              String?               @db.Text
   extractedText     String?               @map("extracted_text") @db.Text
   extractedAt       DateTime?             @map("extracted_at")
+  // T-164: アップロード済みファイル本体から抽出したテキストの永続キャッシュ（advisor-context 用）。
+  //   PDFの中身は一度アップロードされたら変わらない前提で、一度解析したら再解析しない。
+  //   extractedText（BOOKMARK求人票の抽出パイプライン専用）とは別系統。
+  //   ファイル実体の差し替え（replace-docx/xlsx 等）時は3列とも NULL に戻すこと。
+  parsedText    String?   @map("parsed_text") @db.Text
+  parsedAt      DateTime? @map("parsed_at")
+  parseFailedAt DateTime? @map("parse_failed_at") // 失敗を永久キャッシュしない（parsedText が無ければ次回再試行）
   aiMatchRating     String?               @map("ai_match_rating")
   aiAnalysisComment String?               @map("ai_analysis_comment") @db.Text
   aiAnalyzedAt      DateTime?             @map("ai_analyzed_at")
@@ -1521,6 +1548,10 @@ model CandidateFile {
   archivedBy        User?                 @relation("CandidateFileArchivedBy", fields: [archivedById], references: [id])
   createdAt         DateTime              @default(now()) @map("created_at")
   updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  // T-159: OneDrive への一方向コピーの記録（1ファイル1行・別テーブル）。
+  //   CandidateFile は既に50列あるため列を足さない。行が無い＝同期対象として受け付けていない。
+  oneDriveSyncLog   OneDriveSyncLog?
 
   @@unique([candidateId, kyuujinJobId]) // T-133 P1: 同一候補者×同一kyuujin Jobの重複行防止（NULLは重複扱いされない）
   @@index([candidateId, category, archivedAt])
@@ -1597,6 +1628,9 @@ model AdvisorChatSession {
   messages        AdvisorChatMessage[]
   contextCache    String?              @map("context_cache") @db.Text
   contextCachedAt DateTime?            @map("context_cached_at")
+  // T-164: context の材料（候補者・ファイル・評価・面談ログ等の更新状態）のハッシュ。
+  //   一致すれば経過時間に関係なくキャッシュを使い、変われば再ビルドする（上限TTL 24h を安全弁に併置）。
+  contextFingerprint String? @map("context_fingerprint")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
@@ -1616,6 +1650,10 @@ model AdvisorChatMessage {
   // 「今回は不要」で破棄した候補を同一セッション内で再提示しないことも同じ仕組みで満たせる。
   suggestedTasks            Json?     @map("suggested_tasks")
   suggestedTasksDismissedAt DateTime? @map("suggested_tasks_dismissed_at")
+
+  // T-163: メッセージ種別。"ANALYSIS"=求人全件分析の産物（チャットAPIの送信窓から除外する）。
+  // null=通常チャット。画面表示・DB保存には影響させず、AI への送信内容の選別にのみ使う。
+  kind String?
 
   @@map("advisor_chat_messages")
 }
@@ -1639,6 +1677,9 @@ model AdvisorUsageLog {
   costUsd             Float    @map("cost_usd")
   isRetry             Boolean  @default(false) @map("is_retry")
   note                String?
+  // T-163: 所要時間の実測（従来は未計測だった）。どちらも記録開始以前の行は null。
+  latencyMs      Int? @map("latency_ms") // Anthropic API 呼び出しの所要時間(ms)
+  contextBuildMs Int? @map("context_build_ms") // 候補者contextビルド(PDF読み込み含む)の所要時間(ms)。キャッシュヒット時は 0
 
   @@index([createdAt])
   @@index([endpoint])
@@ -2197,6 +2238,8 @@ model InterviewRecord {
   workHistories WorkHistory[]
   // T-152: この面談に紐づく面談ログ等（CandidateFile.interviewId 経由）
   meetingFiles  CandidateFile[]       @relation("InterviewMeetingFiles")
+  // T-183 Phase 2: 面談サポート（文字起こし+AI解説）のセッション
+  supportSessions InterviewSupportSession[]
   createdAt     DateTime              @default(now()) @map("created_at")
   updatedAt     DateTime              @updatedAt @map("updated_at")
 
@@ -2210,14 +2253,40 @@ model InterviewRecord {
   @@map("interview_records")
 }
 
+// T-183 Phase 2: 面談サポート（リアルタイム文字起こし+AI解説）のセッション保存。
+// - id はクライアント側で生成（「開始」押下時に確定）。1分ごとの定期保存は同一 id への upsert（丸ごと上書き）で冪等。
+// - transcript: [{ t: ISO文字列, text: string }, ...] / explanations: [{ t, mode: "recent"|"selection", sourceText, resultText }, ...]
+// - endedAt null = 記録中または中断（タブを閉じた等）。振り返りタブでは transcript 最終時刻から長さを概算表示する。
+// - 純粋追加（既存テーブル・カラムは一切変更しない）。
+model InterviewSupportSession {
+  id                String          @id @default(cuid())
+  interviewRecordId String          @map("interview_record_id")
+  interviewRecord   InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+  createdByUserId   String          @map("created_by_user_id")
+  createdBy         Employee        @relation("interviewSupportCreatedBy", fields: [createdByUserId], references: [id])
+  startedAt         DateTime        @map("started_at")
+  endedAt           DateTime?       @map("ended_at")
+  transcript        Json
+  explanations      Json
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@index([interviewRecordId])
+  @@map("interview_support_sessions")
+}
+
 // 改修③（途中保存）: 面談前フォームの質問下書き。
-// - 求職者ごとに1件（candidateId @unique）・PUT で upsert・フォーム作成成功で DELETE。
+// - 求職者ごとに1件（candidateId @unique）・PUT で upsert。T-179 以降、フォーム作成成功でも削除せず
+//   consumedAt に作成日時を入れて「使用済み」にする（明示的な「新しく作り直す」でのみ DELETE）。
 // - InterviewRecord（フォーム作成後に作られる isLatest 管理の正レコード）には相乗りさせない独立テーブル。
 // - 純粋追加（既存データ非破壊）。
 model FormDraft {
   id            String   @id @default(cuid())
   candidateId   String   @unique @map("candidate_id")
   questionsJson Json     @map("questions_json")
+  // T-179: この下書きの内容でフォームを作成した日時。null = 作りかけ（未使用）。
+  // 途中保存（PUT）で null に戻し、フォーム作成成功で now() を入れる。
+  consumedAt    DateTime? @map("consumed_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -2947,4 +3016,241 @@ model TrainingWorkAnswer {
   @@index([workKey])
   @@index([employeeId])
   @@map("training_work_answers")
+}
+
+// ============================================================
+// RPAスカウト検索条件管理（Phase 1）
+// マイナビスカウトRPA 1〜6号機の検索条件・変更ログ・配信計画を管理する
+// ============================================================
+
+// RPA号機マスタ
+model RpaScoutMachine {
+  id             String   @id @default(cuid())
+  machineNo      Int      @unique // 1〜6
+  accountName    String // アカウント名（例: 藤本 なつみ）
+  employeeCode   String // 社員コード（例: BS1000010）
+  mynaviSaveName String // マイナビ上の保存名称（例: RPA1(藤本なつみ)）
+  isActive       Boolean  @default(true) // false=停止中（操作は可能）
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("rpa_scout_machines")
+}
+
+// 職種マスタ（job-platform 0004_masters_seed.sql の master_job_categories を移植。値は原文のまま）
+model RpaScoutJobCategory {
+  id        Int    @id @default(autoincrement())
+  large     String // 大分類名
+  middle    String // 中分類名
+  small     String // 小分類名
+  sortOrder Int // 表示順（0004のINSERT順）
+
+  @@unique([large, middle, small])
+  @@index([large])
+  @@index([middle])
+  @@map("rpa_scout_job_categories")
+}
+
+// 検索条件パターン
+model RpaScoutPattern {
+  id                  String   @id @default(cuid())
+  targetMachineNo     Int? // 1〜6。null=全号機対象/旧体系
+  name                String // パターン名（号機プレフィックスなし）
+  sendStatus          String? // "UNSENT"(未送信) | "SENT"(送信済)
+  registDays          Int?
+  registDirection     String? // "WITHIN"(以内) | "AFTER"(以降)
+  lastLoginDays       Int? // デフォルト1
+  areaType            String? // "EAST" | "WEST" | "NATIONWIDE" | "PREFECTURES"
+  prefectures         Json? // areaType=PREFECTURES時の県名配列
+  education           String? // "NONE" | "高卒" | "専門卒" | "短大卒" | "高専卒" | "大卒" | "大学院卒"
+  gradYearFrom        Int? // 西暦4桁
+  gradYearTo          Int?
+  companyCount        Int? // 1 | 2 | 3
+  jobCategories       Json? // 小分類名配列（最大3件・RpaScoutJobCategory.small と一致）
+  jobCategoryPriority String? // "FIRST"(職種第1) | "SECOND"(職種第2)
+  workLocations       Json? // 県名配列。新規作成時デフォルト ["首都圏","愛知","大阪","兵庫","京都"]
+  workLocationPriority String? // "NONE"(エリア不順) | "SECOND"(エリア第2)
+  transferTiming      String? // "すぐにでも" | "3カ月以内" | "半年以内" | "1年以内" | "未定"
+  rawConditions       Json? // 移行データの原文15列（isMigrated=true時のみ）
+  isActive            Boolean  @default(true) // false=論理削除
+  isMigrated          Boolean  @default(false) // Excel移行由来
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([targetMachineNo])
+  @@map("rpa_scout_patterns")
+}
+
+// 件名テンプレート
+model RpaScoutSubjectTemplate {
+  id        String   @id @default(cuid())
+  name      String // テンプレ名（例: 【未送信用】口コミ4.9オーダーメイド）
+  kind      String? // UNSENT=未送信用 / SENT=送信済用 / INDIVIDUAL=個別配信用。移行前データはnull
+  subject   String // 件名
+  body      String?  @db.Text // 本文
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("rpa_scout_subject_templates")
+}
+
+// 検索条件の変更ログ（実績）。「現在の設定」は号機ごとの最新レコードで表現する
+model RpaScoutLog {
+  id                String   @id @default(cuid())
+  machineNo         Int // 1〜6
+  patternId         String? // 移行データはnull
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  searchCount       Int? // 検索件数。停止記録はnull
+  recordedAt        DateTime // 記録日時（JST値をそのまま保持。UTC変換しない）
+  recordedByUserId  String?
+  createdAt         DateTime @default(now())
+
+  @@index([machineNo, recordedAt])
+  @@index([recordedAt])
+  @@map("rpa_scout_logs")
+}
+
+// 配信計画（カレンダー）。実績ログとは独立で自動連動しない
+model RpaScoutPlan {
+  id                String    @id @default(cuid())
+  planDate          DateTime // 計画日（JST値をそのまま保持・日付のみ意味を持つ）
+  timeSlot          String // "AM" | "PM" | "EVENING"（表示名: AM / PM / 夕方）
+  machineNo         Int // 1〜6
+  patternId         String?
+  patternName       String // スナップショット
+  subjectTemplateId String?
+  subjectName       String // スナップショット
+  memo              String?
+  expectedCount     Int? // 想定検索件数（任意入力。null=想定なし）
+  reflectedAt       DateTime? // 土日計画のマイナビ反映日時
+  reflectedByUserId String? // 反映チェックを押した人
+  executedAt        DateTime? // 実績として記録した日時（JST値をそのまま保持・null=未実施）
+  executedLogId     String? // 生成した RpaScoutLog.id（取り消し時に削除する対象）
+  executedByUserId  String? // 実績記録を押した人
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([planDate])
+  @@index([machineNo, planDate])
+  @@map("rpa_scout_plans")
+}
+
+// ============================================================
+// T-159: portal → OneDrive 一方向コピーの記録
+// ============================================================
+
+/// コピーの帰結。SKIPPED と FAILED の区別は「再試行するか」。
+///   PENDING : 受付済み・未処理（レコード作成直後）
+///   SUCCESS : コピー成功
+///   SKIPPED : 仕様上コピーしない。再試行しない
+///   FAILED  : 一時的な失敗。再試行対象
+///   GIVEN_UP: 再試行上限（ONEDRIVE_SYNC_MAX_ATTEMPTS）に達して諦めた。以後拾わない
+enum OneDriveSyncStatus {
+  PENDING
+  SUCCESS
+  SKIPPED
+  FAILED
+  GIVEN_UP
+}
+
+/// スキップ・失敗の理由。HTTPステータスだけでは原因が判別できないため理由を明示的に持つ。
+/// 再試行対象（status=FAILED と組むもの）は AUTH_ERROR / RATE_LIMITED / GRAPH_ERROR の3つだけ。
+/// それ以外は status=SKIPPED として再試行しない。
+enum OneDriveSyncSkipReason {
+  /// 求職者に oneDriveFolderUrl が未登録（null / 空）。CAへの案内は「URLを登録してください」
+  NO_FOLDER_URL
+  /// URL はあるが復元不能、または書き込み許可プレフィックス外。CAへの案内は「URLを貼り直してください」
+  /// NO_FOLDER_URL と分けるのは、CAに求める行動が「登録」か「貼り直し」かで違うため。
+  BAD_FOLDER_URL
+  /// OneDrive 側に 2.求人 / 3.BS作成書類 が無い。★フォルダは作らない（確定仕様）
+  NO_SUBFOLDER
+  /// 同名ファイルが既にある（Graph 409）。上書きしない
+  NAME_ALREADY_EXISTS
+  /// ONEDRIVE_SYNC_ENABLED が false。★T-159 Phase 2-b 以降は使用しない
+  /// （無効時は SKIPPED にせず PENDING のまま残し、有効化後に夜間処理が拾えるようにする）
+  SYNC_DISABLED
+  /// BOOKMARK / BS_DOCUMENT 以外のカテゴリ
+  UNSUPPORTED_CATEGORY
+  /// ファイル本体を取得できない（driveFileId が null 等）
+  NO_FILE_BODY
+  /// 認証失敗（シークレット期限切れ等）
+  AUTH_ERROR
+  /// 429
+  RATE_LIMITED
+  /// その他の Graph エラー
+  GRAPH_ERROR
+}
+
+/// portal にアップされたファイルを OneDrive の求職者フォルダへコピーした記録。1 CandidateFile につき1行。
+/// 行の存在自体が「同期対象として受け付けた」ことを意味する（行が無い＝稼働開始前 or 対象外）。
+/// これにより拾い直し cron は本テーブルだけを見ればよく、candidate_files（10万行超）を全走査しない。
+model OneDriveSyncLog {
+  id              String                  @id @default(cuid())
+  candidateFileId String                  @unique @map("candidate_file_id")
+  candidateFile   CandidateFile           @relation(fields: [candidateFileId], references: [id], onDelete: Cascade)
+  /// 集計・求職者ごとの画面表示用（candidateFile 経由の JOIN を省くための非正規化ではなく検索キー）
+  candidateId     String                  @map("candidate_id")
+  candidate       Candidate               @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  status          OneDriveSyncStatus      @default(PENDING)
+  skipReason      OneDriveSyncSkipReason? @map("skip_reason")
+  /// 実際に書き込んだ／書き込もうとした OneDrive のドライブ相対パス（監査記録）。
+  ///   例: /ビズスタジオ/6.求職者書類関連/1.大野/2026/202607/5008266_吉川 祐樹/2.求人/求人票_◯◯.pdf
+  ///   真実は Candidate.oneDriveFolderUrl 側。ここは「何をしたか」の記録であって設定値ではない。
+  targetPath      String?                 @map("target_path")
+  /// 成功時に Graph が返した driveItem.id
+  targetItemId    String?                 @map("target_item_id")
+  /// スキップ時に、その求職者フォルダ直下に実在した子フォルダ名の一覧。
+  ///   「2.求人 が無い」と言われた CA が、ではどこに入れればよいかを画面上で判断できるようにする。
+  siblingFolders  String[]                @map("sibling_folders")
+  attemptCount    Int                     @default(0) @map("attempt_count")
+  lastAttemptedAt DateTime?               @map("last_attempted_at")
+  /// 次に再試行してよい日時（指数バックオフ）。null は「即座に拾ってよい」。
+  /// 使うのは Phase 2-c の夜間処理。列だけ先に置いてあるのは後追いマイグレーションを避けるため。
+  nextRetryAt     DateTime?               @map("next_retry_at")
+  /// エラー本文（Graph の error.code + error.message）。先頭1000文字までに切り詰めて保存する。
+  errorMessage    String?                 @map("error_message") @db.Text
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  @@index([status]) // 拾い直し cron が PENDING / FAILED を拾うため
+  @@index([candidateId]) // 求職者ごとの状態表示のため
+  @@map("onedrive_sync_logs")
+}
+
+/// T-159 Phase 3: `Candidate.oneDriveFolderUrl` を**自動処理が設定した**という台帳。
+///
+/// ★存在理由は1つだけ。「CA が基本情報編集から手で貼ったURLを、自動処理が二度と書き換えないこと」。
+///   フォルダ移動追随（機能2）は、この台帳に行があり、かつ `autoUrl` が
+///   `Candidate.oneDriveFolderUrl` と **byte 一致する** 求職者だけを対象にする。
+///
+/// ★列の追加（`Candidate.onedrive_folder_url_source` のような enum 1列）ではなく別テーブルにした理由:
+///   守るべきは「手貼りかどうか」ではなく「今入っている値が自動処理の産物のままかどうか」。
+///   自動登録された後で CA が手で貼り替えた場合、enum 1列だと値は AUTO のまま残り、
+///   自動処理が CA の手作業を上書きしてしまう。設定した URL 自体を控えておき、
+///   現在値との一致を都度確かめる方式なら、貼り替えは一致しなくなるので自動的に保護される。
+///   加えて、どこへ向けて設定したか（drivePath）と何回移動追随したか（moveCount）が残り、
+///   異常な書き換えに後から気付ける。
+model OneDriveFolderUrlLedger {
+  id          String    @id @default(cuid())
+  candidateId String    @unique @map("candidate_id")
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  /// 自動処理が設定した URL そのもの。現在値と食い違ったら「CA が手で貼り替えた」とみなして触らない。
+  autoUrl     String    @map("auto_url")
+  /// autoUrl が指すドライブ相対パス（監査用。URL から復元できるが、目視で追える方が事故に気付ける）。
+  drivePath   String    @map("drive_path")
+  /// 経路: "T158_BACKFILL"（T-158 一括登録分の遡り記録）/ "AUTO_SCAN"（夜間の自動登録）/ "AUTO_MOVE"（移動追随）。
+  /// enum にしないのは、値が増えるのが運用の都度でありマイグレーションを伴わせたくないため。
+  source      String
+  /// 移動追随で書き換えた回数。異常に多い行はフォルダ整理の最中か実装不具合のサイン。
+  moveCount   Int       @default(0) @map("move_count")
+  lastMovedAt DateTime? @map("last_moved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("onedrive_folder_url_ledger")
 }

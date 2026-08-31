@@ -400,3 +400,221 @@ col + INTERVAL '9 hours'
 
 **関連ケース**:
 - T-135（2026/7/5-7/6）: この罠を 2 回踏み、「18 時間ズレ」「未取込 4 名」「9 桁会員 No」という 3 つの誤報告を生成。正しい変換で全て解消。詳細: `docs/survey_T-135_timezone_drift.md`
+
+## 41. 全ページ 502 のとき、まずインフラかコードかを切り分ける
+
+**罠**: 全ページが 502 になると、反射的に「直近のデプロイが原因では」と考えてコミットを疑いに行ってしまう。だが**全ページが一斉に死ぬ障害の原因はほぼコードではない**。2026-08-10 の障害では、この誤った仮説に時間を使い、切り分けに 45 分を要した。
+
+### 判定軸（この 3 つが揃えばホスト起因＝コード修正では直らない）
+
+| 確認項目 | ホスト起因のときの値 |
+|--|--|
+| 自コンテナの CPU throttle | `nr_throttled 0`（制限されていない） |
+| DB 接続数 | max_connections に余裕がある（例: 55/100） |
+| データ用ディスク使用率 | 満杯でない（例: 1%） |
+
+上記が全て正常なのに DB が応答しない場合、**自分の使い方の問題ではなくホスト機の問題**。逆に言えば、この 3 つのどれかが振り切れていれば自分たちのコード・設定に原因がある。
+
+### 切り分け手順
+
+1. `railway ssh --service <DBサービス名>` でコンテナ内部に入る。**`railway run` は使用禁止**（ローカルの空 DB に繋がる）
+2. Railway のプロキシが飽和していると通常の接続（psql / Prisma）が ECONNRESET やタイムアウトで通らず、調査自体ができない。**必ずコンテナ内部から直接計測する**
+3. ホスト全体の負荷: `cat /proc/loadavg` — コア数の 10 倍以上なら異常（今回は 48 コア機で 944）。**コンテナ内で見てもホストの値が出る**
+4. **I/O 圧迫の決定的指標**: `cat /proc/pressure/io` — `some` の avg10 / avg60 / avg300 が全て 99 なら、I/O 待ちで完全停止が 5 分以上継続している
+5. 自コンテナの制限状況: `cat /sys/fs/cgroup/cpu.stat`（`nr_throttled`）、`cat /sys/fs/cgroup/memory.max` と `memory.current`
+6. Postgres の checkpoint 所要時間: `railway logs` の `checkpoint complete` にある `write=` の秒数。通常 0.5〜2 秒。異常に伸びていれば書き込みが劣化している（今回は約 10MB の書き込みに 133.8 秒＝約 80KB/s）。**`checkpoint starting` の後に `checkpoint complete` が来ていない**なら checkpointer が刺さっている
+7. I/O で刺さったプロセス: `ps -eo stat= | sort | uniq -c` で uninterruptible **D state** のプロセスが存在するか
+8. ディスクは `df -h /var/lib/postgresql/data` で確認。Railway ダッシュボードのボリューム使用量表示は障害時に `0MB/50000MB` のような無意味な値を返すことがあるので信用しない
+
+### やってはいけないこと
+
+- **直近コミットの revert**。全ページ 502 の原因がクライアント側 UI 変更であることはまずない。サーバ側で全リクエストに乗るもの（middleware・共通レイアウト・DB 接続層）以外は容疑者にならない
+- **PID の増加をフォーク暴走と判断する**。PID は逆行することがあり信頼できない（今回 03:12 に 25964 → 03:31 に 99004 → 03:40 に 26015 と逆行し、「7 万プロセスのフォーク暴走」と誤読した。実プロセス数は 55 だった）。必ず `ps` で**実プロセス数を数える**
+- **障害対応中の master 直 push による「ついでの改善」**。切り分けが濁るうえ、検証もできない
+
+### インフラ構成メモ
+
+- 本番 Postgres は portal とは**別の Railway プロジェクト**にある。`bizstudio-portal` プロジェクトのサービスは `bizstudio-portal` と `bizstudio-portal-staging` のみで、DB は**プロジェクト `surprising-acceptance` / サービス `Postgres`**（接続先 `trolley.proxy.rlwy.net:40669`）。障害時に Railway 画面で探すと見つからず時間を溶かすので注意
+- この DB は **ai-resume-generator**（`BIZSTUDIO_DATABASE_URL`）と **portal-staging** と共有している。**DB 再起動はこれらも巻き添えにする**
+- kyuujin-pdf-tool / candidate-intake / job-platform は別 DB なので影響しない
+
+**関連ケース**:
+- 2026-08-10: Railway ホスト機の I/O 飽和（noisy neighbor）で本番 portal が全ページ 502。パターン辞書は `08-bug-patterns.md` の L-1。検知の仕組みは T-160（`4f49d46`）で 5 分ごとの死活監視 + LINE WORKS 通知を実装済み
+
+## 42. 一覧の行を丸ごと差し替える更新の再発条件（更新APIの include が一覧より狭いと列が消える）
+
+**症状**: エントリー管理画面で何かを更新すると、その行の「担当RC」が `-` になる。リロードすると戻る（T-161 で修正済み）。
+
+**原因**: エントリー管理の一覧は、更新API（`PATCH /api/entries/[entryId]`・`PATCH /api/entries/[entryId]/flags`）の
+レスポンスで行を**丸ごと差し替えている**（`EntryBoard.tsx` の `setEntries(prev.map(...))`）。
+一覧の表示に使う項目を新しく増やしたときに、更新APIのレスポンスに同じ項目を足し忘れると
+「更新すると消える／リロードで戻る」が再発する。今回（T-161）は `candidate.recruiterName` がこれに該当した。
+
+**予防**: 一覧に列を追加するときは、更新API側のレスポンス項目（include/select）も必ず同時に確認すること。
+`GET /api/entries` と PATCH 2本の `include.candidate.select` は常に同一に保つ。
+
+**見分け方**: 「更新直後だけ消える／リロードで戻る」＝ほぼ確実にこのパターン。DB を疑う前に一覧APIと更新APIの include を突き合わせる。
+
+**副作用**: 消えた列でクライアントソートしていると、その行だけソートキーが null になり並び順も飛ぶ。
+
+## 43. 求人紹介一覧の成立条件（片方のデータ源だけ見て件数を判断しない）
+
+求人紹介一覧（紹介履歴タブ）は、**求人出力ツール（kyuujin）側の求人と、portal側のサイト経由/紹介済みブックマークの両方**から成る
+（T-161 R3・`api/candidates/[candidateId]/jobs/route.ts`）。片方だけを見て件数を判断しないこと。
+
+**実績として数えるかどうかは一覧に出るかどうかとは別**:
+本人が自分で応募したもの（「本人応募」バッジ・origin='candidate' & drive_file_id IS NULL）は一覧には出るが実績には数えない（R1）。
+CAが出力せず紹介済みにしたもの（「紹介済み」バッジ・introduced_at）は一覧に出て実績にも数える（R2）。
+
+## 44. `last_exported_at` は「紹介済みフラグ」ではない（流用すると人事評価の数字が変わる）
+
+`candidate_files.last_exported_at` は **「CAが求人ツールへ実際に出力した」行動量の実測値**で、
+日報「求人検索」の出力数・選定率（`jobSearch.ts`）、日報CAメトリクスの紹介数（`metrics.ts`）、
+週次実績の提案人数（`weeklyMatrix.ts`・人事評価用）、実績詳細（`performance/detail`）、
+supportSubStatus 自動判定、求職者ダッシュボードの最終提案日の**分子そのもの**。
+
+「出力していないが紹介扱いにしたい」は `introduced_at` で表現する（T-161 の mark-introduced API）。
+集計側は `COALESCE(last_exported_at, introduced_at)` ＋ 本人応募除外（`NOT (origin='candidate' AND drive_file_id IS NULL)`）で統一済み。
+**実在した事故**: 旧 send-to-job-tool がサイト経由行にも last_exported_at を立てており、
+「出力済バッジは付くのに求人紹介に出ない」表示矛盾と日報出力数の水増し（本番9件）が起きていた（T-161 で修正・データもクリア済み）。
+
+## 45. 通知の宛先解決は「名前一致」でやらない。`lineworksId` 未登録者は黙って落ちる
+
+LINE WORKS のタスク通知は `Employee`（担当者） → `User` → `User.lineworksId` を解決して
+`<m userId="...">` のメンションを組み立てる。ここに2つの罠がある。
+
+**罠1: 名前一致で `User` を引くと黙って落ちる／誤爆する**
+
+T-162 以前は各所で `prisma.user.findMany({ where: { name: { in: assigneeNames }, status: "active" } })`
+と **`User.name` の文字列一致**で引いていた。`Employee.userId` というリレーションが存在するのに使っていない。
+
+- `Employee` と `User` で氏名表記が1文字でも違えば、その担当者のメンションだけが無言で消える
+- 同名の `User` がいると別人にメンションが飛ぶ（`ai-task-create.ts` のコメントでも既に指摘されていた既知の穴）
+
+→ T-162 で `resolveAssigneeNotifyTargets()`（`src/lib/task-notification.ts`）に統一。
+`Employee.userId` のリレーションを第一手段にし、**User 未リンクの Employee だけ**名前一致でフォールバックする。
+`User.status !== "active"` は `lineworksId` を null 扱い（＝メンションしない）にする。
+
+**罠2: `lineworksId` 未登録者はコードでは救えない。ログに出さないと気づけない**
+
+2026-08-18 時点の本番実測（active な Employee 13名）:
+
+| 状態 | 人数 | 該当 |
+|--|--|--|
+| `User` にリンク済み・`lineworksId` あり | 9 | 大野 将幸 / 大野 望 / 安藤 嘉富 / 南條 雄三 / 佐藤 葵 / 奥村 裕司 / 見ル野 未来 / 藤田 愛 / 道西 未来 |
+| `User` 自体が無い | 2 | 藤本 夏海（1000003） / 上原 千遥（1000005） |
+| `User` が disabled | 2 | 岡田 愛子（1000007） / 仮予約（9000） |
+
+未登録者を担当者に含めると、その人**だけ**がメンションから抜けた通知が飛ぶ。
+本文の「■ 担当者」には名前が出るので**画面上は正常に見える**のが厄介。
+T-162 で `logAssigneeNotifyTargets()` を追加し、送信時に必ず
+
+```
+[task-notify:create] task=<id> assignees=3 mentionable=2 names=[A,B,C]
+[task-notify:create] task=<id> lineworksId 未登録のためメンション対象外: C(user=未リンク)
+```
+
+を出すようにした。**登録は運用作業（DB への UPDATE）であってコード修正では直らない。**
+
+**罠3: 送信の直列 await（この経路では該当しないが、混同しやすい）**
+
+タスク通知は「担当者ごとに個別 DM」ではなく **共通トークルームへ1通＋本文中で全員をメンション**する方式
+（`LINEWORKS_TASK_BOT_ID` / `LINEWORKS_TASK_CHANNEL_ID`）。
+つまり送信は常に1回であり、「1人目の送信で例外が出て2人目以降が止まる」型の障害は**この経路では起きない**。
+「先頭1名にしか届かない」を見たら、直列ループを疑う前に**宛先配列がそもそも1要素になっていないか**を先に見ること
+（T-162 の真因は保存側で `assigneeIds[0]` に潰れていたこと。バグ辞書 M-1 参照）。
+担当者ごとに個別送信する経路を今後作る場合は `Promise.allSettled` にして、
+1名の失敗が他名の送信を止めないようにすること。
+
+## （採番待ち・T-163）AIアドバイザーのチャット履歴テーブルは、求人の全件分析の出力と共用されている
+
+`analyze-batch` はバッチごとに user/assistant 1組を `advisor_chat_messages` に書き込んでいた。
+チャットAPIが送る「直近20件」の窓を分析出力が占拠し（実測84.7%）、入力トークン肥大と
+few-shot汚染（AIが長文レポート調を模倣し「簡潔に」の指示が効かなくなる）を同時に起こす。
+T-163 で完了カード1枚に変更＋`kind` カラムで送信窓から分離。
+個別の評価は `CandidateFile.aiMatchRating` / `aiAnalysisComment` に保存済みで一覧バッジから閲覧できるため、
+チャットへの長文出力は二重表示だった。
+今後このテーブルに別用途のメッセージを書き込む場合は必ず `kind` を付けて送信窓から分離すること。
+
+**関連の罠**: 最終バッチの総合まとめは「過去バッチ結果」を入力に取る。T-163 以降の供給元は
+チャット履歴ではなく analyze-batch 内のプロセス内キャッシュ（`runBatchResultsCache`）＋
+`candidate_files.aiAnalysisComment` からの再構成フォールバック。チャット履歴に依存しないこと。
+
+## （採番待ち・T-163）キャッシュが効かない原因は byte 不一致（罠#39）だけではない。ephemeral のTTL（既定5分）切れもある
+
+`cache_creation_tokens` が毎回同値なら byte 一致は取れている。それでも cache_read が出ないならTTL切れを疑う。
+実測（T-163）ではチャットの連続コールが5分以内なのは 37.4%、cache_read 率 29.6%。
+1時間TTLは書き込み単価が2倍のため、ヒット率が 52.6% を超えないと素の入力より高くつく。
+（T-163 時点の実測: 60分以内の連続コールは 54.0% で、5分TTL比の損益分岐 57.5% に届かず 1時間化は見送り）
+
+## （採番待ち・T-164）アップロード済みPDFの解析結果はファイル単位で永続化する。セッション単位の時間キャッシュだけでは足りない
+
+PDFの中身は一度アップロードされたら変わらないのに、T-163 時点では30分ごとに解析し直しており、
+候補者context の再ビルドに **15,507ms** かかっていた（連続ターンの25.4%で発生＝「最初の1通が遅い」の主因）。
+T-164 で `CandidateFile.parsedText` に永続化し、再解析を廃止（実測: 再ビルド 15,507ms → 145〜156ms）。
+失敗は `parseFailedAt` で記録し、**失敗を永久キャッシュしない**こと。
+なお `parsePdfWithAI` は失敗時に throw せず「（ファイルの読み取りに失敗しました）」の定型文を返すため、
+**戻り値の定型文チェックなしに保存すると失敗を成功として永久キャッシュしてしまう**（T-164 実装の要注意点）。
+ファイル実体の差し替え経路（replace-docx / replace-xlsx）では parsedText 3列を必ず NULL に戻す。
+
+## （採番待ち・T-164）キャッシュに載せる内容を増やすときは、そのキャッシュの失効条件が新しい内容に合っているかを必ず確認する
+
+T-163 で候補者context に求人の評価一覧を追加したが、context は30分の時間TTLでキャッシュされていたため、
+全件分析の直後30分間は評価が反映されない context が使われうる状態になっていた
+（実測: TTL 30分以内に評価が変わった形跡のあるセッションが 33件）。
+T-164 で失効判定を「経過時間」から「材料の指紋一致」（`computeContextFingerprint` / sha256）に変更
+（上限TTL 24時間を安全弁として併置）。時間TTLは「中身が変わらない前提」でのみ成立する。
+
+## （採番待ち・T-165）分析結果のサマリを出すときは、集計母集団を「今回の実行対象」に必ず限定する
+
+T-163 で追加した完了カードが、今回の分析対象10件ではなく該当求職者のブックマーク全体（66件）を
+集計しており、同一カード内で「66件を評価しました」と「全10件」が矛盾した（T-165 で修正）。
+このAPIには「追加のみ」「未評価/破損のみ」等の絞り込みがあり、
+**画面の絞り込み条件を通した後のファイル群が集計母集団**になる。
+該当求職者の全 BOOKMARK を数えると、過去に評価済みのものまで混入する。
+
+
+## （T-170）candidate-intake は未知のサブカテゴリコードを黙って default にフォールバックする
+
+Google フォーム自動生成の経験職種サブカテゴリは、portal `src/constants/google-form-categories.ts` と
+candidate-intake `specs/generate_form_prompt.yaml` の `target_subcategories` に**二重管理**されている。
+candidate-intake は知らないコードを受け取ってもエラーにせず default テンプレートで生成するため、
+**コードのタイポは画面上では一切気づけない**（残るのはログの `Unknown subcategory` 警告のみ）。
+片側だけ更新した場合も同じで、「フォームは作れているのに質問だけ汎用」という壊れ方をする。
+追加・変更時は必ず両リポジトリを同時に更新し、コード文字列を突合（不一致0）してから push すること。
+
+もう1つの罠として、T-170 まで `service_cs` が 事務職 と サービス業 の**両方に同じコード**で登録されており、
+`categoryValue → 大項目` の逆引き（`find(...)`）が先勝ちで常に事務職を返していた。
+サブカテゴリのコードは**全グループを通して一意**であることが逆引きの前提。
+保存済み `groupKey` を持つデータ（Googleフォーム作成依頼タスクの JSON）は定義変更で食い違うため、
+読込時は `resolveGoogleFormGroupKey()` でサブカテゴリの実所属を優先して解決する。
+
+## 46. setState の updater 内で件数を数えて直後に読むと常に 0 になる
+
+**症状**: 社員詳細（`/admin/users/[id]`）の「履歴書・書類をAI読み取り」で、**初回の読み取りでも**
+「新たに埋まる空欄はありませんでした」と表示される。画面には実際に値が入っているのに件数だけ 0 になる。
+
+**原因**: 埋めた件数を `setForm` の updater 内で数え、その直後に外側で読んでいた。
+
+```ts
+let filled = 0;
+setForm((prev) => { const r = mergeEmptyOnly(prev, data, keys); filled = r.filled; return r.next; });
+setFilledCount(filled);   // ← ここでは常に 0
+```
+
+React は同一ハンドラで**先に別の setState が走っていると updater を即時実行しない**（eager state 計算が使われない）ため、
+`setFilledCount(filled)` の時点では updater 未実行＝初期値のまま。AI解析は `await fetch` を挟み、
+その前に `setLoading(true)` / `setError(null)` 等が走っているので、この条件に必ず当たる。
+
+**対処**: 件数・キー一覧などの判定は updater に依存せず、`formRef.current` のような**確定済みの値**を参照して行う。
+updater 内では state の更新のみを行い、副作用（カウント・ログ・通知・別の state 更新）を書かない。
+
+```ts
+const r = mergeEmptyOnly(formRef.current, data, keys);   // 判定は ref の現在値で
+setForm((f) => applyOnly(f, r.next, r.filledKeys));      // updater は更新だけ
+setFilledCount(r.filled);
+```
+
+**実例**: `src/app/(app)/admin/users/[id]/useResumeAiFill.ts`（コミット 888a75c で修正）。
+同コミットでは、この誤表示に隠れて「AI読み取り結果が一度も保存されない」不具合も併せて修正している
+（社員詳細は保存ボタンを持たない自動保存方式。`14-ui-component-map.md`「社員詳細の保存方式」節を参照）。

@@ -602,11 +602,22 @@ export default function AdvisorFloatingPanel({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: diagnosisMessage }),
+          // T-184: このフラグが立っているときだけ、サーバー側が未読の面談ログを
+          // 診断と同じ1回のコールに同梱し、要約保存＋既読化まで行う。
+          body: JSON.stringify({ content: diagnosisMessage, typeDiagnosis: true }),
         }
       );
       if (!res.ok) throw new Error("タイプ診断の実行に失敗しました");
+      const data = await res.json().catch(() => ({}));
       await fetchMessages(activeSessionId);
+
+      // T-184: 診断のついでに取り込めた場合は、画面リロードなしで未読件数を最新化する。
+      // 0件（同梱しなかった／fail-closed）のときは何も出さない。
+      const ingested = data?.logIngest?.ingested;
+      if (typeof ingested === "number" && ingested > 0) {
+        await fetchUnreadLogCount();
+        toast.success(`面談ログ ${ingested}件を読み込みました`);
+      }
     } catch (err) {
       setMessages((prev) => prev.filter((m) => !m.isLoading));
       alert(err instanceof Error ? err.message : "タイプ診断の実行に失敗しました");

@@ -9,17 +9,54 @@ export const runtime = "nodejs";
 const TEMPLATE_NAME = "【日程調整】初回メッセージ";
 const SENDER_NAME = "藤本 夏海";
 
+/**
+ * T-169: RPA(PAD) から届く送信日時は **JST の壁時計値**（例 "2026/08/18 23:10:00"）。
+ * 旧実装は `new Date(y, mo-1, d, ...)`（＝サーバーのローカル時刻として構築）していたため、
+ * Railway 本番コンテナ（TZ=UTC）では JST の壁時計値がそのまま UTC 値として保存され、
+ * 真の instant より **9時間進んだ値**が入っていた（罠#17）。
+ *
+ * ここでは **タイムゾーン表記を持たない入力を JST(+09:00) として解釈**する。
+ * 末尾に `Z` / `+09:00` / `+0900` などの TZ 表記を含む入力は従来どおりその表記に従う。
+ * パースできない入力の挙動（現在時刻を返す）は変更しない。
+ * 罠#17: `toISOString().slice()` 系の変換は使わない。
+ */
 function parseDateLoose(value: unknown): Date {
   if (!value) return new Date();
   const s = String(value).trim();
   if (!s) return new Date();
-  const slashMatch = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})$/);
-  if (slashMatch) {
-    const [, y, mo, d, h, mi, sec] = slashMatch;
-    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec));
+
+  const hasTz = /([zZ])$|([+-]\d{2}:?\d{2})$/.test(s);
+  if (!hasTz) {
+    // "2026/08/18 23:10:00" / "2026-08-18 23:10:00" / "2026-08-18T23:10:00" / 日付のみ
+    const m = s.match(
+      /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?(?:\.\d+)?)?$/,
+    );
+    if (m) {
+      const p = (n: string | undefined) => String(Number(n ?? 0)).padStart(2, "0");
+      const jst = new Date(
+        `${m[1]}-${p(m[2])}-${p(m[3])}T${p(m[4])}:${p(m[5])}:${p(m[6])}+09:00`,
+      );
+      if (!isNaN(jst.getTime())) return jst;
+    }
+    const withJst = new Date(`${s}+09:00`);
+    if (!isNaN(withJst.getTime())) return withJst;
   }
+
   const parsed = new Date(s);
   return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/**
+ * T-167: 送信結果はフェイルクローズで判定する。
+ * 以前は `sendResult === "FAILURE"` 以外を全て SUCCESS とみなしていたため、
+ * RPA が実際に送っていた "FAILED" / 空文字 / 変数展開失敗（"%送信結果%"）/
+ * フィールド欠落が全て「送信成功」として永久記録されていた。
+ * ここでは **"SUCCESS" に一致したときだけ成功**とし、それ以外は全て失敗にする。
+ * 保存する値は必ず "SUCCESS" または "FAILED" のどちらかに正規化する（生値は保存しない）。
+ */
+function normalizeSendResult(raw: unknown): "SUCCESS" | "FAILED" {
+  if (raw === null || raw === undefined) return "FAILED";
+  return String(raw).trim().toUpperCase() === "SUCCESS" ? "SUCCESS" : "FAILED";
 }
 
 /**
@@ -35,9 +72,22 @@ export async function POST(req: Request) {
     const body = await parseRpaRequestBody(req);
 
     const processingLogId: string = String(body?.processingLogId || "");
-    const sendResult: string =
-      body?.sendResult === "FAILURE" ? "FAILURE" : "SUCCESS";
+    const rawSendResult: unknown = body?.sendResult;
+    const sendResult = normalizeSendResult(rawSendResult);
     const sentAt: Date = parseDateLoose(body?.sentAt);
+
+    // T-167: 正常系でも受信した生値を必ずログに残す（事後検証のため）。
+    console.log(
+      "[rpa/mynavi/reply-sent] received:",
+      JSON.stringify({
+        processingLogId,
+        rawSendResult:
+          rawSendResult === undefined ? "(missing)" : rawSendResult,
+        rawSendResultType: typeof rawSendResult,
+        normalized: sendResult,
+        rawSentAt: body?.sentAt ?? null,
+      }),
+    );
 
     if (!processingLogId) {
       console.error("[rpa/mynavi/reply-sent] processingLogId missing. body:", JSON.stringify(body));
@@ -61,10 +111,26 @@ export async function POST(req: Request) {
     const candidateId: string | null =
       (body?.candidateId ? String(body.candidateId) : null) || log.candidateId;
 
+    // 失敗時は replySentAt を更新しない（送信していないものに送信日時を残さない）。
     await prisma.mynaviRpaProcessingLog.update({
       where: { id: processingLogId },
-      data: { replySentAt: sentAt, replyResult: sendResult },
+      data:
+        sendResult === "SUCCESS"
+          ? { replySentAt: sentAt, replyResult: sendResult }
+          : { replyResult: sendResult },
     });
+
+    if (sendResult === "FAILED") {
+      console.error(
+        "[rpa/mynavi/reply-sent] 送信失敗として記録しました:",
+        JSON.stringify({
+          processingLogId,
+          candidateId,
+          rawSendResult:
+            rawSendResult === undefined ? "(missing)" : rawSendResult,
+        }),
+      );
+    }
 
     if (candidateId) {
       const candidate = await prisma.candidate.findUnique({
@@ -85,7 +151,9 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true });
+    // 失敗でも 200 を返す（RPA 側のフローを止めないため）。
+    // 保存した結果値を返し、RPA 側のログから portal の解釈を確認できるようにする。
+    return NextResponse.json({ ok: true, sendResult });
   } catch (e) {
     console.error("[rpa/mynavi/reply-sent] error:", e);
     const message = e instanceof Error ? e.message : String(e);

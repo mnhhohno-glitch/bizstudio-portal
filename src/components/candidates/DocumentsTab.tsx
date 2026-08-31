@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import FileUploadModal from "./FileUploadModal";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
+import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
 
 type CandidateFile = {
   id: string;
@@ -17,6 +18,8 @@ type CandidateFile = {
   memo: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
+  // T-159 Phase 2-c: OneDrive コピー状況（BS作成書類のみ対象）。null / 未定義なら何も表示しない。
+  oneDriveSyncLog?: OneDriveSyncBadgeSource | null;
 };
 
 type BSFolder = {
@@ -625,6 +628,18 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
         <input type="checkbox" checked={selectedFileIds.has(file.id)} onChange={() => toggleFileSelect(file.id)} className="w-3.5 h-3.5 rounded border-gray-300 text-[#2563EB] shrink-0" />
         <span className="text-lg">{getFileIcon(file.mimeType)}</span>
         <span className="font-medium text-gray-800 text-sm truncate">{file.fileName}</span>
+        {/* T-159 Phase 2-c: OneDrive に入っていない場合だけ出す（SUCCESS・ログ行なしは無音） */}
+        {(() => {
+          const od = oneDriveSyncBadge(file.oneDriveSyncLog, {
+            hasFileBody: file.driveFileId !== null,
+          });
+          return od ? (
+            <span
+              className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${od.cls}`}
+              title={od.title}
+            >{od.label}</span>
+          ) : null;
+        })()}
       </div>
       {/* 情報 */}
       <p className="text-xs text-gray-500 mt-1">

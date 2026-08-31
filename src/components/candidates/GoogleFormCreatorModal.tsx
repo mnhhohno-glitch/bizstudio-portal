@@ -2,7 +2,15 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
-import { GOOGLE_FORM_CATEGORY_GROUPS } from "@/constants/google-form-categories";
+import {
+  GOOGLE_FORM_CATEGORY_GROUPS,
+  resolveGoogleFormGroupKey,
+} from "@/constants/google-form-categories";
+import {
+  normalizeGoogleFormRequestData,
+  normalizeCompanyNameForMatch,
+  type GoogleFormRequestData,
+} from "@/constants/google-form-request";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 
 export type GoogleFormMeetingFile = {
@@ -27,10 +35,10 @@ type Stage = "extract" | "generate" | "create";
 type StageState = "pending" | "running" | "done" | "failed";
 // 改修①: 全カテゴリで generate と create の間に "confirmQuestions"（質問確認画面）を挟む。
 // （T-035 step2 ではその他系のみだったが、全カテゴリで事前確認するよう変更）
-// 改修③（途中保存）: モーダルを開いた時に下書きがあれば "restorePrompt"（復元確認）を挟む。
+// 改修③（途中保存）→ T-179: 作りかけの下書きがあれば確認を挟まず confirmQuestions へ直接復元する
+// （旧 "restorePrompt" ステップは廃止）。
 type ModalStep =
   | "idle"
-  | "restorePrompt"
   | "processing"
   | "selectCompany"
   | "confirmQuestions"
@@ -70,6 +78,17 @@ const ITEM_TYPE_LABEL: Record<string, string> = {
   multi_select: "複数選択",
   dropdown: "プルダウン",
   section_header: "見出し",
+};
+
+// T-171: 「Googleフォーム作成依頼」タスク（未完了・最新1件）の受け取り型。
+// GET /api/candidates/[id]/google-form/request の request をそのまま持つ。
+type GoogleFormRequestInfo = {
+  taskId: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  createdByName: string | null;
+  data: GoogleFormRequestData;
 };
 
 // T-038: モーダル open 時に既存 URL チェックで使う最小型
@@ -115,6 +134,20 @@ function getOtherTypeLabelPlaceholder(value: string): string {
     default:
       return "";
   }
+}
+
+// T-179: 日時表示は JST 固定（罠ポイント #17）。toISOString().slice(0,10) は使わない。
+function formatJst(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const date = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const time = d.toLocaleTimeString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${date} ${time}`;
 }
 
 const STAGE_LABELS: Record<Stage, string> = {
@@ -206,8 +239,21 @@ export default function GoogleFormCreatorModal({
   const [regenerateInstruction, setRegenerateInstruction] = useState<string>("");
   const [regenerateNotice, setRegenerateNotice] = useState<string | null>(null);
 
-  // 改修③（途中保存）: 開いた時に見つかった下書き（復元プロンプト用）と保存状態。
-  const [draftPrompt, setDraftPrompt] = useState<{ questionsJson: unknown; updatedAt: string | null } | null>(null);
+  // T-171: 「Googleフォーム作成依頼」タスク由来の依頼内容。
+  // requestIgnored=true は「依頼内容を使わずに最初からやり直す」を押した状態。
+  const [requestInfo, setRequestInfo] = useState<GoogleFormRequestInfo | null>(null);
+  const [requestIgnored, setRequestIgnored] = useState(false);
+  // T-172追補: selectCompany の会社カードに出す職種詳細ヒント（キー=work_history index 文字列）。
+  const [requestDetailMap, setRequestDetailMap] = useState<Record<string, string>>({});
+
+  // 改修③（途中保存）: 開いた時に見つかった下書きと保存状態。
+  // T-179: consumedAt = null が「作りかけ」。使用済み（値あり）でも保持して、完了画面の
+  // 「前回の内容から作り直す」で使う。
+  const [draftPrompt, setDraftPrompt] = useState<{
+    questionsJson: unknown;
+    updatedAt: string | null;
+    consumedAt: string | null;
+  } | null>(null);
   // 自動保存の3状態表示（保存中 / 保存しました / 保存に失敗しました）。
   // 手動の「途中保存」ボタンからも同じ saveDraftNow を呼ぶので、この state に集約する。
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -222,6 +268,20 @@ export default function GoogleFormCreatorModal({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 確認ダイアログの「キャンセル」に初期フォーカスを当てるための参照。
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  // T-179: 「新しく作り直す」等でリセットした後、open 判定の useEffect が再発火しても
+  // 完了画面へ自動で引き戻されないようにする抑止フラグ（モーダルを閉じると解除）。
+  const skipAutoJumpRef = useRef(false);
+
+  // T-179: 下書きの内容を確認画面の state に載せる共通処理（open 時の自動復元と
+  // 完了画面の「前回の内容から作り直す」で共用）。
+  const applyDraftToQuestions = useCallback((questions: unknown) => {
+    setQuestionsJson(questions);
+    setCheckedTargets({});
+    setRegenerateInstruction("");
+    setRegenerateNotice(null);
+    setLastAppliedInstruction("");
+    setAutoSaveStatus("idle");
+  }, []);
 
   const pdfCandidates = useMemo(
     () =>
@@ -238,84 +298,160 @@ export default function GoogleFormCreatorModal({
     [meetingFiles],
   );
 
+  // 業務ルール「基本は初回面談のログを使う」に合わせ、面談ログの初期選択は最も古いファイルにする。
+  // 比較は一覧表示と同じ createdAt。ファイル名の「新規 / 既存」等の文字列では判定しない
+  // （ファイル名の表記と実際の日付が逆転しているケースがあるため）。
+  // 同着（createdAt が完全一致）のときは現状の並び順（createdAt 降順）の先頭を採用する。
+  const oldestTxtFileId = useMemo(() => {
+    if (txtCandidates.length === 0) return null;
+    return txtCandidates.reduce((oldest, f) =>
+      +new Date(f.createdAt) < +new Date(oldest.createdAt) ? f : oldest,
+    ).id;
+  }, [txtCandidates]);
+
   // 初期選択（モーダル開いた瞬間 / ファイル一覧変更時）
+  // PDF は従来どおり最新、面談ログのみ最古を初期選択にする。どちらも手動で切り替え可能。
   useEffect(() => {
     if (!isOpen) return;
     if (selectedPdfFileId === null && pdfCandidates.length > 0) {
       setSelectedPdfFileId(pdfCandidates[0].id);
     }
-    if (selectedTxtFileId === null && txtCandidates.length > 0) {
-      setSelectedTxtFileId(txtCandidates[0].id);
+    if (selectedTxtFileId === null && oldestTxtFileId) {
+      setSelectedTxtFileId(oldestTxtFileId);
     }
-  }, [isOpen, pdfCandidates, txtCandidates, selectedPdfFileId, selectedTxtFileId]);
+  }, [isOpen, pdfCandidates, oldestTxtFileId, selectedPdfFileId, selectedTxtFileId]);
 
-  // T-038: モーダル open 時に既存 Google フォーム URL をチェック → あれば completed へジャンプ
+  // T-038 / T-179: モーダル open 時のジャンプ判定。
+  // 判定材料を 2 本とも取り終えてから 1 箇所で setStep する（並行 fetch の後勝ちで画面が
+  // 上書きされないよう直列化）。優先順位:
+  //   1) 作りかけの下書き（consumedAt = null）あり → 質問確認へ復元（既存URLがあっても完了画面に飛ばさない）
+  //   2) それ以外で既存URLあり → 完了画面
+  //   3) どちらも無ければ idle
   useEffect(() => {
     if (!isOpen) {
       setHasCheckedExistingUrl(false);
+      // T-179: 「作り直す」で立てた自動ジャンプ抑止は、モーダルを閉じた時点で解除する。
+      skipAutoJumpRef.current = false;
       return;
     }
     if (hasCheckedExistingUrl) return;
-    if (formResult) {
-      // 同一セッション内で既に作成済み or DB から復元済み → 再 fetch 不要
-      setHasCheckedExistingUrl(true);
-      return;
-    }
+    const alreadyHasFormResult = !!formResult;
     setHasCheckedExistingUrl(true);
 
     (async () => {
+      // T-171 / T-172: 未完了の「Googleフォーム作成依頼」タスク（最新1件）を取得。
+      // 見つかったら大項目/サブカテゴリ/自由記述だけを依頼値で初期選択する。
+      // T-172: 依頼側の履歴書読み取り・会社別指定は廃止したため、ファイル選択の上書きも
+      // resumeData の再利用も行わない（履歴書の解析は常にこのモーダルで実行する）。
+      // 依頼JSON は v1（T-171 時代）/ v2 のどちらも来るので normalize してから使う。
+      // 既存フォームありでも requestInfo は保持する（完了画面の「依頼タスクへ」リンク用）。
+      let loadedRequest: GoogleFormRequestInfo | null = null;
       try {
-        const res = await fetch(`/api/candidates/${candidateId}/interviews`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const records: InterviewRecordForGoogleForm[] = data.records || [];
-
-        // 出力済みフォームのURLは、フォーム作成後に面談が追加されると isLatest=false に降格した
-        // 旧レコードへ取り残されることがある。そのため isLatest だけでなく全レコードから
-        // edit/view 両URLを持つものを探し、複数あれば作成日時が最新のものを採用する。
-        const formRecord = records
-          .filter((r) => r.googleFormEditUrl && r.googleFormViewUrl)
-          .sort(
-            (a, b) =>
-              new Date(b.googleFormCreatedAt ?? 0).getTime() -
-              new Date(a.googleFormCreatedAt ?? 0).getTime(),
-          )[0];
-
-        if (formRecord?.googleFormEditUrl && formRecord?.googleFormViewUrl) {
-          setFormResult({
-            formId: formRecord.googleFormId || "",
-            editUrl: formRecord.googleFormEditUrl,
-            viewUrl: formRecord.googleFormViewUrl,
-            persisted: true,
-          });
-          setFormCreatedAt(formRecord.googleFormCreatedAt);
-          setStep("completed");
-          return; // 既存フォームあり → 下書き確認はスキップ
+        const rres = await fetch(`/api/candidates/${candidateId}/google-form/request`);
+        if (rres.ok) {
+          const rdata = await rres.json();
+          const normalized = normalizeGoogleFormRequestData(rdata?.request?.data);
+          if (rdata?.request && normalized) {
+            loadedRequest = { ...rdata.request, data: normalized } as GoogleFormRequestInfo;
+            setRequestInfo(loadedRequest);
+            setRequestIgnored(false);
+            const d = normalized;
+            // T-170: 依頼保存時と定義が変わっている場合があるため、
+            // サブカテゴリの実所属から大項目を解決する（コードは全グループで一意）。
+            const resolvedGroupKey = resolveGoogleFormGroupKey(d.groupKey, d.categoryValue);
+            if (resolvedGroupKey) setGroupKey(resolvedGroupKey);
+            if (d.categoryValue) setCategoryValue(d.categoryValue);
+            setOtherLabel(d.otherLabel ?? "");
+          }
         }
       } catch (err) {
-        // サイレントに idle 表示（通常の新規作成フローにフォールバック）
-        console.warn("[GoogleFormCreatorModal] Failed to check existing URL:", err);
+        console.warn("[GoogleFormCreatorModal] Failed to check request task:", err);
       }
 
-      // 改修③（途中保存）: フォーム未作成なら下書きを確認 → あれば復元プロンプトを表示。
-      // 同一セッションで既に確認画面まで進んでいる（questionsJson 保持中）場合は復元プロンプトを出さない。
-      if (questionsJson) return;
+      // T-179: 先に下書きを取得する（既存URLチェックより前に解決させ、作りかけを取りこぼさない）。
+      let draft: { questionsJson: unknown; updatedAt: string | null; consumedAt: string | null } | null = null;
       try {
         const dres = await fetch(`/api/candidates/${candidateId}/google-form/draft`);
-        if (!dres.ok) return;
-        const ddata = await dres.json();
-        if (ddata?.draft?.questionsJson) {
-          setDraftPrompt({
-            questionsJson: ddata.draft.questionsJson,
-            updatedAt: ddata.draft.updatedAt ?? null,
-          });
-          setStep("restorePrompt");
+        if (dres.ok) {
+          const ddata = await dres.json();
+          if (ddata?.draft?.questionsJson) {
+            draft = {
+              questionsJson: ddata.draft.questionsJson,
+              updatedAt: ddata.draft.updatedAt ?? null,
+              consumedAt: ddata.draft.consumedAt ?? null,
+            };
+            // 完了画面の「前回の内容から作り直す」でも使うため、使用済みでも保持する。
+            setDraftPrompt(draft);
+          }
         }
       } catch (err) {
         console.warn("[GoogleFormCreatorModal] Failed to check draft:", err);
       }
+
+      // 既存 Google フォーム URL のチェック（完了画面ジャンプと、復元時のバナー表示に使う）。
+      // 同一セッションで既に formResult を持っている場合は再 fetch しない。
+      let hasExistingForm = alreadyHasFormResult;
+      if (!alreadyHasFormResult) {
+        try {
+          const res = await fetch(`/api/candidates/${candidateId}/interviews`);
+          if (res.ok) {
+            const data = await res.json();
+            const records: InterviewRecordForGoogleForm[] = data.records || [];
+
+            // 出力済みフォームのURLは、フォーム作成後に面談が追加されると isLatest=false に降格した
+            // 旧レコードへ取り残されることがある。そのため isLatest だけでなく全レコードから
+            // edit/view 両URLを持つものを探し、複数あれば作成日時が最新のものを採用する。
+            const formRecord = records
+              .filter((r) => r.googleFormEditUrl && r.googleFormViewUrl)
+              .sort(
+                (a, b) =>
+                  new Date(b.googleFormCreatedAt ?? 0).getTime() -
+                  new Date(a.googleFormCreatedAt ?? 0).getTime(),
+              )[0];
+
+            if (formRecord?.googleFormEditUrl && formRecord?.googleFormViewUrl) {
+              setFormResult({
+                formId: formRecord.googleFormId || "",
+                editUrl: formRecord.googleFormEditUrl,
+                viewUrl: formRecord.googleFormViewUrl,
+                persisted: true,
+              });
+              setFormCreatedAt(formRecord.googleFormCreatedAt);
+              hasExistingForm = true;
+            }
+          }
+        } catch (err) {
+          // サイレントに idle 表示（通常の新規作成フローにフォールバック）
+          console.warn("[GoogleFormCreatorModal] Failed to check existing URL:", err);
+        }
+      }
+
+      // ここから画面決定。setStep はこの 1 箇所だけで行う。
+      // 「作り直す」直後（skipAutoJumpRef）と、同一セッションで既に確認画面まで進んでいる
+      // （questionsJson 保持中）ケースでは自動ジャンプしない。
+      if (skipAutoJumpRef.current) return;
+      if (questionsJson) return;
+
+      if (draft && !draft.consumedAt) {
+        // T-179: 作りかけの下書きが最優先。既存URLがあっても完了画面へは飛ばさない。
+        applyDraftToQuestions(draft.questionsJson);
+        setStep("confirmQuestions");
+        toast.success("前回の途中保存を復元しました");
+        return;
+      }
+      if (hasExistingForm) {
+        setStep("completed");
+      }
     })();
-  }, [isOpen, hasCheckedExistingUrl, formResult, candidateId, questionsJson]);
+  }, [
+    isOpen,
+    hasCheckedExistingUrl,
+    formResult,
+    candidateId,
+    questionsJson,
+    meetingFiles,
+    applyDraftToQuestions,
+  ]);
 
   const groups = GOOGLE_FORM_CATEGORY_GROUPS;
   const selectedGroup = groups.find((g) => g.label === groupKey) ?? null;
@@ -332,6 +468,10 @@ export default function GoogleFormCreatorModal({
   const overlayClose = useOverlayClose(handleClose);
 
   const handleResetAll = () => {
+    // T-179: リセット直後に open 判定 useEffect が再発火しても completed へ引き戻されないよう固定する。
+    // （hasCheckedExistingUrl はここで false に戻さない。戻すと既存URLチェックが再実行され、
+    //   完了画面へ自動ジャンプしてしまう）
+    skipAutoJumpRef.current = true;
     setStep("idle");
     setStageStatus({ extract: "pending", generate: "pending", create: "pending" });
     setErrorMessage(null);
@@ -350,21 +490,36 @@ export default function GoogleFormCreatorModal({
     setAutoSaveStatus("idle");
     setShowCreateConfirm(false);
     setLastAppliedInstruction("");
+    setRequestDetailMap({});
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
   };
 
+  // T-171: 「依頼内容を使わずに最初からやり直す」。依頼由来の初期選択をすべて解除して
+  // 通常の新規作成フローに戻す（handleResetAll 相当＋カテゴリ選択のクリア）。
+  const handleIgnoreRequest = () => {
+    setRequestIgnored(true);
+    handleResetAll();
+    setGroupKey("");
+    setCategoryValue("");
+    setOtherLabel("");
+  };
+
   // T-038: 「新しく作り直す」ボタン（confirm 付きで handleResetAll を呼ぶ）
+  // T-179: ここは「前回の内容を明示的に捨てる」操作なので下書きも削除する
+  //        （前回の内容から作り直したい場合は「前回の内容から作り直す」を使う）。
   const handleStartFresh = () => {
     const confirmed = window.confirm(
       "既存の Google フォームはそのままに、新しいフォームを作成し直します。\n" +
+        "保存されている前回の質問内容は破棄されます。\n" +
         "既に求職者へ URL を共有済みの場合、共有 URL は引き続き有効ですが、新規作成後は別 URL になります。\n\n" +
         "本当に作り直しますか?",
     );
     if (!confirmed) return;
     handleResetAll();
+    void deleteDraft();
   };
 
   // T-035: work_history を取り出すヘルパー（resumeData は unknown）
@@ -397,6 +552,41 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryMap(initialMap);
     setCompanyGroupMap(initialGroupMap);
     setCompanyCategoryLabelMap(initialLabelMap);
+  };
+
+  // T-172追補: 全社に 1画面目のカテゴリを配ったうえで、依頼タスクの会社別指定を
+  // **会社名一致**（NFKC 正規化＋空白除去の完全一致）で上書きする。一致しない会社は既定値のまま。
+  // 依頼側に resumeData は無い（依頼時のAI読み取りは廃止したまま）ので、対応付けは名前だけで行う。
+  // あわせて会社カードのヒント用に職種詳細（detail）マップも組み立てる。
+  const applyDefaultCompanyMaps = (workHistory: WorkHistoryEntry[]) => {
+    initializeCompanyCategoryMap(workHistory, groupKey, categoryValue, otherLabel);
+    const req = !requestIgnored ? requestInfo : null;
+    const companies = req?.data.companies;
+    if (!companies || companies.length === 0) {
+      setRequestDetailMap({});
+      return;
+    }
+    const mapPatch: Record<string, string> = {};
+    const groupPatch: Record<string, string> = {};
+    const detailMap: Record<string, string> = {};
+    workHistory.forEach((w, i) => {
+      const key = String(i);
+      const target = normalizeCompanyNameForMatch(w.company);
+      if (!target) return;
+      const match = companies.find((c) => normalizeCompanyNameForMatch(c.name) === target);
+      if (!match) return;
+      if (match.categoryValue) {
+        mapPatch[key] = match.categoryValue;
+        // T-170: 保存済み groupKey より、サブカテゴリの実所属を優先する
+        groupPatch[key] = resolveGoogleFormGroupKey(match.groupKey, match.categoryValue);
+      }
+      if (match.detail) detailMap[key] = match.detail;
+    });
+    if (Object.keys(mapPatch).length > 0) {
+      setCompanyCategoryMap((prev) => ({ ...prev, ...mapPatch }));
+      setCompanyGroupMap((prev) => ({ ...prev, ...groupPatch }));
+    }
+    setRequestDetailMap(detailMap);
   };
 
   // T-035: 質問生成前のバリデーション（全社サブカテゴリ必須）
@@ -530,11 +720,15 @@ export default function GoogleFormCreatorModal({
       setFormResult(result);
       setFormCreatedAt(new Date().toISOString());
       setStageStatus((s) => ({ ...s, create: "done" }));
-      // 改修③（途中保存）: フォーム作成に成功したら下書きを自動削除（残り続けないように）。
-      // 失敗してもフォーム作成自体は成功扱い（fire-and-forget）。
-      fetch(`/api/candidates/${candidateId}/google-form/draft`, { method: "DELETE" }).catch(
-        () => {},
-      );
+      // T-179: フォーム作成成功でも下書きは削除しない（「前回の内容から作り直す」ために内容を残す）。
+      // サーバ側（create-form）が consumedAt をセット済み＝以降は「作りかけ」扱いにならない。
+      // 画面側の下書き情報も使用済みに更新して、完了画面のボタンをすぐ使えるようにする。
+      const consumedNow = new Date().toISOString();
+      setDraftPrompt({
+        questionsJson: questions,
+        updatedAt: consumedNow,
+        consumedAt: consumedNow,
+      });
       return result;
     } catch (e) {
       setStageStatus((s) => ({ ...s, create: "failed" }));
@@ -556,12 +750,14 @@ export default function GoogleFormCreatorModal({
     setCompanyCategoryMap({});
     setCompanyGroupMap({});
 
+    // T-172: 依頼タスクがあっても履歴書の読み取りは常にここで実行する
+    // （依頼側の解析・resumeData 再利用は廃止）。
     const e1 = await runExtract();
     if (!e1) {
       setStep("error");
       return;
     }
-    initializeCompanyCategoryMap(getWorkHistory(e1.resumeData), groupKey, categoryValue, otherLabel);
+    applyDefaultCompanyMaps(getWorkHistory(e1.resumeData));
     setStep("selectCompany");
   };
 
@@ -718,23 +914,20 @@ export default function GoogleFormCreatorModal({
     else toast.error("途中保存に失敗しました");
   };
 
-  // 改修③（途中保存）: 下書きを復元 → 生成をスキップして確認画面へ。
+  // 改修③（途中保存）/ T-179: 下書きを復元 → 生成をスキップして確認画面へ。
+  // 完了画面の「前回の内容から作り直す」から呼ぶ（open 時の自動復元は useEffect 側）。
+  // formResult / formCreatedAt はクリアしない（確認画面上部の「前回作成したフォーム」バナー用）。
   const handleRestoreDraft = () => {
     if (!draftPrompt) return;
-    setQuestionsJson(draftPrompt.questionsJson);
-    setCheckedTargets({});
-    setRegenerateInstruction("");
-    setRegenerateNotice(null);
-    setLastAppliedInstruction("");
-    setAutoSaveStatus("idle");
-    setDraftPrompt(null);
+    skipAutoJumpRef.current = true;
+    applyDraftToQuestions(draftPrompt.questionsJson);
     setStep("confirmQuestions");
+    toast.success("前回の内容を読み込みました");
   };
 
-  // 改修③（途中保存）: 下書きを破棄 → 通常の新規作成フロー（idle）へ。
-  const handleDiscardDraft = async () => {
+  // T-179: 下書きの明示削除（「新しく作り直す」からのみ）。失敗しても画面操作は止めない。
+  const deleteDraft = async () => {
     setDraftPrompt(null);
-    setStep("idle");
     try {
       await fetch(`/api/candidates/${candidateId}/google-form/draft`, { method: "DELETE" });
     } catch (e) {
@@ -867,7 +1060,7 @@ export default function GoogleFormCreatorModal({
         setStep("error");
         return;
       }
-      initializeCompanyCategoryMap(getWorkHistory(r.resumeData), groupKey, categoryValue, otherLabel);
+      applyDefaultCompanyMaps(getWorkHistory(r.resumeData));
       setStep("selectCompany");
       return;
     }
@@ -952,6 +1145,47 @@ export default function GoogleFormCreatorModal({
         {/* Step 1: idle - 入力 */}
         {step === "idle" && (
           <>
+            {/* T-171: 依頼タスクの内容を読み込んだバナー（日時は JST 表示） */}
+            {requestInfo && !requestIgnored && (
+              <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-200 px-3 py-2.5 text-[12px] text-indigo-900">
+                <p className="font-medium">
+                  📋 依頼内容を読み込みました（タスク: {requestInfo.title}／依頼者: {requestInfo.createdByName ?? "不明"}／
+                  {new Date(requestInfo.createdAt).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" })}{" "}
+                  {new Date(requestInfo.createdAt).toLocaleTimeString("ja-JP", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "Asia/Tokyo",
+                  })}）
+                </p>
+                <p className="mt-0.5 text-indigo-700">
+                  メイン経験職種カテゴリを依頼内容から初期設定しています。履歴書の読み取りはこの画面から実行してください。
+                  面談ログは基本的に初回面談のログを選択してください（初期選択は最も古いファイルです）。
+                  {requestInfo.data.companies.length > 0 && (
+                    <>
+                      <br />
+                      会社別の職種指定 {requestInfo.data.companies.length} 件は、読み取り後に会社名が一致した会社へ自動適用します。
+                    </>
+                  )}
+                </p>
+                {/* 会社カードに収まらない全体の申し送りとして、依頼メモは常に全文表示する */}
+                {requestInfo.data.memo && (
+                  <div className="mt-1.5 rounded border border-indigo-200 bg-white px-2 py-1.5">
+                    <p className="text-[11px] font-medium text-indigo-700">依頼メモ</p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-[12px] text-indigo-900">
+                      {requestInfo.data.memo}
+                    </p>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleIgnoreRequest}
+                  className="mt-1.5 text-[12px] font-medium text-indigo-700 underline hover:text-indigo-900"
+                >
+                  依頼内容を使わずに最初からやり直す
+                </button>
+              </div>
+            )}
+
             {/* PDF ファイル選択 */}
             <div className="mb-4">
               <label className="block text-[13px] font-medium text-[#374151] mb-2">
@@ -1020,6 +1254,10 @@ export default function GoogleFormCreatorModal({
                   ))}
                 </div>
               )}
+              {/* 業務ルールの常時表示（ファイル数に関わらず出す） */}
+              <p className="mt-1 text-[11px] text-gray-500">
+                基本は初回面談のログを選択してください（初期選択は最も古いファイルです）
+              </p>
             </div>
 
             {/* カテゴリ選択 */}
@@ -1093,47 +1331,6 @@ export default function GoogleFormCreatorModal({
               </button>
             </div>
           </>
-        )}
-
-        {/* 改修③（途中保存）: restorePrompt - 下書き復元の確認 */}
-        {step === "restorePrompt" && (
-          <div>
-            <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-[13px] text-blue-800">
-              この求職者の <span className="font-semibold">フォーム質問の下書き</span> が保存されています。
-              {draftPrompt?.updatedAt && (
-                <span className="block text-[12px] text-blue-700 mt-1">
-                  保存日時: {new Date(draftPrompt.updatedAt).toLocaleDateString("sv-SE")}{" "}
-                  {new Date(draftPrompt.updatedAt).toLocaleTimeString("ja-JP", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              )}
-            </div>
-            <p className="mb-4 text-[13px] text-gray-600">
-              続きから再開するか、破棄して新しく作成し直すかを選んでください。
-            </p>
-            <div className="flex gap-2 pt-2 border-t border-gray-200">
-              <button
-                onClick={handleClose}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
-              >
-                閉じる
-              </button>
-              <button
-                onClick={handleDiscardDraft}
-                className="flex-1 border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
-              >
-                破棄して新規作成
-              </button>
-              <button
-                onClick={handleRestoreDraft}
-                className="flex-1 bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8]"
-              >
-                続きから
-              </button>
-            </div>
-          </div>
         )}
 
         {/* Step 1.5: selectCompany - 会社別カテゴリ選択（T-035） */}
@@ -1247,6 +1444,12 @@ export default function GoogleFormCreatorModal({
                             ))}
                           </select>
                         </div>
+                        {/* T-172追補: 依頼タスクに書かれた職種詳細のヒント表示（この会社分） */}
+                        {requestDetailMap[key] && (
+                          <p className="mt-1.5 rounded bg-indigo-50 border border-indigo-100 px-2 py-1 text-[11px] text-indigo-800">
+                            💡 依頼の職種詳細: {requestDetailMap[key]}
+                          </p>
+                        )}
                         {/* T-035 step2: その他系のときだけ、会社別の自由記入欄（任意） */}
                         {isOtherTypeCategory(currentCategory) && (
                           <div className="mt-2">
@@ -1302,6 +1505,24 @@ export default function GoogleFormCreatorModal({
           const canRegenerate = regenerateInstruction.trim().length > 0 && !isRegenerating;
           return (
             <div>
+              {/* T-179: 作りかけの下書きを復元して表示しているとき、既に作成済みのフォームがあれば
+                  情報として知らせる（完了画面へは遷移させない）。 */}
+              {formResult?.editUrl && (
+                <div className="mb-3 rounded-md bg-gray-50 border border-gray-200 px-4 py-2.5 text-[12px] text-gray-600 flex items-center justify-between gap-3">
+                  <span>
+                    前回作成したフォームがあります
+                    {formatJst(formCreatedAt) ? `（${formatJst(formCreatedAt)} 作成）` : ""}
+                  </span>
+                  <a
+                    href={formResult.editUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-[#2563EB] underline hover:text-[#1D4ED8]"
+                  >
+                    編集フォームを開く ↗
+                  </a>
+                </div>
+              )}
               <div className="mb-3 rounded-md bg-green-50 border border-green-200 px-4 py-3 text-[14px] text-green-800">
                 ✓ 質問を生成しました（{sections.length} セクション / {totalItems} 項目）。内容をご確認ください。
                 <span className="block text-[12px] text-green-700 mt-1">
@@ -1650,31 +1871,52 @@ export default function GoogleFormCreatorModal({
             </div>
 
             {/* T-038: 作成日時表示（JST、罠ポイント #17 準拠で sv-SE ロケール使用）*/}
-            {formCreatedAt && (
+            {formatJst(formCreatedAt) && (
               <div className="text-[11px] text-gray-500 mb-4">
-                作成日時: {new Date(formCreatedAt).toLocaleDateString("sv-SE")}{" "}
-                {new Date(formCreatedAt).toLocaleTimeString("ja-JP", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                作成日時: {formatJst(formCreatedAt)}
               </div>
             )}
 
             <div className="flex justify-between items-center pt-2 border-t border-gray-200 gap-2">
-              {/* T-038: 「新しく作り直す」ボタン（confirm 付き）*/}
-              <button
-                type="button"
-                onClick={handleStartFresh}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
-              >
-                新しく作り直す
-              </button>
-              <button
-                onClick={handleClose}
-                className="border border-gray-300 bg-white text-gray-700 rounded-md px-5 py-2 text-[13px] font-medium hover:bg-gray-50"
-              >
-                閉じる
-              </button>
+              <div className="flex items-center gap-2">
+                {/* T-179: 保存されている前回の質問内容から作り直す（下書きが残っているときだけ表示）*/}
+                {draftPrompt && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreDraft}
+                    className="border border-[#2563EB] bg-white text-[#2563EB] rounded-md px-4 py-2 text-[13px] font-medium hover:bg-blue-50"
+                  >
+                    前回の内容から作り直す
+                  </button>
+                )}
+                {/* T-038: 「新しく作り直す」ボタン（confirm 付き）*/}
+                <button
+                  type="button"
+                  onClick={handleStartFresh}
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-4 py-2 text-[13px] font-medium hover:bg-gray-50"
+                >
+                  新しく作り直す
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* T-171: 依頼タスクへのリンク（完了操作は担当者の手動。ステータスは変更しない） */}
+                {requestInfo && (
+                  <a
+                    href={`/tasks/${requestInfo.taskId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="border border-[#2563EB] bg-white text-[#2563EB] rounded-md px-4 py-2 text-[13px] font-medium hover:bg-blue-50"
+                  >
+                    依頼タスクへ ↗
+                  </a>
+                )}
+                <button
+                  onClick={handleClose}
+                  className="border border-gray-300 bg-white text-gray-700 rounded-md px-5 py-2 text-[13px] font-medium hover:bg-gray-50"
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
           </div>
         )}

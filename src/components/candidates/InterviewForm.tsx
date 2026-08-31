@@ -20,6 +20,8 @@ import SuggestedTaskCard, {
   type SuggestedTask,
   type SuggestedTaskDone,
 } from "@/components/common/SuggestedTaskCard";
+// T-183 Phase 2: 面談サポートタブ（記録一覧・閲覧・削除）。
+import InterviewSupportLogTab from "@/components/interview-support/InterviewSupportLogTab";
 
 // 専用欄アップロード成功の中央通知の表示時間。既存トースト（約3秒）より長め＝
 // 「解析ボタンを押す」という次の操作に気づける時間を確保する。
@@ -126,6 +128,8 @@ const RIGHT_TABS = [
   { id: "rating", label: "ランク評価" },
   { id: "action", label: "アクション" },
   { id: "attachments", label: "添付" },
+  // T-183 Phase 2: 面談サポート（文字起こし+AI解説）の記録一覧・閲覧・削除
+  { id: "support", label: "面談サポート" },
 ] as const;
 
 const AUTOSAVE_DEBOUNCE = 3_000;
@@ -1349,6 +1353,15 @@ export default function InterviewForm({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasPdf ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
+          {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled */}
+          <button
+            type="button" onClick={() => window.open(`/interview-support/${interviewId}`, "_blank")} disabled={!interviewId}
+            className="inline-flex items-center justify-center gap-1"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: interviewId ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: interviewId ? 1 : 0.5, cursor: interviewId ? "pointer" : "not-allowed" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={interviewId ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            面談サポート
+          </button>
           <button
             type="button" onClick={handleSave} disabled={saving}
             className="cursor-pointer"
@@ -1931,6 +1944,11 @@ export default function InterviewForm({
                   <Fld value={d.nextAction || d.freeMemo || d.initialSummary || form.summaryText} onChange={(v) => setDetail("nextAction", v)} type="textarea" rows={8} style={{ flex: "1 1 auto", minHeight: 560 }} isMissing={miss.has("d.nextAction") && miss.has("d.freeMemo") && miss.has("d.initialSummary")} />
                 </div>
               </div>
+            )}
+
+            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる ===== */}
+            {rightTab === "support" && (
+              <InterviewSupportLogTab candidateId={candidateId} interviewId={interviewId} />
             )}
 
             {/* ===== 添付タブ ===== */}

@@ -1,14 +1,18 @@
 // T-098 追補: AI解析結果を form state にマージする共通ロジック。
 // allowedKeys に含まれ、かつ「現在の form 値が空のフィールドのみ」を埋める。
 // ボタン経路（単一ファイル・自タブ）と全画面D&D経路（複数ファイル・全タブ配布）の両方から使う。
+//
+// T-098 追補2（未保存バグ修正）: 各タブは onBlur/onChange 起点の自動保存であるため、
+// AI が setForm で入れた値は「人がその欄を触らない限り保存されない」。どのキーを埋めたかを
+// filledKeys で返し、呼び出し側が「未保存です」表示＋保存ボタンを出せるようにする。
 
 export function mergeEmptyOnly<T extends Record<string, string>>(
   prev: T,
   data: Record<string, unknown>,
   allowedKeys: readonly (keyof T & string)[],
-): { next: T; filled: number } {
+): { next: T; filled: number; filledKeys: string[] } {
   const next = { ...prev };
-  let filled = 0;
+  const filledKeys: string[] = [];
   for (const key of allowedKeys) {
     // 空欄のみマージ: 現在の値が空文字 or 空白のみのときに限る（人の編集を上書きしない）
     const cur = (prev[key] ?? "").toString();
@@ -17,10 +21,10 @@ export function mergeEmptyOnly<T extends Record<string, string>>(
     if (typeof v === "string" && v.trim() !== "") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (next as any)[key] = v;
-      filled++;
+      filledKeys.push(key);
     }
   }
-  return { next, filled };
+  return { next, filled: filledKeys.length, filledKeys };
 }
 
 export function filledMessage(filled: number): string {

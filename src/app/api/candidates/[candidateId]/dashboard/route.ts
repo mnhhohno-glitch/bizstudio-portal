@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
 import { todayJstDateString, toJstDateString } from "@/lib/dailyReport/jstDate";
+// T-170: 最終接触日 / 放置日数 / 求人配信（紹介）数の定義は共通モジュールに集約。
+// 求職者管理一覧（/admin/master）も同じ関数を使うため、ここで再定義しない。
+import {
+  DELIVERED_BOOKMARK_FILTER,
+  computeLastContact,
+  idleDaysFrom,
+  maxDate,
+} from "@/lib/candidates/last-contact";
 
 /**
  * T-107: 求職者ダッシュボード集計 API（読み取りのみ）。
@@ -31,17 +39,6 @@ function fmtJstDateTime(raw: string | null | undefined): string | null {
   const s = d.toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD HH:mm:ss"
   const [date, time] = s.split(" ");
   return `${date.replace(/-/g, "/")} ${(time ?? "").slice(0, 5)}`; // YYYY/MM/DD HH:mm
-}
-// JST 日付文字列同士の日数差（a - b）。罠#17準拠で JST 0:00 基準。
-function diffJstDays(a: string, b: string): number {
-  const da = new Date(`${a}T00:00:00+09:00`).getTime();
-  const db = new Date(`${b}T00:00:00+09:00`).getTime();
-  return Math.round((da - db) / 86_400_000);
-}
-function maxDate(...ds: (Date | null | undefined)[]): Date | null {
-  let m: Date | null = null;
-  for (const d of ds) if (d && (!m || d > m)) m = d;
-  return m;
 }
 
 type DailyView = { date: string; count: number };
@@ -136,11 +133,15 @@ export async function GET(
     }),
     prisma.candidateNote.aggregate({ where: { candidateId }, _max: { createdAt: true } }),
     prisma.contactLog.aggregate({ where: { candidateId }, _max: { contactedAt: true } }),
+    // T-161 R2: 最終求人提案日・提案件数は「出力済 ∪ 出力なし紹介済み」（本人応募は除外）。
+    // マイページ反応の母数（下の baseFiles）は「掲載＝送信済」の定義のため従来どおり lastExportedAt 基準を維持。
     prisma.candidateFile.aggregate({
-      where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } },
-      _max: { lastExportedAt: true },
+      where: { ...DELIVERED_BOOKMARK_FILTER, candidateId },
+      _max: { lastExportedAt: true, introducedAt: true },
     }),
-    prisma.candidateFile.count({ where: { candidateId, category: "BOOKMARK", lastExportedAt: { not: null } } }),
+    prisma.candidateFile.count({
+      where: { ...DELIVERED_BOOKMARK_FILTER, candidateId },
+    }),
     // マイページ反応の母数＆新台帳の仕分け: マイページ掲載求人（送信済 かつ 紹介保留=archived を除く）
     //   の kyuujinJobId と responseStatus。新 /site/ の仕分けはここ（CandidateFile.responseStatus）に入る。
     prisma.candidateFile.findMany({
@@ -198,7 +199,8 @@ export async function GET(
   };
 
   /* ----- ②こちらの対応 ----- */
-  const bookmarkMaxExport = bookmarkAgg._max.lastExportedAt ?? null;
+  // T-161 R2: 最終提案 = 出力日と紹介日（出力なし紹介済み）の新しい方。
+  const bookmarkMaxExport = maxDate(bookmarkAgg._max.lastExportedAt ?? null, bookmarkAgg._max.introducedAt ?? null);
   const maxEntryDate = entries.reduce<Date | null>((m, e) => (e.entryDate && (!m || e.entryDate > m) ? e.entryDate : m), null);
   // 最終求人提案日 = BOOKMARK送信日 と 求人紹介(JobEntry)記録日 の新しい方
   const lastProposal = maxDate(bookmarkMaxExport, maxEntryDate);
@@ -206,15 +208,14 @@ export async function GET(
 
   /* ----- 信号バー: 最終接触 / 放置日数 / 次回連絡 ----- */
   // 最終接触日 = 面談実施 / 連絡メモ / 連絡記録(ContactLog) / 求人提案(送信) の最新（タスク完了は含めない）
-  const lastContact = maxDate(
-    latestInterview?.interviewDate ?? null,
-    notesAgg._max.createdAt ?? null,
-    contactLogAgg._max.contactedAt ?? null,
-    bookmarkMaxExport,
-  );
+  const lastContact = computeLastContact({
+    latestInterviewAt: latestInterview?.interviewDate ?? null,
+    latestNoteAt: notesAgg._max.createdAt ?? null,
+    latestContactLogAt: contactLogAgg._max.contactedAt ?? null,
+    latestDeliveryAt: bookmarkMaxExport,
+  });
   const todayStr = todayJstDateString();
-  const lastContactJst = lastContact ? toJstDateString(lastContact) : null;
-  const idleDays = lastContactJst ? diffJstDays(todayStr, lastContactJst) : null;
+  const idleDays = idleDaysFrom(lastContact, todayStr);
 
   // 次回連絡予定: T-111 で直接設定した Candidate.nextContactAt を最優先。未設定のときのみ
   // 従来の「最新面談の次回予定 / 未完了タスク期限のうち今日以降で最も近い日」へフォールバック。

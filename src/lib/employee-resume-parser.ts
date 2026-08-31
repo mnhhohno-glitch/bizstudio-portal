@@ -5,9 +5,7 @@
  * PDF/Word/画像をネイティブ理解可能（OCR/抽出ライブラリ不要）。
  */
 
-import { recordGeminiUsage } from "@/lib/ai-usage";
-
-const GEMINI_MODEL = "gemini-3-flash-preview";
+import { callGeminiForJson } from "@/lib/gemini-json-call";
 
 export type EmployeeResumeResult = {
   // 基本情報
@@ -73,7 +71,8 @@ const EMPLOYEE_RESUME_PROMPT = `添付されたファイルは社員の履歴書
 
 /**
  * ファイル Buffer を Gemini API に送信し、社員詳細用フィールドを抽出する。
- * 失敗時（APIキー未設定 / APIエラー / レスポンス不正 / JSON解析失敗）は throw する。
+ * 一時的な失敗（レート制限 / 5xx / 通信断 / 出力途中切れ）は callGeminiForJson が
+ * 最大3回まで自動リトライする。全滅した場合は GeminiJsonError を throw するので、
  * 呼び出し側で catch し、AI解析失敗として扱うこと。
  */
 export type ResumeFileInput = { buffer: Buffer; mimeType: string };
@@ -81,72 +80,24 @@ export type ResumeFileInput = { buffer: Buffer; mimeType: string };
 export async function parseEmployeeResume(
   files: ResumeFileInput[],
 ): Promise<EmployeeResumeResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY が設定されていません");
-  }
   if (files.length === 0) {
     throw new Error("ファイルが指定されていません");
   }
 
-  // 全ファイルの inlineData を並べ＋プロンプト1本で1リクエストにまとめる
-  const parts = [
-    ...files.map((f) => ({
-      inlineData: { mimeType: f.mimeType, data: f.buffer.toString("base64") },
-    })),
-    { text: EMPLOYEE_RESUME_PROMPT },
-  ];
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4000,
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  // T-135: 費用記録（fire-and-forget・空レスポンスで throw する前に）
-  void recordGeminiUsage({
-    system: "portal",
+  const parsed = await callGeminiForJson({
+    // 全ファイルの inlineData を並べ＋プロンプト1本で1リクエストにまとめる
+    parts: [
+      ...files.map((f) => ({
+        inlineData: { mimeType: f.mimeType, data: f.buffer.toString("base64") },
+      })),
+      { text: EMPLOYEE_RESUME_PROMPT },
+    ],
     endpoint: "employee-resume-parse",
-    model: GEMINI_MODEL,
-    usage: data?.usageMetadata,
-    meta: { fileCount: files.length },
+    logMeta: {
+      fileCount: files.length,
+      totalBytes: files.reduce((sum, f) => sum + f.buffer.length, 0),
+    },
   });
-
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText || typeof rawText !== "string") {
-    throw new Error("Gemini レスポンスが空です");
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    // Gemini が ```json ... ``` ラッパーや前文テキストを付与する場合がある
-    const codeBlockMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const jsonStr = codeBlockMatch
-      ? codeBlockMatch[1].trim()
-      : rawText.substring(rawText.indexOf("{"), rawText.lastIndexOf("}") + 1);
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    console.error(
-      "[employee-resume-parser] JSON parse failed. rawText (500 chars):",
-      rawText.substring(0, 500),
-    );
-    throw new Error("Gemini レスポンスのJSON解析に失敗しました");
-  }
 
   const s = (v: unknown): string | null =>
     typeof v === "string" && v.trim() !== "" ? v.trim() : null;

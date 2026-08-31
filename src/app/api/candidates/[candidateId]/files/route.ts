@@ -101,12 +101,19 @@ export async function GET(
       aiAnalyzedAt: true,
       lastExportedAt: true,
       lastExportedTo: true,
+      // T-161: 出力なしの「紹介済み」時刻。ブックマーク一覧の紹介済みバッジ・ボタン活性判定に使う。
+      introducedAt: true,
       archivedAt: true,
       archivedReason: true,
       archivedNote: true,
       archivedById: true,
       uploadedBy: { select: { id: true, name: true } },
       archivedBy: { select: { id: true, name: true } },
+      // T-159 Phase 2-c: OneDrive コピー状況のバッジ用。1 CandidateFile につき 0..1 行。
+      // 行が無い＝同期対象として受け付けていない（対象外カテゴリ・機能稼働前）→ 画面は何も出さない。
+      oneDriveSyncLog: {
+        select: { status: true, skipReason: true, siblingFolders: true },
+      },
     },
   });
 

@@ -8,7 +8,10 @@ import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
-import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
+
+// T-181: 担当CAフィルタで「担当CA未設定」を表す特別値（Employee.id と衝突しない固定文字列）
+const UNASSIGNED_CA = "__UNASSIGNED__";
 
 const SUPPORT_TABS = [
   { key: "ACTIVE", label: "支援中" },
@@ -51,6 +54,27 @@ type CandidateRow = {
   supportSubStatus: string | null;
   supportEndReason: string | null;
   jobStatus?: "entry" | "introduced" | "before" | null;
+  // T-170: 追加5列（サーバ側 computeCandidateListMetrics の戻り値をそのまま持つ）
+  desiredJobType?: string | null;
+  desiredJobTypeFull?: string | null;
+  desiredArea?: string | null;
+  desiredAreaFull?: string | null;
+  referralCount?: number;
+  entryCount?: number;
+  idleDays?: number | null;
+  idleLevel?: "ok" | "warn" | "alert" | null;
+};
+
+// T-170追補: 「希望職種 / 希望エリア」列の並び替え状態。上段（職種）と下段（エリア）で別キー、
+// 各キーは 昇順 → 降順 → 解除 の3状態。null は並び替えなし（＝求職者番号降順の元の並び）。
+type DesiredSortKey = "job" | "area";
+type DesiredSort = { key: DesiredSortKey; dir: "asc" | "desc" };
+
+// T-170: 放置日数の文字色。DashboardTab の idleSignal と同じ閾値・同じ色を使う。
+const IDLE_LEVEL_COLOR: Record<string, string> = {
+  ok: "#16A34A",
+  warn: "#CA8A04",
+  alert: "#DC2626",
 };
 
 const SUB_STATUS_BADGE: Record<string, string> = {
@@ -136,7 +160,8 @@ function formatGender(gender: string | null) {
 // 罠#17: 登録日・応募日・配信日はいずれも jstDateStr() で JST の暦日文字列に揃えてから比較する。
 type NonTabFilters = {
   search: string;
-  caId: string;
+  /** T-181: 担当CAの複数選択。空配列 ＝ 絞り込みなし。UNASSIGNED_CA は担当CA未設定を表す */
+  caIds: string[];
   dateFrom: string;
   dateTo: string;
   gender: string;
@@ -159,7 +184,12 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
         (!!c.employee?.name && c.employee.name.toLowerCase().includes(q));
       if (!hit) return false;
     }
-    if (f.caId !== "ALL" && c.employee?.id !== f.caId) return false;
+    // T-181: 担当CA（複数選択・OR）。判定は行データの employee.id で行う（表示整形は使わない）
+    if (f.caIds.length > 0) {
+      const empId = c.employee?.id || "";
+      const hitCa = empId ? f.caIds.includes(empId) : f.caIds.includes(UNASSIGNED_CA);
+      if (!hitCa) return false;
+    }
     if (f.gender !== "ALL" && c.gender !== f.gender) return false;
     if (f.route !== "ALL" && (c.applicationRoute || "") !== f.route) return false;
     if (f.media !== "ALL" && (c.mediaSource || "") !== f.media) return false;
@@ -201,7 +231,10 @@ export default function CandidateListClient({
   const [modalOpen, setModalOpen] = useState(false);
   const [supportTab, setSupportTab] = useState("ACTIVE");
   const [endModalCandidateId, setEndModalCandidateId] = useState<string | null>(null);
-  const [caFilter, setCaFilter] = useState(currentEmployeeId || "ALL");
+  // T-181: 担当CAは複数選択。空配列＝絞り込みなし（従来の "ALL" と同じ意味）。
+  // 初期値は従来どおり「ログイン中の自分の担当のみ」（社員未紐付け等で null なら ALL）。
+  // クリアボタンは自分に戻すのではなく全解除（集計時に一発で全体へ戻せるようにするため）。
+  const [caFilter, setCaFilter] = useState<string[]>(currentEmployeeId ? [currentEmployeeId] : []);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [genderFilter, setGenderFilter] = useState("ALL");
@@ -214,6 +247,8 @@ export default function CandidateListClient({
   const [appDateTo, setAppDateTo] = useState("");
   const [delDateFrom, setDelDateFrom] = useState("");
   const [delDateTo, setDelDateTo] = useState("");
+  // T-170追補: 希望職種 / 希望エリアの並び替え（この列のみ）
+  const [desiredSort, setDesiredSort] = useState<DesiredSort | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkAssigneeModalOpen, setBulkAssigneeModalOpen] = useState(false);
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
@@ -245,7 +280,7 @@ export default function CandidateListClient({
     () =>
       applyNonTabFilters(candidates, {
         search: debouncedSearch,
-        caId: caFilter,
+        caIds: caFilter,
         dateFrom,
         dateTo,
         gender: genderFilter,
@@ -258,6 +293,24 @@ export default function CandidateListClient({
       }),
     [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]
   );
+
+  // T-181: 担当CAの選択肢。社員一覧（active・employeeNumber順）に加えて、
+  // 行データに担当CAとして居るのに社員一覧に無い人（退職・無効化された社員）も末尾に足す。
+  // これを足さないと「全選択（＝担当あり）」にも「未設定」にも入らない行が生まれ、件数が合わなくなる。
+  const caOptions = useMemo(() => {
+    const base = employees.map((e) => ({ value: e.id, label: e.name }));
+    const known = new Set(base.map((o) => o.value));
+    const extra = new Map<string, string>();
+    for (const c of candidates) {
+      if (c.employee?.id && !known.has(c.employee.id)) extra.set(c.employee.id, c.employee.name);
+    }
+    return [
+      ...base,
+      ...[...extra]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, "ja")),
+    ];
+  }, [employees, candidates]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<string, number> = { ALL: 0, BEFORE: 0, ACTIVE: 0, WAITING: 0, ENDED: 0, ARCHIVED: 0 };
@@ -279,6 +332,35 @@ export default function CandidateListClient({
     }
     return result;
   }, [baseRows, supportTab, endReasonFilter]);
+
+  // T-170追補: 希望職種 / 希望エリアの並び替え。フィルタ・支援タブ・フリー検索の結果（filtered）に
+  // 後段で掛けるだけなので、絞り込み条件やタブ件数には一切影響しない。
+  // 空欄（null）は昇順・降順どちらでも末尾に固定する（sign を掛けない）。
+  const sorted = useMemo(() => {
+    if (!desiredSort) return filtered;
+    const pick = (c: CandidateRow) =>
+      (desiredSort.key === "job" ? c.desiredJobType : c.desiredArea) || "";
+    const sign = desiredSort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const va = pick(a);
+      const vb = pick(b);
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return sign * va.localeCompare(vb, "ja");
+    });
+  }, [filtered, desiredSort]);
+
+  // 昇順 → 降順 → 解除。別キーを押したときは、そのキーの昇順から始める（他方は解除）。
+  const toggleDesiredSort = (key: DesiredSortKey) => {
+    setDesiredSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+  const desiredSortMark = (key: DesiredSortKey) =>
+    desiredSort?.key === key ? (desiredSort.dir === "asc" ? "▲" : "▼") : "";
 
   const handleSupportStatusChange = async (candidateId: string, newStatus: string) => {
     if (newStatus === "ENDED") {
@@ -305,15 +387,15 @@ export default function CandidateListClient({
     } catch { toast.error("更新に失敗しました"); }
   };
 
-  const totalFiltered = filtered.length;
+  const totalFiltered = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const skip = (safePage - 1) * PAGE_SIZE;
-  const pageData = filtered.slice(skip, skip + PAGE_SIZE);
+  const pageData = sorted.slice(skip, skip + PAGE_SIZE);
 
   const refreshCandidates = useCallback(async () => {
     try {
-      const res = await fetch("/api/master/candidates?include=employee");
+      const res = await fetch("/api/master/candidates?include=employee,metrics");
       if (res.ok) {
         const data = await res.json();
         setCandidates(data.candidates);
@@ -557,7 +639,8 @@ export default function CandidateListClient({
           {SUPPORT_TABS.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); setCaFilter(tab.key === "ACTIVE" && currentEmployeeId ? currentEmployeeId : "ALL"); }}
+              // T-181: 担当CAの選択はタブ切替でリセットしない（タブ側の絞り込みだけ変える）
+              onClick={() => { setSupportTab(tab.key); setCurrentPage(1); setSelectedIds([]); if (tab.key !== "ENDED") setEndReasonFilter("ALL"); }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 supportTab === tab.key
                   ? "text-[#2563EB] border-[#2563EB]"
@@ -583,18 +666,17 @@ export default function CandidateListClient({
         <FilterTopRow>
           {/* 担当者 */}
           <FilterGroup label="担当者">
-            <FilterField label="担当CA">
-              <select
-                value={caFilter}
-                onChange={(e) => { setCaFilter(e.target.value); setCurrentPage(1); }}
-                className={`w-40 ${FILTER_INPUT_CLS}`}
-              >
-                <option value="ALL">ALL</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </FilterField>
+            {/* T-181: 複数選択。「全選択」＝CA名を全部ON（未設定はOFF）＝担当CAが設定されている人のみ */}
+            <FilterMultiSelectField
+              label="担当CA"
+              options={caOptions}
+              specialOption={{ value: UNASSIGNED_CA, label: "未設定" }}
+              selected={caFilter}
+              onChange={(next) => { setCaFilter(next); setCurrentPage(1); }}
+              width="w-44"
+              allSelectedLabel="担当あり（全員）"
+              moreUnit="名"
+            />
           </FilterGroup>
 
           {/* 期間 */}
@@ -621,9 +703,9 @@ export default function CandidateListClient({
                 className={`w-56 ${FILTER_INPUT_CLS}`}
               />
             </FilterField>
-            {(caFilter !== "ALL" || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
+            {(caFilter.length > 0 || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
               <FilterClearButton onClick={() => {
-                setCaFilter("ALL");
+                setCaFilter([]);
                 setDateFrom("");
                 setDateTo("");
                 setGenderFilter("ALL");
@@ -697,6 +779,11 @@ export default function CandidateListClient({
               </FilterField>
             )}
           </FilterGroup>
+
+          {/* T-181: 絞り込み後の該当件数（数える作業をなくすのが目的。タブのバッジ件数は従来どおり） */}
+          <span className="ml-auto self-end inline-flex items-center rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-[12px] text-[#374151]">
+            <span className="font-medium">該当 <span className="text-[#2563EB]">{filtered.length.toLocaleString()}</span> 件</span>
+          </span>
         </FilterTopRow>
       </FilterShell>
 
@@ -763,20 +850,25 @@ export default function CandidateListClient({
       <div className="mt-4 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         <div className="p-4">
           <TableWrap>
-            <Table className="table-fixed w-full">
+            <Table className="table-fixed w-full min-w-[1686px]">
               <colgroup>
-                <col style={{ width: "3%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "4%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "11%" }} />
+                <col style={{ width: 44 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 56 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 100 }} />
+                {/* T-170 */}
+                <col style={{ width: 190 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 120 }} />
+                <col style={{ width: 120 }} />
               </colgroup>
               <thead>
                 <tr>
@@ -797,6 +889,31 @@ export default function CandidateListClient({
                   <Th>応募日 / 配信日</Th>
                   <Th>経路</Th>
                   <Th>担当RC</Th>
+                  {/* T-170追補: 上段=希望職種 / 下段=希望エリア。見出しの「職種」「エリア」で個別に並び替え */}
+                  <Th>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleDesiredSort("job")}
+                        title="希望職種で並び替え（昇順→降順→解除）"
+                        className={`cursor-pointer hover:underline ${desiredSort?.key === "job" ? "text-[#2563EB]" : ""}`}
+                      >
+                        職種{desiredSortMark("job")}
+                      </button>
+                      <span className="text-[#374151]/40">/</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleDesiredSort("area")}
+                        title="希望エリアで並び替え（昇順→降順→解除）"
+                        className={`cursor-pointer hover:underline ${desiredSort?.key === "area" ? "text-[#2563EB]" : ""}`}
+                      >
+                        エリア{desiredSortMark("area")}
+                      </button>
+                    </div>
+                  </Th>
+                  <Th className="text-right">求人紹介数</Th>
+                  <Th className="text-right">エントリー数</Th>
+                  <Th className="text-right">放置日数</Th>
                   <Th>登録日時</Th>
                   <Th>支援状況</Th>
                   <Th>ステータス</Th>
@@ -864,6 +981,41 @@ export default function CandidateListClient({
                         );
                       })()}
                     </Td>
+                    {/* T-170: 希望職種(上段) / 希望エリア(下段) / 求人紹介数 / エントリー数 / 放置日数 */}
+                    <Td className="overflow-hidden">
+                      {!cand.desiredJobType && !cand.desiredArea ? (
+                        <div className="text-[13px]">-</div>
+                      ) : (
+                        <>
+                          <div
+                            className="truncate whitespace-nowrap text-[13px]"
+                            title={cand.desiredJobTypeFull || ""}
+                          >
+                            {cand.desiredJobType || "-"}
+                          </div>
+                          <div
+                            className="truncate whitespace-nowrap text-[11px] text-gray-500"
+                            title={cand.desiredAreaFull || ""}
+                          >
+                            {cand.desiredArea || "-"}
+                          </div>
+                        </>
+                      )}
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span className="text-[13px]">{cand.referralCount ?? 0}</span>
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span className="text-[13px]">{cand.entryCount ?? 0}</span>
+                    </Td>
+                    <Td className="text-right tabular-nums whitespace-nowrap">
+                      <span
+                        className="text-[13px]"
+                        style={cand.idleLevel ? { color: IDLE_LEVEL_COLOR[cand.idleLevel] } : undefined}
+                      >
+                        {cand.idleDays == null ? "-" : `${cand.idleDays}日`}
+                      </span>
+                    </Td>
                     <Td className="overflow-hidden">
                       <div className="truncate font-mono text-[12px] text-[#374151]/70">
                         {formatDate(cand.createdAt)}
@@ -907,7 +1059,7 @@ export default function CandidateListClient({
                 {pageData.length === 0 && (
                   <tr>
                     <td
-                      colSpan={12}
+                      colSpan={16}
                       className="py-8 text-center text-[14px] text-[#374151]/60"
                     >
                       {debouncedSearch.trim()

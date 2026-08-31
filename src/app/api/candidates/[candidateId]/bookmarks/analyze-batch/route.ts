@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { getCandidateContext } from "@/lib/advisor-context";
+import { getCandidateContext, RATINGS_SECTION_MARKER } from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
+import { CA_MARK_CLASS, matchCaItemLine } from "@/lib/ca-analysis-format";
 import { extractCompanyNameCandidates } from "@/lib/normalize-filename";
 
 export const maxDuration = 300; // 5 minutes
+
+// T-180: 選考分析（CA向け）の項目見出し行「【固定残業】▲」を、求人セクション見出し
+// 「【会社名】求人タイトル」と区別するための否定先読み。
+// 【…】の直後が「判定記号1文字だけで行末」なら項目行なのでセクション区切りとして扱わない。
+const NOT_CA_ITEM = `(?!\\s*${CA_MARK_CLASS}\\s*(?:\\n|$))`;
 
 function hasValidThreeAxisMarkers(comment: string | null | undefined): boolean {
   if (!comment) return false;
@@ -29,6 +35,8 @@ function compressBatchResultForSummary(content: string): string {
     const t = rawLine.trim();
     if (t === "") continue;
     const noBold = t.replace(/\*\*/g, "");
+    // T-180: 選考分析の項目見出し（【固定残業】▲）は会社名見出しではないので落とす。
+    if (matchCaItemLine(noBold)) continue;
     // 会社名見出し（## 【…】 / **【…】** / 裸【…】 / 求人N:）
     if (/^(?:#{1,3}\s*)?【[^】]+】/.test(noBold) || /^(?:#{1,3}\s*)?求人\d+[：:]/.test(noBold)) {
       kept.push(t);
@@ -152,10 +160,15 @@ function extractRatingsAndComments(
 
       // セクション終端: 次の会社セクション（## 【】 / **【】 / 空行後の裸【】）・総合まとめ・旧求人N:
       // ※ \n--- は求人内部の区切りにも使われるため終端に含めない（推薦本文まで取り込む）
+      // ※ T-180: 選考分析（CA向け）の項目見出し「【固定残業】▲」も空行後の裸【】に見えるため、
+      //   NOT_CA_ITEM（記号1文字で行末＝項目行 を否定先読みで除外）を付けないと、
+      //   1件目の項目行で求人セクションが打ち切られ選考分析が丸ごと欠落する。
       const afterStart = analysisText.substring(startIndex);
       const nextSection = afterStart
         .slice(1)
-        .match(/\n##\s+【[^】]+】|\n\*\*\s*【[^】]+】|\n\n【[^】]+】|\n(?:###?\s*)?求人\d+[：:]|\n━━━/);
+        .match(new RegExp(
+          `\\n##\\s+【[^】]+】${NOT_CA_ITEM}|\\n\\*\\*\\s*【[^】]+】|\\n\\n【[^】]+】${NOT_CA_ITEM}|\\n(?:###?\\s*)?求人\\d+[：:]|\\n━━━`
+        ));
       const endIndex = nextSection
         ? startIndex + 1 + (nextSection.index || afterStart.length)
         : startIndex + Math.min(afterStart.length, 3000);
@@ -263,9 +276,28 @@ function extractSearchNames(fileName: string): string[] {
   return expanded;
 }
 
-/** Replace full-width spaces with half-width (length-preserving) for matching */
+/**
+ * 照合用アポストロフィの畳み込み（1文字→1文字・長さ保存）。
+ *
+ * AI は入力の `’`(U+2019) を `'`(U+0027) に正規化して見出しを書くことがあり、
+ * ファイル名側（DB実値）が U+2019 のままだと `【[^】]*会社名[^】]*】` の照合が
+ * 必ず MISS して評価の保存ごとスキップされる（本番で 6件・求職者6名が該当）。
+ *   例) DB: 求人票_株式会社ＣＯＭ’Ｓ.pdf  ／ AI出力: 【株式会社ＣＯＭ'Ｓ】
+ *
+ * ★対象は U+2019 / U+FF07 / U+2018 / U+02BC の4種のみ★
+ * `` ` ``(U+0060) と `´`(U+00B4) は会社名の区切りとして使われうるため畳まない。
+ */
+const APOSTROPHE_VARIANTS = /[’＇‘ʼ]/g;
+
+/**
+ * Replace full-width spaces with half-width, and unify apostrophe variants,
+ * for matching. ★必ず長さ保存（1文字→1文字）であること★
+ * normalizedText のインデックスは analysisText にそのまま対応する前提で
+ * 本文を substring 切り出ししているため（Phase 2 冒頭のコメント参照）、
+ * ここに長さの変わる置換を足すと切り出しが破損する。
+ */
 function normalizeSpaces(str: string): string {
-  return str.replace(/　/g, " ");
+  return str.replace(/　/g, " ").replace(APOSTROPHE_VARIANTS, "'");
 }
 
 function normalizeCompanyName(name: string): string {
@@ -273,6 +305,7 @@ function normalizeCompanyName(name: string): string {
     .replace(/株式会社|有限会社|合同会社|一般財団法人|公益財団法人|一般社団法人|合資会社/g, "")
     .replace(/[Ａ-Ｚａ-ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(APOSTROPHE_VARIANTS, "'")
     .replace(/[・]/g, "")
     .replace(/[\s　]/g, "")
     .trim()
@@ -280,7 +313,6 @@ function normalizeCompanyName(name: string): string {
 }
 
 const API_TIMEOUT_MS = 300000;
-const MAX_PAST_MESSAGES = 30;
 const MAX_CONTEXT_CHARS = 20000;
 const MAX_CHAT_MESSAGE_CHARS = 4000;
 
@@ -307,6 +339,53 @@ function setCachedRunContext(sessionId: string, context: string): void {
   runContextCache.set(sessionId, { context, ts: now });
 }
 
+// T-163: 中間バッチの圧縮結果を run 内で保持するプロセス内キャッシュ。
+// 従来は中間バッチの結果をチャット（advisor_chat_messages）へ書き込み、最終バッチが
+// チャット履歴経由で読み戻して総合まとめを作っていた。チャット書き込みを廃止したため、
+// 同じ内容（compressBatchResultForSummary 済みテキスト）をここに積んで最終バッチへ渡す。
+// Railway は単一プロセス常駐のため run 内の全バッチをカバーできる（runContextCache と同方式）。
+const runBatchResultsCache = new Map<string, { results: string[]; ts: number }>();
+
+function appendRunBatchResult(sessionId: string, compressed: string): void {
+  const now = Date.now();
+  for (const [k, v] of runBatchResultsCache) {
+    if (now - v.ts >= RUN_CONTEXT_TTL_MS) runBatchResultsCache.delete(k);
+  }
+  const entry = runBatchResultsCache.get(sessionId);
+  if (entry && now - entry.ts < RUN_CONTEXT_TTL_MS) {
+    entry.results.push(compressed);
+    entry.ts = now;
+  } else {
+    runBatchResultsCache.set(sessionId, { results: [compressed], ts: now });
+  }
+}
+
+function takeRunBatchResults(sessionId: string): string[] {
+  const entry = runBatchResultsCache.get(sessionId);
+  if (!entry || Date.now() - entry.ts >= RUN_CONTEXT_TTL_MS) return [];
+  return entry.results;
+}
+
+function clearRunBatchResults(sessionId: string): void {
+  runBatchResultsCache.delete(sessionId);
+}
+
+// T-163: 完了カード用に、最終バッチ出力から総合まとめセクションだけを取り出す。
+// 見つからなければ空文字を返す（呼び出し側は件数のみのカードにする。AIは再度呼ばない）。
+function extractOverallSummary(analysisText: string): string {
+  const idx = analysisText.indexOf("【総合優先順位");
+  if (idx === -1) return "";
+  let from = analysisText.lastIndexOf("\n", Math.max(0, idx - 1));
+  from = from === -1 ? 0 : from + 1; // 見出し行の行頭
+  // 直前行が罫線（━…）ならそこから含める（見た目を揃える）
+  if (from >= 2) {
+    const prevStart = analysisText.lastIndexOf("\n", from - 2) + 1;
+    const prevLine = analysisText.slice(prevStart, from - 1).trim();
+    if (/^━+$/.test(prevLine)) from = prevStart;
+  }
+  return analysisText.slice(from).trim();
+}
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ candidateId: string }> }
@@ -318,13 +397,16 @@ export async function POST(
   const { searchParams } = new URL(req.url);
   const mode = searchParams.get("mode");
   const body = await req.json();
-  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate } = body as {
+  const { sessionId, batchIndex, batchSize, totalFiles, isLastBatch, sinceDate, dryRun } = body as {
     sessionId: string;
     batchIndex: number;
     batchSize: number;
     totalFiles: number;
     isLastBatch: boolean;
     sinceDate?: string;
+    // T-182: 判定基準の精度検証用。true なら AI 評価だけ行い DB へ一切書き戻さない
+    //（CandidateFile の評価上書き・完了カードのチャット書き込みを両方スキップ）。既定 false。
+    dryRun?: boolean;
   };
 
   if (!sessionId || batchIndex == null || !batchSize || !totalFiles) {
@@ -385,10 +467,16 @@ export async function POST(
   if (!candidateContext) {
     try {
       candidateContext = await getCandidateContext(candidateId);
-      // Strip bookmark section (we send job postings separately)
+      // Strip bookmark sections (we send job postings separately)
+      // T-163: 評価一覧（RATINGS_SECTION_MARKER）はチャット用のため、評価する側の
+      // analyze-batch には見せない（自分の過去評価による判定の自己調整を防ぐ）。
+      // 評価一覧 → 求人票テキストの順で並ぶため、早い方の位置から除去する
+      // ＝analyze-batch の入力は T-163 以前と byte 同一に保たれる。
+      const ratingsIdx = candidateContext.indexOf(RATINGS_SECTION_MARKER);
       const bookmarkIdx = candidateContext.indexOf("## ブックマーク求人票");
-      if (bookmarkIdx !== -1) {
-        candidateContext = candidateContext.substring(0, bookmarkIdx).trim();
+      const cutIdx = [ratingsIdx, bookmarkIdx].filter((i) => i !== -1).sort((a, b) => a - b)[0];
+      if (cutIdx !== undefined) {
+        candidateContext = candidateContext.substring(0, cutIdx).trim();
       }
     } catch (e) {
       console.error("[AnalyzeBatch] Context error:", e);
@@ -433,10 +521,34 @@ export async function POST(
 
 **最初に必ず確認：** 必須要件（学歴・資格・経験年数）の充足チェック。未充足ならD判定（推薦状でカバー可能な場合のみC検討）。スキル定義の Phase 5 軸2 を参照。
 
-- A: 必須要件を全て満たした上で+過去の通過実績あり+企業の採用温度感が高い
-- B: 必須要件をクリア+一部不確定要素あり
-- C: 必須要件は満たすが通過率に不安要素あり、または必須要件未充足だが推薦状でカバー可能性あり
-- D: 必須要件の充足が不十分
+**判定手順（2026年8月改訂・必ずこの順で）:**
+
+1. 必須要件（学歴・資格・経験年数）の充足を確認する。未充足なら D で確定（推薦状でカバー可能な場合のみ C）
+2. 必須要件を満たす場合、選考分析の各項目（年齢レンジ・経験年数・経験の質・転職回数・年収レンジ・勤務条件・歓迎要件など）に 〇/▲/× を付ける
+3. **（選考観点の）▲と×の個数でランクを機械的に決める**。「迷ったらB」は禁止。懸念を数えて必ず A/B/C のどれかに振り分ける
+
+| ランク | 判定条件 |
+|---|---|
+| A | 必須要件を全て満たし、選考観点の▲・×が0個。年齢・経験年数・転職回数が求人の想定レンジ内 |
+| B | 必須要件を満たすが、選考観点の▲が1〜2個ある。×は0個 |
+| C | 必須要件は満たすが、選考観点の▲が3個以上、または(必須要件以外に)×が1個以上ある。または必須要件未充足だが推薦状でカバー可能性あり |
+| D | 必須要件の充足が不十分（学歴・資格・経験年数のいずれかが未充足） |
+
+**歓迎要件の扱い:** 求人票に歓迎要件の記載があり、本人がそのいずれにも該当しない場合は、選考観点の▲1個として数える(選考分析に【歓迎要件】▲ の項目を立てる)。一部でも該当していれば〇。求人票に歓迎要件の記載がない場合は項目を立てず、数えない。
+（閾値の根拠: 実績200件の検証 2026-08-28 T-182 step3 — 選考観点▲0個57.9%/1個61.2%/2個54.2%に対し▲3個以上27.8%・×1個以上36.5%。段差は▲2↔3の間と×の有無にのみある）
+
+**A判定の条件について:** 過去の通過実績・企業の採用温度感は、判定時に分かっている場合のみ「B→A」「A→B」の補正に使う。Aの必須条件ではない。
+この補正が使えるのは **A と B の間だけ** である。▲が3個以上ある／×がある求人（＝C）を「経験の親和性が高い」「致命的ではない」等の理由でBへ引き上げてはならない。個数ルールが常に優先する。
+
+
+**数える対象（重要）:** 通過率に数えるのは「**企業が選考で落とす理由になる** ▲・×」だけである。
+- **数える（選考観点）**: 必須要件充足 / 経験・スキル / 経験の質 / 経験年数 / 年齢レンジ / 転職回数 / 求人の想定年収レンジからの逸脱 / 歓迎要件 / 選考難易度
+- **数えない（本人希望観点）**: 固定残業が希望より長い / 年間休日が希望より少ない / 通勤距離・勤務地が希望と違う / 職種の好みに合わない / 希望年収に届かない
+
+本人希望観点の懸念は「① 本人希望」で既に評価しているため、通過率に二重計上してはならない（2軸が同じものを測ってしまい、通過率の予測力が失われる）。ただし勤務地・勤務条件でも「物理的に通勤不可能」「シフトが本人の制約と両立不可」など**選考自体が成立しない**水準であれば選考観点として数える。
+**判定の甘さの目安:** ランク付き求人のうち通過率Bが5割を超えている状態は、懸念を数えずにBへ逃げている可能性が高い。
+
+**【出力順に関する必須手順】** 「■ 通過率」行は出力上は「◆ 選考分析（CA向け）」より前に来るが、**判定の順序は逆である**。1件の求人を書き始める前に、必ず先に「◆ 選考分析（CA向け）」の全項目と各項目の 〇/▲/× を確定させ、そのうち**選考観点の** ▲ と × の個数を数えてから通過率ランクを決め、「■ 通過率」行を書くこと。ランクを先に決めてから選考分析の記号を後付けで合わせてはならない。出力し終えた時点で、選考分析に実際に付いた選考観点の ▲・× の個数と上表の条件が必ず一致していること（不一致は誤りであり、その場合は選考分析の記号側を正として通過率ランクを直す）。
 
 補足:
 - 業務委託・BPO・派遣での経験は、自社運営の経験より書類評価が低くなる傾向
@@ -529,7 +641,50 @@ export async function POST(
 キャリアアドバイザーが選考を進める上で把握すべき現実的な評価を、事実ベースで簡潔に記載。
 この内容はマイページには表示されず、CAのみが閲覧する。
 
-【CA向けに含める内容】
+■ 出力形式（必須・T-180）
+このセクションは必ず「項目ごとの判定」形式で書くこと。1項目 = 見出し行1行 + コメント行。
+項目と項目の間には空行を1行入れる。
+
+書式:
+
+【項目名】記号
+（その項目のコメント。1〜3文で簡潔に）
+
+（空行）
+
+【項目名】記号
+（コメント）
+
+判定記号は次の3種のみを使う。他の記号（◎ △ ー 等）や記号なしは不可:
+- 〇 … 問題なし・要件を満たす・希望と合致
+- ▲ … 懸念あり・要確認・条件が一部合わない
+- × … 不適合・選考上の大きな障害
+
+書式の絶対ルール:
+- 見出し行は「【項目名】記号」だけで完結させ、記号の後ろに文章・句読点・補足を書かない（コメントは必ず次の行）
+- 記号は必ず 〇 / ▲ / × のいずれか1文字
+- コメントは見出し行の次の行から書く。見出し行と同じ行に続けない
+- 項目名は【】で囲む。項目名の中に【】を入れない
+- 「- 」等の箇条書き記号でこの見出し行を始めない
+- 全体で4〜7項目程度に収める
+- **このセクションの ▲・× の個数が「■ 通過率」ランクの根拠である**（評価ルール② の判定手順を参照）。記号は実態に忠実に付け、通過率ランクと整合させること。ただし数えるのは**選考観点の ▲・×**（必須要件・経験・スキル・年齢・転職回数・想定年収レンジ逸脱・歓迎要件・選考難易度）だけで、本人希望観点の ▲・×（固定残業・年間休日・通勤距離・職種の好み・希望年収との差）は通過率には数えない
+- **選考分析に「【項目名】記号」以外の【】見出しを作らない**。「【通過率判定根拠】」のような判定理由の独立ブロックを追加してはならない（記号のない【】見出しは求人の区切りとして誤認され、コメントが途中で切れる）。補足したい場合は該当項目のコメント行に書く
+
+項目名は求人ごとに適切なものをAIが立ててよい（固定リストではない）。
+典型例: 必須要件充足 / 経験・スキル / 年収 / 固定残業 / 勤務地 / 選考難易度 / 推薦時の注意点 / 志望動機の作り込み
+
+出力例:
+
+【必須要件充足】〇
+4大卒〇、ライター職への志望度〇。選考ではライターへの志望度・意欲がメインの確認事項であり、経験・志向と合致。
+
+【年収】〇
+300万〜400万円。現年収約300万円からの微増〜上昇が見込める。
+
+【固定残業】▲
+45時間が最大の懸念。希望は月11〜15時間。安定志向の求職者にはD評価相当。
+
+【CA向けに含める内容】（上記の項目として立てる）
 - 必須要件の充足状況（大卒要件、経験年数、資格等）。未達項目があれば明示
 - 経験・スキルの強みと不足を率直に記載
 - 書類選考・面接で想定される懸念点
@@ -540,7 +695,6 @@ export async function POST(
 【CA向けの文体ルール】
 - 事実ベースで簡潔に
 - 「〜が懸念点です」「〜の確認が必要です」「〜でカバーが必要」等、率直な表現で構わない
-- 箇条書き可
 
 ---
 
@@ -624,32 +778,45 @@ ${skillContent}
 - 「---」の区切り線で各求人を明確に分離すること`;
   }
 
-  // 6. Fetch chat history — 最終バッチ（総合まとめ生成）のみ過去バッチ結果を同梱する。
+  // 6. 過去バッチ結果 — 最終バッチ（総合まとめ生成）のみ同梱する。
   //    中間バッチは各求人単体分析に履歴不要のため非同梱（input 削減・質不変）。
-  //    T-126 Phase2: 最終バッチの履歴は compressBatchResultForSummary で会社名+3軸だけに圧縮し、
+  //    T-126 Phase2: 過去バッチ結果は compressBatchResultForSummary で会社名+3軸だけに圧縮し、
   //    uncached input を削減する（最終バッチの入力膨張=最高額コールの主因）。
-  const pastMessages = isLastBatch
-    ? (
-        await prisma.advisorChatMessage.findMany({
-          where: { sessionId },
-          orderBy: { createdAt: "asc" },
-        })
-      ).slice(-MAX_PAST_MESSAGES)
-    : [];
+  //    T-163: 供給元をチャット履歴（advisor_chat_messages）から run 内のプロセス内キャッシュへ変更。
+  //    中間バッチのチャット書き込みを廃止したため（step 8 参照）。内容は従来と同じ圧縮形式。
+  //    プロセス再起動等でキャッシュが空の場合は、各バッチが candidate_files に保存済みの
+  //    aiAnalysisComment（会社名見出し+3軸+本文を含む）から同じ圧縮で再構成するフォールバック。
+  let priorBatchResults: string[] = [];
+  if (isLastBatch) {
+    priorBatchResults = takeRunBatchResults(sessionId);
+    if (priorBatchResults.length === 0 && start > 0) {
+      priorBatchResults = allBookmarks
+        .slice(0, start)
+        .map((f) => (f.aiAnalysisComment ? compressBatchResultForSummary(f.aiAnalysisComment) : ""))
+        .filter((t) => t.trim() !== "");
+    }
+  }
+
+  const priorResultsText = priorBatchResults
+    .map((t) =>
+      t.length > MAX_CHAT_MESSAGE_CHARS
+        ? t.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
+        : t
+    )
+    .join("\n\n---\n\n");
 
   const messagesArray = [
-    ...pastMessages.map((m) => {
-      // assistant（過去バッチ結果）は総合まとめに必要な要点だけへ圧縮。
-      const compressed =
-        m.role === "assistant" ? compressBatchResultForSummary(m.content) : m.content;
-      return {
-        role: m.role as "user" | "assistant",
-        content:
-          compressed.length > MAX_CHAT_MESSAGE_CHARS
-            ? compressed.substring(0, MAX_CHAT_MESSAGE_CHARS) + "\n...（省略）"
-            : compressed,
-      };
-    }),
+    // 過去バッチ結果を従来のチャット履歴と同じ位置（最終 user ターンの前）に assistant 発話として置く。
+    // systemPrompt の「これまでのバッチの結果はチャット履歴に含まれています」の参照先はこのターン。
+    ...(priorResultsText
+      ? [
+          {
+            role: "user" as const,
+            content: `これまでのバッチ（1〜${start}件目）の分析結果を出力してください。`,
+          },
+          { role: "assistant" as const, content: priorResultsText },
+        ]
+      : []),
     {
       // T-126 Phase2: 候補者情報は system の第2キャッシュブロックへ移動（run内不変=バッチ間で cache read 化）。
       // user ターンには可変部（このバッチの求人票）だけを置く。
@@ -755,26 +922,20 @@ ${skillContent}
     });
     const analysisText = data.content?.[0]?.text || "";
 
-    // 8. Save to chat
+    // 8. T-163: 中間バッチはチャットへ書き込まない。
+    //    従来はバッチごとに user/assistant 1組を advisor_chat_messages へ書き込んでいたが、
+    //    分析長文がチャットの送信窓（直近20件）を占拠し input 肥大と few-shot 汚染を
+    //    起こしていた（実測: 窓の84.7%が分析産物）。個別の評価は step 9 で
+    //    CandidateFile.aiMatchRating / aiAnalysisComment に保存され一覧バッジから閲覧できる。
+    //    中間バッチの結果は総合まとめ生成用にプロセス内キャッシュへ圧縮して積み、
+    //    最終バッチ完了後に「完了カード」1組だけを書き込む（step 9 の後）。
     const label = isLastBatch
       ? `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）+ 総合まとめ】`
       : `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）】`;
 
-    await prisma.advisorChatMessage.create({
-      data: {
-        sessionId,
-        role: "user",
-        content: `ブックマーク求人分析（${start + 1}〜${end}件目 / 全${totalFiles}件）を実行`,
-      },
-    });
-
-    await prisma.advisorChatMessage.create({
-      data: {
-        sessionId,
-        role: "assistant",
-        content: `${label}\n\n${analysisText}`,
-      },
-    });
+    if (!isLastBatch) {
+      appendRunBatchResult(sessionId, compressBatchResultForSummary(analysisText));
+    }
 
     // 9. Extract ratings + comments and save to CandidateFile
     //    「rating + comment + 3軸マーカー」の3点が揃って初めて DB 反映する。
@@ -803,14 +964,18 @@ ${skillContent}
           );
           continue;
         }
-        await prisma.candidateFile.update({
-          where: { id: fileId },
-          data: {
-            aiAnalyzedAt: new Date(),
-            aiMatchRating: rating,
-            aiAnalysisComment: comment,
-          },
-        });
+        // T-182 dryRun: 精度検証時は評価を DB へ書き戻さない
+        //（レスポンスの analysisText だけ返し、既存の評価値は温存する）。
+        if (!dryRun) {
+          await prisma.candidateFile.update({
+            where: { id: fileId },
+            data: {
+              aiAnalyzedAt: new Date(),
+              aiMatchRating: rating,
+              aiAnalysisComment: comment,
+            },
+          });
+        }
       } catch (updateErr) {
         skippedFileIds.push(fileId);
         console.error(`[AnalyzeBatch] Update failed for fileId=${fileId}:`, updateErr);
@@ -823,6 +988,66 @@ ${skillContent}
       skippedCount: skippedFileIds.length,
       ratings: Object.fromEntries([...ratingsAndComments].map(([id, { rating }]) => [id, rating])),
     });
+
+    // T-163: 最終バッチ完了後、チャットへは「完了カード」1組のみを書き込む。
+    //   - 件数はAIに数えさせず、DB保存済みの aiMatchRating をプログラムで集計する
+    //     （このバッチの保存が終わった step 9 の後に再取得するため、run 全体の最新値になる）。
+    //   - 総合まとめ本文は最終バッチのAI出力から抽出。失敗時は件数のみのカード（AIは再度呼ばない）。
+    //   - カード作成の失敗で分析本体（評価保存・レスポンス）を落とさない。
+    if (isLastBatch && !dryRun) {
+      try {
+        // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
+        // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
+        // （= 実行対象は allBookmarks.slice(0, end)）。allBookmarks 全体を数えると、
+        // 絞り込み（追加のみ / 未評価・破損のみ）で対象外だった過去評価分まで混入し、
+        // 見出しの件数がまとめ本文の「全N件」と矛盾する。
+        const runTargetFiles = allBookmarks.slice(0, end);
+        const runFiles = await prisma.candidateFile.findMany({
+          where: { id: { in: runTargetFiles.map((f) => f.id) } },
+          select: { aiMatchRating: true },
+        });
+        // 幅表記（"A〜B"等）は先頭の評価値で読む。B+ を B と誤読しないよう RATING_VALUE（B\+ 先行の交替）を使う。
+        const headRatingRe = new RegExp(`^(${RATING_VALUE})`);
+        const counts: Record<string, number> = { A: 0, "B+": 0, B: 0, C: 0, D: 0 };
+        let unrated = 0;
+        for (const f of runFiles) {
+          const m = (f.aiMatchRating ?? "").match(headRatingRe);
+          if (m && m[1] in counts) counts[m[1]]++;
+          else unrated++;
+        }
+        const header =
+          `【求人分析 完了】${runFiles.length}件を評価しました\n` +
+          `総合 A:${counts["A"]}件 / B+:${counts["B+"]}件 / B:${counts["B"]}件 / C:${counts["C"]}件 / D:${counts["D"]}件 / 未評価:${unrated}件`;
+        const footer = `※ 各求人の評価コメントは、求人一覧の評価バッジをクリックすると開きます。`;
+        // 本文全体を 2,000 字以内に収める（超過分は総合まとめ側を削り、件数と案内文は必ず残す）。
+        const MAX_CARD_CHARS = 2000;
+        let summary = extractOverallSummary(analysisText);
+        const fixedLen = header.length + footer.length + 4; // 区切りの空行ぶん
+        const OMIT_SUFFIX = "\n…（省略）";
+        if (summary && fixedLen + summary.length > MAX_CARD_CHARS) {
+          summary =
+            summary.substring(0, Math.max(0, MAX_CARD_CHARS - fixedLen - OMIT_SUFFIX.length)) +
+            OMIT_SUFFIX;
+        }
+        const cardContent = summary ? `${header}\n\n${summary}\n\n${footer}` : `${header}\n\n${footer}`;
+
+        await prisma.advisorChatMessage.create({
+          data: {
+            sessionId,
+            role: "user",
+            content: `ブックマーク求人分析（全${totalFiles}件）を実行`,
+            kind: "ANALYSIS",
+          },
+        });
+        await prisma.advisorChatMessage.create({
+          data: { sessionId, role: "assistant", content: cardContent, kind: "ANALYSIS" },
+        });
+      } catch (cardErr) {
+        console.error("[AnalyzeBatch] completion card create failed (non-fatal):", cardErr);
+      } finally {
+        clearRunBatchResults(sessionId);
+      }
+    }
 
     return NextResponse.json({
       batchIndex,

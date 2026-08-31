@@ -1,58 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { uploadFileToDrive, getOrCreateFolder } from "@/lib/google-drive";
-
-// D-3: 求人検索由来PDFの生成元（Railway pdf-service）。本番は環境変数で上書き可。
-const PDF_SERVICE_URL = process.env.PDF_SERVICE_URL || "https://bizstudio-job-platform-production.up.railway.app";
-const PDF_GEN_TIMEOUT_MS = 30000;
-
-/**
- * D-3: pdf-service でPDFを生成 → 既存のGoogle Drive保管プラミングで求職者フォルダへ保管
- *      → CandidateFile の driveFileId/driveViewUrl/driveFolderId/mimeType/fileSize を更新。
- * 失敗時は throw（呼び出し側で try/catch 隔離＝保存自体は巻き込まない）。extractedText は触らない。
- */
-async function generateAndStorePdf(params: {
-  fileId: string;
-  candidateId: string;
-  sid: string;
-  fileName: string;
-}): Promise<void> {
-  const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
-  if (!parentFolderId) throw new Error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID 未設定");
-
-  // 1) pdf-service からPDFバイナリ取得（タイムアウト付き）
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PDF_GEN_TIMEOUT_MS);
-  let pdfBuffer: Buffer;
-  try {
-    const token = process.env.PDF_SERVICE_TOKEN; // 将来用・設定時のみ送信（現状 /generate は未要求）
-    const res = await fetch(`${PDF_SERVICE_URL}/generate?sid=${encodeURIComponent(params.sid)}`, {
-      signal: controller.signal,
-      ...(token ? { headers: { "x-api-token": token } } : {}),
-    });
-    if (!res.ok) throw new Error(`pdf-service responded ${res.status}`);
-    pdfBuffer = Buffer.from(await res.arrayBuffer());
-    if (pdfBuffer.length === 0) throw new Error("pdf-service returned empty body");
-  } finally {
-    clearTimeout(timer);
-  }
-
-  // 2) 既存の保管プラミングで求職者フォルダ（candidateId 名）へアップロード（既存ブックマークと同一場所）
-  const folderId = await getOrCreateFolder(params.candidateId, parentFolderId);
-  const { fileId: driveFileId, webViewLink } = await uploadFileToDrive(params.fileName, pdfBuffer, folderId, "application/pdf");
-
-  // 3) CandidateFile を更新（fileName/extractedText/sourceType 等は維持・PDF実体情報のみ追加）
-  await prisma.candidateFile.update({
-    where: { id: params.fileId },
-    data: {
-      driveFileId,
-      driveViewUrl: webViewLink,
-      driveFolderId: folderId,
-      mimeType: "application/pdf",
-      fileSize: pdfBuffer.length,
-    },
-  });
-}
+import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
+// T-181: generateAndStorePdf は本routeのローカル関数だったものを @/lib/job-platform-pdf へ
+// 切り出した（サイト経由お気に入り・バックフィルと共有）。挙動は切り出し前と同一。
+import { generateAndStorePdf } from "@/lib/job-platform-pdf";
+// T-185: 求人名・職種の保存。payload の jobTitle/jobCategory を優先し、無ければ求人本文から抽出する。
+import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
 
 /**
  * POST /api/external/bookmarks/from-job-platform
@@ -77,6 +30,9 @@ type JobInput = {
   externalJobRef?: unknown;
   companyName?: unknown;
   jobTitle?: unknown;
+  // T-185: 職種。jobCategory / jobType のどちらの名前でも受け付ける（送られてこなければ本文から抽出）。
+  jobCategory?: unknown;
+  jobType?: unknown;
   extractedText?: unknown;
   jobUrl?: unknown;
   fileNumericId?: unknown; // ファイル名用の数値ID（10桁以上推奨）。無ければ会社名のみ。
@@ -192,6 +148,13 @@ export async function POST(request: Request) {
     const fileSize = Buffer.byteLength(extractedText, "utf8");
     // T-128 Phase2-1: 元媒体（例: "hito_link"）。未送信は null（既存動作）。
     const sourceMedia = str(j.sourceMedia);
+    // T-185: 求人名・職種を CandidateFile に保存する。
+    //   旧実装は payload の jobTitle を型宣言だけして一度も書いていなかったため、CA がブックマークした
+    //   行（本番 7,851 行）の job_title が全件 NULL になり、to-entry で作るエントリーの求人名が空だった。
+    //   payload に無い場合は求人本文（extractedText）から抽出する（job-platform の構造化テキスト
+    //   「【求人タイトル】」/ HITO-Link 求人票PDFの「求人名」行）。どちらでも取れなければ null のまま。
+    const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
+    const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
 
     try {
       // 冪等: 同一求職者×同一求人（job-platform）の既存BOOKMARK行を探す。
@@ -215,6 +178,9 @@ export async function POST(request: Request) {
           where: { id: existing.id },
           data: {
             fileName, fileSize, extractedText, memo,
+            // T-185: 求人名・職種は取れたときだけ上書き（取れないときに既存値を消さない）。
+            ...(jobTitle ? { jobTitle } : {}),
+            ...(jobCategory ? { jobCategory } : {}),
             ...(existing.extractedAt ? {} : { extractedAt: new Date() }),
             ...(savedBy ? { uploadedByUserId: savedBy } : {}),
             // T-128 Phase2-1: sourceMedia が来ていれば更新（未送信＝undefined は既存値維持）。
@@ -225,27 +191,38 @@ export async function POST(request: Request) {
         fileId = existing.id;
         needsPdf = !existing.driveFileId; // 既にPDF保管済みなら再生成しない
       } else {
-        const createdRow = await prisma.candidateFile.create({
-          data: {
-            candidateId: candidate.id,
-            category: "BOOKMARK",
-            fileName,
-            fileSize,
-            mimeType: "text/plain",
-            driveFileId: null,
-            driveViewUrl: null,
-            driveFolderId: null,
-            extractedText,
-            // テキスト化済みシグナル: 保存時点で求人本文を受領済み＝AI分析フィルタ(extractedAt必須)を通すため立てる。
-            extractedAt: new Date(),
-            sourceType: "job-platform",
-            externalJobRef,
-            // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
-            sourceMedia,
-            memo,
-            uploadedByUserId: uploaderUserId,
-          },
-          select: { id: true },
+        // T-159: CandidateFile の作成と OneDrive 同期の受付（PENDING 行）を同一トランザクションにする。
+        const createdRow = await prisma.$transaction(async (tx) => {
+          const row = await tx.candidateFile.create({
+            data: {
+              candidateId: candidate.id,
+              category: "BOOKMARK",
+              fileName,
+              fileSize,
+              mimeType: "text/plain",
+              driveFileId: null,
+              driveViewUrl: null,
+              driveFolderId: null,
+              extractedText,
+              // テキスト化済みシグナル: 保存時点で求人本文を受領済み＝AI分析フィルタ(extractedAt必須)を通すため立てる。
+              extractedAt: new Date(),
+              sourceType: "job-platform",
+              externalJobRef,
+              // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
+              sourceMedia,
+              memo,
+              // T-185: 求人名・職種のスナップショット（to-entry で JobEntry へ引き継ぐ）。
+              jobTitle,
+              jobCategory,
+              uploadedByUserId: uploaderUserId,
+            },
+            select: { id: true },
+          });
+          await enqueueOneDriveSync(
+            { candidateFileId: row.id, candidateId: candidate.id, category: "BOOKMARK" },
+            tx,
+          );
+          return row;
         });
         created++;
         fileId = createdRow.id;
@@ -256,8 +233,20 @@ export async function POST(request: Request) {
       // 失敗しても保存(CandidateFile作成/更新)は成功扱いのまま（PDFは後で再生成可能）＝失敗隔離。
       if (needsPdf) {
         try {
-          await generateAndStorePdf({ fileId, candidateId: candidate.id, sid: externalJobRef, fileName });
+          // T-159: 既存行に後からPDFが付く経路（サイトのお気に入り由来＝実体なしで作られた行など）を拾う。
+          //        新規作成分は上のトランザクションで受付済みなので、ここで足すのは既存行のときだけ。
+          if (existing) {
+            await enqueueOneDriveSync({
+              candidateFileId: fileId,
+              candidateId: candidate.id,
+              category: "BOOKMARK",
+            });
+          }
+          const pdfBuffer = await generateAndStorePdf({ fileId, candidateId: candidate.id, sid: externalJobRef, fileName });
           pdfStored++;
+          // T-159: PDF実体が揃ったこの時点でコピーを起動する。★await しない。
+          //        本文は手元にあるので Google Drive から取り直さない。
+          triggerOneDriveSync({ candidateFileId: fileId, content: pdfBuffer, mimeType: "application/pdf" });
         } catch (pdfErr) {
           console.error(`[external/bookmarks/from-job-platform] PDF gen/store failed (sid=${externalJobRef}):`, pdfErr instanceof Error ? pdfErr.message : String(pdfErr));
           pdfFailed++;

@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { sendBotMessage } from "@/lib/lineworks";
+import {
+  resolveAssigneeNotifyTargets,
+  logAssigneeNotifyTargets,
+  type AssigneeNotifyTarget,
+} from "@/lib/task-notification";
 import { TaskPriority } from "@prisma/client";
 
 const CATEGORY_IDS = {
@@ -20,32 +25,48 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { candidateId, assigneeId, dueDate, priority, fieldValues } = body as {
-      candidateId: string;
-      assigneeId: string;
-      dueDate?: string;
-      priority?: string;
-      fieldValues?: {
-        resume?: { fieldId: string; value: string }[];
-        career?: { fieldId: string; value: string }[];
-        recommendation?: { fieldId: string; value: string }[];
+    const { candidateId, assigneeId, assigneeIds, completionType, dueDate, priority, fieldValues } =
+      body as {
+        candidateId: string;
+        /** T-162 以前の単数フィールド。旧クライアント互換のため残す。 */
+        assigneeId?: string;
+        assigneeIds?: string[];
+        completionType?: string;
+        dueDate?: string;
+        priority?: string;
+        fieldValues?: {
+          resume?: { fieldId: string; value: string }[];
+          career?: { fieldId: string; value: string }[];
+          recommendation?: { fieldId: string; value: string }[];
+        };
       };
-    };
 
-    if (!candidateId || !assigneeId) {
+    // T-162: 複数担当者に対応。単数 assigneeId は旧クライアント互換のフォールバック。
+    const requestedAssigneeIds = Array.from(
+      new Set(
+        (Array.isArray(assigneeIds) && assigneeIds.length > 0
+          ? assigneeIds
+          : assigneeId
+            ? [assigneeId]
+            : []
+        ).filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    );
+
+    if (!candidateId || requestedAssigneeIds.length === 0) {
       return NextResponse.json(
         { error: "求職者と担当者は必須です" },
         { status: 400 }
       );
     }
 
-    const [candidate, employee] = await Promise.all([
+    const [candidate, employees] = await Promise.all([
       prisma.candidate.findUnique({
         where: { id: candidateId },
         select: { id: true, name: true, candidateNumber: true },
       }),
-      prisma.employee.findUnique({
-        where: { id: assigneeId },
+      prisma.employee.findMany({
+        where: { id: { in: requestedAssigneeIds } },
         select: { id: true, name: true },
       }),
     ]);
@@ -53,9 +74,12 @@ export async function POST(request: Request) {
     if (!candidate) {
       return NextResponse.json({ error: "求職者が見つかりません" }, { status: 404 });
     }
-    if (!employee) {
+    if (employees.length !== requestedAssigneeIds.length) {
       return NextResponse.json({ error: "担当者が見つかりません" }, { status: 404 });
     }
+
+    // 画面で選んだ順序を保つ（通知本文の担当者順を選択順に合わせる）
+    const orderedEmployeeIds = requestedAssigneeIds;
 
     const categories = await prisma.taskCategory.findMany({
       where: { id: { in: Object.values(CATEGORY_IDS) } },
@@ -68,6 +92,9 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    const resolvedCompletionType =
+      orderedEmployeeIds.length > 1 && completionType === "all" ? "all" : "any";
 
     const fvKeys = ["resume", "career", "recommendation"] as const;
     const createdTasks = await prisma.$transaction(
@@ -83,8 +110,9 @@ export async function POST(request: Request) {
             priority: (priority || "MEDIUM") as TaskPriority,
             dueDate: dueDate ? new Date(dueDate) : null,
             createdByUserId: actor.id,
+            completionType: resolvedCompletionType,
             assignees: {
-              create: [{ employeeId: assigneeId }],
+              create: orderedEmployeeIds.map((employeeId) => ({ employeeId })),
             },
             ...(fvs.length > 0 ? {
               fieldValues: {
@@ -99,10 +127,28 @@ export async function POST(request: Request) {
       })
     );
 
+    // T-162: 担当者 → User の解決は Employee.userId 経由の共通ヘルパーに統一。
+    const notifyTargets = await resolveAssigneeNotifyTargets(orderedEmployeeIds);
+
+    // completionType="all" の場合、全担当者分の TaskAssigneeStatus を生成（/api/tasks と同じ扱い）
+    if (resolvedCompletionType === "all") {
+      const userIds = Array.from(
+        new Set(notifyTargets.map((t) => t.userId).filter((id): id is string => !!id)),
+      );
+      if (userIds.length > 0) {
+        await prisma.taskAssigneeStatus.createMany({
+          data: createdTasks.flatMap((t) =>
+            userIds.map((userId) => ({ taskId: t.id, userId, isCompleted: false })),
+          ),
+          skipDuplicates: true,
+        });
+      }
+    }
+
     sendBulkNotification({
       candidateName: candidate.name,
       candidateNumber: candidate.candidateNumber,
-      assigneeName: employee.name,
+      notifyTargets,
       creatorName: actor.name,
       taskIds: createdTasks.map((t) => t.id),
       priority: priority || null,
@@ -126,7 +172,7 @@ export async function POST(request: Request) {
 async function sendBulkNotification(params: {
   candidateName: string;
   candidateNumber: string;
-  assigneeName: string;
+  notifyTargets: AssigneeNotifyTarget[];
   creatorName: string;
   taskIds: string[];
   priority: string | null;
@@ -136,7 +182,16 @@ async function sendBulkNotification(params: {
   const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
   const baseUrl = process.env.PORTAL_BASE_URL;
 
-  if (!botId || !channelId) return;
+  logAssigneeNotifyTargets(
+    "task-notify:3point",
+    params.taskIds.join("+"),
+    params.notifyTargets,
+  );
+
+  if (!botId || !channelId) {
+    console.warn("LINE WORKS タスク通知の環境変数が未設定です");
+    return;
+  }
 
   const dueDateStr = params.dueDate
     ? new Date(params.dueDate).toLocaleDateString("ja-JP", {
@@ -156,10 +211,10 @@ async function sendBulkNotification(params: {
     .map((id, i) => `  • ${CATEGORY_NAMES[i]}: ${baseUrl}/tasks/${id}`)
     .join("\n");
 
-  const assigneeUser = await prisma.user.findFirst({
-    where: { name: params.assigneeName, status: "active" },
-    select: { lineworksId: true },
-  });
+  const assigneeNames = params.notifyTargets.map((t) => t.name);
+  const mentionIds = params.notifyTargets
+    .map((t) => t.lineworksId)
+    .filter((id): id is string => !!id);
 
   const lines = [
     "📋 応募書類3点セットのタスクが作成されました",
@@ -171,7 +226,7 @@ async function sendBulkNotification(params: {
     taskLinks,
     "",
     "■ 担当者",
-    params.assigneeName,
+    assigneeNames.join("、") || "未設定",
     "",
     "■ 優先度",
     params.priority ? (PRIORITY_LABEL[params.priority] ?? params.priority) : "未設定",
@@ -185,25 +240,32 @@ async function sendBulkNotification(params: {
 
   const assignHeader = `${params.creatorName}から応募書類3点セットのタスクが割り当てられました`;
 
-  if (assigneeUser?.lineworksId) {
+  if (mentionIds.length > 0) {
     const mentionedLines = [
-      `<m userId="${assigneeUser.lineworksId}">`,
+      ...mentionIds.map((id) => `<m userId="${id}">`),
       ` ${assignHeader}`,
       "",
       ...lines.slice(2),
     ];
     try {
       await sendBotMessage(botId, channelId, mentionedLines.join("\n"));
+      console.log(
+        `[task-notify:3point] sent mentions=${mentionIds.length} tasks=${params.taskIds.length}`,
+      );
       return;
     } catch (e) {
       console.warn("メンション付き3点セット通知に失敗:", e);
     }
   }
 
+  const namePrefix = assigneeNames.map((n) => `${n}さん`).join("、");
   const fallbackLines = [
-    `${params.assigneeName}さん ${assignHeader}`,
+    `${namePrefix} ${assignHeader}`,
     "",
     ...lines.slice(2),
   ];
   await sendBotMessage(botId, channelId, fallbackLines.join("\n"));
+  console.log(
+    `[task-notify:3point] sent fallback(no-mention) recipients=${assigneeNames.length} tasks=${params.taskIds.length}`,
+  );
 }

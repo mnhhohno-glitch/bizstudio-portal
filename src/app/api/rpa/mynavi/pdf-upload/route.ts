@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { parseResumeData } from "@/lib/mynavi-rpa/parse-resume-data";
 import { parseResumeWithGemini, type GeminiResumeResult } from "@/lib/gemini-resume-parser";
+import { GeminiJsonError } from "@/lib/gemini-json-call";
 import { normalizePhoneNumber } from "@/lib/phone-normalize";
 import { checkDuplicateProcessing } from "@/lib/mynavi-rpa/duplicate-check";
 import { isAgeNg, isForeignNg, calculateAge } from "@/lib/mynavi-rpa/judgment";
@@ -60,6 +61,45 @@ async function resolveMynaviMemberNo(
     console.error("[rpa/mynavi/pdf-upload] memberNo fallback failed:", e instanceof Error ? e.message : String(e));
   }
   return null;
+}
+
+/**
+ * AI解析に失敗したPDFを Drive の「AI解析失敗」フォルダへ退避する。
+ *
+ * 失敗時は Candidate も CandidateFile も作られないため、従来は PDF がどこにも残らず
+ * 「実物が無いので再現できない」状態だった（2026-08-12 の切り分けで実際に詰まった）。
+ * 退避は best-effort で、失敗しても本処理（AI_FAILED ログ作成・通知）は止めない。
+ * 個人情報を含むため公開リンクにはしない（makePublic=false）。
+ */
+async function archiveFailedPdf(
+  pdfBuffer: Buffer,
+  batchId: string,
+): Promise<{ fileId: string | null; url: string | null; fileName: string | null }> {
+  try {
+    const parentFolderId = process.env.GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID;
+    if (!parentFolderId) throw new Error("GOOGLE_DRIVE_CANDIDATE_FILES_FOLDER_ID が未設定");
+    const folderId = await getOrCreateFolder("AI解析失敗", parentFolderId);
+    // 氏名が取れていないので、いつ・どのバッチの分かで一意にする（JST表記）
+    const stamp = new Date()
+      .toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" })
+      .replace(/[-: ]/g, "")
+      .slice(0, 14);
+    const fileName = `AI_FAILED_${stamp}_${batchId}.pdf`;
+    const uploaded = await uploadFileToDrive(
+      fileName,
+      pdfBuffer,
+      folderId,
+      "application/pdf",
+      false,
+    );
+    return { fileId: uploaded.fileId, url: uploaded.webViewLink, fileName };
+  } catch (e) {
+    console.error(
+      "[rpa/mynavi/pdf-upload] 失敗PDFの退避に失敗:",
+      e instanceof Error ? e.message : String(e),
+    );
+    return { fileId: null, url: null, fileName: null };
+  }
 }
 
 /** CandidateFile.uploadedByUserId 用のシステムユーザーを解決する */
@@ -142,11 +182,15 @@ export async function POST(req: NextRequest) {
     // ---- Gemini API で履歴書解析（求職者新規登録モーダルと同一経路）----
     let resumeData: GeminiResumeResult | null = null;
     let aiErrorDetail: string | null = null;
+    // 切り分け用の診断情報（finishReason / HTTPステータス / 試行回数）。
+    // 「AI解析失敗」だけでは原因に辿り着けなかったため通知本文にも載せる。
+    let aiDiagnostics: string | null = null;
     try {
       resumeData = await parseResumeWithGemini(pdfBuffer, { caller: "rpa-mynavi-pdf-upload" });
     } catch (e) {
       aiErrorDetail = e instanceof Error ? e.message : String(e);
-      console.error("[rpa/mynavi/pdf-upload] Gemini error:", aiErrorDetail);
+      if (e instanceof GeminiJsonError) aiDiagnostics = e.diagnostics;
+      console.error("[rpa/mynavi/pdf-upload] Gemini error:", aiErrorDetail, aiDiagnostics ?? "");
     }
 
     const parsed = parseResumeData(resumeData);
@@ -156,6 +200,8 @@ export async function POST(req: NextRequest) {
       const reason = aiErrorDetail
         ? `AI解析失敗（Gemini解析エラー）`
         : "AI解析失敗";
+      // 再現用にPDFを退避してからログを作る（ログに Drive の在り処を持たせるため）
+      const archived = await archiveFailedPdf(pdfBuffer, batchId);
       const log = await prisma.mynaviRpaProcessingLog.create({
         data: {
           batchId,
@@ -165,12 +211,18 @@ export async function POST(req: NextRequest) {
           candidateName: parsed.name,
           phoneNormalized: normalizePhoneNumber(parsed.phone),
           errorMessage: aiErrorDetail,
+          pdfFileName: archived.fileName,
+          failedPdfFileId: archived.fileId,
+          failedPdfUrl: archived.url,
         },
       });
-      await notifyMynaviError(
-        `AI解析に失敗しました（応募1件をスキップ）`,
-        { batchId, detail: aiErrorDetail ?? "氏名または生年月日を抽出できませんでした" },
-      );
+      await notifyMynaviError(`AI解析に失敗しました（応募1件をスキップ）`, {
+        batchId,
+        detail: aiErrorDetail ?? "氏名または生年月日を抽出できませんでした",
+        // 切り分けに要る情報を通知本文へ。AI解析失敗の一次切り分けをここで完結させる
+        ...(aiDiagnostics ? { diagnostics: aiDiagnostics } : {}),
+        ...(archived.url ? { failedPdf: archived.url } : { failedPdf: "退避失敗（PDFは残っていません）" }),
+      });
       return NextResponse.json({
         processingLogId: log.id,
         candidateId: null,

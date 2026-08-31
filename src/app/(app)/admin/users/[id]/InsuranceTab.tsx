@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { InsuranceData, DependentData } from "./detail-types";
 import {
@@ -15,12 +15,19 @@ import {
   useAutoSave,
   AutoSaveIndicator,
   RelationSelect,
+  PendingAiSaveBar,
 } from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
 
 // T-098: 社会保険タブで AI から仮入力するのは番号類のみ。
 const INSURANCE_AI_KEYS = ["pensionNumber", "employmentInsuranceNumber"] as const;
+
+// AI読み取りの未保存バーに出す項目ラベル（INSURANCE_AI_KEYS と対応）。
+const INSURANCE_AI_LABELS: Record<string, string> = {
+  pensionNumber: "基礎年金番号",
+  employmentInsuranceNumber: "雇用保険 被保険者番号",
+};
 
 // T-096 タブ3: 社会保険（自動保存化）＋扶養家族 1:N（各行を自動保存）
 
@@ -60,9 +67,25 @@ export default function InsuranceTab({
     autoSave.save(field as string, form[field]);
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）— 番号類だけ反映
-  const ai = useResumeAiFill(employeeId, setForm, INSURANCE_AI_KEYS);
+  // AI解析はネットワーク待ちを挟むため、判定は ref で「現在の form」を読む（stale 回避）。
+  const formRef = useRef(form);
+  formRef.current = form;
+  const ai = useResumeAiFill(employeeId, setForm, INSURANCE_AI_KEYS, formRef);
   // T-098 追補: 全画面D&Dの解析結果配布（番号類の空欄のみマージ）
-  const dropFill = useAiFillData(aiFillData, setForm, INSURANCE_AI_KEYS);
+  const dropFill = useAiFillData(aiFillData, setForm, INSURANCE_AI_KEYS, formRef);
+
+  // T-098 追補2: AI 仮入力は自動保存が走らないので、未保存キーを保持して明示保存させる。
+  const pendingAiKeys = useMemo(
+    () => Array.from(new Set([...ai.pendingKeys, ...dropFill.pendingKeys])),
+    [ai.pendingKeys, dropFill.pendingKeys],
+  );
+  const saveAiFilled = () => {
+    for (const key of pendingAiKeys) {
+      autoSave.save(key, form[key as keyof typeof form]);
+    }
+    ai.clearPending();
+    dropFill.clearPending();
+  };
 
   return (
     <div className="px-5 py-5">
@@ -76,6 +99,12 @@ export default function InsuranceTab({
           <ResumeAiButton {...ai} />
         </div>
       </div>
+      <PendingAiSaveBar
+        pendingKeys={pendingAiKeys}
+        labels={INSURANCE_AI_LABELS}
+        onSave={saveAiFilled}
+        status={autoSave.status}
+      />
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="加入状況">
           <TextInput value={form.employmentInsuranceStatus} onChange={set("employmentInsuranceStatus")} onBlur={blurSave("employmentInsuranceStatus")} placeholder="例: 加入" />

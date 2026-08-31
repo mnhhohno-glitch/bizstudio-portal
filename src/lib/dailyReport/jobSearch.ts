@@ -10,6 +10,12 @@
 //     （bmCount は archivedAt 無条件なので、その値が BM数+紹介保留数 と一致する＝SQL検証済み・一致=true）
 //   旧定義は (A+B+C)÷合計BM（aiMatchRating ベース・D/未評価を分子から除外）だった。
 //   aiMatchRating の構成比（ratings）は ABCD 円グラフ用に従来どおり返す（円の表示は不変）。
+//
+// T-161 R1/R2: 分子の「出力数」を「紹介数」に拡張。
+//   紹介 = COALESCE(last_exported_at, introduced_at)（出力した行 ∪ 出力せずCAが紹介済みにした行）。
+//   本人応募（origin='candidate' かつ drive_file_id IS NULL）は CA紹介実績に数えない（R1）。
+//   既存データでは introduced_at 保有行は全件 last_exported_at も保有（T-133移行分）のため、
+//   この変更で動く数字は「誤って出力済が立ったサイト経由行の除外」と「今後の紹介済み行の加算」のみ。
 
 import { prisma } from "@/lib/prisma";
 
@@ -24,7 +30,8 @@ export async function computeJobSearchDay(userId: string, dateStr: string): Prom
   const counts = await prisma.$queryRawUnsafe<{ bm: number; exp: number }[]>(`
     SELECT
       COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}')::int bm,
-      COUNT(*) FILTER (WHERE (last_exported_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}')::int exp
+      COUNT(*) FILTER (WHERE (COALESCE(last_exported_at, introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}'
+                         AND NOT (origin = 'candidate' AND drive_file_id IS NULL))::int exp
     FROM candidate_files
     WHERE category = 'BOOKMARK' AND uploaded_by_user_id = '${userId}'`);
   const ratingRows = await prisma.$queryRawUnsafe<{ r: string; n: number }[]>(`

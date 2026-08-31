@@ -165,8 +165,19 @@ export async function computeCaMetricsForRange(params: {
     prisma.candidateFile.count({
       where: { category: "BOOKMARK", archivedAt: null, uploadedByUserId: userId, createdAt: range },
     }),
+    // T-161 R1/R2: 紹介数 = 出力した行 ∪ 出力せず紹介済みにした行（COALESCE(出力日, 紹介日) が当日）。
+    // 本人応募（origin='candidate' & driveFileId=null）は数えない。
+    // introduced_at 単独行は「出力日なし」なので lastExportedAt=null AND introducedAt=range で拾う（重複計上なし）。
     prisma.candidateFile.count({
-      where: { category: "BOOKMARK", uploadedByUserId: userId, lastExportedAt: range },
+      where: {
+        category: "BOOKMARK",
+        uploadedByUserId: userId,
+        NOT: { origin: "candidate", driveFileId: null },
+        OR: [
+          { lastExportedAt: range },
+          { lastExportedAt: null, introducedAt: range },
+        ],
+      },
     }),
     // エントリー数：応募済み以降のステージに限定（求人紹介段階を除外）。候補者ユニーク人数。
     countUniqueCandidates({ ...advisorFilter, ...entryFlagPostApplication, entryDate: range }),

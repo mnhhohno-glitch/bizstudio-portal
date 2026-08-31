@@ -1,21 +1,33 @@
 // T-139 Task2: PATCH /api/external/schedule-tasks/[taskId]
 // 日程調整AIエージェント（外部RPA機）がタスクの status 変更 / コメント追加を行う更新API。
 // 安全柵: 対象がカテゴリ「日程調整」でなければ 403（一切更新しない）。存在しなければ 404。
-// 通知抑止: 既存の内部ルート（status/comments）は LINE WORKS 通知を発火させるが、本APIは
-//   notification ヘルパーを一切呼ばない＝夜間ポーリングでの通知連発を防ぐ。
+// T-177 変更点:
+//   (a) status=COMPLETED は IN_PROGRESS（対応中）へ読み替えて保存する。AIが返信を送った時点では
+//       面談日程が確定したとは限らず、完了にすると一覧APIの既定フィルタで黙って消えるため。
+//       完了操作は人が内容を確認してから画面（/api/tasks/[taskId]/status）で行う。
+//   (b) AIによる **初回** の更新時だけ LINE WORKS 通知を出す。従来は通知を一切出さない設計で、
+//       AIが完了化してもCA・事務が気づけなかった。二重通知は「更新前に【日程調整AI】コメントが
+//       既にあるか」で抑止する＝夜間ポーリングでの通知連発は起きない。
+//       通知はフェイルソフト（失敗しても 200 を返す）。
 import { NextResponse } from "next/server";
 import type { TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   AI_COMMENT_PREFIX,
+  EMPTY_SCHEDULE_COMMENT_FLAGS,
   SCHEDULE_CATEGORY_NAME,
-  SCHEDULE_EXEMPT_COMMENT_MARKER,
   VALID_TASK_STATUSES,
   isAuthorizedExternal,
+  loadScheduleCommentFlags,
+  resolveStoredStatus,
   resolveSystemUserId,
   scheduleTaskInclude,
   serializeScheduleTask,
 } from "@/lib/schedule-tasks";
+import {
+  notifyScheduleAiTaskUpdated,
+  resolveAssigneeNotifyTargets,
+} from "@/lib/task-notification";
 
 export const dynamic = "force-dynamic";
 
@@ -43,8 +55,9 @@ export async function PATCH(
     return NextResponse.json({ error: "status または comment のいずれかが必要です" }, { status: 400 });
   }
 
-  // status 検証（許可値のみ）。
-  let nextStatus: TaskStatus | null = null;
+  // status 検証（許可値のみ）。許可外は従来どおり 400。
+  let requestedStatus: TaskStatus | null = null;
+  let storedStatus: TaskStatus | null = null;
   if (hasStatus) {
     const s = String(body.status);
     if (!VALID_TASK_STATUSES.includes(s as (typeof VALID_TASK_STATUSES)[number])) {
@@ -53,7 +66,10 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    nextStatus = s as TaskStatus;
+    requestedStatus = s as TaskStatus;
+    // T-177: COMPLETED → IN_PROGRESS の読み替え。HTTPは 200 のまま返し、
+    // レスポンスの status は実際に保存した値（= updated.status）になる。
+    storedStatus = resolveStoredStatus(requestedStatus);
   }
 
   // comment 検証。
@@ -82,6 +98,13 @@ export async function PATCH(
     return NextResponse.json({ error: "対象タスクは日程調整カテゴリではありません" }, { status: 403 });
   }
 
+  // T-177: 二重通知の抑止判定は **今回の更新を反映する前** に行う。
+  // ここより後でコメントを作るため、この時点の値が「AIの初回更新かどうか」を表す。
+  const alreadyNotifiedByAi = await prisma.taskComment.count({
+    where: { taskId, content: { contains: AI_COMMENT_PREFIX } },
+  });
+  const isFirstAiUpdate = alreadyNotifiedByAi === 0;
+
   // コメント作者（TaskComment.userId 必須）はシステムユーザー。本文に AI 接頭辞を付けて人間が判別可能に。
   if (commentContent) {
     const systemUserId = await resolveSystemUserId();
@@ -97,9 +120,9 @@ export async function PATCH(
     });
   }
 
-  // status 更新（通知ヘルパーは呼ばない＝発火なし）。
-  if (nextStatus) {
-    await prisma.task.update({ where: { id: taskId }, data: { status: nextStatus } });
+  // status 更新（T-177: 読み替え後の storedStatus を保存する）。
+  if (storedStatus) {
+    await prisma.task.update({ where: { id: taskId }, data: { status: storedStatus } });
   }
 
   // 更新後のタスクを GET と同じ形状で返す。
@@ -110,8 +133,46 @@ export async function PATCH(
   if (!updated) {
     return NextResponse.json({ error: "更新後のタスク取得に失敗しました" }, { status: 500 });
   }
-  const hasExempt = await prisma.taskComment.count({
-    where: { taskId, content: { contains: SCHEDULE_EXEMPT_COMMENT_MARKER } },
-  });
-  return NextResponse.json(serializeScheduleTask(updated, { hasExemptComment: hasExempt > 0 }));
+  const flags = (await loadScheduleCommentFlags([taskId])).get(taskId) ?? EMPTY_SCHEDULE_COMMENT_FLAGS;
+
+  // T-177: AIの初回更新時のみ LINE WORKS へ通知。フェイルソフト（絶対に throw させない）。
+  let notifyOutcome: string;
+  if (!isFirstAiUpdate) {
+    notifyOutcome = "skipped(already-ai-updated)";
+  } else {
+    try {
+      // scheduleTaskInclude は候補者名を含まない（RPA向けレスポンスに不要）ため、
+      // 通知本文に出す名前だけをこの分岐でピンポイントに引く。GETの取得内容は変えない。
+      const candidate = updated.candidateId
+        ? await prisma.candidate.findUnique({
+            where: { id: updated.candidateId },
+            select: { name: true },
+          })
+        : null;
+      const targets = await resolveAssigneeNotifyTargets(updated.assignees.map((a) => a.employee.id));
+      const sent = await notifyScheduleAiTaskUpdated({
+        taskId: updated.id,
+        title: updated.title,
+        candidateName: candidate?.name ?? null,
+        storedStatus: updated.status,
+        commentContent,
+        assigneeNames: targets.map((t) => t.name),
+        assigneeLineworksIds: targets.map((t) => t.lineworksId),
+      });
+      notifyOutcome = sent ? "sent" : "skipped(no-env)";
+    } catch (e) {
+      notifyOutcome = "failed";
+      console.error(`[schedule-tasks:external-patch] task=${taskId} 通知に失敗しました:`, e);
+    }
+  }
+
+  // T-177: このルートは従来ログが1行も無く Railway ログから追跡できなかった。1リクエスト1行で残す。
+  console.log(
+    `[schedule-tasks:external-patch] task=${taskId}` +
+      ` requestedStatus=${requestedStatus ?? "none"} storedStatus=${storedStatus ?? "unchanged"}` +
+      ` downgraded=${requestedStatus !== null && requestedStatus !== storedStatus}` +
+      ` comment=${commentContent ? "yes" : "no"} firstAiUpdate=${isFirstAiUpdate} notify=${notifyOutcome}`,
+  );
+
+  return NextResponse.json(serializeScheduleTask(updated, flags));
 }

@@ -55,3 +55,6 @@ scripts/output/
 
 # T-151 検証スクリプトの状態ファイル（実行時生成・コミット対象外）
 scripts/.t151_verify_state.json
+
+# T-181: 分析用CSVはコミットしない（個票データのため）
+docs/analysis/*.csv

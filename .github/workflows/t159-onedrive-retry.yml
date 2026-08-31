@@ -1,0 +1,137 @@
+# T-159 Phase 2-c: portal → OneDrive の書類コピーで未達だったものを毎晩拾い直す。
+#
+# 背景: アップロード時に1回試すだけだったため、その瞬間に OneDrive フォルダURLが未登録／
+#       コピー先フォルダが無かったファイルは、後から CA が直しても永久に入らなかった。
+#
+# 設計:
+#  - 実行時刻は JST 02:00。cron は UTC で書くので 17:00 UTC（JST = UTC+9 → 02:00 - 9h = 17:00 前日）。
+#    ★ここを "0 2 * * *" と書くと JST 11:00（業務時間の真ん中）に走る。UTC/JST のズレに注意。
+#  - portal 側の /api/internal/onedrive-sync/retry を叩くだけ。処理本体は portal に置く
+#    （Graph の認証情報・Google Drive の認証情報を Actions 側に持たせないため）。
+#  - Phase 3 で同じエンドポイントに3つの処理が追加されている（★ワークフローは1本のまま）:
+#      1. OneDrive フォルダURLの自動登録（未登録の求職者のフォルダを Graph で探す）
+#      2. フォルダ移動への追随（404 のときだけ現在地を探して張り替える）
+#      4. Azure クライアントシークレットの期限通知（残り60/30/14/7/3/1日と期限超過後）
+#    順序は 1 → 2 → 3(拾い直し) → 4 → 5(通知)。1 を先に置くことで、その夜のうちに
+#    URLが付いた求職者のファイルが 3 でコピーされる（分けると丸1日遅れる）。
+#  - 二段ガード: 定時実行は dry_run=false&confirm=true。手動実行は既定 dry_run=true（件数だけ見る）。
+#    ★Phase 3 の DRY-RUN は Graph の**読み取り**は行う（フォルダの有無を確かめるため）。DBは書かない。
+#  - CA 向けの結果通知（コピー完了件数・対応が必要な件数）は portal 側が LINE WORKS の
+#    CA チャンネルへ送る。対応が必要なものが0件の晩は送らない。
+#  - この workflow 自身が失敗した（= 夜間処理が動かなかった）時だけ、死活監視と同じ経路で
+#    大野将幸ひとりの DM に流す。CA チャンネルに HTTP エラーを流しても打つ手が無いため。
+#  - INTERNAL_API_KEY は GitHub Secrets 経由（auto-expire / t131-resubmit-stale と同一シークレット）。
+#  - default branch (master) に置かないと schedule が動かない。
+#  - 対象0件時は API 側が何もせず即返す（正常終了）。300件を超える分は翌日の実行で処理。
+
+name: T-159 OneDrive retry (JST 02:00)
+
+on:
+  schedule:
+    # JST 02:00 = 17:00 UTC（前日）。GitHub 側の混雑で数分〜数十分遅れることがある（仕様）。
+    # ★"0 2 * * *" と書くと JST 11:00（業務時間の真ん中）に走る。UTC/JST のズレに注意。
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら Graph/DB を触らず対象件数のみ（疎通確認用）。定時実行は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      notify:
+        description: "false なら CA チャンネルへの LINE WORKS 通知を抑止する（手動確認でCAを鳴らしたくない時）。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+# 前夜の実行が長引いている最中に次が始まると同じ行を二重に処理しうるので直列化する。
+concurrency:
+  group: t159-onedrive-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine flags
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 定時実行は必ず本番実行。通知も既定どおり出す。
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+            echo "notify=true" >> "$GITHUB_OUTPUT"
+          else
+            DRY="${{ github.event.inputs.dry_run }}"
+            echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+            if [ "$DRY" = "false" ]; then
+              echo "confirm=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "confirm=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "notify=${{ github.event.inputs.notify }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call onedrive-sync retry API (production)
+        id: call
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          BASE="https://bizstudio-portal-production.up.railway.app/api/internal/onedrive-sync/retry"
+          URL="$BASE?dry_run=${{ steps.flag.outputs.dry }}&confirm=${{ steps.flag.outputs.confirm }}&notify=${{ steps.flag.outputs.notify }}"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }} / dry_run=${{ steps.flag.outputs.dry }} confirm=${{ steps.flag.outputs.confirm }} notify=${{ steps.flag.outputs.notify }}"
+
+          # 300件を最大3並列で処理するため長めに待つ。API 側は 480 秒で自ら打ち切って返す。
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 600 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+          echo "http=$HTTP" >> "$GITHUB_OUTPUT"
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::onedrive-sync retry returned HTTP $HTTP"
+            exit 1
+          fi
+
+          # サマリを Actions ログにも別途出す（後から遡りやすく）
+          if command -v jq >/dev/null 2>&1; then
+            echo "=== Summary ==="
+            jq -r '"mode=\(.mode) syncEnabled=\(.syncEnabled) eligible=\(.eligible) picked=\(.picked) processed=\(.processed) success=\(.success) givenUp=\(.givenUp) deferred=\(.deferred) notification=\(.notification) duration_ms=\(.durationMs)"' response.json || true
+            echo "=== byStatus / bySkipReason ==="
+            jq -c '{byStatus, bySkipReason, needsAttention}' response.json || true
+            echo "=== Phase 3: フォルダURLの自動登録 / 移動追随 / 鍵の期限 ==="
+            jq -c '{scan: .folderUrl.scan, register: (.folderUrl.register | del(.details)), move: (.folderUrl.move | del(.details)), folderUrlError, secret}' response.json || true
+          fi
+
+      # 夜間処理が動かなかったことを運用者に知らせる。CA チャンネルではなく DM。
+      - name: Notify LINE WORKS (夜間処理の失敗)
+        if: failure()
+        env:
+          HTTP_STATUS: ${{ steps.call.outputs.http }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LW_CLIENT_ID: ${{ secrets.LINEWORKS_CLIENT_ID }}
+          LW_CLIENT_SECRET: ${{ secrets.LINEWORKS_CLIENT_SECRET }}
+          LW_SERVICE_ACCOUNT: ${{ secrets.LINEWORKS_SERVICE_ACCOUNT }}
+          LW_PRIVATE_KEY: ${{ secrets.LINEWORKS_PRIVATE_KEY }}
+          LW_BOT_ID: ${{ secrets.LINEWORKS_TASK_BOT_ID }}
+          LW_USER_ID: ${{ secrets.LINEWORKS_ALERT_USER_ID }}
+        run: node .github/scripts/onedrive-retry-notify.mjs

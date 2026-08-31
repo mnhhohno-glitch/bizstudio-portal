@@ -23,7 +23,7 @@ function subject(today: string): string {
   return `【日程調整AI】カレンダー連携切れ検知（${today}）`;
 }
 
-function buildBody(brokens: BrokenCa[]): string {
+function buildBody(brokens: BrokenCa[], writerBroken: boolean): string {
   const lines: string[] = [
     "日程調整AIエージェントが、以下のCAのGoogleカレンダーを読み取れませんでした。",
     "連携が切れている可能性があります。ご確認ください。",
@@ -34,10 +34,28 @@ function buildBody(brokens: BrokenCa[]): string {
   lines.push(
     "",
     "連携が切れているCAは空き枠の判定から除外されます。",
-    "対象CAが全員読み取れない場合、応募者に「満枠」と誤って自動返信されるおそれがあります。",
+    "対象CAが全員読み取れない場合、応募者に「満枠」と誤って自動返信されるおそれがあります。"
+  );
+
+  // T-167: writer（仮予約カレンダーの名義人）が落ちている場合、日程調整AIは仮予約カレンダーを
+  //   読めず常に「返信不要」を返す＝自動返信が完全停止する。影響度が違うので本文で明示する。
+  if (writerBroken) {
+    lines.push(
+      "",
+      "■■ 重要 ■■",
+      "仮予約カレンダーの名義人（writer）の連携が切れています。",
+      "この状態では仮予約カレンダーを読み取れないため、",
+      "**日程調整AIの自動返信が停止しています**（応募者へ一切返信されません）。",
+      "最優先で再連携してください。"
+    );
+  }
+
+  lines.push(
     "",
-    "▼確認方法",
-    "portal の社員管理から該当CAのGoogleカレンダー連携を再設定してください。",
+    "▼再連携の方法",
+    "portal にログインし、ダッシュボードの「日報」タブ上部にある",
+    "「🔗 Googleカレンダー / ToDo を連携」ボタンから再認証してください。",
+    "（スケジュール画面の同じボタンからでも再連携できます。社員管理画面に連携UIはありません）",
     "",
     "（このメールは同一CA・同一日につき1通のみ送信されます）"
   );
@@ -48,7 +66,11 @@ function buildBody(brokens: BrokenCa[]): string {
  * 連携切れCAを検知した際に呼び出す。返り値は「実際にメール送信を試みたか」だけ（呼び出し側は結果を無視して良い）。
  * 例外は内部で握りつぶす（副作用のため resolve 本体の応答を壊さない）。
  */
-export async function sendBrokenCalendarAlert(brokenUserIds: string[]): Promise<{
+export async function sendBrokenCalendarAlert(
+  brokenUserIds: string[],
+  /** T-167: writer（仮予約カレンダー名義人）が壊れているか。true なら本文に自動返信停止を明記する。 */
+  options?: { writerBroken?: boolean }
+): Promise<{
   attempted: boolean;
   notifiedUserIds: string[];
   reason?: string;
@@ -126,7 +148,7 @@ export async function sendBrokenCalendarAlert(brokenUserIds: string[]): Promise<
           from: FROM,
           to: [RECIPIENT],
           subject: subject(today),
-          text: buildBody(finalBrokens),
+          text: buildBody(finalBrokens, Boolean(options?.writerBroken)),
         }),
         signal: controller.signal,
       });

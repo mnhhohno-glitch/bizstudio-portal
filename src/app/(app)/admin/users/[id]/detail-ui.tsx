@@ -418,3 +418,42 @@ export function ResumeAiButton({
     </div>
   );
 }
+
+/**
+ * T-098 追補2: AI読み取りで仮入力されたが「まだ保存されていない」項目の警告バー。
+ *
+ * 背景: このページの各タブは onBlur / onChange 起点の自動保存で、保存ボタンを持たない。
+ * AI読み取りは setForm するだけなので、人がその欄を触らない限り一度も保存されず、
+ * 画面を開き直すと消えていた（本バグ）。自動保存にはせず（AI の誤読をそのまま DB に入れない）、
+ * 「未保存である」ことを明示し、ワンクリックで保存できる導線をここで出す。
+ */
+export function PendingAiSaveBar({
+  pendingKeys,
+  labels,
+  onSave,
+  status,
+}: {
+  pendingKeys: string[];
+  labels?: Record<string, string>;
+  onSave: () => void;
+  status: AutoSaveStatus;
+}) {
+  if (pendingKeys.length === 0) return null;
+  const names = pendingKeys.map((k) => labels?.[k] ?? k).join("・");
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-3 py-2">
+      <div className="text-[12px] text-amber-800">
+        AI読み取り結果は<span className="font-semibold">未保存</span>です。内容を確認して保存してください。
+        <span className="ml-1 text-[11px] text-amber-700">（{names}）</span>
+      </div>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={status === "saving"}
+        className="shrink-0 rounded bg-amber-600 px-3 py-1 text-[12px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+      >
+        {status === "saving" ? "保存中..." : "AI読み取り結果を保存"}
+      </button>
+    </div>
+  );
+}

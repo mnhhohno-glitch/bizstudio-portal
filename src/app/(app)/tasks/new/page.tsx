@@ -6,6 +6,14 @@ import Link from "next/link";
 import JobCategorySelector, { type JobAxis } from "@/components/tasks/JobCategorySelector";
 import PointsModal from "@/components/tasks/PointsModal";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
+import { GOOGLE_FORM_CATEGORY_GROUPS, getGoogleFormCategoryLabel } from "@/constants/google-form-categories";
+import {
+  GOOGLE_FORM_REQUEST_CATEGORY,
+  GOOGLE_FORM_REQUEST_HIDDEN_LABELS,
+  GOOGLE_FORM_REQUEST_DATA_LABEL,
+  CATEGORY_DEFAULT_ASSIGNEE_NUMBERS,
+  type GoogleFormRequestData,
+} from "@/constants/google-form-request";
 
 /* ---------- types ---------- */
 
@@ -66,9 +74,24 @@ const THREE_POINT_CATEGORY_IDS = [
   "cmmolxxtl002xpo4f1mf6srei", // 推薦状作成
 ] as const;
 const THREE_POINT_LABELS = ["履歴書作成", "職務経歴書作成", "推薦状作成"];
+/** 3カテゴリ共通のテンプレート項目ラベル。3点セット経路では1回だけ聞いて3タスクへ同値で格納する。 */
+const DELIVERY_FORMAT_LABEL = "納品形式";
 const HIDDEN_CATEGORY_ID = "cmoal05cp002r1dsxyokhti3i";
 
 const MENDAN_FUSANKA_CATEGORY = "面談不参加共有";
+
+/** T-172 追補: Googleフォーム作成依頼の会社別職種分類 1行分。
+ * name/period は面談ログ解析済みの WorkHistory 由来（AI呼び出しなし）か手入力。 */
+type GfCompanyRow = {
+  name: string;
+  period: string;
+  groupKey: string;
+  categoryValue: string;
+  detail: string;
+  /** 面談ログ解析由来の職種メモ（カテゴリ選択の判断材料。表示のみで保存しない） */
+  jobTypeHint?: string;
+};
+
 const MENSETSU_TAISAKU_CATEGORY = "面接対策依頼";
 const NAITEI_CATEGORY = "内定承諾報告";
 const NYUSHA_CATEGORY = "入社報告";
@@ -115,6 +138,9 @@ const REGIONS = [
 ];
 
 const EMPLOYMENT_TYPES = ["正社員", "契約社員", "派遣社員", "アルバイト", "業務委託"];
+
+// 数字以外（全角数字・記号・マイナス・小数点など）を落とす。金額入力の正規化用。
+const onlyDigits = (s: string): string => (s ?? "").replace(/[^\d]/g, "");
 
 // 内定承諾報告の紹介手数料（税抜き）算出。
 // 理論年収方式: round(理論年収 × 手数料% / 100)。固定方式: 入力金額（整数丸め）。
@@ -169,6 +195,8 @@ export default function TaskNewPage() {
   const [is3pointSet, setIs3pointSet] = useState(false);
   const [subStep3pt, setSubStep3pt] = useState(0); // 0=履歴書, 1=職務経歴書, 2=推薦状
   const [fieldValues3pt, setFieldValues3pt] = useState<Record<string, string>[]>([{}, {}, {}]);
+  /** 3点セット共通の納品形式（履歴書/職務経歴書/推薦状の3タスクへ同じ値で保存）。既定は先頭の選択肢（Word）。 */
+  const [deliveryFormat3pt, setDeliveryFormat3pt] = useState("");
   const [motivState3pt, setMotivState3pt] = useState({ majorId: "", majorName: "", middleId: "", middleName: "", minors: [] as string[] });
   const [jobAxes3pt, setJobAxes3pt] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [careerSummary3pt, setCareerSummary3pt] = useState("");
@@ -231,6 +259,16 @@ export default function TaskNewPage() {
   const [templateDragOver, setTemplateDragOver] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement>(null);
 
+  // step 2 - カテゴリ固有: Googleフォーム作成依頼（T-171 → T-172 で2項目に簡素化 → T-172追補で会社別指定を復活）
+  const [gfGroupKey, setGfGroupKey] = useState("");
+  const [gfCategoryValue, setGfCategoryValue] = useState("");
+  const [gfOtherLabel, setGfOtherLabel] = useState("");
+  const [gfMemo, setGfMemo] = useState("");
+  const [gfCompanies, setGfCompanies] = useState<GfCompanyRow[]>([]);
+  const [gfWhLoading, setGfWhLoading] = useState(false);
+  /** 職歴の自動取得が済んだ求職者ID（同じ求職者で二重取得・入力上書きをしない） */
+  const gfWhLoadedFor = useRef<string | null>(null);
+
   // step 2 - カテゴリ固有: 求人検索
   const [kyujinJobAxes, setKyujinJobAxes] = useState<JobAxis[]>([{ axis: 1, major: "", middle: null, minor: null }]);
   const [aiOrganizing, setAiOrganizing] = useState(false);
@@ -283,6 +321,18 @@ export default function TaskNewPage() {
     () => THREE_POINT_CATEGORY_IDS.map((id) => categories.find((c) => c.id === id) ?? null),
     [categories]
   );
+  /** 3点セット共通の納品形式の選択肢。DBマスタ（履歴書作成の納品形式）から引くのでUIにハードコードしない。 */
+  const deliveryFormatOptions = useMemo(
+    () => threePointCategories[0]?.fields.find((f) => f.label === DELIVERY_FORMAT_LABEL)?.options ?? [],
+    [threePointCategories]
+  );
+
+  // 既定値カラムがスキーマに無いため、既定 "Word"（選択肢の先頭）はマスタ読み込み後にクライアントで補う。
+  useEffect(() => {
+    if (deliveryFormatOptions.length === 0) return;
+    setDeliveryFormat3pt((prev) => (prev ? prev : deliveryFormatOptions[0].value));
+  }, [deliveryFormatOptions]);
+
   const active3ptCategory = is3pointSet ? threePointCategories[subStep3pt] : null;
   const effectiveCategory = is3pointSet ? active3ptCategory : selectedCategory;
 
@@ -299,6 +349,7 @@ export default function TaskNewPage() {
   const isRAEntry = selectedCategory?.name === RA_ENTRY_CATEGORY;
   const isFmTouroku = selectedCategory?.name === FM_TOUROKU_CATEGORY;
   const isKyujinKensaku = selectedCategory?.name === KYUJIN_KENSAKU_CATEGORY;
+  const isGformRequest = selectedCategory?.name === GOOGLE_FORM_REQUEST_CATEGORY;
   const hideStep5Attachment = HIDE_STEP5_ATTACHMENT_CATEGORIES.includes(selectedCategory?.name ?? "");
 
   /** 職務経歴書: 「実績なし」チェックがONか */
@@ -537,13 +588,14 @@ export default function TaskNewPage() {
       if (Object.keys(updates).length > 0) setFieldValues((prev) => ({ ...prev, ...updates }));
     }
 
-    // 課金方式ラジオの初期値（feeType）と算出用入力
+    // 課金方式ラジオの初期値（feeType）と算出用入力。
+    // 理論年収は課金方式に関係なく入力・保存する項目なので、FIXED でもプリセットする。
+    const ti = searchParams.get("theoreticalAnnualIncome");
+    if (ti) setNaiteiTheoryIncome(onlyDigits(ti));
     const feeType = searchParams.get("feeType"); // ANNUAL_RATE / FIXED
     if (feeType === "ANNUAL_RATE") {
       setNaiteiFeeMode("ANNUAL_RATE");
-      const ti = searchParams.get("theoreticalAnnualIncome");
       const fr = searchParams.get("feeRatePercent");
-      if (ti) setNaiteiTheoryIncome(ti);
       if (fr) setNaiteiFeeRate(fr);
     } else {
       setNaiteiFeeMode("FIXED");
@@ -567,6 +619,103 @@ export default function TaskNewPage() {
     const value = `${selectedCandidate.name}（${selectedCandidate.candidateNo}）`;
     setFieldValues((prev) => (prev[targetField.id] === value ? prev : { ...prev, [targetField.id]: value }));
   }, [isNaitei, selectedCategory, selectedCandidate]);
+
+  /* ----- Googleフォーム作成依頼（T-172追補）: 職歴の即時取得・行操作 ----- */
+  // 面談ログ解析などで既に DB へ入っている WorkHistory を同期取得して会社カードを初期生成する。
+  // T-172 で廃止した「履歴書を読み取る」（extract-resume / 30〜75秒の AI 解析）は復活させない。
+  // ここは単なる DB 読み取りなので待ち時間はほぼ無い。職歴が無い求職者は空の手入力行を1行出す。
+  useEffect(() => {
+    if (!isGformRequest || !candidateId) return;
+    if (gfWhLoadedFor.current === candidateId) return;
+    gfWhLoadedFor.current = candidateId;
+    let cancelled = false;
+    setGfWhLoading(true);
+    fetch(`/api/candidates/${candidateId}/work-histories`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        const rows = (d?.workHistories ?? []) as {
+          companyName: string;
+          period: string;
+          jobTypeHint: string;
+        }[];
+        setGfCompanies(
+          rows.map((w) => ({
+            name: w.companyName,
+            period: w.period ?? "",
+            groupKey: gfGroupKey,
+            categoryValue: gfCategoryValue,
+            detail: "",
+            jobTypeHint: w.jobTypeHint || undefined,
+          })),
+        );
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setGfWhLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // gfGroupKey / gfCategoryValue は初期値としてのみ参照する（変更で再取得しない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGformRequest, candidateId]);
+
+  // 職歴が0件（または取得失敗）なら、手入力用の空行を1行だけ用意する。
+  useEffect(() => {
+    if (!isGformRequest || gfWhLoading || gfCompanies.length > 0) return;
+    setGfCompanies([{ name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" }]);
+  }, [isGformRequest, gfWhLoading, gfCompanies.length, gfGroupKey, gfCategoryValue]);
+
+  // メイン経験職種カテゴリを選び直したら、CA が個別に触っていない行へ一括適用する。
+  // 「触っていない」= 未選択、もしくは直前のメインカテゴリと同じ値のまま の行。
+  const gfPrevMain = useRef<{ groupKey: string; categoryValue: string }>({ groupKey: "", categoryValue: "" });
+  useEffect(() => {
+    if (!isGformRequest) return;
+    const prev = gfPrevMain.current;
+    gfPrevMain.current = { groupKey: gfGroupKey, categoryValue: gfCategoryValue };
+    if (!gfCategoryValue || (prev.groupKey === gfGroupKey && prev.categoryValue === gfCategoryValue)) return;
+    setGfCompanies((rows) =>
+      rows.map((c) =>
+        !c.categoryValue || c.categoryValue === prev.categoryValue
+          ? { ...c, groupKey: gfGroupKey, categoryValue: gfCategoryValue }
+          : c,
+      ),
+    );
+  }, [isGformRequest, gfGroupKey, gfCategoryValue]);
+
+  const gfUpdateCompany = (idx: number, patch: Partial<GfCompanyRow>) => {
+    setGfCompanies((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+  const gfAddCompany = () => {
+    setGfCompanies((prev) => [
+      ...prev,
+      { name: "", period: "", groupKey: gfGroupKey, categoryValue: gfCategoryValue, detail: "" },
+    ]);
+  };
+  const gfRemoveCompany = (idx: number) => {
+    setGfCompanies((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  /* ----- Googleフォーム作成依頼: 既定担当者 ----- */
+  // カテゴリ既定担当者（CATEGORY_DEFAULT_ASSIGNEE_NUMBERS）を選択時に一度だけ自動チェック。
+  // 手動での外し・追加を上書きしないよう、同一カテゴリ選択中は再適用しない。
+  const defaultAssigneesApplied = useRef(false);
+  useEffect(() => {
+    const defaults = CATEGORY_DEFAULT_ASSIGNEE_NUMBERS[selectedCategory?.name ?? ""];
+    if (!defaults) {
+      defaultAssigneesApplied.current = false;
+      return;
+    }
+    if (defaultAssigneesApplied.current || employees.length === 0) return;
+    const ids = defaults
+      .map((num) => employees.find((e) => e.employeeNo === num)?.id)
+      .filter((id): id is string => !!id);
+    if (ids.length > 0) {
+      setAssigneeIds((prev) => Array.from(new Set([...prev, ...ids])));
+      defaultAssigneesApplied.current = true;
+    }
+  }, [selectedCategory, employees]);
 
   /* ----- job category cascading ----- */
   useEffect(() => {
@@ -693,6 +842,27 @@ export default function TaskNewPage() {
     }
   }, [step, is3pointSet, selectedCategory, selectedCandidate]);
 
+  /* ----- Googleフォーム作成依頼（T-171 / T-172） ----- */
+  // 表示用: メイン経験職種カテゴリ「大項目 ＞ サブカテゴリ（自由記述）」
+  const gfMainCategoryText = (() => {
+    if (!gfGroupKey || !gfCategoryValue) return "";
+    const sub = getGoogleFormCategoryLabel(gfCategoryValue) ?? gfCategoryValue;
+    const other = gfOtherLabel.trim() ? `（${gfOtherLabel.trim()}）` : "";
+    return `${gfGroupKey} ＞ ${sub}${other}`;
+  })();
+
+  // 表示用: 会社別職種分類「会社名（期間）：大項目 ＞ サブカテゴリ／職種詳細」1社1行。
+  // 会社名が空の行（手入力の空行）は捨てる。1行も無ければ空文字＝フィールドに書き込まない。
+  const gfCompaniesText = gfCompanies
+    .filter((c) => c.name.trim() && c.categoryValue)
+    .map((c) => {
+      const sub = getGoogleFormCategoryLabel(c.categoryValue) ?? c.categoryValue;
+      const period = c.period.trim() ? `（${c.period.trim()}）` : "";
+      const detail = c.detail.trim() ? `／${c.detail.trim()}` : "";
+      return `${c.name.trim()}${period}：${c.groupKey} ＞ ${sub}${detail}`;
+    })
+    .join("\n");
+
   /* ----- step validation ----- */
   const canProceed = (): boolean => {
     switch (step) {
@@ -705,6 +875,12 @@ export default function TaskNewPage() {
         if (!cat) return false;
         // 内定承諾報告: 対象者（求職者）必須。未選択では先へ進めない。
         if (isNaitei && !candidateId) return false;
+        // Googleフォーム作成依頼（T-172）: 求職者・メイン経験職種カテゴリが必須（メモは任意）
+        if (isGformRequest) {
+          if (!candidateId) return false;
+          if (!gfGroupKey || !gfCategoryValue) return false;
+          if (gfCategoryValue === "other" && !gfOtherLabel.trim()) return false;
+        }
         // 履歴書作成: 志望動機の大中小必須
         if (isRirekisho) {
           if (!motivMajorName || !motivMiddleName || selectedMotivMinors.length === 0) return false;
@@ -715,6 +891,8 @@ export default function TaskNewPage() {
         }
         // 求人検索: 第1軸の大項目は必須
         if (isKyujinKensaku && (!kyujinJobAxes[0]?.major)) return false;
+        // 3点セット: 共通の納品形式（generic 描画から外しているのでここで必須チェック）
+        if (is3pointSet && deliveryFormatOptions.length > 0 && !deliveryFormat3pt) return false;
         // テンプレート必須フィールドのバリデーション
         const visibleFields = getVisibleFields();
         const vals = is3pointSet ? fieldValues3pt[subStep3pt] : fieldValues;
@@ -743,13 +921,17 @@ export default function TaskNewPage() {
     const cat = is3pointSet ? active3ptCategory : selectedCategory;
     if (!cat) return [];
 
+    // 3点セット経路: 納品形式は3タスク共通のカスタムUI（1回入力）で制御するため generic 描画から除外。
+    // 単体依頼（履歴書作成 / 職務経歴書作成 / 推薦状作成）では従来どおりカテゴリの項目として表示する。
+    const stripShared = (fs: Field[]) => (is3pointSet ? fs.filter((f) => f.label !== DELIVERY_FORMAT_LABEL) : fs);
+
     // 履歴書作成: 志望動機フィールドはカスケードUIで代替するので非表示
     if (isRirekisho) {
-      return cat.fields.filter((f) =>
+      return stripShared(cat.fields.filter((f) =>
         f.label !== "志望動機（大分類）" &&
         f.label !== "志望動機（中分類）" &&
         f.label !== "志望動機（小分類）"
-      );
+      ));
     }
 
     // 内定承諾報告: カスタムUIで代替するフィールドを非表示
@@ -775,9 +957,14 @@ export default function TaskNewPage() {
       return cat.fields.filter((f) => !hiddenLabels.includes(f.label));
     }
 
-    if (!isShokumu) return cat.fields;
+    // Googleフォーム作成依頼（T-171）: 全項目カスタムUI（機械用 JSON 含む）で代替
+    if (isGformRequest) {
+      return cat.fields.filter((f) => !GOOGLE_FORM_REQUEST_HIDDEN_LABELS.includes(f.label));
+    }
 
-    return cat.fields.filter((f) => {
+    if (!isShokumu) return stripShared(cat.fields);
+
+    return stripShared(cat.fields.filter((f) => {
       if (f.label === "応募職種") return false;
       if (isSalesJob) {
         if (noNumbersChecked && SALES_ONLY_LABELS.includes(f.label)) return false;
@@ -785,8 +972,8 @@ export default function TaskNewPage() {
       }
       if (NON_SALES_HIDDEN_LABELS.includes(f.label)) return false;
       return true;
-    });
-  }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku]);
+    }));
+  }, [selectedCategory, active3ptCategory, is3pointSet, isRirekisho, isShokumu, isSalesJob, noNumbersChecked, isNaitei, isMensetsuTaisaku, isRAEntry, isFmTouroku, isGformRequest]);
 
   /* ----- submit (3point set) ----- */
   const handle3ptSubmit = async () => {
@@ -825,6 +1012,12 @@ export default function TaskNewPage() {
             if (otherField) extra.push({ fieldId: otherField.id, value: careerSummary3pt.trim() });
           }
         }
+
+        // 納品形式は1回だけ入力させ、3カテゴリすべてへ同じ値で格納する（fieldId はカテゴリごとに別）。
+        const deliveryField = cat.fields.find((f) => f.label === DELIVERY_FORMAT_LABEL);
+        if (deliveryField && deliveryFormat3pt) {
+          extra.push({ fieldId: deliveryField.id, value: deliveryFormat3pt });
+        }
         return [...normalFvs, ...extra];
       };
 
@@ -833,7 +1026,10 @@ export default function TaskNewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           candidateId: candidateId,
-          assigneeId: assigneeIds[0],
+          // T-162: 以前は assigneeIds[0] だけを送っていたため、Step3 で3名選んでも
+          // 先頭1名しか TaskAssignee に入らず、LINE WORKS 通知も1名分しか飛ばなかった。
+          assigneeIds,
+          completionType: assigneeIds.length > 1 ? completionType : "any",
           dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           priority,
           fieldValues: {
@@ -893,6 +1089,12 @@ export default function TaskNewPage() {
       setStep(0);
       return;
     }
+    // Googleフォーム作成依頼（T-171）: 求職者必須（依頼データは求職者に紐づく）
+    if (isGformRequest && !candidateId) {
+      alert("求職者を選択してください。Googleフォーム作成依頼では「求職者選択」での指定が必要です。");
+      setStep(0);
+      return;
+    }
     setSubmitting(true);
     try {
       // 追加のfieldValues
@@ -936,15 +1138,54 @@ export default function TaskNewPage() {
         if (locField && naiteiPrefecture) extraFieldValues.push({ fieldId: locField.id, value: `${naiteiRegion} ${naiteiPrefecture}` });
         const empField = selectedCategory.fields.find((f) => f.label === "雇用形態");
         if (empField && naiteiEmploymentType) extraFieldValues.push({ fieldId: empField.id, value: naiteiEmploymentType });
-        // 課金方式: 理論年収方式のときのみ理論年収を保存。紹介手数料（税抜き）は算出値を保存。
+        // 理論年収は課金方式に関係なく（固定方式でも）保存する。空なら従来どおり未保存。
+        // 紹介手数料（税抜き）は算出値を保存（固定方式では理論年収を計算に使わない）。
         const theoryField = selectedCategory.fields.find((f) => f.label === "理論年収");
-        const theoryDigits = naiteiTheoryIncome.replace(/[^\d]/g, "");
-        if (theoryField && naiteiFeeMode === "ANNUAL_RATE" && theoryDigits) {
+        const theoryDigits = onlyDigits(naiteiTheoryIncome);
+        if (theoryField && theoryDigits) {
           extraFieldValues.push({ fieldId: theoryField.id, value: theoryDigits });
         }
         const feeField = selectedCategory.fields.find((f) => f.label === "紹介手数料（税抜き）");
         if (feeField && naiteiComputedFee != null) {
           extraFieldValues.push({ fieldId: feeField.id, value: String(naiteiComputedFee) });
+        }
+      }
+
+      // Googleフォーム作成依頼（T-172追補）: 表示用3項目＋機械用 JSON（v3）をセット。
+      // 「会社別職種分類」は会社カードが1行も無ければ書き込まない（任意入力のため）。
+      if (isGformRequest && selectedCategory) {
+        const mainField = selectedCategory.fields.find((f) => f.label === "メイン経験職種カテゴリ");
+        if (mainField && gfMainCategoryText) {
+          extraFieldValues.push({ fieldId: mainField.id, value: gfMainCategoryText });
+        }
+        const compField = selectedCategory.fields.find((f) => f.label === "会社別職種分類");
+        if (compField && gfCompaniesText) {
+          extraFieldValues.push({ fieldId: compField.id, value: gfCompaniesText });
+        }
+        const memoField = selectedCategory.fields.find((f) => f.label === "その他メモ");
+        if (memoField && gfMemo.trim()) {
+          extraFieldValues.push({ fieldId: memoField.id, value: gfMemo.trim() });
+        }
+        const dataField = selectedCategory.fields.find((f) => f.label === GOOGLE_FORM_REQUEST_DATA_LABEL);
+        if (dataField) {
+          const requestData: GoogleFormRequestData = {
+            v: 3,
+            groupKey: gfGroupKey,
+            categoryValue: gfCategoryValue,
+            otherLabel: gfOtherLabel.trim(),
+            memo: gfMemo.trim(),
+            // 会社名が空 / カテゴリ未選択の行は落とす。モーダル側は会社名一致で対応付ける。
+            companies: gfCompanies
+              .filter((c) => c.name.trim() && c.categoryValue)
+              .map((c) => ({
+                name: c.name.trim(),
+                period: c.period.trim(),
+                groupKey: c.groupKey,
+                categoryValue: c.categoryValue,
+                detail: c.detail.trim(),
+              })),
+          };
+          extraFieldValues.push({ fieldId: dataField.id, value: JSON.stringify(requestData) });
         }
       }
 
@@ -1454,6 +1695,13 @@ export default function TaskNewPage() {
                 setMotivMiddleId("");
                 setMotivMiddleName("");
                 setSelectedMotivMinors([]);
+                // T-171 / T-172: Googleフォーム作成依頼のカスタム state もカテゴリ切替でリセット
+                setGfGroupKey("");
+                setGfCategoryValue("");
+                setGfOtherLabel("");
+                setGfMemo("");
+                setGfCompanies([]);
+                gfWhLoadedFor.current = null;
               };
 
               const select3pointSet = () => {
@@ -1716,7 +1964,7 @@ export default function TaskNewPage() {
             {/* テンプレートフィールド */}
             {(() => {
               const visibleFields = getVisibleFields();
-              if (visibleFields.length === 0 && !isShokumu && !isKyujinKensaku) {
+              if (visibleFields.length === 0 && !isShokumu && !isKyujinKensaku && !isGformRequest) {
                 return (
                   <p className="text-[14px] text-[#6B7280]">
                     テンプレート項目はありません。次へ進んでください。
@@ -1888,6 +2136,25 @@ export default function TaskNewPage() {
                   );
                   })}
 
+                  {/* 3点セット共通: 納品形式（1回だけ入力し3タスクへ同値で保存）。1/3 のサブステップにのみ表示。 */}
+                  {is3pointSet && subStep3pt === 0 && deliveryFormatOptions.length > 0 && (
+                    <div className="rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                      <label className="mb-1 block text-[13px] font-medium text-[#374151]">
+                        {DELIVERY_FORMAT_LABEL}<span className="ml-1 text-red-500">*</span>
+                      </label>
+                      <p className="mb-2 text-[12px] text-[#9CA3AF]">3点セット共通です。履歴書・職務経歴書・推薦状の3タスクに同じ内容で登録されます。</p>
+                      <select
+                        value={deliveryFormat3pt}
+                        onChange={(e) => setDeliveryFormat3pt(e.target.value)}
+                        className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                      >
+                        {deliveryFormatOptions.map((opt) => (
+                          <option key={opt.id} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   {/* 非営業: 経歴・実績の概要 */}
                   {isShokumu && shokumuJobAxes[0]?.major && !isSalesJob && (
                     <div>
@@ -2005,6 +2272,22 @@ export default function TaskNewPage() {
                         </select>
                       </div>
 
+                      {/* 理論年収（課金方式に関係なく常時入力・保存する。数字のみ） */}
+                      <div>
+                        <label className="mb-1.5 block text-[13px] font-medium text-[#374151]">理論年収（円）</label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          step={1}
+                          value={naiteiTheoryIncome}
+                          onChange={(e) => setNaiteiTheoryIncome(onlyDigits(e.target.value))}
+                          onKeyDown={(e) => { if (["e", "E", "+", "-", "."].includes(e.key)) e.preventDefault(); }}
+                          placeholder="例: 4000000"
+                          className={selectCls}
+                        />
+                      </div>
+
                       {/* 紹介手数料（課金方式: 固定 / 理論年収） */}
                       <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
                         <p className="text-[13px] font-bold text-[#374151]">紹介手数料（税抜き）<span className="ml-1 text-red-500">*</span></p>
@@ -2020,15 +2303,9 @@ export default function TaskNewPage() {
                         </div>
                         {naiteiFeeMode === "ANNUAL_RATE" ? (
                           <>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="mb-1 block text-[12px] text-[#6B7280]">理論年収（円）</label>
-                                <input type="text" inputMode="numeric" value={naiteiTheoryIncome} onChange={(e) => setNaiteiTheoryIncome(e.target.value)} placeholder="例: 4000000" className={selectCls} />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[12px] text-[#6B7280]">手数料%</label>
-                                <input type="text" inputMode="decimal" value={naiteiFeeRate} onChange={(e) => setNaiteiFeeRate(e.target.value)} placeholder="例: 35" className={selectCls} />
-                              </div>
+                            <div className="max-w-[240px]">
+                              <label className="mb-1 block text-[12px] text-[#6B7280]">手数料%</label>
+                              <input type="text" inputMode="decimal" value={naiteiFeeRate} onChange={(e) => setNaiteiFeeRate(e.target.value)} placeholder="例: 35" className={selectCls} />
                             </div>
                             <p className="text-[13px] text-[#374151]">
                               紹介手数料（税抜き）: <span className="font-bold text-[#16A34A]">{naiteiComputedFee != null ? `¥${naiteiComputedFee.toLocaleString("ja-JP")}` : "—"}</span>
@@ -2041,6 +2318,151 @@ export default function TaskNewPage() {
                             <input type="text" inputMode="numeric" value={naiteiFixedFee} onChange={(e) => setNaiteiFixedFee(e.target.value)} placeholder="例: 1200000" className={selectCls} />
                           </div>
                         )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ===== Googleフォーム作成依頼（T-171）: カスタムUI ===== */}
+                  {isGformRequest && (
+                    <>
+                      {/* 求職者必須（Step0 未選択のまま進んだ場合の案内） */}
+                      {!selectedCandidate && (
+                        <div className="flex items-center justify-between gap-2 rounded-[6px] border border-red-300 bg-red-50 px-3 py-2 text-[13px] text-red-600">
+                          <span>求職者が未選択です。このカテゴリでは最初の「求職者選択」で対象者の指定が必要です。</span>
+                          <button type="button" onClick={() => setStep(0)} className="shrink-0 rounded-[6px] bg-white px-2 py-1 text-[12px] font-medium text-[#2563EB] border border-[#2563EB] hover:bg-[#EEF2FF]">
+                            求職者を選択
+                          </button>
+                        </div>
+                      )}
+
+                      {/* メイン経験職種カテゴリ（2段ドロップダウン・フォーム作成モーダルと同じ定数） */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <p className="text-[13px] font-bold text-[#374151]">メイン経験職種カテゴリ<span className="ml-1 text-red-500">*</span></p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <select
+                            value={gfGroupKey}
+                            onChange={(e) => { setGfGroupKey(e.target.value); setGfCategoryValue(""); setGfOtherLabel(""); }}
+                            className={selectCls}
+                          >
+                            <option value="">大項目を選択...</option>
+                            {GOOGLE_FORM_CATEGORY_GROUPS.map((g) => <option key={g.label} value={g.label}>{g.label}</option>)}
+                          </select>
+                          <select
+                            value={gfCategoryValue}
+                            onChange={(e) => setGfCategoryValue(e.target.value)}
+                            disabled={!gfGroupKey}
+                            className={`${selectCls} disabled:bg-gray-50 disabled:text-gray-400`}
+                          >
+                            <option value="">サブカテゴリを選択...</option>
+                            {(GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === gfGroupKey)?.options ?? []).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {gfCategoryValue === "other" && (
+                          <div>
+                            <label className="mb-1 block text-[12px] text-[#6B7280]">自由記述<span className="ml-1 text-red-500">*</span></label>
+                            <input
+                              type="text"
+                              value={gfOtherLabel}
+                              onChange={(e) => setGfOtherLabel(e.target.value)}
+                              placeholder="例: トラック運転手、職人 など"
+                              className={selectCls}
+                            />
+                          </div>
+                        )}
+                        {gfMainCategoryText && <p className="text-[12px] text-[#2563EB]">選択中: {gfMainCategoryText}</p>}
+                      </div>
+
+                      {/* 会社ごとの職種分類（T-172追補で復活。任意入力）
+                          会社名・在籍期間は面談ログ解析済みの職歴（WorkHistory）から即時取得。AI呼び出しは無し。 */}
+                      <div className="space-y-3 rounded-[8px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-[13px] font-bold text-[#374151]">会社ごとの職種分類<span className="ml-1 text-[11px] font-normal text-[#9CA3AF]">（任意）</span></p>
+                          {gfWhLoading && <span className="text-[12px] text-[#6B7280]">経歴を取得中…</span>}
+                        </div>
+                        <p className="text-[11px] text-[#6B7280]">
+                          面談ログの解析結果から会社名・在籍期間を自動表示しています。会社ごとに職種が違う場合はここで指定してください（未指定でも依頼は作成できます）。
+                        </p>
+
+                        {gfCompanies.length > 0 && (
+                          <div className="space-y-2">
+                            {gfCompanies.map((c, idx) => {
+                              const rowGroup = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === c.groupKey);
+                              return (
+                                <div key={idx} className="rounded-[6px] border border-[#E5E7EB] bg-white p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={c.name}
+                                      onChange={(e) => gfUpdateCompany(idx, { name: e.target.value })}
+                                      placeholder="会社名"
+                                      className="flex-1 rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={c.period}
+                                      onChange={(e) => gfUpdateCompany(idx, { period: e.target.value })}
+                                      placeholder="在籍期間"
+                                      className="w-[160px] rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    />
+                                    <button type="button" onClick={() => gfRemoveCompany(idx)} className="shrink-0 text-[12px] text-[#9CA3AF] hover:text-red-600">削除</button>
+                                  </div>
+                                  {c.jobTypeHint && (
+                                    <p className="truncate text-[11px] text-[#6B7280]" title={c.jobTypeHint}>
+                                      面談ログの職種メモ: {c.jobTypeHint}
+                                    </p>
+                                  )}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <select
+                                      value={c.groupKey}
+                                      onChange={(e) => {
+                                        const newGroup = e.target.value;
+                                        const firstSub = GOOGLE_FORM_CATEGORY_GROUPS.find((g) => g.label === newGroup)?.options[0]?.value ?? "";
+                                        gfUpdateCompany(idx, { groupKey: newGroup, categoryValue: firstSub });
+                                      }}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                    >
+                                      <option value="">大項目を選択...</option>
+                                      {GOOGLE_FORM_CATEGORY_GROUPS.map((g) => <option key={g.label} value={g.label}>{g.label}</option>)}
+                                    </select>
+                                    <select
+                                      value={c.categoryValue}
+                                      onChange={(e) => gfUpdateCompany(idx, { categoryValue: e.target.value })}
+                                      disabled={!c.groupKey}
+                                      className="rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] disabled:bg-gray-50 disabled:text-gray-400"
+                                    >
+                                      <option value="">サブカテゴリを選択...</option>
+                                      {(rowGroup?.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    </select>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={c.detail}
+                                    onChange={(e) => gfUpdateCompany(idx, { detail: e.target.value })}
+                                    placeholder="職種詳細（この会社での職種の補足・任意）"
+                                    className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[12px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <button type="button" onClick={gfAddCompany} className="text-[13px] font-medium text-[#2563EB] hover:underline">
+                          ＋ 会社を追加
+                        </button>
+                      </div>
+
+                      {/* その他メモ（会社カードに書ききれない全体の申し送り。フォーム作成モーダルのバナーに全文表示される） */}
+                      <div>
+                        <label className="mb-1 block text-[13px] font-medium text-[#374151]">その他メモ（任意）</label>
+                        <textarea
+                          rows={4}
+                          value={gfMemo}
+                          onChange={(e) => setGfMemo(e.target.value)}
+                          placeholder="会社ごとの職種の補足や申し送り事項があれば入力してください"
+                          className="w-full rounded-[6px] border border-[#D1D5DB] px-3 py-2 text-[14px] outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
+                        />
                       </div>
                     </>
                   )}
@@ -2488,6 +2910,14 @@ export default function TaskNewPage() {
                     </dd>
                   </div>
                 )
+              )}
+              {/* Googleフォーム作成依頼（T-171）: カスタム入力の確認表示 */}
+              {!is3pointSet && isGformRequest && (
+                <>
+                  <ConfirmRow label="メイン経験職種カテゴリ" value={gfMainCategoryText || "-"} />
+                  <ConfirmRow label="会社ごとの職種分類" value={gfCompaniesText || "-"} />
+                  {gfMemo.trim() && <ConfirmRow label="その他メモ" value={gfMemo.trim()} />}
+                </>
               )}
               <ConfirmRow
                 label="担当者"

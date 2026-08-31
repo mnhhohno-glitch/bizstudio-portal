@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { EmployeeBasic } from "./detail-types";
 import { calcAge, calcTenure } from "./detail-types";
 import {
@@ -15,9 +15,24 @@ import {
   AutoSaveIndicator,
   RelationSelect,
   AddressLookupButton,
+  PendingAiSaveBar,
 } from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
+
+// AI読み取りの未保存バーに出す項目ラベル（BASIC_AI_KEYS と対応）。
+const BASIC_AI_LABELS: Record<string, string> = {
+  name: "氏名",
+  furigana: "フリガナ",
+  birthday: "生年月日",
+  gender: "性別",
+  postalCode: "郵便番号",
+  address: "住所",
+  phone: "電話番号",
+  emergencyContactName: "緊急連絡先氏名",
+  emergencyContactRelation: "緊急連絡先続柄",
+  emergencyContactPhone: "緊急連絡先電話",
+};
 
 const BASIC_AI_KEYS = [
   "name",
@@ -70,9 +85,27 @@ export default function BasicInfoTab({
   const autoSave = useSectionAutoSave(employee.id, "basic", initial);
 
   // T-098: 履歴書AI読み取り（空欄のみマージ）
-  const ai = useResumeAiFill(employee.id, setForm, BASIC_AI_KEYS);
+  // AI解析はネットワーク待ちを挟むため、判定は ref で「現在の form」を読む（stale 回避）。
+  const formRef = useRef(form);
+  formRef.current = form;
+  const ai = useResumeAiFill(employee.id, setForm, BASIC_AI_KEYS, formRef);
   // T-098 追補: 全画面D&Dの解析結果配布（自タブの空欄のみマージ）
-  const dropFill = useAiFillData(aiFillData, setForm, BASIC_AI_KEYS);
+  const dropFill = useAiFillData(aiFillData, setForm, BASIC_AI_KEYS, formRef);
+
+  // T-098 追補2: AI が仮入力しただけのキーは自動保存が走らない（保存は onBlur/onChange 起点のため）。
+  // 未保存キーを保持し、ユーザーが明示的に保存できるようにする（自動保存はしない）。
+  const pendingAiKeys = useMemo(
+    () => Array.from(new Set([...ai.pendingKeys, ...dropFill.pendingKeys])),
+    [ai.pendingKeys, dropFill.pendingKeys],
+  );
+  const saveAiFilled = () => {
+    // 保存値は form の現在値（AI仮入力後に人が直した場合はその値）を使う。
+    for (const key of pendingAiKeys) {
+      autoSave.save(key, form[key as keyof typeof form]);
+    }
+    ai.clearPending();
+    dropFill.clearPending();
+  };
 
   const set = (key: keyof typeof form) => (v: string) => {
     setForm((f) => ({ ...f, [key]: v }));
@@ -123,6 +156,12 @@ export default function BasicInfoTab({
           <ResumeAiButton {...ai} />
         </div>
       </div>
+      <PendingAiSaveBar
+        pendingKeys={pendingAiKeys}
+        labels={BASIC_AI_LABELS}
+        onSave={saveAiFilled}
+        status={autoSave.status}
+      />
       <div className="grid grid-cols-4 gap-x-6 gap-y-3">
         <FormField label="社員番号">
           <TextInput value={form.employeeNumber} onChange={set("employeeNumber")} onBlur={blurSave("employeeNumber")} />
