@@ -116,9 +116,11 @@ export async function GET(req: Request) {
   if (tab === "proposal") {
     const jeWhere: Prisma.JobEntryWhereInput = { candidate: candFilter, archivedAt: null, jobIntroDate: range };
     // T-161 R1/R2: 提案 = 出力した行 ∪ 出力せず紹介済みにした行（introducedAt のみ）。本人応募は除外。
+    // T-189: 自動引き当て由来（autoSourcedAt あり）もCA実績から除外（現状0件・数値不変）。
     const cfWhere: Prisma.CandidateFileWhereInput = {
       category: "BOOKMARK",
       candidate: candFilter,
+      autoSourcedAt: null,
       NOT: { origin: "candidate", driveFileId: null },
       OR: [
         { lastExportedAt: range },
@@ -153,7 +155,7 @@ export async function GET(req: Request) {
         SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
         WHERE ${empPredSql} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
-          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL) AND cf.auto_sourced_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2 WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
               AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date

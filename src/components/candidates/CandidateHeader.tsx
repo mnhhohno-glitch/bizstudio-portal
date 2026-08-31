@@ -38,6 +38,7 @@ type Candidate = {
   desiredPrefecture2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
+  autoRecommendEnabled: boolean;
   createdAt: string;
 };
 
@@ -60,6 +61,10 @@ interface CandidateHeaderProps {
   oneDriveFolderUrl?: string | null;
   /** T-159 Phase 4: 即時同期の完了後に呼ぶ。求職者データとファイル一覧を取り直す。 */
   onOneDriveSynced?: () => void;
+  /** T-189 Phase1: おすすめ配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ true） */
+  showAutoRecommendToggle?: boolean;
+  /** T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う） */
+  onAutoRecommendToggle?: (enabled: boolean) => Promise<void> | void;
 }
 
 function genderLabel(g: string | null) {
@@ -147,10 +152,13 @@ export default function CandidateHeader({
   googleFormDisabledReason,
   oneDriveFolderUrl,
   onOneDriveSynced,
+  showAutoRecommendToggle,
+  onAutoRecommendToggle,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
   const [oneDriveSyncing, setOneDriveSyncing] = useState(false);
+  const [autoRecommendSaving, setAutoRecommendSaving] = useState(false);
 
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
@@ -282,6 +290,33 @@ export default function CandidateHeader({
                   {candidate.supportSubStatus || "-"}
                 </span>
               </>
+            )}
+            {/* T-189 Phase1: おすすめ配信トグル（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ表示） */}
+            {showAutoRecommendToggle && (
+              <div className="flex flex-col items-center gap-0.5">
+                <button
+                  disabled={autoRecommendSaving}
+                  onClick={async () => {
+                    if (autoRecommendSaving) return;
+                    setAutoRecommendSaving(true);
+                    try {
+                      await onAutoRecommendToggle?.(!candidate.autoRecommendEnabled);
+                    } finally {
+                      setAutoRecommendSaving(false);
+                    }
+                  }}
+                  className={`w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate disabled:opacity-50 ${
+                    candidate.autoRecommendEnabled
+                      ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200"
+                      : "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200"
+                  }`}
+                >
+                  おすすめ配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
+                </button>
+                <span className="text-[10px] leading-tight text-gray-400 w-[130px] text-center">
+                  配信条件は求人サイトで保存（未保存の場合は配信されません）
+                </span>
+              </div>
             )}
             <button
               onClick={onEditBasicInfo}

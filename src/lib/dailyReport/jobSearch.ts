@@ -31,7 +31,8 @@ export async function computeJobSearchDay(userId: string, dateStr: string): Prom
     SELECT
       COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}')::int bm,
       COUNT(*) FILTER (WHERE (COALESCE(last_exported_at, introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date = DATE '${dateStr}'
-                         AND NOT (origin = 'candidate' AND drive_file_id IS NULL))::int exp
+                         AND NOT (origin = 'candidate' AND drive_file_id IS NULL)
+                         AND auto_sourced_at IS NULL)::int exp
     FROM candidate_files
     WHERE category = 'BOOKMARK' AND uploaded_by_user_id = '${userId}'`);
   const ratingRows = await prisma.$queryRawUnsafe<{ r: string; n: number }[]>(`
