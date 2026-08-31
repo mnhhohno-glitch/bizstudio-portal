@@ -779,10 +779,10 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v6。Phase 4 で Deepgram 差し替え・イベント駆動判定・UI拡大に改訂）。
+要件の正: `docs/mendan-support/requirements.md`（v7。Phase 5 でキャリアシート事前投入・確認ポイント・判定調整に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
@@ -838,3 +838,29 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     （予約は常に1本・応答待ち中に発火した分は完了後に予約し直す）。スキップ条件（新規発話20字未満）・explainedTerms・
     existingJobs/existingReason・カード更新ロジック・手動ボタン2つは Phase 3 のまま。auto-scan API のプロンプトも無変更。
   - UI: 右カラム（解説カード）を主役化。横幅比率 ログ 40% : カード 60%（`flex-[2]` : `flex-[3]`）、カード本文は `text-base leading-8`。
+- **事前情報＋確認ポイント（Phase 5）**: 実面談テストで判明した課題（次に聞くことが出ない・用語カードの誤検知・
+  業務内容が一般論・事前資料未使用による文脈誤読）への対応。
+  - `GET /api/interview-support/[interviewId]/prior-info`（`getSessionUser` 認証・`?fileId=` で明示指定可）…
+    面談→求職者の CandidateFile（MEETING/ORIGINAL/BS_DOCUMENT/APPLICATION・PDF・非アーカイブ・driveFileId あり）から
+    ファイル名に**キャリアシート/職務経歴/レジュメ/履歴書**を含むものを検索し、この優先順→新しい順で自動選択。
+    テキスト抽出は `extractTextFromPdf`（pdf-parse→pdfjs-dist。**AI不使用**）で、T-164 の `parsedText` キャッシュが
+    あれば流用（**書き込みはしない**＝advisor-context のAI解析パイプラインと混ぜない）。抽出 **200字未満はスキャンPDF
+    とみなし `{ available: false }`**。成功時は先頭 **6,000字**に切り詰めた `text`＋`candidates`（複数候補の一覧）を返す。
+  - 支援画面: 起動時に prior-info を取得し上部バーに「事前情報: あり（ファイル名）／なし」を表示。候補が複数の時だけ
+    プルダウン（＋「使わない」）。開始後は切り替え不可（`sessionStarted`）。
+  - **下書き生成（bootstrap）**: 「開始」後、事前情報がある場合のみ auto-scan を text 空＋`priorInfoText` で1回呼ぶ
+    （下書きモード。取得完了が開始より遅れても effect が拾う）。AIは事前情報のみから jobs（＋記載があれば reason）を
+    source="prior" で生成。terms は生成しない（サーバー側でも保険で空にする）。
+  - **auto-scan の Phase 5 拡張**: リクエストに `priorInfoText`（≦6,000字。面談中は byte 一致の同一文字列を送り続ける）。
+    system は「固定指示」＋「事前情報」の**2ブロックそれぞれに cache_control**。jobs/reason のレスポンスに
+    `questions: string[]`（新人CAがそのまま読み上げられる深掘り質問1〜3件。回答済みは外して入れ替える更新型）と
+    `source: "prior"|"conversation"` を追加。existingJobs に questions/source、existingReason は `{ text, questions }`
+    オブジェクト（旧 string も受理）。max_tokens 600→900。
+  - **判定調整（Phase 5）**: 職種名・国家資格名は terms に出さず jobs で扱う／文の途中で切れた語・単独の1語・文脈と
+    噛み合わない語は文字起こしの断片として terms にしない（クライアント側でも業務内容カードの title・key に含まれる
+    term を表示前に除外＝二重防御）／jobs 要約は「実際に何をしていたか」で、職種名のみの段階は1〜2行＋
+    「（本人の具体的な業務はまだ未聴取）」注記、強みは根拠がある時だけ。
+  - カードUI: 業務内容・転職理由カードに根拠ラベル（「事前情報」グレー／「会話で確認済み」緑）と「確認ポイント」欄
+    （本文より小さめの箇条書き）。保存は explanations の auto-job/auto-reason 要素に `questions`/`source` を追加
+    （Json 相乗り・テーブル/保存API無変更）。`InterviewSupportLogTab` の閲覧でもラベル・確認ポイントを表示
+    （Phase 4 以前の保存データは optional 扱いで無表示）。

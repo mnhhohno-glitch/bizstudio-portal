@@ -12,6 +12,10 @@
 // - Phase 4: 文字起こしエンジンを Deepgram（useDeepgramTranscription）に差し替え。起動時に stt-token API で
 //   利用可否を判定し、使えなければ Chrome 内蔵（useSpeechTranscription）へ自動フォールバック。
 //   自動検知は30秒タイマーをやめ、発話確定のたびに起動するイベント駆動（連続実行は最低5秒空ける）。
+// - Phase 5: 事前情報（キャリアシート等）。起動時に prior-info API で取得して上部バーに表示し、
+//   「開始」時に事前情報のみで下書きカードを1回生成（bootstrap）。以後の auto-scan にも毎回
+//   同じ priorInfoText を添える（byte一致で prompt cache に乗る）。カードは questions（確認ポイント）と
+//   source（事前情報/会話で確認済み）を持つ。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
@@ -22,6 +26,7 @@ import ExplainCards, {
   type ExplainCard,
   type AutoJobCard,
   type AutoReasonCard,
+  type AutoCardSource,
 } from "./ExplainCards";
 
 // 「直近30秒」の切り出し幅(ms)。実測を見て調整する設定値。
@@ -45,6 +50,15 @@ type InterviewInfo = {
   interviewDate: string | null;
   interviewCount: number | null;
 };
+
+/* ---- Phase 5: 事前情報（キャリアシート等） ---- */
+type PriorCandidateFile = { id: string; fileName: string };
+type PriorInfoState =
+  // loading: prior-info API 応答待ち / none: 該当ファイルなし or 抽出不可 / off: ユーザーが「使わない」を選択
+  | { status: "loading" }
+  | { status: "none"; candidates: PriorCandidateFile[] }
+  | { status: "off"; candidates: PriorCandidateFile[] }
+  | { status: "ready"; fileId: string; fileName: string; text: string; candidates: PriorCandidateFile[] };
 
 function sessionStorageKey(interviewId: string): string {
   return `interview-support-log:${interviewId}`;
@@ -85,6 +99,49 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const [jobCards, setJobCards] = useState<AutoJobCard[]>([]);
   const [reasonCard, setReasonCard] = useState<AutoReasonCard | null>(null);
 
+  /* ---- Phase 5: 事前情報（キャリアシート等）の取得と選択 ---- */
+  const [priorInfo, setPriorInfo] = useState<PriorInfoState>({ status: "loading" });
+  // auto-scan から常に最新の事前情報テキストを読むための鏡（"ready" 以外は null）。
+  const priorTextRef = useRef<string | null>(null);
+  useEffect(() => {
+    priorTextRef.current = priorInfo.status === "ready" ? priorInfo.text : null;
+  }, [priorInfo]);
+  // 「開始」初回押下でセッションが動き出したら事前情報の切り替えを固定する
+  // （途中で差し替えると下書きと以後のスキャン前提がずれるため）。
+  const [sessionStarted, setSessionStarted] = useState(false);
+
+  const loadPriorInfo = useCallback(
+    async (fileId?: string) => {
+      setPriorInfo({ status: "loading" });
+      try {
+        const url = `/api/interview-support/${interviewId}/prior-info${fileId ? `?fileId=${encodeURIComponent(fileId)}` : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = (await res.json()) as {
+          available?: boolean;
+          fileId?: string;
+          fileName?: string;
+          text?: string;
+          candidates?: PriorCandidateFile[];
+        };
+        const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+        if (data.available && data.fileId && data.fileName && data.text) {
+          setPriorInfo({ status: "ready", fileId: data.fileId, fileName: data.fileName, text: data.text, candidates });
+        } else {
+          setPriorInfo({ status: "none", candidates });
+        }
+      } catch {
+        // 事前情報が無くても本体は動く。失敗は「なし」として静かに続行。
+        setPriorInfo({ status: "none", candidates: [] });
+      }
+    },
+    [interviewId]
+  );
+
+  useEffect(() => {
+    void loadPriorInfo();
+  }, [loadPriorInfo]);
+
   /* ---- Phase 2: DBへの自動保存 ---- */
   // 「開始」初回押下で確定するセッション識別子。以後の保存はすべてこのIDへの upsert（冪等）。
   const dbSessionRef = useRef<{ id: string; startedAt: number } | null>(null);
@@ -116,11 +173,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           sourceText: c.source,
           resultText: c.text,
         })),
+        // Phase 5: questions（確認ポイント）と source（事前情報/会話で確認済み）も保存する（Json相乗り・形式拡張のみ）。
         ...curJobs.map((j) => ({
           t: new Date(j.updatedAt).toISOString(),
           mode: "auto-job" as const,
           sourceText: j.title,
           resultText: j.text,
+          questions: j.questions,
+          source: j.source,
         })),
         ...(curReason
           ? [{
@@ -128,6 +188,8 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               mode: "auto-reason" as const,
               sourceText: "転職理由",
               resultText: curReason.text,
+              questions: curReason.questions,
+              source: curReason.source,
             }]
           : []),
       ].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
@@ -169,14 +231,31 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     return () => clearInterval(timer);
   }, [listening, saveSession]);
 
+  // Phase 5: 「開始」時の下書き生成（事前情報のみで auto-scan を1回呼ぶ）。実体は runAutoScan だが
+  // 定義順の都合で ref 経由で呼ぶ（scheduleAutoScanRef と同じ流儀）。セッション中1回だけ。
+  const bootstrapDoneRef = useRef(false);
+  const runBootstrapScanRef = useRef<() => void>(() => {});
+
   const handleStart = useCallback(() => {
     if (!dbSessionRef.current) {
       dbSessionRef.current = { id: crypto.randomUUID(), startedAt: Date.now() };
     }
     // 停止→再開は同一セッションの続きとして扱う（「終了済み」を取り消す）。
     endedAtRef.current = null;
+    // Phase 5: 下書き生成は sessionStarted を見る effect 側で発火する（事前情報の取得完了が
+    // 「開始」押下より遅れても取りこぼさないため）。
+    setSessionStarted(true);
     start();
   }, [start]);
+
+  // Phase 5: 事前情報がある場合のみ、開始後に1回だけ下書きカードを生成する。
+  // 認識開始はブロックしない（非同期で走らせ、結果はカードとして流れ込む）。
+  useEffect(() => {
+    if (!sessionStarted || bootstrapDoneRef.current) return;
+    if (priorInfo.status !== "ready") return;
+    bootstrapDoneRef.current = true;
+    runBootstrapScanRef.current();
+  }, [sessionStarted, priorInfo]);
 
   const handleStop = useCallback(() => {
     stop();
@@ -338,12 +417,15 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const explainedTermsRef = useRef<string[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runAutoScan = useCallback(async () => {
+  const runAutoScan = useCallback(async (opts?: { bootstrap?: boolean }) => {
     if (scanInFlightRef.current) return;
+    const bootstrap = opts?.bootstrap ?? false;
     const { entries: curEntries, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
-    const newEntries = curEntries.slice(scannedCountRef.current);
+    // Phase 5 bootstrap: 会話開始前の下書き生成。新規発話なし・事前情報のみで呼ぶ。
+    const newEntries = bootstrap ? [] : curEntries.slice(scannedCountRef.current);
     const text = newEntries.map((e) => e.text).join("\n");
-    if (text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
+    if (!bootstrap && text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
+    if (bootstrap && !priorTextRef.current) return; // 下書きは事前情報がある時だけ
     const scannedCount = curEntries.length;
     scanInFlightRef.current = true;
     try {
@@ -352,27 +434,55 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
+          // Phase 5: 事前情報は毎回同じ文字列を添える（byte一致で prompt cache に乗せる）。
+          priorInfoText: priorTextRef.current ?? undefined,
           explainedTerms: explainedTermsRef.current,
-          existingJobs: curJobs.map((j) => ({ key: j.key, title: j.title, text: j.text })),
-          existingReason: curReason?.text ?? null,
+          existingJobs: curJobs.map((j) => ({
+            key: j.key,
+            title: j.title,
+            text: j.text,
+            questions: j.questions,
+            source: j.source,
+          })),
+          existingReason: curReason ? { text: curReason.text, questions: curReason.questions } : null,
         }),
       });
       if (!res.ok) return; // 自動フローはエラーを画面に出さない（次回スキャンで回復）
       const data = (await res.json()) as {
         terms?: Array<{ term?: string; text?: string }>;
-        jobs?: Array<{ key?: string; title?: string; text?: string }>;
-        reason?: { text?: string } | null;
+        jobs?: Array<{ key?: string; title?: string; text?: string; questions?: string[]; source?: string }>;
+        reason?: { text?: string; questions?: string[]; source?: string } | null;
       };
-      scannedCountRef.current = scannedCount;
+      if (!bootstrap) scannedCountRef.current = scannedCount;
 
       let applied = false;
       const now = Date.now();
+      // Phase 5: source の既定値。下書きは事前情報由来、通常スキャンは会話由来。
+      const fallbackSource: AutoCardSource = bootstrap ? "prior" : "conversation";
+      const asCardSource = (v: string | undefined): AutoCardSource =>
+        v === "prior" || v === "conversation" ? v : fallbackSource;
+      const asQuestions = (v: string[] | undefined): string[] =>
+        (Array.isArray(v) ? v : []).filter((q) => typeof q === "string" && q.trim() !== "").slice(0, 3);
+
+      // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
+      const jobs = (data.jobs ?? []).flatMap((j) =>
+        j?.key && j?.text
+          ? [{ key: j.key, title: j.title ?? "", text: j.text, questions: asQuestions(j.questions), source: asCardSource(j.source) }]
+          : []
+      );
 
       // ①用語: 時系列エリアに完成カードとして積む。解説済みは再解説しない。
+      // Phase 5 保険: 既存/今回の業務内容カードの title・key に含まれる語（職種名等）は用語カードにしない
+      // （プロンプトでも禁止しているが、すり抜けをクライアント側で最終除外する）。
+      const jobTitleTexts = [
+        ...curJobs.flatMap((j) => [j.title, j.key]),
+        ...jobs.flatMap((j) => [j.title, j.key]),
+      ].filter(Boolean);
       const newTermCards: ExplainCard[] = [];
       for (const t of (data.terms ?? []).slice(0, 2)) {
         if (!t?.term || !t?.text) continue;
         if (explainedTermsRef.current.includes(t.term)) continue;
+        if (jobTitleTexts.some((title) => title.includes(t.term!))) continue;
         explainedTermsRef.current = [...explainedTermsRef.current, t.term].slice(-EXPLAINED_TERMS_MAX);
         cardSeqRef.current += 1;
         newTermCards.push({
@@ -390,10 +500,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         setCards((prev) => [...newTermCards, ...prev]);
       }
 
-      // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
-      const jobs = (data.jobs ?? []).flatMap((j) =>
-        j?.key && j?.text ? [{ key: j.key, title: j.title ?? "", text: j.text }] : []
-      );
       if (jobs.length > 0) {
         applied = true;
         setJobCards((prev) => {
@@ -401,9 +507,25 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           for (const j of jobs) {
             const idx = next.findIndex((c) => c.key === j.key);
             if (idx >= 0) {
-              next[idx] = { ...next[idx], title: j.title || next[idx].title, text: j.text, updatedAt: now, highlight: true };
+              next[idx] = {
+                ...next[idx],
+                title: j.title || next[idx].title,
+                text: j.text,
+                questions: j.questions,
+                source: j.source,
+                updatedAt: now,
+                highlight: true,
+              };
             } else {
-              next.push({ key: j.key, title: j.title || "業務内容", text: j.text, updatedAt: now, highlight: true });
+              next.push({
+                key: j.key,
+                title: j.title || "業務内容",
+                text: j.text,
+                questions: j.questions,
+                source: j.source,
+                updatedAt: now,
+                highlight: true,
+              });
             }
           }
           return next;
@@ -413,7 +535,13 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       // ③転職理由: 全体で1枚の更新型（統合済みの最新版で置き換え）。
       if (data.reason?.text) {
         applied = true;
-        setReasonCard({ text: data.reason.text, updatedAt: now, highlight: true });
+        setReasonCard({
+          text: data.reason.text,
+          questions: asQuestions(data.reason.questions),
+          source: asCardSource(data.reason.source),
+          updatedAt: now,
+          highlight: true,
+        });
       }
 
       if (applied) {
@@ -456,6 +584,10 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   useEffect(() => {
     scheduleAutoScanRef.current = scheduleAutoScan;
   }, [scheduleAutoScan]);
+  // Phase 5: 「開始」時の下書き生成の実体（handleStart は定義順の都合で ref 経由で呼ぶ）。
+  useEffect(() => {
+    runBootstrapScanRef.current = () => void runAutoScan({ bootstrap: true });
+  }, [runAutoScan]);
 
   useEffect(() => {
     if (!listening) return;
@@ -514,6 +646,37 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
                 "読み込み中..."
               )}
             </span>
+          )}
+          {/* Phase 5: 事前情報（キャリアシート等）の有無。複数候補がある時だけ選択プルダウンを出す。 */}
+          <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+            {priorInfo.status === "loading"
+              ? "事前情報: 確認中…"
+              : priorInfo.status === "ready"
+                ? `事前情報: あり（${priorInfo.fileName}）`
+                : priorInfo.status === "off"
+                  ? "事前情報: 使わない"
+                  : "事前情報: なし"}
+          </span>
+          {priorInfo.status !== "loading" && priorInfo.candidates.length > 1 && (
+            <select
+              value={priorInfo.status === "ready" ? priorInfo.fileId : "__none__"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__none__") {
+                  setPriorInfo((prev) => (prev.status === "loading" ? prev : { status: "off", candidates: prev.candidates }));
+                } else {
+                  void loadPriorInfo(v);
+                }
+              }}
+              disabled={sessionStarted}
+              title={sessionStarted ? "開始後は事前情報を切り替えられません" : "使用する事前情報ファイルを選択"}
+              className="shrink-0 max-w-56 truncate rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600 disabled:opacity-50"
+            >
+              {priorInfo.candidates.map((c) => (
+                <option key={c.id} value={c.id}>{c.fileName}</option>
+              ))}
+              <option value="__none__">使わない</option>
+            </select>
           )}
         </div>
         <div className="flex items-center gap-3">
