@@ -4,8 +4,10 @@
 // useSpeechTranscription（Chrome内蔵）と同一インターフェースで、画面側はエンジンを差し替えるだけで動く。
 // - マイク音声を MediaRecorder（webm/opus）で約250msごとの小チャンクにして WebSocket で Deepgram へ送る。
 //   コンテナ付き音声のため encoding/sample_rate の指定は不要（Deepgram 側で自動判別）。
-// - 認証は /api/interview-support/stt-token が返す短時間有効トークンを access_token クエリで渡す
-//   （永続キーはブラウザに来ない）。トークンは接続時のみ必要で、再接続のたびに取り直す。
+// - 認証は /api/interview-support/stt-token が返す短時間有効トークン(JWT)を
+//   Sec-WebSocket-Protocol: ["bearer", <JWT>] で渡す（永続キーはブラウザに来ない）。
+//   ※ access_token クエリでの接続は本番実測でハンドシェイク拒否される（Deepgram側に記録も残らない）。
+//   トークンは接続時のみ必要で、再接続のたびに取り直す。
 // - interim（未確定）は「現在の発話行」として都度差し替え、is_final で確定ログに積む。
 // - 接続断・エラー時は短い待機を挟んで自動再接続。ユーザーの「停止」では再接続しない。
 
@@ -30,7 +32,7 @@ type DeepgramResultMessage = {
   channel?: { alternatives?: Array<{ transcript?: string }> };
 };
 
-function buildListenUrl(accessToken: string): string {
+function buildListenUrl(): string {
   const params = new URLSearchParams({
     model: DEEPGRAM_MODEL,
     language: DEEPGRAM_LANGUAGE,
@@ -38,7 +40,6 @@ function buildListenUrl(accessToken: string): string {
     endpointing: String(ENDPOINTING_MS),
     punctuate: "true",
     smart_format: "true",
-    access_token: accessToken,
   });
   return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 }
@@ -59,6 +60,11 @@ export function useDeepgramTranscription() {
   const [supported, setSupported] = useState(true);
   // 接続断時にこの値を進めて下の effect を回し直し、トークン取得から接続をやり直す。
   const [restartTick, setRestartTick] = useState(0);
+  // Deepgram から最初のメッセージ（Metadata / Results）を受信できているか。
+  // 「認識中（緑）」は onopen ではなくこれで判定する（緑なのに何も起きない状態を作らない）。
+  const [receiving, setReceiving] = useState(false);
+  // 接続失敗・トークン発行失敗・異常切断の間、上部バーに出し続けるエラー文言。回復（受信再開）で消える。
+  const [engineError, setEngineError] = useState<string | null>(null);
   const idSeqRef = useRef(0);
 
   useEffect(() => {
@@ -82,7 +88,10 @@ export function useDeepgramTranscription() {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch {
         // マイク拒否・デバイス無し。再接続しても失敗し続けるため停止に倒す。
-        if (!cancelled) setListening(false);
+        if (!cancelled) {
+          setEngineError("マイクを使用できません（許可設定・デバイスを確認してください）");
+          setListening(false);
+        }
         return;
       }
       if (cancelled) {
@@ -107,6 +116,7 @@ export function useDeepgramTranscription() {
       }
       if (!accessToken) {
         // キーが外された等で発行できなくなった場合。少し待って再試行（次回発行できれば復帰）。
+        setEngineError("一時トークンの発行に失敗しました（自動で再試行します）");
         stream.getTracks().forEach((t) => t.stop());
         scheduleReconnect();
         return;
@@ -114,7 +124,8 @@ export function useDeepgramTranscription() {
 
       // 3) WebSocket 接続 → 開通後に MediaRecorder 開始
       //    （webm はストリーム先頭にヘッダを持つため、接続ごとに Recorder も作り直す）
-      ws = new WebSocket(buildListenUrl(accessToken));
+      //    認証は bearer サブプロトコル（access_token クエリは拒否される・本番実測）。
+      ws = new WebSocket(buildListenUrl(), ["bearer", accessToken]);
       ws.onopen = () => {
         if (cancelled || !stream) return;
         const mimeType = pickRecorderMimeType();
@@ -128,11 +139,18 @@ export function useDeepgramTranscription() {
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) ws.send(e.data);
         };
-        recorder.onerror = () => scheduleReconnect();
+        recorder.onerror = () => {
+          setEngineError("音声の取得に失敗しました（自動で再接続します）");
+          scheduleReconnect();
+        };
         recorder.start(MEDIA_CHUNK_MS);
       };
       ws.onmessage = (event) => {
         if (cancelled) return;
+        // Metadata / Results を問わず、最初のメッセージ受信＝実際に会話できている証拠。
+        // ここで初めて「認識中（緑）」にし、出ていたエラーを消す。
+        setReceiving(true);
+        setEngineError(null);
         let msg: DeepgramResultMessage;
         try {
           msg = JSON.parse(String(event.data)) as DeepgramResultMessage;
@@ -158,11 +176,18 @@ export function useDeepgramTranscription() {
         }
       };
       // 切断・エラー時は再接続（cancelled = ユーザー停止時は scheduleReconnect が何もしない）。
-      ws.onclose = () => {
+      // 認証拒否等はハンドシェイク失敗として onerror → onclose の順で来る。緑を消しエラーを出し続ける。
+      ws.onclose = (e) => {
         setInterimText("");
+        setReceiving(false);
+        setEngineError(`接続が切断されました（自動で再接続します）code=${e.code}`);
         scheduleReconnect();
       };
-      ws.onerror = () => scheduleReconnect();
+      ws.onerror = () => {
+        setReceiving(false);
+        setEngineError("Deepgram に接続できません（自動で再接続します）");
+        scheduleReconnect();
+      };
     })();
 
     return () => {
@@ -202,12 +227,15 @@ export function useDeepgramTranscription() {
       setSupported(false);
       return;
     }
+    setEngineError(null);
     setListening(true);
   }, []);
 
   const stop = useCallback(() => {
     setListening(false);
     setInterimText("");
+    setReceiving(false);
+    setEngineError(null); // 停止は明示操作。エラー表示は持ち越さない
   }, []);
 
   // sessionStorage 退避分の復元用（useSpeechTranscription と同じ約束）。
@@ -215,5 +243,5 @@ export function useDeepgramTranscription() {
     setEntries((prev) => (prev.length > 0 ? prev : saved));
   }, []);
 
-  return { entries, interimText, listening, supported, start, stop, restore };
+  return { entries, interimText, listening, supported, start, stop, restore, receiving, engineError };
 }

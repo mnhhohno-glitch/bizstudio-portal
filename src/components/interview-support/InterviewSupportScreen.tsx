@@ -73,7 +73,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     };
   }, []);
   const active = engine === "deepgram" ? deepgram : speech;
-  const { entries, interimText, listening, supported, start, stop, restore } = active;
+  const { entries, interimText, listening, supported, start, stop, restore, receiving, engineError } = active;
 
   const [info, setInfo] = useState<InterviewInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -517,6 +517,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           )}
         </div>
         <div className="flex items-center gap-3">
+          {/* Phase 4 fix: 接続失敗・トークン発行失敗・異常切断は赤字で出し続ける（受信回復で消える）。
+              「緑なのに何も起きない」状態を作らないための必須表示。 */}
+          {engineError && (
+            <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              文字起こしエラー: {engineError}
+            </span>
+          )}
           {saveFailed && (
             <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
               <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
@@ -527,14 +535,24 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
             {engine === null ? "エンジン確認中…" : engine === "deepgram" ? "Deepgram" : "ブラウザ内蔵"}
           </span>
+          {/* Phase 4 fix: 「認識中（緑）」は Deepgram から最初のメッセージを受信してから。
+              それまでは「接続中…」（内蔵方式は receiving=listening のため従来どおり即緑）。 */}
           <span className="flex items-center gap-1.5 text-sm">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${
-                listening ? "bg-green-500 animate-pulse" : "bg-gray-300"
+                listening && receiving
+                  ? "bg-green-500 animate-pulse"
+                  : listening
+                    ? "bg-amber-400 animate-pulse"
+                    : "bg-gray-300"
               }`}
             />
-            <span className={listening ? "text-green-700" : "text-gray-500"}>
-              {listening ? "認識中" : "停止中"}
+            <span
+              className={
+                listening && receiving ? "text-green-700" : listening ? "text-amber-700" : "text-gray-500"
+              }
+            >
+              {listening && receiving ? "認識中" : listening ? "接続中…" : "停止中"}
             </span>
           </span>
           {listening ? (
