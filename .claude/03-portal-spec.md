@@ -779,10 +779,10 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v5。Phase 3 で自動検知3種カード方式に改訂）。
+要件の正: `docs/mendan-support/requirements.md`（v7。Phase 5 でキャリアシート事前投入・確認ポイント・判定調整に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
@@ -818,3 +818,49 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     更新時は背景色 transition で1.5秒ハイライト。希望条件・日程調整・雑談は検知しない（沈黙が正解）。
   - 保存は既存 explanations（Json）に相乗り。用語=1件ずつ、②③=**保存時点の最新版のみ**（更新履歴は積まない。
     定期保存時にクライアントが最新状態から組み立てる）。保存API・テーブルは無変更。
+- **Deepgram 連携（Phase 4）**: 文字起こしの主エンジンを Deepgram ストリーミングに差し替え（内蔵方式はフォールバックとして併存）。
+  - `POST /api/interview-support/stt-token`（`getSessionUser` 認証）… サーバー環境変数 **`DEEPGRAM_API_KEY`** で
+    Deepgram `POST /v1/auth/grant` を呼び、短時間有効トークン（TTL 60秒）を返す。永続キーはブラウザに渡さない。
+    キー未設定・発行失敗・タイムアウト(5秒)は `{ available: false }`。
+  - `useDeepgramTranscription.ts` … `useSpeechTranscription` と**同一インターフェース**。MediaRecorder（webm/opus・250msチャンク）→
+    WebSocket `wss://api.deepgram.com/v1/listen?model=nova-3&language=ja&interim_results=true&endpointing=300&punctuate=true&smart_format=true`。
+    **認証は `Sec-WebSocket-Protocol: ["bearer", <一時トークン>]`**（`access_token` クエリはハンドシェイク拒否される・本番実測 2026-08-31。
+    拒否時は Deepgram 側にリクエスト記録すら残らない）。
+    interim は差し替え表示・`is_final` で確定ログに追加。接続断は1秒待って自動再接続（トークン・Recorder とも作り直し。webm はストリーム
+    先頭にヘッダを持つため Recorder の使い回し不可）。「停止」は CloseStream 送信→ WS/Recorder/マイクをクローズし再接続しない。
+    「認識中（緑）」は最初のメッセージ受信（`receiving`）で判定し、それまでは「接続中…」。接続・トークン・音声取得の失敗は
+    `engineError` として上部バーに赤字表示し続ける（受信回復で消える。緑なのに無反応、を作らない）。
+  - エンジン切替: 画面起動時に stt-token を1回呼んで判定（`available: true` → Deepgram / それ以外 → 内蔵）。判定完了まで「開始」は
+    無効。上部バーに使用中エンジン名（「Deepgram」/「ブラウザ内蔵」）を小さく表示。**フックは両方マウント**して engine で選ぶ
+    （フックの条件呼び出し不可のため。使わない側は start しない限り不活性）。
+  - **自動検知のイベント駆動化（Phase 4）**: 30秒タイマー（旧 `AUTO_SCAN_INTERVAL_MS`）を廃止し、**発話が確定するたび**に
+    auto-scan を予約起動。直前のスキャン完了から最低5秒（`AUTO_SCAN_COOLDOWN_MS`）は待ち、待ち中の確定発話は次の1回にまとめて送る
+    （予約は常に1本・応答待ち中に発火した分は完了後に予約し直す）。スキップ条件（新規発話20字未満）・explainedTerms・
+    existingJobs/existingReason・カード更新ロジック・手動ボタン2つは Phase 3 のまま。auto-scan API のプロンプトも無変更。
+  - UI: 右カラム（解説カード）を主役化。横幅比率 ログ 40% : カード 60%（`flex-[2]` : `flex-[3]`）、カード本文は `text-base leading-8`。
+- **事前情報＋確認ポイント（Phase 5）**: 実面談テストで判明した課題（次に聞くことが出ない・用語カードの誤検知・
+  業務内容が一般論・事前資料未使用による文脈誤読）への対応。
+  - `GET /api/interview-support/[interviewId]/prior-info`（`getSessionUser` 認証・`?fileId=` で明示指定可）…
+    面談→求職者の CandidateFile（MEETING/ORIGINAL/BS_DOCUMENT/APPLICATION・PDF・非アーカイブ・driveFileId あり）から
+    ファイル名に**キャリアシート/職務経歴/レジュメ/履歴書**を含むものを検索し、この優先順→新しい順で自動選択。
+    テキスト抽出は `extractTextFromPdf`（pdf-parse→pdfjs-dist。**AI不使用**）で、T-164 の `parsedText` キャッシュが
+    あれば流用（**書き込みはしない**＝advisor-context のAI解析パイプラインと混ぜない）。抽出 **200字未満はスキャンPDF
+    とみなし `{ available: false }`**。成功時は先頭 **6,000字**に切り詰めた `text`＋`candidates`（複数候補の一覧）を返す。
+  - 支援画面: 起動時に prior-info を取得し上部バーに「事前情報: あり（ファイル名）／なし」を表示。候補が複数の時だけ
+    プルダウン（＋「使わない」）。開始後は切り替え不可（`sessionStarted`）。
+  - **下書き生成（bootstrap）**: 「開始」後、事前情報がある場合のみ auto-scan を text 空＋`priorInfoText` で1回呼ぶ
+    （下書きモード。取得完了が開始より遅れても effect が拾う）。AIは事前情報のみから jobs（＋記載があれば reason）を
+    source="prior" で生成。terms は生成しない（サーバー側でも保険で空にする）。
+  - **auto-scan の Phase 5 拡張**: リクエストに `priorInfoText`（≦6,000字。面談中は byte 一致の同一文字列を送り続ける）。
+    system は「固定指示」＋「事前情報」の**2ブロックそれぞれに cache_control**。jobs/reason のレスポンスに
+    `questions: string[]`（新人CAがそのまま読み上げられる深掘り質問1〜3件。回答済みは外して入れ替える更新型）と
+    `source: "prior"|"conversation"` を追加。existingJobs に questions/source、existingReason は `{ text, questions }`
+    オブジェクト（旧 string も受理）。max_tokens 600→900。
+  - **判定調整（Phase 5）**: 職種名・国家資格名は terms に出さず jobs で扱う／文の途中で切れた語・単独の1語・文脈と
+    噛み合わない語は文字起こしの断片として terms にしない（クライアント側でも業務内容カードの title・key に含まれる
+    term を表示前に除外＝二重防御）／jobs 要約は「実際に何をしていたか」で、職種名のみの段階は1〜2行＋
+    「（本人の具体的な業務はまだ未聴取）」注記、強みは根拠がある時だけ。
+  - カードUI: 業務内容・転職理由カードに根拠ラベル（「事前情報」グレー／「会話で確認済み」緑）と「確認ポイント」欄
+    （本文より小さめの箇条書き）。保存は explanations の auto-job/auto-reason 要素に `questions`/`source` を追加
+    （Json 相乗り・テーブル/保存API無変更）。`InterviewSupportLogTab` の閲覧でもラベル・確認ポイントを表示
+    （Phase 4 以前の保存データは optional 扱いで無表示）。

@@ -143,5 +143,7 @@ export function useSpeechTranscription() {
     setEntries((prev) => (prev.length > 0 ? prev : saved));
   }, []);
 
-  return { entries, interimText, listening, supported, start, stop, restore };
+  // receiving / engineError は Deepgram フックとインターフェースを揃えるためのフィールド。
+  // 内蔵方式は従来どおり listening=認識中（緑）表示・エラーは supported バナーで扱う。
+  return { entries, interimText, listening, supported, start, stop, restore, receiving: listening, engineError: null as string | null };
 }

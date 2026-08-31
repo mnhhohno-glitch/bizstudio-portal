@@ -6,18 +6,27 @@
 // - ログは sessionStorage に逐次退避（保存失敗時の最後の砦として Phase 2 以降も継続）。
 // - Phase 2: DB保存。「開始」でクライアント生成の sessionId を確定し、認識中は1分ごと＋停止時＋
 //   解説完了直後に同一 sessionId へ upsert（冪等）。失敗しても UI は止めず次回保存でリトライ。
-// - Phase 3: 自動検知。認識中は30秒ごとに新規確定発話を /api/interview-support/auto-scan へ送り、
+// - Phase 3: 自動検知。新規確定発話を /api/interview-support/auto-scan へ送り、
 //   用語（時系列に積む）/ 業務内容（職務ごと更新型）/ 転職理由（1枚更新型）のカードを自動生成する。
 //   自動フローのエラーは画面に出さず沈黙（失敗区間は次回スキャンでリトライ）。
+// - Phase 4: 文字起こしエンジンを Deepgram（useDeepgramTranscription）に差し替え。起動時に stt-token API で
+//   利用可否を判定し、使えなければ Chrome 内蔵（useSpeechTranscription）へ自動フォールバック。
+//   自動検知は30秒タイマーをやめ、発話確定のたびに起動するイベント駆動（連続実行は最低5秒空ける）。
+// - Phase 5: 事前情報（キャリアシート等）。起動時に prior-info API で取得して上部バーに表示し、
+//   「開始」時に事前情報のみで下書きカードを1回生成（bootstrap）。以後の auto-scan にも毎回
+//   同じ priorInfoText を添える（byte一致で prompt cache に乗る）。カードは questions（確認ポイント）と
+//   source（事前情報/会話で確認済み）を持つ。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { useSpeechTranscription, type TranscriptEntry } from "./useSpeechTranscription";
+import { useDeepgramTranscription } from "./useDeepgramTranscription";
 import TranscriptLog from "./TranscriptLog";
 import ExplainCards, {
   type ExplainCard,
   type AutoJobCard,
   type AutoReasonCard,
+  type AutoCardSource,
 } from "./ExplainCards";
 
 // 「直近30秒」の切り出し幅(ms)。実測を見て調整する設定値。
@@ -26,8 +35,9 @@ const RECENT_WINDOW_MS = 30_000;
 const EXCERPT_CHARS = 30;
 // Phase 2: DB定期保存の間隔(ms)。認識中はこの間隔で upsert する。
 const AUTOSAVE_INTERVAL_MS = 60_000;
-// Phase 3: 自動検知スキャンの間隔(ms)。実測を見て調整する設定値。
-const AUTO_SCAN_INTERVAL_MS = 30_000;
+// Phase 4: 自動検知はイベント駆動（発話確定ごと）。連続実行の暴走防止として、
+// 直前のスキャン完了からこの時間(ms)は次のスキャンを待つ（待ち中に確定した発話はまとめて次回に送る）。
+const AUTO_SCAN_COOLDOWN_MS = 5_000;
 // Phase 3: 新規発話がこの文字数未満ならスキャンをスキップ（無言・相槌のみの区間は呼ばない＝コストゼロ）。
 const AUTO_SCAN_MIN_CHARS = 20;
 // Phase 3: 再解説防止のためAPIに渡す解説済み用語の保持上限（直近N件）。
@@ -41,13 +51,43 @@ type InterviewInfo = {
   interviewCount: number | null;
 };
 
+/* ---- Phase 5: 事前情報（キャリアシート等） ---- */
+type PriorCandidateFile = { id: string; fileName: string };
+type PriorInfoState =
+  // loading: prior-info API 応答待ち / none: 該当ファイルなし or 抽出不可 / off: ユーザーが「使わない」を選択
+  | { status: "loading" }
+  | { status: "none"; candidates: PriorCandidateFile[] }
+  | { status: "off"; candidates: PriorCandidateFile[] }
+  | { status: "ready"; fileId: string; fileName: string; text: string; candidates: PriorCandidateFile[] };
+
 function sessionStorageKey(interviewId: string): string {
   return `interview-support-log:${interviewId}`;
 }
 
 export default function InterviewSupportScreen({ interviewId }: { interviewId: string }) {
-  const { entries, interimText, listening, supported, start, stop, restore } =
-    useSpeechTranscription();
+  /* ---- Phase 4: 文字起こしエンジンの切替（Deepgram / Chrome内蔵） ---- */
+  // フックは条件呼び出しできないため両方をマウントし、engine で使う側を選ぶ（使わない側は start しない限り不活性）。
+  const speech = useSpeechTranscription();
+  const deepgram = useDeepgramTranscription();
+  // null = 判定中（stt-token API の応答待ち。判定が済むまで「開始」は押せない）。
+  const [engine, setEngine] = useState<"deepgram" | "browser" | null>(null);
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/interview-support/stt-token", { method: "POST" });
+        const data = res.ok ? ((await res.json()) as { available?: boolean }) : null;
+        if (!aborted) setEngine(data?.available ? "deepgram" : "browser");
+      } catch {
+        if (!aborted) setEngine("browser");
+      }
+    })();
+    return () => {
+      aborted = true;
+    };
+  }, []);
+  const active = engine === "deepgram" ? deepgram : speech;
+  const { entries, interimText, listening, supported, start, stop, restore, receiving, engineError } = active;
 
   const [info, setInfo] = useState<InterviewInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -58,6 +98,49 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   /* ---- Phase 3: 自動検知の更新型カード（業務内容=職務ごと / 転職理由=1枚） ---- */
   const [jobCards, setJobCards] = useState<AutoJobCard[]>([]);
   const [reasonCard, setReasonCard] = useState<AutoReasonCard | null>(null);
+
+  /* ---- Phase 5: 事前情報（キャリアシート等）の取得と選択 ---- */
+  const [priorInfo, setPriorInfo] = useState<PriorInfoState>({ status: "loading" });
+  // auto-scan から常に最新の事前情報テキストを読むための鏡（"ready" 以外は null）。
+  const priorTextRef = useRef<string | null>(null);
+  useEffect(() => {
+    priorTextRef.current = priorInfo.status === "ready" ? priorInfo.text : null;
+  }, [priorInfo]);
+  // 「開始」初回押下でセッションが動き出したら事前情報の切り替えを固定する
+  // （途中で差し替えると下書きと以後のスキャン前提がずれるため）。
+  const [sessionStarted, setSessionStarted] = useState(false);
+
+  const loadPriorInfo = useCallback(
+    async (fileId?: string) => {
+      setPriorInfo({ status: "loading" });
+      try {
+        const url = `/api/interview-support/${interviewId}/prior-info${fileId ? `?fileId=${encodeURIComponent(fileId)}` : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = (await res.json()) as {
+          available?: boolean;
+          fileId?: string;
+          fileName?: string;
+          text?: string;
+          candidates?: PriorCandidateFile[];
+        };
+        const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+        if (data.available && data.fileId && data.fileName && data.text) {
+          setPriorInfo({ status: "ready", fileId: data.fileId, fileName: data.fileName, text: data.text, candidates });
+        } else {
+          setPriorInfo({ status: "none", candidates });
+        }
+      } catch {
+        // 事前情報が無くても本体は動く。失敗は「なし」として静かに続行。
+        setPriorInfo({ status: "none", candidates: [] });
+      }
+    },
+    [interviewId]
+  );
+
+  useEffect(() => {
+    void loadPriorInfo();
+  }, [loadPriorInfo]);
 
   /* ---- Phase 2: DBへの自動保存 ---- */
   // 「開始」初回押下で確定するセッション識別子。以後の保存はすべてこのIDへの upsert（冪等）。
@@ -90,11 +173,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           sourceText: c.source,
           resultText: c.text,
         })),
+        // Phase 5: questions（確認ポイント）と source（事前情報/会話で確認済み）も保存する（Json相乗り・形式拡張のみ）。
         ...curJobs.map((j) => ({
           t: new Date(j.updatedAt).toISOString(),
           mode: "auto-job" as const,
           sourceText: j.title,
           resultText: j.text,
+          questions: j.questions,
+          source: j.source,
         })),
         ...(curReason
           ? [{
@@ -102,6 +188,8 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               mode: "auto-reason" as const,
               sourceText: "転職理由",
               resultText: curReason.text,
+              questions: curReason.questions,
+              source: curReason.source,
             }]
           : []),
       ].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
@@ -143,14 +231,31 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     return () => clearInterval(timer);
   }, [listening, saveSession]);
 
+  // Phase 5: 「開始」時の下書き生成（事前情報のみで auto-scan を1回呼ぶ）。実体は runAutoScan だが
+  // 定義順の都合で ref 経由で呼ぶ（scheduleAutoScanRef と同じ流儀）。セッション中1回だけ。
+  const bootstrapDoneRef = useRef(false);
+  const runBootstrapScanRef = useRef<() => void>(() => {});
+
   const handleStart = useCallback(() => {
     if (!dbSessionRef.current) {
       dbSessionRef.current = { id: crypto.randomUUID(), startedAt: Date.now() };
     }
     // 停止→再開は同一セッションの続きとして扱う（「終了済み」を取り消す）。
     endedAtRef.current = null;
+    // Phase 5: 下書き生成は sessionStarted を見る effect 側で発火する（事前情報の取得完了が
+    // 「開始」押下より遅れても取りこぼさないため）。
+    setSessionStarted(true);
     start();
   }, [start]);
+
+  // Phase 5: 事前情報がある場合のみ、開始後に1回だけ下書きカードを生成する。
+  // 認識開始はブロックしない（非同期で走らせ、結果はカードとして流れ込む）。
+  useEffect(() => {
+    if (!sessionStarted || bootstrapDoneRef.current) return;
+    if (priorInfo.status !== "ready") return;
+    bootstrapDoneRef.current = true;
+    runBootstrapScanRef.current();
+  }, [sessionStarted, priorInfo]);
 
   const handleStop = useCallback(() => {
     stop();
@@ -295,21 +400,32 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     runExplain("selection", selectionText);
   }, [selectionText, runExplain]);
 
-  /* ---- Phase 3: 自動検知（30秒ごとに新規発話をスキャンし、用語/業務内容/転職理由カードを自動生成） ---- */
+  /* ---- Phase 3/4: 自動検知（発話が確定するたびに新規発話をスキャンし、用語/業務内容/転職理由カードを自動生成） ---- */
   // スキャン済み entries 件数。API成功時のみ進める（失敗時は同じ発話を次回リトライ）。
   const scannedCountRef = useRef(0);
-  // 多重実行防止（API応答が間隔より遅い場合に重ねて呼ばない）。
+  // 多重実行防止（API応答中に重ねて呼ばない）。
   const scanInFlightRef = useRef(false);
+  // Phase 4: 直前のスキャン完了時刻。ここから AUTO_SCAN_COOLDOWN_MS 空けて次を実行する（暴走防止）。
+  const lastScanEndRef = useRef(0);
+  // 実行待ちのスキャン予約（クールダウン待ち）。予約は常に1本まで＝待ち中の確定発話は自動的にまとめて送られる。
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 予約発火時に前のスキャンがまだ応答待ちだった場合の「完了後に予約し直す」印。
+  const scanPendingRef = useRef(false);
+  // runAutoScan の完了後処理から予約関数を呼ぶための鏡（相互参照を避ける）。
+  const scheduleAutoScanRef = useRef<() => void>(() => {});
   // 再解説防止のための解説済み用語リスト（直近 EXPLAINED_TERMS_MAX 件）。
   const explainedTermsRef = useRef<string[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runAutoScan = useCallback(async () => {
+  const runAutoScan = useCallback(async (opts?: { bootstrap?: boolean }) => {
     if (scanInFlightRef.current) return;
+    const bootstrap = opts?.bootstrap ?? false;
     const { entries: curEntries, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
-    const newEntries = curEntries.slice(scannedCountRef.current);
+    // Phase 5 bootstrap: 会話開始前の下書き生成。新規発話なし・事前情報のみで呼ぶ。
+    const newEntries = bootstrap ? [] : curEntries.slice(scannedCountRef.current);
     const text = newEntries.map((e) => e.text).join("\n");
-    if (text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
+    if (!bootstrap && text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
+    if (bootstrap && !priorTextRef.current) return; // 下書きは事前情報がある時だけ
     const scannedCount = curEntries.length;
     scanInFlightRef.current = true;
     try {
@@ -318,27 +434,55 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
+          // Phase 5: 事前情報は毎回同じ文字列を添える（byte一致で prompt cache に乗せる）。
+          priorInfoText: priorTextRef.current ?? undefined,
           explainedTerms: explainedTermsRef.current,
-          existingJobs: curJobs.map((j) => ({ key: j.key, title: j.title, text: j.text })),
-          existingReason: curReason?.text ?? null,
+          existingJobs: curJobs.map((j) => ({
+            key: j.key,
+            title: j.title,
+            text: j.text,
+            questions: j.questions,
+            source: j.source,
+          })),
+          existingReason: curReason ? { text: curReason.text, questions: curReason.questions } : null,
         }),
       });
       if (!res.ok) return; // 自動フローはエラーを画面に出さない（次回スキャンで回復）
       const data = (await res.json()) as {
         terms?: Array<{ term?: string; text?: string }>;
-        jobs?: Array<{ key?: string; title?: string; text?: string }>;
-        reason?: { text?: string } | null;
+        jobs?: Array<{ key?: string; title?: string; text?: string; questions?: string[]; source?: string }>;
+        reason?: { text?: string; questions?: string[]; source?: string } | null;
       };
-      scannedCountRef.current = scannedCount;
+      if (!bootstrap) scannedCountRef.current = scannedCount;
 
       let applied = false;
       const now = Date.now();
+      // Phase 5: source の既定値。下書きは事前情報由来、通常スキャンは会話由来。
+      const fallbackSource: AutoCardSource = bootstrap ? "prior" : "conversation";
+      const asCardSource = (v: string | undefined): AutoCardSource =>
+        v === "prior" || v === "conversation" ? v : fallbackSource;
+      const asQuestions = (v: string[] | undefined): string[] =>
+        (Array.isArray(v) ? v : []).filter((q) => typeof q === "string" && q.trim() !== "").slice(0, 3);
+
+      // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
+      const jobs = (data.jobs ?? []).flatMap((j) =>
+        j?.key && j?.text
+          ? [{ key: j.key, title: j.title ?? "", text: j.text, questions: asQuestions(j.questions), source: asCardSource(j.source) }]
+          : []
+      );
 
       // ①用語: 時系列エリアに完成カードとして積む。解説済みは再解説しない。
+      // Phase 5 保険: 既存/今回の業務内容カードの title・key に含まれる語（職種名等）は用語カードにしない
+      // （プロンプトでも禁止しているが、すり抜けをクライアント側で最終除外する）。
+      const jobTitleTexts = [
+        ...curJobs.flatMap((j) => [j.title, j.key]),
+        ...jobs.flatMap((j) => [j.title, j.key]),
+      ].filter(Boolean);
       const newTermCards: ExplainCard[] = [];
       for (const t of (data.terms ?? []).slice(0, 2)) {
         if (!t?.term || !t?.text) continue;
         if (explainedTermsRef.current.includes(t.term)) continue;
+        if (jobTitleTexts.some((title) => title.includes(t.term!))) continue;
         explainedTermsRef.current = [...explainedTermsRef.current, t.term].slice(-EXPLAINED_TERMS_MAX);
         cardSeqRef.current += 1;
         newTermCards.push({
@@ -356,10 +500,6 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         setCards((prev) => [...newTermCards, ...prev]);
       }
 
-      // ②業務内容: key が既存なら同カードを更新して育てる。新規 key は固定エリアに追加。
-      const jobs = (data.jobs ?? []).flatMap((j) =>
-        j?.key && j?.text ? [{ key: j.key, title: j.title ?? "", text: j.text }] : []
-      );
       if (jobs.length > 0) {
         applied = true;
         setJobCards((prev) => {
@@ -367,9 +507,25 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           for (const j of jobs) {
             const idx = next.findIndex((c) => c.key === j.key);
             if (idx >= 0) {
-              next[idx] = { ...next[idx], title: j.title || next[idx].title, text: j.text, updatedAt: now, highlight: true };
+              next[idx] = {
+                ...next[idx],
+                title: j.title || next[idx].title,
+                text: j.text,
+                questions: j.questions,
+                source: j.source,
+                updatedAt: now,
+                highlight: true,
+              };
             } else {
-              next.push({ key: j.key, title: j.title || "業務内容", text: j.text, updatedAt: now, highlight: true });
+              next.push({
+                key: j.key,
+                title: j.title || "業務内容",
+                text: j.text,
+                questions: j.questions,
+                source: j.source,
+                updatedAt: now,
+                highlight: true,
+              });
             }
           }
           return next;
@@ -379,7 +535,13 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       // ③転職理由: 全体で1枚の更新型（統合済みの最新版で置き換え）。
       if (data.reason?.text) {
         applied = true;
-        setReasonCard({ text: data.reason.text, updatedAt: now, highlight: true });
+        setReasonCard({
+          text: data.reason.text,
+          questions: asQuestions(data.reason.questions),
+          source: asCardSource(data.reason.source),
+          updatedAt: now,
+          highlight: true,
+        });
       }
 
       if (applied) {
@@ -395,22 +557,59 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       // 通信失敗も沈黙（scannedCount を進めていないので次回同じ発話でリトライ）
     } finally {
       scanInFlightRef.current = false;
+      lastScanEndRef.current = Date.now();
+      // 応答待ちの間に予約が発火していた分（＝その間の確定発話）は、完了後に改めて予約し直す。
+      if (scanPendingRef.current) {
+        scanPendingRef.current = false;
+        scheduleAutoScanRef.current();
+      }
     }
   }, [saveSession]);
 
-  // 認識中のみ30秒間隔で自動スキャン。「停止」中は止まる。
+  // Phase 4: 発話が確定するたびにスキャンを予約する（30秒タイマーは廃止）。
+  // 直前のスキャン完了から AUTO_SCAN_COOLDOWN_MS 経つまでは待ち、その間の確定発話は次の1回にまとめて送る。
+  const scheduleAutoScan = useCallback(() => {
+    if (scanTimerRef.current) return; // 予約済み（後続の確定発話も同じ1回に乗る）
+    const wait = Math.max(0, lastScanEndRef.current + AUTO_SCAN_COOLDOWN_MS - Date.now());
+    scanTimerRef.current = setTimeout(() => {
+      scanTimerRef.current = null;
+      if (scanInFlightRef.current) {
+        // 前のスキャンがまだ応答待ち。取りこぼさないよう完了後の予約し直しに委ねる。
+        scanPendingRef.current = true;
+        return;
+      }
+      void runAutoScan();
+    }, wait);
+  }, [runAutoScan]);
+  useEffect(() => {
+    scheduleAutoScanRef.current = scheduleAutoScan;
+  }, [scheduleAutoScan]);
+  // Phase 5: 「開始」時の下書き生成の実体（handleStart は定義順の都合で ref 経由で呼ぶ）。
+  useEffect(() => {
+    runBootstrapScanRef.current = () => void runAutoScan({ bootstrap: true });
+  }, [runAutoScan]);
+
   useEffect(() => {
     if (!listening) return;
-    const timer = setInterval(() => {
-      void runAutoScan();
-    }, AUTO_SCAN_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [listening, runAutoScan]);
+    if (entries.length <= scannedCountRef.current) return; // 新規確定発話なし
+    scheduleAutoScan();
+  }, [entries.length, listening, scheduleAutoScan]);
 
-  // アンマウント時にハイライト解除タイマーを破棄。
+  // 「停止」したら実行待ちのスキャン予約は破棄する（認識中のみ動く従来動作を維持）。
+  useEffect(() => {
+    if (listening) return;
+    scanPendingRef.current = false;
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+  }, [listening]);
+
+  // アンマウント時に各種タイマーを破棄。
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
     };
   }, []);
 
@@ -448,22 +647,75 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               )}
             </span>
           )}
+          {/* Phase 5: 事前情報（キャリアシート等）の有無。複数候補がある時だけ選択プルダウンを出す。 */}
+          <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+            {priorInfo.status === "loading"
+              ? "事前情報: 確認中…"
+              : priorInfo.status === "ready"
+                ? `事前情報: あり（${priorInfo.fileName}）`
+                : priorInfo.status === "off"
+                  ? "事前情報: 使わない"
+                  : "事前情報: なし"}
+          </span>
+          {priorInfo.status !== "loading" && priorInfo.candidates.length > 1 && (
+            <select
+              value={priorInfo.status === "ready" ? priorInfo.fileId : "__none__"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__none__") {
+                  setPriorInfo((prev) => (prev.status === "loading" ? prev : { status: "off", candidates: prev.candidates }));
+                } else {
+                  void loadPriorInfo(v);
+                }
+              }}
+              disabled={sessionStarted}
+              title={sessionStarted ? "開始後は事前情報を切り替えられません" : "使用する事前情報ファイルを選択"}
+              className="shrink-0 max-w-56 truncate rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600 disabled:opacity-50"
+            >
+              {priorInfo.candidates.map((c) => (
+                <option key={c.id} value={c.id}>{c.fileName}</option>
+              ))}
+              <option value="__none__">使わない</option>
+            </select>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          {/* Phase 4 fix: 接続失敗・トークン発行失敗・異常切断は赤字で出し続ける（受信回復で消える）。
+              「緑なのに何も起きない」状態を作らないための必須表示。 */}
+          {engineError && (
+            <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              文字起こしエラー: {engineError}
+            </span>
+          )}
           {saveFailed && (
             <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
               <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
               保存エラー（自動で再試行します）
             </span>
           )}
+          {/* Phase 4: 使用中の文字起こしエンジン。「ブラウザ内蔵」なら DEEPGRAM_API_KEY 未設定 or 発行失敗。 */}
+          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+            {engine === null ? "エンジン確認中…" : engine === "deepgram" ? "Deepgram" : "ブラウザ内蔵"}
+          </span>
+          {/* Phase 4 fix: 「認識中（緑）」は Deepgram から最初のメッセージを受信してから。
+              それまでは「接続中…」（内蔵方式は receiving=listening のため従来どおり即緑）。 */}
           <span className="flex items-center gap-1.5 text-sm">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${
-                listening ? "bg-green-500 animate-pulse" : "bg-gray-300"
+                listening && receiving
+                  ? "bg-green-500 animate-pulse"
+                  : listening
+                    ? "bg-amber-400 animate-pulse"
+                    : "bg-gray-300"
               }`}
             />
-            <span className={listening ? "text-green-700" : "text-gray-500"}>
-              {listening ? "認識中" : "停止中"}
+            <span
+              className={
+                listening && receiving ? "text-green-700" : listening ? "text-amber-700" : "text-gray-500"
+              }
+            >
+              {listening && receiving ? "認識中" : listening ? "接続中…" : "停止中"}
             </span>
           </span>
           {listening ? (
@@ -478,7 +730,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
             <button
               type="button"
               onClick={handleStart}
-              disabled={!supported}
+              disabled={!supported || engine === null}
               className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               ● 開始
@@ -493,10 +745,10 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         </div>
       )}
 
-      {/* ============ 中央ログ＋右カラム ============ */}
+      {/* ============ 中央ログ＋右カラム（Phase 4: 解説カードを主役に ログ40% : カード60%） ============ */}
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 左: 文字起こしログ＋解説ボタン */}
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-w-0 flex-[2] flex-col gap-3">
           <TranscriptLog
             entries={entries}
             interimText={interimText}
@@ -524,7 +776,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         </div>
 
         {/* 右: 上段=固定エリア（業務内容・転職理由）＋下段=時系列カード（新しい順） */}
-        <div className="w-[380px] shrink-0 min-h-0">
+        <div className="min-w-0 flex-[3] min-h-0">
           <ExplainCards cards={cards} jobCards={jobCards} reasonCard={reasonCard} />
         </div>
       </div>

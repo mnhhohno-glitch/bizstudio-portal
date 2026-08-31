@@ -19,11 +19,17 @@ export type ExplainCard = {
   createdAt: number;
 };
 
+/** Phase 5: カードの根拠。prior=事前情報（キャリアシート等）のみ / conversation=会話で確認済み。 */
+export type AutoCardSource = "prior" | "conversation";
+
 /** 業務内容カード（会社/職務ごとに1枚の更新型）。key は AI が同一職務の判定に使う識別子。 */
 export type AutoJobCard = {
   key: string;
   title: string;
   text: string;
+  /** Phase 5: 新人CAがそのまま読み上げられる確認ポイント（深掘り質問）1〜3件。 */
+  questions: string[];
+  source: AutoCardSource;
   updatedAt: number;
   highlight: boolean;
 };
@@ -31,8 +37,16 @@ export type AutoJobCard = {
 /** 転職理由カード（全体で1枚の更新型）。 */
 export type AutoReasonCard = {
   text: string;
+  questions: string[];
+  source: AutoCardSource;
   updatedAt: number;
   highlight: boolean;
+};
+
+/** Phase 5: source ラベルの表示定義。 */
+const SOURCE_BADGE: Record<AutoCardSource, { label: string; className: string }> = {
+  prior: { label: "事前情報", className: "bg-gray-100 text-gray-600" },
+  conversation: { label: "会話で確認済み", className: "bg-emerald-50 text-emerald-700" },
 };
 
 function formatTime(ts: number): string {
@@ -51,6 +65,8 @@ function PinnedCard({
   badgeClassName,
   title,
   text,
+  questions,
+  source,
   updatedAt,
   highlight,
 }: {
@@ -58,9 +74,12 @@ function PinnedCard({
   badgeClassName: string;
   title: string | null;
   text: string;
+  questions: string[];
+  source: AutoCardSource;
   updatedAt: number;
   highlight: boolean;
 }) {
+  const sourceBadge = SOURCE_BADGE[source];
   return (
     <div
       className={`rounded-lg border border-gray-200 p-3 shadow-sm transition-colors duration-1000 ${
@@ -68,11 +87,29 @@ function PinnedCard({
       }`}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeClassName}`}>{badge}</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeClassName}`}>{badge}</span>
+          {/* Phase 5: 根拠ラベル。事前情報のみの下書きか、会話で確認済みかを一目で区別する。 */}
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${sourceBadge.className}`}>
+            {sourceBadge.label}
+          </span>
+        </div>
         <span className="font-mono text-[10px] text-gray-400">{formatTime(updatedAt)}</span>
       </div>
-      {title && <div className="mb-1 text-xs font-semibold text-gray-700">{title}</div>}
-      <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{text}</div>
+      {title && <div className="mb-1 text-sm font-semibold text-gray-700">{title}</div>}
+      {/* Phase 4: 面談中に一目で読めるよう本文は一段大きく・行間広め */}
+      <div className="whitespace-pre-wrap text-base leading-8 text-gray-800">{text}</div>
+      {/* Phase 5: 確認ポイント（そのまま読み上げられる質問文）。本文より一段小さく。 */}
+      {questions.length > 0 && (
+        <div className="mt-2 border-t border-gray-100 pt-1.5">
+          <div className="mb-0.5 text-[10px] font-medium text-gray-400">確認ポイント</div>
+          <ul className="flex flex-col gap-0.5">
+            {questions.map((q, i) => (
+              <li key={i} className="text-sm leading-6 text-gray-600">・{q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -99,6 +136,8 @@ export default function ExplainCards({
               badgeClassName="bg-indigo-50 text-indigo-700"
               title={job.title}
               text={job.text}
+              questions={job.questions}
+              source={job.source}
               updatedAt={job.updatedAt}
               highlight={job.highlight}
             />
@@ -109,6 +148,8 @@ export default function ExplainCards({
               badgeClassName="bg-rose-50 text-rose-700"
               title={null}
               text={reasonCard.text}
+              questions={reasonCard.questions}
+              source={reasonCard.source}
               updatedAt={reasonCard.updatedAt}
               highlight={reasonCard.highlight}
             />
@@ -141,7 +182,7 @@ export default function ExplainCards({
             {card.status === "error" ? (
               <div className="text-sm text-red-600">{card.text || "解説の取得に失敗しました"}</div>
             ) : (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+              <div className="whitespace-pre-wrap text-base leading-8 text-gray-800">
                 {card.text}
                 {card.status === "streaming" && (
                   <span className="text-gray-400">{card.text ? "▍" : "解説中…"}</span>
