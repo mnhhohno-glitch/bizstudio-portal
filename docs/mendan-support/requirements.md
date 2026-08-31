@@ -75,7 +75,8 @@
 - **主エンジン: Deepgram ストリーミング**（`useDeepgramTranscription.ts`）。マイク音声を MediaRecorder（webm/opus）で約250msごとの小チャンクにし、WebSocket（`wss://api.deepgram.com/v1/listen`）へ送る
   - パラメータ: `model=nova-3`・`language=ja`（nova-3 は日本語専用指定に対応）・`interim_results=true`・`endpointing=300`（無音0.3秒で確定。定数）・`punctuate=true`・`smart_format=true`
   - 未確定（interim）テキストは「現在の発話行」としてログ最下部に薄色で都度差し替え表示し、`is_final` で確定ログに時刻つきで追加（内蔵方式と同じ構造）
-  - 認証: サーバーの `POST /api/interview-support/stt-token` が Deepgram の `POST /v1/auth/grant` で発行した短時間有効トークン（TTL 60秒）を返し、ブラウザは `access_token` クエリで接続する。永続キー（環境変数 `DEEPGRAM_API_KEY`）はブラウザへ渡さない
+  - 認証: サーバーの `POST /api/interview-support/stt-token` が Deepgram の `POST /v1/auth/grant` で発行した短時間有効トークン（TTL 60秒）を返し、ブラウザは **`Sec-WebSocket-Protocol: ["bearer", <トークン>]`** で接続する（`access_token` クエリはハンドシェイク拒否される・本番実測）。永続キー（環境変数 `DEEPGRAM_API_KEY`）はブラウザへ渡さない
+  - 状態表示: 「認識中（緑）」は Deepgram から最初のメッセージを受信してから。それまでは「接続中…」。接続失敗・トークン発行失敗・異常切断は上部バーに赤字「文字起こしエラー: ○○」を出し続ける（受信回復で消える）
   - 接続断・エラー時は短い待機（1秒）を挟んで自動再接続（トークンも取り直す）。ユーザーの「停止」では再接続しない。「停止」で WebSocket（CloseStream 送信）と MediaRecorder・マイクを確実にクローズ
 - **フォールバック: Chrome内蔵の音声認識**（Web Speech API・`useSpeechTranscription.ts`）。画面起動時に stt-token API を呼び、`available: false`（`DEEPGRAM_API_KEY` 未設定・発行失敗）なら内蔵方式で従来どおり動く。認識が勝手に止まる癖への自動再開処理も従来どおり
 - 話者の区別（誰が話したか）は行わない。CAと求職者の発言が混ざったログでよい

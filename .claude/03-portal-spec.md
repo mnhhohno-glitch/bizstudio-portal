@@ -823,9 +823,13 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     Deepgram `POST /v1/auth/grant` を呼び、短時間有効トークン（TTL 60秒）を返す。永続キーはブラウザに渡さない。
     キー未設定・発行失敗・タイムアウト(5秒)は `{ available: false }`。
   - `useDeepgramTranscription.ts` … `useSpeechTranscription` と**同一インターフェース**。MediaRecorder（webm/opus・250msチャンク）→
-    WebSocket `wss://api.deepgram.com/v1/listen?model=nova-3&language=ja&interim_results=true&endpointing=300&punctuate=true&smart_format=true&access_token=…`。
+    WebSocket `wss://api.deepgram.com/v1/listen?model=nova-3&language=ja&interim_results=true&endpointing=300&punctuate=true&smart_format=true`。
+    **認証は `Sec-WebSocket-Protocol: ["bearer", <一時トークン>]`**（`access_token` クエリはハンドシェイク拒否される・本番実測 2026-08-31。
+    拒否時は Deepgram 側にリクエスト記録すら残らない）。
     interim は差し替え表示・`is_final` で確定ログに追加。接続断は1秒待って自動再接続（トークン・Recorder とも作り直し。webm はストリーム
     先頭にヘッダを持つため Recorder の使い回し不可）。「停止」は CloseStream 送信→ WS/Recorder/マイクをクローズし再接続しない。
+    「認識中（緑）」は最初のメッセージ受信（`receiving`）で判定し、それまでは「接続中…」。接続・トークン・音声取得の失敗は
+    `engineError` として上部バーに赤字表示し続ける（受信回復で消える。緑なのに無反応、を作らない）。
   - エンジン切替: 画面起動時に stt-token を1回呼んで判定（`available: true` → Deepgram / それ以外 → 内蔵）。判定完了まで「開始」は
     無効。上部バーに使用中エンジン名（「Deepgram」/「ブラウザ内蔵」）を小さく表示。**フックは両方マウント**して engine で選ぶ
     （フックの条件呼び出し不可のため。使わない側は start しない限り不活性）。
