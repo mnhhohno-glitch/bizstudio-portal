@@ -13,6 +13,8 @@
 // - T-183 Phase 6: Keyterm Prompting。setKeyterms で渡した固有名詞（キャリアシート由来の病院名・
 //   資格名等）を listen URL の keyterm パラメータに載せ、nova-3 の固有名詞認識を底上げする。
 //   ref 保持のため接続・再接続のたびに最新のリストが使われる（接続中の変更は次の接続から反映）。
+// - T-183 Phase 7: 話者識別（diarize=true）。確定発話の words[].speaker の最頻値をその発話の
+//   話者番号として TranscriptEntry.speaker に保持する。番号→表示名（CA/求職者）の割り当ては画面側で行う。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranscriptEntry } from "./useSpeechTranscription";
@@ -34,8 +36,32 @@ type DeepgramResultMessage = {
   type?: string;
   is_final?: boolean;
   speech_final?: boolean;
-  channel?: { alternatives?: Array<{ transcript?: string }> };
+  channel?: {
+    alternatives?: Array<{
+      transcript?: string;
+      // Phase 7: diarize=true 時のみ。単語ごとの話者番号（0始まり）。
+      words?: Array<{ speaker?: number }>;
+    }>;
+  };
 };
+
+/** Phase 7: 発話全体の話者番号。単語ごとの speaker の最頻値を採る（発話跨ぎの誤割当てに引っ張られない）。 */
+function dominantSpeaker(words: Array<{ speaker?: number }> | undefined): number | undefined {
+  if (!words) return undefined;
+  const counts = new Map<number, number>();
+  for (const w of words) {
+    if (typeof w.speaker === "number") counts.set(w.speaker, (counts.get(w.speaker) ?? 0) + 1);
+  }
+  let best: number | undefined;
+  let bestCount = 0;
+  for (const [speaker, count] of counts) {
+    if (count > bestCount) {
+      best = speaker;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 
 function buildListenUrl(keyterms: string[]): string {
   const params = new URLSearchParams({
@@ -45,6 +71,8 @@ function buildListenUrl(keyterms: string[]): string {
     endpointing: String(ENDPOINTING_MS),
     punctuate: "true",
     smart_format: "true",
+    // Phase 7: 話者識別。番号→CA/求職者の表示割り当てとラベル反転は画面側で行う。
+    diarize: "true",
   });
   // Phase 6: Keyterm Prompting（nova-3）。keyterm=語1&keyterm=語2... の繰り返し形式。
   // https://developers.deepgram.com/docs/keyterm
@@ -178,10 +206,12 @@ export function useDeepgramTranscription() {
           const text = transcript.trim();
           if (text) {
             idSeqRef.current += 1;
+            const speaker = dominantSpeaker(msg.channel?.alternatives?.[0]?.words);
             const entry: TranscriptEntry = {
               id: `d-${Date.now()}-${idSeqRef.current}`,
               text,
               timestamp: Date.now(),
+              ...(speaker !== undefined ? { speaker } : {}),
             };
             setEntries((prev) => [...prev, entry]);
           }

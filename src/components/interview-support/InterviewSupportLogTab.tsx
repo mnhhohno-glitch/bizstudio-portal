@@ -20,7 +20,8 @@ type SessionRow = {
   createdByName: string;
 };
 
-type TranscriptItem = { t: string; text: string };
+// Phase 7: speaker は支援画面が解決済みの表示名（CA/求職者/話者3…）。過去の保存データには無い（optional）。
+type TranscriptItem = { t: string; text: string; speaker?: string };
 // mode: recent/selection = 手動解説（Phase 1）/ auto-term/auto-job/auto-reason = 自動検知3種（Phase 3）
 type ExplanationMode = "recent" | "selection" | "auto-term" | "auto-job" | "auto-reason";
 // Phase 5: auto-job/auto-reason は questions（確認ポイント）を持ちうる（Phase 4 以前の保存データには
@@ -232,6 +233,28 @@ export default function InterviewSupportLogTab({
   );
 }
 
+/** Phase 7: 話者ラベルの色分け（支援画面 TranscriptLog と同じ規則）。 */
+function speakerColor(label: string): string {
+  if (label === "CA") return "#2563eb";
+  if (label === "求職者") return "#059669";
+  return "var(--im-fg2)";
+}
+
+/** Phase 7: 保存済みログ全文を時刻・話者付きでクリップボードへコピー（解説・カードは含めない）。 */
+function copyTranscript(transcript: TranscriptItem[]) {
+  if (transcript.length === 0) {
+    toast.info("コピーする文字起こしがありません");
+    return;
+  }
+  const text = transcript
+    .map((item) => `[${formatTime(item.t)}] ${item.speaker ? `${item.speaker}: ` : ""}${item.text}`)
+    .join("\n");
+  navigator.clipboard.writeText(text).then(
+    () => toast.success("コピーしました"),
+    () => toast.error("コピーに失敗しました")
+  );
+}
+
 /** 文字起こしログと解説履歴を時系列にマージして表示する（読み取り専用）。解説はログと区別できる見た目にする。
  * Phase 3: 更新型カード（業務内容・転職理由。保存されるのは最新版のみ）はサマリーとして先頭にまとめ、
  * 用語・手動解説は従来どおり時系列に混ぜる。 */
@@ -254,6 +277,21 @@ function SessionTimeline({ detail }: { detail: SessionDetail }) {
 
   return (
     <div className="flex flex-col gap-1.5">
+      {/* Phase 7: 保存済みログのコピー（時刻・話者付き全文。解説・カードは含めない） */}
+      {detail.transcript.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => copyTranscript(detail.transcript)}
+            title="文字起こしログ全文をコピー（時刻・話者付き）"
+            className="cursor-pointer"
+            style={{
+              padding: "2px 8px", fontSize: 11, borderRadius: 4, fontFamily: "inherit",
+              border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg2)",
+            }}
+          >コピー</button>
+        </div>
+      )}
       {pinned.map((item, idx) => (
         <div
           key={`pinned-${idx}`}
@@ -289,7 +327,12 @@ function SessionTimeline({ detail }: { detail: SessionDetail }) {
             <span className="shrink-0 font-mono" style={{ fontSize: 10.5, color: "var(--im-fg3)", paddingTop: 1.5 }}>
               {formatTime(entry.t)}
             </span>
-            <span style={{ color: "var(--im-fg)", whiteSpace: "pre-wrap" }}>{entry.item.text}</span>
+            <span style={{ color: "var(--im-fg)", whiteSpace: "pre-wrap" }}>
+              {entry.item.speaker && (
+                <span style={{ fontWeight: 500, color: speakerColor(entry.item.speaker) }}>{entry.item.speaker}: </span>
+              )}
+              {entry.item.text}
+            </span>
           </div>
         ) : (
           <div
