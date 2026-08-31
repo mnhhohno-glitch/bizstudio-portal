@@ -8,6 +8,7 @@ import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
 import { CA_MARK_CLASS, matchCaItemLine } from "@/lib/ca-analysis-format";
 import { extractCompanyNameCandidates } from "@/lib/normalize-filename";
+import { buildAnalyzeBatchSystemBlocks } from "@/lib/analyze-batch-cache";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -831,28 +832,15 @@ ${skillContent}
     return NextResponse.json({ error: "ANTHROPIC_API_KEY が未設定です" }, { status: 500 });
   }
 
-  // T-126 Phase2: run の総バッチ数。1バッチだけの run では cache_control を付けない
-  //   （write割増(1.25x)の純損になり、read の恩恵も得られないため）。
-  //   複数バッチ run のみ、固定プレフィックス(skill)と候補者context をキャッシュブロック化して
-  //   バッチ2件目以降を cache read にする。
-  const totalBatches = Math.ceil(totalFiles / batchSize);
-  const isMultiBatch = totalBatches > 1;
-  const cacheControl = isMultiBatch ? { type: "ephemeral" as const } : undefined;
-
   // system ブロックの並び順: ①固定プレフィックス(skill+評価ルール) → ②候補者context → ③可変(バッチ指示)。
-  // ①②は run 内で不変なので cache_control を付ける（複数バッチ時）。③は毎バッチ変わるので付けない。
-  type SystemBlock = { type: "text"; text: string; cache_control?: { type: "ephemeral" } };
-  const systemBlocks: SystemBlock[] = [
-    { type: "text", text: FIXED_SYSTEM, ...(cacheControl ? { cache_control: cacheControl } : {}) },
-  ];
-  if (candidateContext && candidateContext.trim() !== "") {
-    systemBlocks.push({
-      type: "text",
-      text: `## 候補者情報\n${candidateContext}`,
-      ...(cacheControl ? { cache_control: cacheControl } : {}),
-    });
-  }
-  systemBlocks.push({ type: "text", text: systemPrompt });
+  // T-189: 従来の isMultiBatch ガード（1バッチ run では cache_control を付けない）を撤廃し、
+  //   全実行で①②にキャッシュを付ける。①は run をまたいで byte-identical なので 1h TTL。
+  //   付与ポリシーの詳細は src/lib/analyze-batch-cache.ts のコメント参照。
+  const systemBlocks = buildAnalyzeBatchSystemBlocks({
+    fixedSystem: FIXED_SYSTEM,
+    candidateContext,
+    batchInstruction: systemPrompt,
+  });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
