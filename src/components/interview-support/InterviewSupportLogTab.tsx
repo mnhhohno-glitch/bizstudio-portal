@@ -23,15 +23,14 @@ type SessionRow = {
 type TranscriptItem = { t: string; text: string };
 // mode: recent/selection = 手動解説（Phase 1）/ auto-term/auto-job/auto-reason = 自動検知3種（Phase 3）
 type ExplanationMode = "recent" | "selection" | "auto-term" | "auto-job" | "auto-reason";
-// Phase 5: auto-job/auto-reason は questions（確認ポイント）と source（事前情報/会話で確認済み）を持ちうる。
-// Phase 4 以前の保存データには無いので optional。
+// Phase 5: auto-job/auto-reason は questions（確認ポイント）を持ちうる（Phase 4 以前の保存データには
+// 無いので optional）。Phase 5 の一時期に保存された source フィールドは Phase 6 で廃止（読み飛ばすだけ）。
 type ExplanationItem = {
   t: string;
   mode: ExplanationMode;
   sourceText: string;
   resultText: string;
   questions?: string[];
-  source?: "prior" | "conversation";
 };
 
 const EXPLANATION_LABEL: Record<ExplanationMode, string> = {
@@ -40,12 +39,6 @@ const EXPLANATION_LABEL: Record<ExplanationMode, string> = {
   "auto-term": "自動・用語",
   "auto-job": "業務内容",
   "auto-reason": "転職理由",
-};
-
-// Phase 5: source ラベル（支援画面の SOURCE_BADGE と同じ文言）。
-const SOURCE_LABEL: Record<"prior" | "conversation", { label: string; color: string; bg: string }> = {
-  prior: { label: "事前情報", color: "#4b5563", bg: "#f3f4f6" },
-  conversation: { label: "会話で確認済み", color: "#047857", bg: "#ecfdf5" },
 };
 
 type SessionDetail = {
@@ -273,17 +266,6 @@ function SessionTimeline({ detail }: { detail: SessionDetail }) {
             <span style={{ fontSize: 10, fontWeight: 500, color: "#4338ca", background: "#e0e7ff", borderRadius: 3, padding: "1px 5px" }}>
               {EXPLANATION_LABEL[item.mode] ?? item.mode}
             </span>
-            {/* Phase 5: 根拠ラベル（事前情報のみの下書きか、会話で確認済みか）。旧データは無表示。 */}
-            {item.source && SOURCE_LABEL[item.source] && (
-              <span
-                style={{
-                  fontSize: 10, fontWeight: 500, borderRadius: 3, padding: "1px 5px",
-                  color: SOURCE_LABEL[item.source].color, background: SOURCE_LABEL[item.source].bg,
-                }}
-              >
-                {SOURCE_LABEL[item.source].label}
-              </span>
-            )}
             {item.mode === "auto-job" && (
               <span style={{ fontSize: 11, fontWeight: 500, color: "var(--im-fg)" }}>{item.sourceText}</span>
             )}

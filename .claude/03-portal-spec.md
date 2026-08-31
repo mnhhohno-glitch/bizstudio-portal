@@ -779,10 +779,10 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01, Phase 6: 2026-09-01）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v7。Phase 5 でキャリアシート事前投入・確認ポイント・判定調整に改訂）。
+要件の正: `docs/mendan-support/requirements.md`（v8。Phase 6 で事前情報を裏方専用化＋Keyterm 認識強化に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
@@ -848,19 +848,28 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     とみなし `{ available: false }`**。成功時は先頭 **6,000字**に切り詰めた `text`＋`candidates`（複数候補の一覧）を返す。
   - 支援画面: 起動時に prior-info を取得し上部バーに「事前情報: あり（ファイル名）／なし」を表示。候補が複数の時だけ
     プルダウン（＋「使わない」）。開始後は切り替え不可（`sessionStarted`）。
-  - **下書き生成（bootstrap）**: 「開始」後、事前情報がある場合のみ auto-scan を text 空＋`priorInfoText` で1回呼ぶ
-    （下書きモード。取得完了が開始より遅れても effect が拾う）。AIは事前情報のみから jobs（＋記載があれば reason）を
-    source="prior" で生成。terms は生成しない（サーバー側でも保険で空にする）。
   - **auto-scan の Phase 5 拡張**: リクエストに `priorInfoText`（≦6,000字。面談中は byte 一致の同一文字列を送り続ける）。
     system は「固定指示」＋「事前情報」の**2ブロックそれぞれに cache_control**。jobs/reason のレスポンスに
-    `questions: string[]`（新人CAがそのまま読み上げられる深掘り質問1〜3件。回答済みは外して入れ替える更新型）と
-    `source: "prior"|"conversation"` を追加。existingJobs に questions/source、existingReason は `{ text, questions }`
-    オブジェクト（旧 string も受理）。max_tokens 600→900。
+    `questions: string[]`（新人CAがそのまま読み上げられる深掘り質問1〜3件。回答済みは外して入れ替える更新型）を追加。
+    existingJobs に questions、existingReason は `{ text, questions }` オブジェクト（旧 string も受理）。max_tokens 600→900。
   - **判定調整（Phase 5）**: 職種名・国家資格名は terms に出さず jobs で扱う／文の途中で切れた語・単独の1語・文脈と
     噛み合わない語は文字起こしの断片として terms にしない（クライアント側でも業務内容カードの title・key に含まれる
     term を表示前に除外＝二重防御）／jobs 要約は「実際に何をしていたか」で、職種名のみの段階は1〜2行＋
     「（本人の具体的な業務はまだ未聴取）」注記、強みは根拠がある時だけ。
-  - カードUI: 業務内容・転職理由カードに根拠ラベル（「事前情報」グレー／「会話で確認済み」緑）と「確認ポイント」欄
-    （本文より小さめの箇条書き）。保存は explanations の auto-job/auto-reason 要素に `questions`/`source` を追加
-    （Json 相乗り・テーブル/保存API無変更）。`InterviewSupportLogTab` の閲覧でもラベル・確認ポイントを表示
-    （Phase 4 以前の保存データは optional 扱いで無表示）。
+  - カードUI: 業務内容・転職理由カードに「確認ポイント」欄（本文より小さめの箇条書き）。保存は explanations の
+    auto-job/auto-reason 要素に `questions` を追加（Json 相乗り・テーブル/保存API無変更）。
+    `InterviewSupportLogTab` の閲覧でも確認ポイントを表示（Phase 4 以前の保存データは optional 扱いで無表示）。
+- **事前情報の裏方専用化＋Keyterm 認識強化（Phase 6）**: 実面談テストで、事前情報から作った下書きカードが
+  **CAの「シート照合」を誘発し会話への集中を崩す**ことが判明したための方針転換。画面は常に白紙から会話ベースで積み上げる。
+  - **廃止**: 開始時の下書き生成（bootstrapモード。auto-scan の text 必須化で復活不可）と、カードの
+    `source`（"prior"|"conversation"）・「事前情報／会話で確認済み」ラベル。Phase 5 の一時期に `source` 付きで
+    保存された explanations は閲覧側が読み飛ばすだけ（表示は壊れない）。
+  - **事前情報の用途（system プロンプト）**: 読み取り補正と要約の正確性向上のためだけの裏方。誤字・断片・固有名詞は
+    事前情報を手がかりに補正して理解する。**事前情報にしか出ていない内容をカード・questions に書くこと、
+    「シートでは〜」型の照合質問は禁止**。本人が会話で語るまでカードを作らない。
+    上部バーの「事前情報: あり／なし」表示と複数候補プルダウンは裏方の確認用として存続。
+  - **Keyterm Prompting**: prior-info API が抽出テキストから固有名詞リスト（社名・病院名・施設名・学校名・資格名・
+    職種名。重複除去・最大50語）を `keyterms` として返す。抽出は `CLAUDE_MODEL_FAST`（Haiku）1回・失敗は空配列で続行・
+    usage は endpoint `interview-support-prior-keyterms` で AdvisorUsageLog へ。`useDeepgramTranscription` に
+    `setKeyterms`（ref 保持）を追加し、listen 接続URLに `keyterm=語1&keyterm=語2...` を付与（nova-3 の Keyterm
+    Prompting。反映は次の WebSocket 接続から＝取得完了前に開始しても再接続時に効く）。事前情報なしは keyterm なしで従来どおり。
