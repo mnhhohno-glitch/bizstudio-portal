@@ -33,6 +33,13 @@ import {
   MAX_TRANSFER_RECIPIENTS,
   TRANSFER_MAIL_SUBJECT,
 } from "@/lib/secure-transfer-shared";
+import {
+  applyTransferTemplateTags,
+  extractTransferTemplateTags,
+  hasUnresolvedTemplateBraces,
+  type ContactField,
+  type TransferTemplateTagName,
+} from "@/lib/secure-transfer-templates";
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB（サーバー側と同値）
@@ -48,6 +55,29 @@ type UploadState = {
   progress: number; // 0-100
   status: "pending" | "uploading" | "done" | "error";
   storagePath?: string;
+};
+
+// T-185: 送信画面で使うテンプレートの型（一覧APIのレスポンス形）
+type RecipientTemplateOption = {
+  id: string;
+  name: string;
+  companyName: string | null;
+  contacts: { id: string; name: string | null; email: string; defaultField: string }[];
+};
+
+type MessageTemplateOption = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  signature: string | null;
+};
+
+// 宛先テンプレート選択時のチェックリスト1行分（適用前にその場で付け替えできる）
+type ContactCheckRow = {
+  name: string | null;
+  email: string;
+  field: ContactField; // TO / CC / NONE（NONE = 入れない）
 };
 
 type SendResult = {
@@ -150,6 +180,40 @@ export default function NewTransferPage() {
   const [senderInfo, setSenderInfo] = useState<{ name: string; email: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ---------- T-185: テンプレート ----------
+  const [recipientTemplates, setRecipientTemplates] = useState<RecipientTemplateOption[]>([]);
+  const [messageTemplates, setMessageTemplates] = useState<MessageTemplateOption[]>([]);
+  // 宛先テンプレート: 選択→担当者チェックリスト展開→「適用」でTO/CC欄へ反映（反映後は手入力と同じ扱い）
+  const [selectedRecipientTplId, setSelectedRecipientTplId] = useState("");
+  const [contactChecks, setContactChecks] = useState<ContactCheckRow[]>([]);
+  const [appliedRecipientTplId, setAppliedRecipientTplId] = useState<string | null>(null);
+  // 文面テンプレート: 既に入力がある場合は上書き確認をインラインで出す（window.confirm は使わない）
+  const [selectedMessageTplId, setSelectedMessageTplId] = useState("");
+  const [pendingMessageTplId, setPendingMessageTplId] = useState<string | null>(null);
+  const [appliedMessageTplId, setAppliedMessageTplId] = useState<string | null>(null);
+  // 差し込みタグの入力値（件名・本文・署名に {{タグ}} が含まれるものだけ入力欄を出す）
+  const [tagValues, setTagValues] = useState<Record<TransferTemplateTagName, string>>({
+    企業名: "",
+    担当者名: "",
+    候補者名: "",
+  });
+  // 「この宛先/文面をテンプレートに保存」のインライン保存フォーム
+  const [savingTplKind, setSavingTplKind] = useState<"recipient" | "message" | null>(null);
+  const [savingTplName, setSavingTplName] = useState("");
+  const [tplSaving, setTplSaving] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/transfers/templates/recipients").then((r) => (r.ok ? r.json() : { templates: [] })),
+      fetch("/api/transfers/templates/messages").then((r) => (r.ok ? r.json() : { templates: [] })),
+    ])
+      .then(([r, m]) => {
+        setRecipientTemplates(r.templates || []);
+        setMessageTemplates(m.templates || []);
+      })
+      .catch(() => {});
+  }, []);
+
   // 署名の既定値に送信者名・メールが要るのでログイン中ユーザーを取得する
   useEffect(() => {
     fetch("/api/auth/session")
@@ -192,7 +256,31 @@ export default function NewTransferPage() {
 
   const fileNames = useMemo(() => uploads.map((u) => u.file.name), [uploads]);
   const previewExpiresAt = useMemo(() => calcExpiresAt(expiresDays), [expiresDays]);
-  const resolvedSubject = subject.trim() || TRANSFER_MAIL_SUBJECT;
+
+  // T-185: 差し込みタグの解決。件名・本文・署名の入力値にはタグをそのまま保持し、
+  // プレビュー・確認画面・実送信の直前に置換する。値が空のタグは {{...}} のまま残り、
+  // 確認画面の unresolvedTags 判定で送信ボタンが無効化される（未展開のまま届く事故防止）。
+  const activeTags = useMemo(
+    () => extractTransferTemplateTags(subject, editableBody, editableSignature),
+    [subject, editableBody, editableSignature]
+  );
+  const resolvedSubjectRaw = useMemo(
+    () => applyTransferTemplateTags(subject, tagValues),
+    [subject, tagValues]
+  );
+  const resolvedBody = useMemo(
+    () => applyTransferTemplateTags(editableBody, tagValues),
+    [editableBody, tagValues]
+  );
+  const resolvedSignature = useMemo(
+    () => applyTransferTemplateTags(editableSignature, tagValues),
+    [editableSignature, tagValues]
+  );
+  const unresolvedTags = useMemo(
+    () => hasUnresolvedTemplateBraces(resolvedSubjectRaw, resolvedBody, resolvedSignature),
+    [resolvedSubjectRaw, resolvedBody, resolvedSignature]
+  );
+  const resolvedSubject = resolvedSubjectRaw.trim() || TRANSFER_MAIL_SUBJECT;
 
   // （2）（3）は自動挿入・編集不可。実送信と同じ関数で組み立てる
   const fixedPreview = useMemo(
@@ -207,19 +295,19 @@ export default function NewTransferPage() {
     [passwordInEmail, previewExpiresAt, fileNames]
   );
 
-  // 確認画面で見せるメール全文（実送信と同じ組み立て）
+  // 確認画面で見せるメール全文（実送信と同じ組み立て）。差し込みタグは置換後の姿を見せる
   const fullPreview = useMemo(
     () =>
       buildTransferNoticeBody({
-        body: editableBody,
-        signature: editableSignature,
+        body: resolvedBody,
+        signature: resolvedSignature,
         url: URL_PLACEHOLDER,
         password: PW_PLACEHOLDER,
         passwordInEmail,
         expiresAt: previewExpiresAt,
         fileNames,
       }),
-    [editableBody, editableSignature, passwordInEmail, previewExpiresAt, fileNames]
+    [resolvedBody, resolvedSignature, passwordInEmail, previewExpiresAt, fileNames]
   );
 
   const addFiles = (fileList: FileList | null) => {
@@ -266,6 +354,150 @@ export default function NewTransferPage() {
     window.scrollTo({ top: 0 });
   };
 
+  // ---------- T-185: テンプレート操作 ----------
+
+  /** 宛先テンプレートを選択 → 担当者チェックリストを展開（defaultField を初期値にする）。 */
+  const handleSelectRecipientTpl = (id: string) => {
+    setSelectedRecipientTplId(id);
+    const tpl = recipientTemplates.find((t) => t.id === id);
+    setContactChecks(
+      tpl
+        ? tpl.contacts.map((c) => ({
+            name: c.name,
+            email: c.email,
+            field: (["TO", "CC", "NONE"].includes(c.defaultField) ? c.defaultField : "TO") as ContactField,
+          }))
+        : []
+    );
+  };
+
+  /**
+   * チェックリストの内容を TO / CC 欄へ反映する。
+   * 反映後は通常の手入力と同じ扱い（自由に追加・削除でき、件数上限・ドメイン混在警告も既存のまま効く）。
+   * 企業名・担当者名の差し込み値もここで自動で埋める（手で上書き可能）。
+   */
+  const handleApplyRecipientTpl = () => {
+    const tpl = recipientTemplates.find((t) => t.id === selectedRecipientTplId);
+    if (!tpl) return;
+    const toAdd = contactChecks.filter((c) => c.field === "TO").map((c) => c.email);
+    const ccAdd = contactChecks.filter((c) => c.field === "CC").map((c) => c.email);
+    if (toAdd.length === 0 && ccAdd.length === 0) {
+      toast.error("TOまたはCCに入れる担当者を選択してください");
+      return;
+    }
+    // 既存入力の末尾へ改行区切りで追記（既に入力済みの同一アドレスは追記しない）
+    const appendEmails = (current: string, add: string[]): string => {
+      const existing = new Set(parseEmailList(current).map((e) => e.toLowerCase()));
+      const news = add.filter((e) => !existing.has(e.toLowerCase()));
+      return [current.trim(), ...news].filter(Boolean).join("\n");
+    };
+    setRecipientsText((cur) => appendEmails(cur, toAdd));
+    setCcText((cur) => appendEmails(cur, ccAdd));
+    // 差し込み値の自動埋め: 企業名＝テンプレートの企業名 / 担当者名＝TOに入れた先頭1名の名前
+    const firstToName = contactChecks.find((c) => c.field === "TO" && c.name?.trim())?.name?.trim();
+    setTagValues((prev) => ({
+      ...prev,
+      企業名: tpl.companyName?.trim() || prev.企業名,
+      担当者名: firstToName || prev.担当者名,
+    }));
+    setAppliedRecipientTplId(tpl.id);
+    setSelectedRecipientTplId("");
+    setContactChecks([]);
+    toast.success(`宛先テンプレート「${tpl.name}」を反映しました`);
+  };
+
+  /** 文面テンプレートを実際に流し込む（上書き確認済みの前提）。 */
+  const applyMessageTpl = (tpl: MessageTemplateOption) => {
+    setSubject(tpl.subject);
+    setEditableBody(tpl.body);
+    // テンプレートを明示的に選んだ時だけ上書きする。以降は添え書きで本文を上書きしない
+    setBodyTouched(true);
+    if (tpl.signature !== null && tpl.signature.trim()) {
+      setEditableSignature(tpl.signature);
+    }
+    // 署名が未設定のテンプレートは現行の署名（自動署名 or 編集済み）をそのまま使う
+    setAppliedMessageTplId(tpl.id);
+    setSelectedMessageTplId("");
+    setPendingMessageTplId(null);
+    toast.success(`文面テンプレート「${tpl.name}」を適用しました`);
+  };
+
+  /** 文面テンプレートを選択。既に件名・本文の入力がある場合はインラインで上書き確認を出す。 */
+  const handleSelectMessageTpl = (id: string) => {
+    setSelectedMessageTplId(id);
+    setPendingMessageTplId(null);
+    if (!id) return;
+    const tpl = messageTemplates.find((t) => t.id === id);
+    if (!tpl) return;
+    if (subject.trim() || editableBody.trim()) {
+      setPendingMessageTplId(id); // 「上書きします」の確認パネルを出す
+    } else {
+      applyMessageTpl(tpl);
+    }
+  };
+
+  /** 現在の入力をテンプレートとして保存（画面遷移せず、保存後もそのまま送信操作を続けられる）。 */
+  const handleSaveTemplate = async () => {
+    if (!savingTplKind || tplSaving) return;
+    const name = savingTplName.trim();
+    if (!name) {
+      toast.error("テンプレート名を入力してください");
+      return;
+    }
+    setTplSaving(true);
+    try {
+      let res: Response;
+      if (savingTplKind === "recipient") {
+        const contacts = [
+          ...recipients.map((email) => ({ name: "", email, defaultField: "TO" })),
+          ...ccRecipients.map((email) => ({ name: "", email, defaultField: "CC" })),
+        ];
+        if (contacts.length === 0) {
+          toast.error("宛先（TO）またはCCを入力してから保存してください");
+          setTplSaving(false);
+          return;
+        }
+        res = await fetch("/api/transfers/templates/recipients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, contacts }),
+        });
+      } else {
+        // ★保存するのは自由文部分（件名・本文・署名）の生の入力値のみ。
+        //   固定生成部（URL・パスワード・有効期限・ファイル名）は editableBody / editableSignature に
+        //   そもそも含まれない構造（buildTransferFixedBlock は別領域）なので保存対象外になる
+        res = await fetch("/api/transfers/templates/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            subject,
+            body: editableBody,
+            signature: editableSignature,
+          }),
+        });
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存に失敗しました");
+      toast.success(
+        savingTplKind === "recipient" ? "宛先テンプレートを保存しました" : "文面テンプレートを保存しました"
+      );
+      setSavingTplKind(null);
+      setSavingTplName("");
+      // 保存直後から選択肢に出るよう一覧を再取得（このまま送信操作を続けられる）
+      const [r, m] = await Promise.all([
+        fetch("/api/transfers/templates/recipients").then((x) => (x.ok ? x.json() : { templates: [] })),
+        fetch("/api/transfers/templates/messages").then((x) => (x.ok ? x.json() : { templates: [] })),
+      ]);
+      setRecipientTemplates(r.templates || []);
+      setMessageTemplates(m.templates || []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保存に失敗しました");
+    } finally {
+      setTplSaving(false);
+    }
+  };
+
   const handleSend = async () => {
     if (sending) return;
     setSending(true);
@@ -300,14 +532,17 @@ export default function NewTransferPage() {
         body: JSON.stringify({
           recipientEmails: recipients,
           ccEmails: ccRecipients,
-          subject: subject.trim() || undefined,
-          // プレビューで編集された（1）本文・（4）署名の最終形をそのまま送る
-          message: editableBody.trim() || undefined,
-          signature: editableSignature.trim(), // 空文字 = 署名なしの明示指定
+          // T-185: 差し込みタグを置換した最終形を送る（確認画面のプレビューと同じ値）
+          subject: resolvedSubjectRaw.trim() || undefined,
+          message: resolvedBody.trim() || undefined,
+          signature: resolvedSignature.trim(), // 空文字 = 署名なしの明示指定
           expiresDays,
           passwordInEmail,
           sendCopyToSender,
           files: uploaded,
+          // 使用したテンプレートの lastUsedAt を送信成功時に更新してもらう
+          recipientTemplateId: appliedRecipientTplId ?? undefined,
+          messageTemplateId: appliedMessageTplId ?? undefined,
         }),
       });
       const data = await res.json();
@@ -473,6 +708,16 @@ export default function NewTransferPage() {
             </div>
           )}
 
+          {unresolvedTags && (
+            <div className="rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3">
+              <p className="text-sm font-semibold text-red-700">⚠ 差し込みが埋まっていません</p>
+              <p className="mt-1 text-xs text-red-700">
+                件名・本文・署名に {"{{ }}"} のまま残っている箇所があります。
+                このままでは送信できません。「戻って修正する」から差し込み欄を入力するか、本文を直接修正してください。
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <p className="text-xs font-semibold text-gray-500 mb-1">宛先（{recipients.length}件）</p>
@@ -582,10 +827,14 @@ export default function NewTransferPage() {
             </button>
             <button
               onClick={handleSend}
-              disabled={sending}
+              disabled={sending || unresolvedTags}
               className="flex-1 rounded-lg bg-[#2563EB] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8] disabled:opacity-50"
             >
-              {sending ? "アップロード・送信中..." : "送信する"}
+              {sending
+                ? "アップロード・送信中..."
+                : unresolvedTags
+                  ? "差し込みが埋まっていません"
+                  : "送信する"}
             </button>
           </div>
         </div>
@@ -662,6 +911,83 @@ export default function NewTransferPage() {
             )}
           </div>
 
+          {/* T-185: 宛先テンプレート */}
+          {recipientTemplates.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                宛先テンプレートから選ぶ
+              </label>
+              <select
+                value={selectedRecipientTplId}
+                onChange={(e) => handleSelectRecipientTpl(e.target.value)}
+                disabled={sending}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
+              >
+                <option value="">（選択してください）</option>
+                {recipientTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.companyName ? `${t.name}（${t.companyName}）` : t.name}
+                  </option>
+                ))}
+              </select>
+              {selectedRecipientTplId && (
+                <div className="mt-2 space-y-1.5">
+                  {contactChecks.length === 0 && (
+                    <p className="text-xs text-gray-400">このテンプレートに担当者が登録されていません</p>
+                  )}
+                  {contactChecks.map((c, i) => (
+                    <div
+                      key={`${c.email}-${i}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded border border-gray-200 bg-white px-3 py-1.5"
+                    >
+                      <span className="text-xs text-gray-700">
+                        {c.name ? `${c.name}（${c.email}）` : c.email}
+                      </span>
+                      <span className="flex items-center gap-2 text-xs text-gray-600">
+                        {(["TO", "CC", "NONE"] as const).map((f) => (
+                          <label key={f} className="flex cursor-pointer items-center gap-1">
+                            <input
+                              type="radio"
+                              name={`apply-contact-${i}`}
+                              checked={c.field === f}
+                              onChange={() =>
+                                setContactChecks((prev) =>
+                                  prev.map((row, idx) => (idx === i ? { ...row, field: f } : row))
+                                )
+                              }
+                            />
+                            {f === "NONE" ? "入れない" : f}
+                          </label>
+                        ))}
+                      </span>
+                    </div>
+                  ))}
+                  {contactChecks.length > 0 && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={handleApplyRecipientTpl}
+                        disabled={sending}
+                        className="rounded-lg bg-[#2563EB] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                      >
+                        適用（TO/CC欄へ反映）
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedRecipientTplId("");
+                          setContactChecks([]);
+                        }}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                      >
+                        キャンセル
+                      </button>
+                      <span className="text-xs text-gray-400">反映後も自由に追加・削除できます</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 宛先（TO） */}
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
@@ -716,7 +1042,129 @@ export default function NewTransferPage() {
             <p className="mt-1 text-xs text-gray-400">
               宛先とCCを含めた1通のメールを送信します。CCのアドレスは受信者全員に表示されます。
             </p>
+            {/* T-185: 現在のTO/CCを宛先テンプレートとして保存（画面遷移しない） */}
+            <div className="mt-2">
+              {savingTplKind === "recipient" ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2">
+                  <input
+                    type="text"
+                    value={savingTplName}
+                    onChange={(e) => setSavingTplName(e.target.value)}
+                    placeholder="テンプレート名（例: ○○社｜候補者ご紹介）"
+                    className="min-w-[220px] flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-[#2563EB] focus:outline-none"
+                  />
+                  <button
+                    onClick={handleSaveTemplate}
+                    disabled={tplSaving}
+                    className="rounded bg-[#2563EB] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    {tplSaving ? "保存中..." : "保存"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSavingTplKind(null);
+                      setSavingTplName("");
+                    }}
+                    disabled={tplSaving}
+                    className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setSavingTplKind("recipient");
+                    setSavingTplName("");
+                  }}
+                  disabled={sending || (recipients.length === 0 && ccRecipients.length === 0)}
+                  className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  この宛先をテンプレートに保存
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* T-185: 文面テンプレート */}
+          {messageTemplates.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                文面テンプレートから選ぶ
+              </label>
+              <select
+                value={selectedMessageTplId}
+                onChange={(e) => handleSelectMessageTpl(e.target.value)}
+                disabled={sending}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none"
+              >
+                <option value="">（選択してください）</option>
+                {messageTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {pendingMessageTplId && (
+                <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-amber-800">
+                    入力済みの件名・本文を上書きします。よろしいですか？
+                  </p>
+                  <div className="mt-1.5 flex gap-2">
+                    <button
+                      onClick={() => {
+                        const tpl = messageTemplates.find((t) => t.id === pendingMessageTplId);
+                        if (tpl) applyMessageTpl(tpl);
+                      }}
+                      className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                    >
+                      上書きして適用
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPendingMessageTplId(null);
+                        setSelectedMessageTplId("");
+                      }}
+                      className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* T-185: 差し込みタグの入力欄（件名・本文・署名に {{タグ}} が含まれる分だけ出す） */}
+          {activeTags.length > 0 && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+              <p className="mb-2 text-xs font-medium text-gray-600">
+                差し込み項目
+                <span className="ml-2 font-normal text-gray-400">
+                  未入力のままだと {"{{ }}"} が残り、確認画面で送信できません
+                </span>
+              </p>
+              <div className="space-y-2">
+                {activeTags.map((tag) => (
+                  <div key={tag} className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 text-xs text-gray-600">{tag}</span>
+                    <input
+                      type="text"
+                      value={tagValues[tag]}
+                      onChange={(e) =>
+                        setTagValues((prev) => ({ ...prev, [tag]: e.target.value }))
+                      }
+                      disabled={sending}
+                      placeholder={
+                        tag === "候補者名" ? "例: 山田 太郎" : `{{${tag}}} に入る値`
+                      }
+                      className="flex-1 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-[#2563EB] focus:outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 件名 */}
           <div>
@@ -897,6 +1345,50 @@ export default function NewTransferPage() {
               <p className="mt-1 text-xs text-gray-400">
                 役職・住所・電話番号などを自由に追記できます。空にすると署名なしで送信されます。
               </p>
+            </div>
+
+            {/* T-185: 現在の件名・本文・署名を文面テンプレートとして保存（画面遷移しない）。
+                固定生成部（URL・パスワード・有効期限・ファイル名）は本文・署名の入力欄に含まれないため保存されない */}
+            <div>
+              {savingTplKind === "message" ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2">
+                  <input
+                    type="text"
+                    value={savingTplName}
+                    onChange={(e) => setSavingTplName(e.target.value)}
+                    placeholder="テンプレート名（例: 新規候補者のご紹介）"
+                    className="min-w-[220px] flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs focus:border-[#2563EB] focus:outline-none"
+                  />
+                  <button
+                    onClick={handleSaveTemplate}
+                    disabled={tplSaving}
+                    className="rounded bg-[#2563EB] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    {tplSaving ? "保存中..." : "保存"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSavingTplKind(null);
+                      setSavingTplName("");
+                    }}
+                    disabled={tplSaving}
+                    className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setSavingTplKind("message");
+                    setSavingTplName("");
+                  }}
+                  disabled={sending || (!subject.trim() && !editableBody.trim())}
+                  className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  この文面をテンプレートに保存
+                </button>
+              )}
             </div>
           </div>
 
