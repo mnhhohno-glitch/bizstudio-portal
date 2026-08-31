@@ -779,10 +779,10 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v5。Phase 3 で自動検知3種カード方式に改訂）。
+要件の正: `docs/mendan-support/requirements.md`（v6。Phase 4 で Deepgram 差し替え・イベント駆動判定・UI拡大に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
@@ -818,3 +818,19 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     更新時は背景色 transition で1.5秒ハイライト。希望条件・日程調整・雑談は検知しない（沈黙が正解）。
   - 保存は既存 explanations（Json）に相乗り。用語=1件ずつ、②③=**保存時点の最新版のみ**（更新履歴は積まない。
     定期保存時にクライアントが最新状態から組み立てる）。保存API・テーブルは無変更。
+- **Deepgram 連携（Phase 4）**: 文字起こしの主エンジンを Deepgram ストリーミングに差し替え（内蔵方式はフォールバックとして併存）。
+  - `POST /api/interview-support/stt-token`（`getSessionUser` 認証）… サーバー環境変数 **`DEEPGRAM_API_KEY`** で
+    Deepgram `POST /v1/auth/grant` を呼び、短時間有効トークン（TTL 60秒）を返す。永続キーはブラウザに渡さない。
+    キー未設定・発行失敗・タイムアウト(5秒)は `{ available: false }`。
+  - `useDeepgramTranscription.ts` … `useSpeechTranscription` と**同一インターフェース**。MediaRecorder（webm/opus・250msチャンク）→
+    WebSocket `wss://api.deepgram.com/v1/listen?model=nova-3&language=ja&interim_results=true&endpointing=300&punctuate=true&smart_format=true&access_token=…`。
+    interim は差し替え表示・`is_final` で確定ログに追加。接続断は1秒待って自動再接続（トークン・Recorder とも作り直し。webm はストリーム
+    先頭にヘッダを持つため Recorder の使い回し不可）。「停止」は CloseStream 送信→ WS/Recorder/マイクをクローズし再接続しない。
+  - エンジン切替: 画面起動時に stt-token を1回呼んで判定（`available: true` → Deepgram / それ以外 → 内蔵）。判定完了まで「開始」は
+    無効。上部バーに使用中エンジン名（「Deepgram」/「ブラウザ内蔵」）を小さく表示。**フックは両方マウント**して engine で選ぶ
+    （フックの条件呼び出し不可のため。使わない側は start しない限り不活性）。
+  - **自動検知のイベント駆動化（Phase 4）**: 30秒タイマー（旧 `AUTO_SCAN_INTERVAL_MS`）を廃止し、**発話が確定するたび**に
+    auto-scan を予約起動。直前のスキャン完了から最低5秒（`AUTO_SCAN_COOLDOWN_MS`）は待ち、待ち中の確定発話は次の1回にまとめて送る
+    （予約は常に1本・応答待ち中に発火した分は完了後に予約し直す）。スキップ条件（新規発話20字未満）・explainedTerms・
+    existingJobs/existingReason・カード更新ロジック・手動ボタン2つは Phase 3 のまま。auto-scan API のプロンプトも無変更。
+  - UI: 右カラム（解説カード）を主役化。横幅比率 ログ 40% : カード 60%（`flex-[2]` : `flex-[3]`）、カード本文は `text-base leading-8`。

@@ -71,8 +71,9 @@ function PinnedCard({
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeClassName}`}>{badge}</span>
         <span className="font-mono text-[10px] text-gray-400">{formatTime(updatedAt)}</span>
       </div>
-      {title && <div className="mb-1 text-xs font-semibold text-gray-700">{title}</div>}
-      <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{text}</div>
+      {title && <div className="mb-1 text-sm font-semibold text-gray-700">{title}</div>}
+      {/* Phase 4: 面談中に一目で読めるよう本文は一段大きく・行間広め */}
+      <div className="whitespace-pre-wrap text-base leading-8 text-gray-800">{text}</div>
     </div>
   );
 }
@@ -141,7 +142,7 @@ export default function ExplainCards({
             {card.status === "error" ? (
               <div className="text-sm text-red-600">{card.text || "解説の取得に失敗しました"}</div>
             ) : (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+              <div className="whitespace-pre-wrap text-base leading-8 text-gray-800">
                 {card.text}
                 {card.status === "streaming" && (
                   <span className="text-gray-400">{card.text ? "▍" : "解説中…"}</span>

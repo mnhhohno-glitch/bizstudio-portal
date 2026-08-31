@@ -6,13 +6,17 @@
 // - ログは sessionStorage に逐次退避（保存失敗時の最後の砦として Phase 2 以降も継続）。
 // - Phase 2: DB保存。「開始」でクライアント生成の sessionId を確定し、認識中は1分ごと＋停止時＋
 //   解説完了直後に同一 sessionId へ upsert（冪等）。失敗しても UI は止めず次回保存でリトライ。
-// - Phase 3: 自動検知。認識中は30秒ごとに新規確定発話を /api/interview-support/auto-scan へ送り、
+// - Phase 3: 自動検知。新規確定発話を /api/interview-support/auto-scan へ送り、
 //   用語（時系列に積む）/ 業務内容（職務ごと更新型）/ 転職理由（1枚更新型）のカードを自動生成する。
 //   自動フローのエラーは画面に出さず沈黙（失敗区間は次回スキャンでリトライ）。
+// - Phase 4: 文字起こしエンジンを Deepgram（useDeepgramTranscription）に差し替え。起動時に stt-token API で
+//   利用可否を判定し、使えなければ Chrome 内蔵（useSpeechTranscription）へ自動フォールバック。
+//   自動検知は30秒タイマーをやめ、発話確定のたびに起動するイベント駆動（連続実行は最低5秒空ける）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { useSpeechTranscription, type TranscriptEntry } from "./useSpeechTranscription";
+import { useDeepgramTranscription } from "./useDeepgramTranscription";
 import TranscriptLog from "./TranscriptLog";
 import ExplainCards, {
   type ExplainCard,
@@ -26,8 +30,9 @@ const RECENT_WINDOW_MS = 30_000;
 const EXCERPT_CHARS = 30;
 // Phase 2: DB定期保存の間隔(ms)。認識中はこの間隔で upsert する。
 const AUTOSAVE_INTERVAL_MS = 60_000;
-// Phase 3: 自動検知スキャンの間隔(ms)。実測を見て調整する設定値。
-const AUTO_SCAN_INTERVAL_MS = 30_000;
+// Phase 4: 自動検知はイベント駆動（発話確定ごと）。連続実行の暴走防止として、
+// 直前のスキャン完了からこの時間(ms)は次のスキャンを待つ（待ち中に確定した発話はまとめて次回に送る）。
+const AUTO_SCAN_COOLDOWN_MS = 5_000;
 // Phase 3: 新規発話がこの文字数未満ならスキャンをスキップ（無言・相槌のみの区間は呼ばない＝コストゼロ）。
 const AUTO_SCAN_MIN_CHARS = 20;
 // Phase 3: 再解説防止のためAPIに渡す解説済み用語の保持上限（直近N件）。
@@ -46,8 +51,29 @@ function sessionStorageKey(interviewId: string): string {
 }
 
 export default function InterviewSupportScreen({ interviewId }: { interviewId: string }) {
-  const { entries, interimText, listening, supported, start, stop, restore } =
-    useSpeechTranscription();
+  /* ---- Phase 4: 文字起こしエンジンの切替（Deepgram / Chrome内蔵） ---- */
+  // フックは条件呼び出しできないため両方をマウントし、engine で使う側を選ぶ（使わない側は start しない限り不活性）。
+  const speech = useSpeechTranscription();
+  const deepgram = useDeepgramTranscription();
+  // null = 判定中（stt-token API の応答待ち。判定が済むまで「開始」は押せない）。
+  const [engine, setEngine] = useState<"deepgram" | "browser" | null>(null);
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/interview-support/stt-token", { method: "POST" });
+        const data = res.ok ? ((await res.json()) as { available?: boolean }) : null;
+        if (!aborted) setEngine(data?.available ? "deepgram" : "browser");
+      } catch {
+        if (!aborted) setEngine("browser");
+      }
+    })();
+    return () => {
+      aborted = true;
+    };
+  }, []);
+  const active = engine === "deepgram" ? deepgram : speech;
+  const { entries, interimText, listening, supported, start, stop, restore } = active;
 
   const [info, setInfo] = useState<InterviewInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -295,11 +321,19 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     runExplain("selection", selectionText);
   }, [selectionText, runExplain]);
 
-  /* ---- Phase 3: 自動検知（30秒ごとに新規発話をスキャンし、用語/業務内容/転職理由カードを自動生成） ---- */
+  /* ---- Phase 3/4: 自動検知（発話が確定するたびに新規発話をスキャンし、用語/業務内容/転職理由カードを自動生成） ---- */
   // スキャン済み entries 件数。API成功時のみ進める（失敗時は同じ発話を次回リトライ）。
   const scannedCountRef = useRef(0);
-  // 多重実行防止（API応答が間隔より遅い場合に重ねて呼ばない）。
+  // 多重実行防止（API応答中に重ねて呼ばない）。
   const scanInFlightRef = useRef(false);
+  // Phase 4: 直前のスキャン完了時刻。ここから AUTO_SCAN_COOLDOWN_MS 空けて次を実行する（暴走防止）。
+  const lastScanEndRef = useRef(0);
+  // 実行待ちのスキャン予約（クールダウン待ち）。予約は常に1本まで＝待ち中の確定発話は自動的にまとめて送られる。
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 予約発火時に前のスキャンがまだ応答待ちだった場合の「完了後に予約し直す」印。
+  const scanPendingRef = useRef(false);
+  // runAutoScan の完了後処理から予約関数を呼ぶための鏡（相互参照を避ける）。
+  const scheduleAutoScanRef = useRef<() => void>(() => {});
   // 再解説防止のための解説済み用語リスト（直近 EXPLAINED_TERMS_MAX 件）。
   const explainedTermsRef = useRef<string[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -395,22 +429,55 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       // 通信失敗も沈黙（scannedCount を進めていないので次回同じ発話でリトライ）
     } finally {
       scanInFlightRef.current = false;
+      lastScanEndRef.current = Date.now();
+      // 応答待ちの間に予約が発火していた分（＝その間の確定発話）は、完了後に改めて予約し直す。
+      if (scanPendingRef.current) {
+        scanPendingRef.current = false;
+        scheduleAutoScanRef.current();
+      }
     }
   }, [saveSession]);
 
-  // 認識中のみ30秒間隔で自動スキャン。「停止」中は止まる。
+  // Phase 4: 発話が確定するたびにスキャンを予約する（30秒タイマーは廃止）。
+  // 直前のスキャン完了から AUTO_SCAN_COOLDOWN_MS 経つまでは待ち、その間の確定発話は次の1回にまとめて送る。
+  const scheduleAutoScan = useCallback(() => {
+    if (scanTimerRef.current) return; // 予約済み（後続の確定発話も同じ1回に乗る）
+    const wait = Math.max(0, lastScanEndRef.current + AUTO_SCAN_COOLDOWN_MS - Date.now());
+    scanTimerRef.current = setTimeout(() => {
+      scanTimerRef.current = null;
+      if (scanInFlightRef.current) {
+        // 前のスキャンがまだ応答待ち。取りこぼさないよう完了後の予約し直しに委ねる。
+        scanPendingRef.current = true;
+        return;
+      }
+      void runAutoScan();
+    }, wait);
+  }, [runAutoScan]);
+  useEffect(() => {
+    scheduleAutoScanRef.current = scheduleAutoScan;
+  }, [scheduleAutoScan]);
+
   useEffect(() => {
     if (!listening) return;
-    const timer = setInterval(() => {
-      void runAutoScan();
-    }, AUTO_SCAN_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [listening, runAutoScan]);
+    if (entries.length <= scannedCountRef.current) return; // 新規確定発話なし
+    scheduleAutoScan();
+  }, [entries.length, listening, scheduleAutoScan]);
 
-  // アンマウント時にハイライト解除タイマーを破棄。
+  // 「停止」したら実行待ちのスキャン予約は破棄する（認識中のみ動く従来動作を維持）。
+  useEffect(() => {
+    if (listening) return;
+    scanPendingRef.current = false;
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+  }, [listening]);
+
+  // アンマウント時に各種タイマーを破棄。
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
     };
   }, []);
 
@@ -456,6 +523,10 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               保存エラー（自動で再試行します）
             </span>
           )}
+          {/* Phase 4: 使用中の文字起こしエンジン。「ブラウザ内蔵」なら DEEPGRAM_API_KEY 未設定 or 発行失敗。 */}
+          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+            {engine === null ? "エンジン確認中…" : engine === "deepgram" ? "Deepgram" : "ブラウザ内蔵"}
+          </span>
           <span className="flex items-center gap-1.5 text-sm">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${
@@ -478,7 +549,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
             <button
               type="button"
               onClick={handleStart}
-              disabled={!supported}
+              disabled={!supported || engine === null}
               className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               ● 開始
@@ -493,10 +564,10 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         </div>
       )}
 
-      {/* ============ 中央ログ＋右カラム ============ */}
+      {/* ============ 中央ログ＋右カラム（Phase 4: 解説カードを主役に ログ40% : カード60%） ============ */}
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 左: 文字起こしログ＋解説ボタン */}
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex min-w-0 flex-[2] flex-col gap-3">
           <TranscriptLog
             entries={entries}
             interimText={interimText}
@@ -524,7 +595,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         </div>
 
         {/* 右: 上段=固定エリア（業務内容・転職理由）＋下段=時系列カード（新しい順） */}
-        <div className="w-[380px] shrink-0 min-h-0">
+        <div className="min-w-0 flex-[3] min-h-0">
           <ExplainCards cards={cards} jobCards={jobCards} reasonCard={reasonCard} />
         </div>
       </div>

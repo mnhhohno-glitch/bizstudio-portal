@@ -75,6 +75,7 @@ kyuujin-pdf-tool: project, processing_unit, job, memo を作成
 | kyuujinPDF → portal | x-api-secret ヘッダ | PORTAL_API_SECRET |
 | mypage → kyuujinPDF | URLトークン認証 | （URL内 secret パラメータ）|
 | portal → candidate-intake | (確認) | INTAKE_API_KEY |
+| portal → Deepgram（面談サポート文字起こし・T-183） | 永続キーはサーバーのみ。stt-token API が一時トークン(TTL60秒)を発行しブラウザがWS接続 | DEEPGRAM_API_KEY（未設定時はChrome内蔵方式へ自動フォールバック） |
 
 ## 主要ドメインモデル間の関係
 
