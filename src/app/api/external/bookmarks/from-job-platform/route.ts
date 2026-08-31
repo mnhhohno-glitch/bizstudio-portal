@@ -4,6 +4,8 @@ import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 // T-181: generateAndStorePdf は本routeのローカル関数だったものを @/lib/job-platform-pdf へ
 // 切り出した（サイト経由お気に入り・バックフィルと共有）。挙動は切り出し前と同一。
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
+// T-185: 求人名・職種の保存。payload の jobTitle/jobCategory を優先し、無ければ求人本文から抽出する。
+import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
 
 /**
  * POST /api/external/bookmarks/from-job-platform
@@ -28,6 +30,9 @@ type JobInput = {
   externalJobRef?: unknown;
   companyName?: unknown;
   jobTitle?: unknown;
+  // T-185: 職種。jobCategory / jobType のどちらの名前でも受け付ける（送られてこなければ本文から抽出）。
+  jobCategory?: unknown;
+  jobType?: unknown;
   extractedText?: unknown;
   jobUrl?: unknown;
   fileNumericId?: unknown; // ファイル名用の数値ID（10桁以上推奨）。無ければ会社名のみ。
@@ -143,6 +148,13 @@ export async function POST(request: Request) {
     const fileSize = Buffer.byteLength(extractedText, "utf8");
     // T-128 Phase2-1: 元媒体（例: "hito_link"）。未送信は null（既存動作）。
     const sourceMedia = str(j.sourceMedia);
+    // T-185: 求人名・職種を CandidateFile に保存する。
+    //   旧実装は payload の jobTitle を型宣言だけして一度も書いていなかったため、CA がブックマークした
+    //   行（本番 7,851 行）の job_title が全件 NULL になり、to-entry で作るエントリーの求人名が空だった。
+    //   payload に無い場合は求人本文（extractedText）から抽出する（job-platform の構造化テキスト
+    //   「【求人タイトル】」/ HITO-Link 求人票PDFの「求人名」行）。どちらでも取れなければ null のまま。
+    const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
+    const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
 
     try {
       // 冪等: 同一求職者×同一求人（job-platform）の既存BOOKMARK行を探す。
@@ -166,6 +178,9 @@ export async function POST(request: Request) {
           where: { id: existing.id },
           data: {
             fileName, fileSize, extractedText, memo,
+            // T-185: 求人名・職種は取れたときだけ上書き（取れないときに既存値を消さない）。
+            ...(jobTitle ? { jobTitle } : {}),
+            ...(jobCategory ? { jobCategory } : {}),
             ...(existing.extractedAt ? {} : { extractedAt: new Date() }),
             ...(savedBy ? { uploadedByUserId: savedBy } : {}),
             // T-128 Phase2-1: sourceMedia が来ていれば更新（未送信＝undefined は既存値維持）。
@@ -196,6 +211,9 @@ export async function POST(request: Request) {
               // T-128 Phase2-1: 元媒体（"hito_link" 等・未送信は null）。
               sourceMedia,
               memo,
+              // T-185: 求人名・職種のスナップショット（to-entry で JobEntry へ引き継ぐ）。
+              jobTitle,
+              jobCategory,
               uploadedByUserId: uploaderUserId,
             },
             select: { id: true },

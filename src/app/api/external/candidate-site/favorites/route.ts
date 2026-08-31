@@ -5,6 +5,8 @@ import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
 import { extractRecommendationForDisplay } from "@/lib/comment-split";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
+// T-185: mypage が jobTitle/jobCategory を送ってこないときに求人本文から補う。
+import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
 
 // T-128 T2: 求職者サイト向け お気に入り（ブックマーク）API。
 // 台帳は CandidateFile（category="BOOKMARK"）。origin で CA追加(null|"ca") と 本人追加("candidate") を区別。
@@ -260,11 +262,12 @@ export async function POST(request: Request) {
   }
 
   const companyName = str(body.companyName);
-  const jobTitle = str(body.jobTitle);
-  // T-161: 職種。mypage が送ってくれば保存する（jobCategory / jobType 両方の名前を受け付ける）。
-  // 送られてこなければ null のまま（捏造しない）。
-  const jobCategory = str(body.jobCategory ?? body.jobType);
   const extractedText = str(body.extractedText);
+  // T-161: 職種。mypage が送ってくれば保存する（jobCategory / jobType 両方の名前を受け付ける）。
+  // T-185: 送られてこない場合は求人本文（extractedText）から抽出する。どちらでも取れなければ
+  //        null のまま（捏造しない）。to-entry 側でも同一求人の他行から解決を試みる。
+  const jobTitle = str(body.jobTitle) ?? extractJobTitleFromText(extractedText);
+  const jobCategory = str(body.jobCategory ?? body.jobType) ?? extractJobCategoryFromText(extractedText);
   const jobUrl = str(body.jobUrl);
   // 本人メモ（任意）。candidateNote / note 両方受け付ける。空文字・未指定は null。
   const candidateNote = str(body.candidateNote ?? body.note);

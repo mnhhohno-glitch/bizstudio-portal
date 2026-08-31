@@ -7,6 +7,7 @@ import {
   extractJobNoFromRef,
   resolveBookmarkMedia,
 } from "@/lib/constants/source-media";
+import { resolveBookmarkJobSnapshot } from "@/lib/bookmark-job-snapshot";
 
 // ブックマークを求人ツール（kyuujin）を経由せず JobEntry（エントリー）へ直接登録する。
 // T-161 で対象を2種類に拡張:
@@ -76,6 +77,7 @@ export async function POST(
       kyuujinJobId: true,
       jobTitle: true,
       jobCategory: true,
+      extractedText: true,
       memo: true,
     },
   });
@@ -88,6 +90,35 @@ export async function POST(
       { created: 0, skipped: 0, rejected, error: "登録対象の求人がありません（サイト経由または紹介済みの求人のみ登録できます）" },
       { status: 422 }
     );
+  }
+
+  // T-185: 求人名フォールバック用の「同一求人の他行」。
+  //   求人名が自行から取れない行（mypage が jobTitle を送る前に作られたサイト経由行など）について、
+  //   同じ externalJobRef を持つ別の求職者のブックマークを引く。求人そのものは同一なので求人名・職種は
+  //   共有できる。候補が無ければ空のまま（求人名は空文字で作成し、エラーにはしない）。
+  const needFallbackRefs = files
+    .filter((f) => f.externalJobRef && !resolveBookmarkJobSnapshot(f).jobTitle)
+    .map((f) => f.externalJobRef as string);
+  const fallbackByRef = new Map<string, { jobTitle: string | null; jobCategory: string | null; extractedText: string | null }[]>();
+  if (needFallbackRefs.length > 0) {
+    const others = await prisma.candidateFile.findMany({
+      where: {
+        category: "BOOKMARK",
+        externalJobRef: { in: [...new Set(needFallbackRefs)] },
+        id: { notIn: files.map((f) => f.id) },
+        OR: [{ jobTitle: { not: null } }, { extractedText: { not: null } }],
+      },
+      select: { externalJobRef: true, jobTitle: true, jobCategory: true, extractedText: true },
+      orderBy: { createdAt: "desc" },
+      // 同一求人を多数の求職者が保存しているケースでの取り過ぎ防止（求人本文は数KBある）。
+      take: 100,
+    });
+    for (const o of others) {
+      if (!o.externalJobRef) continue;
+      const list = fallbackByRef.get(o.externalJobRef) ?? [];
+      if (list.length < 3) list.push({ jobTitle: o.jobTitle, jobCategory: o.jobCategory, extractedText: o.extractedText });
+      fallbackByRef.set(o.externalJobRef, list);
+    }
   }
 
   // 二重登録防止（T-161 改訂）:
@@ -152,12 +183,18 @@ export async function POST(
     // 求人URL: favorites POST は memo 列に求人URLを保存する設計。URL形式のときのみ引き継ぐ
     // （PDF行の memo は自由記入のため URL 以外は写さない）。
     const jobUrl = f.memo && /^https?:\/\//.test(f.memo.trim()) ? f.memo.trim() : null;
+    // T-185: 求人名・職種の解決。ブックマーク行の jobTitle 列 → 求人本文からの抽出 →
+    //   同一求人の他行、の順で試す。取れなければ空（従来どおり作成は成功させる）。
+    const snapshot = resolveBookmarkJobSnapshot(
+      f,
+      f.externalJobRef ? fallbackByRef.get(f.externalJobRef) ?? [] : [],
+    );
     rows.push({
       candidateId,
       companyName,
       // T-161: ブックマークの求人スナップショットを引き継ぐ。無い項目は捏造しない（空のまま）。
-      jobTitle: f.jobTitle ?? "",
-      jobCategory: f.jobCategory ?? null,
+      jobTitle: snapshot.jobTitle ?? "",
+      jobCategory: snapshot.jobCategory,
       originalUrl: jobUrl,
       // kyuujin job が判明している行（旧マイページ webhook 由来）は引き当てキーとして引き継ぐ。
       externalJobId: f.kyuujinJobId ?? 0,
