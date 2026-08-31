@@ -465,6 +465,9 @@ model Candidate {
   supportStatus          String    @default("BEFORE") @map("support_status")
   supportSubStatus       String?   @map("support_sub_status")
   supportSubStatusManual Boolean   @default(false) @map("support_sub_status_manual")
+  // T-189 Phase1: おすすめ求人の自動引き当て・配信 ON/OFF。既定OFF（既存行は全て false）。
+  //   トグルは求職者詳細ヘッダにあり、AUTO_RECOMMEND_ADMIN_IDS のユーザーにのみ表示（試験運用）。
+  autoRecommendEnabled   Boolean   @default(false) @map("auto_recommend_enabled")
   supportEndReason       String?   @map("support_end_reason")
   supportEndNote         String?   @map("support_end_note")
   supportEndDate         DateTime? @map("support_end_date")
@@ -1489,6 +1492,13 @@ model CandidateFile {
   responseSubmittedAt     DateTime? @map("response_submitted_at")
   caMatchLabel            String?   @map("ca_match_label") // CA手動の◎○△。aiMatchRating(AI由来A-D)とは別系統・共存
   introducedAt            DateTime? @map("introduced_at") // 紹介日時（createdAt=行作成時刻とは意味が異なる）
+  // T-189 Phase1: 自動引き当て（おすすめ求人）の承認管理。既存行・CA手動行は全て null（挙動不変）。
+  //   却下・期限切れでも archivedAt は立てない（from-job-platform の冪等判定 archivedAt:null と
+  //   archivedReason の既存運用値10種に衝突するため。docs/reports/T-189_phase0_portal_survey.md §1-3）。
+  //   実績集計（COALESCE(lastExportedAt, introducedAt) 系）は autoSourcedAt IS NULL で自動由来を除外する。
+  autoSourcedAt           DateTime? @map("auto_sourced_at") // 自動引き当てで作成された日時。null=従来どおり手動
+  approvalStatus          String?   @map("approval_status") // PENDING / APPROVED / REJECTED / EXPIRED（自動由来のみ使用）
+  rejectedReason          String?   @map("rejected_reason") // 却下理由（自由文または定型値）
   excludedBy              String?   @map("excluded_by") // "user" / "ca"（箱B excluded_by 相当）
   excludedAt              DateTime? @map("excluded_at")
   responseSubmissionItems CandidateResponseSubmissionItem[]

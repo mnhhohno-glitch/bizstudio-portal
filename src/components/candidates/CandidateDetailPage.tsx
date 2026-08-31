@@ -100,6 +100,7 @@ type Candidate = {
   desiredIndustry2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
+  autoRecommendEnabled: boolean;
   oneDriveFolderUrl: string | null;
   guideEntries: GuideEntry[];
   notes: Note[];
@@ -112,6 +113,8 @@ type SessionUser = {
   name: string;
   email: string;
   role: string;
+  // T-189 Phase1: おすすめ配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS 判定・/api/auth/session が返す）
+  autoRecommendAdmin?: boolean;
 };
 
 /* ---------- Constants ---------- */
@@ -1961,6 +1964,15 @@ function CandidateDetailPageBody() {
         onOneDriveSynced={() => {
           fetchCandidate();
           setFileRefreshKey((k) => k + 1);
+        }}
+        showAutoRecommendToggle={currentUser?.autoRecommendAdmin === true}
+        onAutoRecommendToggle={async (enabled) => {
+          await fetch(`/api/candidates/${candidate.id}/update`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ autoRecommendEnabled: enabled }),
+          });
+          fetchCandidate();
         }}
       />
       )}

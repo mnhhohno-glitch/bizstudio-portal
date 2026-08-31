@@ -18,10 +18,14 @@ import { todayJstDateString, toJstDateString } from "@/lib/dailyReport/jstDate";
  *   BOOKMARK かつ「本人応募（origin=candidate かつ PDF 無し）」を除き、
  *   「出力済み（lastExportedAt）∪ 出力なし紹介済み（introducedAt）」のいずれかを持つ行。
  *
+ * T-189 Phase1: 自動引き当て由来（autoSourcedAt あり）はCAの紹介実績・最終接触に数えない。
+ *   現時点で該当行は0件のため数値は不変（承認で introducedAt が立っても実績に混ざらない先回り）。
+ *
  * 使う側で candidateId / candidateId:{in:[...]} を足して使う。
  */
 export const DELIVERED_BOOKMARK_FILTER: Prisma.CandidateFileWhereInput = {
   category: "BOOKMARK",
+  autoSourcedAt: null,
   NOT: { origin: "candidate", driveFileId: null },
   OR: [{ lastExportedAt: { not: null } }, { introducedAt: { not: null } }],
 };
