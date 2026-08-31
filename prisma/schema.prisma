@@ -2827,6 +2827,59 @@ model SecureTransferFile {
   @@map("secure_transfer_files")
 }
 
+// T-185: セキュアファイル送信のテンプレート（宛先＝企業 / 文面）。
+// - 共有範囲は全社共有（誰でも一覧・使用・編集可。アーカイブは作成者本人と admin のみ・確定仕様）。
+// - createdByUserId は FK を張らない（CandidateActivityLog と同方針・既存 User モデルに触れない）。
+// - 文面テンプレートに保存するのは自由文部分（件名・本文・署名）のみ。
+//   固定生成部（URL・パスワード・有効期限・ファイル名）は絶対に保存しない。
+// - 削除は isArchived の論理削除のみ（物理削除しない・送信履歴の証跡方針と揃える）。
+model SecureTransferRecipientTemplate {
+  id              String    @id @default(cuid())
+  name            String // 表示名。例「スライヴネット｜候補者ご紹介」
+  companyName     String?   @map("company_name") // 企業名（表示・並べ替え・{{企業名}}の差し込み値）
+  memo            String?   @db.Text
+  createdByUserId String    @map("created_by_user_id")
+  lastUsedAt      DateTime? @map("last_used_at") // 送信成功時に更新。90日以上前 or null は一覧でグレー表示
+  isArchived      Boolean   @default(false) @map("is_archived")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  contacts SecureTransferRecipientContact[]
+
+  @@index([isArchived])
+  @@index([companyName])
+  @@map("secure_transfer_recipient_templates")
+}
+
+model SecureTransferRecipientContact {
+  id           String                          @id @default(cuid())
+  templateId   String                          @map("template_id")
+  template     SecureTransferRecipientTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  name         String? // 担当者名（{{担当者名}} の差し込み値になる）
+  email        String
+  defaultField String                          @default("TO") @map("default_field") // TO / CC / NONE（enum化しない＝将来値追加でmigration不要）
+  sortOrder    Int                             @default(0) @map("sort_order")
+
+  @@index([templateId])
+  @@map("secure_transfer_recipient_contacts")
+}
+
+model SecureTransferMessageTemplate {
+  id              String    @id @default(cuid())
+  name            String // テンプレート名。例「新規候補者のご紹介」
+  subject         String // 件名の雛形（{{企業名}}等の差し込みタグを含んでよい）
+  body            String    @db.Text // （1）自由文部分の雛形のみ。固定生成部は含めない
+  signature       String?   @db.Text // （4）署名の雛形。null なら現行の自動署名を使う
+  createdByUserId String    @map("created_by_user_id")
+  lastUsedAt      DateTime? @map("last_used_at")
+  isArchived      Boolean   @default(false) @map("is_archived")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([isArchived])
+  @@map("secure_transfer_message_templates")
+}
+
 model SecureTransferDownload {
   id           String              @id @default(cuid())
   transferId   String              @map("transfer_id")

@@ -104,6 +104,9 @@ export async function POST(req: NextRequest) {
     passwordInEmail?: boolean;
     sendCopyToSender?: boolean; // 送信者本人への控えメール。未指定は送る（既定ON）
     files?: { fileName?: string; fileSize?: number; storagePath?: string }[];
+    // T-185: 送信画面で使用したテンプレートのID（任意）。送信成功時に lastUsedAt を更新する
+    recipientTemplateId?: string;
+    messageTemplateId?: string;
   } | null;
 
   if (!body) {
@@ -290,6 +293,25 @@ export async function POST(req: NextRequest) {
       { error: "メール送信に失敗しました。もう一度お試しください" },
       { status: 502 }
     );
+  }
+
+  // T-185: 使用したテンプレートの最終使用日時を更新（送信成功時のみ）。
+  // updateMany なので存在しないIDでも落ちない。失敗しても送信自体は成功扱い（fail-open）。
+  if (typeof body.recipientTemplateId === "string" && body.recipientTemplateId) {
+    await prisma.secureTransferRecipientTemplate
+      .updateMany({
+        where: { id: body.recipientTemplateId },
+        data: { lastUsedAt: new Date() },
+      })
+      .catch((e) => console.error("[T-185] recipient template lastUsedAt update failed:", e));
+  }
+  if (typeof body.messageTemplateId === "string" && body.messageTemplateId) {
+    await prisma.secureTransferMessageTemplate
+      .updateMany({
+        where: { id: body.messageTemplateId },
+        data: { lastUsedAt: new Date() },
+      })
+      .catch((e) => console.error("[T-185] message template lastUsedAt update failed:", e));
   }
 
   // 送信者への控え（既定ON）。★失敗しても受信者への送信は成功扱いにする（fail-open・確定仕様）

@@ -256,12 +256,20 @@ export default function TransfersPage() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-bold text-[#374151]">ファイル送信</h1>
-        <Link
-          href="/transfers/new"
-          className="rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-[#1D4ED8] transition-colors"
-        >
-          ＋ 新規送信
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/transfers/templates"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            テンプレート管理
+          </Link>
+          <Link
+            href="/transfers/new"
+            className="rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-[#1D4ED8] transition-colors"
+          >
+            ＋ 新規送信
+          </Link>
+        </div>
       </div>
 
       <p className="mb-4 text-xs text-gray-500">
