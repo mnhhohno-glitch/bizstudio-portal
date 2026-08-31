@@ -276,9 +276,28 @@ function extractSearchNames(fileName: string): string[] {
   return expanded;
 }
 
-/** Replace full-width spaces with half-width (length-preserving) for matching */
+/**
+ * 照合用アポストロフィの畳み込み（1文字→1文字・長さ保存）。
+ *
+ * AI は入力の `’`(U+2019) を `'`(U+0027) に正規化して見出しを書くことがあり、
+ * ファイル名側（DB実値）が U+2019 のままだと `【[^】]*会社名[^】]*】` の照合が
+ * 必ず MISS して評価の保存ごとスキップされる（本番で 6件・求職者6名が該当）。
+ *   例) DB: 求人票_株式会社ＣＯＭ’Ｓ.pdf  ／ AI出力: 【株式会社ＣＯＭ'Ｓ】
+ *
+ * ★対象は U+2019 / U+FF07 / U+2018 / U+02BC の4種のみ★
+ * `` ` ``(U+0060) と `´`(U+00B4) は会社名の区切りとして使われうるため畳まない。
+ */
+const APOSTROPHE_VARIANTS = /[’＇‘ʼ]/g;
+
+/**
+ * Replace full-width spaces with half-width, and unify apostrophe variants,
+ * for matching. ★必ず長さ保存（1文字→1文字）であること★
+ * normalizedText のインデックスは analysisText にそのまま対応する前提で
+ * 本文を substring 切り出ししているため（Phase 2 冒頭のコメント参照）、
+ * ここに長さの変わる置換を足すと切り出しが破損する。
+ */
 function normalizeSpaces(str: string): string {
-  return str.replace(/　/g, " ");
+  return str.replace(/　/g, " ").replace(APOSTROPHE_VARIANTS, "'");
 }
 
 function normalizeCompanyName(name: string): string {
@@ -286,6 +305,7 @@ function normalizeCompanyName(name: string): string {
     .replace(/株式会社|有限会社|合同会社|一般財団法人|公益財団法人|一般社団法人|合資会社/g, "")
     .replace(/[Ａ-Ｚａ-ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
     .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+    .replace(APOSTROPHE_VARIANTS, "'")
     .replace(/[・]/g, "")
     .replace(/[\s　]/g, "")
     .trim()
