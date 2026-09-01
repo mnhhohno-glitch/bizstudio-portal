@@ -276,6 +276,20 @@ function isInterviewOverdue(entry: Entry, stage: "first" | "second" | "final"): 
   return interview < today;
 }
 
+// 求人DB列の URL は CA の手入力。javascript: 等を開かせないため http/https のみ通し、
+// 不正値は null を返して企業名セルをプレーンテキストへ落とす。
+function toSafeExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const url = raw.trim();
+  if (!url) return null;
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "http:" || protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function getFieldValue(entry: Entry, key: string): string | null {
   switch (key) {
     case "candidate": return entry.candidate.name;
@@ -947,12 +961,18 @@ export default function EntryTable({
         //   (externalJobRef あり・originalUrl なし) がクリック不可の黒文字に落ちていた。
         //   1. externalJobRef あり → portal SSO 経由で自社求人サイト(bizstudio-job-platform)の求人詳細
         //   2. なければ originalUrl → 従来どおり kyuujin PDF プレビュー
-        //   3. どちらも無ければ黒文字プレーンテキスト
+        //   3. なければ jobDbUrl → 求人DB列と同じ外部ページ(CA が登録した選考URL)を別タブで開く。
+        //      FileMaker 一括取込行のように ref も PDF も持たない行を救う。
+        //   4. いずれも無ければ黒文字プレーンテキスト
         const jobPlatformRef = entry.externalJobRef || null;
-        const clickable = !!jobPlatformRef || !!entry.originalUrl;
+        // 求人DB列が <a href> に使っている値そのもの(entry.jobDbUrl)を使う。企業名用の別ロジックは持たない。
+        const jobDbLink = jobPlatformRef || entry.originalUrl ? null : toSafeExternalUrl(entry.jobDbUrl);
+        const clickable = !!jobPlatformRef || !!entry.originalUrl || !!jobDbLink;
         const titleHint = jobPlatformRef
           ? `${entry.companyName}\nクリックで自社求人サイト(bizstudio-job-platform)の求人詳細を開きます`
-          : entry.companyName;
+          : jobDbLink
+            ? `${entry.companyName} (クリックで求人DBの登録URLを開きます)`
+            : entry.companyName;
         return (
           <td key={col.key} className="px-2 py-1.5" title={titleHint}>
             <div
@@ -968,7 +988,9 @@ export default function EntryTable({
                 if (entry.originalUrl) {
                   const previewUrl = entry.originalUrl.replace(/\/view(\?|$)/, "/preview$1");
                   window.open(previewUrl, "_blank");
+                  return;
                 }
+                if (jobDbLink) window.open(jobDbLink, "_blank", "noopener,noreferrer");
               }}
               className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "text-[#2563EB] cursor-pointer hover:underline" : "cursor-default"}`}
               title={titleHint}
