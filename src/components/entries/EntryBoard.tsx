@@ -93,8 +93,9 @@ export type Entry = {
   taskRequestedAt?: string | null;
   // T-140: 応募経路。"site-apply" = ブックマークからサイト経由レコードを直接エントリー登録した行。
   route?: string | null;
-  // T-140: サイト経由エントリーで企業名クリック→自社求人サイト詳細を開くための job-platform 側 source_job_id。
-  //   通常の求人紹介経由エントリーでは null（企業名クリックは originalUrl=kyuujin PDF プレビュー）。
+  // 企業名クリック→自社求人サイト詳細を開くための job-platform 側 source_job_id。
+  //   ブックマーク由来のエントリー(サイト経由・紹介済みの両方)に入る。route では分岐させない。
+  //   これが無い行(kyuujin 求人ツール経由の旧行)だけ originalUrl=Drive PDF プレビューへ落ちる。
   externalJobRef?: string | null;
 };
 

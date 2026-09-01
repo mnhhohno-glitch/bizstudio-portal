@@ -852,6 +852,8 @@ export default function EntryTable({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [maxHeight, setMaxHeight] = useState<number | null>(null);
   const rafRef = useRef<number | null>(null);
+  // 企業名クリック→求人詳細を開く処理の二重クリック防止ガード(表示に影響しないので ref)。
+  const openingJobRef = useRef<string | null>(null);
 
   const recalcHeight = useCallback(() => {
     const el = wrapRef.current;
@@ -939,12 +941,16 @@ export default function EntryTable({
         );
       }
       case "company": {
-        // T-140: サイト経由(route="site-apply")かつ externalJobRef ありの行は、
-        // 企業名クリックで portal SSO 経由 bizstudio-job-platform 求人詳細ページを開く。
-        // 通常の求人紹介経由行は従来通り originalUrl(kyuujin PDF プレビュー)を開く。
-        const isSiteApply = entry.route === "site-apply" && !!entry.externalJobRef;
-        const clickable = isSiteApply || !!entry.originalUrl;
-        const titleHint = isSiteApply
+        // 企業名クリックの飛び先。route / entryFlag では分岐させない。
+        //   T-140 の初版は route==="site-apply" の行だけを job-platform へ飛ばしていたため、
+        //   ブックマークの「紹介済み」行から作った route=null のエントリー
+        //   (externalJobRef あり・originalUrl なし) がクリック不可の黒文字に落ちていた。
+        //   1. externalJobRef あり → portal SSO 経由で自社求人サイト(bizstudio-job-platform)の求人詳細
+        //   2. なければ originalUrl → 従来どおり kyuujin PDF プレビュー
+        //   3. どちらも無ければ黒文字プレーンテキスト
+        const jobPlatformRef = entry.externalJobRef || null;
+        const clickable = !!jobPlatformRef || !!entry.originalUrl;
+        const titleHint = jobPlatformRef
           ? `${entry.companyName}\nクリックで自社求人サイト(bizstudio-job-platform)の求人詳細を開きます`
           : entry.companyName;
         return (
@@ -952,8 +958,11 @@ export default function EntryTable({
             <div
               onClick={(e) => {
                 e.stopPropagation();
-                if (isSiteApply && entry.externalJobRef) {
-                  openJobPlatformDetail(entry.externalJobRef);
+                if (jobPlatformRef) {
+                  // 二重クリック防止(トークン発行を挟むため)。表示に影響しないので ref で持つ。
+                  if (openingJobRef.current) return;
+                  openingJobRef.current = jobPlatformRef;
+                  openJobPlatformDetail(jobPlatformRef).finally(() => { openingJobRef.current = null; });
                   return;
                 }
                 if (entry.originalUrl) {
@@ -961,7 +970,7 @@ export default function EntryTable({
                   window.open(previewUrl, "_blank");
                 }
               }}
-              className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
+              className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "text-[#2563EB] cursor-pointer hover:underline" : "cursor-default"}`}
               title={titleHint}
               data-company-name={entry.companyName}
             >
