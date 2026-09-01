@@ -130,6 +130,10 @@ export async function GET(request: Request) {
   // T-182: サイトに出すのは「CAが紹介した求人（introducedAt あり）」と「本人がサイトで追加した
   // お気に入り（origin="candidate"）」のみ。CAがブックマークしただけの未紹介行は本人に見せない。
   // origin 条件を外すと本人追加のお気に入りが全員分消えるため必ず残すこと。
+  // T-189 Phase3-1: 自動配信（origin="auto"）の行は承認済み（introducedAt あり）でもこの枠には出さない。
+  //   CA厳選求人と混ざるのを防ぐため、候補者サイトの専用枠「新着マッチ求人」（Phase 3②）が
+  //   origin="auto" AND approvalStatus="APPROVED" を直接取得する設計にする。
+  //   origin は null（旧CA行）を含むため、NOT origin="auto" は null を残す形で書く。
   const files = await prisma.candidateFile.findMany({
     where: {
       candidateId: candidate.id,
@@ -139,6 +143,7 @@ export async function GET(request: Request) {
         { introducedAt: { not: null } },
         { origin: "candidate" },
       ],
+      AND: [{ OR: [{ origin: null }, { origin: { not: "auto" } }] }],
     },
     select: {
       id: true,
@@ -238,12 +243,15 @@ export async function POST(request: Request) {
   }
 
   // 重複ガード: 同一候補者×同一求人の既存BOOKMARK行があれば新規作成しない（CA追加済みでも既存を返す）。
+  // T-189 Phase3-1: 自動配信行（origin="auto"）は「既存」とみなさない（GET が返さない行を alreadyExists で
+  //   返すと、本人には追加されたのに一覧に出ない状態になるため）。本人追加行は別行として作成する。
   const existing = await prisma.candidateFile.findFirst({
     where: {
       candidateId: candidate.id,
       category: "BOOKMARK",
       externalJobRef,
       archivedAt: null,
+      AND: [{ OR: [{ origin: null }, { origin: { not: "auto" } }] }],
     },
     select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
   });

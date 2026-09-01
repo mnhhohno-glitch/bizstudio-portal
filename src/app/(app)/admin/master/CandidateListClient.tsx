@@ -98,6 +98,8 @@ interface CandidateListClientProps {
   employees: Employee[];
   currentEmployeeId?: string | null;
   isAdmin?: boolean;
+  // T-189 Phase3-1: 自動配信の承認ページへのリンク表示可否（AUTO_RECOMMEND_ADMIN_IDS）
+  autoRecommendAdmin?: boolean;
 }
 
 type FileBreakdown = Record<string, number>;
@@ -223,6 +225,7 @@ export default function CandidateListClient({
   employees,
   currentEmployeeId,
   isAdmin = false,
+  autoRecommendAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
   const [search, setSearch] = useState("");
@@ -625,12 +628,22 @@ export default function CandidateListClient({
             求職者の基本情報を管理します
           </p>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
-        >
-          + 新規登録
-        </button>
+        <div className="flex items-center gap-2">
+          {autoRecommendAdmin && (
+            <Link
+              href="/admin/auto-recommend"
+              className="rounded-md border border-[#2563EB] bg-white px-4 py-2 text-[13px] font-medium text-[#2563EB] hover:bg-[#EFF6FF] transition-colors"
+            >
+              自動配信
+            </Link>
+          )}
+          <button
+            onClick={() => setModalOpen(true)}
+            className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
+          >
+            + 新規登録
+          </button>
+        </div>
       </div>
 
       {/* 支援ステータスタブ */}

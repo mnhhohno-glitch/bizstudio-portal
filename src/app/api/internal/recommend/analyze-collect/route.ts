@@ -4,6 +4,7 @@ import { validateInternalApiKey } from "@/lib/internal-auth";
 import { anthropic } from "@/lib/claude";
 import { recordAdvisorUsage, type AnthropicUsage } from "@/lib/advisor-usage";
 import { applyAnalysisResults } from "@/lib/analyze-bookmarks";
+import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval";
 
 // T-189 Phase 2a: Message Batches API へ投入したAI評価の結果回収。
 //
@@ -50,6 +51,7 @@ export async function POST(request: NextRequest) {
     let expiredRows = 0;
     let savedFiles = 0;
     let skippedFiles = 0; // fail-closed（3点セット不揃い）で保存しなかったファイル
+    let autoRejectedD = 0; // T-189 Phase3-1: 評価 D で自動却下した自動配信行
     const batchStatuses: { batchId: string; processingStatus: string; rows: number }[] = [];
 
     for (const batchId of batchIds) {
@@ -99,7 +101,7 @@ export async function POST(request: NextRequest) {
           });
           // CA画面経路と同一の解析・fail-closed 保存（3点セット揃いのみ aiAnalyzedAt/aiMatchRating/
           // aiAnalysisComment を更新。揃わない行は既存値温存＝未評価のまま次回再投入）。
-          const { skippedFileIds } = await applyAnalysisResults({
+          const { ratingsAndComments, skippedFileIds } = await applyAnalysisResults({
             analysisText,
             batchFiles,
             candidateId: row.candidateId,
@@ -107,6 +109,21 @@ export async function POST(request: NextRequest) {
           });
           savedFiles += batchFiles.length - skippedFileIds.length;
           skippedFiles += skippedFileIds.length;
+
+          // T-189 Phase3-1: 保存した総合評価が D の自動配信行は承認待ちに並べず、その場で自動却下する
+          //（2026-09-02 決定）。承認ページの承認待ちには A/B+/B/C＋未評価だけが残り、D は詳細の
+          //   REJECTED 折りたたみで確認できる。archivedAt は触らない（受け口の冪等・再送防止のため）。
+          //   対象は「今回保存された（skip されなかった）」かつ PENDING の自動由来行のみ。
+          const savedDIds = [...ratingsAndComments]
+            .filter(([id, v]) => v.rating === "D" && !skippedFileIds.includes(id))
+            .map(([id]) => id);
+          if (savedDIds.length > 0) {
+            const r = await prisma.candidateFile.updateMany({
+              where: { id: { in: savedDIds }, autoSourcedAt: { not: null }, approvalStatus: "PENDING" },
+              data: { approvalStatus: "REJECTED", rejectedReason: AUTO_REJECT_REASON_D },
+            });
+            autoRejectedD += r.count;
+          }
 
           await recordAdvisorUsage({
             endpoint: "recommend-analyze",
@@ -148,6 +165,7 @@ export async function POST(request: NextRequest) {
       expiredRows,
       savedFiles,
       skippedFiles,
+      autoRejectedD,
     });
   } catch (e) {
     console.error("[recommend/analyze-collect] 失敗:", e);

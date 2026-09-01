@@ -468,6 +468,8 @@ model Candidate {
   // T-189 Phase1: おすすめ求人の自動引き当て・配信 ON/OFF。既定OFF（既存行は全て false）。
   //   トグルは求職者詳細ヘッダにあり、AUTO_RECOMMEND_ADMIN_IDS のユーザーにのみ表示（試験運用）。
   autoRecommendEnabled   Boolean   @default(false) @map("auto_recommend_enabled")
+  // T-189 Phase3-1: 自動配信のLINE案内をCAが求職者へ送った日時（承認ページの「LINE送信済み」ボタンで打刻・押し直しで上書き）。
+  lastLineSentAt         DateTime? @map("last_line_sent_at")
   supportEndReason       String?   @map("support_end_reason")
   supportEndNote         String?   @map("support_end_note")
   supportEndDate         DateTime? @map("support_end_date")

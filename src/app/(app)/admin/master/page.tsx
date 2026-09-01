@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
 import CandidateListClient from "./CandidateListClient";
 // T-170: 希望職種 / 希望エリア / 求人紹介数 / エントリー数 / 放置日数（一括集計・N+1なし）
 import { computeCandidateListMetrics, EMPTY_CANDIDATE_LIST_METRICS } from "@/lib/candidates/list-metrics";
@@ -85,6 +86,7 @@ export default async function CandidateMasterPage() {
         }))}
         currentEmployeeId={currentEmployee?.id ?? null}
         isAdmin={actor?.role === "admin"}
+        autoRecommendAdmin={actor ? isAutoRecommendAdmin(actor) : false}
       />
     </div>
   );

@@ -81,11 +81,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   //   非admin は他フィールドが正当でも 403（部分適用しない）。他フィールドのみの更新は従来どおり。
   if (body.autoRecommendEnabled !== undefined && !isAutoRecommendAdmin(user)) {
     return NextResponse.json(
-      { error: "おすすめ配信の変更権限がありません" },
+      { error: "自動配信の変更権限がありません" },
       { status: 403 }
     );
   }
-  // T-189 Phase1: おすすめ配信 ON/OFF（true 以外は全て false に落とす）
+  // T-189 Phase1: 自動配信 ON/OFF（true 以外は全て false に落とす）
   if (body.autoRecommendEnabled !== undefined) {
     updateData.autoRecommendEnabled = body.autoRecommendEnabled === true;
   }

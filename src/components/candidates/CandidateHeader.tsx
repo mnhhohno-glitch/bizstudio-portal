@@ -61,7 +61,7 @@ interface CandidateHeaderProps {
   oneDriveFolderUrl?: string | null;
   /** T-159 Phase 4: 即時同期の完了後に呼ぶ。求職者データとファイル一覧を取り直す。 */
   onOneDriveSynced?: () => void;
-  /** T-189 Phase1: おすすめ配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ true） */
+  /** T-189 Phase1: 自動配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ true） */
   showAutoRecommendToggle?: boolean;
   /** T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う） */
   onAutoRecommendToggle?: (enabled: boolean) => Promise<void> | void;
@@ -291,7 +291,7 @@ export default function CandidateHeader({
                 </span>
               </>
             )}
-            {/* T-189 Phase1: おすすめ配信トグル（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ表示） */}
+            {/* T-189 Phase1: 自動配信トグル（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ表示） */}
             {showAutoRecommendToggle && (
               <button
                 disabled={autoRecommendSaving}
@@ -310,7 +310,7 @@ export default function CandidateHeader({
                     : "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200"
                 }`}
               >
-                おすすめ配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
+                自動配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
               </button>
             )}
             <button

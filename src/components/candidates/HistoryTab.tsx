@@ -330,6 +330,8 @@ type BookmarkFile = {
   introducedAt?: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
   origin?: string | null;
+  // T-189 Phase3-1: 自動引き当て由来（非null）は担当列を「AI自動検索」表示（保存者はシステム/管理者のため名前を出さない）。
+  autoSourcedAt?: string | null;
   // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
   externalJobRef?: string | null;
   sourceMedia?: string | null;
@@ -588,6 +590,15 @@ function AnalysisCommentBody({ comment }: { comment: string }) {
       )}
     </div>
   );
+}
+
+// T-189 Phase3-1: 担当列の表示名。自動引き当て由来（autoSourcedAt 非null）は保存者名（システム/管理者）ではなく
+// 「AI自動検索」を出す。表示のみで uploadedByUserId は変えない。並び替え（uploader 基準）も同じ文字列を使う。
+const AUTO_SOURCED_LABEL = "AI自動検索";
+function uploaderLabel(f: { origin?: string | null; autoSourcedAt?: string | null; uploadedBy: { name: string } }): string {
+  if (f.origin === "candidate") return "サイト経由";
+  if (f.autoSourcedAt) return AUTO_SOURCED_LABEL;
+  return f.uploadedBy.name;
 }
 
 /* ---------- Bookmark sort helpers (pure functions) ---------- */
@@ -1401,7 +1412,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     // 修正2: 本人回答（responseStatus・「本人回答」列と同じ値）を優先し、無ければ従来値へフォールバック。
     getResponse: (f) => resolveResponseForSort(f.responseStatus, findJobResponse(f.fileName)),
     getDate: (f) => rowDate(f),
-    getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
+    getUploader: (f) => uploaderLabel(f),
   };
 
   // Filtered + sorted files（空キーでも確定タイブレーク 総合→会社名 が効く）
@@ -2305,6 +2316,11 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                     className="w-[72px] shrink-0 text-[11px] text-emerald-600 font-medium truncate"
                     title="求職者がサイト（マイページ）から登録・応募した求人"
                   >サイト経由</span>
+                ) : file.autoSourcedAt ? (
+                  <span
+                    className="w-[72px] shrink-0 text-[11px] text-violet-600 font-medium truncate"
+                    title="自動配信（AI自動検索）で引き当てた求人"
+                  >{AUTO_SOURCED_LABEL}</span>
                 ) : (
                   <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 )}
