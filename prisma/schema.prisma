@@ -3317,3 +3317,24 @@ model OneDriveFolderUrlLedger {
 
   @@map("onedrive_folder_url_ledger")
 }
+
+/// T-189 Phase 2a: おすすめ求人（自動引き当て）AI評価の Message Batches API 投入台帳。
+/// 1行 = バッチ内の1リクエスト（求職者 × 求人最大5件）。行の id をそのまま Anthropic の
+/// custom_id に使い、結果回収時に custom_id → fileIds の対応をこの台帳で引く。
+/// status: SUBMITTED（投入済み・未回収）/ COMPLETED（回収・保存済み）/
+///         FAILED（errored/canceled）/ EXPIRED（24h 未完了・期限切れ）。
+/// FAILED/EXPIRED になった行の対象ファイルは aiAnalyzedAt が null のままなので、
+/// 次回の analyze-submit が自動的に再投入対象として拾う（この台帳側の再操作は不要）。
+model RecommendAnalyzeBatch {
+  id          String    @id @default(cuid())
+  batchId     String    @map("batch_id") // Anthropic Message Batches の batch id（msgbatch_...）
+  candidateId String    @map("candidate_id")
+  fileIds     Json      @map("file_ids") // 対象 CandidateFile.id の配列
+  status      String    @default("SUBMITTED")
+  submittedAt DateTime  @default(now()) @map("submitted_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([status]) // 回収 cron が SUBMITTED を拾うため
+  @@index([batchId])
+  @@map("recommend_analyze_batches")
+}

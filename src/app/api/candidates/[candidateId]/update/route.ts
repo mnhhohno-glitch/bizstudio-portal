@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
+import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -75,6 +76,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   if (body.masType !== undefined) {
     updateData.masType = body.masType?.trim() || null;
+  }
+  // T-189 Phase2a: autoRecommendEnabled の更新は AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ。
+  //   非admin は他フィールドが正当でも 403（部分適用しない）。他フィールドのみの更新は従来どおり。
+  if (body.autoRecommendEnabled !== undefined && !isAutoRecommendAdmin(user)) {
+    return NextResponse.json(
+      { error: "おすすめ配信の変更権限がありません" },
+      { status: 403 }
+    );
   }
   // T-189 Phase1: おすすめ配信 ON/OFF（true 以外は全て false に落とす）
   if (body.autoRecommendEnabled !== undefined) {

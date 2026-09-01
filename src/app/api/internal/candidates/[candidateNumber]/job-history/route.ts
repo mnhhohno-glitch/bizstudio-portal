@@ -145,6 +145,9 @@ export async function GET(
           externalJobRef: true,
           kyuujinJobId: true,
           responseStatus: true,
+          // T-189 Phase 2a: 自動引き当ての除外判定用（REJECTED / EXPIRED をエンジン側が参照）。
+          autoSourcedAt: true,
+          approvalStatus: true,
           fileName: true,
           displayOverrides: true,
           archivedAt: true,
@@ -207,6 +210,11 @@ export async function GET(
       status: entryStage ?? toHistoryStatus(f.responseStatus),
       archived: f.archivedAt !== null,
       companyName,
+      // T-189 Phase 2a: 自動引き当て属性（従来フィールドは不変・純粋追加）。
+      //   autoSourcedAt: 自動引き当てで受信した日時（ISO文字列 / null=手動）。
+      //   approvalStatus: PENDING / APPROVED / REJECTED / EXPIRED / null（自動由来のみ値あり）。
+      autoSourcedAt: f.autoSourcedAt,
+      approvalStatus: f.approvalStatus,
     };
   });
 

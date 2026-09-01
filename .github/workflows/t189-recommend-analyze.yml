@@ -1,0 +1,91 @@
+# T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・50%割引）を定期実行する。
+# - 07:30 JST に analyze-submit（対象を1つの Message Batch に投入）、
+#   07:45 / 08:15 / 09:00 / 12:00 JST に analyze-collect（完了分の結果回収・保存）を叩く。
+# - どちらを叩くかは github.event.schedule（発火した cron 式）で分岐する。
+# - workflow_dispatch で手動疎通も可能（endpoint と dry_run を選択。dry_run=true は書き込みなし）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（resubmit-stale / auto-expire と同一シークレット）。
+# - default branch (master) に置かないと schedule が動かない。
+# - 対象0件時は API 側が何もせず即返す（正常終了）。投入上限は RECOMMEND_ANALYZE_MAX_FILES（既定200）。
+
+name: T-189 recommend analyze (batches API)
+
+on:
+  schedule:
+    - cron: "30 22 * * *" # 07:30 JST = submit
+    - cron: "45 22 * * *" # 07:45 JST = collect
+    - cron: "15 23 * * *" # 08:15 JST = collect
+    - cron: "0 0 * * *"   # 09:00 JST = collect
+    - cron: "0 3 * * *"   # 12:00 JST = collect
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "叩くエンドポイント"
+        required: true
+        default: "analyze-submit"
+        type: choice
+        options:
+          - "analyze-submit"
+          - "analyze-collect"
+      dry_run:
+        description: "true なら書き込みなし（件数・構成・費用試算 / バッチ状況照会のみ）。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  recommend-analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine endpoint and flags
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 07:30 JST（22:30 UTC）だけ submit、それ以外の定時は collect。定時は常に本実行。
+            if [ "${{ github.event.schedule }}" = "30 22 * * *" ]; then
+              echo "endpoint=analyze-submit" >> "$GITHUB_OUTPUT"
+            else
+              echo "endpoint=analyze-collect" >> "$GITHUB_OUTPUT"
+            fi
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "endpoint=${{ github.event.inputs.endpoint }}" >> "$GITHUB_OUTPUT"
+            DRY="${{ github.event.inputs.dry_run }}"
+            echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+            if [ "$DRY" = "false" ]; then
+              echo "confirm=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "confirm=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Call recommend API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/recommend/${{ steps.flag.outputs.endpoint }}?dry_run=${{ steps.flag.outputs.dry }}&confirm=${{ steps.flag.outputs.confirm }}"
+          echo "Calling: $URL"
+          echo "Event: ${{ github.event_name }} / schedule=${{ github.event.schedule }} / dry_run=${{ steps.flag.outputs.dry }} confirm=${{ steps.flag.outputs.confirm }}"
+
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 600 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::${{ steps.flag.outputs.endpoint }} returned HTTP $HTTP"
+            exit 1
+          fi

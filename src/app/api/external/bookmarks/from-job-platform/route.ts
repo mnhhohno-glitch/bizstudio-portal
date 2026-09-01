@@ -122,6 +122,120 @@ export async function POST(request: Request) {
 
   const rawJobs: JobInput[] = Array.isArray(body.jobs) ? (body.jobs as JobInput[]) : [body as JobInput];
 
+  // T-189 Phase 2a: 自動引き当て（job-platform エンジン）由来の受け口。
+  // origin="auto" のときだけこの分岐に入り、既存の手動経路（この下の処理）は一切変更しない。
+  //   - CandidateFile を origin="auto" / autoSourcedAt=now / approvalStatus="PENDING" /
+  //     introducedAt=null（未設定）で作成。候補者サイトの表示ゲート
+  //     （introducedAt IS NOT NULL OR origin='candidate'）に掛からず、承認まで本人に見えない。
+  //   - PDF生成（generateAndStorePdf）と OneDrive 同期は実行しない（承認時に Phase 3 で生成）。
+  //     extractedText はそのまま保存する（AI評価の入力に必要）。
+  //   - 冪等: 同一 candidateId × externalJobRef の既存 BOOKMARK 行（archivedAt IS NULL）があれば
+  //     **作成も更新もしない**。手動行（autoSourcedAt null）= skipped:manual_exists（手動を汚さない）、
+  //     自動行 = skipped:auto_exists（REJECTED/EXPIRED でも行が残り続けるため再送は常にここで止まる）。
+  if (str(body.origin) === "auto") {
+    // 引き当てCA（sourcedBy・任意）。実在＆active のみ採用。無ければ既存フォールバック
+    //（savedByUserId → anonymous@local）と同じ uploaderUserId を使う。
+    let autoUploaderId = uploaderUserId;
+    const sourcedBy = str(body.sourcedBy);
+    if (sourcedBy) {
+      const u = await prisma.user.findUnique({ where: { id: sourcedBy }, select: { id: true, status: true } });
+      if (u && u.status === "active") autoUploaderId = u.id;
+    }
+
+    let autoCreated = 0;
+    let autoSkipped = 0;
+    const autoErrors: { index: number; error: string }[] = [];
+    const results: { index: number; externalJobRef: string | null; result: string }[] = [];
+
+    for (let i = 0; i < rawJobs.length; i++) {
+      const j = rawJobs[i] ?? {};
+      const externalJobRef = str(j.externalJobRef);
+      const companyName = str(j.companyName);
+      const extractedText = str(j.extractedText);
+      if (!externalJobRef || !companyName) {
+        autoErrors.push({ index: i, error: "externalJobRef and companyName are required" });
+        results.push({ index: i, externalJobRef, result: "error" });
+        continue;
+      }
+      if (!extractedText) {
+        autoErrors.push({ index: i, error: "extractedText (job body) is required and must be non-empty" });
+        results.push({ index: i, externalJobRef, result: "error" });
+        continue;
+      }
+      try {
+        // 冪等判定は sourceType を問わない（サイト経由行・PDF昇格行も「既存」として尊重する）。
+        const existing = await prisma.candidateFile.findFirst({
+          where: {
+            candidateId: candidate.id,
+            category: "BOOKMARK",
+            externalJobRef,
+            archivedAt: null,
+          },
+          select: { id: true, autoSourcedAt: true },
+        });
+        if (existing) {
+          results.push({
+            index: i,
+            externalJobRef,
+            result: existing.autoSourcedAt ? "skipped:auto_exists" : "skipped:manual_exists",
+          });
+          autoSkipped++;
+          continue;
+        }
+        const numericId = pickNumericId(str(j.fileNumericId), externalJobRef);
+        const fileName = buildFileName(companyName, numericId);
+        const memo = str(j.jobUrl);
+        const fileSize = Buffer.byteLength(extractedText, "utf8");
+        const sourceMedia = str(j.sourceMedia);
+        const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
+        const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+        await prisma.candidateFile.create({
+          data: {
+            candidateId: candidate.id,
+            category: "BOOKMARK",
+            fileName,
+            fileSize,
+            mimeType: "text/plain",
+            driveFileId: null,
+            driveViewUrl: null,
+            driveFolderId: null,
+            extractedText,
+            // テキスト化済みシグナル: AI評価フィルタ（extractedAt 必須）を通すため受領時点で立てる。
+            extractedAt: new Date(),
+            sourceType: "job-platform",
+            externalJobRef,
+            sourceMedia,
+            memo,
+            jobTitle,
+            jobCategory,
+            origin: "auto",
+            autoSourcedAt: new Date(),
+            approvalStatus: "PENDING",
+            uploadedByUserId: autoUploaderId,
+          },
+        });
+        results.push({ index: i, externalJobRef, result: "created" });
+        autoCreated++;
+      } catch (e) {
+        console.error("[external/bookmarks/from-job-platform] auto save failed:", e);
+        autoErrors.push({ index: i, error: "save failed" });
+        results.push({ index: i, externalJobRef, result: "error" });
+      }
+    }
+
+    return NextResponse.json({
+      ok: autoErrors.length === 0,
+      origin: "auto",
+      candidateNumber: candidate.candidateNumber,
+      received: rawJobs.length,
+      created: autoCreated,
+      skipped: autoSkipped,
+      errors: autoErrors,
+      // 求人ごとの結果: created / skipped:manual_exists / skipped:auto_exists / error
+      results,
+    });
+  }
+
   let created = 0;
   let updated = 0;
   let pdfStored = 0;

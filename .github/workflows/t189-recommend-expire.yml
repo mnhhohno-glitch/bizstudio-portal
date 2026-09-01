@@ -1,0 +1,69 @@
+# T-189 Phase 2a: 自動引き当てブックマークの承認待ち期限切れ（14日放置 → EXPIRED）を毎日実行する。
+# - 04:00 JST（19:00 UTC）に本番へ dry_run=false&confirm=true で 1 回叩く。
+# - workflow_dispatch で手動疎通も可能（dry_run=true で書き換えなし確認）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（resubmit-stale / auto-expire と同一シークレット）。
+# - default branch (master) に置かないと schedule が動かない。
+# - 対象0件時は API 側が updateMany 0件で即返す（正常終了）。
+
+name: T-189 recommend expire (daily)
+
+on:
+  schedule:
+    - cron: "0 19 * * *" # 04:00 JST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら書き換えなしで件数のみ（疎通確認用）。本番自動実行（schedule）は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  recommend-expire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine dry_run flag
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "confirm=true" >> "$GITHUB_OUTPUT"
+          else
+            DRY="${{ github.event.inputs.dry_run }}"
+            echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+            if [ "$DRY" = "false" ]; then
+              echo "confirm=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "confirm=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Call expire API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/recommend/expire?dry_run=${{ steps.flag.outputs.dry }}&confirm=${{ steps.flag.outputs.confirm }}"
+          echo "Calling: $URL"
+
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 300 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::recommend-expire returned HTTP $HTTP"
+            exit 1
+          fi
