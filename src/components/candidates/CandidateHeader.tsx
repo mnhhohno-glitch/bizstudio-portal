@@ -293,30 +293,25 @@ export default function CandidateHeader({
             )}
             {/* T-189 Phase1: おすすめ配信トグル（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ表示） */}
             {showAutoRecommendToggle && (
-              <div className="flex flex-col items-center gap-0.5">
-                <button
-                  disabled={autoRecommendSaving}
-                  onClick={async () => {
-                    if (autoRecommendSaving) return;
-                    setAutoRecommendSaving(true);
-                    try {
-                      await onAutoRecommendToggle?.(!candidate.autoRecommendEnabled);
-                    } finally {
-                      setAutoRecommendSaving(false);
-                    }
-                  }}
-                  className={`w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate disabled:opacity-50 ${
-                    candidate.autoRecommendEnabled
-                      ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200"
-                      : "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200"
-                  }`}
-                >
-                  おすすめ配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
-                </button>
-                <span className="text-[10px] leading-tight text-gray-400 w-[130px] text-center">
-                  配信条件は求人サイトで保存（未保存の場合は配信されません）
-                </span>
-              </div>
+              <button
+                disabled={autoRecommendSaving}
+                onClick={async () => {
+                  if (autoRecommendSaving) return;
+                  setAutoRecommendSaving(true);
+                  try {
+                    await onAutoRecommendToggle?.(!candidate.autoRecommendEnabled);
+                  } finally {
+                    setAutoRecommendSaving(false);
+                  }
+                }}
+                className={`w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate disabled:opacity-50 ${
+                  candidate.autoRecommendEnabled
+                    ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200"
+                    : "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200"
+                }`}
+              >
+                おすすめ配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
+              </button>
             )}
             <button
               onClick={onEditBasicInfo}
