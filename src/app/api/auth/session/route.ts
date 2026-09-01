@@ -13,7 +13,7 @@ export async function GET() {
     name: user.name,
     email: user.email,
     role: user.role,
-    // T-189: おすすめ配信トグルの表示可否（判定は lib に集約。更新APIの403判定と同一）。
+    // T-189: 自動配信トグルの表示可否（判定は lib に集約。更新APIの403判定と同一）。
     autoRecommendAdmin: isAutoRecommendAdmin(user),
   });
 }

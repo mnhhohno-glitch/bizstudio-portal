@@ -113,7 +113,7 @@ type SessionUser = {
   name: string;
   email: string;
   role: string;
-  // T-189 Phase1: おすすめ配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS 判定・/api/auth/session が返す）
+  // T-189 Phase1: 自動配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS 判定・/api/auth/session が返す）
   autoRecommendAdmin?: boolean;
 };
 
