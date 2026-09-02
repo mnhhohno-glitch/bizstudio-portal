@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
-import { anthropic } from "@/lib/claude";
-import { recordAdvisorUsage, type AnthropicUsage } from "@/lib/advisor-usage";
-import { applyAnalysisResults } from "@/lib/analyze-bookmarks";
-import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval";
-import { rejectAutoFiles } from "@/lib/recommend/auto-approval-sync";
+import { runAnalyzeCollect } from "@/lib/recommend/analyze-batch-run";
 
 // T-189 Phase 2a: Message Batches API へ投入したAI評価の結果回収。
 //
@@ -19,14 +14,13 @@ import { rejectAutoFiles } from "@/lib/recommend/auto-approval-sync";
 //     解析・保存関数（applyAnalysisResults・fail-closed）で3軸を保存する。
 //     マーカー不揃いで保存されなかったファイルは aiAnalyzedAt が null のままなので、
 //     翌日の analyze-submit が自動的に再投入する（無人リトライ）。
-//   - usage は recordAdvisorUsage(endpoint="recommend-analyze", batchApi=true) で記録する
-//     （バッチ割引 ×0.5 を反映。既存の同期経路は従来どおり満額）。
+//   - usage は recordAdvisorUsage(endpoint="recommend-analyze", batchApi=true) で記録する。
 //   - errored / canceled → status="FAILED"、expired → status="EXPIRED"。
-//     24時間を超えても ended にならないバッチの行は EXPIRED にする（Anthropic 側も24hで期限切れ）。
+//     24時間を超えても ended にならないバッチの行は EXPIRED にする。
+//
+// 処理本体は src/lib/recommend/analyze-batch-run.ts（画面の「今すぐ探す」と共用）。
 
 export const maxDuration = 300;
-
-const BATCH_TIMEOUT_MS = 24 * 60 * 60 * 1000; // Anthropic Message Batches の期限（24h）
 
 export async function POST(request: NextRequest) {
   if (!validateInternalApiKey(request)) {
@@ -40,131 +34,8 @@ export async function POST(request: NextRequest) {
   const willExecute = !dryRun && confirmed;
 
   try {
-    const rows = await prisma.recommendAnalyzeBatch.findMany({
-      where: { status: "SUBMITTED" },
-      select: { id: true, batchId: true, candidateId: true, fileIds: true, submittedAt: true },
-    });
-    const rowById = new Map(rows.map((r) => [r.id, r]));
-    const batchIds = [...new Set(rows.map((r) => r.batchId))];
-
-    let completedRows = 0;
-    let failedRows = 0;
-    let expiredRows = 0;
-    let savedFiles = 0;
-    let skippedFiles = 0; // fail-closed（3点セット不揃い）で保存しなかったファイル
-    let autoRejectedD = 0; // T-189 Phase3-1: 評価 D で自動却下した自動配信行
-    const batchStatuses: { batchId: string; processingStatus: string; rows: number }[] = [];
-
-    for (const batchId of batchIds) {
-      const batchRows = rows.filter((r) => r.batchId === batchId);
-      let processingStatus = "unknown";
-      try {
-        const mb = await anthropic.messages.batches.retrieve(batchId);
-        processingStatus = mb.processing_status;
-      } catch (e) {
-        console.error(`[recommend/analyze-collect] retrieve failed batch=${batchId}:`, e);
-        batchStatuses.push({ batchId, processingStatus: "retrieve-error", rows: batchRows.length });
-        continue;
-      }
-      batchStatuses.push({ batchId, processingStatus, rows: batchRows.length });
-
-      if (processingStatus !== "ended") {
-        // 24h を超えて未完了なら期限切れ扱い（対象ファイルは次回 submit で再投入対象に戻る）。
-        const oldest = Math.min(...batchRows.map((r) => r.submittedAt.getTime()));
-        if (willExecute && Date.now() - oldest > BATCH_TIMEOUT_MS) {
-          await prisma.recommendAnalyzeBatch.updateMany({
-            where: { batchId, status: "SUBMITTED" },
-            data: { status: "EXPIRED", completedAt: new Date() },
-          });
-          expiredRows += batchRows.length;
-          console.warn(`[recommend/analyze-collect] batch=${batchId} 24h超過のため EXPIRED (${batchRows.length}行)`);
-        }
-        continue;
-      }
-
-      if (!willExecute) continue; // DRY-RUN は照会のみ
-
-      for await (const result of await anthropic.messages.batches.results(batchId)) {
-        const row = rowById.get(result.custom_id);
-        if (!row || row.batchId !== batchId) continue;
-        const fileIds = Array.isArray(row.fileIds)
-          ? row.fileIds.filter((v): v is string => typeof v === "string")
-          : [];
-
-        if (result.result.type === "succeeded") {
-          const message = result.result.message;
-          const analysisText = message.content
-            .map((b) => (b.type === "text" ? b.text : ""))
-            .join("");
-          const batchFiles = await prisma.candidateFile.findMany({
-            where: { id: { in: fileIds } },
-            select: { id: true, fileName: true },
-          });
-          // CA画面経路と同一の解析・fail-closed 保存（3点セット揃いのみ aiAnalyzedAt/aiMatchRating/
-          // aiAnalysisComment を更新。揃わない行は既存値温存＝未評価のまま次回再投入）。
-          const { ratingsAndComments, skippedFileIds } = await applyAnalysisResults({
-            analysisText,
-            batchFiles,
-            candidateId: row.candidateId,
-            dryRun: false,
-          });
-          savedFiles += batchFiles.length - skippedFileIds.length;
-          skippedFiles += skippedFileIds.length;
-
-          // T-189 Phase3-1: 保存した総合評価が D の自動配信行は承認待ちに並べず、その場で自動却下する
-          //（2026-09-02 決定）。承認ページの承認待ちには A/B+/B/C＋未評価だけが残り、D は詳細の
-          //   REJECTED 折りたたみ・求職者詳細の保留一覧で確認できる。
-          //   対象は「今回保存された（skip されなかった）」かつ PENDING の自動由来行のみ。
-          const savedDIds = [...ratingsAndComments]
-            .filter(([id, v]) => v.rating === "D" && !skippedFileIds.includes(id))
-            .map(([id]) => id);
-          if (savedDIds.length > 0) {
-            // T-189 修正: 却下＝紹介保留と同一扱い（archivedAt/archivedReason=AI評価D（自動）/archivedById=sourcedBy 相当）
-            autoRejectedD += await rejectAutoFiles({ fileIds: savedDIds, rejectedReason: AUTO_REJECT_REASON_D });
-          }
-
-          await recordAdvisorUsage({
-            endpoint: "recommend-analyze",
-            model: message.model,
-            usage: message.usage as AnthropicUsage,
-            candidateId: row.candidateId,
-            fileCount: fileIds.length,
-            batchApi: true, // バッチ割引（全トークン種別 ×0.5）を費用計上に反映
-            note: `batch=${batchId}`,
-          });
-
-          await prisma.recommendAnalyzeBatch.update({
-            where: { id: row.id },
-            data: { status: "COMPLETED", completedAt: new Date() },
-          });
-          completedRows++;
-        } else {
-          const status = result.result.type === "expired" ? "EXPIRED" : "FAILED";
-          console.warn(
-            `[recommend/analyze-collect] batch=${batchId} custom_id=${row.id} result=${result.result.type} → ${status} (files=${fileIds.length})`,
-          );
-          await prisma.recommendAnalyzeBatch.update({
-            where: { id: row.id },
-            data: { status, completedAt: new Date() },
-          });
-          if (status === "EXPIRED") expiredRows++;
-          else failedRows++;
-        }
-      }
-    }
-
-    return NextResponse.json({
-      willExecute,
-      mode: willExecute ? "EXECUTE" : "DRY-RUN",
-      pendingRows: rows.length,
-      batches: batchStatuses,
-      completedRows,
-      failedRows,
-      expiredRows,
-      savedFiles,
-      skippedFiles,
-      autoRejectedD,
-    });
+    const result = await runAnalyzeCollect({ willExecute });
+    return NextResponse.json({ willExecute, ...result });
   } catch (e) {
     console.error("[recommend/analyze-collect] 失敗:", e);
     return NextResponse.json(

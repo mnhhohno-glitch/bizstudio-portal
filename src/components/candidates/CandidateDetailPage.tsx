@@ -1974,6 +1974,11 @@ function CandidateDetailPageBody() {
           });
           fetchCandidate();
         }}
+        onRecommendUpdated={() => {
+          // T-189 追加:「今すぐ探す」で求人が増えた／AI評価が終わった時にブックマークタブを取り直す
+          fetchCandidate();
+          setFileRefreshKey((k) => k + 1);
+        }}
       />
       )}
 

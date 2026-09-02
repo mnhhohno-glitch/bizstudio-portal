@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import IssueSiteTokenButton from "@/components/candidates/IssueSiteTokenButton";
@@ -65,6 +65,8 @@ interface CandidateHeaderProps {
   showAutoRecommendToggle?: boolean;
   /** T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う） */
   onAutoRecommendToggle?: (enabled: boolean) => Promise<void> | void;
+  /** T-189 追加: 「今すぐ探す」で求人が増えた／AI評価が終わった時に呼ぶ（ブックマークタブの再読込） */
+  onRecommendUpdated?: () => void;
 }
 
 function genderLabel(g: string | null) {
@@ -154,11 +156,23 @@ export default function CandidateHeader({
   onOneDriveSynced,
   showAutoRecommendToggle,
   onAutoRecommendToggle,
+  onRecommendUpdated,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
   const [oneDriveSyncing, setOneDriveSyncing] = useState(false);
   const [autoRecommendSaving, setAutoRecommendSaving] = useState(false);
+  // T-189 追加: 「今すぐ探す」。running=引き当てAPI待ち / polling=AI評価の完了待ち
+  const [recommendRunning, setRecommendRunning] = useState(false);
+  const [recommendPolling, setRecommendPolling] = useState(false);
+  // アンマウント後にポーリングを続けない（画面遷移でタイマーを止める）
+  const recommendAliveRef = useRef(true);
+  useEffect(() => {
+    recommendAliveRef.current = true;
+    return () => {
+      recommendAliveRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
@@ -195,6 +209,109 @@ export default function CandidateHeader({
       toast.error("同期に失敗しました。時間をおいてお試しください。", { duration: 8000 });
     } finally {
       setOneDriveSyncing(false);
+    }
+  };
+
+  // T-189 追加:「今すぐ探す」。
+  //   ① recommend-now（job-platform の即時引き当て → 新着があればAI評価バッチへ投入）
+  //   ② created>0 なら recommend-collect を30秒間隔・最長10分ポーリングして評価完了を待つ
+  //   評価はバッチAPI（数分〜）なので、完了したらブックマークタブを取り直す。
+  const RECOMMEND_POLL_INTERVAL_MS = 30_000;
+  const RECOMMEND_POLL_MAX_MS = 10 * 60_000;
+
+  const pollRecommendCollect = async () => {
+    const startedAt = Date.now();
+    let autoRejectedD = 0;
+    setRecommendPolling(true);
+    try {
+      while (recommendAliveRef.current && Date.now() - startedAt < RECOMMEND_POLL_MAX_MS) {
+        await new Promise((r) => setTimeout(r, RECOMMEND_POLL_INTERVAL_MS));
+        if (!recommendAliveRef.current) return;
+        try {
+          const res = await fetch(`/api/candidates/${candidate.id}/recommend-collect`, {
+            method: "POST",
+          });
+          if (!res.ok) continue; // 一時的な失敗は次の周回で拾う
+          const data = (await res.json().catch(() => ({}))) as {
+            pending?: number;
+            autoRejectedD?: number;
+          };
+          autoRejectedD += data.autoRejectedD ?? 0;
+          if ((data.pending ?? 1) === 0) {
+            toast.success(`評価が完了しました（D自動却下 ${autoRejectedD}件）`, { duration: 8000 });
+            onRecommendUpdated?.();
+            return;
+          }
+        } catch {
+          // ネットワーク断は次の周回で再試行
+        }
+      }
+      if (recommendAliveRef.current) {
+        toast.message("AI評価がまだ完了していません。時間をおいて画面を更新してください。", {
+          duration: 8000,
+        });
+        onRecommendUpdated?.();
+      }
+    } finally {
+      setRecommendPolling(false);
+    }
+  };
+
+  const handleRecommendNow = async () => {
+    if (recommendRunning || recommendPolling) return;
+    setRecommendRunning(true);
+    const loadingId = toast.loading("求人を探しています…");
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/recommend-now`, { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        created?: number;
+        skipped?: number;
+        submitted?: number;
+        error?: string;
+        submitError?: string;
+      };
+      toast.dismiss(loadingId);
+
+      if (!res.ok) {
+        if (res.status === 404 && data.error === "no_condition") {
+          const jobPlatformUrl =
+            process.env.NEXT_PUBLIC_JOB_PLATFORM_URL || "https://bizstudio-job-platform.vercel.app/jobs";
+          toast.error("求人サイトで配信条件を保存してください", {
+            duration: 12000,
+            action: {
+              label: "求人サイトを開く",
+              onClick: () => window.open(jobPlatformUrl, "_blank", "noopener,noreferrer"),
+            },
+          });
+        } else if (res.status === 429) {
+          toast.error("1分以内に実行済みです", { duration: 8000 });
+        } else if (res.status === 400 && data.error === "auto_recommend_off") {
+          toast.error("自動配信をONにしてください", { duration: 8000 });
+        } else {
+          toast.error("求人の取得に失敗しました。時間をおいてお試しください。", { duration: 8000 });
+        }
+        return;
+      }
+
+      const created = data.created ?? 0;
+      if (created === 0) {
+        toast.message("条件に合う新着はありませんでした", { duration: 8000 });
+        return;
+      }
+      toast.success(`${created}件を追加しました。AI評価中（数分）`, { duration: 8000 });
+      onRecommendUpdated?.(); // 評価前でもブックマークタブには並ぶので先に取り直す
+      if (data.submitError) {
+        toast.error("AI評価の投入に失敗しました（夜間の自動処理で再試行されます）", {
+          duration: 10000,
+        });
+        return;
+      }
+      void pollRecommendCollect();
+    } catch {
+      toast.dismiss(loadingId);
+      toast.error("求人の取得に失敗しました。時間をおいてお試しください。", { duration: 8000 });
+    } finally {
+      setRecommendRunning(false);
     }
   };
 
@@ -311,6 +428,29 @@ export default function CandidateHeader({
                 }`}
               >
                 自動配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
+              </button>
+            )}
+            {/* T-189 追加: 今すぐ探す（自動配信 ON のときだけ押せる） */}
+            {showAutoRecommendToggle && (
+              <button
+                disabled={
+                  !candidate.autoRecommendEnabled || recommendRunning || recommendPolling
+                }
+                title={
+                  !candidate.autoRecommendEnabled
+                    ? "自動配信をONにしてください"
+                    : recommendPolling
+                      ? "AI評価の完了を待っています"
+                      : "求人サイトの配信条件で今すぐ引き当てます"
+                }
+                onClick={handleRecommendNow}
+                className="w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {recommendRunning
+                  ? "検索中…"
+                  : recommendPolling
+                    ? "AI評価中…"
+                    : "今すぐ探す"}
               </button>
             )}
             <button
