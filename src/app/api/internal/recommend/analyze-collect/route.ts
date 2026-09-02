@@ -8,6 +8,11 @@ import { runAnalyzeCollect } from "@/lib/recommend/analyze-batch-run";
 //   - 認証: x-api-key（INTERNAL_API_KEY）。analyze-submit と同一。
 //   - 二段ガード: 本回収（DB保存）は dry_run=false かつ confirm=true の時のみ。
 //     それ以外は DRY-RUN（未回収バッチの processing_status を照会して返すだけ・書き込みなし）。
+//   - T-189 修正: この定時回収は「安全網」になった。通常は受け口（from-job-platform）が
+//     投入直後に自前でポーリング回収するため、ここに来る時点で対象0件のことが多い（正常）。
+//     打ち切り（20分）・インスタンス再起動でポーリングが死んだ分だけをここで拾う。
+//     回収は台帳行を SUBMITTED → COLLECTING でアトミックに掴んでから行うので、
+//     自前ポーリングと同時に走っても同じバッチを二重回収しない（掴めない側が空振りする）。
 //   - 流れ: RecommendAnalyzeBatch.status="SUBMITTED" の行を batchId ごとにまとめ、
 //     batches.retrieve → processing_status="ended" のバッチだけ results() をストリームで読む。
 //     custom_id（=台帳行 id）で fileIds を引き当て、succeeded は CA画面経路と同一の

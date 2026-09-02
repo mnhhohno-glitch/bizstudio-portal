@@ -15,10 +15,28 @@
 //   - runAnalyzeSubmit 自体が冪等（対象は origin="auto" / PENDING / aiAnalyzedAt=null かつ
 //     SUBMITTED 台帳に載っていない行のみ）なので、万一二重に走っても同じ行は二度投入されない。
 import { prisma } from "@/lib/prisma";
-import { runAnalyzeSubmit } from "@/lib/recommend/analyze-batch-run";
+import { runAnalyzeSubmit, runAnalyzeCollect } from "@/lib/recommend/analyze-batch-run";
 
 const LOG = "[auto-eval-kick]";
 const DEBOUNCE_MS = 60_000;
+
+// T-189 修正: 投入したら回収まで自前でやる（定時の GitHub Actions を待たない）。
+//
+// 背景: 投入は受け口到着の1秒後に走るようになったが、回収は GitHub Actions の定時のみだった。
+//   GitHub Actions の schedule は混雑時に大幅に遅延する（実測: 2026-09-02 は 07:30 JST 予定の
+//   ジョブが 09:23 JST 発火 ＝ 113分遅延）。2026-09-03 も 07:00:08 投入 → 07:05:14 に Anthropic 側は
+//   完了していたのに、07:56 時点で定時の collect が未発火で「未評価—」のまま滞留していた。
+//   → 投入した本人が、完了するまで数分おきに回収を試みる。
+//
+// 打ち切り: 最長 20分。バッチの実測完了は 5〜6分なので十分な余裕がある。
+//   打ち切った分は定時の collect（安全網・そのまま残す）が拾う。
+// 排他: runAnalyzeCollect が台帳行を SUBMITTED → COLLECTING でアトミックに掴むので、
+//   定時 collect や画面ポーリングと同時に走っても片方が空振りするだけ（二重回収しない）。
+const COLLECT_MAX_MS = 20 * 60_000;
+const COLLECT_FIRST_DELAY_MS = 30_000;
+const COLLECT_MAX_DELAY_MS = 120_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** プロセス内 debounce（第一段）。candidateId → 直近に起動した時刻(ms)。 */
 const lastKickedAt = new Map<string, number>();
@@ -31,6 +49,57 @@ async function submittedRecently(candidateId: string): Promise<boolean> {
     select: { batchId: true },
   });
   return recent !== null;
+}
+
+/**
+ * 投入したバッチが回収されるまで、30秒 → 60秒 → 120秒（上限）間隔でポーリングする。
+ * 完了判定は「当該 batchId の台帳行に SUBMITTED / COLLECTING が1件も残っていない」こと。
+ * 評価保存・D自動却下・PDF先行生成は runAnalyzeCollect の中で既存どおり行われる。
+ * 例外は投げない（after() の中で走るため）。
+ */
+async function collectUntilDone(args: {
+  candidateId: string;
+  candidateNumber: string;
+  batchId: string;
+}): Promise<void> {
+  const { candidateId, candidateNumber, batchId } = args;
+  const startedAt = Date.now();
+  const deadline = startedAt + COLLECT_MAX_MS;
+  let delay = COLLECT_FIRST_DELAY_MS;
+  let attempts = 0;
+
+  while (Date.now() < deadline) {
+    await sleep(delay);
+    delay = Math.min(delay * 2, COLLECT_MAX_DELAY_MS);
+    attempts++;
+    try {
+      const r = await runAnalyzeCollect({ willExecute: true, candidateId });
+      // 自分が投入したバッチの行が捌け切ったか（他経路が回収した場合もここで 0 になる）。
+      const remaining = await prisma.recommendAnalyzeBatch.count({
+        where: { batchId, status: { in: ["SUBMITTED", "COLLECTING"] } },
+      });
+      if (remaining === 0) {
+        console.log(
+          `${LOG} collected candidate=${candidateNumber} batch=${batchId} ` +
+            `attempts=${attempts} saved=${r.savedFiles} skipped=${r.skippedFiles} ` +
+            `autoRejectedD=${r.autoRejectedD} pdf=${r.pdfGenerated}/${r.pdfTargets} ` +
+            `${Math.round((Date.now() - startedAt) / 1000)}秒`,
+        );
+        return;
+      }
+    } catch (e) {
+      // 一時的な失敗（Anthropic API・DB）は次の周回で拾い直す。打ち切りは deadline のみ。
+      console.error(
+        `${LOG} collect_failed candidate=${candidateNumber} batch=${batchId} attempt=${attempts}:`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  console.warn(
+    `${LOG} collect_timeout candidate=${candidateNumber} batch=${batchId} ` +
+      `attempts=${attempts} ${Math.round((Date.now() - startedAt) / 1000)}秒で打ち切り（定時の collect に委ねる）`,
+  );
 }
 
 /**
@@ -73,6 +142,12 @@ export async function kickAutoEvaluation(args: {
         `targetFiles=${submit.targetFiles} requests=${submit.requests} ` +
         `batch=${submit.batchId ?? "-"} ${elapsed}ms`,
     );
+
+    // T-189 修正: 投入できたら、そのまま回収まで見届ける（定時の collect は安全網として残す）。
+    // 台帳保存に失敗した場合は回収できる行が無いのでポーリングしない。
+    if (submit.batchId && !submit.ledgerSaveFailed) {
+      await collectUntilDone({ candidateId, candidateNumber, batchId: submit.batchId });
+    }
   } catch (e) {
     // 失敗しても受け口の作成は成功扱い。未評価のまま残るので翌朝の定時 submit が拾い直す。
     console.error(

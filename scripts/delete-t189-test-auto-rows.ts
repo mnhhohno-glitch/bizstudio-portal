@@ -188,7 +188,8 @@ async function main() {
   let completedLedgerRefs = 0;
   for (const b of batches) {
     const list = Array.isArray(b.file_ids) ? b.file_ids : [];
-    const settled = b.status !== "SUBMITTED"; // COMPLETED / FAILED / EXPIRED = 回収済み（履歴）
+    // COMPLETED / FAILED / EXPIRED = 回収済み（履歴）。SUBMITTED / COLLECTING は未回収なのでブロックする。
+    const settled = b.status !== "SUBMITTED" && b.status !== "COLLECTING";
     for (const fid of list) {
       if (typeof fid !== "string" || !idSet.has(fid)) continue;
       if (settled && ALLOW_COMPLETED_LEDGER) {
