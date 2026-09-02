@@ -7,8 +7,7 @@
 //   ② 「今すぐ探す」で job-platform が 404 condition_not_found を返した
 //
 // 「求人サイトで登録する」は portal SSO（issue-app-token）で /jobs を新規タブで開く。
-// 求職者選択モード自体は job-platform 側のページ内 state のため URL では復元できない
-// （openJobPlatformSearch のコメント参照）。CA が画面上でモードを切り替えて求職者を選ぶ。
+// select_cand=<求職者番号> を付けるので、求人サイトは求職者選択モードON＋この求職者を選択済みで開く。
 import { useState } from "react";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { openJobPlatformSearch } from "@/lib/openJobPlatformDetail";
@@ -33,7 +32,8 @@ export default function AutoRecommendConditionDialog({
     if (opening) return;
     setOpening(true);
     try {
-      await openJobPlatformSearch();
+      // select_cand 付きで開く＝求人サイト側が求職者選択モードONでこの求職者を選択した状態にする
+      await openJobPlatformSearch({ candidateNumber });
     } finally {
       setOpening(false);
     }
@@ -65,9 +65,6 @@ export default function AutoRecommendConditionDialog({
               {candidateNumber ? `（${candidateNumber}）` : ""}
             </p>
           )}
-          <p className="mt-3 text-[12px] text-[#6B7280]">
-            求人サイトでは「求職者選択」モードに切り替え、この求職者を選んでから条件を保存してください。
-          </p>
         </div>
         <div className="flex justify-end gap-2 border-t border-[#E5E7EB] px-6 py-4">
           <button

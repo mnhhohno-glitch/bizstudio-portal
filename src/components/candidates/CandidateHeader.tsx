@@ -612,7 +612,7 @@ export default function CandidateHeader({
                 <span className="text-gray-600">
                   配信条件が未登録です
                   <button
-                    onClick={() => void openJobPlatformSearch()}
+                    onClick={() => void openJobPlatformSearch({ candidateNumber: candidate.candidateNumber })}
                     className="ml-2 text-blue-600 underline hover:text-blue-800"
                   >
                     求人サイトで登録する
@@ -641,7 +641,12 @@ export default function CandidateHeader({
                         {p.summary}
                       </span>
                       <button
-                        onClick={() => void openJobPlatformSearch(p.queryString)}
+                        onClick={() =>
+                          void openJobPlatformSearch({
+                            candidateNumber: candidate.candidateNumber,
+                            queryString: p.queryString,
+                          })
+                        }
                         className="shrink-0 text-blue-600 underline hover:text-blue-800"
                         title="この条件で求人サイトの検索画面を開きます"
                       >

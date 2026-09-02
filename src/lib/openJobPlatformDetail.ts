@@ -12,18 +12,25 @@ export async function openJobPlatformDetail(externalJobRef: string): Promise<voi
 }
 
 // T-189 追加: portal SSO 経由で job-platform の**求人検索画面**を新規タブで開く。
-//   queryString（配信条件パターンの query_string＝ /jobs のURLクエリ文字列）を渡すと、
-//   その検索条件が適用された状態で開く（クエリ引き継ぎ「可」）。
-//
-// 注意（クエリ引き継ぎの範囲）: job-platform の「求職者選択モード」はページ内のクライアント state で
-//   あり URL パラメータでは復元できない（cand/exj/exc は "紹介済みを除く" 用で、モードOFFのまま
-//   ロードすると ExcludeUrlSync が掃除する）。したがってモードと求職者の選択は CA が画面上で行う。
-//   ここで引き継げるのは**検索条件だけ**。
-export async function openJobPlatformSearch(queryString?: string | null): Promise<void> {
-  return openJobPlatform({ queryString: queryString ?? undefined });
+//   - queryString（配信条件パターンの query_string＝ /jobs のURLクエリ文字列）を渡すと、
+//     その検索条件が適用された状態で開く。
+//   - candidateNumber を渡すと `select_cand=<求職者番号>` を付ける。job-platform 側はこれを見て
+//     **求職者選択モードON＋その求職者を選択済み**の状態で開く（job-platform 側の実装が正）。
+//     ※ cand/exj/exc は「紹介済みを除く」用の別パラメータ。ここでは使わない。
+export async function openJobPlatformSearch(
+  opts?: { candidateNumber?: string | null; queryString?: string | null } | null,
+): Promise<void> {
+  return openJobPlatform({
+    candidateNumber: opts?.candidateNumber ?? undefined,
+    queryString: opts?.queryString ?? undefined,
+  });
 }
 
-async function openJobPlatform(opts: { id?: string; queryString?: string }): Promise<void> {
+async function openJobPlatform(opts: {
+  id?: string;
+  candidateNumber?: string;
+  queryString?: string;
+}): Promise<void> {
   try {
     const res = await fetch("/api/auth/issue-app-token", {
       method: "POST",
@@ -38,6 +45,10 @@ async function openJobPlatform(opts: { id?: string; queryString?: string }): Pro
     const { token, target_url } = await res.json();
     let url = `${target_url}?auth_token=${encodeURIComponent(token)}`;
     if (opts.id) url += `&id=${encodeURIComponent(opts.id)}`;
+    // 求職者選択モードON＋その求職者を選択した状態で開かせる（job-platform が select_cand を解釈）。
+    if (opts.candidateNumber) {
+      url += `&select_cand=${encodeURIComponent(opts.candidateNumber)}`;
+    }
     // queryString は job-platform 側で保存された /jobs 用のクエリ文字列。そのまま連結する
     // （portal 側で解釈・再構築しない＝条件の二重実装を作らない）。
     if (opts.queryString) url += `&${opts.queryString.replace(/^[?&]+/, "")}`;
