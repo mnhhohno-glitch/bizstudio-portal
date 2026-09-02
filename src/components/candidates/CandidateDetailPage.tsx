@@ -1967,12 +1967,15 @@ function CandidateDetailPageBody() {
         }}
         showAutoRecommendToggle={currentUser?.autoRecommendAdmin === true}
         onAutoRecommendToggle={async (enabled) => {
-          await fetch(`/api/candidates/${candidate.id}/update`, {
+          // T-189 追加: サーバー側ガード（条件未登録は 400 condition_not_found）の結果をヘッダへ返す。
+          const res = await fetch(`/api/candidates/${candidate.id}/update`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ autoRecommendEnabled: enabled }),
           });
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
           fetchCandidate();
+          return { ok: res.ok, error: data.error };
         }}
         onRecommendUpdated={() => {
           // T-189 追加:「今すぐ探す」で求人が増えた／AI評価が終わった時にブックマークタブを取り直す

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
 import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
+import { fetchCandidateConditions } from "@/lib/recommend/job-platform-conditions";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -88,6 +89,29 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   // T-189 Phase1: 自動配信 ON/OFF（true 以外は全て false に落とす）
   if (body.autoRecommendEnabled !== undefined) {
     updateData.autoRecommendEnabled = body.autoRecommendEnabled === true;
+  }
+  // T-189 追加: OFF→ON は「求人サイトに配信条件（パターン）が1件以上ある」ことを条件にする。
+  //   ON なのに何も届かない状態を作らせないためのサーバー側ガード（画面側にも同じ判定があるが、
+  //   画面の情報が古い場合・API直叩きの場合はここで止まる）。
+  //   - 0件（404含む）→ 400 condition_not_found（フラグは変えない＝この時点で return）
+  //   - 求人サイトに聞けなかった → 502 job_platform_unreachable（**「条件あり」とみなさない**＝fail-closed）
+  //   - true→false（OFF）と、既に true の求職者への true 再送はチェックしない。
+  if (updateData.autoRecommendEnabled === true && existing.autoRecommendEnabled !== true) {
+    const conditions = await fetchCandidateConditions({
+      candidateNumber: existing.candidateNumber,
+    });
+    if (!conditions.ok) {
+      console.error(
+        `[candidate-update] 配信条件の確認に失敗 candidate=${existing.candidateNumber} status=${conditions.status}: ${conditions.error}`,
+      );
+      return NextResponse.json(
+        { error: "job_platform_unreachable", detail: conditions.error },
+        { status: 502 }
+      );
+    }
+    if (conditions.enabledCount < 1) {
+      return NextResponse.json({ error: "condition_not_found" }, { status: 400 });
+    }
   }
   // T-111: 次回連絡予定（面談非依存・直接設定/修正/クリア）。日時はクライアントが JST→ISO 化して送る前提。
   if (body.nextContactAt !== undefined) {

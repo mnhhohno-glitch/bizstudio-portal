@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import IssueSiteTokenButton from "@/components/candidates/IssueSiteTokenButton";
 import SitePreviewButton from "@/components/candidates/SitePreviewButton";
+import AutoRecommendConditionDialog from "@/components/candidates/AutoRecommendConditionDialog";
+import { openJobPlatformSearch } from "@/lib/openJobPlatformDetail";
 
 // T-182: 求人出力（kyuujinPDF）廃止に伴い「求人マイページ」「求人出力」ボタンを非表示。
 // コードは残し描画だけ止める。復活時はここを true に戻す。
@@ -42,6 +44,26 @@ type Candidate = {
   createdAt: string;
 };
 
+// T-189 追加: 求人サイト側の配信条件パターン（/api/candidates/[id]/recommend-conditions の応答）。
+type ConditionPattern = {
+  id: string;
+  label: string;
+  summary: string;
+  queryString: string;
+  enabled: boolean;
+  updatedAt: string | null;
+};
+
+type ConditionsState = {
+  /** ok = 取得できた（0件を含む） / unreachable = 求人サイトに聞けなかった＝不明 */
+  status: "ok" | "unreachable";
+  patterns: ConditionPattern[];
+  enabledCount: number;
+};
+
+/** 自動配信トグルの保存結果（親が /update の応答をそのまま返す）。 */
+export type AutoRecommendToggleResult = { ok: boolean; error?: string };
+
 interface CandidateHeaderProps {
   candidate: Candidate;
   onStatusChange: (status: string) => void;
@@ -63,8 +85,13 @@ interface CandidateHeaderProps {
   onOneDriveSynced?: () => void;
   /** T-189 Phase1: 自動配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ true） */
   showAutoRecommendToggle?: boolean;
-  /** T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う） */
-  onAutoRecommendToggle?: (enabled: boolean) => Promise<void> | void;
+  /**
+   * T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う）。
+   * T-189 追加: 保存APIの結果を返すこと（400 condition_not_found を受け取って共通ダイアログを出す）。
+   */
+  onAutoRecommendToggle?: (
+    enabled: boolean,
+  ) => Promise<AutoRecommendToggleResult | void> | AutoRecommendToggleResult | void;
   /** T-189 追加: 「今すぐ探す」で求人が増えた／AI評価が終わった時に呼ぶ（ブックマークタブの再読込） */
   onRecommendUpdated?: () => void;
 }
@@ -174,6 +201,44 @@ export default function CandidateHeader({
     };
   }, []);
 
+  // T-189 追加: 求人サイト（job-platform）に登録された配信条件パターン。
+  //   null = 未取得 / unreachable = 求人サイトに聞けなかった（ONガードでは「不明＝ONにしない」）
+  const [conditions, setConditions] = useState<ConditionsState | null>(null);
+  const [conditionsLoading, setConditionsLoading] = useState(false);
+  const [conditionDialogOpen, setConditionDialogOpen] = useState(false);
+
+  // 最新の条件を取り直す（トグル操作時は必ずこれを通す＝画面の古い情報でONにしない）。
+  const loadConditions = useCallback(async (): Promise<ConditionsState> => {
+    setConditionsLoading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/recommend-conditions`);
+      if (!res.ok) {
+        const state: ConditionsState = { status: "unreachable", patterns: [], enabledCount: 0 };
+        setConditions(state);
+        return state;
+      }
+      const data = (await res.json()) as { patterns?: ConditionPattern[]; enabledCount?: number };
+      const state: ConditionsState = {
+        status: "ok",
+        patterns: data.patterns ?? [],
+        enabledCount: data.enabledCount ?? 0,
+      };
+      setConditions(state);
+      return state;
+    } catch {
+      const state: ConditionsState = { status: "unreachable", patterns: [], enabledCount: 0 };
+      setConditions(state);
+      return state;
+    } finally {
+      setConditionsLoading(false);
+    }
+  }, [candidate.id]);
+
+  useEffect(() => {
+    if (!showAutoRecommendToggle) return;
+    void loadConditions();
+  }, [showAutoRecommendToggle, loadConditions]);
+
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
   }, [candidate.birthday]);
@@ -274,15 +339,9 @@ export default function CandidateHeader({
 
       if (!res.ok) {
         if (res.status === 404 && data.error === "no_condition") {
-          const jobPlatformUrl =
-            process.env.NEXT_PUBLIC_JOB_PLATFORM_URL || "https://bizstudio-job-platform.vercel.app/jobs";
-          toast.error("求人サイトで配信条件を保存してください", {
-            duration: 12000,
-            action: {
-              label: "求人サイトを開く",
-              onClick: () => window.open(jobPlatformUrl, "_blank", "noopener,noreferrer"),
-            },
-          });
+          // T-189 追加: トースト＋リンクをやめ、トグルのガードと同じ共通ダイアログに統一する。
+          setConditionDialogOpen(true);
+          void loadConditions();
         } else if (res.status === 429) {
           toast.error("1分以内に実行済みです", { duration: 8000 });
         } else if (res.status === 400 && data.error === "auto_recommend_off") {
@@ -312,6 +371,44 @@ export default function CandidateHeader({
       toast.error("求人の取得に失敗しました。時間をおいてお試しください。", { duration: 8000 });
     } finally {
       setRecommendRunning(false);
+    }
+  };
+
+  // T-189 追加: 自動配信トグル。
+  //   OFF→ON のときだけ「求人サイトに配信条件パターンが1件以上あるか」を先に確認する。
+  //     - 0件 → 共通ダイアログを出し、トグルは OFF のまま（保存APIも叩かない）
+  //     - 求人サイトに聞けない → ONにしない（fail-closed。サーバー側も502で拒否する）
+  //     - 1件以上 → 従来どおり保存。保存APIが 400 condition_not_found（画面が古い）でも同じダイアログ
+  //   ON→OFF は無条件で従来どおり。
+  const handleAutoRecommendToggleClick = async () => {
+    if (autoRecommendSaving) return;
+    const next = !candidate.autoRecommendEnabled;
+    setAutoRecommendSaving(true);
+    try {
+      if (next) {
+        const state = await loadConditions();
+        if (state.status === "unreachable") {
+          toast.error("求人サイトに接続できず、配信条件を確認できませんでした", { duration: 8000 });
+          return;
+        }
+        if (state.enabledCount < 1) {
+          setConditionDialogOpen(true);
+          return;
+        }
+      }
+      const result = await onAutoRecommendToggle?.(next);
+      if (result && result.ok === false) {
+        if (result.error === "condition_not_found") {
+          setConditionDialogOpen(true);
+          void loadConditions(); // 表示も最新に合わせる
+        } else if (result.error === "job_platform_unreachable") {
+          toast.error("求人サイトに接続できず、配信条件を確認できませんでした", { duration: 8000 });
+        } else {
+          toast.error("自動配信の切り替えに失敗しました", { duration: 8000 });
+        }
+      }
+    } finally {
+      setAutoRecommendSaving(false);
     }
   };
 
@@ -412,15 +509,7 @@ export default function CandidateHeader({
             {showAutoRecommendToggle && (
               <button
                 disabled={autoRecommendSaving}
-                onClick={async () => {
-                  if (autoRecommendSaving) return;
-                  setAutoRecommendSaving(true);
-                  try {
-                    await onAutoRecommendToggle?.(!candidate.autoRecommendEnabled);
-                  } finally {
-                    setAutoRecommendSaving(false);
-                  }
-                }}
+                onClick={handleAutoRecommendToggleClick}
                 className={`w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate disabled:opacity-50 ${
                   candidate.autoRecommendEnabled
                     ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200"
@@ -505,6 +594,75 @@ export default function CandidateHeader({
           )}
         </div>
       </div>
+
+      {/* Row 2.4: T-189 配信条件パターン一覧（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ・読み取り専用）。
+          登録・編集・削除・ON/OFF は求人サイト側だけで行う（portal では行わない）。 */}
+      {showAutoRecommendToggle && (
+        <div className="px-6 pb-2">
+          <div className="flex items-start gap-2 text-[13px]">
+            <span className="shrink-0 pt-0.5 text-gray-400">配信条件:</span>
+            <div className="min-w-0 flex-1">
+              {conditions === null ? (
+                <span className="text-gray-400">{conditionsLoading ? "読み込み中…" : "-"}</span>
+              ) : conditions.status === "unreachable" ? (
+                <span className="text-amber-700">
+                  求人サイトに接続できず、配信条件を取得できませんでした
+                </span>
+              ) : conditions.patterns.length === 0 ? (
+                <span className="text-gray-600">
+                  配信条件が未登録です
+                  <button
+                    onClick={() => void openJobPlatformSearch()}
+                    className="ml-2 text-blue-600 underline hover:text-blue-800"
+                  >
+                    求人サイトで登録する
+                  </button>
+                </span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {conditions.patterns.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0 text-[10px] font-medium ${
+                          p.enabled
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
+                        title={
+                          p.enabled
+                            ? "自動配信に使うパターン"
+                            : "保存のみ（自動配信には使わない）"
+                        }
+                      >
+                        {p.enabled ? "配信" : "保存のみ"}
+                      </span>
+                      <span className="shrink-0 font-medium text-gray-700">{p.label}</span>
+                      <span className="truncate text-gray-500" title={p.summary}>
+                        {p.summary}
+                      </span>
+                      <button
+                        onClick={() => void openJobPlatformSearch(p.queryString)}
+                        className="shrink-0 text-blue-600 underline hover:text-blue-800"
+                        title="この条件で求人サイトの検索画面を開きます"
+                      >
+                        求人サイトで開く
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* T-189 追加: 配信条件が未登録のときの共通ダイアログ（トグルON・今すぐ探すの両方から出す） */}
+      <AutoRecommendConditionDialog
+        open={conditionDialogOpen}
+        candidateName={candidate.name}
+        candidateNumber={candidate.candidateNumber}
+        onClose={() => setConditionDialogOpen(false)}
+      />
 
       {/* Row 2.5: 希望条件サマリ（全 null なら非表示） */}
       {(candidate.desiredJobType1 ||
