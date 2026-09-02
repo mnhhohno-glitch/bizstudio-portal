@@ -22,6 +22,7 @@
  *   - dry-run（既定）は一切書き込まない。--execute 指定時のみ削除。
  *   - 削除前に全カラムを CSV（verify/t189-auto-rows-deleted-<timestamp>.csv）へ退避。
  *   - 削除直前に関連レコードを再確認し、1件でもあれば **その行は削除せず報告**する。
+ *     例外は --allow-completed-ledger を付けたときの「完了済みの投入台帳」だけ（下記）。
  *       ・本人回答         : candidate_response_submission_items（当該ファイル）
  *                            / candidate_job_responses（kyuujin_job_id 経由）
  *       ・OneDrive同期ログ  : one_drive_sync_logs
@@ -30,9 +31,17 @@
  *   - 削除は抽出済み ID 限定（unscoped DELETE なし）。
  *   - idempotent: 2回目以降は対象0件で正常終了する。
  *
+ * --allow-completed-ledger について:
+ *   受け口の検証で作った行は、その場で AI評価バッチへ投入されるため投入台帳に必ず載る。
+ *   台帳が **COMPLETED / FAILED / EXPIRED**（＝回収が終わっている）なら履歴レコードに過ぎず、
+ *   CandidateFile を消しても回収処理には影響しない（回収は status='SUBMITTED' の行しか読まない。
+ *   file_ids は FK ではないので参照が残っても壊れない）。この場合だけブロックを解除する。
+ *   **SUBMITTED（回収前）の台帳がある行は、このフラグを付けても削除しない**（回収中の取りこぼし防止）。
+ *
  * Usage:
  *   npx tsx --env-file=.env scripts/delete-t189-test-auto-rows.ts             # dry-run
  *   npx tsx --env-file=.env scripts/delete-t189-test-auto-rows.ts --execute   # 実削除
+ *   npx tsx --env-file=.env scripts/delete-t189-test-auto-rows.ts --allow-completed-ledger --execute
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -45,6 +54,9 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 const EXECUTE = process.argv.includes("--execute");
+// 回収済み（COMPLETED/FAILED/EXPIRED）の投入台帳に載っているだけの行を削除対象に含める。
+// SUBMITTED（回収前）の台帳がある行は、このフラグの有無に関わらず削除しない。
+const ALLOW_COMPLETED_LEDGER = process.argv.includes("--allow-completed-ledger");
 
 /** 残骸が作られた日（JST）。この日に作られた未着手の自動配信行だけを対象にする。 */
 const TARGET_JST_DATE = "2026-09-02";
@@ -145,23 +157,52 @@ async function main() {
   `;
   for (const r of submissionItems) block(r.candidate_file_id, "本人回答(submission_item)");
 
-  const syncLogs = await prisma.$queryRaw<{ candidate_file_id: string }[]>`
-    SELECT candidate_file_id FROM onedrive_sync_logs
+  // OneDrive: 実際にコピーされた（status=SUCCESS もしくは target_item_id が付いている）行だけを
+  //   ブロック対象にする。PENDING/SKIPPED/FAILED は OneDrive 側に実体が無く、ログ行自体は
+  //   CandidateFile 削除時に onDelete: Cascade で消えるため残骸にならない。
+  const syncLogs = await prisma.$queryRaw<{ candidate_file_id: string; status: string; target_item_id: string | null }[]>`
+    SELECT candidate_file_id, status::text AS status, target_item_id FROM onedrive_sync_logs
     WHERE candidate_file_id = ANY(${ids}::text[])
   `;
-  for (const r of syncLogs) block(r.candidate_file_id, "OneDrive同期ログ");
+  let notCopiedSyncLogs = 0;
+  for (const r of syncLogs) {
+    if (r.status === "SUCCESS" || r.target_item_id) {
+      block(r.candidate_file_id, `OneDrive同期ログ(${r.status}・コピー済み)`);
+    } else {
+      notCopiedSyncLogs++;
+    }
+  }
+  if (notCopiedSyncLogs > 0) {
+    console.log(
+      `[delete-t189-test-auto-rows] OneDrive未コピーの同期ログ ${notCopiedSyncLogs} 件はブロックしない` +
+        `（OneDrive側に実体なし・行はCascadeで消える）`,
+    );
+  }
 
   // 投入台帳: file_ids は JSON 配列。1行ずつ突き合わせる。
-  const batches = await prisma.$queryRaw<{ id: string; batch_id: string; file_ids: unknown }[]>`
-    SELECT id, batch_id, file_ids FROM recommend_analyze_batches
+  const batches = await prisma.$queryRaw<{ id: string; batch_id: string; status: string; file_ids: unknown }[]>`
+    SELECT id, batch_id, status, file_ids FROM recommend_analyze_batches
     WHERE candidate_id = ANY(${candidateIds}::text[])
   `;
   const idSet = new Set(ids);
+  let completedLedgerRefs = 0;
   for (const b of batches) {
     const list = Array.isArray(b.file_ids) ? b.file_ids : [];
+    const settled = b.status !== "SUBMITTED"; // COMPLETED / FAILED / EXPIRED = 回収済み（履歴）
     for (const fid of list) {
-      if (typeof fid === "string" && idSet.has(fid)) block(fid, `投入台帳(${b.batch_id})`);
+      if (typeof fid !== "string" || !idSet.has(fid)) continue;
+      if (settled && ALLOW_COMPLETED_LEDGER) {
+        completedLedgerRefs++;
+        continue; // 履歴レコードなのでブロックしない（--allow-completed-ledger 指定時のみ）
+      }
+      block(fid, `投入台帳(${b.batch_id}/${b.status})`);
     }
+  }
+  if (completedLedgerRefs > 0) {
+    console.log(
+      `[delete-t189-test-auto-rows] 回収済み投入台帳の参照 ${completedLedgerRefs} 件は ` +
+        `--allow-completed-ledger によりブロックしない（履歴レコードのため）`,
+    );
   }
 
   // エントリー: candidate_id × external_job_ref（サイト経由/ブックマーク由来の紐付けキー）
