@@ -334,6 +334,8 @@ export default function CandidateHeader({
         submitted?: number;
         error?: string;
         submitError?: string;
+        // T-189 修正: created=0 の理由。"daily_limit" は本日の自動配信上限に到達。
+        reason?: string;
       };
       toast.dismiss(loadingId);
 
@@ -354,7 +356,16 @@ export default function CandidateHeader({
 
       const created = data.created ?? 0;
       if (created === 0) {
-        toast.message("条件に合う新着はありませんでした", { duration: 8000 });
+        // T-189 修正: 上限到達（求人サイト側が created:0 / reason:"daily_limit" を返す）は
+        //   「新着なし」と区別して伝える。理由が無い/不明なら従来どおりの文言。
+        if (data.reason === "daily_limit") {
+          toast.message(
+            "本日の自動配信の上限（15件）に達しています。明日以降に再度お試しください",
+            { duration: 8000 },
+          );
+        } else {
+          toast.message("条件に合う新着はありませんでした", { duration: 8000 });
+        }
         return;
       }
       toast.success(`${created}件を追加しました。AI評価中（数分）`, { duration: 8000 });

@@ -1507,6 +1507,13 @@ model CandidateFile {
   //   response-status API が status=EXCLUDED のときだけ保存し、EXCLUDED 以外へ変更した時点で excludedBy/At と
   //   同時にクリアする（＝現在の対象外の理由）。自動配信行・手動行を問わず使う。null=理由なし（従来どおり）。
   candidateExcludeReason  String?   @map("candidate_exclude_reason")
+  // T-189 修正: 自動配信行の「出所」。job-platform 側の送信 payload の同名項目をそのまま保存する
+  //   （未送信＝null。既存行も null のまま＝挙動不変）。どの条件・どの経路で届いた行かを後から辿るため。
+  //   autoSourceMode: "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+  //   autoPatternId / autoPatternLabel: 求人サイト側の配信条件パターン（ID・表示名）
+  autoSourceMode          String?   @map("auto_source_mode")
+  autoPatternId           String?   @map("auto_pattern_id")
+  autoPatternLabel        String?   @map("auto_pattern_label")
   responseSubmissionItems CandidateResponseSubmissionItem[]
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。

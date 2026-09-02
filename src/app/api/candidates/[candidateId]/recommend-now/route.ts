@@ -18,10 +18,11 @@ import { runAnalyzeSubmit } from "@/lib/recommend/analyze-batch-run";
 //       3. 回収は待たない。画面が recommend-collect をポーリングする。
 //   - 連打防止: 同一求職者につき60秒に1回（job-platform 側と二重で持つ）。
 //
-// レスポンス（200）: { created, skipped, submitted, batchId }
+// レスポンス（200）: { created, skipped, submitted, batchId, reason }
 //   created   … job-platform が portal に新規作成したブックマーク件数
 //   skipped   … 既出などで送られなかった件数
 //   submitted … 今回 AI評価バッチへ投入したファイル件数
+//   reason    … created=0 の理由（"daily_limit" = 本日の配信上限に到達）。不明は null
 // 400 { error: "auto_recommend_off" } / 404 { error: "no_condition" } / 429 { error: "cooldown" }
 
 // job-platform 側の検索〜PDF化〜送信が数十秒かかる。投入まで含めて余裕を持たせる。
@@ -115,6 +116,7 @@ export async function POST(
         skipped: run.sent.skipped,
         submitted: 0,
         batchId: null,
+        reason: run.reason,
         submitError: e instanceof Error ? e.message : String(e),
       });
     }
@@ -129,5 +131,7 @@ export async function POST(
     skipped: run.sent.skipped,
     submitted,
     batchId,
+    // T-189 修正: created=0 の理由（"daily_limit" 等）。画面が上限到達を伝えるのに使う。
+    reason: run.reason,
   });
 }

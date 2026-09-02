@@ -207,6 +207,15 @@ function JobCard({
           <div className="text-[13px] text-gray-800">{card.jobTitle ?? <span className="text-gray-400">（求人タイトル未取得）</span>}</div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
             <span>引き当て {fmtJst(card.autoSourcedAt)}</span>
+            {/* T-189 修正: どの配信条件パターン・どの経路で届いた行か（記録がある行だけ出す）。 */}
+            {card.autoPatternLabel && (
+              <span
+                className="text-violet-700"
+                title={`経路: ${card.autoSourceMode === "manual" ? "手動（今すぐ探す）" : card.autoSourceMode === "auto" ? "自動（定時）" : "記録なし"}`}
+              >
+                パターン: {card.autoPatternLabel}
+              </span>
+            )}
             {card.aiAnalyzedAt && <span>AI評価 {fmtJst(card.aiAnalyzedAt)}</span>}
             {card.introducedAt && <span>公開 {fmtJst(card.introducedAt)}</span>}
             {card.approvalStatus === "APPROVED" && (

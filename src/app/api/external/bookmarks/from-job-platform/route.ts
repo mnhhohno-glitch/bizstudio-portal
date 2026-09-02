@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 // T-181: generateAndStorePdf は本routeのローカル関数だったものを @/lib/job-platform-pdf へ
@@ -6,6 +6,8 @@ import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 // T-185: 求人名・職種の保存。payload の jobTitle/jobCategory を優先し、無ければ求人本文から抽出する。
 import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
+// T-189 修正: 自動配信行が届いた直後の AI評価投入（受け口の応答を遅らせないよう after() で走らせる）。
+import { kickAutoEvaluation } from "@/lib/recommend/auto-eval-kick";
 
 /**
  * POST /api/external/bookmarks/from-job-platform
@@ -39,6 +41,10 @@ type JobInput = {
   // T-128 Phase2-1: 元媒体の識別子（例: "hito_link"）。任意・後方互換（未送信でも従来どおり動作）。
   //   受信時は CandidateFile.sourceMedia に生値のまま保存。マッピング（→ "HITO-Link" 等）は HistoryTab で解決。
   sourceMedia?: unknown;
+  // T-189 修正: 出所（経路・配信条件パターン）。任意・後方互換。body 直下でも jobs[] の要素でも受け付ける。
+  autoSourceMode?: unknown;  // "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+  autoPatternId?: unknown;
+  autoPatternLabel?: unknown;
 };
 
 function str(v: unknown): string | null {
@@ -142,6 +148,14 @@ export async function POST(request: Request) {
       if (u && u.status === "active") autoUploaderId = u.id;
     }
 
+    // T-189 修正: 出所の記録。job-platform 側の送信 payload の任意項目（未送信なら null）。
+    //   autoSourceMode: "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+    //   autoPatternId / autoPatternLabel: 求人サイト側の配信条件パターン（ID・表示名）
+    //   求人ごと（jobs[] の各要素）に付いていればそちらを優先し、無ければ body 直下の値を使う。
+    const autoSourceModeTop = str(body.autoSourceMode);
+    const autoPatternIdTop = str(body.autoPatternId);
+    const autoPatternLabelTop = str(body.autoPatternLabel);
+
     let autoCreated = 0;
     let autoSkipped = 0;
     const autoErrors: { index: number; error: string }[] = [];
@@ -215,6 +229,10 @@ export async function POST(request: Request) {
             origin: "auto",
             autoSourcedAt: new Date(),
             approvalStatus: "PENDING",
+            // T-189 修正: 出所（経路・配信条件パターン）。未送信は null のまま。
+            autoSourceMode: str(j.autoSourceMode) ?? autoSourceModeTop,
+            autoPatternId: str(j.autoPatternId) ?? autoPatternIdTop,
+            autoPatternLabel: str(j.autoPatternLabel) ?? autoPatternLabelTop,
             uploadedByUserId: autoUploaderId,
           },
         });
@@ -225,6 +243,18 @@ export async function POST(request: Request) {
         autoErrors.push({ index: i, error: "save failed" });
         results.push({ index: i, externalJobRef, result: "error" });
       }
+    }
+
+    // T-189 修正: 1件以上作れたら、レスポンス返却後に当該求職者の未評価分を AI評価バッチへ投入する。
+    //   毎朝07:30の定時 submit は安全網として残す（ここで投入済みなら対象0件で正常終了する）。
+    if (autoCreated > 0) {
+      after(() =>
+        kickAutoEvaluation({
+          candidateId: candidate.id,
+          candidateNumber: candidate.candidateNumber,
+          createdCount: autoCreated,
+        }),
+      );
     }
 
     return NextResponse.json({

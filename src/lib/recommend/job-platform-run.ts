@@ -36,6 +36,12 @@ export type RecommendRunOk = {
   adopted: number;
   sent: { created: number; skipped: number; error: number };
   jobs: RecommendRunJob[];
+  /**
+   * T-189 修正: created=0 の理由（job-platform 側が返す任意項目）。
+   * "daily_limit" = 本日の自動配信上限に到達。画面はこれを見て専用のトーストを出す。
+   * 未送信・不明は null（＝従来どおり「条件に合う新着はありませんでした」）。
+   */
+  reason: string | null;
 };
 
 export type RecommendRunNg = {
@@ -105,6 +111,13 @@ export async function runRecommendOnJobPlatform(args: {
         error: Number(sent.error ?? 0),
       },
       jobs: Array.isArray(json.jobs) ? (json.jobs as RecommendRunJob[]) : [],
+      // reason は top-level / sent 配下のどちらで来ても拾う（job-platform 側の実装差を吸収）。
+      reason:
+        typeof json.reason === "string"
+          ? json.reason
+          : typeof sent.reason === "string"
+            ? (sent.reason as string)
+            : null,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

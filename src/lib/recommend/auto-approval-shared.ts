@@ -66,6 +66,10 @@ export type AutoApprovalCard = {
   aiAnalysisComment: string | null;
   aiAnalyzedAt: string | null;
   autoSourcedAt: string | null; // 引き当て日
+  // T-189 修正: 出所。autoPatternLabel は求人サイト側の配信条件パターン名、autoSourceMode は
+  //   "auto"（毎朝の無人引き当て）/"manual"（CA の「今すぐ探す」）。どちらも未記録の行は null。
+  autoSourceMode: string | null;
+  autoPatternLabel: string | null;
   approvalStatus: string | null;
   rejectedReason: string | null;
   introducedAt: string | null;

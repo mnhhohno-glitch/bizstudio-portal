@@ -333,6 +333,9 @@ type BookmarkFile = {
   origin?: string | null;
   // T-189 Phase3-1: 自動引き当て由来（非null）は担当列を「AI自動検索」表示（保存者はシステム/管理者のため名前を出さない）。
   autoSourcedAt?: string | null;
+  // T-189 修正: 出所。担当列「AI自動検索」のホバー（title）に「パターン / 経路」を出す。null=記録なし。
+  autoSourceMode?: string | null;
+  autoPatternLabel?: string | null;
   // T-189 修正: 自動配信行の承認状態（PENDING/APPROVED/REJECTED/EXPIRED）。PENDING の行だけ ✓承認/✗却下 ボタンを出す。
   approvalStatus?: string | null;
   rejectedReason?: string | null;
@@ -599,6 +602,14 @@ function AnalysisCommentBody({ comment }: { comment: string }) {
 // T-189 Phase3-1: 担当列の表示名。自動引き当て由来（autoSourcedAt 非null）は保存者名（システム/管理者）ではなく
 // 「AI自動検索」を出す。表示のみで uploadedByUserId は変えない。並び替え（uploader 基準）も同じ文字列を使う。
 const AUTO_SOURCED_LABEL = "AI自動検索";
+// T-189 修正: 自動配信行のホバー説明。どの配信条件パターンで・どの経路（毎朝の自動 / CAの「今すぐ探す」）
+// で届いた行かを出す。列は増やさない（担当列の title のみ）。値が無い行は「記録なし」と明示する。
+function autoSourcedTitle(f: { autoSourceMode?: string | null; autoPatternLabel?: string | null }): string {
+  const pattern = f.autoPatternLabel ?? "記録なし";
+  const mode = f.autoSourceMode === "auto" ? "自動" : f.autoSourceMode === "manual" ? "手動" : "記録なし";
+  return `自動配信（AI自動検索）で引き当てた求人
+パターン: ${pattern} / 経路: ${mode}`;
+}
 function uploaderLabel(f: { origin?: string | null; autoSourcedAt?: string | null; uploadedBy: { name: string } }): string {
   if (f.origin === "candidate") return "サイト経由";
   if (f.autoSourcedAt) return AUTO_SOURCED_LABEL;
@@ -2370,7 +2381,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                 ) : file.autoSourcedAt ? (
                   <span
                     className="w-[72px] shrink-0 text-[11px] text-violet-600 font-medium truncate"
-                    title="自動配信（AI自動検索）で引き当てた求人"
+                    title={autoSourcedTitle(file)}
                   >{AUTO_SOURCED_LABEL}</span>
                 ) : (
                   <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
