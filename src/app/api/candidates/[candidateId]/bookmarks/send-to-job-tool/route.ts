@@ -5,6 +5,7 @@ import { downloadFileFromDrive } from "@/lib/google-drive";
 import { extractCandidateFacingComment } from "@/lib/comment-split";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { RANK_ORDER, RANK_UNRANKED, toMatchLabel } from "@/lib/ai-rating";
+import { approveAutoFiles } from "@/lib/recommend/auto-approval-sync";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -67,7 +68,37 @@ export async function POST(
   //                   「出力済なのに求人紹介に出ない」矛盾と日報の出力数水増しを生んでいた。
   //                   lastExportedAt は「実際に kyuujin へ送信して job が作られた行」にのみ立てる（本修正）。
   //                   サイト経由行は送信対象から外し、スキップとして件数を返す。
+  //
+  // T-189 修正（2026-09-02）: 求職者詳細の自動配信 ✓✗ を撤去し、承認＝「チェック→送信」に統合した。
+  //   選択に自動配信の承認待ち行（autoSourcedAt != null / approvalStatus="PENDING"）が混ざっていたら、
+  //   PDF有無の判定より前に承認ページ ✓ と同じ approveAutoFiles を呼ぶ（APPROVED + introducedAt + PDF生成）。
+  //   承認で PDF が生成されればこの後の pdfFiles に載り、通常のブックマークと同じ送信経路に乗る。
+  //   承認/PDF生成に失敗した行は driveFileId が無いままなので送信対象から自然に外れ、件数だけ返す。
   const ratingOrder = RANK_ORDER;
+  const preFiles = await prisma.candidateFile.findMany({
+    where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
+    select: { id: true, autoSourcedAt: true, approvalStatus: true },
+  });
+  const autoPendingIds = preFiles
+    .filter((f) => f.autoSourcedAt && f.approvalStatus === "PENDING")
+    .map((f) => f.id);
+  let autoApprovedCount = 0;
+  let autoPdfFailedCount = 0;
+  if (autoPendingIds.length > 0) {
+    try {
+      const r = await approveAutoFiles({ fileIds: autoPendingIds });
+      autoApprovedCount = r.approvedIds.length;
+      autoPdfFailedCount = r.pdfFailed.length;
+      console.log(
+        `[SendToJobTool] auto approved candidate=${candidateId} by=${user.id} pending=${autoPendingIds.length} approved=${autoApprovedCount} pdfOk=${r.pdfGenerated} pdfFailed=${autoPdfFailedCount}`,
+      );
+    } catch (e) {
+      // 承認に失敗しても通常行の送信は続行する（該当行は PDF 無しのまま送信対象外になる）
+      console.error("[SendToJobTool] auto approve failed:", e);
+      autoPdfFailedCount = autoPendingIds.length;
+    }
+  }
+
   const bookmarkFiles = (
     await prisma.candidateFile.findMany({
       where: { id: { in: fileIds }, category: "BOOKMARK", archivedAt: null },
@@ -83,11 +114,24 @@ export async function POST(
   const linkOnlyFiles = bookmarkFiles.filter(
     (f) => !f.driveFileId && f.origin === "candidate",
   );
+  // 承認したのに PDF が作れなかった自動配信行（黙って落とさず件数を返す）
+  const autoNoPdfCount = bookmarkFiles.filter((f) => !f.driveFileId && f.autoSourcedAt).length;
 
   // 全件がサイト経由（PDFなし）の場合: kyuujin へ送信できるものが無い。
   // T-161: 旧実装はここで lastExportedAt を立てて「移動しました」と返していたが、実際には
   // kyuujin に job は作られない（虚偽の出力済）。何もせず、理由を明示して返す。
   if (pdfFiles.length === 0) {
+    if (autoNoPdfCount > 0) {
+      return NextResponse.json(
+        {
+          error: `自動配信の求人${autoNoPdfCount}件はPDF生成に失敗したため送信できませんでした（承認ページの「PDF再生成」で再試行できます）`,
+          autoApprovedCount,
+          autoPdfFailedCount,
+          skippedAutoNoPdfCount: autoNoPdfCount,
+        },
+        { status: 422 },
+      );
+    }
     if (linkOnlyFiles.length === 0) {
       return NextResponse.json(
         { error: "送信できる求人がありません（選択した求人にPDFが無く、サイト経由求人でもありません）" },
@@ -399,6 +443,9 @@ export async function POST(
     const linkedNote = linkOnlyFiles.length > 0
       ? `（サイト経由${linkOnlyFiles.length}件はPDFが無いため送信対象外。「エントリーへ登録」または「紹介済みにする」から進めてください）`
       : "";
+    const autoNote = autoApprovedCount > 0
+      ? `（自動配信${autoApprovedCount}件を承認${autoNoPdfCount > 0 ? `。うち${autoNoPdfCount}件はPDF生成に失敗し送信対象外` : ""}）`
+      : "";
     return NextResponse.json({
       success: true,
       projectId,
@@ -407,9 +454,12 @@ export async function POST(
       uploadedCount: downloadedFiles.length,
       linkedCount: 0,
       skippedSiteCount: linkOnlyFiles.length,
+      autoApprovedCount,
+      autoPdfFailedCount,
+      skippedAutoNoPdfCount: autoNoPdfCount,
       failedCount,
       projectUrl: memoUrl,
-      message: `${downloadedFiles.length}件のPDFを送信しました${linkedNote}。メモ一覧で引当てを確認してください`,
+      message: `${downloadedFiles.length}件のPDFを送信しました${autoNote}${linkedNote}。メモ一覧で引当てを確認してください`,
     });
   } catch (e) {
     console.error("Send to job tool error:", e);

@@ -10,7 +10,7 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
-import { REJECT_REASON_CHOICES as AUTO_REJECT_REASON_CHOICES, AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval-shared";
+import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval-shared";
 
 // T-182: 求人出力（kyuujinPDF 送信）の廃止。旧導線（求人出力へ送信・求人紹介へ移動・
 // 出力済バッジ・未出力選択）はコードを残したまま描画だけ止める。復活時はここを true に戻す。
@@ -1068,7 +1068,7 @@ function formatFileDate(iso: string): string {
 //   variant="bookmark"  … 未紹介行のみ（introducedAt なし）。従来どおりアップロード可。
 //   variant="introduced" … 紹介済み行のみ（introducedAt あり）。アップロード不可・「ブックマークに戻す」あり。
 // 区分による差分は「振り分けフィルタ・ヘッダー文言・紹介日列の値・フッターのボタン構成」だけに限定する。
-function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", autoRecommendAdmin = false, onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; /** T-189 修正: 自動配信の承認権限（AUTO_RECOMMEND_ADMIN_IDS）。true なら自動配信 PENDING 行に ✓承認/✗却下 を出す */ autoRecommendAdmin?: boolean; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onIntroducedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; /** T-189 修正: 紹介求人区分の件数だけ更新する（タブは切り替えない） */ onIntroducedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -1306,73 +1306,12 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
 
   // 単一ブックマークの紹介保留化。一覧行の「保留」ボタンと AI評価モーダルの「紹介保留」で共有する。
   // 成功したら true。呼び出し側は戻り値で後処理（AI評価モーダルの次求人送り等）を分岐する。
-  // T-189 修正: 自動配信行の ✓承認/✗却下（承認ページ /admin/auto-recommend と同じ API を叩く。権限も同じ＝API 側で 403）。
-  //   ✓承認 → APPROVED + introducedAt（PDF生成込み）。行は紹介求人区分へ移るのでそちらへ切り替える。
-  //   ✗却下 → REJECTED + 紹介保留（archivedAt）。行は一覧から消え保留一覧に入る。
-  const [autoActingId, setAutoActingId] = useState<string | null>(null);
-  const [autoRejectTarget, setAutoRejectTarget] = useState<BookmarkFile | null>(null);
-  const [autoRejectReason, setAutoRejectReason] = useState<string>(AUTO_REJECT_REASON_CHOICES[0]);
-  const [autoRejectNote, setAutoRejectNote] = useState("");
-  const isAutoPending = (f: BookmarkFile) => !!f.autoSourcedAt && f.approvalStatus === "PENDING" && !f.archivedAt;
-  const showAutoApproval = autoRecommendAdmin && variant === "bookmark" && files.some(isAutoPending);
-  const actionColWidth = showAutoApproval ? "w-[150px]" : "w-[100px]";
-
-  const approveAutoFile = async (file: BookmarkFile) => {
-    if (autoActingId) return;
-    setAutoActingId(file.id);
-    try {
-      const res = await fetch("/api/admin/auto-recommend/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileIds: [file.id] }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || (res.status === 403 ? "承認権限がありません" : "承認に失敗しました"));
-      if ((data?.approved ?? 0) === 0) {
-        toast.info("この求人は既に処理済みです");
-      } else if (Array.isArray(data?.pdfFailed) && data.pdfFailed.length > 0) {
-        toast.warning("承認しました（PDF生成に失敗。承認ページの「PDF再生成」で再試行できます）");
-      } else {
-        toast.success("承認しました（紹介求人へ移動）");
-      }
-      fetchFiles();
-      onSwitchToJobs?.();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "承認に失敗しました");
-    } finally {
-      setAutoActingId(null);
-    }
-  };
-
-  const rejectAutoFile = async () => {
-    const file = autoRejectTarget;
-    if (!file || autoActingId) return;
-    const note = autoRejectNote.trim();
-    if (autoRejectReason === "その他" && !note) {
-      toast.error("「その他」の場合は理由を入力してください");
-      return;
-    }
-    setAutoActingId(file.id);
-    try {
-      const res = await fetch("/api/admin/auto-recommend/reject", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileIds: [file.id], reason: autoRejectReason, note }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || (res.status === 403 ? "却下権限がありません" : "却下に失敗しました"));
-      toast.success((data?.rejected ?? 0) === 0 ? "この求人は既に処理済みです" : "却下しました（紹介保留へ移動）");
-      setAutoRejectTarget(null);
-      setAutoRejectNote("");
-      setSelectedIds((prev) => { const n = new Set(prev); n.delete(file.id); return n; });
-      fetchFiles();
-      onArchivedChange?.();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "却下に失敗しました");
-    } finally {
-      setAutoActingId(null);
-    }
-  };
+  // T-189 修正（2026-09-02）: 求職者詳細の自動配信行から ✓承認/✗却下 を撤去した。
+  //   1件押すたびに行が別区分へ移って画面が動き、まとめて処理できなかったため。既存の一括操作に統合する。
+  //   - 承認 = チェック → 「紹介求人へ移動」（mark-introduced が承認ページ ✓ と同じ approveAutoFiles を呼ぶ）
+  //   - 却下 = チェック → 「紹介保留に移動」／行の 📦（archive API の hold-sync が REJECTED に同期する）
+  //   ✓✗ は承認ページ /admin/auto-recommend にのみ残す。
+  const actionColWidth = "w-[100px]";
 
   const archiveSingleFile = async (fileId: string, reason: string | null, note: string | null): Promise<boolean> => {
     setArchivingId(fileId);
@@ -1770,11 +1709,19 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "紹介済みへの変更に失敗しました");
       const parts = [`${data.marked ?? 0}件を紹介求人へ移動しました`];
+      // T-189 修正（2026-09-02）: 自動配信の承認待ち行はここで承認（APPROVED+PDF生成）される。件数を明示する。
+      if (data.autoApproved > 0) parts.push(`うち自動配信${data.autoApproved}件を承認`);
       if (data.skippedSite > 0) parts.push(`${data.skippedSite}件は本人応募のため対象外`);
       toast.success(parts.join("、"));
+      if (data.autoPdfFailed > 0) {
+        toast.warning(`自動配信${data.autoPdfFailed}件はPDF生成に失敗しました（承認ページの「PDF再生成」で再試行できます）`);
+      }
       setSelectedIds(new Set());
+      // T-189 修正（2026-09-02）: 実行後はブックマークタブに留まる（自動でタブを切り替えない）。
+      // 一覧を取り直して該当行が消えるだけにし、続けて他の行を処理できるようにする。
+      // 紹介求人タブのバッジ件数だけは裏で更新する。
       fetchFiles();
-      onSwitchToJobs?.();
+      onIntroducedChange?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
@@ -2465,27 +2412,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                   >
                     {file.caComment ? "💬" : "🗨️"}
                   </button>
-                  {/* T-189 修正: 自動配信の承認待ち行だけ ✓承認/✗却下（承認権限者のみ）。承認ページと同じ API。 */}
-                  {showAutoApproval && isAutoPending(file) && (
-                    <>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); approveAutoFile(file); }}
-                        disabled={autoActingId === file.id}
-                        className="text-[14px] font-bold px-1.5 py-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-50"
-                        title="承認（求職者のマイページ「新着マッチ求人」に出す・紹介求人へ移動）"
-                      >
-                        ✓
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setAutoRejectReason(AUTO_REJECT_REASON_CHOICES[0]); setAutoRejectNote(""); setAutoRejectTarget(file); }}
-                        disabled={autoActingId === file.id}
-                        className="text-[14px] font-bold px-1.5 py-1 rounded border border-red-300 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
-                        title="却下（紹介保留へ移動）"
-                      >
-                        ✗
-                      </button>
-                    </>
-                  )}
+                  {/* T-189 修正（2026-09-02）: 自動配信行の ✓承認/✗却下 は撤去。
+                      承認＝チェックして「紹介求人へ移動」、却下＝この 📦（紹介保留）で行う。 */}
                   <button
                     onClick={() => openArchiveModal(file.id)}
                     disabled={archivingId === file.id}
@@ -2501,35 +2429,6 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
         )}
       </div>
 
-      {/* T-189 修正: 自動配信行の却下理由ポップオーバー（承認ページの ✗ と同じ選択肢・保存形式） */}
-      {autoRejectTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => !autoActingId && setAutoRejectTarget(null)}>
-          <div className="w-[340px] rounded-lg bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-1 text-[14px] font-bold text-gray-800">却下理由</div>
-            <div className="mb-3 truncate text-[12px] text-gray-500" title={autoRejectTarget.fileName}>{stripFileMetadata(autoRejectTarget.fileName)}</div>
-            <div className="flex flex-col gap-1.5">
-              {AUTO_REJECT_REASON_CHOICES.map((r) => (
-                <label key={r} className="flex items-center gap-2 text-[13px] text-gray-700">
-                  <input type="radio" name="auto-reject-reason" checked={autoRejectReason === r} onChange={() => setAutoRejectReason(r)} />
-                  {r}
-                </label>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={autoRejectNote}
-              onChange={(e) => setAutoRejectNote(e.target.value)}
-              placeholder={autoRejectReason === "その他" ? "理由（必須）" : "補足（任意）"}
-              maxLength={200}
-              className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-[13px]"
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <button onClick={() => setAutoRejectTarget(null)} disabled={!!autoActingId} className="rounded border border-gray-300 px-3 py-1 text-[13px] text-gray-600 hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
-              <button onClick={rejectAutoFile} disabled={!!autoActingId} className="rounded bg-red-600 px-3 py-1 text-[13px] font-bold text-white hover:bg-red-700 disabled:opacity-50">却下する</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Send to job tool modal */}
       {showEntryModal && (
@@ -3534,7 +3433,7 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
 /* ================================================================== */
 /*  Main Component                                                      */
 /* ================================================================== */
-export default function HistoryTab({ candidateId, candidateName, initialSubTab, autoRecommendAdmin = false }: { candidateId: string; candidateName?: string; initialSubTab?: "bookmark" | "jobs" | "entries" | "archived"; /** T-189 修正: 自動配信の承認権限（ブックマーク区分の自動配信 PENDING 行に ✓承認/✗却下 を出す） */ autoRecommendAdmin?: boolean }) {
+export default function HistoryTab({ candidateId, candidateName, initialSubTab }: { candidateId: string; candidateName?: string; initialSubTab?: "bookmark" | "jobs" | "entries" | "archived" }) {
   const [activeSubTab, setActiveSubTab] = useState<"bookmark" | "jobs" | "entries" | "archived">(initialSubTab ?? "bookmark");
   const [bookmarkCount, setBookmarkCount] = useState(0);
   const [archivedCount, setArchivedCount] = useState(0);
@@ -4169,7 +4068,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab, 
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} autoRecommendAdmin={autoRecommendAdmin} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onEntryCreated={fetchEntries} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onIntroducedChange={() => { fetchJobs(); fetchBookmarkRatings(); }} onEntryCreated={fetchEntries} />
       )}
 
       {/* ===== 紹介保留サブタブ ===== */}

@@ -2042,7 +2042,7 @@ function CandidateDetailPageBody() {
               <CandidateTasksTab candidateId={candidateId} employees={employees} />
             )}
             {activeTab === "history" && (
-              <HistoryTab key={`history-${fileRefreshKey}`} candidateId={candidateId} candidateName={candidate.name} initialSubTab={historyInitialSubTab} autoRecommendAdmin={!!currentUser?.autoRecommendAdmin} />
+              <HistoryTab key={`history-${fileRefreshKey}`} candidateId={candidateId} candidateName={candidate.name} initialSubTab={historyInitialSubTab} />
             )}
             {activeTab === "notes" && (
               <NotesTab

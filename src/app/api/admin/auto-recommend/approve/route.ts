@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAutoRecommendAdmin } from "@/lib/recommend/auto-approval-auth";
-import { findAutoFilesForPdf, generatePdfForAutoFile } from "@/lib/recommend/auto-approval-pdf";
+import { approveAutoFiles } from "@/lib/recommend/auto-approval-sync";
 
 // T-189 Phase3-1: ✓承認。
-//   - 対象: 自動由来（autoSourcedAt != null）かつ PENDING の行のみ（他の状態は無視＝冪等）。
-//   - approvalStatus="APPROVED" と同時に introducedAt を立てる（mark-introduced 相当。null の行のみ）。
-//     lastExportedAt は触らない。実績集計は autoSourcedAt IS NULL で自動由来を除外しているので
-//     introducedAt を立てても日報の紹介数・週次実績には乗らない。
-//   - この時点で PDF を生成し Drive 保管＋OneDrive コピー（受け口では作っていない）。
-//     PDF 失敗は承認を巻き込まない（pdfFailed を返し、カードの「PDF再生成」で再試行）。
-//   - T-189 Phase3-2a: PDF は AI評価回収時（analyze-collect・D以外）とクリック時に先に作られるようになったので、
-//     ここでは driveFileId が無い行だけ生成する（generatePdfForAutoFile が driveFileId 済みなら即 ok＝二重生成しない）。
-//   - supportSubStatus の自動再計算は呼ばない（自動配信は支援ステータスに影響させない）。
+//   実処理は approveAutoFiles（@/lib/recommend/auto-approval-sync）に集約している。
+//   T-189 修正（2026-09-02）: 求職者詳細の ✓✗ を撤去し、承認＝ブックマークの「紹介求人へ移動」/
+//   「求人出力へ送信」に統合したため、承認処理は両者で同じ関数を呼ぶ（コピーを作らない）。
 export const maxDuration = 120;
 
 export async function POST(req: Request) {
@@ -26,42 +19,15 @@ export async function POST(req: Request) {
   if (fileIds.length === 0) return NextResponse.json({ error: "fileIds は必須です" }, { status: 400 });
 
   try {
-    const now = new Date();
-    // 承認対象を先に確定（PENDING の自動由来行だけ）
-    const targets = await prisma.candidateFile.findMany({
-      // T-189 修正: 保留中（archivedAt 非null）は却下扱いなので承認対象にしない
-      where: { id: { in: fileIds }, autoSourcedAt: { not: null }, approvalStatus: "PENDING", archivedAt: null },
-      select: { id: true },
-    });
-    const targetIds = targets.map((t) => t.id);
-    if (targetIds.length > 0) {
-      await prisma.$transaction([
-        prisma.candidateFile.updateMany({
-          where: { id: { in: targetIds }, approvalStatus: "PENDING" },
-          data: { approvalStatus: "APPROVED" },
-        }),
-        prisma.candidateFile.updateMany({
-          where: { id: { in: targetIds }, introducedAt: null },
-          data: { introducedAt: now },
-        }),
-      ]);
-    }
-
-    // PDF 生成（承認済みになった行のうち driveFileId 無しだけ。既にある行は生成しない）。1件ずつ・失敗隔離。
-    const pdfResults = [];
-    for (const f of await findAutoFilesForPdf(targetIds)) {
-      if (f.driveFileId) continue; // T-189 Phase3-2a: 評価回収時/クリック時に生成済み → スキップ
-      pdfResults.push(await generatePdfForAutoFile(f));
-    }
-    const pdfFailed = pdfResults.filter((r) => !r.ok);
+    const { approvedIds, pdfGenerated, pdfFailed } = await approveAutoFiles({ fileIds });
     console.log(
-      `[admin/auto-recommend/approve] by=${auth.user.id} files=${fileIds.length} approved=${targetIds.length} pdfOk=${pdfResults.length - pdfFailed.length} pdfFailed=${pdfFailed.length}`,
+      `[admin/auto-recommend/approve] by=${auth.user.id} files=${fileIds.length} approved=${approvedIds.length} pdfOk=${pdfGenerated} pdfFailed=${pdfFailed.length}`,
     );
     return NextResponse.json({
       ok: true,
-      approved: targetIds.length,
-      approvedIds: targetIds,
-      pdfGenerated: pdfResults.length - pdfFailed.length,
+      approved: approvedIds.length,
+      approvedIds,
+      pdfGenerated,
       pdfFailed: pdfFailed.map((r) => ({ fileId: r.fileId, error: r.error })),
     });
   } catch (e) {
