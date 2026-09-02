@@ -67,6 +67,8 @@ export default async function CandidateMasterPage() {
     supportSubStatus: (c.supportSubStatus as string | null) ?? null,
     supportEndReason: (c.supportEndReason as string) || null,
     jobStatus: determineJobStatus(c.id),
+    // T-189 追加: 一覧の「自動配信」絞り込み・配信バッジ用
+    autoRecommendEnabled: c.autoRecommendEnabled,
   }));
 
   // ログインユーザーに対応する社員IDを取得
