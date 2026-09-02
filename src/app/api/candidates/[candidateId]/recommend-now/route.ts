@@ -74,8 +74,19 @@ export async function POST(
     console.error(
       `[recommend-now] job-platform run 失敗 candidate=${candidate.candidateNumber} status=${run.status}: ${run.error}`,
     );
-    if (run.status === 404) {
+    // 404 は2種類ある。JSON で返ってきた 404 だけが job-platform の「配信条件が未保存」。
+    // HTML の 404（notJson）は引き当てAPI自体が存在しない＝設定・デプロイの問題なので区別する。
+    if (run.status === 404 && !run.notJson) {
       return NextResponse.json({ error: "no_condition" }, { status: 404 });
+    }
+    if (run.status === 404 && run.notJson) {
+      return NextResponse.json(
+        {
+          error: "job_platform_error",
+          detail: "job-platform に /api/internal/recommend/run がありません（未デプロイ）",
+        },
+        { status: 502 },
+      );
     }
     if (run.status === 429) {
       return NextResponse.json({ error: "cooldown" }, { status: 429 });

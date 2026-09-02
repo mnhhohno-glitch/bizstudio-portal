@@ -43,6 +43,12 @@ export type RecommendRunNg = {
   /** HTTP ステータス（fetch 自体が失敗した場合は 0） */
   status: number;
   error: string;
+  /**
+   * レスポンスが JSON でなかった（＝job-platform の API 応答ではない）。
+   * Vercel は未実装パスにも HTML の 404 を返すため、これが true の 404 は
+   * 「配信条件が未保存」ではなく「エンドポイントが存在しない」を意味する。
+   */
+  notJson?: boolean;
 };
 
 export type RecommendRunResult = RecommendRunOk | RecommendRunNg;
@@ -72,12 +78,19 @@ export async function runRecommendOnJobPlatform(args: {
       }),
       signal: controller.signal,
     });
-    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    let json: Record<string, unknown> = {};
+    let notJson = false;
+    try {
+      json = (await res.json()) as Record<string, unknown>;
+    } catch {
+      notJson = true; // HTML エラーページなど（＝APIの応答ではない）
+    }
     if (!res.ok) {
       return {
         ok: false,
         status: res.status,
         error: typeof json.error === "string" ? json.error : `HTTP ${res.status}`,
+        notJson,
       };
     }
     const sent = (json.sent ?? {}) as Record<string, unknown>;
