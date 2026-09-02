@@ -17,8 +17,9 @@ export type RejectReasonChoice = (typeof REJECT_REASON_CHOICES)[number];
 /**
  * 1日の自動引き当て上限（job-platform 側の自動検索が1求職者につき1日に送ってくる最大件数）。
  * 一覧の「当日上限到達」は JST 当日の autoSourcedAt 件数がこの値以上かで判定する。
+ * T-189 Phase3-2a: 5 → 15（job-platform 側 env RECOMMEND_MAX_PER_CANDIDATE=15 に合わせる）。
  */
-export const AUTO_DAILY_CAP = 5;
+export const AUTO_DAILY_CAP = 15;
 
 /** ランク内訳のキー（表示順）。null / 想定外値は「未評価」に寄せる */
 export const RANK_KEYS = ["A", "B+", "B", "C", "D", "未評価"] as const;
@@ -69,7 +70,12 @@ export type AutoApprovalCard = {
   rejectedReason: string | null;
   introducedAt: string | null;
   hasPdf: boolean; // driveFileId が付いているか（承認時PDF生成の成否）
+  driveViewUrl: string | null; // T-189 Phase3-2a: PDF を開くURL（hasPdf=true のとき）。無ければクリック時に遅延生成
   viewed: boolean; // 求職者が求人詳細を開いたか（JOB_VIEW ログ）
+  // T-189 Phase3-2a: 求職者本人の回答（公開済みカードに表示）。responseStatus は7値（null=未回答）、
+  // candidateExcludeReason は本人が「対象外」を選んだ理由（response-status API で保存・null=なし）
+  responseStatus: string | null;
+  candidateExcludeReason: string | null;
 };
 
 export type AutoApprovalDetail = {

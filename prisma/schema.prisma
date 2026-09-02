@@ -1503,6 +1503,10 @@ model CandidateFile {
   rejectedReason          String?   @map("rejected_reason") // 却下理由（自由文または定型値）
   excludedBy              String?   @map("excluded_by") // "user" / "ca"（箱B excluded_by 相当）
   excludedAt              DateTime? @map("excluded_at")
+  // T-189 Phase3-2a: 求職者本人がマイページで「対象外」を選んだ理由（定型値 or 「その他: 自由記述」）。
+  //   response-status API が status=EXCLUDED のときだけ保存し、EXCLUDED 以外へ変更した時点で excludedBy/At と
+  //   同時にクリアする（＝現在の対象外の理由）。自動配信行・手動行を問わず使う。null=理由なし（従来どおり）。
+  candidateExcludeReason  String?   @map("candidate_exclude_reason")
   responseSubmissionItems CandidateResponseSubmissionItem[]
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。

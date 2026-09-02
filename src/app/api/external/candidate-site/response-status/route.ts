@@ -6,6 +6,9 @@ import {
   USER_SETTABLE_STATUSES,
   PORTAL_INTENT_MAP,
   EXCLUDED_ACTOR_VALUES,
+  isCandidateExcludeReasonChoice,
+  formatCandidateExcludeReason,
+  CANDIDATE_EXCLUDE_REASON_CHOICES,
   type ExcludedActor,
 } from "@/lib/constants/response-status";
 import {
@@ -31,6 +34,16 @@ import {
 //   EXCLUDED からの復帰も CA のみ（箱B restore が CA専用のため）。
 // 同値変更は no-op（responseStatusUpdatedAt を進めない＝偽の未送信差分を作らない）。
 // kyuujinPDF への同期送信はしない（P2 は並行稼働なし・箱Bはこの経路から更新しない）。
+//
+// T-189 Phase3-2a（対象外理由・任意項目・後方互換）:
+//   body.excludeReason     … "職種が違う" | "会社の雰囲気" | "年収" | "その他"（任意）
+//   body.excludeReasonText … excludeReason="その他" の自由記述（任意・200文字まで）
+//   - status=EXCLUDED のときだけ CandidateFile.candidateExcludeReason に保存（「その他」は `その他: 本文`）。
+//     auto 行・手動行を問わず保存する。EXCLUDED 以外へ変更したときは excludedBy/At と同時にクリアする。
+//   - 未指定なら従来どおり（列に触らない）。excludeReason が不正値なら 400。
+//   - 同値変更（EXCLUDED→EXCLUDED）で excludeReason だけ来た場合は理由のみ更新する（updatedAt は進めない）。
+//   - actor=user の EXCLUDED は、自動配信行（autoSourcedAt 非null＝マイページ「新着マッチ求人」）に限り許可する。
+//     手動行（CA厳選）は従来どおり CA のみ（現行 /site/ 仕様を維持）。EXCLUDED からの復帰は従来どおり CA のみ。
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,13 +80,29 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "actor must be 'user' or 'ca'" }, { status: 400 });
   }
 
-  // actor=user の権限制約（現行 /site/ 仕様: EXCLUDED は CA/管理者のみ・選考2値は READONLY）
-  if (actor === "user" && !USER_SETTABLE_STATUSES.has(status)) {
+  // actor=user の権限制約（現行 /site/ 仕様: EXCLUDED は CA/管理者のみ・選考2値は READONLY）。
+  // T-189 Phase3-2a: EXCLUDED だけは対象行が自動配信行なら user にも許可するため、行を引いてから判定する（下）。
+  if (actor === "user" && !USER_SETTABLE_STATUSES.has(status) && status !== "EXCLUDED") {
     return NextResponse.json(
       { error: `actor=user cannot set status=${status}` },
       { status: 403 },
     );
   }
+
+  // T-189 Phase3-2a: 対象外理由（任意）。不正値は 400。EXCLUDED 以外の status に付いてきた場合は無視する。
+  const excludeReasonRaw = body.excludeReason;
+  if (excludeReasonRaw != null && excludeReasonRaw !== "" && !isCandidateExcludeReasonChoice(excludeReasonRaw)) {
+    return NextResponse.json(
+      { error: `excludeReason must be one of ${CANDIDATE_EXCLUDE_REASON_CHOICES.join("/")}` },
+      { status: 400 },
+    );
+  }
+  const excludeReasonText =
+    typeof body.excludeReasonText === "string" ? body.excludeReasonText : null;
+  const candidateExcludeReason =
+    status === "EXCLUDED" && isCandidateExcludeReasonChoice(excludeReasonRaw)
+      ? formatCandidateExcludeReason(excludeReasonRaw, excludeReasonText)
+      : null;
 
   // 対象行の特定: fileId 優先、無ければ kyuujinJobId（候補者スコープ・一意制約で高々1行）
   const fileId = body.fileId != null ? String(body.fileId) : null;
@@ -96,10 +125,18 @@ export async function PATCH(request: Request) {
       archivedAt: null,
       ...(fileId ? { id: fileId } : { kyuujinJobId: kyuujinJobId! }),
     },
-    select: { id: true, kyuujinJobId: true, responseStatus: true, fileName: true },
+    select: { id: true, kyuujinJobId: true, responseStatus: true, fileName: true, autoSourcedAt: true },
   });
   if (!row) {
     return NextResponse.json({ error: "Bookmark not found" }, { status: 404 });
+  }
+
+  // T-189 Phase3-2a: user の EXCLUDED は自動配信行のみ（手動行は従来どおり CA のみ）
+  if (actor === "user" && status === "EXCLUDED" && !row.autoSourcedAt) {
+    return NextResponse.json(
+      { error: "actor=user cannot set status=EXCLUDED (only auto-recommended jobs)" },
+      { status: 403 },
+    );
   }
 
   const current = row.responseStatus ?? "UNANSWERED";
@@ -112,8 +149,12 @@ export async function PATCH(request: Request) {
     );
   }
 
-  // 同値変更は no-op（updatedAt を進めない）
+  // 同値変更は no-op（updatedAt を進めない）。EXCLUDED→EXCLUDED で理由だけ来たら理由のみ更新。
   if (current === status) {
+    if (candidateExcludeReason !== null) {
+      await prisma.candidateFile.update({ where: { id: row.id }, data: { candidateExcludeReason } });
+      return NextResponse.json({ ok: true, changed: false, status, candidateExcludeReason });
+    }
     return NextResponse.json({ ok: true, changed: false, status });
   }
 
@@ -125,8 +166,13 @@ export async function PATCH(request: Request) {
       responseStatusUpdatedAt: now,
       // 箱Bパリティ: EXCLUDED はactor/日時を記録、それ以外への変更は無条件クリア
       ...(status === "EXCLUDED"
-        ? { excludedBy: actor as ExcludedActor, excludedAt: now }
-        : { excludedBy: null, excludedAt: null }),
+        ? {
+            excludedBy: actor as ExcludedActor,
+            excludedAt: now,
+            // T-189 Phase3-2a: 理由が来たときだけ保存（未指定は列に触らない＝後方互換）
+            ...(candidateExcludeReason !== null ? { candidateExcludeReason } : {}),
+          }
+        : { excludedBy: null, excludedAt: null, candidateExcludeReason: null }),
     },
   });
 
@@ -166,5 +212,6 @@ export async function PATCH(request: Request) {
     status,
     previousStatus: current,
     synced, // "upserted" | "cleared" | null（同期対象外 or kyuujinJobId なし）
+    candidateExcludeReason: status === "EXCLUDED" ? candidateExcludeReason : null,
   });
 }

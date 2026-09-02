@@ -13,7 +13,8 @@ import { runAnalyzeCollect } from "@/lib/recommend/analyze-batch-run";
 //   - 返り値の pending は「その求職者の未評価の自動配信ブックマーク件数」。
 //     0 になったら評価完了。画面はこれを見てポーリングを止める。
 //
-// レスポンス（200）: { pending, savedFiles, autoRejectedD, inFlightRows }
+// レスポンス（200）: { pending, savedFiles, autoRejectedD, inFlightRows, pdfGenerated, pdfFailed }
+//   pdfGenerated/pdfFailed … T-189 Phase3-2a: 回収時に先行生成した承認待ち（D以外）の求人票PDF件数
 
 export const maxDuration = 300;
 
@@ -49,6 +50,8 @@ export async function POST(
       savedFiles: result.savedFiles,
       autoRejectedD: result.autoRejectedD,
       inFlightRows: result.pendingRows,
+      pdfGenerated: result.pdfGenerated,
+      pdfFailed: result.pdfFailed,
     });
   } catch (e) {
     console.error(`[recommend-collect] 失敗 candidate=${candidateId}:`, e);

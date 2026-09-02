@@ -15,6 +15,7 @@ import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
 import { extractAxis } from "@/lib/ai-rating";
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import {
+  AUTO_DAILY_CAP,
   RANK_KEYS,
   REJECT_REASON_CHOICES,
   toRankKey,
@@ -106,24 +107,39 @@ function AnalysisComment({ comment }: { comment: string }) {
 
 /* ---------- 求人カード ---------- */
 
+// T-189 Phase3-2a: 公開済みカードに出す本人回答のラベル（responseStatus 7値）。null/UNANSWERED は「未回答」
+const RESPONSE_LABEL: Record<string, { label: string; cls: string }> = {
+  APPLY: { label: "応募したい", cls: "bg-red-100 text-red-700" },
+  INTERESTED: { label: "気になる", cls: "bg-yellow-100 text-yellow-700" },
+  PENDING: { label: "保留", cls: "bg-gray-100 text-gray-700" },
+  EXCLUDED: { label: "対象外", cls: "bg-gray-200 text-gray-600" },
+  IN_SELECTION: { label: "選考中", cls: "bg-blue-100 text-blue-700" },
+  SELECTION_ENDED: { label: "選考終了", cls: "bg-gray-100 text-gray-500" },
+};
+
 function JobCard({
   card,
   busy,
   onApprove,
   onReject,
   onRetryPdf,
+  onGeneratePdf,
 }: {
   card: AutoApprovalCard;
   busy: boolean;
   onApprove?: (id: string) => void;
   onReject?: (id: string) => void;
   onRetryPdf?: (id: string) => void;
+  /** T-189 Phase3-2a: クリック時遅延生成。生成できたら driveViewUrl を返す（失敗は null） */
+  onGeneratePdf?: (id: string) => Promise<string | null>;
 }) {
   const pending = card.approvalStatus === "PENDING";
   // 承認待ちカードは AI評価コメントを最初から開く（判断材料）。参考表示の行は閉じておく。
   const [open, setOpen] = useState(pending);
+  const [generating, setGenerating] = useState(false);
   const wish = extractAxis(card.aiAnalysisComment, "本人希望");
   const pass = extractAxis(card.aiAnalysisComment, "通過率");
+  const response = card.responseStatus && card.responseStatus !== "UNANSWERED" ? RESPONSE_LABEL[card.responseStatus] : null;
 
   const openJob = async () => {
     if (card.jobUrl) {
@@ -132,6 +148,27 @@ function JobCard({
     }
     if (card.externalJobRef) await openJobPlatformDetail(card.externalJobRef);
     else toast.error("求人票のリンクがありません");
+  };
+
+  // T-189 Phase3-2a: 会社名クリック＝求人票PDF。driveViewUrl があればそのまま開く。無ければその場で生成して開く
+  // （生成中は表示で分かるようにする）。生成に失敗したら従来どおり求人サイト側の詳細へフォールバック。
+  const openPdf = async () => {
+    if (card.driveViewUrl) {
+      window.open(card.driveViewUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (!onGeneratePdf || generating) {
+      await openJob();
+      return;
+    }
+    setGenerating(true);
+    try {
+      const url = await onGeneratePdf(card.id);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      else await openJob();
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -147,9 +184,26 @@ function JobCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-[15px] font-semibold text-gray-900">{card.companyName}</span>
+            <button
+              type="button"
+              onClick={openPdf}
+              disabled={generating}
+              title={card.driveViewUrl ? "求人票PDFを開く" : "求人票PDFを生成して開く"}
+              className="text-left text-[15px] font-semibold text-gray-900 underline decoration-dotted underline-offset-2 hover:text-[#1D4ED8] disabled:opacity-60"
+            >
+              {card.companyName}
+            </button>
+            {generating && <span className="text-[11px] text-gray-500">PDF生成中…</span>}
             {card.jobCategory && <span className="text-[11px] text-gray-500">{card.jobCategory}</span>}
+            {card.approvalStatus === "APPROVED" && (
+              <span className={`rounded px-1.5 py-0.5 text-[11px] ${response ? response.cls : "bg-gray-50 text-gray-400"}`}>
+                本人回答: {response ? response.label : "未回答"}
+              </span>
+            )}
           </div>
+          {card.approvalStatus === "APPROVED" && card.responseStatus === "EXCLUDED" && card.candidateExcludeReason && (
+            <div className="text-[11px] text-gray-600">対象外の理由: {card.candidateExcludeReason}</div>
+          )}
           <div className="text-[13px] text-gray-800">{card.jobTitle ?? <span className="text-gray-400">（求人タイトル未取得）</span>}</div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
             <span>引き当て {fmtJst(card.autoSourcedAt)}</span>
@@ -371,6 +425,28 @@ function CandidateDetail({ candidateId, onChanged }: { candidateId: string; onCh
     }
   };
 
+  // T-189 Phase3-2a: 会社名クリック時の遅延生成（同じ retry-pdf を使う。承認状態を問わず自動由来行なら生成可）。
+  // 成功したら driveViewUrl を返してカード側で開く。カード一覧は再読込して hasPdf/driveViewUrl を反映。
+  const generatePdf = async (fileId: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/admin/auto-recommend/retry-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.driveViewUrl) {
+        toast.error(`${j?.error ?? "PDF生成に失敗しました"}（求人サイトを開きます）`);
+        return null;
+      }
+      void load();
+      return j.driveViewUrl as string;
+    } catch {
+      toast.error("PDF生成に失敗しました（求人サイトを開きます）");
+      return null;
+    }
+  };
+
   if (loading) return <div className="px-4 py-3 text-[13px] text-gray-500">読み込み中…</div>;
   if (!detail) return null;
 
@@ -397,7 +473,7 @@ function CandidateDetail({ candidateId, onChanged }: { candidateId: string; onCh
       {detail.pending.length === 0 && <div className="text-[13px] text-gray-500">承認待ちの求人はありません。</div>}
       <div className="space-y-2">
         {detail.pending.map((c) => (
-          <JobCard key={c.id} card={c} busy={busy} onApprove={(id) => approve([id])} onReject={(id) => setRejectTargets([id])} />
+          <JobCard key={c.id} card={c} busy={busy} onApprove={(id) => approve([id])} onReject={(id) => setRejectTargets([id])} onGeneratePdf={generatePdf} />
         ))}
       </div>
 
@@ -409,7 +485,7 @@ function CandidateDetail({ candidateId, onChanged }: { candidateId: string; onCh
           <div className="mt-2 space-y-2">
             {detail.approved.length === 0 && <div className="text-[12px] text-gray-500">公開済みの求人はありません。</div>}
             {detail.approved.map((c) => (
-              <JobCard key={c.id} card={c} busy={busy} onRetryPdf={retryPdf} />
+              <JobCard key={c.id} card={c} busy={busy} onRetryPdf={retryPdf} onGeneratePdf={generatePdf} />
             ))}
           </div>
         )}
@@ -423,7 +499,7 @@ function CandidateDetail({ candidateId, onChanged }: { candidateId: string; onCh
           <div className="mt-2 space-y-2">
             {reference.length === 0 && <div className="text-[12px] text-gray-500">却下・期限切れの求人はありません。</div>}
             {reference.map((c) => (
-              <JobCard key={c.id} card={c} busy={busy} />
+              <JobCard key={c.id} card={c} busy={busy} onGeneratePdf={generatePdf} />
             ))}
           </div>
         )}
@@ -438,7 +514,7 @@ function CandidateDetail({ candidateId, onChanged }: { candidateId: string; onCh
 
 export default function AutoRecommendApprovalClient() {
   const [rows, setRows] = useState<AutoApprovalOverviewRow[]>([]);
-  const [dailyCap, setDailyCap] = useState(5);
+  const [dailyCap, setDailyCap] = useState(AUTO_DAILY_CAP);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);

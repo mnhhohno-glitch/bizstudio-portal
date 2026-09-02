@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
-import { SUBMITTABLE_STATUSES } from "@/lib/constants/response-status";
-import { extractRecommendationForDisplay } from "@/lib/comment-split";
+// T-189 Phase3-2a: 返却 DTO（型・select・変換・ヘルパ）は auto-matches API と共有するため lib へ切り出した。
+import { FAVORITE_DTO_SELECT, toFavoriteDTO, type FavoriteDTO } from "@/lib/candidate-site-favorite-dto";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 // T-185: mypage が jobTitle/jobCategory を送ってこないときに求人本文から補う。
@@ -25,14 +25,6 @@ function str(v: unknown): string | null {
   return s.length ? s : null;
 }
 
-// fileName（求人票_{会社名}_{10桁以上ID}.pdf / 求人票_{会社名}.pdf）から会社名をベストエフォート抽出。
-// 旧PDF等で形式が違う場合は null（fileName 自体はそのまま返すので情報は落ちない）。
-function parseCompanyFromFileName(fileName: string): string | null {
-  const n = fileName.replace(/\.pdf$/i, "");
-  const m = n.match(/^求人票_(.+?)(?:_\d{10,})?$/);
-  return m ? m[1] : null;
-}
-
 // 本人追加行の uploadedByUserId 用。実ユーザー（求職者）は存在しないためシステムユーザーを使う。
 // origin="candidate" 列が本人追加であることを示す（uploadedByUserId は台帳上の便宜）。
 async function resolveSystemUserId(): Promise<string | null> {
@@ -41,74 +33,6 @@ async function resolveSystemUserId(): Promise<string | null> {
   const admin = await prisma.user.findFirst({ where: { role: "admin", status: "active" }, select: { id: true } });
   return admin?.id ?? null;
 }
-
-// T-131 step3a: externalJobRef が付いた行（＝job-platformに紐付いた求人。CA/本人が保存したjp求人と、
-// PDFアップから自動フルデータ化された紐付け済み求人の両方）を「jp形」に正規化して返す。
-//   - sourceJobId = externalJobRef（job-platformの媒体内ID。フル詳細/AI解説の取得キー）
-//   - sourceType = "job-platform"（PDF由来でも紐付け済みは job-platform 扱いに昇格）
-// これで既存jp行とT-131紐付け行のレスポンス形が一致し、求職者サイト側は区別できず自動でフルカード表示になる。
-// externalJobRef（内部列名）は互換のため当面併記する（消費側がsourceJobIdへ移行後に削れる）。
-function jpNormalize(
-  externalJobRef: string | null,
-  storedSourceType: string | null,
-): { sourceJobId: string | null; sourceType: string | null } {
-  if (externalJobRef) return { sourceJobId: externalJobRef, sourceType: "job-platform" };
-  return { sourceJobId: null, sourceType: storedSourceType };
-}
-
-// T-133 P2: 未送信の仕分け変更フラグ（差分送信の対象になるか）。
-// 対象 = INTERESTED/APPLY/PENDING かつ（未送信 or 送信後に変更）。response-submission API の差分抽出と同一解釈。
-function computeHasUnsubmittedChange(f: {
-  responseStatus: string | null;
-  responseStatusUpdatedAt: Date | null;
-  responseSubmittedAt: Date | null;
-}): boolean {
-  if (!f.responseStatus || !SUBMITTABLE_STATUSES.has(f.responseStatus as never)) return false;
-  if (!f.responseStatusUpdatedAt) return false;
-  if (!f.responseSubmittedAt) return true;
-  return f.responseStatusUpdatedAt.getTime() > f.responseSubmittedAt.getTime();
-}
-
-type FavoriteDTO = {
-  id: string;
-  externalJobRef: string | null;
-  /** job-platform 媒体内ID（紐付け済み行のみ・= externalJobRef）。フル詳細/AI解説の取得キー。 */
-  sourceJobId: string | null;
-  /** kyuujinPDF の Job 内部ID（jobs.id・Int）。PDF由来求人を会社名照合せず直接引くための鍵。未紐付けは null。 */
-  kyuujinJobId: number | null;
-  /** T-133 P2: 箱A内製の仕分けステータス（7値・箱B feedback_status と同一文字列）。null=未仕分け（UNANSWERED相当）。 */
-  responseStatus: string | null;
-  /** T-133 P2: CA手動の◎○△（aiMatchRating A-D とは別系統）。 */
-  caMatchLabel: string | null;
-  /** T-133 P2: 紹介日時（ISO）。null=未設定。 */
-  introducedAt: string | null;
-  /** T-133 P2: 現在の仕分けを最後にまとめ送信した日時（ISO）。null=未送信。 */
-  responseSubmittedAt: string | null;
-  /** T-133 P2: 未送信の仕分け変更があるか（INTERESTED/APPLY/PENDING かつ 送信後に変更 or 未送信）。 */
-  hasUnsubmittedChange: boolean;
-  sourceType: string | null;
-  origin: "ca" | "candidate";
-  fileName: string;
-  companyName: string | null;
-  jobUrl: string | null;
-  candidateNote: string | null; // 求職者本人のメモ（本人が編集可）
-  caComment: string | null; // CAアドバイザーコメント（求職者からは読み取り専用）
-  /** T-133 FU-13a: CAによる求職者向け表示の上書き（13項目のキー→上書き文字列）。null=上書きなし。mypage BFF が元データにマージ。 */
-  displayOverrides: Record<string, string> | null;
-  /** T-133 FU-14a: CAによる手動並び順。null=手動順なし（従来ソート）。小さいほど先頭。favorites は既にこの順で返る。 */
-  displayOrder: number | null;
-  /** ピックアップ: CAが「先頭固定」を付けた日時（ISO）。null=非ピックアップ。上限3件／求職者は API 側で判定。 */
-  pickedUpAt: string | null;
-  /**
-   * 本人向けおすすめポイント本文（フェイルクローズ）。ai_analysis_comment から「◆ おすすめポイント（本人向け）」
-   * 本文だけを切り出したもの。両見出し（本人向け＋CA向け）が正順で揃う分析のみ値が入り、それ以外は null。
-   * CA向けの選考分析（通過率・懸念点等）は一切含まない。生の ai_analysis_comment はレスポンスに載せない。
-   */
-  aiRecommendation: string | null;
-  aiMatchRating: string | null;
-  createdAt: string;
-  applied: boolean;
-};
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -145,29 +69,7 @@ export async function GET(request: Request) {
       ],
       AND: [{ OR: [{ origin: null }, { origin: { not: "auto" } }] }],
     },
-    select: {
-      id: true,
-      externalJobRef: true,
-      kyuujinJobId: true,
-      sourceType: true,
-      origin: true,
-      fileName: true,
-      memo: true,
-      candidateNote: true,
-      caComment: true,
-      // 生の分析文。レスポンスには載せず、本人向け部分の切り出し（aiRecommendation）にのみ使う。
-      aiAnalysisComment: true,
-      displayOverrides: true,
-      displayOrder: true,
-      pickedUpAt: true,
-      aiMatchRating: true,
-      responseStatus: true,
-      responseStatusUpdatedAt: true,
-      responseSubmittedAt: true,
-      caMatchLabel: true,
-      introducedAt: true,
-      createdAt: true,
-    },
+    select: FAVORITE_DTO_SELECT,
     // T-133 FU-14a: CA手動順を先頭側に、未設定(NULL)行は従来ソート(createdAt DESC)で後続。
     // 全行 displayOrder=NULL なら第1キーが同値になり、従来の createdAt DESC と完全に同一の並びになる（後方互換）。
     orderBy: [{ displayOrder: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
@@ -180,35 +82,10 @@ export async function GET(request: Request) {
   });
   const appliedRefs = new Set(applications.map((a) => a.externalJobRef));
 
-  const favorites: FavoriteDTO[] = files.map((f) => {
-    const jp = jpNormalize(f.externalJobRef, f.sourceType);
-    return {
-    id: f.id,
-    externalJobRef: f.externalJobRef,
-    sourceJobId: jp.sourceJobId,
-    kyuujinJobId: f.kyuujinJobId,
-    responseStatus: f.responseStatus,
-    caMatchLabel: f.caMatchLabel,
-    introducedAt: f.introducedAt ? f.introducedAt.toISOString() : null,
-    responseSubmittedAt: f.responseSubmittedAt ? f.responseSubmittedAt.toISOString() : null,
-    hasUnsubmittedChange: computeHasUnsubmittedChange(f),
-    sourceType: jp.sourceType,
-    origin: f.origin === "candidate" ? "candidate" : "ca", // null/"ca" は CA 追加として正規化
-    fileName: f.fileName,
-    companyName: parseCompanyFromFileName(f.fileName),
-    jobUrl: f.memo,
-    candidateNote: f.candidateNote,
-    caComment: f.caComment,
-    displayOverrides: (f.displayOverrides ?? null) as unknown as Record<string, string> | null,
-    displayOrder: f.displayOrder,
-    pickedUpAt: f.pickedUpAt ? f.pickedUpAt.toISOString() : null,
-    // フェイルクローズ切り出し。生の aiAnalysisComment はレスポンスに含めない（本人向け本文のみ）。
-    aiRecommendation: extractRecommendationForDisplay(f.aiAnalysisComment),
-    aiMatchRating: f.aiMatchRating,
-    createdAt: f.createdAt.toISOString(),
-    applied: f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false,
-    };
-  });
+  // DTO 変換は共通関数（切り出し前のインライン構築と同一のフィールド構成）。
+  const favorites: FavoriteDTO[] = files.map((f) =>
+    toFavoriteDTO(f, f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false),
+  );
 
   return NextResponse.json({
     ok: true,
@@ -253,14 +130,14 @@ export async function POST(request: Request) {
       archivedAt: null,
       AND: [{ OR: [{ origin: null }, { origin: { not: "auto" } }] }],
     },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: FAVORITE_DTO_SELECT,
   });
   if (existing) {
     return NextResponse.json({
       ok: true,
       created: false,
       alreadyExists: true,
-      favorite: toDTO(existing, false),
+      favorite: toFavoriteDTO(existing, false),
     });
   }
 
@@ -316,7 +193,7 @@ export async function POST(request: Request) {
         ...(extractedText ? { extractedText, extractedAt: new Date() } : {}),
         uploadedByUserId: systemUserId,
       },
-      select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+      select: FAVORITE_DTO_SELECT,
     });
     // T-181: この時点では実体が無いので同期は起動しない（PENDING受付のみ）。
     // 実コピーは下の fire-and-forget PDF生成の成功時に triggerOneDriveSync で起動する。
@@ -339,7 +216,7 @@ export async function POST(request: Request) {
       console.error(`[candidate-site/favorites] PDF gen/store failed (sid=${externalJobRef}):`, err instanceof Error ? err.message : String(err));
     });
 
-  return NextResponse.json({ ok: true, created: true, favorite: toDTO(created, false) });
+  return NextResponse.json({ ok: true, created: true, favorite: toFavoriteDTO(created, false) });
 }
 
 // ---- PATCH: お気に入りのメモ(candidateNote)更新 ----
@@ -393,10 +270,10 @@ export async function PATCH(request: Request) {
   const updated = await prisma.candidateFile.update({
     where: { id: row.id },
     data: { candidateNote },
-    select: { id: true, origin: true, fileName: true, memo: true, candidateNote: true, caComment: true, aiAnalysisComment: true, displayOverrides: true, displayOrder: true, pickedUpAt: true, sourceType: true, aiMatchRating: true, externalJobRef: true, kyuujinJobId: true, responseStatus: true, responseStatusUpdatedAt: true, responseSubmittedAt: true, caMatchLabel: true, introducedAt: true, createdAt: true },
+    select: FAVORITE_DTO_SELECT,
   });
 
-  return NextResponse.json({ ok: true, updated: true, favorite: toDTO(updated, false) });
+  return NextResponse.json({ ok: true, updated: true, favorite: toFavoriteDTO(updated, false) });
 }
 
 // ---- DELETE: 本人お気に入り解除（origin="candidate" のみ） ----
@@ -447,59 +324,4 @@ export async function DELETE(request: Request) {
   });
 
   return NextResponse.json({ ok: true, removed: true });
-}
-
-// 追加/重複/更新時のレスポンス用 DTO 変換（applied は呼び出し側が持つ場合のみ true）。
-function toDTO(
-  f: {
-    id: string;
-    externalJobRef: string | null;
-    kyuujinJobId: number | null;
-    responseStatus: string | null;
-    responseStatusUpdatedAt: Date | null;
-    responseSubmittedAt: Date | null;
-    caMatchLabel: string | null;
-    introducedAt: Date | null;
-    sourceType: string | null;
-    origin: string | null;
-    fileName: string;
-    memo: string | null;
-    candidateNote: string | null;
-    caComment: string | null;
-    aiAnalysisComment: string | null;
-    displayOverrides: unknown;
-    displayOrder: number | null;
-    pickedUpAt: Date | null;
-    aiMatchRating: string | null;
-    createdAt: Date;
-  },
-  applied: boolean
-): FavoriteDTO {
-  const jp = jpNormalize(f.externalJobRef, f.sourceType);
-  return {
-    id: f.id,
-    externalJobRef: f.externalJobRef,
-    sourceJobId: jp.sourceJobId,
-    kyuujinJobId: f.kyuujinJobId,
-    responseStatus: f.responseStatus,
-    caMatchLabel: f.caMatchLabel,
-    introducedAt: f.introducedAt ? f.introducedAt.toISOString() : null,
-    responseSubmittedAt: f.responseSubmittedAt ? f.responseSubmittedAt.toISOString() : null,
-    hasUnsubmittedChange: computeHasUnsubmittedChange(f),
-    sourceType: jp.sourceType,
-    origin: f.origin === "candidate" ? "candidate" : "ca",
-    fileName: f.fileName,
-    companyName: parseCompanyFromFileName(f.fileName),
-    jobUrl: f.memo,
-    candidateNote: f.candidateNote,
-    caComment: f.caComment,
-    displayOverrides: (f.displayOverrides ?? null) as Record<string, string> | null,
-    displayOrder: f.displayOrder,
-    pickedUpAt: f.pickedUpAt ? f.pickedUpAt.toISOString() : null,
-    // フェイルクローズ切り出し。生の aiAnalysisComment はレスポンスに含めない（本人向け本文のみ）。
-    aiRecommendation: extractRecommendationForDisplay(f.aiAnalysisComment),
-    aiMatchRating: f.aiMatchRating,
-    createdAt: f.createdAt.toISOString(),
-    applied,
-  };
 }

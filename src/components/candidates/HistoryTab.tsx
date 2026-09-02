@@ -1141,6 +1141,30 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     }
   };
 
+  // T-189 Phase3-2a: 自動配信行（autoSourcedAt 非null）で PDF 未生成の求人名クリック＝その場で PDF を生成して開く。
+  //   生成中は ⏳（openingRef を流用）。成功したらプレビューを開き一覧を再読込。失敗したら従来どおり求人詳細へフォールバック。
+  //   本人サイト由来（origin="candidate"）の PDF 無しは意味付け（サイト経由）なので、ここには来ない（従来分岐のまま）。
+  const isAutoNoPdf = (f: BookmarkFile) => !!f.autoSourcedAt && !f.driveViewUrl && !!f.externalJobRef;
+  const handleOpenAutoPdf = async (file: BookmarkFile) => {
+    if (openingRef || !file.externalJobRef) return;
+    setOpeningRef(file.externalJobRef);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/${file.id}/generate-pdf`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.driveViewUrl) {
+        setPreviewFile({ ...file, driveFileId: data.driveFileId ?? file.driveFileId, driveViewUrl: data.driveViewUrl, mimeType: data.mimeType ?? file.mimeType, fileSize: data.fileSize ?? file.fileSize });
+        fetchFiles();
+        return;
+      }
+      toast.error(`${data?.error ?? "PDF生成に失敗しました"}（求人ページを開きます）`);
+    } catch {
+      toast.error("PDF生成に失敗しました（求人ページを開きます）");
+    } finally {
+      setOpeningRef(null);
+    }
+    await handleOpenJobPlatformDetail(file.externalJobRef);
+  };
+
   const triggerExtraction = (fileIds: string[], label = "") => {
     if (fileIds.length === 0) return;
     console.log(`[ExtractText${label}] Triggering extraction for`, fileIds.length, "files:", fileIds);
@@ -2293,6 +2317,14 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                       className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
                       title={file.fileName}
                     >{file.fileName}</button>
+                  ) : isAutoNoPdf(file) ? (
+                    /* T-189 Phase3-2a: 自動配信行の PDF 未生成 → クリックでその場生成して開く（失敗時は求人ページ） */
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleOpenAutoPdf(file); }}
+                      disabled={openingRef === file.externalJobRef}
+                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left disabled:opacity-50 disabled:cursor-wait"
+                      title={`${file.fileName} — 求人票PDFを生成して開きます`}
+                    >{openingRef === file.externalJobRef ? "⏳ PDF生成中… " : ""}{file.fileName}</button>
                   ) : file.externalJobRef ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(file.externalJobRef!); }}

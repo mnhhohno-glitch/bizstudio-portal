@@ -21,11 +21,18 @@ import {
 import { recordAdvisorUsage, type AnthropicUsage } from "@/lib/advisor-usage";
 import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval";
 import { rejectAutoFiles } from "@/lib/recommend/auto-approval-sync";
+import { AUTO_FILE_PDF_SELECT, generatePdfForAutoFile } from "@/lib/recommend/auto-approval-pdf";
 import { randomUUID } from "crypto";
 
 const BATCH_SIZE = 5; // CA画面（AdvisorFloatingPanel）の batchSize と同一
 const DEFAULT_MAX_FILES = 200;
 const BATCH_TIMEOUT_MS = 24 * 60 * 60 * 1000; // Anthropic Message Batches の期限（24h）
+// T-189 Phase3-2a: 評価回収時に PDF を先行生成する1回あたりの上限（env RECOMMEND_PDF_MAX_PER_RUN・既定100）
+const DEFAULT_PDF_MAX_PER_RUN = 100;
+function pdfMaxPerRun(): number {
+  const n = Number.parseInt(process.env.RECOMMEND_PDF_MAX_PER_RUN ?? "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_PDF_MAX_PER_RUN;
+}
 
 // 費用試算用の概算値（dry_run 表示のみに使用。課金には一切影響しない）。
 const EST_TOKENS_PER_CHAR = 0.92;
@@ -249,7 +256,58 @@ export type AnalyzeCollectResult = {
   savedFiles: number;
   skippedFiles: number;
   autoRejectedD: number;
+  // T-189 Phase3-2a: 評価回収後の PDF 先行生成（PENDING・D以外・driveFileId 無し）
+  pdfTargets: number; // 生成対象として拾った件数（上限適用前）
+  pdfGenerated: number;
+  pdfFailed: number;
+  pdfFailures: { fileId: string; error: string }[]; // 行ごとの失敗（driveFileId は null のままなので次回 collect で再試行）
 };
+
+/**
+ * T-189 Phase3-2a: AI評価が付いた承認待ち（PENDING）の自動配信行のうち D 以外の PDF を先に作る。
+ * 承認前にCAが承認ページで求人票を開けるようにするため（D は analyze-collect で自動却下されるので作らない）。
+ *   対象: autoSourcedAt 非null・PENDING・archivedAt null・driveFileId null・externalJobRef あり・
+ *         aiMatchRating 非null かつ "D" 以外（未評価の行は評価が付いてから）
+ *   上限: RECOMMEND_PDF_MAX_PER_RUN（既定100）／1回。1件ずつ・失敗隔離。
+ *   失敗した行は driveFileId が null のままなので次回の collect で自動的に再試行される。
+ * 過去に評価済みで PDF が無い PENDING 行（この変更より前の引き当て分）も同じ条件で拾う。
+ */
+export async function generatePendingAutoPdfs(opts: { candidateId?: string }): Promise<{
+  pdfTargets: number;
+  pdfGenerated: number;
+  pdfFailed: number;
+  pdfFailures: { fileId: string; error: string }[];
+}> {
+  const targets = await prisma.candidateFile.findMany({
+    where: {
+      autoSourcedAt: { not: null },
+      approvalStatus: "PENDING",
+      archivedAt: null,
+      driveFileId: null,
+      externalJobRef: { not: null },
+      aiMatchRating: { not: null, notIn: ["D"] },
+      ...(opts.candidateId ? { candidateId: opts.candidateId } : {}),
+    },
+    select: { ...AUTO_FILE_PDF_SELECT, aiMatchRating: true },
+    orderBy: [{ aiAnalyzedAt: "desc" }, { autoSourcedAt: "desc" }],
+  });
+  const cap = pdfMaxPerRun();
+  const slice = targets.slice(0, cap);
+  let pdfGenerated = 0;
+  const pdfFailures: { fileId: string; error: string }[] = [];
+  for (const f of slice) {
+    const r = await generatePdfForAutoFile(f);
+    if (r.ok) pdfGenerated++;
+    else pdfFailures.push({ fileId: f.id, error: r.error ?? "unknown" });
+  }
+  if (targets.length > 0) {
+    console.log(
+      `[recommend/analyze-collect] pdf pre-generate targets=${targets.length} cap=${cap} generated=${pdfGenerated} failed=${pdfFailures.length}` +
+        (opts.candidateId ? ` candidate=${opts.candidateId}` : ""),
+    );
+  }
+  return { pdfTargets: targets.length, pdfGenerated, pdfFailed: pdfFailures.length, pdfFailures };
+}
 
 /**
  * 投入済みバッチの結果を回収して3軸を保存する。
@@ -374,6 +432,12 @@ export async function runAnalyzeCollect(opts: {
     }
   }
 
+  // T-189 Phase3-2a: 評価を保存した直後に、承認待ち（D以外）の PDF を先に作っておく。
+  // 今回のバッチで評価が付いた行だけでなく、以前の失敗分・未生成分も同じ条件で拾う（＝再試行）。
+  const pdf = willExecute
+    ? await generatePendingAutoPdfs({ candidateId })
+    : { pdfTargets: 0, pdfGenerated: 0, pdfFailed: 0, pdfFailures: [] };
+
   return {
     mode: willExecute ? "EXECUTE" : "DRY-RUN",
     pendingRows: rows.length,
@@ -384,5 +448,6 @@ export async function runAnalyzeCollect(opts: {
     savedFiles,
     skippedFiles,
     autoRejectedD,
+    ...pdf,
   };
 }

@@ -10,6 +10,8 @@ import { findAutoFilesForPdf, generatePdfForAutoFile } from "@/lib/recommend/aut
 //     introducedAt を立てても日報の紹介数・週次実績には乗らない。
 //   - この時点で PDF を生成し Drive 保管＋OneDrive コピー（受け口では作っていない）。
 //     PDF 失敗は承認を巻き込まない（pdfFailed を返し、カードの「PDF再生成」で再試行）。
+//   - T-189 Phase3-2a: PDF は AI評価回収時（analyze-collect・D以外）とクリック時に先に作られるようになったので、
+//     ここでは driveFileId が無い行だけ生成する（generatePdfForAutoFile が driveFileId 済みなら即 ok＝二重生成しない）。
 //   - supportSubStatus の自動再計算は呼ばない（自動配信は支援ステータスに影響させない）。
 export const maxDuration = 120;
 
@@ -45,9 +47,10 @@ export async function POST(req: Request) {
       ]);
     }
 
-    // PDF 生成（承認済みになった行のうち driveFileId 無し）。1件ずつ・失敗隔離。
+    // PDF 生成（承認済みになった行のうち driveFileId 無しだけ。既にある行は生成しない）。1件ずつ・失敗隔離。
     const pdfResults = [];
     for (const f of await findAutoFilesForPdf(targetIds)) {
+      if (f.driveFileId) continue; // T-189 Phase3-2a: 評価回収時/クリック時に生成済み → スキップ
       pdfResults.push(await generatePdfForAutoFile(f));
     }
     const pdfFailed = pdfResults.filter((r) => !r.ok);
