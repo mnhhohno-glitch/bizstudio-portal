@@ -27,7 +27,8 @@ export async function POST(req: Request) {
     const now = new Date();
     // 承認対象を先に確定（PENDING の自動由来行だけ）
     const targets = await prisma.candidateFile.findMany({
-      where: { id: { in: fileIds }, autoSourcedAt: { not: null }, approvalStatus: "PENDING" },
+      // T-189 修正: 保留中（archivedAt 非null）は却下扱いなので承認対象にしない
+      where: { id: { in: fileIds }, autoSourcedAt: { not: null }, approvalStatus: "PENDING", archivedAt: null },
       select: { id: true },
     });
     const targetIds = targets.map((t) => t.id);

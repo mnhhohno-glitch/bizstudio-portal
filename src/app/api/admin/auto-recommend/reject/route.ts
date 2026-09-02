@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAutoRecommendAdmin } from "@/lib/recommend/auto-approval-auth";
 import { REJECT_REASON_CHOICES } from "@/lib/recommend/auto-approval";
+import { rejectAutoFiles } from "@/lib/recommend/auto-approval-sync";
 
 // T-189 Phase3-1: ✗却下。
 //   - 対象: 自動由来（autoSourcedAt != null）かつ PENDING の行のみ（他の状態は無視＝冪等）。
 //   - approvalStatus="REJECTED"・rejectedReason 必須（定型 or 「その他: 自由記述」）。
-//   - archivedAt は触らない（from-job-platform の冪等判定 archivedAt:null が壊れて同じ求人が再送されるため）。
+//   - T-189 修正: 却下＝紹介保留と同一扱い。archivedAt/archivedReason(=却下理由)/archivedById(=操作者) も立てる
+//     （受け口の冪等判定は自動配信行なら archivedAt を問わないので再送されない）。
 //   - introducedAt / supportSubStatus は触らない。
 export async function POST(req: Request) {
   const auth = await requireAutoRecommendAdmin();
@@ -33,12 +34,9 @@ export async function POST(req: Request) {
   const rejectedReason = reason === "その他" ? `その他: ${note}` : note ? `${reason}（${note}）` : reason;
 
   try {
-    const r = await prisma.candidateFile.updateMany({
-      where: { id: { in: fileIds }, autoSourcedAt: { not: null }, approvalStatus: "PENDING" },
-      data: { approvalStatus: "REJECTED", rejectedReason },
-    });
-    console.log(`[admin/auto-recommend/reject] by=${auth.user.id} files=${fileIds.length} rejected=${r.count} reason=${rejectedReason}`);
-    return NextResponse.json({ ok: true, rejected: r.count, rejectedReason });
+    const rejected = await rejectAutoFiles({ fileIds, rejectedReason, archivedById: auth.user.id });
+    console.log(`[admin/auto-recommend/reject] by=${auth.user.id} files=${fileIds.length} rejected=${rejected} reason=${rejectedReason}`);
+    return NextResponse.json({ ok: true, rejected, rejectedReason });
   } catch (e) {
     console.error("[admin/auto-recommend/reject] failed:", e);
     return NextResponse.json({ error: "却下に失敗しました" }, { status: 500 });

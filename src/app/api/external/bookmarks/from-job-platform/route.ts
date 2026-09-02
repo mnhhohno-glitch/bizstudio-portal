@@ -164,13 +164,17 @@ export async function POST(request: Request) {
       }
       try {
         // 冪等判定は sourceType を問わない（サイト経由行・PDF昇格行も「既存」として尊重する）。
+        // T-189 修正: 自動配信行（autoSourcedAt 非null）は archivedAt を問わず「既存」とみなす。
+        //   自動配信行では紹介保留＝却下なので、保留にされた求人が再送で復活してはならない。
+        //   手動ブックマークは従来どおり未保留（archivedAt: null）の行だけを既存扱い。自動行を優先して拾う。
         const existing = await prisma.candidateFile.findFirst({
           where: {
             candidateId: candidate.id,
             category: "BOOKMARK",
             externalJobRef,
-            archivedAt: null,
+            OR: [{ autoSourcedAt: { not: null } }, { archivedAt: null }],
           },
+          orderBy: { autoSourcedAt: { sort: "desc", nulls: "last" } },
           select: { id: true, autoSourcedAt: true },
         });
         if (existing) {

@@ -493,6 +493,9 @@ export default function AutoRecommendApprovalClient() {
           <p className="mt-1 text-[12px] text-gray-500">
             自動配信ONの求職者 {rows.length}名・承認待ち {totalPending}件。承認した求人だけが求職者のマイページ「新着マッチ求人」に出ます。
           </p>
+          <p className="mt-0.5 text-[12px] text-gray-500">
+            各求職者の詳細ブックマークタブからも承認できます。
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/admin/master" className="text-[13px] text-[#2563EB] underline">
