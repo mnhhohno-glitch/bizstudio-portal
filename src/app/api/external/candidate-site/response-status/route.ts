@@ -29,9 +29,9 @@ import {
 //     UNANSWERED・PENDING・EXCLUDED→取り消し削除。IN_SELECTION/SELECTION_ENDED は同期しない）
 //     ※PENDING/EXCLUDED の削除は箱Bからの意図的な差分（保留・対象外にした求人が
 //       「気になる」として回答タスク／フラグに残り続ける不整合を解消するため）
-//   - restore（EXCLUDED→UNANSWERED）は本APIの status=UNANSWERED で対応（箱B restore と同等・CAのみ）
-// actor 制約: user は EXCLUDED を指定不可・READONLY(IN_SELECTION/SELECTION_ENDED)も指定不可。
-//   EXCLUDED からの復帰も CA のみ（箱B restore が CA専用のため）。
+//   - restore（EXCLUDED→UNANSWERED）は本APIの status=UNANSWERED で対応（箱B restore と同等）
+// actor 制約: user は READONLY(IN_SELECTION/SELECTION_ENDED)を指定不可。
+//   EXCLUDED の設定と、EXCLUDED からの UNANSWERED 復帰は、自動配信行に限り user にも許可（下記 T-189）。
 // 同値変更は no-op（responseStatusUpdatedAt を進めない＝偽の未送信差分を作らない）。
 // kyuujinPDF への同期送信はしない（P2 は並行稼働なし・箱Bはこの経路から更新しない）。
 //
@@ -43,7 +43,10 @@ import {
 //   - 未指定なら従来どおり（列に触らない）。excludeReason が不正値なら 400。
 //   - 同値変更（EXCLUDED→EXCLUDED）で excludeReason だけ来た場合は理由のみ更新する（updatedAt は進めない）。
 //   - actor=user の EXCLUDED は、自動配信行（autoSourcedAt 非null＝マイページ「新着マッチ求人」）に限り許可する。
-//     手動行（CA厳選）は従来どおり CA のみ（現行 /site/ 仕様を維持）。EXCLUDED からの復帰は従来どおり CA のみ。
+//     手動行（CA厳選）は従来どおり CA のみ（現行 /site/ 仕様を維持）。
+//   - その取り消し（EXCLUDED→UNANSWERED）も自動配信行に限り actor=user を許可する（時間制限なし）。
+//     復帰時は excludedBy/At と candidateExcludeReason をクリア（EXCLUDED 以外への遷移と同じ処理）。
+//     手動行の復帰・UNANSWERED 以外への遷移は従来どおり CA のみ。
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -141,8 +144,13 @@ export async function PATCH(request: Request) {
 
   const current = row.responseStatus ?? "UNANSWERED";
 
-  // EXCLUDED からの復帰は CA のみ（箱B restore=CA専用のパリティ）
-  if (current === "EXCLUDED" && actor === "user") {
+  // EXCLUDED からの復帰は CA のみ（箱B restore=CA専用のパリティ）。
+  // 例外: 自動配信行（autoSourcedAt 非null）は、本人が自分で押した「対象外」を
+  //       UNANSWERED へ取り消せる（時間制限なし＝意思表示の撤回は常に可）。
+  //       手動行（CA厳選）と、UNANSWERED 以外への遷移は従来どおり CA のみ。
+  const isUserUndoOnAutoRow =
+    actor === "user" && !!row.autoSourcedAt && status === "UNANSWERED";
+  if (current === "EXCLUDED" && actor === "user" && !isUserUndoOnAutoRow) {
     return NextResponse.json(
       { error: "actor=user cannot change status of an EXCLUDED job" },
       { status: 403 },
