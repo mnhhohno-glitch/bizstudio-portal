@@ -284,6 +284,8 @@ export default function CandidateHeader({
   //   評価はバッチAPI（数分〜）なので、完了したらブックマークタブを取り直す。
   const RECOMMEND_POLL_INTERVAL_MS = 30_000;
   const RECOMMEND_POLL_MAX_MS = 10 * 60_000;
+  // T-189 修正: 上限到達トーストの既定件数。job-platform が daily.limit を返さない場合だけ使う。
+  const DEFAULT_RECOMMEND_DAILY_LIMIT = 15;
 
   const pollRecommendCollect = async () => {
     const startedAt = Date.now();
@@ -335,6 +337,8 @@ export default function CandidateHeader({
         error?: string;
         // T-189 修正: created=0 の理由。"daily_limit" は本日の「今すぐ探す」上限に到達。
         reason?: string;
+        // T-189 修正: job-platform が返す本日の枠の上限件数（返らなければ undefined＝既定15で表示）。
+        dailyLimit?: number | null;
         // T-189 修正: job-platform が返す本日の自動配信件数（返らなければ undefined）。
         autoSentToday?: number | null;
       };
@@ -360,14 +364,16 @@ export default function CandidateHeader({
         // T-189 修正: 上限到達（求人サイト側が created:0 / reason:"daily_limit" を返す）は
         //   「新着なし」と区別して伝える。理由が無い/不明なら従来どおりの文言。
         if (data.reason === "daily_limit") {
-          // T-189 修正: 上限は「今すぐ探す」の手動枠（15件）。自動配信の枠とは別なので明示する。
+          // T-189 修正: 上限は「今すぐ探す」の手動枠。自動配信の枠とは別なので明示する。
+          // 件数は job-platform の応答（daily.limit）から出す。返らなければ従来の 15 件。
           // job-platform が本日の自動配信件数を返したときだけ、その内訳も添える。
+          const limit = typeof data.dailyLimit === "number" ? data.dailyLimit : DEFAULT_RECOMMEND_DAILY_LIMIT;
           const autoSuffix =
             typeof data.autoSentToday === "number"
               ? `（自動配信: 本日 ${data.autoSentToday} 件）`
               : "";
           toast.message(
-            `本日の「今すぐ探す」の上限（15件）に達しています。明日以降に再度お試しください${autoSuffix}`,
+            `本日の「今すぐ探す」の上限（${limit}件）に達しています。明日以降に再度お試しください${autoSuffix}`,
             { duration: 8000 },
           );
         } else {

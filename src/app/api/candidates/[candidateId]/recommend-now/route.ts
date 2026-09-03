@@ -29,6 +29,7 @@ import { ensureAutoEvaluationSubmitted } from "@/lib/recommend/auto-eval-kick";
 //   created       … job-platform が portal に新規作成したブックマーク件数
 //   skipped       … 既出などで送られなかった件数
 //   reason        … created=0 の理由（"daily_limit" = 本日の「今すぐ探す」上限に到達）。不明は null
+//   dailyLimit    … job-platform が返す本日の枠の上限件数（返らなければ null。画面は既定15で表示）
 //   autoSentToday … job-platform が返す本日の自動配信件数（返らなければ null）
 // 400 { error: "auto_recommend_off" } / 404 { error: "no_condition" } / 429 { error: "cooldown" }
 
@@ -124,6 +125,8 @@ export async function POST(
     skipped: run.sent.skipped,
     // T-189 修正: created=0 の理由（"daily_limit" 等）。画面が上限到達を伝えるのに使う。
     reason: run.reason,
+    // T-189 修正: 上限到達トーストの「上限（N件）」に使う件数（手動枠の上限）。
+    dailyLimit: run.dailyLimit,
     // T-189 修正: 上限到達トーストに「（自動配信: 本日 N 件）」を添えるための件数。
     autoSentToday: run.autoSentToday,
   });

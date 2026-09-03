@@ -19,6 +19,8 @@ import { fetchViewedJobRefs, isJobRefViewed } from "@/lib/candidate-site-job-vie
 //       candidateExcludeReason … 本人が「対象外」を選んだ理由（response-status API で保存。null=なし）
 //     origin は "auto" 固定（favorites の "ca"|"candidate" とは別値。表示側の枠分けに使う）。
 //   - 並び: approvedAt 降順（同時刻は autoSourcedAt 降順）。
+//   - トップレベルに autoRecommendEnabled（Candidate.autoRecommendEnabled）を返す。
+//     承認済みが0件でもタブを出す／出さないの判断に使う（T-189 修正）。
 //   - 認証失敗は 401（fail-closed）、候補者不在は 404。他候補者の行は一切返さない（candidateId で全クエリをスコープ）。
 
 export type AutoMatchDTO = Omit<FavoriteDTO, "origin"> & {
@@ -77,6 +79,9 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     candidateNumber: candidate.candidateNumber,
+    // T-189 修正: 自動配信ON/OFF。承認済みが0件でも「新着マッチ」タブを出すかの判断に使う
+    //   （ON かつ 0件＝「これから届きます」、OFF＝タブ自体を出さない、を候補者サイト側で出し分ける）。
+    autoRecommendEnabled: candidate.autoRecommendEnabled,
     autoMatches,
     unreadCount: autoMatches.filter((m) => !m.isRead).length,
   });

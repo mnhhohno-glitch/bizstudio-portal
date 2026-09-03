@@ -45,9 +45,11 @@ export type RecommendRunOk = {
   /**
    * T-189 修正: job-platform が返す `daily` の内訳（任意項目）。
    *   dailyMode      … "manual"（＝「今すぐ探す」の別枠）等。返らなければ null
+   *   dailyLimit     … 本日の枠の上限件数。上限到達トーストの「（N件）」に使う。返らなければ null
    *   autoSentToday  … 本日の自動配信件数。上限到達トーストに添える。返らなければ null
    */
   dailyMode: string | null;
+  dailyLimit: number | null;
   autoSentToday: number | null;
 };
 
@@ -128,6 +130,10 @@ export async function runRecommendOnJobPlatform(args: {
             ? (sent.reason as string)
             : null,
       dailyMode: typeof daily.mode === "string" ? daily.mode : null,
+      dailyLimit:
+        daily.limit !== undefined && daily.limit !== null && Number.isFinite(Number(daily.limit))
+          ? Number(daily.limit)
+          : null,
       autoSentToday:
         daily.autoSentToday !== undefined &&
         daily.autoSentToday !== null &&
