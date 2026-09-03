@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { FAVORITE_DTO_SELECT, toFavoriteDTO, type FavoriteDTO } from "@/lib/candidate-site-favorite-dto";
+// T-189 追加: 既読判定は favorites API と共通（複製しない）。
+import { fetchViewedJobRefs, isJobRefViewed } from "@/lib/candidate-site-job-views";
 
 // T-189 Phase3-2a: 求職者サイト向け「新着マッチ求人」API（承認済みの自動配信求人）。
 //
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
   }
 
-  const [files, applications, viewRows] = await Promise.all([
+  const [files, applications, viewed] = await Promise.all([
     prisma.candidateFile.findMany({
       where: {
         candidateId: candidate.id,
@@ -60,19 +61,15 @@ export async function GET(request: Request) {
       where: { candidateId: candidate.id },
       select: { externalJobRef: true },
     }),
-    // 既読判定: 求人詳細閲覧ログ（承認ページの「未読」判定と同一の解釈）。
-    prisma.$queryRaw<{ job_ref: string }[]>(Prisma.sql`
-      SELECT DISTINCT job_ref FROM candidate_activity_logs
-      WHERE event_type = 'JOB_VIEW' AND job_ref IS NOT NULL AND candidate_id = ${candidate.id}
-    `),
+    // 既読判定: 求人詳細閲覧ログ（承認ページの「未読」判定と同一の解釈）。favorites API と共通関数。
+    fetchViewedJobRefs(candidate.id),
   ]);
   const appliedRefs = new Set(applications.map((a) => a.externalJobRef));
-  const viewed = new Set(viewRows.map((r) => r.job_ref));
 
   const autoMatches: AutoMatchDTO[] = files.map((f) => ({
     ...toFavoriteDTO(f, f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false),
     origin: "auto",
-    isRead: !!f.externalJobRef && viewed.has(f.externalJobRef),
+    isRead: isJobRefViewed(f.externalJobRef, viewed),
     approvedAt: f.introducedAt ? f.introducedAt.toISOString() : null,
     candidateExcludeReason: f.candidateExcludeReason,
   }));

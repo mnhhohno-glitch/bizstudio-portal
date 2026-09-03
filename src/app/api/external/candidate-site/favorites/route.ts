@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 // T-189 Phase3-2a: 返却 DTO（型・select・変換・ヘルパ）は auto-matches API と共有するため lib へ切り出した。
 import { FAVORITE_DTO_SELECT, toFavoriteDTO, type FavoriteDTO } from "@/lib/candidate-site-favorite-dto";
+// T-189 追加: 既読（本人が求人詳細を開いたか）判定は auto-matches API と共通関数を使う（複製しない）。
+import { fetchViewedJobRefs, isJobRefViewed } from "@/lib/candidate-site-job-views";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 // T-185: mypage が jobTitle/jobCategory を送ってこないときに求人本文から補う。
@@ -37,6 +39,10 @@ async function resolveSystemUserId(): Promise<string | null> {
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
+
+// T-189 追加: 担当CAおすすめ一覧の行。既存 FavoriteDTO（introducedAt を含む）に isRead を足しただけ。
+// 既存項目・並び・件数は不変。POST/PATCH の返却 favorite は従来どおり FavoriteDTO のまま。
+export type FavoriteWithReadDTO = FavoriteDTO & { isRead: boolean };
 
 // ---- GET: お気に入り一覧 ----
 export async function GET(request: Request) {
@@ -76,16 +82,22 @@ export async function GET(request: Request) {
   });
 
   // 応募済み externalJobRef 一覧（画面の「応募済み」表示用）。候補者スコープ。
-  const applications = await prisma.candidateJobApplication.findMany({
-    where: { candidateId: candidate.id },
-    select: { externalJobRef: true },
-  });
+  // 既読判定用の JOB_VIEW ログも候補者単位で一括取得する（N+1 にしない）。
+  const [applications, viewed] = await Promise.all([
+    prisma.candidateJobApplication.findMany({
+      where: { candidateId: candidate.id },
+      select: { externalJobRef: true },
+    }),
+    fetchViewedJobRefs(candidate.id),
+  ]);
   const appliedRefs = new Set(applications.map((a) => a.externalJobRef));
 
   // DTO 変換は共通関数（切り出し前のインライン構築と同一のフィールド構成）。
-  const favorites: FavoriteDTO[] = files.map((f) =>
-    toFavoriteDTO(f, f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false),
-  );
+  // T-189 追加: isRead を付与（auto-matches と同一判定）。introducedAt は FavoriteDTO に既存。
+  const favorites: FavoriteWithReadDTO[] = files.map((f) => ({
+    ...toFavoriteDTO(f, f.externalJobRef ? appliedRefs.has(f.externalJobRef) : false),
+    isRead: isJobRefViewed(f.externalJobRef, viewed),
+  }));
 
   return NextResponse.json({
     ok: true,
