@@ -8,6 +8,7 @@
 //   1. cron: /api/internal/recommend/analyze-submit・analyze-collect（candidateId なし＝全体対象）
 //   2. 画面: /api/candidates/[candidateId]/recommend-now・recommend-collect（当該求職者のみ）
 // どちらも同じ関数を通るため、無人経路と手動経路で評価内容がズレない。
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { anthropic, CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
 import { buildAnalyzeBatchSystemBlocks } from "@/lib/analyze-batch-cache";
@@ -33,6 +34,19 @@ const BATCH_TIMEOUT_MS = 24 * 60 * 60 * 1000; // Anthropic Message Batches の�
 //   COLLECTING 中は completedAt を「掴んだ時刻」として使う（完了時に本来の完了時刻で上書きされる）。
 //   プロセス落ち等で掴んだまま放置された行は、次回の回収開始時に SUBMITTED へ戻して拾い直す。
 const COLLECT_CLAIM_STALE_MS = 10 * 60 * 1000;
+// T-189 修正: 投入の排他。台帳行を「Anthropic に投入する前」に RESERVED で先に確保する。
+//   以前は batches.create 成功後に台帳へ INSERT していたため、同じ求職者に対する2つの投入経路
+//   （「今すぐ探す」自身の投入と受け口キック）が同時に走ると、双方の未回収判定が「台帳に無い」を
+//   見て素通りし、同一15ファイルが 0.355 秒差で2バッチに投入された（2026-09-03 11:52・¥59の無駄）。
+//   対象確定と RESERVED の INSERT を1トランザクション＋advisory lock で直列化すれば、
+//   後発の投入は「未回収の台帳行に載っている」＝対象0件で終わる（構造的な排他）。
+const SUBMIT_LOCK_KEY = "recommend-analyze-submit";
+// 未回収（＝そのファイルを再投入してはいけない）とみなす台帳ステータス。
+const IN_FLIGHT_LEDGER_STATUSES = ["RESERVED", "SUBMITTED", "COLLECTING"];
+// 予約したまま放置された行（投入直前にプロセスが落ちた等）を FAILED に落として再投入可能にする猶予。
+const RESERVED_STALE_MS = 10 * 60 * 1000;
+// RESERVED 行の batchId（Anthropic の batch id が決まるのは投入後なので、それまでの placeholder）。
+const RESERVED_BATCH_PLACEHOLDER = "reserved";
 // T-189 Phase3-2a: 評価回収時に PDF を先行生成する1回あたりの上限（env RECOMMEND_PDF_MAX_PER_RUN・既定100）
 const DEFAULT_PDF_MAX_PER_RUN = 100;
 function pdfMaxPerRun(): number {
@@ -69,22 +83,35 @@ export type AnalyzeSubmitResult = {
   ledgerSaveFailed?: boolean;
 };
 
+type PlannedRequest = {
+  customId: string;
+  candidateId: string;
+  fileIds: string[];
+  totalFiles: number;
+  start: number;
+  end: number;
+};
+
+type SubmissionPlan = {
+  capped: { id: string; candidateId: string; fileName: string; extractedText: string | null }[];
+  eligibleCount: number;
+  inFlightCount: number;
+  planned: PlannedRequest[];
+  candidateCount: number;
+};
+
 /**
- * 未評価の自動引き当てブックマークを Message Batches API へ投入する。
- * `candidateId` を渡すとその求職者の分だけを対象にする（画面の「今すぐ探す」用）。
+ * 投入対象の確定（DB読みのみ・副作用なし）。
+ * 実投入時は advisory lock を取ったトランザクション内で呼び、直後に RESERVED を INSERT する。
  */
-export async function runAnalyzeSubmit(opts: {
-  willExecute: boolean;
-  maxFiles?: number;
-  candidateId?: string;
-}): Promise<AnalyzeSubmitResult> {
-  const { willExecute, candidateId } = opts;
-  const envMax = Number(process.env.RECOMMEND_ANALYZE_MAX_FILES);
-  const maxFiles =
-    opts.maxFiles ?? (Number.isInteger(envMax) && envMax > 0 ? envMax : DEFAULT_MAX_FILES);
+async function planSubmission(
+  db: Prisma.TransactionClient,
+  args: { candidateId?: string; maxFiles: number },
+): Promise<SubmissionPlan> {
+  const { candidateId, maxFiles } = args;
 
   // 1. 対象ファイルの抽出（CA画面の対象条件 + 自動引き当て限定の3条件）。
-  const candidates = await prisma.candidateFile.findMany({
+  const candidates = await db.candidateFile.findMany({
     where: {
       category: "BOOKMARK",
       origin: "auto",
@@ -98,12 +125,12 @@ export async function runAnalyzeSubmit(opts: {
     orderBy: { createdAt: "asc" },
   });
 
-  // 2. 投入済み（未回収）のファイルを除外（二重投入防止）。
+  // 2. 未回収のファイルを除外（二重投入防止）。
   //    FAILED / EXPIRED の行は除外しない＝対象ファイルが自動的に再投入対象へ戻る。
-  //    T-189 修正: 回収中（COLLECTING）も「未回収」なので除外対象に含める。
-  //    含めないと、回収の最中に走った submit が同じファイルを再投入してしまう（費用二重）。
-  const inFlight = await prisma.recommendAnalyzeBatch.findMany({
-    where: { status: { in: ["SUBMITTED", "COLLECTING"] } },
+  //    T-189 修正: 回収中（COLLECTING）と投入予約中（RESERVED）も「未回収」なので除外対象に含める。
+  //    RESERVED を含めるのが二重投入の本命の防波堤（投入前に予約済み＝後発は対象0件になる）。
+  const inFlight = await db.recommendAnalyzeBatch.findMany({
+    where: { status: { in: IN_FLIGHT_LEDGER_STATUSES } },
     select: { fileIds: true },
   });
   const inFlightIds = new Set<string>();
@@ -123,14 +150,6 @@ export async function runAnalyzeSubmit(opts: {
     byCandidate.set(f.candidateId, arr);
   }
 
-  type PlannedRequest = {
-    customId: string;
-    candidateId: string;
-    fileIds: string[];
-    totalFiles: number;
-    start: number;
-    end: number;
-  };
   const planned: PlannedRequest[] = [];
   for (const [cid, files] of byCandidate) {
     for (let start = 0; start < files.length; start += BATCH_SIZE) {
@@ -146,7 +165,76 @@ export async function runAnalyzeSubmit(opts: {
     }
   }
 
-  // 4. dry_run: 件数・構成・費用試算のみ返す（context の組み立ても行わない＝副作用ゼロ）。
+  return {
+    capped,
+    eligibleCount: eligible.length,
+    inFlightCount: inFlightIds.size,
+    planned,
+    candidateCount: byCandidate.size,
+  };
+}
+
+/**
+ * 未評価の自動引き当てブックマークを Message Batches API へ投入する。
+ * `candidateId` を渡すとその求職者の分だけを対象にする（画面の「今すぐ探す」用）。
+ *
+ * T-189 修正: 実投入時の順序を「対象確定 → 台帳に RESERVED を INSERT → Anthropic へ投入 →
+ *   同じ行を SUBMITTED + batchId に確定」に変えた。対象確定と予約は advisory lock 付きの
+ *   1トランザクションなので、同時に走った別経路の submit は「未回収の台帳行に載っている」を
+ *   見て対象0件で終わる（＝同一ファイルが2バッチに入らない）。
+ */
+export async function runAnalyzeSubmit(opts: {
+  willExecute: boolean;
+  maxFiles?: number;
+  candidateId?: string;
+}): Promise<AnalyzeSubmitResult> {
+  const { willExecute, candidateId } = opts;
+  const envMax = Number(process.env.RECOMMEND_ANALYZE_MAX_FILES);
+  const maxFiles =
+    opts.maxFiles ?? (Number.isInteger(envMax) && envMax > 0 ? envMax : DEFAULT_MAX_FILES);
+
+  // dry_run は照会のみ（ロックも予約もしない）。実投入は対象確定と予約を1トランザクションで直列化する。
+  const plan = willExecute
+    ? await prisma.$transaction(
+        async (tx) => {
+          // 同時に走る他の submit（定時cron / 受け口キック / 保険経路）と直列化する。
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SUBMIT_LOCK_KEY})::bigint)`;
+
+          // 予約したまま放置された行を FAILED に落とす（投入直前にプロセスが落ちた場合の復旧）。
+          const stale = await tx.recommendAnalyzeBatch.updateMany({
+            where: {
+              status: "RESERVED",
+              submittedAt: { lt: new Date(Date.now() - RESERVED_STALE_MS) },
+            },
+            data: { status: "FAILED", completedAt: new Date() },
+          });
+          if (stale.count > 0) {
+            console.warn(
+              `[recommend/analyze-submit] 放置された RESERVED を ${stale.count}行 FAILED にした（再投入対象へ戻す）`,
+            );
+          }
+
+          const p = await planSubmission(tx, { candidateId, maxFiles });
+          if (p.planned.length > 0) {
+            await tx.recommendAnalyzeBatch.createMany({
+              data: p.planned.map((r) => ({
+                id: r.customId,
+                batchId: RESERVED_BATCH_PLACEHOLDER,
+                candidateId: r.candidateId,
+                fileIds: r.fileIds,
+                status: "RESERVED",
+              })),
+            });
+          }
+          return p;
+        },
+        { timeout: 30_000, maxWait: 30_000 },
+      )
+    : await planSubmission(prisma, { candidateId, maxFiles });
+
+  const { capped, planned } = plan;
+
+  // 4. 費用試算（dry_run 表示のみに使用。課金には一切影響しない）。
   const jobChars = capped.reduce(
     (sum, f) => sum + Math.min((f.extractedText ?? "").length, 3000),
     0,
@@ -163,10 +251,10 @@ export async function runAnalyzeSubmit(opts: {
   const summary: AnalyzeSubmitResult = {
     mode: willExecute ? "EXECUTE" : "DRY-RUN",
     targetFiles: capped.length,
-    eligibleFiles: eligible.length,
-    inFlightFiles: inFlightIds.size,
+    eligibleFiles: plan.eligibleCount,
+    inFlightFiles: plan.inFlightCount,
     maxFiles,
-    candidates: byCandidate.size,
+    candidates: plan.candidateCount,
     requests: planned.length,
     requestPlan: planned.map((r) => ({
       candidateId: r.candidateId,
@@ -184,65 +272,86 @@ export async function runAnalyzeSubmit(opts: {
   if (!willExecute) return summary;
   if (planned.length === 0) return { ...summary, batchId: null };
 
-  // 5. 実投入: 候補者contextを1回ずつ組み立て、全リクエストを1つの Message Batch にまとめる。
-  const fixedSystem = buildAnalyzeFixedSystem();
-  const fileById = new Map(capped.map((f) => [f.id, f]));
-  const contextByCandidate = new Map<string, string>();
-  const requests = [];
-  for (const r of planned) {
-    let context = contextByCandidate.get(r.candidateId);
-    if (context === undefined) {
-      context = await buildAnalyzeCandidateContext(r.candidateId);
-      contextByCandidate.set(r.candidateId, context);
+  const reservedIds = planned.map((r) => r.customId);
+  /** 予約を解除して対象ファイルを再投入対象へ戻す（投入に至らなかった場合）。 */
+  const releaseReservation = async () => {
+    try {
+      await prisma.recommendAnalyzeBatch.updateMany({
+        where: { id: { in: reservedIds }, status: "RESERVED" },
+        data: { status: "FAILED", completedAt: new Date() },
+      });
+    } catch (e) {
+      // 落とせなくても RESERVED_STALE_MS 後に次回の submit が FAILED にする。
+      console.error("[recommend/analyze-submit] 予約解除に失敗（10分後に自動で解除される）:", e);
     }
-    const batchFiles = r.fileIds.map((id) => fileById.get(id)!);
-    const jobsSection = buildAnalyzeJobsSection(batchFiles, r.start);
-    const systemBlocks = buildAnalyzeBatchSystemBlocks({
-      fixedSystem,
-      candidateContext: context,
-      // 総合まとめは自動経路では生成しない（常に非最終バッチの指示文）。
-      batchInstruction: buildBatchInstruction({
-        totalFiles: r.totalFiles,
-        start: r.start,
-        end: r.end,
-        isLastBatch: false,
-      }),
-    });
-    requests.push({
-      custom_id: r.customId,
-      params: {
-        model: CLAUDE_MODEL_ANALYSIS,
-        max_tokens: 16000,
-        temperature: 0.7,
-        system: systemBlocks,
-        messages: [
-          {
-            role: "user" as const,
-            content: `## 検討中の求人票（${r.start + 1}〜${r.end}件目 / 全${r.totalFiles}件）\n${jobsSection}\n\n上記の求人について分析してください。`,
-          },
-        ],
-      },
-    });
+  };
+
+  // 5. 実投入: 候補者contextを1回ずつ組み立て、全リクエストを1つの Message Batch にまとめる。
+  let batch: { id: string };
+  try {
+    const fixedSystem = buildAnalyzeFixedSystem();
+    const fileById = new Map(capped.map((f) => [f.id, f]));
+    const contextByCandidate = new Map<string, string>();
+    const requests = [];
+    for (const r of planned) {
+      let context = contextByCandidate.get(r.candidateId);
+      if (context === undefined) {
+        context = await buildAnalyzeCandidateContext(r.candidateId);
+        contextByCandidate.set(r.candidateId, context);
+      }
+      const batchFiles = r.fileIds.map((id) => fileById.get(id)!);
+      const jobsSection = buildAnalyzeJobsSection(batchFiles, r.start);
+      const systemBlocks = buildAnalyzeBatchSystemBlocks({
+        fixedSystem,
+        candidateContext: context,
+        // 総合まとめは自動経路では生成しない（常に非最終バッチの指示文）。
+        batchInstruction: buildBatchInstruction({
+          totalFiles: r.totalFiles,
+          start: r.start,
+          end: r.end,
+          isLastBatch: false,
+        }),
+      });
+      requests.push({
+        custom_id: r.customId,
+        params: {
+          model: CLAUDE_MODEL_ANALYSIS,
+          max_tokens: 16000,
+          temperature: 0.7,
+          system: systemBlocks,
+          messages: [
+            {
+              role: "user" as const,
+              content: `## 検討中の求人票（${r.start + 1}〜${r.end}件目 / 全${r.totalFiles}件）\n${jobsSection}\n\n上記の求人について分析してください。`,
+            },
+          ],
+        },
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    batch = await anthropic.messages.batches.create({ requests: requests as any });
+  } catch (e) {
+    // 投入に至らなかった（context 組み立て失敗 / Anthropic エラー）。予約を解除して呼び出し元に返す。
+    await releaseReservation();
+    throw e;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const batch = await anthropic.messages.batches.create({ requests: requests as any });
-
-  // 6. 台帳へ記録（custom_id = 行 id）。ここが失敗すると回収不能になるため、失敗時は
-  //    batchId をログに残す（Anthropic Console から手動回収可能）。
+  // 6. 予約行を SUBMITTED + 実 batchId に確定する。ここが失敗すると回収不能になるため、
+  //    失敗時は batchId をログに残す（Anthropic Console から手動回収可能）。
   try {
-    await prisma.recommendAnalyzeBatch.createMany({
-      data: planned.map((r) => ({
-        id: r.customId,
-        batchId: batch.id,
-        candidateId: r.candidateId,
-        fileIds: r.fileIds,
-        status: "SUBMITTED",
-      })),
+    const confirmed = await prisma.recommendAnalyzeBatch.updateMany({
+      where: { id: { in: reservedIds }, status: "RESERVED" },
+      data: { batchId: batch.id, status: "SUBMITTED" },
     });
+    if (confirmed.count !== reservedIds.length) {
+      console.error(
+        `[recommend/analyze-submit] 予約行の確定件数が不一致（batchId=${batch.id} 予約=${reservedIds.length} 確定=${confirmed.count}）`,
+      );
+    }
   } catch (dbErr) {
     console.error(
-      `[recommend/analyze-submit] 台帳保存に失敗（batchId=${batch.id}）。回収不能のため要調査:`,
+      `[recommend/analyze-submit] 台帳の確定に失敗（batchId=${batch.id}）。回収不能のため要調査:`,
       dbErr,
     );
     return { ...summary, batchId: batch.id, ledgerSaveFailed: true };

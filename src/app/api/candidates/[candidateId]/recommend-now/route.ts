@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
 import { runRecommendOnJobPlatform } from "@/lib/recommend/job-platform-run";
-import { runAnalyzeSubmit } from "@/lib/recommend/analyze-batch-run";
+import { ensureAutoEvaluationSubmitted } from "@/lib/recommend/auto-eval-kick";
 
 // T-189 追加: 求職者詳細の「今すぐ探す」ボタンの受け口。
 //
@@ -13,19 +13,26 @@ import { runAnalyzeSubmit } from "@/lib/recommend/analyze-batch-run";
 //   - 処理:
 //       1. job-platform の即時引き当て（POST /api/internal/recommend/run）を呼ぶ。
 //          採用された求人は job-platform 側から portal の自動配信受け口（origin="auto"）に入る。
-//       2. created>0 なら、その求職者の未評価分だけを AI評価バッチへ投入する
-//          （夜間 cron と同一の runAnalyzeSubmit。対象条件・プロンプトとも共通）。
-//       3. 回収は待たない。画面が recommend-collect をポーリングする。
+//       2. AI評価の投入はしない。受け口（from-job-platform の origin="auto" 分岐）が
+//          行を作った直後に kickAutoEvaluation() で投入し、回収まで見届ける。
+//       3. キックが走らなかった場合の保険だけを after() で仕掛ける（90秒後に台帳を見て、
+//          投入が1件も無ければ1回だけ投入する）。
+//       4. 評価完了の待機は画面側（recommend-collect のポーリング・最長10分）が従来どおり行う。
 //   - 連打防止: 同一求職者につき60秒に1回（job-platform 側と二重で持つ）。
 //
-// レスポンス（200）: { created, skipped, submitted, batchId, reason }
-//   created   … job-platform が portal に新規作成したブックマーク件数
-//   skipped   … 既出などで送られなかった件数
-//   submitted … 今回 AI評価バッチへ投入したファイル件数
-//   reason    … created=0 の理由（"daily_limit" = 本日の配信上限に到達）。不明は null
+// T-189 修正: 以前はここでも runAnalyzeSubmit を呼んでいた。受け口キックと同時に走ると、
+//   当時の二重投入ガード（台帳の照会）は台帳行を Anthropic 投入「後」に作っていたため
+//   双方が素通りし、同一15ファイルが 0.355秒差で2バッチに投入された（2026-09-03 11:52・¥59の無駄）。
+//   投入経路を受け口キックに一本化し、排他の正は台帳の事前予約（RESERVED）に置いた。
+//
+// レスポンス（200）: { created, skipped, reason, autoSentToday }
+//   created       … job-platform が portal に新規作成したブックマーク件数
+//   skipped       … 既出などで送られなかった件数
+//   reason        … created=0 の理由（"daily_limit" = 本日の「今すぐ探す」上限に到達）。不明は null
+//   autoSentToday … job-platform が返す本日の自動配信件数（返らなければ null）
 // 400 { error: "auto_recommend_off" } / 404 { error: "no_condition" } / 429 { error: "cooldown" }
 
-// job-platform 側の検索〜PDF化〜送信が数十秒かかる。投入まで含めて余裕を持たせる。
+// job-platform 側の検索〜PDF化〜送信が数十秒かかる。余裕を持たせる。
 export const maxDuration = 300;
 
 const COOLDOWN_MS = 60_000;
@@ -95,43 +102,29 @@ export async function POST(
     return NextResponse.json({ error: "job_platform_error", detail: run.error }, { status: 502 });
   }
 
-  // 2. 新規に入った求人があれば、その求職者の未評価分だけAI評価バッチへ投入する。
-  //    （投入は冪等: 対象は origin="auto" かつ aiAnalyzedAt IS NULL かつ未投入の行のみ）
-  let submitted = 0;
-  let batchId: string | null = null;
+  // 2. AI評価の投入はここでは行わない（受け口キックに一本化）。
+  //    キックが走らなかった場合の保険だけをレスポンス返却後に仕掛ける。
+  //    保険が投入しても二重にはならない（runAnalyzeSubmit が台帳を事前予約するため）。
   if (run.sent.created > 0) {
-    try {
-      const submit = await runAnalyzeSubmit({ willExecute: true, candidateId });
-      submitted = submit.targetFiles;
-      batchId = submit.batchId ?? null;
-      if (submit.ledgerSaveFailed) {
-        console.error(`[recommend-now] 台帳保存に失敗 batchId=${batchId}（要手動回収）`);
-      }
-    } catch (e) {
-      console.error(`[recommend-now] AI評価投入に失敗 candidate=${candidateId}:`, e);
-      // 引き当て自体は成功しているので 200 で返し、投入失敗だけを伝える
-      // （未評価のまま残るので翌日の cron が拾い直す）。
-      return NextResponse.json({
-        created: run.sent.created,
-        skipped: run.sent.skipped,
-        submitted: 0,
-        batchId: null,
-        reason: run.reason,
-        submitError: e instanceof Error ? e.message : String(e),
-      });
-    }
+    after(() =>
+      ensureAutoEvaluationSubmitted({
+        candidateId: candidate.id,
+        candidateNumber: candidate.candidateNumber,
+        createdCount: run.sent.created,
+      }),
+    );
   }
 
   console.log(
-    `[recommend-now] candidate=${candidate.candidateNumber} hit=${run.hit} adopted=${run.adopted} created=${run.sent.created} skipped=${run.sent.skipped} submitted=${submitted} batch=${batchId ?? "-"}`,
+    `[recommend-now] candidate=${candidate.candidateNumber} hit=${run.hit} adopted=${run.adopted} created=${run.sent.created} skipped=${run.sent.skipped} reason=${run.reason ?? "-"}（投入は受け口キックに委譲）`,
   );
 
   return NextResponse.json({
     created: run.sent.created,
     skipped: run.sent.skipped,
-    submitted,
-    batchId,
     // T-189 修正: created=0 の理由（"daily_limit" 等）。画面が上限到達を伝えるのに使う。
     reason: run.reason,
+    // T-189 修正: 上限到達トーストに「（自動配信: 本日 N 件）」を添えるための件数。
+    autoSentToday: run.autoSentToday,
   });
 }

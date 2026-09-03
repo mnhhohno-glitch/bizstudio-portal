@@ -42,6 +42,13 @@ export type RecommendRunOk = {
    * 未送信・不明は null（＝従来どおり「条件に合う新着はありませんでした」）。
    */
   reason: string | null;
+  /**
+   * T-189 修正: job-platform が返す `daily` の内訳（任意項目）。
+   *   dailyMode      … "manual"（＝「今すぐ探す」の別枠）等。返らなければ null
+   *   autoSentToday  … 本日の自動配信件数。上限到達トーストに添える。返らなければ null
+   */
+  dailyMode: string | null;
+  autoSentToday: number | null;
 };
 
 export type RecommendRunNg = {
@@ -100,6 +107,8 @@ export async function runRecommendOnJobPlatform(args: {
       };
     }
     const sent = (json.sent ?? {}) as Record<string, unknown>;
+    // T-189 修正: 本日の枠の内訳（job-platform 側が manual を別枠にした際に返す）。
+    const daily = (json.daily ?? {}) as Record<string, unknown>;
     return {
       ok: true,
       mode: typeof json.mode === "string" ? json.mode : "unknown",
@@ -118,6 +127,13 @@ export async function runRecommendOnJobPlatform(args: {
           : typeof sent.reason === "string"
             ? (sent.reason as string)
             : null,
+      dailyMode: typeof daily.mode === "string" ? daily.mode : null,
+      autoSentToday:
+        daily.autoSentToday !== undefined &&
+        daily.autoSentToday !== null &&
+        Number.isFinite(Number(daily.autoSentToday))
+          ? Number(daily.autoSentToday)
+          : null,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

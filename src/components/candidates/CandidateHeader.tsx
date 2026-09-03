@@ -278,7 +278,8 @@ export default function CandidateHeader({
   };
 
   // T-189 追加:「今すぐ探す」。
-  //   ① recommend-now（job-platform の即時引き当て → 新着があればAI評価バッチへ投入）
+  //   ① recommend-now（job-platform の即時引き当て。AI評価の投入は受け口キックに一本化したので
+  //      サーバー側では投入しない＝二重投入が起きない）
   //   ② created>0 なら recommend-collect を30秒間隔・最長10分ポーリングして評価完了を待つ
   //   評価はバッチAPI（数分〜）なので、完了したらブックマークタブを取り直す。
   const RECOMMEND_POLL_INTERVAL_MS = 30_000;
@@ -331,11 +332,11 @@ export default function CandidateHeader({
       const data = (await res.json().catch(() => ({}))) as {
         created?: number;
         skipped?: number;
-        submitted?: number;
         error?: string;
-        submitError?: string;
-        // T-189 修正: created=0 の理由。"daily_limit" は本日の自動配信上限に到達。
+        // T-189 修正: created=0 の理由。"daily_limit" は本日の「今すぐ探す」上限に到達。
         reason?: string;
+        // T-189 修正: job-platform が返す本日の自動配信件数（返らなければ undefined）。
+        autoSentToday?: number | null;
       };
       toast.dismiss(loadingId);
 
@@ -359,8 +360,14 @@ export default function CandidateHeader({
         // T-189 修正: 上限到達（求人サイト側が created:0 / reason:"daily_limit" を返す）は
         //   「新着なし」と区別して伝える。理由が無い/不明なら従来どおりの文言。
         if (data.reason === "daily_limit") {
+          // T-189 修正: 上限は「今すぐ探す」の手動枠（15件）。自動配信の枠とは別なので明示する。
+          // job-platform が本日の自動配信件数を返したときだけ、その内訳も添える。
+          const autoSuffix =
+            typeof data.autoSentToday === "number"
+              ? `（自動配信: 本日 ${data.autoSentToday} 件）`
+              : "";
           toast.message(
-            "本日の自動配信の上限（15件）に達しています。明日以降に再度お試しください",
+            `本日の「今すぐ探す」の上限（15件）に達しています。明日以降に再度お試しください${autoSuffix}`,
             { duration: 8000 },
           );
         } else {
@@ -370,12 +377,6 @@ export default function CandidateHeader({
       }
       toast.success(`${created}件を追加しました。AI評価中（数分）`, { duration: 8000 });
       onRecommendUpdated?.(); // 評価前でもブックマークタブには並ぶので先に取り直す
-      if (data.submitError) {
-        toast.error("AI評価の投入に失敗しました（夜間の自動処理で再試行されます）", {
-          duration: 10000,
-        });
-        return;
-      }
       void pollRecommendCollect();
     } catch {
       toast.dismiss(loadingId);

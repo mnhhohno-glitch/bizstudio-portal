@@ -12,8 +12,13 @@
 //   - 同一求職者で 60 秒以内の多重起動は 1 回にまとめる。プロセス内メモリ（Railway 単一インスタンス）
 //     を第一段、投入台帳（recommend_analyze_batches の直近60秒）を第二段に置く二段構え。
 //     複数インスタンス構成になっても台帳側のガードで二重投入を抑止できる。
-//   - runAnalyzeSubmit 自体が冪等（対象は origin="auto" / PENDING / aiAnalyzedAt=null かつ
-//     SUBMITTED 台帳に載っていない行のみ）なので、万一二重に走っても同じ行は二度投入されない。
+//   - 排他の正は runAnalyzeSubmit 側の「台帳の事前予約（RESERVED）」。対象確定と予約を
+//     advisory lock 付きの1トランザクションで行うので、同時に走った投入は対象0件で終わる。
+//     ここの debounce 二段は無駄なAPI往復を減らすための前段でしかない。
+//
+// T-189 修正: 投入経路はこのキックに一本化した。「今すぐ探す」（recommend-now）は自分では投入せず、
+//   受け口経由でここが投入・回収するのを待つ。キックが何らかの理由で走らなかった場合の保険として
+//   recommend-now が ensureAutoEvaluationSubmitted() を 90秒後に1回だけ呼ぶ。
 import { prisma } from "@/lib/prisma";
 import { runAnalyzeSubmit, runAnalyzeCollect } from "@/lib/recommend/analyze-batch-run";
 
@@ -35,6 +40,10 @@ const DEBOUNCE_MS = 60_000;
 const COLLECT_MAX_MS = 20 * 60_000;
 const COLLECT_FIRST_DELAY_MS = 30_000;
 const COLLECT_MAX_DELAY_MS = 120_000;
+
+// T-189 修正: 「今すぐ探す」の保険経路が受け口キックの投入を待つ時間。
+// 受け口キックは行作成の直後（after()）に走るので、通常はこの前に予約が台帳に載る。
+const FALLBACK_WAIT_MS = 90_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -103,32 +112,17 @@ async function collectUntilDone(args: {
 }
 
 /**
- * 当該求職者の未評価の自動配信行を AI評価バッチへ投入する。
- * 例外は投げない（呼び出し元＝受け口の応答に影響させないため、ここで握って握りつぶす）。
+ * 投入 → 回収まで通しで行う本体（debounce・保険判定は呼び出し元の責任）。
+ * 例外は投げない（after() の中で走るため、ここで握りつぶしてログに残す）。
  */
-export async function kickAutoEvaluation(args: {
+async function submitAndCollect(args: {
   candidateId: string;
   candidateNumber: string;
-  createdCount: number;
+  tag: string;
+  note: string;
 }): Promise<void> {
-  const { candidateId, candidateNumber, createdCount } = args;
+  const { candidateId, candidateNumber, tag, note } = args;
   try {
-    const now = Date.now();
-    const last = lastKickedAt.get(candidateId);
-    if (last !== undefined && now - last < DEBOUNCE_MS) {
-      console.log(
-        `${LOG} skip(debounce/memory) candidate=${candidateNumber} created=${createdCount} ` +
-          `前回起動から ${Math.round((now - last) / 1000)}秒`,
-      );
-      return;
-    }
-    lastKickedAt.set(candidateId, now);
-
-    if (await submittedRecently(candidateId)) {
-      console.log(`${LOG} skip(debounce/ledger) candidate=${candidateNumber} created=${createdCount}`);
-      return;
-    }
-
     const startedAt = Date.now();
     const submit = await runAnalyzeSubmit({ willExecute: true, candidateId });
     const elapsed = Date.now() - startedAt;
@@ -138,7 +132,7 @@ export async function kickAutoEvaluation(args: {
       );
     }
     console.log(
-      `${LOG} submitted candidate=${candidateNumber} created=${createdCount} ` +
+      `${LOG} ${tag} candidate=${candidateNumber} ${note} ` +
         `targetFiles=${submit.targetFiles} requests=${submit.requests} ` +
         `batch=${submit.batchId ?? "-"} ${elapsed}ms`,
     );
@@ -151,8 +145,116 @@ export async function kickAutoEvaluation(args: {
   } catch (e) {
     // 失敗しても受け口の作成は成功扱い。未評価のまま残るので翌朝の定時 submit が拾い直す。
     console.error(
-      `${LOG} failed candidate=${candidateNumber} created=${createdCount}:`,
+      `${LOG} failed(${tag}) candidate=${candidateNumber} ${note}:`,
       e instanceof Error ? e.message : String(e),
     );
   }
+}
+
+/**
+ * T-189 修正: 「今すぐ探す」用の保険。
+ * 受け口キック（kickAutoEvaluation）が何らかの理由で走らなかった場合に備え、
+ * waitMs 待ってから台帳を見て、当該求職者の投入が1件も無ければ1回だけ投入する。
+ *
+ * 二重投入にはならない: runAnalyzeSubmit は対象確定〜台帳予約を advisory lock 付きの
+ * トランザクションで行うので、キックが先に予約済みなら対象0件で終わる。
+ * ここの事前チェックは「無駄な往復をしない」ためのもので、排他の正ではない。
+ */
+export async function ensureAutoEvaluationSubmitted(args: {
+  candidateId: string;
+  candidateNumber: string;
+  createdCount: number;
+  waitMs?: number;
+}): Promise<void> {
+  const { candidateId, candidateNumber, createdCount } = args;
+  const waitMs = args.waitMs ?? FALLBACK_WAIT_MS;
+  try {
+    await sleep(waitMs);
+
+    const inFlight = await prisma.recommendAnalyzeBatch.count({
+      where: { candidateId, status: { in: ["RESERVED", "SUBMITTED", "COLLECTING"] } },
+    });
+    if (inFlight > 0) {
+      console.log(
+        `${LOG} fallback-skip(投入済み) candidate=${candidateNumber} created=${createdCount} rows=${inFlight}`,
+      );
+      return;
+    }
+
+    const unevaluated = await prisma.candidateFile.count({
+      where: {
+        candidateId,
+        category: "BOOKMARK",
+        origin: "auto",
+        approvalStatus: "PENDING",
+        aiAnalyzedAt: null,
+        extractedText: { not: null },
+        archivedAt: null,
+      },
+    });
+    if (unevaluated === 0) {
+      console.log(
+        `${LOG} fallback-skip(未評価なし) candidate=${candidateNumber} created=${createdCount}`,
+      );
+      return;
+    }
+
+    console.warn(
+      `${LOG} fallback 受け口キックの投入が ${Math.round(waitMs / 1000)}秒経っても見えないため保険で投入する ` +
+        `candidate=${candidateNumber} created=${createdCount} unevaluated=${unevaluated}`,
+    );
+    await submitAndCollect({
+      candidateId,
+      candidateNumber,
+      tag: "fallback-submitted",
+      note: `created=${createdCount}`,
+    });
+  } catch (e) {
+    console.error(
+      `${LOG} fallback failed candidate=${candidateNumber} created=${createdCount}:`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+}
+
+/**
+ * 当該求職者の未評価の自動配信行を AI評価バッチへ投入する。
+ * 例外は投げない（呼び出し元＝受け口の応答に影響させないため、ここで握って握りつぶす）。
+ */
+export async function kickAutoEvaluation(args: {
+  candidateId: string;
+  candidateNumber: string;
+  createdCount: number;
+}): Promise<void> {
+  const { candidateId, candidateNumber, createdCount } = args;
+  const now = Date.now();
+  const last = lastKickedAt.get(candidateId);
+  if (last !== undefined && now - last < DEBOUNCE_MS) {
+    console.log(
+      `${LOG} skip(debounce/memory) candidate=${candidateNumber} created=${createdCount} ` +
+        `前回起動から ${Math.round((now - last) / 1000)}秒`,
+    );
+    return;
+  }
+  lastKickedAt.set(candidateId, now);
+
+  try {
+    if (await submittedRecently(candidateId)) {
+      console.log(`${LOG} skip(debounce/ledger) candidate=${candidateNumber} created=${createdCount}`);
+      return;
+    }
+  } catch (e) {
+    // 台帳が引けなくても投入は進める（排他は runAnalyzeSubmit 側の予約が担保する）。
+    console.error(
+      `${LOG} debounce判定に失敗（投入は継続） candidate=${candidateNumber}:`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+
+  await submitAndCollect({
+    candidateId,
+    candidateNumber,
+    tag: "submitted",
+    note: `created=${createdCount}`,
+  });
 }
