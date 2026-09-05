@@ -977,6 +977,8 @@ export default function CandidateListClient({
                       <div className="flex items-center gap-1 min-w-0">
                         <Link
                           href={`/candidates/${cand.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="block truncate text-[#2563EB] hover:underline cursor-pointer"
                           title={cand.name}
                         >

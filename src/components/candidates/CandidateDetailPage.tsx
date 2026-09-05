@@ -1409,7 +1409,7 @@ function CandidateTasksTab({ candidateId, employees }: { candidateId: string; em
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <a href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
+                    <a href={`/tasks/${t.id}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline">
                       {t.title}
                     </a>
                   </td>
