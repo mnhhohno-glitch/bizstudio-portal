@@ -929,7 +929,7 @@ export default function EntryTable({
             style={{ left: CHECKBOX_COL_WIDTH }}
           >
             <div className="flex items-center gap-1.5">
-              <Link href={`/candidates/${entry.candidateId}`} className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
+              <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
                 {entry.candidate.name}
               </Link>
               {/* T-120: タスク作成（エントリー対応依頼）の依頼中バッジ。エントリータブの間だけ表示し、書類選考以降で自動的に消える。 */}
