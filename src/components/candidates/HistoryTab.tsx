@@ -13,6 +13,8 @@ import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-
 import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval-shared";
 // T-184: 求人評価モーダルに出す「求人情報（CA向け）」。抽出そのものはサーバ側（/job-info）で行う。
 import type { BookmarkJobInfo } from "@/lib/bookmark-job-info";
+// T-190: 評価モーダルのタブ表示（評価｜仕事内容｜会社概要）用の本文切り出し（表示専用の純関数）。
+import { splitAnalysisForTabs } from "@/lib/analysis-comment-tabs";
 
 // T-182: 求人出力（kyuujinPDF 送信）の廃止。旧導線（求人出力へ送信・求人紹介へ移動・
 // 出力済バッジ・未出力選択）はコードを残したまま描画だけ止める。復活時はここを true に戻す。
@@ -603,12 +605,36 @@ function AnalysisCommentBody({ comment }: { comment: string }) {
 
 // T-184: 求人評価モーダルの「◆ 求人情報（CA向け・求職者には非表示）」セクション。
 // 評価テキスト（aiAnalysisComment）とは完全に別データ。表示専用で、編集・コピー・求職者向け出力には一切載らない。
-function JobInfoSection({ info }: { info: { state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null } }) {
-  const items: { label: string; value: string | null }[] = [
+type JobInfoState = { state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null };
+
+// 求人情報の1項目（仕事内容 / 従業員数 / 会社概要）。読み込み中・取得失敗・データなしの出し分けは
+// タブ表示（JobInfoTabBody）とフォールバックのまとめ表示（JobInfoSection）で共通。
+function JobInfoField({ label, value, state }: { label: string; value: string | null; state: JobInfoState["state"] }) {
+  return (
+    <div>
+      <div className="text-[12px] font-semibold text-gray-500 mb-0.5">{label}</div>
+      {state === "loading" ? (
+        <div className="text-sm text-gray-400">読み込み中…</div>
+      ) : state === "error" ? (
+        <div className="text-sm text-gray-500">（取得できませんでした）</div>
+      ) : value ? (
+        <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{value}</div>
+      ) : (
+        <div className="text-sm text-gray-400">（データなし）</div>
+      )}
+    </div>
+  );
+}
+
+function jobInfoItems(info: JobInfoState): { label: string; value: string | null }[] {
+  return [
     { label: "仕事内容", value: info.data?.jobDescription ?? null },
     { label: "従業員数", value: info.data?.employeeCount ?? null },
     { label: "会社概要", value: info.data?.companyOverview ?? null },
   ];
+}
+
+function JobInfoSection({ info }: { info: JobInfoState }) {
   return (
     <div className="mt-6 pt-4 border-t border-gray-200">
       <div className="flex items-center gap-2 mb-2">
@@ -620,15 +646,8 @@ function JobInfoSection({ info }: { info: { state: "loading" | "ok" | "error"; d
         <div className="text-sm text-gray-500">（取得できませんでした）</div>
       ) : (
         <div className="space-y-3">
-          {items.map((it) => (
-            <div key={it.label}>
-              <div className="text-[12px] font-semibold text-gray-500 mb-0.5">{it.label}</div>
-              {it.value ? (
-                <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{it.value}</div>
-              ) : (
-                <div className="text-sm text-gray-400">（データなし）</div>
-              )}
-            </div>
+          {jobInfoItems(info).map((it) => (
+            <JobInfoField key={it.label} label={it.label} value={it.value} state={info.state} />
           ))}
         </div>
       )}
@@ -1144,7 +1163,10 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
   const [savingComment, setSavingComment] = useState(false);
   // T-184: 求人情報（仕事内容/従業員数/会社概要）。モーダルを開いたときに都度取得する表示専用データ。
   //   評価テキスト（aiAnalysisComment）には一切書き込まない・混ぜない。
-  const [jobInfo, setJobInfo] = useState<{ state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null }>({ state: "loading", data: null });
+  const [jobInfo, setJobInfo] = useState<JobInfoState>({ state: "loading", data: null });
+  // T-190: 評価モーダルのタブ。表示専用 state（保存内容には影響しない）。
+  //   モーダルを開いた時・◀▶ で別求人へ移った時・編集モードを抜けた時は必ず "eval" に戻す。
+  const [analysisTab, setAnalysisTab] = useState<"eval" | "job" | "company">("eval");
   const [wishRating, setWishRating] = useState<string>("");
   const [passRating, setPassRating] = useState<string>("");
   const [overallRating, setOverallRating] = useState<string>("");
@@ -1285,7 +1307,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     setWishRating(axis?.wish && axis.wish !== "—" ? axis.wish : "");
     setPassRating(axis?.pass && axis.pass !== "—" ? axis.pass : "");
     setOverallRating(axis?.overall && axis.overall !== "—" ? axis.overall : selectedAnalysis.rating || "");
-    // ◀▶ で別の求人へ移動したときは本文を先頭から読ませたいのでスクロール位置を戻す
+    // ◀▶ で別の求人へ移動したときは評価タブに戻し、本文も先頭から読ませる
+    setAnalysisTab("eval");
     analysisBodyRef.current?.scrollTo({ top: 0 });
   }, [selectedAnalysis?.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2753,8 +2776,13 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                 >✕</button>
               </div>
             </div>
-            <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
-              <div className="font-mono text-sm mb-3 space-y-1">
+            {(() => {
+            // T-190: 表示モードかつ新フォーマット（◆見出しあり）のときだけタブ表示にする。
+            // 編集モードと旧形式（◆なし）は従来どおり全文表示のまま。
+            const split = splitAnalysisForTabs(selectedAnalysis.comment);
+            const tabbed = !editingComment && split.hasSections;
+            const ratingSelectors = (
+              <div className="font-mono text-sm space-y-1">
                 {(["wish", "pass", "overall"] as const).map((axis) => {
                   const label = axis === "wish" ? "本人希望：" : axis === "pass" ? "通過率　：" : "総合　　：";
                   const value = axis === "wish" ? wishRating : axis === "pass" ? passRating : overallRating;
@@ -2781,19 +2809,78 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                   );
                 })}
               </div>
-              {editingComment ? (
-                <textarea
-                  value={editedCommentText}
-                  onChange={(e) => setEditedCommentText(e.target.value)}
-                  rows={16}
-                  className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
-                />
-              ) : (
-                <AnalysisCommentBody comment={selectedAnalysis.comment} />
-              )}
-              {/* T-184: 選考分析の下。編集モードでも表示専用として出す（textarea の中身には入らない）。 */}
-              <JobInfoSection info={jobInfo} />
-            </div>
+            );
+            if (!tabbed) {
+              // フォールバック: 編集モード / 旧形式の本文は従来どおり 1枚表示。
+              return (
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
+                  <div className="mb-3">{ratingSelectors}</div>
+                  {editingComment ? (
+                    <textarea
+                      value={editedCommentText}
+                      onChange={(e) => setEditedCommentText(e.target.value)}
+                      rows={16}
+                      className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
+                    />
+                  ) : (
+                    <AnalysisCommentBody comment={selectedAnalysis.comment} />
+                  )}
+                  {/* T-184: 選考分析の下。編集モードでも表示専用として出す（textarea の中身には入らない）。 */}
+                  <JobInfoSection info={jobInfo} />
+                </div>
+              );
+            }
+            const tabs = [
+              { key: "eval" as const, label: "評価" },
+              { key: "job" as const, label: "仕事内容" },
+              { key: "company" as const, label: "会社概要" },
+            ];
+            const items = jobInfoItems(jobInfo);
+            const jobDescription = items.find((it) => it.label === "仕事内容")!;
+            const employeeCount = items.find((it) => it.label === "従業員数")!;
+            const companyOverview = items.find((it) => it.label === "会社概要")!;
+            return (
+              <>
+                {/* 3軸セレクトとタイトル行・タブバーは固定（タブ切替でも動かない） */}
+                <div className="px-4 pt-4 shrink-0 border-b border-gray-200">
+                  {ratingSelectors}
+                  {split.titleLine && (
+                    <div className="mt-2 text-sm font-semibold text-gray-900 break-words">{split.titleLine}</div>
+                  )}
+                  <div className="mt-3 flex gap-1 -mb-px">
+                    {tabs.map((t) => (
+                      <button
+                        key={t.key}
+                        onClick={() => {
+                          setAnalysisTab(t.key);
+                          analysisBodyRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className={`px-3 py-1.5 text-[13px] font-medium rounded-t border-b-2 transition-colors ${
+                          analysisTab === t.key
+                            ? "border-[#2563EB] text-[#2563EB] bg-blue-50"
+                            : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
+                  {analysisTab === "eval" ? (
+                    <AnalysisCommentBody comment={split.evaluationBody} />
+                  ) : analysisTab === "job" ? (
+                    <JobInfoField label={jobDescription.label} value={jobDescription.value} state={jobInfo.state} />
+                  ) : (
+                    <div className="space-y-3">
+                      <JobInfoField label={employeeCount.label} value={employeeCount.value} state={jobInfo.state} />
+                      <JobInfoField label={companyOverview.label} value={companyOverview.value} state={jobInfo.state} />
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+            })()}
             <div className="p-3 border-t flex items-center justify-between gap-2 shrink-0">
               {/* 左端: 読んだあとそのまま紹介保留へ。AI評価モーダルは閉じず ArchiveModal を重ねる */}
               <button
@@ -2808,7 +2895,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
               {editingComment ? (
                 <>
                   <button
-                    onClick={() => { setEditingComment(false); setEditedCommentText(""); }}
+                    onClick={() => { setEditingComment(false); setEditedCommentText(""); setAnalysisTab("eval"); }}
                     disabled={savingComment}
                     className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 disabled:opacity-50"
                   >
@@ -2834,6 +2921,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                         setSelectedAnalysis({ ...selectedAnalysis, comment: editedCommentText, rating: updatedRating ?? selectedAnalysis.rating });
                         setEditingComment(false);
                         setEditedCommentText("");
+                        // 表示モードへ戻ったら再分割して評価タブから見せる
+                        setAnalysisTab("eval");
                       } catch {
                         toast.error("保存に失敗しました");
                       } finally {
