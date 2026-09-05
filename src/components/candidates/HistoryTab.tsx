@@ -2740,7 +2740,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       {selectedAnalysis && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" {...overlayCloseAnalysis}>
           {/* T-180: 長文の選考分析を読みやすくするため幅を拡大（スマホは従来どおりほぼ全幅） */}
-          <div className="bg-white rounded-lg shadow-xl w-[92vw] max-w-5xl mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+          {/* 高さは h-[85vh] 固定。max-h だと本文の少ないタブ（会社概要）でモーダルが縮み、
+              タブ切替のたびに外枠がガタつくため、内容量に依存させない（T-190）。 */}
+          <div className="bg-white rounded-lg shadow-xl w-[92vw] max-w-5xl mx-4 h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 {selectedAnalysis.rating && RATING_STYLES[selectedAnalysis.rating] && (
@@ -2812,21 +2814,24 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
             );
             if (!tabbed) {
               // フォールバック: 編集モード / 旧形式の本文は従来どおり 1枚表示。
+              // 高さはモーダル固定枠の残りを埋める（min-h-0 が無いと flex 子が縮まずはみ出す）。
               return (
-                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
-                  <div className="mb-3">{ratingSelectors}</div>
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1 min-h-0 flex flex-col">
+                  <div className="mb-3 shrink-0">{ratingSelectors}</div>
                   {editingComment ? (
+                    // 高さは rows ではなく残り高さで決める（min-h で潰れ防止）。
                     <textarea
                       value={editedCommentText}
                       onChange={(e) => setEditedCommentText(e.target.value)}
-                      rows={16}
-                      className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
+                      className="w-full flex-1 min-h-[240px] text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
                     />
                   ) : (
                     <AnalysisCommentBody comment={selectedAnalysis.comment} />
                   )}
                   {/* T-184: 選考分析の下。編集モードでも表示専用として出す（textarea の中身には入らない）。 */}
-                  <JobInfoSection info={jobInfo} />
+                  <div className="shrink-0">
+                    <JobInfoSection info={jobInfo} />
+                  </div>
                 </div>
               );
             }
@@ -2866,7 +2871,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                     ))}
                   </div>
                 </div>
-                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
+                {/* タブ本文だけが残り高さを埋めてスクロールする。短いタブでは下が空くのが正しい。 */}
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1 min-h-0">
                   {analysisTab === "eval" ? (
                     <AnalysisCommentBody comment={split.evaluationBody} />
                   ) : analysisTab === "job" ? (
