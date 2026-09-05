@@ -11,6 +11,8 @@ import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-r
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
 import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval-shared";
+// T-184: 求人評価モーダルに出す「求人情報（CA向け）」。抽出そのものはサーバ側（/job-info）で行う。
+import type { BookmarkJobInfo } from "@/lib/bookmark-job-info";
 
 // T-182: 求人出力（kyuujinPDF 送信）の廃止。旧導線（求人出力へ送信・求人紹介へ移動・
 // 出力済バッジ・未出力選択）はコードを残したまま描画だけ止める。復活時はここを true に戻す。
@@ -599,6 +601,41 @@ function AnalysisCommentBody({ comment }: { comment: string }) {
   );
 }
 
+// T-184: 求人評価モーダルの「◆ 求人情報（CA向け・求職者には非表示）」セクション。
+// 評価テキスト（aiAnalysisComment）とは完全に別データ。表示専用で、編集・コピー・求職者向け出力には一切載らない。
+function JobInfoSection({ info }: { info: { state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null } }) {
+  const items: { label: string; value: string | null }[] = [
+    { label: "仕事内容", value: info.data?.jobDescription ?? null },
+    { label: "従業員数", value: info.data?.employeeCount ?? null },
+    { label: "会社概要", value: info.data?.companyOverview ?? null },
+  ];
+  return (
+    <div className="mt-6 pt-4 border-t border-gray-200">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="font-semibold text-gray-900 text-sm">◆ 求人情報（CA向け・求職者には非表示）</span>
+      </div>
+      {info.state === "loading" ? (
+        <div className="text-sm text-gray-400">読み込み中…</div>
+      ) : info.state === "error" ? (
+        <div className="text-sm text-gray-500">（取得できませんでした）</div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((it) => (
+            <div key={it.label}>
+              <div className="text-[12px] font-semibold text-gray-500 mb-0.5">{it.label}</div>
+              {it.value ? (
+                <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{it.value}</div>
+              ) : (
+                <div className="text-sm text-gray-400">（データなし）</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // T-189 Phase3-1: 担当列の表示名。自動引き当て由来（autoSourcedAt 非null）は保存者名（システム/管理者）ではなく
 // 「AI自動検索」を出す。表示のみで uploadedByUserId は変えない。並び替え（uploader 基準）も同じ文字列を使う。
 const AUTO_SOURCED_LABEL = "AI自動検索";
@@ -1105,6 +1142,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
   const [editingComment, setEditingComment] = useState(false);
   const [editedCommentText, setEditedCommentText] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  // T-184: 求人情報（仕事内容/従業員数/会社概要）。モーダルを開いたときに都度取得する表示専用データ。
+  //   評価テキスト（aiAnalysisComment）には一切書き込まない・混ぜない。
+  const [jobInfo, setJobInfo] = useState<{ state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null }>({ state: "loading", data: null });
   const [wishRating, setWishRating] = useState<string>("");
   const [passRating, setPassRating] = useState<string>("");
   const [overallRating, setOverallRating] = useState<string>("");
@@ -1248,6 +1288,25 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     // ◀▶ で別の求人へ移動したときは本文を先頭から読ませたいのでスクロール位置を戻す
     analysisBodyRef.current?.scrollTo({ top: 0 });
   }, [selectedAnalysis?.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // T-184: 求人情報（CA向け）をモーダルを開いた時点で取得する。失敗してもモーダル自体は通常どおり開く。
+  useEffect(() => {
+    const fileId = selectedAnalysis?.fileId;
+    if (!fileId) return;
+    let aborted = false;
+    setJobInfo({ state: "loading", data: null });
+    (async () => {
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/job-info`);
+        if (!res.ok) throw new Error();
+        const data = (await res.json()) as BookmarkJobInfo;
+        if (!aborted) setJobInfo({ state: "ok", data });
+      } catch {
+        if (!aborted) setJobInfo({ state: "error", data: null });
+      }
+    })();
+    return () => { aborted = true; };
+  }, [selectedAnalysis?.fileId, candidateId]);
 
   const updateRatingMarker = (axis: "wish" | "pass" | "overall", newValue: string) => {
     const label = axis === "wish" ? "本人希望" : axis === "pass" ? "通過率" : "総合";
@@ -2732,6 +2791,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
               ) : (
                 <AnalysisCommentBody comment={selectedAnalysis.comment} />
               )}
+              {/* T-184: 選考分析の下。編集モードでも表示専用として出す（textarea の中身には入らない）。 */}
+              <JobInfoSection info={jobInfo} />
             </div>
             <div className="p-3 border-t flex items-center justify-between gap-2 shrink-0">
               {/* 左端: 読んだあとそのまま紹介保留へ。AI評価モーダルは閉じず ArchiveModal を重ねる */}
