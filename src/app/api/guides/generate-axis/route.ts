@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { recordGeminiUsage } from "@/lib/ai-usage";
+import { assertGuideAccess } from "@/lib/guides/access";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    // T-191: ガイドの token（または portal のログイン）が無ければ AI を呼ばない。
+    const deny = await assertGuideAccess(request, body?.guideToken);
+    if (deny) return deny;
+
     const { reason_for_change, work_values, future_vision, parsed_resume } = body;
 
     if (

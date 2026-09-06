@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { initialAppState } from "@/types/jimu";
 
 export async function POST(request: Request) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   try {
     const body = await request.json().catch(() => ({}));
     const candidateName = body.candidateName || null;

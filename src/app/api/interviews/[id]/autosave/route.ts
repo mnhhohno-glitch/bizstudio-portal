@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { sanitizeDateTimeFields } from "@/lib/date-utils";
 import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
 
@@ -9,6 +10,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // T-191: session 必須。autosaveToken は競合検知用であって認証ではない。
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const { id } = await params;
 
   try {

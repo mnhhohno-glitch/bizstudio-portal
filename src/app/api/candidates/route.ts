@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 
 /**
  * GET /api/candidates
- * 求職者一覧を返す（他アプリからの参照用）
+ * 求職者一覧を返す
+ *
+ * T-191 で session 必須化（candidate-intake 旧画面は廃止）。
+ * CORS ヘッダは残すが credentials を伴わない `*` なので、認証後は情報が漏れない。
  */
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   try {
     const candidates = await prisma.candidate.findMany({
       orderBy: { candidateNumber: "desc" },

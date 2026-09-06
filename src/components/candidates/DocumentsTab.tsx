@@ -344,18 +344,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
     "text/plain",
   ]);
 
-  const candidateIntakeUrl = process.env.NEXT_PUBLIC_CANDIDATE_INTAKE_URL
-    || "https://candidate-intake-production.up.railway.app";
-
-  const handleOpenIntake = () => {
-    const driveFileIds = files.map((f) => f.driveFileId).filter(Boolean);
-    let url = `${candidateIntakeUrl}/register?candidateId=${candidateId}`;
-    if (driveFileIds.length > 0) {
-      url += `&files=${driveFileIds.join(",")}`;
-    }
-    window.open(url, "_blank");
-  };
-
   // フォルダエリアへの D&D アップロード。folderId 未指定はルート直下扱い
   const handleAreaDrop = async (fileList: FileList, folderId?: string) => {
     const valid = Array.from(fileList).filter(
@@ -848,14 +836,6 @@ export default function DocumentsTab({ candidateId }: { candidateId: string }) {
                 className="border border-gray-300 bg-white text-gray-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-gray-50 transition-colors"
               >
                 + フォルダ作成
-              </button>
-            )}
-            {activeSubTab === "MEETING" && (
-              <button
-                onClick={handleOpenIntake}
-                className="border border-green-200 bg-green-50 text-green-700 rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-green-100 transition-colors"
-              >
-                📝 面談登録 ↗
               </button>
             )}
             <button

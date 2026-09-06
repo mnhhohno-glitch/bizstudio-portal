@@ -13,6 +13,8 @@ interface Section05Props {
   data: Record<string, string>;
   onChange: (key: string, value: string) => void;
   axisResultUrl?: string;
+  /** T-191: /g/[token] から渡るガイドトークン。AI 系 API に x-guide-token として送る。 */
+  guideToken?: string;
 }
 
 const worksheetFields = [
@@ -36,7 +38,13 @@ const worksheetFields = [
   },
 ];
 
-export default function Section05Axis({ data, onChange, axisResultUrl }: Section05Props) {
+export default function Section05Axis({ data, onChange, axisResultUrl, guideToken }: Section05Props) {
+  // T-191: 求職者（未ログイン）からの呼び出しはガイドトークンで認証する。
+  // portal の CA 画面は token を持たないが、その場合はサーバー側で session を見る。
+  const guideAuthHeaders: Record<string, string> = guideToken
+    ? { "x-guide-token": guideToken }
+    : {};
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [modalFieldKey, setModalFieldKey] = useState<string | null>(null);
@@ -74,6 +82,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
 
       const res = await fetch("/api/guides/parse-resume", {
         method: "POST",
+        headers: guideAuthHeaders,
         body: formData,
       });
 
@@ -143,7 +152,7 @@ export default function Section05Axis({ data, onChange, axisResultUrl }: Section
     try {
       const res = await fetch("/api/guides/generate-axis", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...guideAuthHeaders },
         body: JSON.stringify({
           reason_for_change: data["reason_for_change"],
           work_values: data["work_values"],

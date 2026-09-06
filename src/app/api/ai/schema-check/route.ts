@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { assertAiReadAuth } from "@/lib/aiRead/auth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+// T-191: 件数・サンプルレコードを返すため /api/ai/company-kpi と同じ Bearer（AI_READ_API_KEY）を必須にする。
+// 死活監視用の /api/ai/health は none のまま。
+export async function GET(req: Request) {
+  const deny = assertAiReadAuth(req);
+  if (deny) return deny;
+
   const checks: Record<string, unknown> = {};
 
   try {

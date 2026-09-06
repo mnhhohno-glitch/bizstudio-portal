@@ -23,6 +23,8 @@ interface InterviewGuideContentProps {
   onCopyUrl?: () => void;
   copyButtonText?: string;
   axisResultUrl?: string;
+  /** T-191: 求職者向け /g/[token] から渡すガイドトークン。AI 系 API の認証に使う。 */
+  guideToken?: string;
 }
 
 const sectionTitles = [
@@ -54,6 +56,7 @@ export default function InterviewGuideContent({
   onCopyUrl,
   copyButtonText,
   axisResultUrl,
+  guideToken,
 }: InterviewGuideContentProps) {
   const [saved, setSaved] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
@@ -171,7 +174,7 @@ export default function InterviewGuideContent({
     <Section02Essence key="s2" />,
     <Section03Preparation key="s3" />,
     <Section04Categories key="s4" />,
-    <Section05Axis key="s5" data={data} onChange={onChange} axisResultUrl={axisResultUrl} />,
+    <Section05Axis key="s5" data={data} onChange={onChange} axisResultUrl={axisResultUrl} guideToken={guideToken} />,
     <Section06Logic key="s6" />,
     <Section07Strengths key="s7" />,
     <Section08Prep key="s8" data={data} onChange={onChange} />,

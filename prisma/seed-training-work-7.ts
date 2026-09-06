@@ -39,8 +39,7 @@ const FIELD_LABELS: FieldLabel[] = [
 const DESCRIPTION = [
   "現場研修 Day1〜Day5 の総合確認（記述式12問）。求職者に実際に伝える言葉・判断の理由を書く。",
   "送信すると模範解答と採点ポイントが表示される。自己採点して、足りなかった観点を振り返り日報に書く。",
-].join("
-");
+].join("\n");
 
 // modelAnswer / gradingPoints は回答送信後にのみ画面に出る（API 側で制御）
 type Item = {
