@@ -1401,11 +1401,11 @@ model MynaviRpaProcessingLog {
   phoneNormalized   String?           @map("phone_normalized")
   candidateName     String?           @map("candidate_name")
   candidateAge      Int?              @map("candidate_age")
-  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIP" | "ERROR"
+  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIPPED"（旧: "DUPLICATE_SKIP"） | "ERROR"
   reason            String?           @db.Text
   canSendReply      Boolean           @default(false) @map("can_send_reply")
   replySentAt       DateTime?         @map("reply_sent_at")
-  replyResult       String?           @map("reply_result") // "SUCCESS" | "FAILURE"
+  replyResult       String?           @map("reply_result") // "SUCCESS" | "FAILED" | "SKIP"（旧データに "FAILURE" あり得る）
   pdfFileName       String?           @map("pdf_file_name")
   pdfFileId         String?           @map("pdf_file_id")
   errorMessage      String?           @map("error_message") @db.Text
