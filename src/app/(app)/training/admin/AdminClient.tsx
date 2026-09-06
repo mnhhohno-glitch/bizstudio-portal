@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import type { FieldLabel } from "@/lib/training-work";
 import { hasUnknownWordsField } from "@/lib/training-work";
+import ModelAnswerPanel from "@/components/training/ModelAnswerPanel";
 
 export type QuizOption = { quizKey: string; title: string };
 
@@ -125,6 +126,8 @@ type WorkItemLite = {
   sortOrder: number;
   title: string;
   jobContent: string;
+  modelAnswer: string | null;
+  gradingPoints: string | null;
 };
 
 type WorkAnswer = {
@@ -684,6 +687,15 @@ function WorkAnswersSection({
                         </div>
                       ))}
                     </dl>
+                  )}
+                  {/* 研修生の回答の下に模範解答・採点ポイント（回答がある設問のみ。T-192） */}
+                  {answer && item.modelAnswer !== null && (
+                    <ModelAnswerPanel
+                      key={`${detailEmployee}-${item.itemCode}`}
+                      modelAnswer={item.modelAnswer}
+                      gradingPoints={item.gradingPoints}
+                      idPrefix={`admin-${item.itemCode}`}
+                    />
                   )}
                 </div>
               ))}

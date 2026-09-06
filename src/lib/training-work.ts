@@ -52,3 +52,15 @@ export function normalizeFieldLabels(value: unknown): FieldLabel[] {
 export function hasUnknownWordsField(fields: FieldLabel[]): boolean {
   return fields.some((f) => f.key === "answerUnknown" && f.label.includes("分からなかった言葉"));
 }
+
+/**
+ * 採点ポイント（TrainingWorkItem.gradingPoints）は改行区切りの文字列で持つ。
+ * 表示用に1行1項目へ分割する（空行は除く）。
+ */
+export function splitGradingPoints(value: string | null | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}

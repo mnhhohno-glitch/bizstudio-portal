@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>クイズ Ver.6 総合（中級）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Zen+Antique+Soft&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --green:#155E4E;
+    --green-deep:#0C3F34;
+    --green-tint:#EAF3EF;
+    --ink:#1C2724;
+    --sub:#5C6B66;
+    --line:#D8E2DD;
+    --amber:#B96A12;
+    --amber-tint:#FBF1E3;
+    --red:#A63A2E;
+    --red-tint:#F9ECEA;
+    --bg:#F7FAF8;
+    --card:#FFFFFF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.7;
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 64px;}
+  header.app{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:6px 2px 14px;border-bottom:2px solid var(--green);
+    margin-bottom:20px;
+  }
+  .brand{font-weight:900;font-size:15px;letter-spacing:.06em;color:var(--green-deep);}
+  .brand small{display:block;font-weight:500;font-size:11px;color:var(--sub);letter-spacing:.12em;}
+  .lv{font-family:'Zen Antique Soft',serif;font-size:22px;color:var(--green);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 20px;box-shadow:0 1px 2px rgba(12,63,52,.05);}
+  h1{font-size:22px;font-weight:900;color:var(--green-deep);line-height:1.4;margin-bottom:10px;}
+  .lede{font-size:13.5px;color:var(--sub);margin-bottom:20px;}
+  .lede strong{color:var(--ink);}
+
+  .modes{display:grid;gap:10px;margin-bottom:18px;}
+  .mode-btn{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    width:100%;text-align:left;background:var(--green-tint);
+    border:1.5px solid var(--line);border-radius:12px;
+    padding:14px 16px;font-family:inherit;font-size:15px;font-weight:700;color:var(--green-deep);
+    cursor:pointer;transition:border-color .15s;
+  }
+  .mode-btn:hover,.mode-btn:focus-visible{border-color:var(--green);}
+  .mode-btn .count{font-size:12px;font-weight:500;color:var(--sub);flex-shrink:0;}
+  .rule{font-size:12.5px;color:var(--sub);border-top:1px dashed var(--line);padding-top:14px;}
+  .rule b{color:var(--green-deep);}
+
+  /* progress */
+  .progress{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+  .pbar{flex:1;height:8px;background:var(--line);border-radius:99px;overflow:hidden;}
+  .pbar>i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .25s;}
+  .pnum{font-size:13px;font-weight:700;color:var(--sub);white-space:nowrap;}
+  .round-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--amber);background:var(--amber-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:12px;
+  }
+  .cat-tag{
+    display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+    color:var(--green);background:var(--green-tint);border-radius:6px;
+    padding:2px 8px;margin-bottom:10px;
+  }
+  .qtext{font-size:17px;font-weight:700;line-height:1.65;margin-bottom:18px;}
+
+  .opts{display:grid;gap:10px;}
+  .opt{
+    width:100%;text-align:left;background:#fff;border:1.5px solid var(--line);
+    border-radius:12px;padding:13px 15px;font-family:inherit;font-size:14.5px;
+    color:var(--ink);cursor:pointer;line-height:1.55;transition:border-color .12s,background .12s;
+  }
+  .opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--green);}
+  .opt:disabled{cursor:default;}
+  .opt.correct{border-color:var(--green);background:var(--green-tint);font-weight:700;}
+  .opt.wrong{border-color:var(--red);background:var(--red-tint);}
+  .opt .k{display:inline-block;width:1.6em;font-weight:900;color:var(--sub);}
+  .opt.correct .k{color:var(--green);}
+  .opt.wrong .k{color:var(--red);}
+
+  .feedback{margin-top:16px;border-radius:12px;padding:14px 16px;font-size:14px;display:none;}
+  .feedback.ok{display:block;background:var(--green-tint);border:1px solid var(--green);}
+  .feedback.ng{display:block;background:var(--amber-tint);border:1px solid var(--amber);}
+  .feedback .verdict{font-weight:900;font-size:15px;margin-bottom:6px;}
+  .feedback.ok .verdict{color:var(--green-deep);}
+  .feedback.ng .verdict{color:var(--amber);}
+  .feedback .exp{color:var(--ink);}
+
+  .actions{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{
+    appearance:none;border:none;border-radius:99px;padding:12px 26px;
+    font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;
+    background:var(--green);color:#fff;transition:background .15s;
+  }
+  .btn:hover,.btn:focus-visible{background:var(--green-deep);}
+  .btn.ghost{background:#fff;color:var(--green-deep);border:1.5px solid var(--green);}
+  .btn.ghost:hover,.btn.ghost:focus-visible{background:var(--green-tint);}
+  .btn:focus-visible,.opt:focus-visible,.mode-btn:focus-visible{outline:3px solid rgba(21,94,78,.35);outline-offset:2px;}
+
+  /* result */
+  .score-hero{text-align:center;padding:8px 0 18px;}
+  .score-hero .num{font-family:'Zen Antique Soft',serif;font-size:56px;color:var(--green);line-height:1.1;}
+  .score-hero .num small{font-size:22px;color:var(--sub);}
+  .score-hero .msg{font-size:15px;font-weight:700;color:var(--green-deep);margin-top:4px;}
+  .perfect .num{color:var(--amber);}
+  .wrong-list{border-top:1px dashed var(--line);padding-top:14px;margin-top:6px;}
+  .wrong-list h2{font-size:13px;font-weight:700;color:var(--sub);margin-bottom:8px;}
+  .wrong-list li{font-size:13.5px;margin:0 0 6px 1.2em;color:var(--ink);}
+  .note{font-size:12px;color:var(--sub);margin-top:20px;text-align:center;}
+
+
+  /* 記録ステータス表示 */
+  .rec{
+    margin-top:14px;font-size:12px;color:var(--sub);text-align:center;
+    min-height:1.4em;
+  }
+  .rec.ok{color:var(--green);font-weight:700;}
+  .rec.ng{color:var(--amber);font-weight:700;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app">
+    <div class="brand">BizStudio 新人CA研修<small>KNOWLEDGE DRILL</small></div>
+    <div class="lv">Ver.6</div>
+  </header>
+
+  <!-- ===== スタート画面 ===== -->
+  <section id="screen-start" class="card">
+    <h1>クイズ Ver.6 総合（中級）<br>満点になるまで繰り返そう</h1>
+    <p class="lede">現場研修 Day1〜Day5 の内容を、実際の求人票・求職者の条件を前にしたときの判断で確認します。ひっかけを含みます。1周目は6〜7割で構いません。2周目で満点を目指してください。全38問・4択。答えるとその場で<strong>解説</strong>が出ます。1周終わったら<strong>間違えた問題だけ</strong>をもう一度。</p>
+    <div class="modes" id="mode-list"></div>
+    <p class="rule"><b>ルール:</b> 調べながらでOK。ただし解説は必ず読むこと。画面を閉じると記録は消えるので、クリアしたら周回数をメモして報告してください。</p>
+  </section>
+
+  <!-- ===== 出題画面 ===== -->
+  <section id="screen-quiz" class="card" style="display:none;">
+    <div class="round-tag" id="round-tag"></div>
+    <div class="progress">
+      <div class="pbar"><i id="pbar-fill" style="width:0%"></i></div>
+      <div class="pnum" id="pnum"></div>
+    </div>
+    <div class="cat-tag" id="cat-tag"></div>
+    <p class="qtext" id="qtext"></p>
+    <div class="opts" id="opts"></div>
+    <div class="feedback" id="feedback">
+      <div class="verdict" id="verdict"></div>
+      <div class="exp" id="exp"></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-next" style="display:none;">次の問題へ</button>
+    </div>
+  </section>
+
+  <!-- ===== 結果画面 ===== -->
+  <section id="screen-result" class="card">
+    <div class="score-hero" id="score-hero">
+      <div class="num"><span id="score-n">0</span><small> / <span id="score-t">0</span></small></div>
+      <div class="msg" id="score-msg"></div>
+    </div>
+    <div class="wrong-list" id="wrong-wrap">
+      <h2>間違えた問題</h2>
+      <ul id="wrong-list"></ul>
+    </div>
+    <div class="rec" id="rec"></div>
+    <div class="actions" id="result-actions"></div>
+  </section>
+
+  <p class="note">© 株式会社ビズスタジオ 社内研修用 / 問題の追加・修正はHTML内の QUESTIONS を編集</p>
+</div>
+
+<script>
+/* =====================================================================
+   問題データ
+   ここを編集すれば問題の追加・修正ができます。
+   cat: カテゴリ名（そのまま表示。カテゴリ別出題の範囲にもなる）
+   a: 正解の選択肢番号(0始まり)
+   exp: 解説
+===================================================================== */
+const QUIZ_KEY = "sougou6";
+const QUIZ_TITLE = "クイズ Ver.6 総合（中級）";
+
+const QUESTIONS = [
+/* ---------- 支援スタンス (2問) ---------- */
+{qid:"sougou6-Q01", cat:"支援スタンス", q:"求職者は「事務職希望」。事務未経験で、書類通過率が低いことが予想される。CAの対応として最も適切なものは？",
+ o:["「事務」と言えるので、決まりやすい施工管理アシスタントを事務として提案する","事務の5種類を「誰を助ける仕事か」で説明し、接客経験が接続しやすい営業事務を候補に加えて提案する","希望通り一般事務だけを20社出して、数で勝負する","事務は通らないので、営業職だけを提案する"],
+ a:1, exp:"Aは「決まりやすい求人への誘導」そのもので、当社が絶対にやらないこと。Cは一般事務に応募が集中して倍率が高い現実を無視している。Dは本人の希望を否定している。本人が知らない選択肢（営業事務・人事アシスタントなど）を、理由とともに提示するのがCAの仕事。"},
+/* ---------- 転職の現実 (2問) ---------- */
+{qid:"sougou6-Q02", cat:"転職の現実", q:"未経験転職の書類通過率（5〜10%）を、応募前に求職者へ必ず伝える目的として最も適切なものは？",
+ o:["応募を思いとどまらせるため","必要な行動量と応募戦略を理解してもらい、落ちても自己否定に陥らず活動を続けられるようにするため","大手エージェントと同じように「まず60社応募」に誘導するため","書類作成の手間を省く理由を説明するため"],
+ a:1, exp:"数字を知らないまま応募を始めると、落ち続けて転職活動そのものから離脱する。「20社出して1社通ればいい世界」を先に共有し、期待値を合わせる。無差別応募を勧める話ではない。"},
+{qid:"sougou6-Q03", cat:"転職の現実", q:"書類通過率を引き上げる手段のうち、効果が最も大きいものは？",
+ o:["志望動機と自己PRを企業ごとに書き直す","証明写真をプロ撮影に差し替える","本人がまだ気づいていない、強みが業務に接続して通過しやすい求人を提案する","推薦状の文字数を増やす"],
+ a:2, exp:"書類の書き方を正しくすることは有効だが、それだけでは微増。効果が大きいのは「どの求人に応募するか」の方向を変えること。例：事務希望の接客経験者に、既存営業や営業事務を提案すると通過率が跳ね上がる。"},
+/* ---------- 支援スタンス (2問) ---------- */
+{qid:"sougou6-Q04", cat:"支援スタンス", q:"次のうち、当社が「絶対にやらない」対応に該当するものは？",
+ o:["施工管理を本人が望み、活躍の見込みもあるので施工管理の求人を提案した","販売希望者に「何を売りたいか」を聞いた上で、携帯販売を含む複数の販売求人を提案した","事務希望者に「決まりやすいから」という理由で、施工管理アシスタントを「事務業務です」と説明して案内した","「営業は苦手」と言う求職者に「どの営業が苦手か」を聞き、ルート営業を提案した"],
+ a:2, exp:"職種そのものを否定する話ではない。問題は「決まりやすいから」だけを理由に本人の考えを変えさせ、デメリット（現場での写真撮影・現場監督とのやり取り・転勤など）を正しく伝えないこと。短期離職と返金を生み、本人のキャリアも傷つける。"},
+/* ---------- 仕組み (2問) ---------- */
+{qid:"sougou6-Q05", cat:"仕組み", q:"返金規定が「入社1か月以内は80%、3か月以内は50%、6か月以内は20%」の企業。紹介手数料100万円で入社した求職者が、入社4か月目に退職した。返金額は？",
+ o:["80万円","50万円","20万円","0円"],
+ a:2, exp:"4か月目は「3か月以内」を過ぎ「6か月以内」に該当するので20%＝20万円。7か月目以降なら返金は発生しない。規定は会社ごとに異なるので、求人ごとに確認する。"},
+/* ---------- 用語 (1問) ---------- */
+{qid:"sougou6-Q06", cat:"用語", q:"求職者から「この求人、応募お願いします」と連絡を受けた翌日、書類を企業へ提出する前に「他社で決まったので辞退します」と言われた。これは何に該当する？",
+ o:["書類選考の辞退","エントリー段階の辞退","内定辞退","早期離職"],
+ a:1, exp:"本人から応募の意思をもらった段階が「エントリー」。企業に書類を提出して審査中の段階が「書類選考」。提出前なので、企業側には何も動いていない。エントリーと書類選考の境目を区別しておく。"},
+/* ---------- 仕組み (2問) ---------- */
+{qid:"sougou6-Q07", cat:"仕組み", q:"CA（求職者側）とRA（企業側）の分業制について、デメリットとして正しいものは？",
+ o:["企業の情報が伝言やデータベース経由になり、求職者へ届く情報が薄くなりやすい","一人あたりの業務量が増え、時間の投資効率が下がる","求職者と直接話す機会がなくなる","成果報酬の単価が下がる"],
+ a:0, exp:"分業のメリットは専門特化による時間効率、デメリットは情報の薄さ。Bは逆で、両面型のデメリット。当社は両面型に近く、企業から聞いた生の情報をそのまま求職者に届けられる。"},
+/* ---------- 求人票の読み方 (7問) ---------- */
+{qid:"sougou6-Q08", cat:"求人票の読み方", q:"必須条件「基本的なPCスキルをお持ちの方」。求職者は仕事でPCを使った経験がないが、学生時代にレポート作成をしており、タイピングとマウス操作に問題はない。判断は？",
+ o:["仕事でのPC経験がないので必須を満たさない。出さない","満たすと見てよい。迷わず出す","企業に「どこまで求めるか」を必ず確認してから決める","歓迎要件として読み替え、伝えた上で出す"],
+ a:1, exp:"「基本的なPCスキル」は明確な定義がない企業が多く、聞いても答えられないことが多い。仕事・学生時代・趣味のいずれかでPCに触れ、タイピングとマウス操作に問題がなければ満たすと判断してよい。実質「未経験OK」と読む。"},
+{qid:"sougou6-Q09", cat:"求人票の読み方", q:"求人：必須「社会人経験1年以上」、歓迎「Excel中級以上、営業事務経験」。求職者：接客販売2年、Excelは入力のみ、営業事務未経験。線引きは？",
+ o:["出さない（歓迎を2つとも満たさない）","迷わず出す（必須を満たしている。歓迎は条件ではない）","伝えた上で出す（チャレンジエントリー）","確認してから決める"],
+ a:1, exp:"歓迎要件は企業の理想像であって応募条件ではない。必須を満たし歓迎を満たさないだけの応募は、チャレンジですらない通常の応募。歓迎に寄せて精査すると提案が細りすぎる。"},
+{qid:"sougou6-Q10", cat:"求人票の読み方", q:"求人タイトル「未経験歓迎！人事労務スタッフ」。募集条件に「事務経験のある方」、仕事内容は勤怠管理・社会保険手続きが中心。事務未経験で「採用業務をやりたい」接客出身の求職者への対応は？",
+ o:["タイトルに「未経験歓迎」とあるので迷わず出す","募集条件の事務経験で応募要件を満たさず、中身も採用業務ではないので出さない","チャレンジエントリーとして伝えた上で出す","求職者本人に見せて判断させる"],
+ a:1, exp:"タイトルの「未経験」は業種・職種未経験の意味で、募集条件に「事務経験」があれば事務未経験者は弾かれる。さらに仕事内容が労務中心なら、本人がやりたい採用業務でもない。タイトルは中身を端的に表すが、募集条件と仕事内容を必ず確認する。"},
+{qid:"sougou6-Q11", cat:"求人票の読み方", q:"4つの求人のうち、内定までの難易度が最も低い（内定確度が高い）と読めるものは？",
+ o:["面接3回・SPIあり・採用予定2名","面接1回・筆記試験なし・採用予定1名","面接2回・筆記試験なし・採用予定3名","面接2回・適性検査あり・採用予定1名"],
+ a:2, exp:"面接回数が少なく、筆記・適性検査がなく、採用人数が多いほど難易度は下がる。Bは面接1回だが採用1名で枠が絞られ競争になる。Cは面接2回でも採用3名・筆記なしで、総合的に最も通りやすい。複数の要素を合わせて読む。"},
+{qid:"sougou6-Q12", cat:"求人票の読み方", q:"チャレンジエントリーの前提として正しいものは？",
+ o:["要件未達は求職者に伝えず送り、通過したら報告する","CAが「要件に届いていない」と把握した上で、求職者にも可能性と不通過リスクを伝えてから出す","必須条件を満たさない求人はすべてチャレンジエントリーとして出す","歓迎要件を満たさない応募をチャレンジエントリーと呼ぶ"],
+ a:1, exp:"知らずに送るのと、狙って送るのは全く違う。落ちたときに「だから言ったじゃん」ではなく「厳しいと分かって挑戦した」になるかどうか。Cは学歴要件など明確な不一致は出さない。Dは通常の応募。"},
+{qid:"sougou6-Q13", cat:"求人票の読み方", q:"求人の想定年収「350万〜600万円」、未経験歓迎。求職者の希望は450万円。案内として適切なものは？",
+ o:["450万円は範囲内なので狙えると伝える","未経験の提示は下限付近（350〜400万円程度）になる見込みと伝え、上限は経験者・成果を出した人の数字だと説明する","上限の600万円を目標にしましょうと伝える","年収は内定が出てから話す"],
+ a:1, exp:"想定年収の幅は「入社後に到達しうる幅」。未経験者に上限が出ることはまずなく、下限＋50万円以内が実質のライン。範囲内だからと安易に期待させると、内定時に承諾のネックになる。"},
+{qid:"sougou6-Q14", cat:"求人票の読み方", q:"「年間休日120日／週休2日制」と書かれた求人を、土日祝休み希望の求職者に提案する前に確認すべきことは？",
+ o:["120日なら土日祝休みなので、確認は不要","「完全」が付いていないため「2日休める週が月1回以上」の意味であり得る。通常週の休み日数と土曜出勤の有無を確認する","賞与の支給月数","試用期間の長さ"],
+ a:1, exp:"「完全週休2日制」＝毎週必ず2日。「週休2日制」＝2日休める週が月1回以上。年間休日120日も、夏季・年末年始を含んだ数字で土曜出勤がある場合がある。休日欄は1行ずつ読む。"},
+/* ---------- 営業の3軸 (3問) ---------- */
+{qid:"sougou6-Q15", cat:"営業の3軸", q:"求職者「土日は絶対に休みたい。数字を追い続けるのは嫌。人と話すのは好き」。3軸で最も合う営業は？",
+ o:["個人 × 新規開拓 × 無形（保険）","法人 × 新規開拓 × 無形（人材）","法人 × 既存・ルート × 有形（食品・部品）","個人 × 反響・来店 × 有形（ショールーム）"],
+ a:2, exp:"土日休みの時点で個人営業（夜・土日に動く）は外れる。数字を追いたくないので新規開拓も外れる。残るのは法人×既存・ルート。ノルマなしで関係を切らさないことが仕事の求人が多い。Dは接客経験が最も活きるが、土日休みとぶつかる。"},
+{qid:"sougou6-Q16", cat:"営業の3軸", q:"「反響・来店型」の営業に分類されるものはどれか？",
+ o:["人材紹介会社の法人営業（テレアポ・訪問）","保険ショップのカウンター相談員","食品メーカーのルート営業","生命保険の個人営業（紹介の連鎖）"],
+ a:1, exp:"問い合わせてきた人・来店した人に対応するのが反響・来店型。自分から探しに行かないので接客に近い。保険の窓口、SUUMOカウンター、賃貸不動産の店舗など。キャリアアドバイザー自身も反響営業に分類される。"},
+{qid:"sougou6-Q17", cat:"営業の3軸", q:"メーカーや商社の営業に「新規開拓なし」の求人が多い理由として最も適切なものは？",
+ o:["メーカー・商社には営業職が少ないから","戦後〜高度経済成長期に開拓を終え、今は既存の取引を長く維持するフェーズにあるから","法律で新規開拓が制限されているから","商品が売れなくなっているから"],
+ a:1, exp:"メーカー・商社は設立70〜100年の老舗が多く、開拓は先人が済ませている。だからルート営業中心で、安定志向の人に合う。逆にIT・人材など設立20〜30年の会社は取引先を増やすフェーズなので新規営業が多い。"},
+/* ---------- 事務の5種類 (4問) ---------- */
+{qid:"sougou6-Q18", cat:"事務の5種類", q:"5種類の事務のうち、求人の絶対数が最も少なく「欠員が出ないと募集されない」傾向が強いものは？",
+ o:["一般事務","営業事務","経理","総務・人事"],
+ a:3, exp:"総務・人事は会社に1〜2人のポジションで、他部署と比べて求人の絶対数が少ない。経理は「未経験で入れる求人が少ない（簿記が入口）」「選考通過が難しい」だが、求人数そのものは普通にある。「求人が少ない」と「通過が難しい」は別の観点。"},
+{qid:"sougou6-Q19", cat:"事務の5種類", q:"オフィスワーク未経験・無資格の求職者が「経理をやりたい」と言った。対応として最も適切なものは？",
+ o:["経理求人を20社出して数で勝負する","簿記が入口という現実を伝え、簿記3級以上の取得を目指しつつ、並行して他の事務職も提案する","経理は無理なので営業職に切り替えさせる","経理の代わりに総務・人事を提案する"],
+ a:1, exp:"経理は資格の有無が初期選考の最初のふるい。未経験・無資格では応募できる求人がほぼない。否定するのではなく現実を伝え、資格取得で応募できる求人が増えることを説明する。Dは総務・人事も未経験可が稀なので解決にならない。"},
+{qid:"sougou6-Q20", cat:"事務の5種類", q:"接客経験者の事務職への転換先として、営業事務が最も接続しやすい理由は？",
+ o:["座って黙々と作業する仕事だから","社外との電話・メール対応があり、人と関わりながら処理する構造が接客に近い。かつ応募が分散して通りやすい","給与が一般事務より高いから","資格が不要だから"],
+ a:1, exp:"営業事務は受注入力・納期調整・見積・請求書など、取引先や営業担当とのやり取りが多い。「営業」の字や人と話す場面で敬遠されるため応募が分散し、未経験でも比較的通りやすい。"},
+{qid:"sougou6-Q21", cat:"事務の5種類", q:"一般事務も営業事務も「未経験可の求人は多い」。それでも書類通過率が大きく違う理由は？",
+ o:["一般事務は「事務」と聞いて誰もが想像する仕事のため応募が集中し、倍率が跳ね上がる","営業事務の求人数が極端に少ないから","一般事務には資格が必要だから","実際には通過率に差はない"],
+ a:0, exp:"求人が多いことと、実際に通ることは別。一般事務は「座って社内で作業する仕事」を全員が希望するため倍率が高い。派遣や非正規で賄う動きもあり、正社員の一般事務はさらに狭い。"},
+/* ---------- 業種 (4問) ---------- */
+{qid:"sougou6-Q22", cat:"業種", q:"求人票の会社概要に「全国8か所に物流拠点。自社工場はなし。国内メーカー200社から仕入れ」とある。この会社は？",
+ o:["メーカー","商社","小売","物流会社"],
+ a:1, exp:"仕入れて売る＝商社。商社は仕入れた在庫を保管して出荷するため物流倉庫を持つ。工場を持つのがメーカー。Dの物流会社は他社の荷物を運ぶ・保管する会社で、「仕入れ」はしない。"},
+{qid:"sougou6-Q23", cat:"業種", q:"社名は「○○商事株式会社」。仕事内容に「自社工場で製造した製品を、代理店と工務店へ販売」と書かれている。業種の判断は？",
+ o:["社名に「商事」とあるので商社","仕事内容の「自社工場で製造」からメーカー","社名と仕事内容が矛盾するので判断できない","特殊法人"],
+ a:1, exp:"社名は当てにならない。「○○商事」なのにメーカー、「○○工業」なのに工場を持たない会社がある（歴史的な経緯で社名が残っている）。一番確実なのは仕事内容。「自社工場」「生産」「製造」があればメーカー。"},
+{qid:"sougou6-Q24", cat:"業種", q:"必須条件「事業会社での経理実務経験1年以上／日商簿記3級以上」。求職者は税理士法人で会計アシスタント3年、日商簿記2級。判断は？",
+ o:["経験3年・簿記2級で要件を上回るので迷わず出す","税理士法人は事業会社に数えられないので原則出さない。出すならチャレンジエントリーだと本人に伝える","簿記2級があるので優先度を上げて出す","経験年数が足りているので必ず通る"],
+ a:1, exp:"税理士法人・会計事務所・医療法人・学校法人などは特殊法人で、「事業会社での経験」には数えられない。経験年数が足りていても応募要件を満たさない。逆に税理士法人の求人なら同じ経験が歓迎される（J-10とJ-18の関係）。本人が気づけない制約なので、CAが気づく必要がある。"},
+{qid:"sougou6-Q25", cat:"業種", q:"研修では「業種は基本的に絞らない」と教えた。例外として業種で絞るべきケースは？",
+ o:["求職者が事務職を希望している","「理系の知識が必要な商材（化学・電子部品・機械）は避けたい」など、避けたい商材がはっきりしている","求職者の希望年収が高い","未経験転職である"],
+ a:1, exp:"職種（法人営業）は変えたくないが扱う商材を変えたい場合、商材は業種で決まる。キーワードで「化学」「電子」を除外する方法は、求人票に書かれていなければ引っかからないので弱い。本人の「嫌なこと」をシステムの項目に翻訳するのが検索軸を立てるということ。"},
+/* ---------- 給与 (6問) ---------- */
+{qid:"sougou6-Q26", cat:"給与", q:"月給30万円（うち固定残業手当45時間分8万円を含む）。賞与は「基本給の2か月分」。賞与の額は？",
+ o:["60万円","44万円","16万円","30万円"],
+ a:1, exp:"基本給は30万−8万＝22万円。賞与は基本給基準なので22万×2＝44万円。月給30万×2＝60万と思われがちだが、固定残業手当は算定に入らない。基本給が低いと賞与・退職金・残業単価すべてに響く。"},
+{qid:"sougou6-Q27", cat:"給与", q:"J-01：基本給17.0万円・固定残業35時間込み・実働8時間・年間休日122日。J-03：基本給22.0万円・固定残業なし・実働7.5時間・年間休日125日。時間単価が高いのは？",
+ o:["J-01（想定年収の上限が552万円と高い）","J-03","同じ","判断できない"],
+ a:1, exp:"J-01は17万円÷20日÷8時間≒1,060円。J-03は22万円÷19日÷7.5時間≒1,540円。想定年収の順位と基本給・時間単価の順位が完全に逆転する。額面をとにかく取りたい人はJ-01型、安定して働きたい人はJ-03型、と使い分けて提案する。"},
+{qid:"sougou6-Q28", cat:"給与", q:"「固定残業手当35時間分」の求人。求職者から「実際の残業はどれくらいですか」と聞かれた。最も適切な回答は？",
+ o:["35時間残業する前提の会社です","一般に「超えないライン」に余裕を持たせて設定するので、実残業は20〜30時間前後が目安。正確な数字は企業に確認します","固定残業なので残業はありません","45時間程度です"],
+ a:1, exp:"固定残業制度は残業代計算の管理負担を減らす目的で、ほとんどの会社が実残業より余裕を持たせる。「35なら20〜30、20なら10前後」が読みの目安。ただし給与を高く見せるために大きく積む会社もあるので、基本給と固定残業時間を分けて確認する。"},
+{qid:"sougou6-Q29", cat:"給与", q:"現年収470万円（見込み残業35時間分込み・定時18時）の求職者に、年収下限450万円・固定残業なし・定時17時の求人。伝え方として最も適切なものは？",
+ o:["「20万円下がるので、条件は悪くなります」","「額面は20万円下がりますが、残業代込みではなく実働も1時間短いので、実質の待遇は上がる可能性があります」と生活に翻訳して伝える","年収の話は内定後まで触れない","「交渉して500万円にしましょう」"],
+ a:1, exp:"未経験転職で承諾の最大のネックは年収低下。額面だけでなく、残業代・賞与・所定労働時間・固定残業の有無を含めた実質待遇を計算して伝えるのがCAの役割。本人が自分で気づく前に、こちらから示す。"},
+{qid:"sougou6-Q30", cat:"給与", q:"地域の最低賃金は時給1,200円。求人の基本給17万円、所定労働は8時間×月20日＝160時間（基本給ベースの時給は約1,062円）。ほかに通勤手当2万円と固定残業手当3万円がある。この給与設定は？",
+ o:["通勤手当・固定残業手当を足せば超えるので問題ない","基本給ベースで最低賃金を下回っており違法。通勤手当・固定残業手当は算定に含めない","固定残業が付いていれば問題ない","月給制の求人は最低賃金の対象外"],
+ a:1, exp:"基本給÷所定労働時間が最低賃金を下回れば違法。通勤手当・時間外手当（固定残業手当）などは換算されない。毎年10月の改定時、企業は基本給を上げるか、固定残業時間を減らして基本給へ振り替え総支給を変えない方法（多い）を取る。求人票を見るときにチェックできる目線。"},
+{qid:"sougou6-Q31", cat:"給与", q:"面談で求職者が「基本給20万円以上でお願いします」と言った。この発言から読み取れることとして最も適切なものは？",
+ o:["条件が厳しい、わがままな求職者である","給与の仕組み（基本給が賞与・残業代の基準になること）を理解しており、残業前提の給与を避けたい意向がある可能性が高い","年収にはこだわりがない","経理経験者である"],
+ a:1, exp:"一般の求職者は年収の額面で判断する。基本給を指定してくる人は、固定残業込みの見せ方を知っている、または残業をしたくない。提案する求人を「基本給が高く固定残業なし」に寄せる材料になる。"},
+/* ---------- 線引き (1問) ---------- */
+{qid:"sougou6-Q32", cat:"線引き", q:"求職者は26歳・専門学校卒。求人は「大卒以上／未経験歓迎／年収350万円」。線引きは？",
+ o:["迷わず出す（未経験歓迎だから）","伝えた上で出す（学歴以外は合う）","出さない（学歴要件は厳格に運用される）","確認してから決める"],
+ a:2, exp:"学歴要件は、年齢や経験年数の目安と違って厳格。専門卒・短大卒・高専卒は大卒扱いにならない。ハイクラス領域で同業種・高年収の例外はあるが、第二新卒層では大卒以上に専門卒はほぼ通らない。検索では学歴条件を必ず設定する。"},
+/* ---------- Must→Can→Will (2問) ---------- */
+{qid:"sougou6-Q33", cat:"Must→Can→Will", q:"引越作業スタッフ2年の求職者。面談ログに免許の記載はない。必須条件「普通自動車免許」のルート営業求人を見つけた。次の行動は？",
+ o:["引越をしていたので免許は持っている前提で出す","免許が必要なので出さない","免許の有無を本人に確認してから決める","免許を歓迎要件として読み替えて出す"],
+ a:2, exp:"判定は3つではなく4つ。①出さない ②迷わず出す ③伝えた上で出す ④確認してから決める。引越でも同乗のみで免許を持たない人はいる。推測で出すと書類で落ち、本人には理由が分からない。避けるのでも推測するのでもなく、「免許はお持ちですか」の一言で済む。"},
+{qid:"sougou6-Q34", cat:"Must→Can→Will", q:"求人を「Will（やりたいか）→ Can（活きるか）→ Must（応募できるか）」の順で見た場合に起きる問題として正しいものは？",
+ o:["応募できない求人ばかりが集まり、求職者との認識のズレが大きくなる","決定が早くなる","求人の件数が減りすぎる","特に問題は起きない"],
+ a:0, exp:"求職者本人はWillを最優先するが、CAは Must → Can → Will で固定する。エントリーだけ取るならWillだけで済むが、決定を取るには応募できる求人の中から活きる求人を選ぶ必要がある。順番を逆にすると「経歴を見ていない」と信頼を失う。"},
+/* ---------- 求人検索 (3問) ---------- */
+{qid:"sougou6-Q35", cat:"求人検索", q:"求職者の希望年収は「下限300万円」、現年収は350万円。ポータルの年収条件の設定として最も適切なものは？",
+ o:["下限300万円のみ設定する","下限300万円＋「含む」に350万円を設定し、実力値から離れた高年収求人を外す","上限350万円のみ設定する","下限350万円のみ設定する"],
+ a:1, exp:"下限だけだと「300万〜600万」のような求人も残る。「含む」に現年収を入れると、その金額がレンジに入る求人だけになり、本人の実力値に近い求人に絞れる。まず希望額そのままで検索し、少なければ50万下げる。"},
+{qid:"sougou6-Q36", cat:"求人検索", q:"キーワード条件を「1行目：求人タイトルに『未経験 第二新卒』（いずれかを含む）」「2行目：募集条件に『未経験』」と設定した。検索結果に残る求人は？",
+ o:["「未経験」「第二新卒」のどれか1語がどこかに入っている求人","求人タイトルに未経験または第二新卒が入り、かつ募集条件に未経験が入っている求人","3語すべてが求人タイトルに入っている求人","未経験・第二新卒の語を含まない求人"],
+ a:1, exp:"同じ行の中は「いずれか／すべて」で切り替え。行を追加すると縦は必ずAND。求人タイトルと募集条件の掛け合わせで未経験求人に寄せる。「すべてを含む」にすると絞りすぎて件数が数件になることがある。"},
+{qid:"sougou6-Q37", cat:"求人検索", q:"条件を設定したら13件しか出なかった。100件前後まで広げたい。緩める順番として正しいものは？",
+ o:["職種を広げる → 土日休みを外す → 年収を下げる","土日祝休みのチェックを外す","年収の下限を下げる → 勤務地を1つ広げる → キーワードを外す。職種と休日は最後まで動かさない","学歴条件を外す"],
+ a:2, exp:"職種・休日・学歴はMust要件なので動かさない。年収下限は「希望マイナス50万」まで、勤務地は隣接エリアへ、キーワードは条件を1つ外す、の順で緩める。逆に多すぎるときは年収・学歴・雇用形態・キーワードを足して絞る。"},
+/* ---------- 倍率 (1問) ---------- */
+{qid:"sougou6-Q38", cat:"倍率", q:"次の4つの求人のうち、他と比べて応募倍率が「低い」と読めるものは？",
+ o:["大手2社の合弁会社。年収400万〜、リモート可、フレックス、面接3回","年収400万〜、大卒なら誰でも応募可、都心、土日休み、残業少、リモート可。従業員5名","未経験歓迎の一般事務、都心、土日祝休み、従業員300名","年収400万〜、大卒なら誰でも応募可、都心、土日休み、従業員300名"],
+ a:1, exp:"条件が良く要件が緩い求人は倍率が上がる（A・C・D）。Bは条件は100点だが従業員5名。安定志向の人が敬遠するため倍率は下がる。小規模は幅広く任され成長は早いが、ルーティン希望には合わない。求職者にはそのまま伝えて選ばせる。倍率は条件だけでなく、規模・知名度・合弁・選考フローを合わせて読む。"},
+];
+
+// カテゴリ一覧は出題データから作る（登場順）
+const CATS = [...new Set(QUESTIONS.map(q=>q.cat))];
+
+/* ===================================================================== */
+
+
+/* =====================================================================
+   回答記録（ポータルへ送信）
+   同一オリジンの /api/training/quiz-attempts にPOSTする。
+   未ログイン(401)や失敗時は黙って続行し、クイズの利用は妨げない。
+===================================================================== */
+const ATTEMPT_ENDPOINT = "/api/training/quiz-attempts";
+let attemptLog = [];      // 今の周回の解答明細
+let roundStartedAt = null;
+
+function recordAnswer(q, chosenIndex, isCorrect, position){
+  attemptLog.push({
+    qid: q.qid,
+    category: q.cat,
+    questionText: q.q,
+    chosenText: q.o[chosenIndex],
+    correctText: q.o[q.a],
+    isCorrect: !!isCorrect,
+    position: position
+  });
+}
+
+async function sendAttempt(payload){
+  const el = document.getElementById("rec");
+  if(el){ el.className = "rec"; el.textContent = "記録を保存しています…"; }
+  try{
+    const res = await fetch(ATTEMPT_ENDPOINT, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if(!el) return;
+    if(res.ok){
+      el.className = "rec ok";
+      el.textContent = "この結果を記録しました";
+    }else if(res.status === 401){
+      el.className = "rec ng";
+      el.textContent = "未ログインのため記録できませんでした（ポータルにログインしてから開き直してください）";
+    }else{
+      el.className = "rec ng";
+      el.textContent = "記録に失敗しました（結果は画面で確認できます）";
+    }
+  }catch(e){
+    if(el){ el.className = "rec ng"; el.textContent = "記録に失敗しました（オフラインの可能性があります）"; }
+  }
+}
+
+const $ = id => document.getElementById(id);
+const screens = {start:$("screen-start"), quiz:$("screen-quiz"), result:$("screen-result")};
+function show(name){
+  for(const k in screens) screens[k].style.display = (k===name) ? "" : "none";
+}
+
+let pool = [];        // 今の周回で出題する問題(元QUESTIONSへの参照)
+let order = [];       // シャッフル済みインデックス
+let cur = 0;
+let wrong = [];       // 間違えた問題
+let correctCount = 0;
+let round = 1;
+let modeLabel = "";
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+/* ---- スタート画面 ---- */
+function buildStart(){
+  const list = $("mode-list");
+  list.innerHTML = "";
+  const modes = [
+    {key:"ALL", label:"全問チャレンジ", count:QUESTIONS.length},
+    ...CATS.map(c=>({key:c, label:c, count:QUESTIONS.filter(q=>q.cat===c).length}))
+  ];
+  modes.forEach(m=>{
+    const b = document.createElement("button");
+    b.className = "mode-btn";
+    b.innerHTML = `<span>${m.label}</span><span class="count">${m.count}問</span>`;
+    b.addEventListener("click", ()=>startQuiz(m.key, m.label));
+    list.appendChild(b);
+  });
+  show("start");
+}
+
+function startQuiz(key, label){
+  modeLabel = label;
+  round = 1;
+  pool = (key==="ALL") ? QUESTIONS.slice() : QUESTIONS.filter(q=>q.cat===key);
+  beginRound();
+}
+
+function beginRound(){
+  order = shuffle(pool.map((_,i)=>i));
+  cur = 0;
+  wrong = [];
+  correctCount = 0;
+  attemptLog = [];
+  roundStartedAt = new Date().toISOString();
+  show("quiz");
+  renderQuestion();
+}
+
+function renderQuestion(){
+  const q = pool[order[cur]];
+  $("round-tag").textContent = (round===1) ? `1周目 / ${modeLabel}` : `${round}周目(間違えた問題だけ) / ${modeLabel}`;
+  $("pnum").textContent = `${cur+1} / ${order.length}`;
+  $("pbar-fill").style.width = `${(cur)/order.length*100}%`;
+  $("cat-tag").textContent = q.cat;
+  $("qtext").textContent = `Q${cur+1}. ${q.q}`;
+
+  const optWrap = $("opts");
+  optWrap.innerHTML = "";
+  const keys = ["ア","イ","ウ","エ"];
+  const idxs = shuffle(q.o.map((_,i)=>i));   // 選択肢もシャッフル
+  idxs.forEach((oi, pos)=>{
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.innerHTML = `<span class="k">${keys[pos]}</span>${q.o[oi]}`;
+    b.addEventListener("click", ()=>answer(b, oi===q.a, q, optWrap, idxs, oi));
+    optWrap.appendChild(b);
+  });
+
+  const fb = $("feedback");
+  fb.className = "feedback";
+  $("btn-next").style.display = "none";
+}
+
+function answer(btn, isCorrect, q, optWrap, idxs, chosenIndex){
+  recordAnswer(q, chosenIndex, isCorrect, cur + 1);
+  [...optWrap.children].forEach((b,pos)=>{
+    b.disabled = true;
+    if(idxs[pos]===q.a) b.classList.add("correct");
+  });
+  if(!isCorrect){
+    btn.classList.add("wrong");
+    wrong.push(q);
+  }else{
+    correctCount++;
+  }
+  const fb = $("feedback");
+  fb.className = "feedback " + (isCorrect ? "ok" : "ng");
+  $("verdict").textContent = isCorrect ? "正解" : "不正解 — 解説を読んでから次へ";
+  $("exp").textContent = q.exp;
+  const nextBtn = $("btn-next");
+  nextBtn.style.display = "";
+  nextBtn.textContent = (cur+1 < order.length) ? "次の問題へ" : "結果を見る";
+  nextBtn.focus();
+}
+
+$("btn-next").addEventListener("click", ()=>{
+  cur++;
+  if(cur < order.length){ renderQuestion(); }
+  else{ showResult(); }
+});
+
+function showResult(){
+  show("result");
+  const total = order.length;
+  sendAttempt({
+    quizKey: QUIZ_KEY,
+    quizTitle: QUIZ_TITLE,
+    mode: modeLabel,
+    round: round,
+    startedAt: roundStartedAt,
+    finishedAt: new Date().toISOString(),
+    totalQuestions: total,
+    correctCount: correctCount,
+    cleared: wrong.length === 0,
+    answers: attemptLog
+  });
+  $("score-n").textContent = correctCount;
+  $("score-t").textContent = total;
+  const hero = $("score-hero");
+  const actions = $("result-actions");
+  actions.innerHTML = "";
+
+  if(wrong.length===0){
+    hero.classList.add("perfect");
+    $("score-msg").textContent = `満点クリア!(${round}周でクリア)周回数をメモして報告してください`;
+    $("wrong-wrap").style.display = "none";
+    addBtn(actions, "最初からもう一度", ()=>{round=1; beginRound();});
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }else{
+    hero.classList.remove("perfect");
+    $("score-msg").textContent = `あと${wrong.length}問。間違えた問題だけもう一度。`;
+    $("wrong-wrap").style.display = "";
+    const ul = $("wrong-list");
+    ul.innerHTML = "";
+    wrong.forEach(q=>{
+      const li = document.createElement("li");
+      li.textContent = q.q;
+      ul.appendChild(li);
+    });
+    addBtn(actions, `間違えた${wrong.length}問に再挑戦`, ()=>{
+      pool = wrong.slice();
+      round++;
+      beginRound();
+    });
+    addBtn(actions, "範囲を選び直す", buildStart, true);
+  }
+}
+
+function addBtn(parent, label, fn, ghost){
+  const b = document.createElement("button");
+  b.className = "btn" + (ghost ? " ghost" : "");
+  b.textContent = label;
+  b.addEventListener("click", fn);
+  parent.appendChild(b);
+}
+
+buildStart();
+</script>
+</body>
+</html>

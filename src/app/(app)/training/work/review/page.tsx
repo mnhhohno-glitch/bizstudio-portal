@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeFieldLabels } from "@/lib/training-work";
+import ModelAnswerPanel from "@/components/training/ModelAnswerPanel";
 
 // 自分の記述ワーク回答を通して読み返すための読み取り専用画面。
 // サーバーコンポーネントでセッションの employeeId のみを条件に引くため、他人の回答は取得しない
@@ -29,7 +30,7 @@ export default async function TrainingWorkReviewPage({
         prisma.trainingWorkItem.findMany({
           where: { workKey: current.workKey, isActive: true },
           orderBy: { sortOrder: "asc" },
-          select: { itemCode: true, title: true },
+          select: { itemCode: true, title: true, modelAnswer: true, gradingPoints: true },
         }),
         prisma.trainingWorkAnswer.findMany({
           where: { workKey: current.workKey, employeeId: user.id },
@@ -136,6 +137,15 @@ export default async function TrainingWorkReviewPage({
                           </div>
                         ))}
                       </dl>
+                    )}
+
+                    {/* 模範解答は回答済みの設問にだけ出す（T-192。既存ワークは modelAnswer が null なので変化なし） */}
+                    {a && item.modelAnswer !== null && (
+                      <ModelAnswerPanel
+                        modelAnswer={item.modelAnswer}
+                        gradingPoints={item.gradingPoints}
+                        idPrefix={`review-${item.itemCode}`}
+                      />
                     )}
                   </div>
                 );

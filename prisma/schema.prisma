@@ -3066,6 +3066,8 @@ model TrainingWorkItem {
   title       String   // 求人タイトル
   jobContent  String   @db.Text // 仕事内容（研修生に見せる本文）
   hintNote    String?  @db.Text // 補足（任意・研修生に見せる）
+  modelAnswer   String? @db.Text // 模範解答（回答送信後にのみ表示）
+  gradingPoints String? @db.Text // 採点ポイント（改行区切り。回答送信後にのみ表示）
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
