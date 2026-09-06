@@ -28,6 +28,8 @@ export function guideTokenInvalidResponse() {
  * 呼び出し側は `const deny = await assertGuideAccess(req); if (deny) return deny;` の形で使う。
  *
  * token は `x-guide-token` ヘッダ、または（JSON body を先に読んだ場合は）bodyToken で渡す。
+ * multipart のように body を読むとコストがかかる route では bodyToken を使わず、
+ * ヘッダだけで body を読む前に判定すること。
  */
 export async function assertGuideAccess(
   request: Request,

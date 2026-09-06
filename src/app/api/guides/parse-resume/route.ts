@@ -5,13 +5,13 @@ import { assertGuideAccess } from "@/lib/guides/access";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export async function POST(request: Request) {
+  // T-191: ガイドの token（または portal のログイン）が無ければ本文も読まない。
+  // formData() より前に判定しないと、body 不正のリクエストが認証前に 500 で落ちてしまう。
+  const deny = await assertGuideAccess(request);
+  if (deny) return deny;
+
   try {
     const formData = await request.formData();
-
-    // T-191: ガイドの token（または portal のログイン）が無ければ AI を呼ばない。
-    const deny = await assertGuideAccess(request, formData.get("guideToken"));
-    if (deny) return deny;
-
     const file = formData.get("file") as File | null;
 
     if (!file) {
