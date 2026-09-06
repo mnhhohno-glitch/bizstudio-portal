@@ -43,6 +43,13 @@ export async function POST(
     return NextResponse.json({ error: "既に保留中です" }, { status: 400 });
   }
 
+  // T-189 修正: 自動配信行（autoSourcedAt 非null）は「紹介保留」＝「却下」と同一に扱う。
+  // 保留と同時に approvalStatus=REJECTED・rejectedReason=保留理由（＋メモ）へ同期し、承認待ちから外す。
+  // 受け口 from-job-platform の冪等判定は自動配信行なら archivedAt を問わないので、保留後も同じ求人は再送されない。
+  const isAuto = file.autoSourcedAt !== null;
+  const syncedRejectedReason = isAuto
+    ? [reason || "紹介保留", note ? `（${note}）` : ""].join("")
+    : null;
   const updated = await prisma.candidateFile.update({
     where: { id: file.id },
     data: {
@@ -50,6 +57,7 @@ export async function POST(
       archivedReason: reason || null,
       archivedNote: note || null,
       archivedById: user.id,
+      ...(isAuto ? { approvalStatus: "REJECTED", rejectedReason: syncedRejectedReason } : {}),
     },
     include: { archivedBy: { select: { id: true, name: true } } },
   });
@@ -64,6 +72,7 @@ export async function POST(
       fileName: file.fileName,
       reason: reason || null,
       note: note || null,
+      autoRecommendSynced: isAuto ? { approvalStatus: "REJECTED", rejectedReason: syncedRejectedReason } : null,
     },
   }).catch((e) => console.error("[BookmarkArchive] audit failed:", e));
 

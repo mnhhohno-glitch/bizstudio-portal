@@ -6,11 +6,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** 確定した1発話。timestamp は「直近30秒」切り出しに使う（epoch ms）。 */
+/** 確定した1発話。timestamp は「直近30秒」切り出しに使う（epoch ms）。
+ * speaker は Deepgram diarization の話者番号（Phase 7）。内蔵方式・過去データには無い（optional）。 */
 export type TranscriptEntry = {
   id: string;
   text: string;
   timestamp: number;
+  speaker?: number;
 };
 
 // Web Speech API は TypeScript 標準の lib.dom に型が無いため、必要最小限だけ自前定義する。

@@ -52,7 +52,8 @@ export async function POST(req: Request) {
     const ageNgCount = countOf("AGE_NG");
     const foreignNgCount = countOf("FOREIGN_NG");
     const aiFailedCount = countOf("AI_FAILED");
-    const duplicateSkipCount = countOf("DUPLICATE_SKIP");
+    // 2026-09-06 以降の新規ログは "DUPLICATE_SKIPPED"。旧値 "DUPLICATE_SKIP" の過去バッチも正しく数える
+    const duplicateSkipCount = countOf("DUPLICATE_SKIP") + countOf("DUPLICATE_SKIPPED");
     const errorCount = countOf("ERROR");
     const totalCount =
       normalCount +

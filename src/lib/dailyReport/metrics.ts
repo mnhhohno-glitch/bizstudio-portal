@@ -168,10 +168,12 @@ export async function computeCaMetricsForRange(params: {
     // T-161 R1/R2: 紹介数 = 出力した行 ∪ 出力せず紹介済みにした行（COALESCE(出力日, 紹介日) が当日）。
     // 本人応募（origin='candidate' & driveFileId=null）は数えない。
     // introduced_at 単独行は「出力日なし」なので lastExportedAt=null AND introducedAt=range で拾う（重複計上なし）。
+    // T-189: 自動引き当て由来（autoSourcedAt あり）はCA実績に数えない（現状0件・数値不変）。
     prisma.candidateFile.count({
       where: {
         category: "BOOKMARK",
         uploadedByUserId: userId,
+        autoSourcedAt: null,
         NOT: { origin: "candidate", driveFileId: null },
         OR: [
           { lastExportedAt: range },

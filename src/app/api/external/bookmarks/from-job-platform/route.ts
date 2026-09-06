@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 // T-181: generateAndStorePdf は本routeのローカル関数だったものを @/lib/job-platform-pdf へ
@@ -6,6 +6,8 @@ import { enqueueOneDriveSync, triggerOneDriveSync } from "@/lib/onedrive-sync";
 import { generateAndStorePdf } from "@/lib/job-platform-pdf";
 // T-185: 求人名・職種の保存。payload の jobTitle/jobCategory を優先し、無ければ求人本文から抽出する。
 import { extractJobTitleFromText, extractJobCategoryFromText } from "@/lib/bookmark-job-snapshot";
+// T-189 修正: 自動配信行が届いた直後の AI評価投入（受け口の応答を遅らせないよう after() で走らせる）。
+import { kickAutoEvaluation } from "@/lib/recommend/auto-eval-kick";
 
 /**
  * POST /api/external/bookmarks/from-job-platform
@@ -39,6 +41,10 @@ type JobInput = {
   // T-128 Phase2-1: 元媒体の識別子（例: "hito_link"）。任意・後方互換（未送信でも従来どおり動作）。
   //   受信時は CandidateFile.sourceMedia に生値のまま保存。マッピング（→ "HITO-Link" 等）は HistoryTab で解決。
   sourceMedia?: unknown;
+  // T-189 修正: 出所（経路・配信条件パターン）。任意・後方互換。body 直下でも jobs[] の要素でも受け付ける。
+  autoSourceMode?: unknown;  // "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+  autoPatternId?: unknown;
+  autoPatternLabel?: unknown;
 };
 
 function str(v: unknown): string | null {
@@ -121,6 +127,148 @@ export async function POST(request: Request) {
   }
 
   const rawJobs: JobInput[] = Array.isArray(body.jobs) ? (body.jobs as JobInput[]) : [body as JobInput];
+
+  // T-189 Phase 2a: 自動引き当て（job-platform エンジン）由来の受け口。
+  // origin="auto" のときだけこの分岐に入り、既存の手動経路（この下の処理）は一切変更しない。
+  //   - CandidateFile を origin="auto" / autoSourcedAt=now / approvalStatus="PENDING" /
+  //     introducedAt=null（未設定）で作成。候補者サイトの表示ゲート
+  //     （introducedAt IS NOT NULL OR origin='candidate'）に掛からず、承認まで本人に見えない。
+  //   - PDF生成（generateAndStorePdf）と OneDrive 同期は実行しない（承認時に Phase 3 で生成）。
+  //     extractedText はそのまま保存する（AI評価の入力に必要）。
+  //   - 冪等: 同一 candidateId × externalJobRef の既存 BOOKMARK 行（archivedAt IS NULL）があれば
+  //     **作成も更新もしない**。手動行（autoSourcedAt null）= skipped:manual_exists（手動を汚さない）、
+  //     自動行 = skipped:auto_exists（REJECTED/EXPIRED でも行が残り続けるため再送は常にここで止まる）。
+  if (str(body.origin) === "auto") {
+    // 引き当てCA（sourcedBy・任意）。実在＆active のみ採用。無ければ既存フォールバック
+    //（savedByUserId → anonymous@local）と同じ uploaderUserId を使う。
+    let autoUploaderId = uploaderUserId;
+    const sourcedBy = str(body.sourcedBy);
+    if (sourcedBy) {
+      const u = await prisma.user.findUnique({ where: { id: sourcedBy }, select: { id: true, status: true } });
+      if (u && u.status === "active") autoUploaderId = u.id;
+    }
+
+    // T-189 修正: 出所の記録。job-platform 側の送信 payload の任意項目（未送信なら null）。
+    //   autoSourceMode: "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+    //   autoPatternId / autoPatternLabel: 求人サイト側の配信条件パターン（ID・表示名）
+    //   求人ごと（jobs[] の各要素）に付いていればそちらを優先し、無ければ body 直下の値を使う。
+    const autoSourceModeTop = str(body.autoSourceMode);
+    const autoPatternIdTop = str(body.autoPatternId);
+    const autoPatternLabelTop = str(body.autoPatternLabel);
+
+    let autoCreated = 0;
+    let autoSkipped = 0;
+    const autoErrors: { index: number; error: string }[] = [];
+    const results: { index: number; externalJobRef: string | null; result: string }[] = [];
+
+    for (let i = 0; i < rawJobs.length; i++) {
+      const j = rawJobs[i] ?? {};
+      const externalJobRef = str(j.externalJobRef);
+      const companyName = str(j.companyName);
+      const extractedText = str(j.extractedText);
+      if (!externalJobRef || !companyName) {
+        autoErrors.push({ index: i, error: "externalJobRef and companyName are required" });
+        results.push({ index: i, externalJobRef, result: "error" });
+        continue;
+      }
+      if (!extractedText) {
+        autoErrors.push({ index: i, error: "extractedText (job body) is required and must be non-empty" });
+        results.push({ index: i, externalJobRef, result: "error" });
+        continue;
+      }
+      try {
+        // 冪等判定は sourceType を問わない（サイト経由行・PDF昇格行も「既存」として尊重する）。
+        // T-189 修正: 自動配信行（autoSourcedAt 非null）は archivedAt を問わず「既存」とみなす。
+        //   自動配信行では紹介保留＝却下なので、保留にされた求人が再送で復活してはならない。
+        //   手動ブックマークは従来どおり未保留（archivedAt: null）の行だけを既存扱い。自動行を優先して拾う。
+        const existing = await prisma.candidateFile.findFirst({
+          where: {
+            candidateId: candidate.id,
+            category: "BOOKMARK",
+            externalJobRef,
+            OR: [{ autoSourcedAt: { not: null } }, { archivedAt: null }],
+          },
+          orderBy: { autoSourcedAt: { sort: "desc", nulls: "last" } },
+          select: { id: true, autoSourcedAt: true },
+        });
+        if (existing) {
+          results.push({
+            index: i,
+            externalJobRef,
+            result: existing.autoSourcedAt ? "skipped:auto_exists" : "skipped:manual_exists",
+          });
+          autoSkipped++;
+          continue;
+        }
+        const numericId = pickNumericId(str(j.fileNumericId), externalJobRef);
+        const fileName = buildFileName(companyName, numericId);
+        const memo = str(j.jobUrl);
+        const fileSize = Buffer.byteLength(extractedText, "utf8");
+        const sourceMedia = str(j.sourceMedia);
+        const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
+        const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+        await prisma.candidateFile.create({
+          data: {
+            candidateId: candidate.id,
+            category: "BOOKMARK",
+            fileName,
+            fileSize,
+            mimeType: "text/plain",
+            driveFileId: null,
+            driveViewUrl: null,
+            driveFolderId: null,
+            extractedText,
+            // テキスト化済みシグナル: AI評価フィルタ（extractedAt 必須）を通すため受領時点で立てる。
+            extractedAt: new Date(),
+            sourceType: "job-platform",
+            externalJobRef,
+            sourceMedia,
+            memo,
+            jobTitle,
+            jobCategory,
+            origin: "auto",
+            autoSourcedAt: new Date(),
+            approvalStatus: "PENDING",
+            // T-189 修正: 出所（経路・配信条件パターン）。未送信は null のまま。
+            autoSourceMode: str(j.autoSourceMode) ?? autoSourceModeTop,
+            autoPatternId: str(j.autoPatternId) ?? autoPatternIdTop,
+            autoPatternLabel: str(j.autoPatternLabel) ?? autoPatternLabelTop,
+            uploadedByUserId: autoUploaderId,
+          },
+        });
+        results.push({ index: i, externalJobRef, result: "created" });
+        autoCreated++;
+      } catch (e) {
+        console.error("[external/bookmarks/from-job-platform] auto save failed:", e);
+        autoErrors.push({ index: i, error: "save failed" });
+        results.push({ index: i, externalJobRef, result: "error" });
+      }
+    }
+
+    // T-189 修正: 1件以上作れたら、レスポンス返却後に当該求職者の未評価分を AI評価バッチへ投入する。
+    //   毎朝07:30の定時 submit は安全網として残す（ここで投入済みなら対象0件で正常終了する）。
+    if (autoCreated > 0) {
+      after(() =>
+        kickAutoEvaluation({
+          candidateId: candidate.id,
+          candidateNumber: candidate.candidateNumber,
+          createdCount: autoCreated,
+        }),
+      );
+    }
+
+    return NextResponse.json({
+      ok: autoErrors.length === 0,
+      origin: "auto",
+      candidateNumber: candidate.candidateNumber,
+      received: rawJobs.length,
+      created: autoCreated,
+      skipped: autoSkipped,
+      errors: autoErrors,
+      // 求人ごとの結果: created / skipped:manual_exists / skipped:auto_exists / error
+      results,
+    });
+  }
 
   let created = 0;
   let updated = 0;

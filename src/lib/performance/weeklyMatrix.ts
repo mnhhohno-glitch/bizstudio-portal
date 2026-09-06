@@ -114,11 +114,12 @@ export async function computeWeeklyMatrix(params: {
       UNION ALL
       -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)。出力せず紹介済みにした行（introduced_at のみ）も提案に数える。
       -- 本人応募（origin='candidate' かつ drive_file_id IS NULL）は CA提案に数えない。
+      -- T-189: 自動引き当て由来（auto_sourced_at あり）も CA提案に数えない（現状0件・数値不変）。
       -- 既存データは introduced_at 保有行が全件出力済のため COALESCE は従来値と同一（数字は動かない）。
       SELECT cf.candidate_id, MIN(COALESCE(cf.last_exported_at, cf.introduced_at)) AS pdate
       FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
       WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
-        AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
+        AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL) AND cf.auto_sourced_at IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM job_entries je2
           WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
@@ -185,7 +186,7 @@ export async function computeWeeklyMatrix(params: {
         SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
         WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
-          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL) AND cf.auto_sourced_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2
             WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
@@ -351,7 +352,7 @@ export async function computeDayStageDetails(params: {
         SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate
         FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
         WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
-          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL)
+          AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL) AND cf.auto_sourced_at IS NULL
           AND COALESCE(cf.last_exported_at, cf.introduced_at) BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'
           AND NOT EXISTS (
             SELECT 1 FROM job_entries je2

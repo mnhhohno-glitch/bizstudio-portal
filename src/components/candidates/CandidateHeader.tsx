@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
 import IssueSiteTokenButton from "@/components/candidates/IssueSiteTokenButton";
 import SitePreviewButton from "@/components/candidates/SitePreviewButton";
+import AutoRecommendConditionDialog from "@/components/candidates/AutoRecommendConditionDialog";
+import { openJobPlatformSearch } from "@/lib/openJobPlatformDetail";
 
 // T-182: 求人出力（kyuujinPDF）廃止に伴い「求人マイページ」「求人出力」ボタンを非表示。
 // コードは残し描画だけ止める。復活時はここを true に戻す。
@@ -38,8 +40,29 @@ type Candidate = {
   desiredPrefecture2: string | null;
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
+  autoRecommendEnabled: boolean;
   createdAt: string;
 };
+
+// T-189 追加: 求人サイト側の配信条件パターン（/api/candidates/[id]/recommend-conditions の応答）。
+type ConditionPattern = {
+  id: string;
+  label: string;
+  summary: string;
+  queryString: string;
+  enabled: boolean;
+  updatedAt: string | null;
+};
+
+type ConditionsState = {
+  /** ok = 取得できた（0件を含む） / unreachable = 求人サイトに聞けなかった＝不明 */
+  status: "ok" | "unreachable";
+  patterns: ConditionPattern[];
+  enabledCount: number;
+};
+
+/** 自動配信トグルの保存結果（親が /update の応答をそのまま返す）。 */
+export type AutoRecommendToggleResult = { ok: boolean; error?: string };
 
 interface CandidateHeaderProps {
   candidate: Candidate;
@@ -60,6 +83,17 @@ interface CandidateHeaderProps {
   oneDriveFolderUrl?: string | null;
   /** T-159 Phase 4: 即時同期の完了後に呼ぶ。求職者データとファイル一覧を取り直す。 */
   onOneDriveSynced?: () => void;
+  /** T-189 Phase1: 自動配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ true） */
+  showAutoRecommendToggle?: boolean;
+  /**
+   * T-189 Phase1: トグル切替時に呼ぶ（保存は親が行う）。
+   * T-189 追加: 保存APIの結果を返すこと（400 condition_not_found を受け取って共通ダイアログを出す）。
+   */
+  onAutoRecommendToggle?: (
+    enabled: boolean,
+  ) => Promise<AutoRecommendToggleResult | void> | AutoRecommendToggleResult | void;
+  /** T-189 追加: 「今すぐ探す」で求人が増えた／AI評価が終わった時に呼ぶ（ブックマークタブの再読込） */
+  onRecommendUpdated?: () => void;
 }
 
 function genderLabel(g: string | null) {
@@ -147,10 +181,63 @@ export default function CandidateHeader({
   googleFormDisabledReason,
   oneDriveFolderUrl,
   onOneDriveSynced,
+  showAutoRecommendToggle,
+  onAutoRecommendToggle,
+  onRecommendUpdated,
 }: CandidateHeaderProps) {
   const [urlCopied, setUrlCopied] = useState(false);
   const [age, setAge] = useState<number | null>(null);
   const [oneDriveSyncing, setOneDriveSyncing] = useState(false);
+  const [autoRecommendSaving, setAutoRecommendSaving] = useState(false);
+  // T-189 追加: 「今すぐ探す」。running=引き当てAPI待ち / polling=AI評価の完了待ち
+  const [recommendRunning, setRecommendRunning] = useState(false);
+  const [recommendPolling, setRecommendPolling] = useState(false);
+  // アンマウント後にポーリングを続けない（画面遷移でタイマーを止める）
+  const recommendAliveRef = useRef(true);
+  useEffect(() => {
+    recommendAliveRef.current = true;
+    return () => {
+      recommendAliveRef.current = false;
+    };
+  }, []);
+
+  // T-189 追加: 求人サイト（job-platform）に登録された配信条件パターン。
+  //   null = 未取得 / unreachable = 求人サイトに聞けなかった（ONガードでは「不明＝ONにしない」）
+  const [conditions, setConditions] = useState<ConditionsState | null>(null);
+  const [conditionsLoading, setConditionsLoading] = useState(false);
+  const [conditionDialogOpen, setConditionDialogOpen] = useState(false);
+
+  // 最新の条件を取り直す（トグル操作時は必ずこれを通す＝画面の古い情報でONにしない）。
+  const loadConditions = useCallback(async (): Promise<ConditionsState> => {
+    setConditionsLoading(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/recommend-conditions`);
+      if (!res.ok) {
+        const state: ConditionsState = { status: "unreachable", patterns: [], enabledCount: 0 };
+        setConditions(state);
+        return state;
+      }
+      const data = (await res.json()) as { patterns?: ConditionPattern[]; enabledCount?: number };
+      const state: ConditionsState = {
+        status: "ok",
+        patterns: data.patterns ?? [],
+        enabledCount: data.enabledCount ?? 0,
+      };
+      setConditions(state);
+      return state;
+    } catch {
+      const state: ConditionsState = { status: "unreachable", patterns: [], enabledCount: 0 };
+      setConditions(state);
+      return state;
+    } finally {
+      setConditionsLoading(false);
+    }
+  }, [candidate.id]);
+
+  useEffect(() => {
+    if (!showAutoRecommendToggle) return;
+    void loadConditions();
+  }, [showAutoRecommendToggle, loadConditions]);
 
   useEffect(() => {
     setAge(calcAge(candidate.birthday));
@@ -187,6 +274,159 @@ export default function CandidateHeader({
       toast.error("同期に失敗しました。時間をおいてお試しください。", { duration: 8000 });
     } finally {
       setOneDriveSyncing(false);
+    }
+  };
+
+  // T-189 追加:「今すぐ探す」。
+  //   ① recommend-now（job-platform の即時引き当て。AI評価の投入は受け口キックに一本化したので
+  //      サーバー側では投入しない＝二重投入が起きない）
+  //   ② created>0 なら recommend-collect を30秒間隔・最長10分ポーリングして評価完了を待つ
+  //   評価はバッチAPI（数分〜）なので、完了したらブックマークタブを取り直す。
+  const RECOMMEND_POLL_INTERVAL_MS = 30_000;
+  const RECOMMEND_POLL_MAX_MS = 10 * 60_000;
+  // T-189 修正: 上限到達トーストの既定件数。job-platform が daily.limit を返さない場合だけ使う。
+  const DEFAULT_RECOMMEND_DAILY_LIMIT = 15;
+
+  const pollRecommendCollect = async () => {
+    const startedAt = Date.now();
+    let autoRejectedD = 0;
+    setRecommendPolling(true);
+    try {
+      while (recommendAliveRef.current && Date.now() - startedAt < RECOMMEND_POLL_MAX_MS) {
+        await new Promise((r) => setTimeout(r, RECOMMEND_POLL_INTERVAL_MS));
+        if (!recommendAliveRef.current) return;
+        try {
+          const res = await fetch(`/api/candidates/${candidate.id}/recommend-collect`, {
+            method: "POST",
+          });
+          if (!res.ok) continue; // 一時的な失敗は次の周回で拾う
+          const data = (await res.json().catch(() => ({}))) as {
+            pending?: number;
+            autoRejectedD?: number;
+          };
+          autoRejectedD += data.autoRejectedD ?? 0;
+          if ((data.pending ?? 1) === 0) {
+            toast.success(`評価が完了しました（D自動却下 ${autoRejectedD}件）`, { duration: 8000 });
+            onRecommendUpdated?.();
+            return;
+          }
+        } catch {
+          // ネットワーク断は次の周回で再試行
+        }
+      }
+      if (recommendAliveRef.current) {
+        toast.message("AI評価がまだ完了していません。時間をおいて画面を更新してください。", {
+          duration: 8000,
+        });
+        onRecommendUpdated?.();
+      }
+    } finally {
+      setRecommendPolling(false);
+    }
+  };
+
+  const handleRecommendNow = async () => {
+    if (recommendRunning || recommendPolling) return;
+    setRecommendRunning(true);
+    const loadingId = toast.loading("求人を探しています…");
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/recommend-now`, { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        created?: number;
+        skipped?: number;
+        error?: string;
+        // T-189 修正: created=0 の理由。"daily_limit" は本日の「今すぐ探す」上限に到達。
+        reason?: string;
+        // T-189 修正: job-platform が返す本日の枠の上限件数（返らなければ undefined＝既定15で表示）。
+        dailyLimit?: number | null;
+        // T-189 修正: job-platform が返す本日の自動配信件数（返らなければ undefined）。
+        autoSentToday?: number | null;
+      };
+      toast.dismiss(loadingId);
+
+      if (!res.ok) {
+        if (res.status === 404 && data.error === "no_condition") {
+          // T-189 追加: トースト＋リンクをやめ、トグルのガードと同じ共通ダイアログに統一する。
+          setConditionDialogOpen(true);
+          void loadConditions();
+        } else if (res.status === 429) {
+          toast.error("1分以内に実行済みです", { duration: 8000 });
+        } else if (res.status === 400 && data.error === "auto_recommend_off") {
+          toast.error("自動配信をONにしてください", { duration: 8000 });
+        } else {
+          toast.error("求人の取得に失敗しました。時間をおいてお試しください。", { duration: 8000 });
+        }
+        return;
+      }
+
+      const created = data.created ?? 0;
+      if (created === 0) {
+        // T-189 修正: 上限到達（求人サイト側が created:0 / reason:"daily_limit" を返す）は
+        //   「新着なし」と区別して伝える。理由が無い/不明なら従来どおりの文言。
+        if (data.reason === "daily_limit") {
+          // T-189 修正: 上限は「今すぐ探す」の手動枠。自動配信の枠とは別なので明示する。
+          // 件数は job-platform の応答（daily.limit）から出す。返らなければ従来の 15 件。
+          // job-platform が本日の自動配信件数を返したときだけ、その内訳も添える。
+          const limit = typeof data.dailyLimit === "number" ? data.dailyLimit : DEFAULT_RECOMMEND_DAILY_LIMIT;
+          const autoSuffix =
+            typeof data.autoSentToday === "number"
+              ? `（自動配信: 本日 ${data.autoSentToday} 件）`
+              : "";
+          toast.message(
+            `本日の「今すぐ探す」の上限（${limit}件）に達しています。明日以降に再度お試しください${autoSuffix}`,
+            { duration: 8000 },
+          );
+        } else {
+          toast.message("条件に合う新着はありませんでした", { duration: 8000 });
+        }
+        return;
+      }
+      toast.success(`${created}件を追加しました。AI評価中（数分）`, { duration: 8000 });
+      onRecommendUpdated?.(); // 評価前でもブックマークタブには並ぶので先に取り直す
+      void pollRecommendCollect();
+    } catch {
+      toast.dismiss(loadingId);
+      toast.error("求人の取得に失敗しました。時間をおいてお試しください。", { duration: 8000 });
+    } finally {
+      setRecommendRunning(false);
+    }
+  };
+
+  // T-189 追加: 自動配信トグル。
+  //   OFF→ON のときだけ「求人サイトに配信条件パターンが1件以上あるか」を先に確認する。
+  //     - 0件 → 共通ダイアログを出し、トグルは OFF のまま（保存APIも叩かない）
+  //     - 求人サイトに聞けない → ONにしない（fail-closed。サーバー側も502で拒否する）
+  //     - 1件以上 → 従来どおり保存。保存APIが 400 condition_not_found（画面が古い）でも同じダイアログ
+  //   ON→OFF は無条件で従来どおり。
+  const handleAutoRecommendToggleClick = async () => {
+    if (autoRecommendSaving) return;
+    const next = !candidate.autoRecommendEnabled;
+    setAutoRecommendSaving(true);
+    try {
+      if (next) {
+        const state = await loadConditions();
+        if (state.status === "unreachable") {
+          toast.error("求人サイトに接続できず、配信条件を確認できませんでした", { duration: 8000 });
+          return;
+        }
+        if (state.enabledCount < 1) {
+          setConditionDialogOpen(true);
+          return;
+        }
+      }
+      const result = await onAutoRecommendToggle?.(next);
+      if (result && result.ok === false) {
+        if (result.error === "condition_not_found") {
+          setConditionDialogOpen(true);
+          void loadConditions(); // 表示も最新に合わせる
+        } else if (result.error === "job_platform_unreachable") {
+          toast.error("求人サイトに接続できず、配信条件を確認できませんでした", { duration: 8000 });
+        } else {
+          toast.error("自動配信の切り替えに失敗しました", { duration: 8000 });
+        }
+      }
+    } finally {
+      setAutoRecommendSaving(false);
     }
   };
 
@@ -283,6 +523,43 @@ export default function CandidateHeader({
                 </span>
               </>
             )}
+            {/* T-189 Phase1: 自動配信トグル（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ表示） */}
+            {showAutoRecommendToggle && (
+              <button
+                disabled={autoRecommendSaving}
+                onClick={handleAutoRecommendToggleClick}
+                className={`w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate disabled:opacity-50 ${
+                  candidate.autoRecommendEnabled
+                    ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200"
+                    : "bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200"
+                }`}
+              >
+                自動配信 {candidate.autoRecommendEnabled ? "ON" : "OFF"}
+              </button>
+            )}
+            {/* T-189 追加: 今すぐ探す（自動配信 ON のときだけ押せる） */}
+            {showAutoRecommendToggle && (
+              <button
+                disabled={
+                  !candidate.autoRecommendEnabled || recommendRunning || recommendPolling
+                }
+                title={
+                  !candidate.autoRecommendEnabled
+                    ? "自動配信をONにしてください"
+                    : recommendPolling
+                      ? "AI評価の完了を待っています"
+                      : "求人サイトの配信条件で今すぐ引き当てます"
+                }
+                onClick={handleRecommendNow}
+                className="w-[130px] h-8 rounded-md px-2 text-[13px] font-medium border cursor-pointer truncate bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {recommendRunning
+                  ? "検索中…"
+                  : recommendPolling
+                    ? "AI評価中…"
+                    : "今すぐ探す"}
+              </button>
+            )}
             <button
               onClick={onEditBasicInfo}
               className="w-[130px] h-8 bg-white border border-gray-300 text-gray-700 rounded-md px-2 text-[13px] font-medium hover:bg-gray-50 transition-colors truncate"
@@ -335,6 +612,80 @@ export default function CandidateHeader({
           )}
         </div>
       </div>
+
+      {/* Row 2.4: T-189 配信条件パターン一覧（AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ・読み取り専用）。
+          登録・編集・削除・ON/OFF は求人サイト側だけで行う（portal では行わない）。 */}
+      {showAutoRecommendToggle && (
+        <div className="px-6 pb-2">
+          <div className="flex items-start gap-2 text-[13px]">
+            <span className="shrink-0 pt-0.5 text-gray-400">配信条件:</span>
+            <div className="min-w-0 flex-1">
+              {conditions === null ? (
+                <span className="text-gray-400">{conditionsLoading ? "読み込み中…" : "-"}</span>
+              ) : conditions.status === "unreachable" ? (
+                <span className="text-amber-700">
+                  求人サイトに接続できず、配信条件を取得できませんでした
+                </span>
+              ) : conditions.patterns.length === 0 ? (
+                <span className="text-gray-600">
+                  配信条件が未登録です
+                  <button
+                    onClick={() => void openJobPlatformSearch({ candidateNumber: candidate.candidateNumber })}
+                    className="ml-2 text-blue-600 underline hover:text-blue-800"
+                  >
+                    求人サイトで登録する
+                  </button>
+                </span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {conditions.patterns.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0 text-[10px] font-medium ${
+                          p.enabled
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
+                        title={
+                          p.enabled
+                            ? "自動配信に使うパターン"
+                            : "保存のみ（自動配信には使わない）"
+                        }
+                      >
+                        {p.enabled ? "配信" : "保存のみ"}
+                      </span>
+                      <span className="shrink-0 font-medium text-gray-700">{p.label}</span>
+                      <span className="truncate text-gray-500" title={p.summary}>
+                        {p.summary}
+                      </span>
+                      <button
+                        onClick={() =>
+                          void openJobPlatformSearch({
+                            candidateNumber: candidate.candidateNumber,
+                            queryString: p.queryString,
+                          })
+                        }
+                        className="shrink-0 text-blue-600 underline hover:text-blue-800"
+                        title="この条件で求人サイトの検索画面を開きます"
+                      >
+                        求人サイトで開く
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* T-189 追加: 配信条件が未登録のときの共通ダイアログ（トグルON・今すぐ探すの両方から出す） */}
+      <AutoRecommendConditionDialog
+        open={conditionDialogOpen}
+        candidateName={candidate.name}
+        candidateNumber={candidate.candidateNumber}
+        onClose={() => setConditionDialogOpen(false)}
+      />
 
       {/* Row 2.5: 希望条件サマリ（全 null なら非表示） */}
       {(candidate.desiredJobType1 ||

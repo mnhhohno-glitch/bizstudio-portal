@@ -10,6 +10,11 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
 import { oneDriveSyncBadge, type OneDriveSyncBadgeSource } from "@/lib/onedrive-sync-badge";
+import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval-shared";
+// T-184: 求人評価モーダルに出す「求人情報（CA向け）」。抽出そのものはサーバ側（/job-info）で行う。
+import type { BookmarkJobInfo } from "@/lib/bookmark-job-info";
+// T-190: 評価モーダルのタブ表示（評価｜仕事内容｜会社概要）用の本文切り出し（表示専用の純関数）。
+import { splitAnalysisForTabs } from "@/lib/analysis-comment-tabs";
 
 // T-182: 求人出力（kyuujinPDF 送信）の廃止。旧導線（求人出力へ送信・求人紹介へ移動・
 // 出力済バッジ・未出力選択）はコードを残したまま描画だけ止める。復活時はここを true に戻す。
@@ -330,6 +335,14 @@ type BookmarkFile = {
   introducedAt?: string | null;
   // 求職者本人のサイト操作由来（"candidate"）は担当列を「サイト経由」表示。CA追加は null|"ca"。
   origin?: string | null;
+  // T-189 Phase3-1: 自動引き当て由来（非null）は担当列を「AI自動検索」表示（保存者はシステム/管理者のため名前を出さない）。
+  autoSourcedAt?: string | null;
+  // T-189 修正: 出所。担当列「AI自動検索」のホバー（title）に「パターン / 経路」を出す。null=記録なし。
+  autoSourceMode?: string | null;
+  autoPatternLabel?: string | null;
+  // T-189 修正: 自動配信行の承認状態（PENDING/APPROVED/REJECTED/EXPIRED）。PENDING の行だけ ✓承認/✗却下 ボタンを出す。
+  approvalStatus?: string | null;
+  rejectedReason?: string | null;
   // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
   externalJobRef?: string | null;
   sourceMedia?: string | null;
@@ -588,6 +601,75 @@ function AnalysisCommentBody({ comment }: { comment: string }) {
       )}
     </div>
   );
+}
+
+// T-184: 求人評価モーダルの「◆ 求人情報（CA向け・求職者には非表示）」セクション。
+// 評価テキスト（aiAnalysisComment）とは完全に別データ。表示専用で、編集・コピー・求職者向け出力には一切載らない。
+type JobInfoState = { state: "loading" | "ok" | "error"; data: BookmarkJobInfo | null };
+
+// 求人情報の1項目（仕事内容 / 従業員数 / 会社概要）。読み込み中・取得失敗・データなしの出し分けは
+// タブ表示（JobInfoTabBody）とフォールバックのまとめ表示（JobInfoSection）で共通。
+function JobInfoField({ label, value, state }: { label: string; value: string | null; state: JobInfoState["state"] }) {
+  return (
+    <div>
+      <div className="text-[12px] font-semibold text-gray-500 mb-0.5">{label}</div>
+      {state === "loading" ? (
+        <div className="text-sm text-gray-400">読み込み中…</div>
+      ) : state === "error" ? (
+        <div className="text-sm text-gray-500">（取得できませんでした）</div>
+      ) : value ? (
+        <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{value}</div>
+      ) : (
+        <div className="text-sm text-gray-400">（データなし）</div>
+      )}
+    </div>
+  );
+}
+
+function jobInfoItems(info: JobInfoState): { label: string; value: string | null }[] {
+  return [
+    { label: "仕事内容", value: info.data?.jobDescription ?? null },
+    { label: "従業員数", value: info.data?.employeeCount ?? null },
+    { label: "会社概要", value: info.data?.companyOverview ?? null },
+  ];
+}
+
+function JobInfoSection({ info }: { info: JobInfoState }) {
+  return (
+    <div className="mt-6 pt-4 border-t border-gray-200">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="font-semibold text-gray-900 text-sm">◆ 求人情報（CA向け・求職者には非表示）</span>
+      </div>
+      {info.state === "loading" ? (
+        <div className="text-sm text-gray-400">読み込み中…</div>
+      ) : info.state === "error" ? (
+        <div className="text-sm text-gray-500">（取得できませんでした）</div>
+      ) : (
+        <div className="space-y-3">
+          {jobInfoItems(info).map((it) => (
+            <JobInfoField key={it.label} label={it.label} value={it.value} state={info.state} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// T-189 Phase3-1: 担当列の表示名。自動引き当て由来（autoSourcedAt 非null）は保存者名（システム/管理者）ではなく
+// 「AI自動検索」を出す。表示のみで uploadedByUserId は変えない。並び替え（uploader 基準）も同じ文字列を使う。
+const AUTO_SOURCED_LABEL = "AI自動検索";
+// T-189 修正: 自動配信行のホバー説明。どの配信条件パターンで・どの経路（毎朝の自動 / CAの「今すぐ探す」）
+// で届いた行かを出す。列は増やさない（担当列の title のみ）。値が無い行は「記録なし」と明示する。
+function autoSourcedTitle(f: { autoSourceMode?: string | null; autoPatternLabel?: string | null }): string {
+  const pattern = f.autoPatternLabel ?? "記録なし";
+  const mode = f.autoSourceMode === "auto" ? "自動" : f.autoSourceMode === "manual" ? "手動" : "記録なし";
+  return `自動配信（AI自動検索）で引き当てた求人
+パターン: ${pattern} / 経路: ${mode}`;
+}
+function uploaderLabel(f: { origin?: string | null; autoSourcedAt?: string | null; uploadedBy: { name: string } }): string {
+  if (f.origin === "candidate") return "サイト経由";
+  if (f.autoSourcedAt) return AUTO_SOURCED_LABEL;
+  return f.uploadedBy.name;
 }
 
 /* ---------- Bookmark sort helpers (pure functions) ---------- */
@@ -1053,7 +1135,7 @@ function formatFileDate(iso: string): string {
 //   variant="bookmark"  … 未紹介行のみ（introducedAt なし）。従来どおりアップロード可。
 //   variant="introduced" … 紹介済み行のみ（introducedAt あり）。アップロード不可・「ブックマークに戻す」あり。
 // 区分による差分は「振り分けフィルタ・ヘッダー文言・紹介日列の値・フッターのボタン構成」だけに限定する。
-function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; onEntryCreated?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onIntroducedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; /** T-189 修正: 紹介求人区分の件数だけ更新する（タブは切り替えない） */ onIntroducedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -1079,6 +1161,12 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
   const [editingComment, setEditingComment] = useState(false);
   const [editedCommentText, setEditedCommentText] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  // T-184: 求人情報（仕事内容/従業員数/会社概要）。モーダルを開いたときに都度取得する表示専用データ。
+  //   評価テキスト（aiAnalysisComment）には一切書き込まない・混ぜない。
+  const [jobInfo, setJobInfo] = useState<JobInfoState>({ state: "loading", data: null });
+  // T-190: 評価モーダルのタブ。表示専用 state（保存内容には影響しない）。
+  //   モーダルを開いた時・◀▶ で別求人へ移った時・編集モードを抜けた時は必ず "eval" に戻す。
+  const [analysisTab, setAnalysisTab] = useState<"eval" | "job" | "company">("eval");
   const [wishRating, setWishRating] = useState<string>("");
   const [passRating, setPassRating] = useState<string>("");
   const [overallRating, setOverallRating] = useState<string>("");
@@ -1124,6 +1212,30 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     } finally {
       setOpeningRef(null);
     }
+  };
+
+  // T-189 Phase3-2a: 自動配信行（autoSourcedAt 非null）で PDF 未生成の求人名クリック＝その場で PDF を生成して開く。
+  //   生成中は ⏳（openingRef を流用）。成功したらプレビューを開き一覧を再読込。失敗したら従来どおり求人詳細へフォールバック。
+  //   本人サイト由来（origin="candidate"）の PDF 無しは意味付け（サイト経由）なので、ここには来ない（従来分岐のまま）。
+  const isAutoNoPdf = (f: BookmarkFile) => !!f.autoSourcedAt && !f.driveViewUrl && !!f.externalJobRef;
+  const handleOpenAutoPdf = async (file: BookmarkFile) => {
+    if (openingRef || !file.externalJobRef) return;
+    setOpeningRef(file.externalJobRef);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/files/${file.id}/generate-pdf`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.driveViewUrl) {
+        setPreviewFile({ ...file, driveFileId: data.driveFileId ?? file.driveFileId, driveViewUrl: data.driveViewUrl, mimeType: data.mimeType ?? file.mimeType, fileSize: data.fileSize ?? file.fileSize });
+        fetchFiles();
+        return;
+      }
+      toast.error(`${data?.error ?? "PDF生成に失敗しました"}（求人ページを開きます）`);
+    } catch {
+      toast.error("PDF生成に失敗しました（求人ページを開きます）");
+    } finally {
+      setOpeningRef(null);
+    }
+    await handleOpenJobPlatformDetail(file.externalJobRef);
   };
 
   const triggerExtraction = (fileIds: string[], label = "") => {
@@ -1195,9 +1307,29 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     setWishRating(axis?.wish && axis.wish !== "—" ? axis.wish : "");
     setPassRating(axis?.pass && axis.pass !== "—" ? axis.pass : "");
     setOverallRating(axis?.overall && axis.overall !== "—" ? axis.overall : selectedAnalysis.rating || "");
-    // ◀▶ で別の求人へ移動したときは本文を先頭から読ませたいのでスクロール位置を戻す
+    // ◀▶ で別の求人へ移動したときは評価タブに戻し、本文も先頭から読ませる
+    setAnalysisTab("eval");
     analysisBodyRef.current?.scrollTo({ top: 0 });
   }, [selectedAnalysis?.fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // T-184: 求人情報（CA向け）をモーダルを開いた時点で取得する。失敗してもモーダル自体は通常どおり開く。
+  useEffect(() => {
+    const fileId = selectedAnalysis?.fileId;
+    if (!fileId) return;
+    let aborted = false;
+    setJobInfo({ state: "loading", data: null });
+    (async () => {
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/files/${fileId}/job-info`);
+        if (!res.ok) throw new Error();
+        const data = (await res.json()) as BookmarkJobInfo;
+        if (!aborted) setJobInfo({ state: "ok", data });
+      } catch {
+        if (!aborted) setJobInfo({ state: "error", data: null });
+      }
+    })();
+    return () => { aborted = true; };
+  }, [selectedAnalysis?.fileId, candidateId]);
 
   const updateRatingMarker = (axis: "wish" | "pass" | "overall", newValue: string) => {
     const label = axis === "wish" ? "本人希望" : axis === "pass" ? "通過率" : "総合";
@@ -1267,6 +1399,13 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
 
   // 単一ブックマークの紹介保留化。一覧行の「保留」ボタンと AI評価モーダルの「紹介保留」で共有する。
   // 成功したら true。呼び出し側は戻り値で後処理（AI評価モーダルの次求人送り等）を分岐する。
+  // T-189 修正（2026-09-02）: 求職者詳細の自動配信行から ✓承認/✗却下 を撤去した。
+  //   1件押すたびに行が別区分へ移って画面が動き、まとめて処理できなかったため。既存の一括操作に統合する。
+  //   - 承認 = チェック → 「紹介求人へ移動」（mark-introduced が承認ページ ✓ と同じ approveAutoFiles を呼ぶ）
+  //   - 却下 = チェック → 「紹介保留に移動」／行の 📦（archive API の hold-sync が REJECTED に同期する）
+  //   ✓✗ は承認ページ /admin/auto-recommend にのみ残す。
+  const actionColWidth = "w-[100px]";
+
   const archiveSingleFile = async (fileId: string, reason: string | null, note: string | null): Promise<boolean> => {
     setArchivingId(fileId);
     try {
@@ -1401,7 +1540,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
     // 修正2: 本人回答（responseStatus・「本人回答」列と同じ値）を優先し、無ければ従来値へフォールバック。
     getResponse: (f) => resolveResponseForSort(f.responseStatus, findJobResponse(f.fileName)),
     getDate: (f) => rowDate(f),
-    getUploader: (f) => (f.origin === "candidate" ? "サイト経由" : f.uploadedBy.name),
+    getUploader: (f) => uploaderLabel(f),
   };
 
   // Filtered + sorted files（空キーでも確定タイブレーク 総合→会社名 が効く）
@@ -1663,11 +1802,19 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "紹介済みへの変更に失敗しました");
       const parts = [`${data.marked ?? 0}件を紹介求人へ移動しました`];
+      // T-189 修正（2026-09-02）: 自動配信の承認待ち行はここで承認（APPROVED+PDF生成）される。件数を明示する。
+      if (data.autoApproved > 0) parts.push(`うち自動配信${data.autoApproved}件を承認`);
       if (data.skippedSite > 0) parts.push(`${data.skippedSite}件は本人応募のため対象外`);
       toast.success(parts.join("、"));
+      if (data.autoPdfFailed > 0) {
+        toast.warning(`自動配信${data.autoPdfFailed}件はPDF生成に失敗しました（承認ページの「PDF再生成」で再試行できます）`);
+      }
       setSelectedIds(new Set());
+      // T-189 修正（2026-09-02）: 実行後はブックマークタブに留まる（自動でタブを切り替えない）。
+      // 一覧を取り直して該当行が消えるだけにし、続けて他の行を処理できるようにする。
+      // 紹介求人タブのバッジ件数だけは裏で更新する。
       fetchFiles();
-      onSwitchToJobs?.();
+      onIntroducedChange?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "通信エラーが発生しました");
     } finally {
@@ -2147,7 +2294,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
             紹介日
             <DirArrows dir={keyOf("date")?.dir ?? null} /><OrderBadge n={degreeOf("date")} />
           </span>
-          <span className="w-[100px] shrink-0" />
+          <span className={`${actionColWidth} shrink-0`} />
         </div>
       )}
 
@@ -2210,6 +2357,14 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                       className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left"
                       title={file.fileName}
                     >{file.fileName}</button>
+                  ) : isAutoNoPdf(file) ? (
+                    /* T-189 Phase3-2a: 自動配信行の PDF 未生成 → クリックでその場生成して開く（失敗時は求人ページ） */
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleOpenAutoPdf(file); }}
+                      disabled={openingRef === file.externalJobRef}
+                      className="text-[13px] font-medium text-blue-600 hover:text-blue-800 hover:underline truncate text-left disabled:opacity-50 disabled:cursor-wait"
+                      title={`${file.fileName} — 求人票PDFを生成して開きます`}
+                    >{openingRef === file.externalJobRef ? "⏳ PDF生成中… " : ""}{file.fileName}</button>
                   ) : file.externalJobRef ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpenJobPlatformDetail(file.externalJobRef!); }}
@@ -2305,11 +2460,16 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                     className="w-[72px] shrink-0 text-[11px] text-emerald-600 font-medium truncate"
                     title="求職者がサイト（マイページ）から登録・応募した求人"
                   >サイト経由</span>
+                ) : file.autoSourcedAt ? (
+                  <span
+                    className="w-[72px] shrink-0 text-[11px] text-violet-600 font-medium truncate"
+                    title={autoSourcedTitle(file)}
+                  >{AUTO_SOURCED_LABEL}</span>
                 ) : (
                   <span className="w-[72px] shrink-0 text-[11px] text-gray-500 truncate">{file.uploadedBy.name}</span>
                 )}
                 <span className="w-[68px] shrink-0 text-[11px] text-gray-400 whitespace-nowrap">{shortDate(rowDate(file))}</span>
-                <span className="w-[100px] shrink-0 flex items-center gap-0.5 justify-end">
+                <span className={`${actionColWidth} shrink-0 flex items-center gap-0.5 justify-end`}>
                   {/* 案Z: PDF実体が無い行（driveFileId=null）はDLリンクを出さない */}
                   {file.driveFileId && (
                     <a
@@ -2345,6 +2505,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                   >
                     {file.caComment ? "💬" : "🗨️"}
                   </button>
+                  {/* T-189 修正（2026-09-02）: 自動配信行の ✓承認/✗却下 は撤去。
+                      承認＝チェックして「紹介求人へ移動」、却下＝この 📦（紹介保留）で行う。 */}
                   <button
                     onClick={() => openArchiveModal(file.id)}
                     disabled={archivingId === file.id}
@@ -2359,6 +2521,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
           </div>
         )}
       </div>
+
 
       {/* Send to job tool modal */}
       {showEntryModal && (
@@ -2577,7 +2740,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
       {selectedAnalysis && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" {...overlayCloseAnalysis}>
           {/* T-180: 長文の選考分析を読みやすくするため幅を拡大（スマホは従来どおりほぼ全幅） */}
-          <div className="bg-white rounded-lg shadow-xl w-[92vw] max-w-5xl mx-4 max-h-[80vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+          {/* 高さは h-[85vh] 固定。max-h だと本文の少ないタブ（会社概要）でモーダルが縮み、
+              タブ切替のたびに外枠がガタつくため、内容量に依存させない（T-190）。 */}
+          <div className="bg-white rounded-lg shadow-xl w-[92vw] max-w-5xl mx-4 h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b bg-gray-50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 {selectedAnalysis.rating && RATING_STYLES[selectedAnalysis.rating] && (
@@ -2613,8 +2778,13 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                 >✕</button>
               </div>
             </div>
-            <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1">
-              <div className="font-mono text-sm mb-3 space-y-1">
+            {(() => {
+            // T-190: 表示モードかつ新フォーマット（◆見出しあり）のときだけタブ表示にする。
+            // 編集モードと旧形式（◆なし）は従来どおり全文表示のまま。
+            const split = splitAnalysisForTabs(selectedAnalysis.comment);
+            const tabbed = !editingComment && split.hasSections;
+            const ratingSelectors = (
+              <div className="font-mono text-sm space-y-1">
                 {(["wish", "pass", "overall"] as const).map((axis) => {
                   const label = axis === "wish" ? "本人希望：" : axis === "pass" ? "通過率　：" : "総合　　：";
                   const value = axis === "wish" ? wishRating : axis === "pass" ? passRating : overallRating;
@@ -2641,17 +2811,82 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                   );
                 })}
               </div>
-              {editingComment ? (
-                <textarea
-                  value={editedCommentText}
-                  onChange={(e) => setEditedCommentText(e.target.value)}
-                  rows={16}
-                  className="w-full text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
-                />
-              ) : (
-                <AnalysisCommentBody comment={selectedAnalysis.comment} />
-              )}
-            </div>
+            );
+            if (!tabbed) {
+              // フォールバック: 編集モード / 旧形式の本文は従来どおり 1枚表示。
+              // 高さはモーダル固定枠の残りを埋める（min-h-0 が無いと flex 子が縮まずはみ出す）。
+              return (
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1 min-h-0 flex flex-col">
+                  <div className="mb-3 shrink-0">{ratingSelectors}</div>
+                  {editingComment ? (
+                    // 高さは rows ではなく残り高さで決める（min-h で潰れ防止）。
+                    <textarea
+                      value={editedCommentText}
+                      onChange={(e) => setEditedCommentText(e.target.value)}
+                      className="w-full flex-1 min-h-[240px] text-sm text-gray-700 border border-gray-300 rounded p-3 focus:border-[#2563EB] focus:outline-none resize-none font-mono"
+                    />
+                  ) : (
+                    <AnalysisCommentBody comment={selectedAnalysis.comment} />
+                  )}
+                  {/* T-184: 選考分析の下。編集モードでも表示専用として出す（textarea の中身には入らない）。 */}
+                  <div className="shrink-0">
+                    <JobInfoSection info={jobInfo} />
+                  </div>
+                </div>
+              );
+            }
+            const tabs = [
+              { key: "eval" as const, label: "評価" },
+              { key: "job" as const, label: "仕事内容" },
+              { key: "company" as const, label: "会社概要" },
+            ];
+            const items = jobInfoItems(jobInfo);
+            const jobDescription = items.find((it) => it.label === "仕事内容")!;
+            const employeeCount = items.find((it) => it.label === "従業員数")!;
+            const companyOverview = items.find((it) => it.label === "会社概要")!;
+            return (
+              <>
+                {/* 3軸セレクトとタイトル行・タブバーは固定（タブ切替でも動かない） */}
+                <div className="px-4 pt-4 shrink-0 border-b border-gray-200">
+                  {ratingSelectors}
+                  {split.titleLine && (
+                    <div className="mt-2 text-sm font-semibold text-gray-900 break-words">{split.titleLine}</div>
+                  )}
+                  <div className="mt-3 flex gap-1 -mb-px">
+                    {tabs.map((t) => (
+                      <button
+                        key={t.key}
+                        onClick={() => {
+                          setAnalysisTab(t.key);
+                          analysisBodyRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className={`px-3 py-1.5 text-[13px] font-medium rounded-t border-b-2 transition-colors ${
+                          analysisTab === t.key
+                            ? "border-[#2563EB] text-[#2563EB] bg-blue-50"
+                            : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* タブ本文だけが残り高さを埋めてスクロールする。短いタブでは下が空くのが正しい。 */}
+                <div ref={analysisBodyRef} className="p-4 overflow-y-auto flex-1 min-h-0">
+                  {analysisTab === "eval" ? (
+                    <AnalysisCommentBody comment={split.evaluationBody} />
+                  ) : analysisTab === "job" ? (
+                    <JobInfoField label={jobDescription.label} value={jobDescription.value} state={jobInfo.state} />
+                  ) : (
+                    <div className="space-y-3">
+                      <JobInfoField label={employeeCount.label} value={employeeCount.value} state={jobInfo.state} />
+                      <JobInfoField label={companyOverview.label} value={companyOverview.value} state={jobInfo.state} />
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+            })()}
             <div className="p-3 border-t flex items-center justify-between gap-2 shrink-0">
               {/* 左端: 読んだあとそのまま紹介保留へ。AI評価モーダルは閉じず ArchiveModal を重ねる */}
               <button
@@ -2666,7 +2901,7 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
               {editingComment ? (
                 <>
                   <button
-                    onClick={() => { setEditingComment(false); setEditedCommentText(""); }}
+                    onClick={() => { setEditingComment(false); setEditedCommentText(""); setAnalysisTab("eval"); }}
                     disabled={savingComment}
                     className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 disabled:opacity-50"
                   >
@@ -2692,6 +2927,8 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                         setSelectedAnalysis({ ...selectedAnalysis, comment: editedCommentText, rating: updatedRating ?? selectedAnalysis.rating });
                         setEditingComment(false);
                         setEditedCommentText("");
+                        // 表示モードへ戻ったら再分割して評価タブから見せる
+                        setAnalysisTab("eval");
                       } catch {
                         toast.error("保存に失敗しました");
                       } finally {
@@ -3064,6 +3301,16 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
     if (n) return n;
     return "—";
   };
+  // T-189 修正: 自動配信行（autoSourcedAt 非null）は保留者を「AI自動検索」、保留理由を「応募条件不足（AI）」で表示する
+  //（表示のみ・DB の archivedReason/archivedById は変えない）。tooltip に実際の保留理由と却下理由を出す。
+  const isAutoRow = (file: BookmarkFile) => !!file.autoSourcedAt;
+  const autoReasonTitle = (file: BookmarkFile): string => {
+    const parts = [`保留理由: ${reasonText(file)}`];
+    if (file.rejectedReason) parts.push(`却下理由: ${file.rejectedReason}`);
+    if (file.archivedReason === AUTO_REJECT_REASON_D || file.rejectedReason === AUTO_REJECT_REASON_D) parts.push("AI評価Dによる自動却下");
+    return parts.join(" / ");
+  };
+  const autoArchivedCount = files.filter(isAutoRow).length;
 
   const getPreviewUrl = (viewUrl: string) => viewUrl.replace(/\/view(\?|$)/, "/preview$1");
 
@@ -3092,6 +3339,11 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
           )}
         </div>
         <p className="text-[12px] text-gray-500">紹介を保留にしたブックマークの一覧。復元または完全削除できます。</p>
+        {autoArchivedCount > 0 && (
+          <p className="mt-1 text-[12px] text-violet-700" title="自動配信（AI自動検索）由来の行。保留＝却下として扱われ、同じ求人は再送されません。復元すると承認待ちに戻ります。">
+            AI自動検索の保留 {autoArchivedCount}件
+          </p>
+        )}
 
         {files.length > 0 && (
           <div className="flex items-center gap-2 mt-2">
@@ -3215,8 +3467,17 @@ function ArchivedBookmarkSection({ candidateId, onCountChange }: { candidateId: 
                   <span className="w-[44px] shrink-0 text-center">{badge(axis?.pass)}</span>
                   <span className="w-[44px] shrink-0 text-center">{badge(axis?.overall || file.aiMatchRating || undefined)}</span>
                   <span className="w-[64px] shrink-0 text-[11px] text-gray-500 whitespace-nowrap">{shortDate(file.archivedAt)}</span>
-                  <span className="w-[80px] shrink-0 text-[11px] text-gray-500 truncate">{file.archivedBy?.name || "—"}</span>
-                  <span className="w-[160px] shrink-0 text-[11px] text-gray-600 truncate" title={reasonText(file)}>{reasonText(file)}</span>
+                  {isAutoRow(file) ? (
+                    <>
+                      <span className="w-[80px] shrink-0 text-[11px] text-violet-700 truncate" title={`AI自動検索（保留操作: ${file.archivedBy?.name || "自動"}）`}>AI自動検索</span>
+                      <span className="w-[160px] shrink-0 text-[11px] text-violet-700 truncate" title={autoReasonTitle(file)}>応募条件不足（AI）</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-[80px] shrink-0 text-[11px] text-gray-500 truncate">{file.archivedBy?.name || "—"}</span>
+                      <span className="w-[160px] shrink-0 text-[11px] text-gray-600 truncate" title={reasonText(file)}>{reasonText(file)}</span>
+                    </>
+                  )}
                   <span className="w-[110px] shrink-0 flex items-center gap-1 justify-end">
                     <button
                       onClick={() => setConfirmRestore(file)}
@@ -3974,7 +4235,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onEntryCreated={fetchEntries} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onIntroducedChange={() => { fetchJobs(); fetchBookmarkRatings(); }} onEntryCreated={fetchEntries} />
       )}
 
       {/* ===== 紹介保留サブタブ ===== */}

@@ -465,6 +465,11 @@ model Candidate {
   supportStatus          String    @default("BEFORE") @map("support_status")
   supportSubStatus       String?   @map("support_sub_status")
   supportSubStatusManual Boolean   @default(false) @map("support_sub_status_manual")
+  // T-189 Phase1: おすすめ求人の自動引き当て・配信 ON/OFF。既定OFF（既存行は全て false）。
+  //   トグルは求職者詳細ヘッダにあり、AUTO_RECOMMEND_ADMIN_IDS のユーザーにのみ表示（試験運用）。
+  autoRecommendEnabled   Boolean   @default(false) @map("auto_recommend_enabled")
+  // T-189 Phase3-1: 自動配信のLINE案内をCAが求職者へ送った日時（承認ページの「LINE送信済み」ボタンで打刻・押し直しで上書き）。
+  lastLineSentAt         DateTime? @map("last_line_sent_at")
   supportEndReason       String?   @map("support_end_reason")
   supportEndNote         String?   @map("support_end_note")
   supportEndDate         DateTime? @map("support_end_date")
@@ -1396,11 +1401,11 @@ model MynaviRpaProcessingLog {
   phoneNormalized   String?           @map("phone_normalized")
   candidateName     String?           @map("candidate_name")
   candidateAge      Int?              @map("candidate_age")
-  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIP" | "ERROR"
+  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIPPED"（旧: "DUPLICATE_SKIP"） | "ERROR"
   reason            String?           @db.Text
   canSendReply      Boolean           @default(false) @map("can_send_reply")
   replySentAt       DateTime?         @map("reply_sent_at")
-  replyResult       String?           @map("reply_result") // "SUCCESS" | "FAILURE"
+  replyResult       String?           @map("reply_result") // "SUCCESS" | "FAILED" | "SKIP"（旧データに "FAILURE" あり得る）
   pdfFileName       String?           @map("pdf_file_name")
   pdfFileId         String?           @map("pdf_file_id")
   errorMessage      String?           @map("error_message") @db.Text
@@ -1489,8 +1494,26 @@ model CandidateFile {
   responseSubmittedAt     DateTime? @map("response_submitted_at")
   caMatchLabel            String?   @map("ca_match_label") // CA手動の◎○△。aiMatchRating(AI由来A-D)とは別系統・共存
   introducedAt            DateTime? @map("introduced_at") // 紹介日時（createdAt=行作成時刻とは意味が異なる）
+  // T-189 Phase1: 自動引き当て（おすすめ求人）の承認管理。既存行・CA手動行は全て null（挙動不変）。
+  //   却下・期限切れでも archivedAt は立てない（from-job-platform の冪等判定 archivedAt:null と
+  //   archivedReason の既存運用値10種に衝突するため。docs/reports/T-189_phase0_portal_survey.md §1-3）。
+  //   実績集計（COALESCE(lastExportedAt, introducedAt) 系）は autoSourcedAt IS NULL で自動由来を除外する。
+  autoSourcedAt           DateTime? @map("auto_sourced_at") // 自動引き当てで作成された日時。null=従来どおり手動
+  approvalStatus          String?   @map("approval_status") // PENDING / APPROVED / REJECTED / EXPIRED（自動由来のみ使用）
+  rejectedReason          String?   @map("rejected_reason") // 却下理由（自由文または定型値）
   excludedBy              String?   @map("excluded_by") // "user" / "ca"（箱B excluded_by 相当）
   excludedAt              DateTime? @map("excluded_at")
+  // T-189 Phase3-2a: 求職者本人がマイページで「対象外」を選んだ理由（定型値 or 「その他: 自由記述」）。
+  //   response-status API が status=EXCLUDED のときだけ保存し、EXCLUDED 以外へ変更した時点で excludedBy/At と
+  //   同時にクリアする（＝現在の対象外の理由）。自動配信行・手動行を問わず使う。null=理由なし（従来どおり）。
+  candidateExcludeReason  String?   @map("candidate_exclude_reason")
+  // T-189 修正: 自動配信行の「出所」。job-platform 側の送信 payload の同名項目をそのまま保存する
+  //   （未送信＝null。既存行も null のまま＝挙動不変）。どの条件・どの経路で届いた行かを後から辿るため。
+  //   autoSourceMode: "auto"（毎朝の無人引き当て）/ "manual"（CA の「今すぐ探す」）
+  //   autoPatternId / autoPatternLabel: 求人サイト側の配信条件パターン（ID・表示名）
+  autoSourceMode          String?   @map("auto_source_mode")
+  autoPatternId           String?   @map("auto_pattern_id")
+  autoPatternLabel        String?   @map("auto_pattern_label")
   responseSubmissionItems CandidateResponseSubmissionItem[]
   // T-128 Phase2-1: job-platform 経由求人の元媒体（"hito_link" 等）。null は media 情報なし（未送信）。
   //   HistoryTab エントリー化で jobDb/externalJobNo の正値化に使用。sourceType="job-platform" 前提。
@@ -3306,4 +3329,25 @@ model OneDriveFolderUrlLedger {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@map("onedrive_folder_url_ledger")
+}
+
+/// T-189 Phase 2a: おすすめ求人（自動引き当て）AI評価の Message Batches API 投入台帳。
+/// 1行 = バッチ内の1リクエスト（求職者 × 求人最大5件）。行の id をそのまま Anthropic の
+/// custom_id に使い、結果回収時に custom_id → fileIds の対応をこの台帳で引く。
+/// status: SUBMITTED（投入済み・未回収）/ COMPLETED（回収・保存済み）/
+///         FAILED（errored/canceled）/ EXPIRED（24h 未完了・期限切れ）。
+/// FAILED/EXPIRED になった行の対象ファイルは aiAnalyzedAt が null のままなので、
+/// 次回の analyze-submit が自動的に再投入対象として拾う（この台帳側の再操作は不要）。
+model RecommendAnalyzeBatch {
+  id          String    @id @default(cuid())
+  batchId     String    @map("batch_id") // Anthropic Message Batches の batch id（msgbatch_...）
+  candidateId String    @map("candidate_id")
+  fileIds     Json      @map("file_ids") // 対象 CandidateFile.id の配列
+  status      String    @default("SUBMITTED")
+  submittedAt DateTime  @default(now()) @map("submitted_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([status]) // 回収 cron が SUBMITTED を拾うため
+  @@index([batchId])
+  @@map("recommend_analyze_batches")
 }

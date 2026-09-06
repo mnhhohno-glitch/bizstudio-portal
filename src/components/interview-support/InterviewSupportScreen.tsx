@@ -19,8 +19,15 @@
 //   「シート照合」を誘発し会話への集中が崩れたため）。開始時の下書き生成（bootstrap）と
 //   source ラベルを廃止し、画面は常に白紙から会話ベースで積み上げる。あわせて事前情報由来の
 //   固有名詞リスト（keyterms）を Deepgram の Keyterm Prompting に渡し、認識精度を底上げする。
+// - Phase 7: (1) 漏えい修正 = auto-scan へシート抽出テキスト（priorInfoText）を送るのをやめ、
+//   keyterms（固有名詞リスト）だけを送る（指示文の禁止では軽量モデルが先出しを守り切れなかったため、
+//   構造的に漏えい不能にする）。(2) ログコピー（時刻・話者付き全文）。(3) 話者識別 = Deepgram の
+//   diarize。最初に発話した話者=CA・2人目=求職者の自動割り当て＋「話者入れ替え」ボタンで反転。
+//   保存 transcript の各エントリに speaker（解決済み表示名）を追加（Json相乗り・テーブル変更なし）。
+//   あわせて auto-scan の連続失敗を赤字で出す（静かに止まったままにしない）＋fetch にタイムアウト
+//   （応答が返らないと scanInFlight が立ちっぱなしで以後のスキャンが全部止まる経路を塞ぐ）。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { useSpeechTranscription, type TranscriptEntry } from "./useSpeechTranscription";
 import { useDeepgramTranscription } from "./useDeepgramTranscription";
@@ -46,6 +53,15 @@ const AUTO_SCAN_MIN_CHARS = 20;
 const EXPLAINED_TERMS_MAX = 30;
 // Phase 3: 更新型カードのハイライト表示時間(ms)。
 const AUTO_CARD_HIGHLIGHT_MS = 1500;
+// Phase 7: auto-scan がこの回数連続で失敗したら上部バーに赤字を出す（成功で消える）。
+const AUTO_SCAN_FAIL_THRESHOLD = 3;
+// Phase 7: auto-scan fetch のタイムアウト(ms)。応答が永久に返らないと scanInFlight が立ちっぱなしで
+// 以後のスキャンが全部止まるため、必ず打ち切る。
+const AUTO_SCAN_TIMEOUT_MS = 30_000;
+
+function formatLogTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("ja-JP", { hour12: false });
+}
 
 type InterviewInfo = {
   candidateName: string;
@@ -101,12 +117,39 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const [jobCards, setJobCards] = useState<AutoJobCard[]>([]);
   const [reasonCard, setReasonCard] = useState<AutoReasonCard | null>(null);
 
+  /* ---- Phase 7: 話者識別（Deepgram diarize）の番号→表示名割り当て ---- */
+  // 面談はCAの挨拶から始まる運用のため、最初に発話した話者=CA・2人目=求職者。3人目以降は「話者3」等。
+  // 「話者入れ替え」でCA/求職者のラベルを反転できる（既存ログの表示・以後の保存にも効く）。
+  const [speakersSwapped, setSpeakersSwapped] = useState(false);
+  const speakerLabels = useMemo(() => {
+    const order: number[] = [];
+    for (const e of entries) {
+      if (e.speaker !== undefined && !order.includes(e.speaker)) order.push(e.speaker);
+    }
+    const map = new Map<number, string>();
+    order.forEach((speaker, idx) => {
+      const label =
+        idx === 0 ? (speakersSwapped ? "求職者" : "CA")
+        : idx === 1 ? (speakersSwapped ? "CA" : "求職者")
+        : `話者${idx + 1}`;
+      map.set(speaker, label);
+    });
+    return map;
+  }, [entries, speakersSwapped]);
+  /** 1発話をログ1行のテキストにする（話者ラベル付き。コピー・AI送信・保存で共通の解決関数）。 */
+  const labelOf = useCallback(
+    (e: TranscriptEntry, labels: Map<number, string>): string | undefined =>
+      e.speaker !== undefined ? labels.get(e.speaker) : undefined,
+    []
+  );
+
   /* ---- Phase 5: 事前情報（キャリアシート等）の取得と選択 ---- */
   const [priorInfo, setPriorInfo] = useState<PriorInfoState>({ status: "loading" });
-  // auto-scan から常に最新の事前情報テキストを読むための鏡（"ready" 以外は null）。
-  const priorTextRef = useRef<string | null>(null);
+  // Phase 7: auto-scan から常に最新の固有名詞リストを読むための鏡（"ready" 以外は空）。
+  // シート抽出テキスト（priorInfo.text）は auto-scan へは送らない（漏えい修正。表示・keyterm 抽出元として保持のみ）。
+  const priorKeytermsRef = useRef<string[]>([]);
   useEffect(() => {
-    priorTextRef.current = priorInfo.status === "ready" ? priorInfo.text : null;
+    priorKeytermsRef.current = priorInfo.status === "ready" ? priorInfo.keyterms : [];
   }, [priorInfo]);
   // 「開始」初回押下でセッションが動き出したら事前情報の切り替えを固定する
   // （途中で差し替えると下書きと以後のスキャン前提がずれるため）。
@@ -165,10 +208,10 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const endedAtRef = useRef<number | null>(null);
   // interval / beforeunload から常に最新の entries・cards を読むための鏡（stale closure 回避）。
   // render 中の ref 書き込みは React Compiler 系 lint に反するため effect で退避する。
-  const latestRef = useRef({ entries, cards, jobCards, reasonCard });
+  const latestRef = useRef({ entries, cards, jobCards, reasonCard, speakerLabels });
   useEffect(() => {
-    latestRef.current = { entries, cards, jobCards, reasonCard };
-  }, [entries, cards, jobCards, reasonCard]);
+    latestRef.current = { entries, cards, jobCards, reasonCard, speakerLabels };
+  }, [entries, cards, jobCards, reasonCard, speakerLabels]);
   const saveFailedRef = useRef(false);
   // 保存が失敗している間は上部バーに出しっぱなしにする（toast 1回だけだと気づけないため）。
   // 次の保存が1回成功したら消える。
@@ -178,7 +221,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     (opts?: { keepalive?: boolean }) => {
       const session = dbSessionRef.current;
       if (!session) return;
-      const { entries: curEntries, cards: curCards, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
+      const { entries: curEntries, cards: curCards, jobCards: curJobs, reasonCard: curReason, speakerLabels: curLabels } = latestRef.current;
       const doneCards = curCards.filter((c) => c.status === "done");
       if (curEntries.length === 0 && doneCards.length === 0) return;
       // Phase 3: 更新型カード（業務内容・転職理由）は保存時点の最新版のみを乗せる（更新のたびに履歴を積まない）。
@@ -212,7 +255,12 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         sessionId: session.id,
         startedAt: new Date(session.startedAt).toISOString(),
         endedAt: endedAtRef.current ? new Date(endedAtRef.current).toISOString() : null,
-        transcript: curEntries.map((e) => ({ t: new Date(e.timestamp).toISOString(), text: e.text })),
+        // Phase 7: speaker は解決済み表示名（CA/求職者/話者3…）で保存する（Json相乗り・テーブル変更なし）。
+        // 保存は毎回全量上書きのため、途中で「話者入れ替え」しても次の保存でラベルが揃う。
+        transcript: curEntries.map((e) => {
+          const label = labelOf(e, curLabels);
+          return { t: new Date(e.timestamp).toISOString(), text: e.text, ...(label ? { speaker: label } : {}) };
+        }),
         explanations,
       };
       void fetch(`/api/interview-support/${interviewId}/session`, {
@@ -236,7 +284,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           }
         });
     },
-    [interviewId]
+    [interviewId, labelOf]
   );
 
   // 認識中は1分ごとに定期保存。
@@ -263,6 +311,22 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
     endedAtRef.current = Date.now();
     saveSession();
   }, [stop, saveSession]);
+
+  /* ---- Phase 7: ログ全文コピー（時刻・話者付き。カード・解説は含めない） ---- */
+  const handleCopyLog = useCallback(() => {
+    const { entries: curEntries, speakerLabels: curLabels } = latestRef.current;
+    if (curEntries.length === 0) return;
+    const text = curEntries
+      .map((e) => {
+        const label = labelOf(e, curLabels);
+        return `[${formatLogTime(e.timestamp)}] ${label ? `${label}: ` : ""}${e.text}`;
+      })
+      .join("\n");
+    navigator.clipboard.writeText(text).then(
+      () => toast.success("コピーしました"),
+      () => toast.error("コピーに失敗しました")
+    );
+  }, [labelOf]);
 
   /* ---- 面談情報の取得（既存 GET /api/interviews/[id] を流用） ---- */
   useEffect(() => {
@@ -388,13 +452,19 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   const explainRecent = useCallback(() => {
     const since = Date.now() - RECENT_WINDOW_MS;
     const recent = entries.filter((e) => e.timestamp >= since);
-    const text = recent.map((e) => e.text).join("\n");
+    // Phase 7: 話者ラベル付きで送る（誤りうる前提は explain の指示文に明記済み）。
+    const text = recent
+      .map((e) => {
+        const label = labelOf(e, speakerLabels);
+        return label ? `${label}: ${e.text}` : e.text;
+      })
+      .join("\n");
     if (!text.trim()) {
       toast.info("直近30秒の発話がありません");
       return;
     }
     runExplain("recent", text);
-  }, [entries, runExplain]);
+  }, [entries, runExplain, labelOf, speakerLabels]);
 
   const explainSelection = useCallback(() => {
     if (!selectionText.trim()) return;
@@ -417,12 +487,25 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
   // 再解説防止のための解説済み用語リスト（直近 EXPLAINED_TERMS_MAX 件）。
   const explainedTermsRef = useRef<string[]>([]);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Phase 7: 連続失敗カウント。閾値に達したら上部バーに赤字を出す（1回成功で消える）。
+  const scanFailCountRef = useRef(0);
+  const [scanError, setScanError] = useState(false);
+  const markScanFailure = useCallback(() => {
+    scanFailCountRef.current += 1;
+    if (scanFailCountRef.current >= AUTO_SCAN_FAIL_THRESHOLD) setScanError(true);
+  }, []);
 
   const runAutoScan = useCallback(async () => {
     if (scanInFlightRef.current) return;
-    const { entries: curEntries, jobCards: curJobs, reasonCard: curReason } = latestRef.current;
+    const { entries: curEntries, jobCards: curJobs, reasonCard: curReason, speakerLabels: curLabels } = latestRef.current;
     const newEntries = curEntries.slice(scannedCountRef.current);
-    const text = newEntries.map((e) => e.text).join("\n");
+    // Phase 7: 話者ラベル付きで送る（AIの読み取りが良くなる。ラベルは誤りうる前提を指示文に明記済み）。
+    const text = newEntries
+      .map((e) => {
+        const label = labelOf(e, curLabels);
+        return label ? `${label}: ${e.text}` : e.text;
+      })
+      .join("\n");
     if (text.length < AUTO_SCAN_MIN_CHARS) return; // 無言・相槌のみの区間は呼ばない
     const scannedCount = curEntries.length;
     scanInFlightRef.current = true;
@@ -430,11 +513,14 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
       const res = await fetch("/api/interview-support/auto-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Phase 7: 応答が永久に返らないと scanInFlight が立ちっぱなしで以後のスキャンが全部止まるため、
+        // タイムアウトで必ず打ち切る（打ち切りは catch → 次回リトライ）。
+        signal: AbortSignal.timeout(AUTO_SCAN_TIMEOUT_MS),
         body: JSON.stringify({
           text,
-          // Phase 5: 事前情報は毎回同じ文字列を添える（byte一致で prompt cache に乗せる）。
-          // Phase 6 から裏方専用（読み取り補正・要約精度向上）。カードの根拠には使われない。
-          priorInfoText: priorTextRef.current ?? undefined,
+          // Phase 7: シート抽出テキストは送らない（漏えい修正）。固有名詞リストだけを毎回同じ配列で
+          // 添える（byte一致で prompt cache に乗せる）。用途は文字起こしの表記補正のみ。
+          keyterms: priorKeytermsRef.current.length > 0 ? priorKeytermsRef.current : undefined,
           explainedTerms: explainedTermsRef.current,
           existingJobs: curJobs.map((j) => ({
             key: j.key,
@@ -445,13 +531,20 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
           existingReason: curReason ? { text: curReason.text, questions: curReason.questions } : null,
         }),
       });
-      if (!res.ok) return; // 自動フローはエラーを画面に出さない（次回スキャンで回復）
+      if (!res.ok) {
+        // 連続失敗は赤字表示（Phase 7）。スキャン済み位置は進めない＝次回同じ発話でリトライ。
+        markScanFailure();
+        return;
+      }
       const data = (await res.json()) as {
         terms?: Array<{ term?: string; text?: string }>;
         jobs?: Array<{ key?: string; title?: string; text?: string; questions?: string[] }>;
         reason?: { text?: string; questions?: string[] } | null;
       };
       scannedCountRef.current = scannedCount;
+      // 成功。連続失敗カウントとエラー表示をリセット（Phase 7）。
+      scanFailCountRef.current = 0;
+      setScanError(false);
 
       let applied = false;
       const now = Date.now();
@@ -545,7 +638,9 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         saveSession();
       }
     } catch {
-      // 通信失敗も沈黙（scannedCount を進めていないので次回同じ発話でリトライ）
+      // 通信失敗・タイムアウト（scannedCount を進めていないので次回同じ発話でリトライ）。
+      // 連続すると赤字表示（Phase 7）。
+      markScanFailure();
     } finally {
       scanInFlightRef.current = false;
       lastScanEndRef.current = Date.now();
@@ -555,7 +650,7 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
         scheduleAutoScanRef.current();
       }
     }
-  }, [saveSession]);
+  }, [saveSession, labelOf, markScanFailure]);
 
   // Phase 4: 発話が確定するたびにスキャンを予約する（30秒タイマーは廃止）。
   // 直前のスキャン完了から AUTO_SCAN_COOLDOWN_MS 経つまでは待ち、その間の確定発話は次の1回にまとめて送る。
@@ -683,6 +778,25 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
               保存エラー（自動で再試行します）
             </span>
           )}
+          {/* Phase 7: auto-scan の連続失敗を可視化（静かに止まったままにしない）。1回成功で消える。 */}
+          {scanError && (
+            <span className="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-sm font-medium text-red-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              自動検知エラー（自動で再試行します）
+            </span>
+          )}
+          {/* Phase 7: 話者ラベル反転（最初の話者=CAの自動割り当てが逆だった時のワンタップ修正）。
+              2人以上検出された時だけ出す。 */}
+          {speakerLabels.size >= 2 && (
+            <button
+              type="button"
+              onClick={() => setSpeakersSwapped((v) => !v)}
+              title="CA と求職者のラベルを入れ替える（既存ログの表示も反転します）"
+              className="rounded border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50 cursor-pointer"
+            >
+              ⇄ 話者入れ替え
+            </button>
+          )}
           {/* Phase 4: 使用中の文字起こしエンジン。「ブラウザ内蔵」なら DEEPGRAM_API_KEY 未設定 or 発行失敗。 */}
           <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
             {engine === null ? "エンジン確認中…" : engine === "deepgram" ? "Deepgram" : "ブラウザ内蔵"}
@@ -743,6 +857,8 @@ export default function InterviewSupportScreen({ interviewId }: { interviewId: s
             interimText={interimText}
             listening={listening}
             onSelectionChange={setSelectionText}
+            speakerLabels={speakerLabels}
+            onCopy={handleCopyLog}
           />
           <div className="flex items-center gap-3">
             <button

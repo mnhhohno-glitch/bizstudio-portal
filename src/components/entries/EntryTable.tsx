@@ -276,6 +276,20 @@ function isInterviewOverdue(entry: Entry, stage: "first" | "second" | "final"): 
   return interview < today;
 }
 
+// 求人DB列の URL は CA の手入力。javascript: 等を開かせないため http/https のみ通し、
+// 不正値は null を返して企業名セルをプレーンテキストへ落とす。
+function toSafeExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const url = raw.trim();
+  if (!url) return null;
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "http:" || protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function getFieldValue(entry: Entry, key: string): string | null {
   switch (key) {
     case "candidate": return entry.candidate.name;
@@ -852,6 +866,8 @@ export default function EntryTable({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [maxHeight, setMaxHeight] = useState<number | null>(null);
   const rafRef = useRef<number | null>(null);
+  // 企業名クリック→求人詳細を開く処理の二重クリック防止ガード(表示に影響しないので ref)。
+  const openingJobRef = useRef<string | null>(null);
 
   const recalcHeight = useCallback(() => {
     const el = wrapRef.current;
@@ -913,7 +929,7 @@ export default function EntryTable({
             style={{ left: CHECKBOX_COL_WIDTH }}
           >
             <div className="flex items-center gap-1.5">
-              <Link href={`/candidates/${entry.candidateId}`} className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
+              <Link href={`/candidates/${entry.candidateId}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline" onClick={(e) => e.stopPropagation()}>
                 {entry.candidate.name}
               </Link>
               {/* T-120: タスク作成（エントリー対応依頼）の依頼中バッジ。エントリータブの間だけ表示し、書類選考以降で自動的に消える。 */}
@@ -939,29 +955,44 @@ export default function EntryTable({
         );
       }
       case "company": {
-        // T-140: サイト経由(route="site-apply")かつ externalJobRef ありの行は、
-        // 企業名クリックで portal SSO 経由 bizstudio-job-platform 求人詳細ページを開く。
-        // 通常の求人紹介経由行は従来通り originalUrl(kyuujin PDF プレビュー)を開く。
-        const isSiteApply = entry.route === "site-apply" && !!entry.externalJobRef;
-        const clickable = isSiteApply || !!entry.originalUrl;
-        const titleHint = isSiteApply
+        // 企業名クリックの飛び先。route / entryFlag では分岐させない。
+        //   T-140 の初版は route==="site-apply" の行だけを job-platform へ飛ばしていたため、
+        //   ブックマークの「紹介済み」行から作った route=null のエントリー
+        //   (externalJobRef あり・originalUrl なし) がクリック不可の黒文字に落ちていた。
+        //   1. externalJobRef あり → portal SSO 経由で自社求人サイト(bizstudio-job-platform)の求人詳細
+        //   2. なければ originalUrl → 従来どおり kyuujin PDF プレビュー
+        //   3. なければ jobDbUrl → 求人DB列と同じ外部ページ(CA が登録した選考URL)を別タブで開く。
+        //      FileMaker 一括取込行のように ref も PDF も持たない行を救う。
+        //   4. いずれも無ければ黒文字プレーンテキスト
+        const jobPlatformRef = entry.externalJobRef || null;
+        // 求人DB列が <a href> に使っている値そのもの(entry.jobDbUrl)を使う。企業名用の別ロジックは持たない。
+        const jobDbLink = jobPlatformRef || entry.originalUrl ? null : toSafeExternalUrl(entry.jobDbUrl);
+        const clickable = !!jobPlatformRef || !!entry.originalUrl || !!jobDbLink;
+        const titleHint = jobPlatformRef
           ? `${entry.companyName}\nクリックで自社求人サイト(bizstudio-job-platform)の求人詳細を開きます`
-          : entry.companyName;
+          : jobDbLink
+            ? `${entry.companyName} (クリックで求人DBの登録URLを開きます)`
+            : entry.companyName;
         return (
           <td key={col.key} className="px-2 py-1.5" title={titleHint}>
             <div
               onClick={(e) => {
                 e.stopPropagation();
-                if (isSiteApply && entry.externalJobRef) {
-                  openJobPlatformDetail(entry.externalJobRef);
+                if (jobPlatformRef) {
+                  // 二重クリック防止(トークン発行を挟むため)。表示に影響しないので ref で持つ。
+                  if (openingJobRef.current) return;
+                  openingJobRef.current = jobPlatformRef;
+                  openJobPlatformDetail(jobPlatformRef).finally(() => { openingJobRef.current = null; });
                   return;
                 }
                 if (entry.originalUrl) {
                   const previewUrl = entry.originalUrl.replace(/\/view(\?|$)/, "/preview$1");
                   window.open(previewUrl, "_blank");
+                  return;
                 }
+                if (jobDbLink) window.open(jobDbLink, "_blank", "noopener,noreferrer");
               }}
-              className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "cursor-pointer hover:text-[#2563EB] hover:underline" : "cursor-default"}`}
+              className={`whitespace-nowrap truncate max-w-[280px] ${clickable ? "text-[#2563EB] cursor-pointer hover:underline" : "cursor-default"}`}
               title={titleHint}
               data-company-name={entry.companyName}
             >

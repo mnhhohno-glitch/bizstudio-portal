@@ -779,10 +779,10 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
   このリストは `/tasks/new` の generic 描画抑止専用で、タスク詳細（`/tasks/[taskId]`）は
   「フォーム作成指定データ」だけを隠す実装なので、**外すとウィザードに素のTEXT入力が二重に出る**。
 
-## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01, Phase 6: 2026-09-01）
+## 面談サポート機能（T-183 / Phase 1: 2026-08-27, Phase 2: 2026-08-27, Phase 3: 2026-08-28, Phase 4: 2026-08-31, Phase 5: 2026-09-01, Phase 6: 2026-09-01, Phase 7: 2026-09-01）
 
 面談中のリアルタイム文字起こし＋AI解説で新人CAの理解を補助し、記録を振り返り・研修教材に使う。
-要件の正: `docs/mendan-support/requirements.md`（v8。Phase 6 で事前情報を裏方専用化＋Keyterm 認識強化に改訂）。
+要件の正: `docs/mendan-support/requirements.md`（v9。Phase 7 で事前情報の漏えい修正〔固有名詞リスト方式〕＋ログコピー＋話者識別に改訂）。
 
 - **モデル**: `InterviewSupportSession`（`interview_support_sessions`）。`InterviewRecord` に多対1（onDelete: Cascade）・
   `createdByUserId` は Employee.id。`id` は**クライアント生成**（支援画面の「開始」初回押下で確定）で、
@@ -873,3 +873,26 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     usage は endpoint `interview-support-prior-keyterms` で AdvisorUsageLog へ。`useDeepgramTranscription` に
     `setKeyterms`（ref 保持）を追加し、listen 接続URLに `keyterm=語1&keyterm=語2...` を付与（nova-3 の Keyterm
     Prompting。反映は次の WebSocket 接続から＝取得完了前に開始しても再接続時に効く）。事前情報なしは keyterm なしで従来どおり。
+- **事前情報の漏えい修正＋ログコピー＋話者識別（Phase 7）**: 実面談テストで、会話が1社目の話しかしていない段階で
+  業務内容カードにシートにしかない内容（「理学療法士（10年以上）」等）が出る・転職理由が語り始めの瞬間にシート内容で
+  先出しされる漏えいが再発（**Phase 6 の指示文による禁止では軽量モデルが守り切れない**）ことへの対応。
+  - **漏えい修正（構造的に漏えい不能化）**: auto-scan への**シート抽出テキスト（`priorInfoText`）の送信・受け付けを廃止**し、
+    prior-info API が抽出済みの `keyterms`（固有名詞リスト。最大50語・各100字）だけを渡す。system は
+    「固定指示」＋「固有名詞リスト」の2ブロック（両方 cache_control。リストは面談中 byte 一致でキャッシュに乗る）。
+    固定指示は「リストは表記補正のためだけ／リストにある語でも会話に出ていなければ書かない／会話に出ていない
+    年数・社数・在籍期間・業務内容・転職理由を書かない／title に経験年数を付けない／転職理由は本人が語った分だけを
+    要約し続きが語られたら統合更新」を明記。prior-info API の全文抽出処理は存続（表示・keyterm 抽出元）だが
+    auto-scan へは送らない。usage note は `keyterms:N`。
+  - **スキャン停止経路の修正**: auto-scan fetch に **30秒タイムアウト**（`AbortSignal.timeout`。応答が永久に
+    返らないと `scanInFlight` が立ちっぱなしで以後のスキャンが全停止する経路を塞ぐ）＋ **3回連続失敗で上部バーに
+    赤字「自動検知エラー（自動で再試行します）」**（`AUTO_SCAN_FAIL_THRESHOLD`。1回成功で消える。
+    サーバー側 JSON パース失敗は従来どおり空結果 200 でループは止まらない）。
+  - **ログコピー**: 支援画面のログ枠右上＋面談サポートタブのセッション閲覧に「コピー」ボタン。
+    `[HH:MM:SS] 話者: 発話内容` 改行区切りの全文をクリップボードへ（カード・解説は含めない）。成功トースト表示。
+  - **話者識別**: `useDeepgramTranscription` に `diarize=true`。確定発話の `words[].speaker` の最頻値を
+    `TranscriptEntry.speaker`（番号）に保持。表示名は画面側で解決: **最初に発話した話者=CA・2人目=求職者**
+    （3人以上は「話者3」等）・上部バー「⇄ 話者入れ替え」でCA/求職者を反転（既存ログ表示・以後の保存にも反映）。
+    ログ行は時刻の後にラベル（CA=青/求職者=緑）。保存 transcript の各エントリに `speaker`（**解決済み表示名の文字列**）を
+    追加（Json 相乗り・テーブル/保存API無変更。speaker なしの過去データは従来表示）。auto-scan・explain へ送る
+    テキストにも「CA:」「求職者:」プレフィックスを付け、両 system プロンプトに「話者ラベルは誤りうる。矛盾したら
+    内容を優先」を明記。Web Speech フォールバックは話者識別なし（従来表示）。

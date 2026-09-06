@@ -51,12 +51,23 @@ function parseDateLoose(value: unknown): Date {
  * 以前は `sendResult === "FAILURE"` 以外を全て SUCCESS とみなしていたため、
  * RPA が実際に送っていた "FAILED" / 空文字 / 変数展開失敗（"%送信結果%"）/
  * フィールド欠落が全て「送信成功」として永久記録されていた。
- * ここでは **"SUCCESS" に一致したときだけ成功**とし、それ以外は全て失敗にする。
- * 保存する値は必ず "SUCCESS" または "FAILED" のどちらかに正規化する（生値は保存しない）。
+ *
+ * 2026-09-06: RPA が canSendReply=false の応募に対して "SKIP" を送るようになったため、
+ * 認識する値を SUCCESS / FAILED / SKIP の3値にした。
+ *   - "SUCCESS"                      → SUCCESS
+ *   - "FAILED" / "FAILURE" / "FAIL"  → FAILED
+ *   - "SKIP" / "SKIPPED"             → SKIP（送信していない＝失敗でも成功でもない）
+ *   - それ以外（空・欠落・変数展開失敗・未知の値）→ FAILED（フェイルクローズは維持）
+ * 400 は返さない（RPA 側のフローを止めないため）。
  */
-function normalizeSendResult(raw: unknown): "SUCCESS" | "FAILED" {
+type SendResult = "SUCCESS" | "FAILED" | "SKIP";
+
+function normalizeSendResult(raw: unknown): SendResult {
   if (raw === null || raw === undefined) return "FAILED";
-  return String(raw).trim().toUpperCase() === "SUCCESS" ? "SUCCESS" : "FAILED";
+  const v = String(raw).trim().toUpperCase();
+  if (v === "SUCCESS") return "SUCCESS";
+  if (v === "SKIP" || v === "SKIPPED") return "SKIP";
+  return "FAILED";
 }
 
 /**
@@ -132,7 +143,8 @@ export async function POST(req: Request) {
       );
     }
 
-    if (candidateId) {
+    // SKIP は「送信していない」ので送信履歴（CandidateSettingsHistory）には積まない。
+    if (candidateId && sendResult !== "SKIP") {
       const candidate = await prisma.candidate.findUnique({
         where: { id: candidateId },
         select: { id: true },
