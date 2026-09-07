@@ -49,15 +49,6 @@ function monthRange(yyyyMm: string, today: string): { from: string; to: string }
   };
 }
 
-// 既知のデータ不備。AI が数字を鵜呑みにしないよう year ブロックに添える。
-// TODO: 2026年1〜3月の仕入・求人DB費のデータ補正が完了したら、この注記を削除する。
-function dataQualityNotesForYear(year: string): string[] {
-  if (year !== "2026") return [];
-  return [
-    "2026年1〜3月の一部案件（12件）で仕入・求人DB費が未入力のため、当該期間の粗利が実態より最大約1,356,630円多く出る可能性があります。",
-  ];
-}
-
 /** year レンジに対応する yearMonth（"YYYY-01"〜"YYYY-12"）一覧。 */
 function monthsOfYear(year: string): string[] {
   return Array.from({ length: 12 }, (_, i) => `${year}-${pad2(i + 1)}`);
@@ -216,7 +207,6 @@ export async function GET(req: Request) {
         period: { from: yRange.from, to: yRange.to },
         ...yearAll,
         targetRegisteredMonths,
-        dataQualityNotes: dataQualityNotesForYear(year),
       },
       month: { period: { from: mRange.from, to: mRange.to }, ...monthAll },
       byCa,
