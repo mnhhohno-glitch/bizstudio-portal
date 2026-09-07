@@ -36,3 +36,27 @@ export async function countCompanyInterviewCandidates(params: {
       );`);
   return rows[0]?.n ?? 0;
 }
+
+/**
+ * 請求売上（税抜）。承諾日が期間内の JobEntry の SUM(revenue)。
+ * 述語は computeWeeklyMatrix の選考状況クエリ（decidedRevenue の母集団）と完全に同一：
+ *   担当軸 = candidate.employee_id / je.archived_at IS NULL / je.acceptance_date BETWEEN [from,to]。
+ * 粗利（decidedRevenue）は同じ母集団に対する SUM(revenue - job_db_cost - cost) なので、
+ * 両者は同じ行集合から算出される（差は控除分のみ）。
+ */
+export async function sumInvoiceRevenue(params: {
+  employeeId: string;
+  from: Date;
+  to: Date;
+  allCas?: boolean;
+}): Promise<number> {
+  const { employeeId, from, to, allCas } = params;
+  const F = tsLit(from);
+  const T = tsLit(to);
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+  const rows = await prisma.$queryRawUnsafe<{ v: string | null }[]>(`
+    SELECT COALESCE(SUM(je.revenue) FILTER (WHERE je.acceptance_date BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}'), 0)::bigint v
+    FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+    WHERE ${empPred} AND je.archived_at IS NULL;`);
+  return rows[0]?.v != null ? Number(rows[0].v) : 0;
+}

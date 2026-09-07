@@ -5,12 +5,13 @@
 //   - 個人情報は返さない。求職者・企業・求人の明細は含めず、CA は employeeNumber と name のみ。
 //   - 人数系・決定売上は実績表の正本 computeWeeklyMatrix を任意レンジで呼んで取る
 //     （数字が実績表と一致することが最重要なので、集計ロジックを二重実装しない）。
-//   - 企業面接数のみ実績表に無いため src/lib/aiRead/kpi.ts で同じ述語で別集計する。
+//   - 企業面接数と請求売上（税抜）だけ実績表に無いため src/lib/aiRead/kpi.ts で同じ述語で別集計する。
+//   - CA売上のみを扱う（RA売上・シェアリング・業務委託売上は Portal 管理外）。scope: "CA_ONLY" で明示する。
 //   - JST 境界は src/lib/dailyReport/jstDate.ts のヘルパを使う（罠 #17：toISOString().slice(0,10) 禁止）。
 
 import { prisma } from "@/lib/prisma";
 import { assertAiReadAuth } from "@/lib/aiRead/auth";
-import { countCompanyInterviewCandidates } from "@/lib/aiRead/kpi";
+import { countCompanyInterviewCandidates, sumInvoiceRevenue } from "@/lib/aiRead/kpi";
 import { computeWeeklyMatrix } from "@/lib/performance/weeklyMatrix";
 import { todayJstDateString, jstDateStart, jstDateEnd } from "@/lib/dailyReport/jstDate";
 
@@ -48,21 +49,36 @@ function monthRange(yyyyMm: string, today: string): { from: string; to: string }
   };
 }
 
+// 既知のデータ不備。AI が数字を鵜呑みにしないよう year ブロックに添える。
+// TODO: 2026年1〜3月の仕入・求人DB費のデータ補正が完了したら、この注記を削除する。
+function dataQualityNotesForYear(year: string): string[] {
+  if (year !== "2026") return [];
+  return [
+    "2026年1〜3月の一部案件（12件）で仕入・求人DB費が未入力のため、当該期間の粗利が実態より最大約1,356,630円多く出る可能性があります。",
+  ];
+}
+
 /** year レンジに対応する yearMonth（"YYYY-01"〜"YYYY-12"）一覧。 */
 function monthsOfYear(year: string): string[] {
   return Array.from({ length: 12 }, (_, i) => `${year}-${pad2(i + 1)}`);
 }
 
 interface Block {
-  revenue: number;
+  // 請求売上（税抜）と粗利は別物。AI に渡したとき「売上」と誤読されないようキーを分ける。
+  invoiceRevenue: number;
+  grossProfit: number;
   revenueTarget: number;
   caInterviewCount: number;
   companyInterviewCount: number | null;
   entryCount: number;
   documentPassCount: number;
   offerCount: number;
-  decidedCount: number;
-  averageUnitPrice: number | null;
+  // 成約「件数」（JobEntry 行数）と決定「人数」（求職者ユニーク）も別物。
+  // 同一求職者が複数社で承諾すると件数 > 人数になる（例: 2026-08 は 10 件 / 9 人）。
+  decidedDealCount: number;
+  decidedCandidateCount: number;
+  averageInvoiceUnitPrice: number | null;
+  averageGrossUnitPrice: number | null;
 }
 
 /** 1 レンジ分の実績を実績表と同じ定義で組み立てる。 */
@@ -75,23 +91,29 @@ async function buildBlock(params: {
 }): Promise<Block> {
   const from = jstDateStart(params.range.from);
   const to = jstDateEnd(params.range.to);
-  const [matrix, companyInterviewCount] = await Promise.all([
+  const [matrix, companyInterviewCount, invoiceRevenue] = await Promise.all([
     computeWeeklyMatrix({ employeeId: params.employeeId, userId: params.userId, from, to, allCas: params.allCas }),
     countCompanyInterviewCandidates({ employeeId: params.employeeId, from, to, allCas: params.allCas }),
+    // 請求売上だけ実績表に露出していないため同一述語で別集計（src/lib/aiRead/kpi.ts）。
+    sumInvoiceRevenue({ employeeId: params.employeeId, from, to, allCas: params.allCas }),
   ]);
-  // decidedRevenue は実績表の「決定売上」（粗利）。売上0のレンジでは null になるので 0 に寄せる。
-  const revenue = matrix.selection.decidedRevenue ?? 0;
-  const decidedCount = matrix.selection.acceptance;
+  // decidedRevenue は実績表の「決定粗利」。売上0のレンジでは null になるので 0 に寄せる。
+  const grossProfit = matrix.selection.decidedRevenue ?? 0;
+  // 件数＝acceptanceRecs（承諾行数）、人数＝acceptance（求職者ユニーク）。どちらも実績表の正本の値をそのまま使う。
+  const decidedDealCount = matrix.selection.acceptanceRecs;
   return {
-    revenue,
+    invoiceRevenue,
+    grossProfit,
     revenueTarget: params.revenueTarget,
     caInterviewCount: matrix.interview.total,
     companyInterviewCount,
     entryCount: matrix.entry.total.uniq,
     documentPassCount: matrix.selection.documentPass,
     offerCount: matrix.selection.offer,
-    decidedCount,
-    averageUnitPrice: decidedCount > 0 ? revenue / decidedCount : null,
+    decidedDealCount,
+    decidedCandidateCount: matrix.selection.acceptance,
+    averageInvoiceUnitPrice: decidedDealCount > 0 ? invoiceRevenue / decidedDealCount : null,
+    averageGrossUnitPrice: decidedDealCount > 0 ? grossProfit / decidedDealCount : null,
   };
 }
 
@@ -166,21 +188,36 @@ export async function GET(req: Request) {
     {
       asOf: today,
       timezone: "Asia/Tokyo",
+      scope: "CA_ONLY",
+      scopeNote:
+        "この数値は Portal に登録された CA実績（人材紹介のCA売上）のみです。RA売上・JOBシェアリング・業務委託売上は Portal 管理外のため含まれません。会社全体の売上ではありません。",
       definitions: {
-        revenue:
-          "決定売上（粗利）。JobEntry の acceptanceDate（承諾日）が期間内の行について SUM(revenue - jobDbCost - cost)。実績表の「決定売上」と同一（computeWeeklyMatrix.selection.decidedRevenue）",
+        invoiceRevenue:
+          "請求売上（税抜）。JobEntry の acceptanceDate（承諾日）が期間内の行について SUM(revenue)。控除前の金額",
+        grossProfit:
+          "粗利。同じ母集団について SUM(revenue - jobDbCost - cost)＝請求売上 − 求人DB費 − 仕入。実績表の「決定粗利」と同一（computeWeeklyMatrix.selection.decidedRevenue）",
+        decidedDealCount:
+          "成約件数。acceptanceDate が期間内の JobEntry の行数（社数）。同一求職者が複数社で承諾すると decidedCandidateCount より大きくなる",
+        decidedCandidateCount:
+          "決定人数。acceptanceDate が期間内の JobEntry の求職者ユニーク人数。実績表の「承諾（人数）」と同一",
         counts:
-          "求職者ユニーク人数（computeWeeklyMatrix と同一定義）。担当軸は Candidate.employeeId、JobEntry は archivedAt 除外",
+          "件数系・人数系はいずれも computeWeeklyMatrix と同一定義。担当軸は Candidate.employeeId、JobEntry は archivedAt 除外",
         revenueTarget:
-          "PerformanceTarget.targetRevenue の合計（在籍CAのみ）。year は yearMonth が YYYY-01〜YYYY-12、month は該当 yearMonth。未登録月は 0",
+          "**粗利ベースの目標**（画面上の「目標粗利」）。PerformanceTarget.targetRevenue の合計（在籍CAのみ）。比較対象は grossProfit であり invoiceRevenue ではない。year は yearMonth が YYYY-01〜YYYY-12、month は該当 yearMonth。未登録月は 0",
         caInterviewCount:
           "CAと求職者の面談（InterviewRecord）の件数。辞退系 resultFlag を除外する実績表と同一ルール",
         companyInterviewCount:
           "企業との面接。JobEntry の firstInterviewDate / secondInterviewDate / finalInterviewDate のいずれかが期間内にある求職者のユニーク人数（同一人の複数社・複数段階は 1 人）",
-        averageUnitPrice: "revenue ÷ decidedCount。decidedCount が 0 のときは null",
+        averageInvoiceUnitPrice: "invoiceRevenue ÷ decidedDealCount。decidedDealCount が 0 のときは null",
+        averageGrossUnitPrice: "grossProfit ÷ decidedDealCount。decidedDealCount が 0 のときは null",
       },
       caCount: cas.length,
-      year: { period: { from: yRange.from, to: yRange.to }, ...yearAll, targetRegisteredMonths },
+      year: {
+        period: { from: yRange.from, to: yRange.to },
+        ...yearAll,
+        targetRegisteredMonths,
+        dataQualityNotes: dataQualityNotesForYear(year),
+      },
       month: { period: { from: mRange.from, to: mRange.to }, ...monthAll },
       byCa,
     },
