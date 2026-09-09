@@ -1439,10 +1439,12 @@ model CandidateSettingsHistory {
   candidateId  String    @map("candidate_id")
   candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   sentAt       DateTime  @map("sent_at")
-  sendType     String    @map("send_type") // "MYNAVI_FIRST_REPLY"
-  sendResult   String    @map("send_result") // "SUCCESS" | "FAILURE"
+  sendType     String    @map("send_type") // "MYNAVI_FIRST_REPLY" | "MYNAVI_FIRST_REPLY_MAIL"
+  sendResult   String    @map("send_result") // "SUCCESS" | "FAILED" | "NO_EMAIL"
   templateName String    @map("template_name")
   senderName   String    @map("sender_name")
+  // T-193追補2: 送信できなかった理由などの補足。既存レコードは null のまま（additive）。
+  note         String?   @map("note")
   createdAt    DateTime  @default(now()) @map("created_at")
 
   @@index([candidateId, sentAt])

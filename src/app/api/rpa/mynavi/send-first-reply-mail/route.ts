@@ -22,6 +22,49 @@ function getTestTo(): string {
   return v && v.length > 0 ? v : DEFAULT_TEST_TO;
 }
 
+/**
+ * T-193追補2: 設定履歴（CandidateSettingsHistory）に残す値。
+ * マイナビ上の一次返信（sendType: "MYNAVI_FIRST_REPLY"）とは別の値にして、CA が両者を混同しないようにする。
+ */
+const HISTORY_SEND_TYPE = "MYNAVI_FIRST_REPLY_MAIL";
+const HISTORY_TEMPLATE_NAME = "【メール】ご応募のお礼と日程調整のご案内";
+const HISTORY_SENDER_NAME = "株式会社ビズスタジオ（agent@bizstudio.co.jp）";
+
+/**
+ * 送信結果を設定履歴に1行残す。
+ *
+ * **絶対条件**: ここでの失敗が本送信フローを壊してはいけない。
+ * - 例外は握りつぶしてログのみ（呼び出し側の result / HTTPステータスは一切変えない）
+ * - 求職者が実在しない場合は FK 違反になるので事前に確認してから書く
+ */
+async function recordHistory(params: {
+  candidateId: string;
+  sentAt: Date;
+  sendResult: "SUCCESS" | "FAILED" | "NO_EMAIL";
+  note: string | null;
+}): Promise<void> {
+  try {
+    const exists = await prisma.candidate.findUnique({
+      where: { id: params.candidateId },
+      select: { id: true },
+    });
+    if (!exists) return;
+    await prisma.candidateSettingsHistory.create({
+      data: {
+        candidateId: params.candidateId,
+        sentAt: params.sentAt,
+        sendType: HISTORY_SEND_TYPE,
+        sendResult: params.sendResult,
+        templateName: HISTORY_TEMPLATE_NAME,
+        senderName: HISTORY_SENDER_NAME,
+        note: params.note,
+      },
+    });
+  } catch (e) {
+    console.error(`${LOG} history write failed candidateId=${params.candidateId}:`, e);
+  }
+}
+
 type Result =
   | "SENT"
   | "ALREADY_SENT"
@@ -122,10 +165,12 @@ export async function POST(req: Request) {
   }
 
   let candidateId: string | null = null;
+  let isTestMode = false;
   try {
     const body = await parseRpaRequestBody(req);
     candidateId = body?.candidateId ? String(body.candidateId).trim() : "";
     const testMode = parseBool(body?.testMode);
+    isTestMode = testMode;
 
     if (!candidateId) {
       return respond({ result: "NOT_FOUND", message: "candidateId が指定されていません" });
@@ -180,7 +225,9 @@ export async function POST(req: Request) {
       });
     }
     if (!hasEmail) {
-      return respond({ ...base, result: "NO_EMAIL", message: "メールアドレスが未登録のため送信していません" });
+      const message = "メールアドレスが未登録のため送信していません";
+      await recordHistory({ candidateId, sentAt: new Date(), sendResult: "NO_EMAIL", note: message });
+      return respond({ ...base, result: "NO_EMAIL", message });
     }
 
     // 1) 条件付き予約（sentAt が null の行だけを押さえる）
@@ -215,6 +262,13 @@ export async function POST(req: Request) {
         where: { id: candidateId },
         data: { mynaviFirstReplyMailMessageId: messageId },
       });
+      // sentAt は予約時刻。成功・失敗で揃える（Candidate.mynaviFirstReplyMailSentAt と同値）。
+      await recordHistory({
+        candidateId,
+        sentAt: reservedAt,
+        sendResult: "SUCCESS",
+        note: messageId ? `Resend messageId: ${messageId}` : null,
+      });
       return respond({
         ...base,
         result: "SENT",
@@ -230,17 +284,26 @@ export async function POST(req: Request) {
         where: { id: candidateId, mynaviFirstReplyMailSentAt: reservedAt },
         data: { mynaviFirstReplyMailSentAt: null },
       });
-      return respond({ ...base, result: "SEND_FAILED", message: `送信に失敗しました（Resend 拒否・予約解除）: ${r.error}` });
+      const message = `送信に失敗しました（Resend 拒否・予約解除）: ${r.error}`;
+      await recordHistory({ candidateId, sentAt: reservedAt, sendResult: "FAILED", note: message });
+      return respond({ ...base, result: "SEND_FAILED", message });
     }
+    const message = `送信に失敗しました（結果不明のため予約は保持）: ${r.error}`;
+    await recordHistory({ candidateId, sentAt: reservedAt, sendResult: "FAILED", note: message });
     return respond({
       ...base,
       result: "SEND_FAILED",
       sentAt: toJstIso(reservedAt),
-      message: `送信に失敗しました（結果不明のため予約は保持）: ${r.error}`,
+      message,
     });
   } catch (e) {
     console.error(`${LOG} candidateId=${candidateId ?? "(none)"} unexpected error:`, e);
     const detail = e instanceof Error ? e.message : String(e);
-    return respond({ result: "ERROR", candidateId, message: `予期しないエラー: ${detail}` });
+    const message = `予期しないエラー: ${detail}`;
+    // candidateId が実在するときだけ履歴を残す（recordHistory 内で存在確認＋例外握りつぶし）。
+    if (candidateId && !isTestMode) {
+      await recordHistory({ candidateId, sentAt: new Date(), sendResult: "FAILED", note: message });
+    }
+    return respond({ result: "ERROR", candidateId, message });
   }
 }

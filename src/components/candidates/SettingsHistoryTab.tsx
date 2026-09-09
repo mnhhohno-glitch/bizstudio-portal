@@ -9,12 +9,34 @@ type SettingsHistory = {
   sendResult: string;
   templateName: string;
   senderName: string;
+  /** T-193追補2: 送信できなかった理由などの補足（既存レコードは null） */
+  note?: string | null;
 };
 
 const SEND_TYPE_LABEL: Record<string, string> = {
   MYNAVI_FIRST_REPLY: "マイナビ一次返信",
   MYNAVI_RESEND: "マイナビ再送信",
+  // T-193追補2: portal から Resend で送るメール。マイナビ上の返信とは別物なので表記を分ける。
+  MYNAVI_FIRST_REPLY_MAIL: "マイナビ一次返信メール",
 };
+
+/**
+ * T-193追補2: sendResult の表示。
+ * NO_EMAIL は「送信に失敗した」のではなく「アドレスが無いので送っていない」ため、
+ * 赤の「失敗」ではなくグレーの中立表示にする（SUCCESS / それ以外の既存表示は変えない）。
+ */
+function sendResultBadge(sendResult: string): { label: string; className: string } {
+  if (sendResult === "SUCCESS") {
+    return { label: "成功", className: "border-green-200 bg-green-50 text-green-700" };
+  }
+  if (sendResult === "NO_EMAIL") {
+    return {
+      label: "未送信（アドレス未登録）",
+      className: "border-gray-200 bg-gray-50 text-gray-600",
+    };
+  }
+  return { label: "失敗", className: "border-red-200 bg-red-50 text-red-700" };
+}
 
 function formatDateTimeJST(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
@@ -71,10 +93,13 @@ export default function SettingsHistoryTab({
               <th className="px-4 py-3 text-left font-medium">送信結果</th>
               <th className="px-4 py-3 text-left font-medium">送信文章名</th>
               <th className="px-4 py-3 text-left font-medium">送信担当者</th>
+              <th className="px-4 py-3 text-left font-medium">備考</th>
             </tr>
           </thead>
           <tbody>
-            {histories.map((h) => (
+            {histories.map((h) => {
+              const badge = sendResultBadge(h.sendResult);
+              return (
               <tr key={h.id} className="border-t border-gray-100">
                 <td className="whitespace-nowrap px-4 py-3 text-gray-600">
                   {formatDateTimeJST(h.sentAt)}
@@ -84,19 +109,17 @@ export default function SettingsHistoryTab({
                 </td>
                 <td className="px-4 py-3">
                   <span
-                    className={`rounded-full border px-2 py-0.5 text-xs ${
-                      h.sendResult === "SUCCESS"
-                        ? "border-green-200 bg-green-50 text-green-700"
-                        : "border-red-200 bg-red-50 text-red-700"
-                    }`}
+                    className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs ${badge.className}`}
                   >
-                    {h.sendResult === "SUCCESS" ? "成功" : "失敗"}
+                    {badge.label}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-700">{h.templateName}</td>
                 <td className="px-4 py-3 text-gray-700">{h.senderName}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">{h.note || ""}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
