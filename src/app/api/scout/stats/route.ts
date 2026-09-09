@@ -2,15 +2,16 @@
  * GET /api/scout/stats?axis={overall|media|machine|category}&from=YYYY-MM-DD&to=YYYY-MM-DD&groupBy={day|week|month|hour}&dateMode={sent|applied}
  *   集計データを返す
  *
- * groupBy=hour（T-135 T-B・後方互換の純追加）: 配信枠の hourSlot(8〜19) でバケット。
- *   キーは "8"〜"19"。配信数/開封数は枠、応募数は紐付き枠の hourSlot に帰属（応募時刻ではなく
+ * groupBy=hour（T-135 T-B・後方互換の純追加）: 配信枠の時刻 (hourSlot, minuteSlot) でバケット。
+ *   キーは slotBucketKey() の "8:00"〜"19:00"（14:30 を含む）。旧形式 "8"〜"19" は 14:30 追加時に廃止。
+ *   配信数/開封数は枠、応募数は紐付き枠の時刻に帰属（応募時刻ではなく
  *   配信された時間帯＝配信日起算の思想と一貫）。day/week/month・dateMode の挙動は不変。
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { parseSlotDate } from "@/lib/scout/slot-helpers";
+import { parseSlotDate, slotBucketKey, compareSlotKeys } from "@/lib/scout/slot-helpers";
 
 type Bucket = {
   key: string;
@@ -104,9 +105,11 @@ export async function GET(req: NextRequest) {
     };
 
     // 配信数・開封数は常に「配信日（deliveryDate）」バケットへ（@db.Date, UTC getter で正しい）。
-    // groupBy=hour のときは日付でなく枠の hourSlot（"8"〜"19"）でバケットする。
+    // groupBy=hour のときは日付でなく枠の時刻（"8:00"〜"19:00"・14:30 含む）でバケットする。
     const deliveryBucket = ensure(
-      groupBy === "hour" ? String(slot.hourSlot) : bucketKey(slot.deliveryDate, groupBy),
+      groupBy === "hour"
+        ? slotBucketKey(slot.hourSlot, slot.minuteSlot)
+        : bucketKey(slot.deliveryDate, groupBy),
     );
     deliveryBucket.deliveryCount += slot.deliveryCount;
     deliveryBucket.openCount += slot.openCount;
@@ -147,6 +150,7 @@ export async function GET(req: NextRequest) {
           select: {
             mediaSource: true,
             hourSlot: true,
+            minuteSlot: true,
             deliveryCategoryLarge: true,
             machine: { select: { machineLabel: true } },
           },
@@ -174,7 +178,7 @@ export async function GET(req: NextRequest) {
       };
       const applyKey =
         groupBy === "hour"
-          ? String(slot.hourSlot)
+          ? slotBucketKey(slot.hourSlot, slot.minuteSlot)
           : c.applicationDate
             ? bucketKey(c.applicationDate, groupBy)
             : jstBucketKey(c.createdAt, groupBy);
@@ -182,10 +186,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // hour は数値順、それ以外は文字列順（"YYYY-MM-DD" 等は辞書順＝時系列順）
+  // hour は時刻順（"8:00" < "14:00" < "14:30" < "19:00"）、それ以外は文字列順（"YYYY-MM-DD" 等は辞書順＝時系列順）
   const sortBuckets = (arr: Bucket[]): Bucket[] =>
     groupBy === "hour"
-      ? arr.sort((a, b) => Number(a.key) - Number(b.key))
+      ? arr.sort((a, b) => compareSlotKeys(a.key, b.key))
       : arr.sort((a, b) => a.key.localeCompare(b.key));
 
   const overall = sortBuckets(Array.from(bucketMap.values()));

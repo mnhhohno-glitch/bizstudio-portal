@@ -3,12 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { formatRecruiterName } from "@/lib/recruiterDisplay";
+import { formatSlotTime } from "@/lib/scout/slot-times";
 
 type Slot = {
   id: string;
   scoutNumber: string;
   deliveryDate: string;
   hourSlot: number;
+  minuteSlot: number;
   searchConditionName: string | null;
   mediaSource: string;
   machine: { recruiterName: string; machineLabel: string } | null;
@@ -190,7 +192,7 @@ export default function ScoutLinkPanel({
             <>
               <div>
                 <span className="text-[#6B7280]">配信日:</span> {linkedSlot.deliveryDate.slice(0, 10)}{" "}
-                <span className="text-[#6B7280] ml-2">時間:</span> {linkedSlot.hourSlot}:00
+                <span className="text-[#6B7280] ml-2">時間:</span> {formatSlotTime(linkedSlot.hourSlot, linkedSlot.minuteSlot)}
               </div>
               <div>
                 <span className="text-[#6B7280]">担当:</span>{" "}
@@ -248,7 +250,7 @@ export default function ScoutLinkPanel({
                     onClick={() => setInput(s.scoutNumber)}
                     className="rounded border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-mono hover:bg-[#EEF2FF]"
                   >
-                    {s.scoutNumber} ({s.deliveryDate.slice(5, 10)} {s.hourSlot}時)
+                    {s.scoutNumber} ({s.deliveryDate.slice(5, 10)} {formatSlotTime(s.hourSlot, s.minuteSlot)})
                   </button>
                 ))}
               </div>

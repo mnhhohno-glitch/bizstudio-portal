@@ -3,17 +3,17 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
+import { SLOT_TIMES, formatSlotTime } from "@/lib/scout/slot-times";
 
 type Slot = {
   id: string;
   hourSlot: number;
+  minuteSlot: number;
   machineId: string | null;
   openCount: number;
   isAggregationTarget: boolean;
   machine: { id: string; recruiterName: string; machineLabel: string; machineNumber: number | null; isActive: boolean } | null;
 };
-
-const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 function yesterday(): string {
   const d = new Date();
@@ -62,6 +62,11 @@ export default function ScoutOpenCountPage() {
       toast.error("保存に失敗しました");
     }
   };
+
+  // 行は SLOT_TIMES 順。その日に存在する時刻だけ出す（14:30 枠が無い既存日には 14:30 行を出さない）
+  const visibleTimes = SLOT_TIMES.filter((t) =>
+    slots.some((s) => s.hourSlot === t.hour && s.minuteSlot === t.minute),
+  );
 
   const groupedMachines = Array.from(
     new Map(
@@ -116,13 +121,15 @@ export default function ScoutOpenCountPage() {
               </tr>
             </thead>
             <tbody>
-              {HOURS.map((hour) => (
-                <tr key={hour} className="border-t border-[#F3F4F6]">
+              {visibleTimes.map((t) => (
+                <tr key={formatSlotTime(t.hour, t.minute)} className="border-t border-[#F3F4F6]">
                   <td className="px-2 py-2 font-medium text-[#374151] border-r border-[#E5E7EB]">
-                    {hour}:00
+                    {formatSlotTime(t.hour, t.minute)}
                   </td>
                   {groupedMachines.map((m) => {
-                    const slot = slots.find((s) => s.machineId === m.id && s.hourSlot === hour);
+                    const slot = slots.find(
+                      (s) => s.machineId === m.id && s.hourSlot === t.hour && s.minuteSlot === t.minute,
+                    );
                     if (!slot) {
                       return <td key={m.id} className="border-r border-[#E5E7EB] px-2 py-1 text-center text-[#9CA3AF]">-</td>;
                     }

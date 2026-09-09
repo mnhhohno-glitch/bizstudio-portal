@@ -4,7 +4,8 @@
  * findMatchingSlot:
  *   recruiterName + applicationDate (JST 日付) を起点に、
  *   ScoutMachineMaster → machineId を引き、当該日の ScoutDeliverySlot から1件選ぶ。
- *   候補が複数なら deliveryCount>0 を優先、その中で hourSlot が現在時刻 (JST) に近いものを選択。
+ *   候補が複数なら deliveryCount>0 を優先、その中で枠時刻 (hourSlot:minuteSlot) が現在時刻 (JST) に
+ *   分単位で近いものを選択（14:00 と 14:30 を区別するため分単位。既存日は全枠 minute=0 なので従来の時差順と同じ）。
  *   当日0件なら前日でも同じ手順で再検索。
  *
  * autoLinkCandidateToSlot:
@@ -13,6 +14,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { slotMinutes } from "@/lib/scout/slot-times";
 
 export type AutoLinkReason =
   | "matched"
@@ -27,6 +29,7 @@ export type MatchedSlot = {
   scoutNumber: string;
   deliveryDate: Date;
   hourSlot: number;
+  minuteSlot: number;
 };
 
 /** YYYY-MM-DD (JST) -> Date (UTC 00:00) */
@@ -75,22 +78,24 @@ export async function pickBestSlot(machineId: string, deliveryDate: Date): Promi
       scoutNumber: true,
       deliveryDate: true,
       hourSlot: true,
+      minuteSlot: true,
       deliveryCount: true,
     },
   });
   if (slots.length === 0) return null;
   if (slots.length === 1) {
     const s = slots[0];
-    return { slotId: s.id, scoutNumber: s.scoutNumber, deliveryDate: s.deliveryDate, hourSlot: s.hourSlot };
+    return { slotId: s.id, scoutNumber: s.scoutNumber, deliveryDate: s.deliveryDate, hourSlot: s.hourSlot, minuteSlot: s.minuteSlot };
   }
   const hasDelivery = slots.filter((s) => s.deliveryCount > 0);
   const pool = hasDelivery.length > 0 ? hasDelivery : slots;
-  // JST 現在時刻
+  // JST 現在時刻（分単位）。枠側も hourSlot*60 + minuteSlot の分単位で距離を測る（14:00 / 14:30 を区別）。
   const now = new Date();
-  const jstHour = new Date(now.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const jstMinutes = jst.getUTCHours() * 60 + jst.getUTCMinutes();
   pool.sort((a, b) => {
-    const da = Math.abs(a.hourSlot - jstHour);
-    const db = Math.abs(b.hourSlot - jstHour);
+    const da = Math.abs(slotMinutes(a.hourSlot, a.minuteSlot) - jstMinutes);
+    const db = Math.abs(slotMinutes(b.hourSlot, b.minuteSlot) - jstMinutes);
     if (da !== db) return da - db;
     return b.deliveryCount - a.deliveryCount;
   });
@@ -100,6 +105,7 @@ export async function pickBestSlot(machineId: string, deliveryDate: Date): Promi
     scoutNumber: best.scoutNumber,
     deliveryDate: best.deliveryDate,
     hourSlot: best.hourSlot,
+    minuteSlot: best.minuteSlot,
   };
 }
 

@@ -5,7 +5,8 @@
  *   認証: セッション認証
  *   Body: {
  *     deliveryDate: "YYYY-MM-DD",
- *     hourSlot: number (8〜19),
+ *     hourSlot: number,                        // (hourSlot, minuteSlot) は SLOT_TIMES（8:00〜19:00 + 14:30）のいずれか
+ *     minuteSlot?: number,                     // 0 / 30。省略時 0
  *     machineId: string,                       // 社員の ScoutMachineMaster.id
  *     deliveryCategoryLarge: "社員",
  *     deliveryCategoryMedium: "一斉配信" | "個別配信",
@@ -22,7 +23,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { parseSlotDate } from "@/lib/scout/slot-helpers";
+import { parseSlotDate, isValidSlotTime, slotTimesLabel } from "@/lib/scout/slot-helpers";
 import { generateScoutNumber } from "@/lib/scout/scout-number";
 
 export async function POST(req: NextRequest) {
@@ -40,6 +41,9 @@ export async function POST(req: NextRequest) {
 
   const deliveryDateStr = String(body.deliveryDate ?? "").trim();
   const hourSlot = Number(body.hourSlot);
+  // minuteSlot 省略時は 0（正時）
+  const minuteSlot =
+    body.minuteSlot === undefined || body.minuteSlot === null ? 0 : Number(body.minuteSlot);
   const machineId = String(body.machineId ?? "").trim();
   const deliveryCategoryLarge = String(body.deliveryCategoryLarge ?? "").trim();
   const deliveryCategoryMedium =
@@ -61,9 +65,9 @@ export async function POST(req: NextRequest) {
   if (!deliveryDateStr) {
     return NextResponse.json({ error: "deliveryDate は必須です" }, { status: 400 });
   }
-  if (!Number.isInteger(hourSlot) || hourSlot < 8 || hourSlot > 19) {
+  if (!isValidSlotTime(hourSlot, minuteSlot)) {
     return NextResponse.json(
-      { error: "hourSlot は 8〜19 の整数で指定してください" },
+      { error: `配信時間（hourSlot/minuteSlot）が不正です。指定できる枠: ${slotTimesLabel()}` },
       { status: 400 },
     );
   }
@@ -110,6 +114,7 @@ export async function POST(req: NextRequest) {
         scoutNumber,
         deliveryDate,
         hourSlot,
+        minuteSlot,
         machineId,
         isMachine: machine.isMachine,
         isStaff: !machine.isMachine,

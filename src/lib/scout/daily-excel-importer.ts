@@ -77,8 +77,12 @@ export async function importDailyScoutExcel(
         const count = typeof cell === "number" ? Math.trunc(cell) : Number(cell);
         if (!Number.isFinite(count) || count < 0) continue;
 
+        // Excel 経路は正時（minuteSlot=0）の枠のみ対象（parseHour が分を捨てるため 14:30 枠には書かない）
         const slot = slots.find(
-          (s) => s.hourSlot === hour && s.machine?.machineNumber === machineNumber,
+          (s) =>
+            s.hourSlot === hour &&
+            s.minuteSlot === 0 &&
+            s.machine?.machineNumber === machineNumber,
         );
         if (!slot) {
           failureCount++;

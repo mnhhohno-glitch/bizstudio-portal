@@ -2614,6 +2614,9 @@ model ScoutDeliverySlot {
   scoutNumber  String   @unique @map("scout_number") // SC + 8桁数字
   deliveryDate DateTime @map("delivery_date") @db.Date
   hourSlot     Int      @map("hour_slot") // 8〜19（開始時刻）
+  // 分（0 / 30）。枠の時刻は (hourSlot, minuteSlot) の組。候補一覧は src/lib/scout/slot-times.ts の SLOT_TIMES が単一ソース。
+  // 2026-09 に 14:30 枠追加のため純追加（既存行は 0 = 従来の「N時00分」）。
+  minuteSlot   Int      @default(0) @map("minute_slot")
 
   machineId String?             @map("machine_id")
   machine   ScoutMachineMaster? @relation(fields: [machineId], references: [id])
@@ -2647,8 +2650,11 @@ model ScoutDeliverySlot {
   // T-135 step6: FM全量入替により「1スカウトNO=1行」を許容するため複合ユニーク制約を撤廃。
   // 同一 日付×時×担当×種別×手法 に複数行（配信イベント）が並ぶ。検索性能維持のため同キーを非ユニークindex化。
   @@index([deliveryDate, hourSlot, machineId, deliveryCategoryLarge, deliveryCategoryMedium], map: "scout_slot_category_idx")
+  // minuteSlot 込みの枠照合用（14:30 対応）。旧 index 2本は追加系マイグレーションの原則で残置（後続の整理で drop 可）。
+  @@index([deliveryDate, hourSlot, minuteSlot, machineId, deliveryCategoryLarge, deliveryCategoryMedium], map: "scout_slot_category_minute_idx")
   @@index([deliveryDate])
   @@index([deliveryDate, hourSlot])
+  @@index([deliveryDate, hourSlot, minuteSlot])
   @@index([machineId])
   @@index([mediaSource])
   @@map("scout_delivery_slots")

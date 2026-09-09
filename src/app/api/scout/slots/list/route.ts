@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { parseSlotDate } from "@/lib/scout/slot-helpers";
+import { parseSlotDate, formatSlotTime, slotMinutes } from "@/lib/scout/slot-helpers";
 import { isForeignNg } from "@/lib/mynavi-rpa/judgment";
 
 type SortKey =
@@ -59,6 +59,7 @@ function dayOfWeekJa(date: Date): string {
   return DOW[date.getUTCDay()];
 }
 
+/** 時間帯区分（時のみで判定。14:30 は 14 時台として「午後」） */
 function timeBlock(hour: number): string {
   if (hour < 12) return "午前";
   if (hour < 14) return "昼";
@@ -227,6 +228,9 @@ export async function GET(req: NextRequest) {
         deliveryDate: slot.deliveryDate.toISOString().slice(0, 10),
         dayOfWeek: dayOfWeekJa(slot.deliveryDate),
         hourSlot: slot.hourSlot,
+        minuteSlot: slot.minuteSlot,
+        // 表示用ラベル "9:00" / "14:30"（クライアント側で `${hourSlot}:00` を組み立てない）
+        timeLabel: formatSlotTime(slot.hourSlot, slot.minuteSlot),
         timeBlock: timeBlock(slot.hourSlot),
         deliveryCount: slot.deliveryCount,
         openCount: slot.openCount,
@@ -254,9 +258,10 @@ export async function GET(req: NextRequest) {
         case "machineId":
           return r.machine?.recruiterName ?? "";
         case "deliveryDate":
-          return `${r.deliveryDate}-${String(r.hourSlot).padStart(2, "0")}`;
+          // 同一日内は時刻（分込み）順。"14:00" と "14:30" が不定順にならないよう通算分を4桁ゼロ埋め
+          return `${r.deliveryDate}-${String(slotMinutes(r.hourSlot, r.minuteSlot)).padStart(4, "0")}`;
         case "hourSlot":
-          return r.hourSlot;
+          return slotMinutes(r.hourSlot, r.minuteSlot);
         case "deliveryCount":
           return r.deliveryCount;
         case "openCount":

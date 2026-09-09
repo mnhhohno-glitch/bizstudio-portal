@@ -23,6 +23,7 @@ export const SCOUT_EXCEL_FORMAT = {
   // 8:00 〜 19:00 の 12 行
   dataRowCount: 12,
   // 時間文字列パース（"8:00" → 8）
+  // NOTE: 分は捨てている（"14:30" → 14）。Excel 経路は正時枠のみ対応で 14:30 枠は扱わない（現在この経路は未使用）。
   parseHour: (raw: unknown): number | null => {
     if (typeof raw === "number") return Math.trunc(raw);
     if (typeof raw === "string") {
