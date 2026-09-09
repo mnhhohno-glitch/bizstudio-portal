@@ -9,10 +9,9 @@ import { prisma } from "@/lib/prisma";
 import { isAuthorizedExternal } from "@/lib/schedule-tasks";
 import { addDaysYmd, dbDateToJstOffsetIso, jstStringToDbDate } from "@/lib/rpa-scout/jst";
 import { displayPatternName } from "@/lib/rpa-scout/pattern-name";
+import { TIME_SLOT_ORDER } from "@/lib/rpa-scout/constants";
 
 export const dynamic = "force-dynamic";
-
-const SLOT_ORDER: Record<string, number> = { AM: 0, PM: 1, EVENING: 2 };
 
 export async function GET(request: Request) {
   if (!isAuthorizedExternal(request)) {
@@ -58,7 +57,7 @@ export async function GET(request: Request) {
   plans.sort(
     (a, b) =>
       a.machineNo - b.machineNo ||
-      (SLOT_ORDER[a.timeSlot] ?? 99) - (SLOT_ORDER[b.timeSlot] ?? 99),
+      (TIME_SLOT_ORDER[a.timeSlot] ?? 99) - (TIME_SLOT_ORDER[b.timeSlot] ?? 99),
   );
 
   return NextResponse.json({

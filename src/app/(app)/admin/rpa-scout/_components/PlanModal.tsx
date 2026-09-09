@@ -65,7 +65,7 @@ export default function PlanModal({
 
   const selectedPattern = patterns.find((p) => p.id === patternId);
 
-  // 同じマスに同じ時間帯の計画が既にあるか（1日3件＝AM/PM/夕方 が想定運用のため重複は注意喚起する）
+  // 同じマスに同じ時間帯の計画が既にあるか（1枠1件＝午前/午後①/午後②/夕方 が想定運用のため重複は注意喚起する）
   const sameSlotPlans = siblingPlans.filter((p) => p.timeSlot === timeSlot);
 
   const save = async () => {

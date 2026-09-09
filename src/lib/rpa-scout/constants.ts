@@ -40,13 +40,20 @@ export const TRANSFER_TIMING_OPTIONS = [
   "未定",
 ] as const;
 
+// 配信タイミング区分。value は DB（rpa_scout_plans.timeSlot / TEXT）にそのまま入る値。
+// 既存データ互換のため PM（=午後①）は値を据え置き、ラベルだけを変えている。
 export const TIME_SLOTS = [
-  { value: "AM", label: "AM" },
-  { value: "PM", label: "PM" },
+  { value: "AM", label: "午前" },
+  { value: "PM", label: "午後①" },
+  { value: "PM2", label: "午後②" },
   { value: "EVENING", label: "夕方" },
 ] as const;
 
-export const TIME_SLOT_ORDER: Record<string, number> = { AM: 0, PM: 1, EVENING: 2 };
+// 許可する timeSlot 値の単一ソース（API のバリデーションはこれを参照する）
+export const TIME_SLOT_VALUES: readonly string[] = TIME_SLOTS.map((s) => s.value);
+
+// 並び順（午前 → 午後① → 午後② → 夕方）。画面・外部APIともこれを使う
+export const TIME_SLOT_ORDER: Record<string, number> = { AM: 0, PM: 1, PM2: 2, EVENING: 3 };
 
 export function timeSlotLabel(slot: string): string {
   return TIME_SLOTS.find((s) => s.value === slot)?.label ?? slot;

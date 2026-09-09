@@ -3204,7 +3204,7 @@ model RpaScoutLog {
 model RpaScoutPlan {
   id                String    @id @default(cuid())
   planDate          DateTime // 計画日（JST値をそのまま保持・日付のみ意味を持つ）
-  timeSlot          String // "AM" | "PM" | "EVENING"（表示名: AM / PM / 夕方）
+  timeSlot          String // "AM" | "PM" | "PM2" | "EVENING"（表示名: 午前 / 午後① / 午後② / 夕方）
   machineNo         Int // 1〜6
   patternId         String?
   patternName       String // スナップショット

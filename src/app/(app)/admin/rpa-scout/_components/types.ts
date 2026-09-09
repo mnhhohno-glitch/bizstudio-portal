@@ -74,7 +74,7 @@ export type RpaTemplate = {
 export type RpaPlan = {
   id: string;
   planDate: string; // JST壁時計値
-  timeSlot: string; // "AM" | "PM" | "EVENING"
+  timeSlot: string; // "AM" | "PM" | "PM2" | "EVENING"（表示名: 午前 / 午後① / 午後② / 夕方）
   machineNo: number;
   patternId: string | null;
   patternName: string;
