@@ -109,7 +109,7 @@ function toJstIso(d: Date): string {
  * POST /api/rpa/mynavi/send-first-reply-mail
  * T-193: マイナビ一次返信と同内容の案内メールを portal から Resend で送る。
  *
- * - 認証失敗(401)以外は常に 200 を返し、状態は result で表現する。
+ * - 認証失敗(403。既存の /api/rpa/mynavi/* と同じ)以外は常に 200 を返し、状態は result で表現する。
  * - 二重送信防止は「先に予約してから送る」: updateMany(where sentAt IS NULL) で押さえた側だけが送信する。
  * - 送信失敗時のロールバックは Resend が明確に拒否（非2xx）したときのみ。通信エラー・タイムアウトは
  *   「送られたか分からない」ので予約を残す（応募者への二重送信を避ける方を優先）。
@@ -117,8 +117,8 @@ function toJstIso(d: Date): string {
  */
 export async function POST(req: Request) {
   if (!verifyRpaSecret(req)) {
-    console.warn(`${LOG} unauthorized`);
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    console.warn(`${LOG} forbidden`);
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   let candidateId: string | null = null;
