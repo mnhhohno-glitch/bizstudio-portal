@@ -59,6 +59,8 @@ export type SendMailResult =
 export async function sendResendEmail(params: {
   to: string | string[]; // 複数指定するとその全員が TO に並ぶ1通になる
   cc?: string[]; // CC。空配列・未指定なら cc ヘッダ自体を付けない
+  // T-193追補4: BCC（送信控え用）。空配列・未指定なら bcc 自体を付けない＝既存の呼び出し元の挙動は変わらない。
+  bcc?: string[];
   subject: string;
   text: string;
   replyTo?: string; // 受信者が返信したとき届くアドレス（例: 送信者本人の User.email）
@@ -87,6 +89,7 @@ export async function sendResendEmail(params: {
         from: params.from?.trim() || FROM,
         to: Array.isArray(params.to) ? params.to : [params.to],
         ...(params.cc && params.cc.length > 0 ? { cc: params.cc } : {}),
+        ...(params.bcc && params.bcc.length > 0 ? { bcc: params.bcc } : {}),
         subject,
         text: params.text,
         ...(params.replyTo ? { reply_to: params.replyTo } : {}),

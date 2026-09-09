@@ -13,6 +13,19 @@ const LOG = "[mynavi-first-reply-mail]";
 const FROM = "株式会社ビズスタジオ <agent@bizstudio.co.jp>";
 
 /**
+ * T-193追補4: 送信控えの BCC 宛先。
+ * portal から直接送っているため agent@ の送信済みにも受信箱にも残らない。その控えを受信箱に残す用途。
+ * 差出人(FROM)とは別定数にしてある（将来どちらか一方だけ変えられるように）。
+ * 環境変数 FIRST_REPLY_MAIL_BCC で上書き可。空文字にすれば BCC 無しで送る。
+ */
+const DEFAULT_BCC = "agent@bizstudio.co.jp";
+function getBcc(): string[] {
+  const v = process.env.FIRST_REPLY_MAIL_BCC;
+  const addr = (v === undefined ? DEFAULT_BCC : v).trim();
+  return addr ? [addr] : [];
+}
+
+/**
  * testMode の宛先は固定（リクエストで宛先を指定させない＝APIキー漏えい時の踏み台化防止）。
  * 環境変数 RPA_MAIL_TEST_TO があればそれを優先する。
  */
@@ -201,7 +214,13 @@ export async function POST(req: Request) {
     // ---- testMode: 固定宛先へ送るだけ。予約も記録もしない ----
     if (testMode) {
       const to = getTestTo();
-      const r = await sendResendEmail({ from: FROM, to, subject: mail.subject, text: mail.text });
+      const r = await sendResendEmail({
+        from: FROM,
+        to,
+        bcc: getBcc(),
+        subject: mail.subject,
+        text: mail.text,
+      });
       if (r.ok) {
         return respond({
           ...base,
@@ -253,7 +272,13 @@ export async function POST(req: Request) {
     }
 
     // 3) 予約を取れた側だけが送信する
-    const r = await sendResendEmail({ from: FROM, to: email, subject: mail.subject, text: mail.text });
+    const r = await sendResendEmail({
+      from: FROM,
+      to: email,
+      bcc: getBcc(),
+      subject: mail.subject,
+      text: mail.text,
+    });
 
     if (r.ok) {
       // 4) 成功: messageId を記録
