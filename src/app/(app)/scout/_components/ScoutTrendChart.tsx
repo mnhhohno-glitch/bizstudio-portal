@@ -45,9 +45,8 @@ const CMP_LABEL: Record<Exclude<Comparison, "none">, string> = {
   prevYear: "前年",
 };
 
-// hour のラベルは "8:00" / "14:30" 形式（時刻そのもの）なので接尾辞を付けない
 function unitSuffix(unit: Unit): string {
-  return unit === "day" ? "日" : unit === "hour" ? "" : "月";
+  return unit === "day" ? "日" : unit === "hour" ? "時" : "月";
 }
 
 export default function ScoutTrendChart({

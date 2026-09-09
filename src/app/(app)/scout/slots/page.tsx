@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
 import ApplicantListModal from "@/components/scout/ApplicantListModal";
 import { TableVirtuoso, type TableComponents } from "react-virtuoso";
-import { SLOT_TIMES, formatSlotTime, parseSlotTimeKey } from "@/lib/scout/slot-times";
 
 type ListRow = {
   id: string;
@@ -19,8 +18,6 @@ type ListRow = {
   deliveryDate: string;
   dayOfWeek: string;
   hourSlot: number;
-  minuteSlot: number;
-  timeLabel: string;
   timeBlock: string;
   deliveryCount: number;
   openCount: number;
@@ -53,8 +50,7 @@ type Media = {
   isActive: boolean;
 };
 
-// 配信時間の候補は SLOT_TIMES（src/lib/scout/slot-times.ts）が単一ソース。select の value は "14:30" 形式のキー。
-const SLOT_TIME_OPTIONS = SLOT_TIMES.map((t) => formatSlotTime(t.hour, t.minute));
+const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 function today(): string {
   const d = new Date();
@@ -85,7 +81,6 @@ function shiftDate(dateStr: string, days: number): string {
 type CreateForm = {
   deliveryDate: string;
   hourSlot: number;
-  minuteSlot: number;
   machineId: string;
   mediaSource: string;
   deliveryCategoryMedium: "個別配信" | "一斉配信";
@@ -97,7 +92,6 @@ type CreateForm = {
 type DuplicateForm = {
   deliveryDate: string;
   hourSlot: number;
-  minuteSlot: number;
   deliveryCount: number;
   searchConditionName: string;
   deliveryCategorySmall: "検索条件指定" | "検索条件未指定";
@@ -148,7 +142,6 @@ export default function ScoutSlotsPage() {
   const [createForm, setCreateForm] = useState<CreateForm>({
     deliveryDate: today(),
     hourSlot: 14,
-    minuteSlot: 0,
     machineId: "",
     mediaSource: "マイナビ転職",
     deliveryCategoryMedium: "一斉配信",
@@ -163,7 +156,6 @@ export default function ScoutSlotsPage() {
   const [duplicateForm, setDuplicateForm] = useState<DuplicateForm>({
     deliveryDate: today(),
     hourSlot: 14,
-    minuteSlot: 0,
     deliveryCount: 0,
     searchConditionName: "",
     deliveryCategorySmall: "検索条件指定",
@@ -267,7 +259,6 @@ export default function ScoutSlotsPage() {
     setDuplicateForm({
       deliveryDate: slot.deliveryDate.slice(0, 10),
       hourSlot: slot.hourSlot,
-      minuteSlot: slot.minuteSlot,
       deliveryCount: slot.deliveryCount,
       searchConditionName: slot.searchConditionName ?? "",
       deliveryCategorySmall: (slot.deliveryCategorySmall as "検索条件指定" | "検索条件未指定") ?? "検索条件指定",
@@ -287,7 +278,6 @@ export default function ScoutSlotsPage() {
           sourceSlotId: duplicateSource.id,
           deliveryDate: duplicateForm.deliveryDate,
           hourSlot: duplicateForm.hourSlot,
-          minuteSlot: duplicateForm.minuteSlot,
           deliveryCount: duplicateForm.deliveryCount,
           searchConditionName: duplicateForm.searchConditionName || null,
           deliveryCategorySmall: duplicateForm.deliveryCategorySmall,
@@ -316,7 +306,6 @@ export default function ScoutSlotsPage() {
         body: JSON.stringify({
           deliveryDate: createForm.deliveryDate,
           hourSlot: createForm.hourSlot,
-          minuteSlot: createForm.minuteSlot,
           machineId: createForm.machineId,
           deliveryCategoryLarge: "社員",
           deliveryCategoryMedium: createForm.deliveryCategoryMedium,
@@ -661,7 +650,7 @@ export default function ScoutSlotsPage() {
                       </td>
                       <td className="px-1 py-1.5 text-left border-r border-[#E5E7EB] whitespace-nowrap">
                         <div>{r.timeBlock}</div>
-                        <div className="text-[10px] text-[#6B7280]">{r.timeLabel}</div>
+                        <div className="text-[10px] text-[#6B7280]">{r.hourSlot}:00</div>
                       </td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.deliveryCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openCount.toLocaleString()}</td>
@@ -672,7 +661,7 @@ export default function ScoutSlotsPage() {
                             onClick={() =>
                               setApplicantModal({
                                 slotId: r.id,
-                                title: `${r.deliveryDate} ${r.machine?.recruiterName ?? ""} ${r.timeLabel} の応募者`,
+                                title: `${r.deliveryDate} ${r.machine?.recruiterName ?? ""} ${r.hourSlot}:00 の応募者`,
                               })
                             }
                             className="text-[#2563EB] hover:underline"
@@ -738,15 +727,12 @@ export default function ScoutSlotsPage() {
               <div>
                 <label className="block text-[12px] text-[#374151]">配信時間</label>
                 <select
-                  value={formatSlotTime(createForm.hourSlot, createForm.minuteSlot)}
-                  onChange={(e) => {
-                    const t = parseSlotTimeKey(e.target.value);
-                    if (t) setCreateForm({ ...createForm, hourSlot: t.hour, minuteSlot: t.minute });
-                  }}
+                  value={createForm.hourSlot}
+                  onChange={(e) => setCreateForm({ ...createForm, hourSlot: parseInt(e.target.value, 10) })}
                   className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px]"
                 >
-                  {SLOT_TIME_OPTIONS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>{h}:00</option>
                   ))}
                 </select>
               </div>
@@ -906,15 +892,12 @@ export default function ScoutSlotsPage() {
               <div>
                 <label className="block text-[12px] text-[#374151]">配信時間</label>
                 <select
-                  value={formatSlotTime(duplicateForm.hourSlot, duplicateForm.minuteSlot)}
-                  onChange={(e) => {
-                    const t = parseSlotTimeKey(e.target.value);
-                    if (t) setDuplicateForm({ ...duplicateForm, hourSlot: t.hour, minuteSlot: t.minute });
-                  }}
+                  value={duplicateForm.hourSlot}
+                  onChange={(e) => setDuplicateForm({ ...duplicateForm, hourSlot: parseInt(e.target.value, 10) })}
                   className="mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-1.5 text-[13px]"
                 >
-                  {SLOT_TIME_OPTIONS.map((k) => (
-                    <option key={k} value={k}>{k}</option>
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>{h}:00</option>
                   ))}
                 </select>
               </div>

@@ -1,12 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { parseSlotDate, formatSlotTime } from "@/lib/scout/slot-helpers";
+import { parseSlotDate } from "@/lib/scout/slot-helpers";
 import { createSlotsForDate } from "@/lib/scout/slot-creator";
 
 export interface AggregatedDataItem {
   machineNumber: number;
   hourSlot: number;
-  /** 分（0 / 30）。省略時は 0（後方互換: Power Automate は当面 {machineNumber, hourSlot, deliveryCount} のみ送る） */
-  minuteSlot?: number;
   deliveryCount: number;
 }
 
@@ -19,17 +17,8 @@ export interface AggregatedImportResult {
   errors: Array<{
     machineNumber: number;
     hourSlot: number;
-    minuteSlot: number;
     reason: string;
   }>;
-  /**
-   * 追加キー（既存キーは削除・改名しない。外部 RPA はプロパティ欠落で例外停止する）:
-   * 取込側で落とした行の内訳。route 側で validation 件数と合算して返す。
-   */
-  skipped: {
-    machineNotFound: number;
-    slotNotFound: number;
-  };
 }
 
 export async function importAggregatedScoutData(params: {
@@ -85,38 +74,28 @@ export async function importAggregatedScoutData(params: {
 
     let successCount = 0;
     let skippedCount = 0;
-    const skipped = { machineNotFound: 0, slotNotFound: 0 };
-    const errors: AggregatedImportResult["errors"] = [];
+    const errors: Array<{ machineNumber: number; hourSlot: number; reason: string }> = [];
 
     for (const item of params.data) {
-      const minuteSlot = item.minuteSlot ?? 0;
       const machineId = machineMap.get(item.machineNumber);
       if (!machineId) {
         skippedCount++;
-        skipped.machineNotFound++;
         errors.push({
           machineNumber: item.machineNumber,
           hourSlot: item.hourSlot,
-          minuteSlot,
           reason: "machine not found",
         });
         continue;
       }
 
-      // 枠照合は (machine, hourSlot, minuteSlot) の完全一致。14:00 と 14:30 は別枠。
       const slot = slots.find(
-        (s) =>
-          s.machineId === machineId &&
-          s.hourSlot === item.hourSlot &&
-          s.minuteSlot === minuteSlot,
+        (s) => s.machineId === machineId && s.hourSlot === item.hourSlot,
       );
       if (!slot) {
         skippedCount++;
-        skipped.slotNotFound++;
         errors.push({
           machineNumber: item.machineNumber,
           hourSlot: item.hourSlot,
-          minuteSlot,
           reason: "slot not found",
         });
         continue;
@@ -129,17 +108,6 @@ export async function importAggregatedScoutData(params: {
       successCount++;
     }
 
-    // 静かに落とさない: 落とした行はサーバーログに件数と内容を残す
-    if (errors.length > 0) {
-      console.warn(
-        `[scout/import/aggregated] ${params.targetDate}: ${skippedCount} 行を未反映で終了 ` +
-          `(machine not found=${skipped.machineNotFound}, slot not found=${skipped.slotNotFound})`,
-        errors
-          .slice(0, 50)
-          .map((e) => `${e.machineNumber}号機 ${formatSlotTime(e.hourSlot, e.minuteSlot)}: ${e.reason}`),
-      );
-    }
-
     await prisma.scoutImportLog.update({
       where: { id: log.id },
       data: {
@@ -149,10 +117,7 @@ export async function importAggregatedScoutData(params: {
         failureCount: skippedCount,
         errorMessage:
           errors.length > 0
-            ? errors
-                .slice(0, 20)
-                .map((e) => `${e.machineNumber}号機 ${formatSlotTime(e.hourSlot, e.minuteSlot)}: ${e.reason}`)
-                .join("\n")
+            ? errors.slice(0, 20).map((e) => `${e.machineNumber}号機 ${e.hourSlot}時: ${e.reason}`).join("\n")
             : null,
         finishedAt: new Date(),
       },
@@ -165,7 +130,6 @@ export async function importAggregatedScoutData(params: {
       skippedCount,
       ...(slotsAutoCreated !== undefined && { slotsAutoCreated }),
       errors: errors.slice(0, 20),
-      skipped,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

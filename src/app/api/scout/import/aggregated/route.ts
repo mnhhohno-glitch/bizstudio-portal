@@ -4,17 +4,10 @@
  * POST /api/scout/import/aggregated
  *   認証: x-rpa-secret ヘッダ
  *   Content-Type: application/json
- *   Body: { targetDate, data: [{ machineNumber, hourSlot, minuteSlot?, deliveryCount }] }
- *     - minuteSlot は任意（0 / 30）。省略時は 0 として扱う（後方互換）。
- *     - (hourSlot, minuteSlot) は SLOT_TIMES（8:00〜19:00 + 14:30）のいずれかであること。
+ *   Body: { targetDate, data: [{ machineNumber, hourSlot, deliveryCount }] }
  *
  * 7号機 PAD が 06.送信結果蓄積ファイル_X号機.xlsx を集計し、
  * 時間×号機別の配信数 JSON を送信する。
- *
- * レスポンス: importAggregatedScoutData の結果（既存キーは不変）＋ 追加キー
- *   skipped: { validation, machineNotFound, slotNotFound, total }
- *   validationErrors: string[]（先頭10件）
- *   ※ 外部 RPA(PAD) はプロパティ欠落で例外停止するため、既存キーの削除・改名は禁止。追加のみ。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,7 +16,6 @@ import {
   importAggregatedScoutData,
   type AggregatedDataItem,
 } from "@/lib/scout/aggregated-importer";
-import { isValidSlotTime } from "@/lib/scout/slot-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -62,36 +54,24 @@ export async function POST(req: NextRequest) {
       const item = data[i] as Record<string, unknown>;
       const mn = item?.machineNumber;
       const hs = item?.hourSlot;
-      const msRaw = item?.minuteSlot;
-      // minuteSlot 省略時は 0（正時）。Power Automate 改修までは省略で送られてくる。
-      const ms = msRaw === undefined || msRaw === null ? 0 : msRaw;
       const dc = item?.deliveryCount;
 
       if (
         typeof mn !== "number" || mn < 1 || mn > 6 ||
-        !isValidSlotTime(hs, ms) ||
+        typeof hs !== "number" || hs < 8 || hs > 19 ||
         typeof dc !== "number" || dc < 0 || !Number.isInteger(dc)
       ) {
         validationErrors.push(
-          `data[${i}]: machineNumber=${mn}, hourSlot=${hs}, minuteSlot=${msRaw === undefined ? "(省略)" : msRaw}, deliveryCount=${dc}`,
+          `data[${i}]: machineNumber=${mn}, hourSlot=${hs}, deliveryCount=${dc}`,
         );
         continue;
       }
 
       validatedData.push({
         machineNumber: mn,
-        hourSlot: hs as number,
-        minuteSlot: ms as number,
+        hourSlot: hs,
         deliveryCount: dc,
       });
-    }
-
-    // 静かに落とさない: 妥当性チェックで弾いた行は件数と内容をサーバーログに出す
-    if (validationErrors.length > 0) {
-      console.warn(
-        `[scout/import/aggregated] ${targetDate.trim()}: validation で ${validationErrors.length}/${data.length} 行を除外`,
-        validationErrors.slice(0, 50),
-      );
     }
 
     if (validatedData.length === 0) {
@@ -107,19 +87,7 @@ export async function POST(req: NextRequest) {
       autoCreateSlots: autoCreateSlots === true,
     });
 
-    const skipped = {
-      validation: validationErrors.length,
-      machineNotFound: result.skipped.machineNotFound,
-      slotNotFound: result.skipped.slotNotFound,
-      total:
-        validationErrors.length + result.skipped.machineNotFound + result.skipped.slotNotFound,
-    };
-
-    return NextResponse.json({
-      ...result,
-      skipped,
-      validationErrors: validationErrors.slice(0, 10),
-    });
+    return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 500 });

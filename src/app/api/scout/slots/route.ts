@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     const slots = await prisma.scoutDeliverySlot.findMany({
       where: { deliveryDate: date },
       include: { machine: true },
-      orderBy: [{ hourSlot: "asc" }, { minuteSlot: "asc" }],
+      orderBy: [{ hourSlot: "asc" }],
     });
     return NextResponse.json({ slots });
   } catch (e) {

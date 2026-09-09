@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ScoutNav from "@/components/scout/ScoutNav";
 import ScoutTrendChart, { type TrendPoint, type Comparison, type Unit } from "./_components/ScoutTrendChart";
-import { SLOT_TIMES, formatSlotTime } from "@/lib/scout/slot-times";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 type StatsResponse = { overall: Bucket[]; subBuckets: Record<string, Bucket[]> };
@@ -58,15 +57,13 @@ function comparisonPeriod(unit: Unit, comparison: Comparison, anchor: string): P
 /** バケットキー → グラフの x ラベル（日番号 / 時 / 月番号） */
 function labelOf(unit: Unit, bucketKey: string): string {
   if (unit === "day") return String(Number(bucketKey.slice(8, 10)));
-  if (unit === "hour") return bucketKey; // "8:00".."19:00"（stats API の slotBucketKey と同形式）
+  if (unit === "hour") return bucketKey; // "8".."19"
   return String(Number(bucketKey.slice(5, 7))); // "YYYY-MM" → 月番号
 }
 
 /** x 軸に並べる全ラベル領域（データ無しラベルも空バーで場所を確保） */
 function domainLabels(unit: Unit, primary: Period): string[] {
-  // 時間別は SLOT_TIMES（13枠・14:30 含む）から生成。12固定にしない。
-  // 14:30 枠が無い既存日はそのラベルのバケットが来ないので null（空バー）になるだけで、他のバケットは欠けない。
-  if (unit === "hour") return SLOT_TIMES.map((t) => formatSlotTime(t.hour, t.minute));
+  if (unit === "hour") return Array.from({ length: 12 }, (_, i) => String(8 + i)); // 8..19
   if (unit === "month") return Array.from({ length: 12 }, (_, i) => String(i + 1)); // 1..12
   const lastDay = Number(primary.to.slice(8, 10));
   return Array.from({ length: lastDay }, (_, i) => String(i + 1)); // 1..末日
@@ -251,7 +248,7 @@ export default function ScoutDashboardPage() {
             <tbody>
               {primaryBuckets.map((b) => (
                 <tr key={b.key} className="border-t border-[#F3F4F6]">
-                  <td className="px-3 py-1.5">{b.key}</td>
+                  <td className="px-3 py-1.5">{unit === "hour" ? `${b.key}時` : b.key}</td>
                   <td className="px-3 py-1.5 text-right">{b.deliveryCount.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{b.openCount.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{b.applyCount.toLocaleString()}</td>

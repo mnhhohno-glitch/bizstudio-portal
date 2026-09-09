@@ -6,8 +6,7 @@
  *   Body: {
  *     sourceSlotId: string,
  *     deliveryDate?: "YYYY-MM-DD",       // 省略時は元と同じ
- *     hourSlot?: number,                 // 省略時は元と同じ。(hourSlot, minuteSlot) は SLOT_TIMES のいずれか
- *     minuteSlot?: number,               // 0 / 30。hourSlot だけ指定された場合は 0（正時）
+ *     hourSlot?: number (8〜19),         // 省略時は元と同じ
  *     deliveryCount?: number,             // 省略時は元と同じ
  *     searchConditionName?: string | null,
  *     deliveryCategorySmall?: string | null,
@@ -21,7 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { parseSlotDate, isValidSlotTime, slotTimesLabel } from "@/lib/scout/slot-helpers";
+import { parseSlotDate } from "@/lib/scout/slot-helpers";
 import { generateScoutNumber } from "@/lib/scout/scout-number";
 
 export async function POST(req: NextRequest) {
@@ -76,22 +75,15 @@ export async function POST(req: NextRequest) {
   }
 
   let hourSlot = source.hourSlot;
-  let minuteSlot = source.minuteSlot;
-  if (body.hourSlot !== undefined || body.minuteSlot !== undefined) {
-    hourSlot = body.hourSlot !== undefined ? Number(body.hourSlot) : source.hourSlot;
-    // hourSlot だけを送る旧クライアントは「正時」を意図しているとみなし minute=0
-    minuteSlot =
-      body.minuteSlot !== undefined && body.minuteSlot !== null
-        ? Number(body.minuteSlot)
-        : body.hourSlot !== undefined
-          ? 0
-          : source.minuteSlot;
-    if (!isValidSlotTime(hourSlot, minuteSlot)) {
+  if (body.hourSlot !== undefined) {
+    const v = Number(body.hourSlot);
+    if (!Number.isInteger(v) || v < 8 || v > 19) {
       return NextResponse.json(
-        { error: `配信時間（hourSlot/minuteSlot）が不正です。指定できる枠: ${slotTimesLabel()}` },
+        { error: "hourSlot は 8〜19 の整数で指定してください" },
         { status: 400 },
       );
     }
+    hourSlot = v;
   }
 
   let deliveryCount = source.deliveryCount;
@@ -127,7 +119,6 @@ export async function POST(req: NextRequest) {
         scoutNumber,
         deliveryDate,
         hourSlot,
-        minuteSlot,
         machineId: source.machineId,
         isMachine: source.isMachine,
         isStaff: source.isStaff,

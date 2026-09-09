@@ -4,26 +4,12 @@
 
 import { prisma } from "@/lib/prisma";
 import { reserveScoutNumbers } from "./scout-number";
-import { SLOT_TIMES } from "./slot-times";
 
-// 時刻定義（SLOT_TIMES・ラベル・バケットキー・妥当性チェック）は slot-times.ts が単一ソース。
-// サーバ側コードの既存 import 先（@/lib/scout/slot-helpers）を維持するため同名で再 export する。
-// client component は prisma を含む本ファイルではなく "@/lib/scout/slot-times" を直接 import すること。
-export {
-  SLOT_TIMES,
-  formatSlotTime,
-  slotBucketKey,
-  slotMinutes,
-  isValidSlotTime,
-  parseSlotTimeKey,
-  compareSlotKeys,
-  slotTimesLabel,
-  type SlotTime,
-} from "./slot-times";
+export const HOUR_SLOTS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] as const;
 
 /**
- * 指定日（JST 解釈、Date 型では UTC の 00:00:00 に揃える）の配信枠を全担当者×全時刻（SLOT_TIMES）ぶん作成する。
- * 既に1件でも存在する場合はスキップ（過去日・当日に新しい時刻枠を遡及して生やすことはしない）。
+ * 指定日（JST 解釈、Date 型では UTC の 00:00:00 に揃える）の配信枠を全担当者×全時間帯ぶん作成する。
+ * 既に1件でも存在する場合はスキップ。
  */
 export async function createDailySlots(targetDate: Date): Promise<{
   created: number;
@@ -42,14 +28,13 @@ export async function createDailySlots(targetDate: Date): Promise<{
     orderBy: [{ isMachine: "desc" }, { machineNumber: "asc" }, { recruiterName: "asc" }],
   });
 
-  const totalSlots = machines.length * SLOT_TIMES.length;
+  const totalSlots = machines.length * HOUR_SLOTS.length;
   const scoutNumbers = await reserveScoutNumbers(totalSlots);
 
   const data: Array<{
     scoutNumber: string;
     deliveryDate: Date;
     hourSlot: number;
-    minuteSlot: number;
     machineId: string;
     isMachine: boolean;
     isStaff: boolean;
@@ -62,14 +47,12 @@ export async function createDailySlots(targetDate: Date): Promise<{
 
   let idx = 0;
   for (const m of machines) {
-    for (const t of SLOT_TIMES) {
+    for (const hour of HOUR_SLOTS) {
       const isStaff = !m.isMachine;
-      // 14:30 枠も含め、全時刻で同じ既定値（isAggregationTarget 等）。ここを変えると集計の分母が変わる。
       data.push({
         scoutNumber: scoutNumbers[idx++],
         deliveryDate: targetDate,
-        hourSlot: t.hour,
-        minuteSlot: t.minute,
+        hourSlot: hour,
         machineId: m.id,
         isMachine: m.isMachine,
         isStaff,
