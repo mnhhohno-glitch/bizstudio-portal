@@ -47,7 +47,14 @@ function isStagingEnv(): boolean {
   return service.includes("staging") || baseUrl.includes("staging");
 }
 
-export type SendMailResult = { ok: true } | { ok: false; error: string };
+// T-193: 既存の呼び出し元と互換を保つため、追加フィールドはすべて任意。
+//   messageId: Resend が返した id（レスポンス本文が読めなかったときは null）
+//   rejected : true = Resend が明確に「受理しなかった」（非2xx / APIキー未設定）＝送られていないことが確定。
+//              false/未設定 = 通信エラー・タイムアウト等で「送られたか分からない」。
+//              呼び出し側で「送信済み予約のロールバック可否」の判断に使う。
+export type SendMailResult =
+  | { ok: true; messageId?: string | null }
+  | { ok: false; error: string; rejected?: boolean };
 
 export async function sendResendEmail(params: {
   to: string | string[]; // 複数指定するとその全員が TO に並ぶ1通になる
@@ -62,7 +69,7 @@ export async function sendResendEmail(params: {
   if (!resendApiKey) {
     // 既存実装は warn してスキップするが、T-147 は「送れたかどうか」が要件なので失敗として返す
     console.error("[Resend] RESEND_API_KEY not configured");
-    return { ok: false, error: "メール送信の設定がされていません（RESEND_API_KEY）" };
+    return { ok: false, error: "メール送信の設定がされていません（RESEND_API_KEY）", rejected: true };
   }
 
   const subject = isStagingEnv() ? `【検証】${params.subject}` : params.subject;
@@ -88,13 +95,21 @@ export async function sendResendEmail(params: {
     }).finally(() => clearTimeout(timer));
 
     if (res.status === 200 || res.status === 201) {
-      return { ok: true };
+      // T-193: Resend は `{ "id": "..." }` を返す。本文が読めなくても成功判定は変えない。
+      let messageId: string | null = null;
+      try {
+        const json = (await res.json()) as { id?: unknown };
+        if (typeof json?.id === "string" && json.id) messageId = json.id;
+      } catch {
+        messageId = null;
+      }
+      return { ok: true, messageId };
     }
     const body = await res.text().catch(() => "");
     console.error(`[Resend] send failed: status=${res.status} body=${body.slice(0, 300)}`);
-    return { ok: false, error: `メール送信に失敗しました（HTTP ${res.status}）` };
+    return { ok: false, error: `メール送信に失敗しました（HTTP ${res.status}）`, rejected: true };
   } catch (e) {
     console.error("[Resend] send failed:", e);
-    return { ok: false, error: "メール送信に失敗しました（通信エラー）" };
+    return { ok: false, error: "メール送信に失敗しました（通信エラー）", rejected: false };
   }
 }

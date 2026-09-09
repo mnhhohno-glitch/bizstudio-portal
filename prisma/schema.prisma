@@ -536,6 +536,12 @@ model Candidate {
   //   URLを保持して開くだけで、OneDrive へのファイル書き込み・フォルダ自動作成は行わない。
   oneDriveFolderUrl String? @map("onedrive_folder_url")
 
+  // T-193: マイナビ一次返信メール（portal が Resend で送る版）の送信済み記録。
+  //   「先に予約してから送る」二重送信防止の要。sentAt は予約時刻（=送信直前の new Date()）、messageId は Resend の id。
+  //   testMode 送信では書かない。CandidateSettingsHistory には積まない。
+  mynaviFirstReplyMailSentAt    DateTime? @map("mynavi_first_reply_mail_sent_at")
+  mynaviFirstReplyMailMessageId String?   @map("mynavi_first_reply_mail_message_id")
+
   guideEntries           GuideEntry[]
   notes                  CandidateNote[]
   contactLogs            ContactLog[]
