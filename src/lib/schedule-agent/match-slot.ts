@@ -40,7 +40,10 @@ export type ReservedEvent = { date: string; startMin: number; endMin: number; su
 export type MatchOutcome =
   | { kind: "reserved"; slot: Slot }
   | { kind: "today_only" }
-  | { kind: "unavailable" };
+  | { kind: "unavailable" }
+  // T-194: 時間上限つきで呼ばれたとき（フォーム送信時の自動仮確定）のみ返る。
+  //   deadline を渡さない従来の呼び出し（resolve 経由）では絶対に返らない。
+  | { kind: "timeout" };
 
 function overlaps(aS: number, aE: number, bS: number, bE: number): boolean {
   return aS < bE && bS < aE;
@@ -117,7 +120,9 @@ export async function findAvailableSlot(
   //   refresh_failed は既存ヘルパで自動削除されるため resolveConnectedTargets でも除外されるが、
   //   fetch_failed（認証OK・listのみ失敗）は接続レコードが残るため、ここで能動的に外さないと
   //   getCalendarEvents が [] を返して「空き」と誤判定されてしまう。
-  excludeUserIds: string[] = []
+  excludeUserIds: string[] = [],
+  // T-194: 枠探索の打ち切り時刻（Date.now() と比較する epoch ms）。省略時は従来どおり無制限。
+  opts: { deadline?: number } = {}
 ): Promise<MatchOutcome> {
   const excluded = new Set(excludeUserIds);
   const connected = (await resolveConnectedTargets(targetUserIds)).filter((u) => !excluded.has(u));
@@ -146,6 +151,8 @@ export async function findAvailableSlot(
 
   for (const w of inRange) {
     for (const slot of slotsFromWindow(w)) {
+      // 時間上限つきの呼び出しのみ。1枠ぶんのカレンダー走査に入る前に打ち切る。
+      if (opts.deadline !== undefined && Date.now() > opts.deadline) return { kind: "timeout" };
       const s = toMin(slot.startTime);
       const e = toMin(slot.endTime);
 

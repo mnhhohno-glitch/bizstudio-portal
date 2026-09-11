@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendBotMessage } from "@/lib/lineworks";
+import { AI_COMMENT_PREFIX, resolveStoredStatus, resolveSystemUserId } from "@/lib/schedule-tasks";
+import { autoReserveFromPreferences } from "@/lib/schedule-agent/auto-reserve";
+import { sendAutoReserveErrorAlert } from "@/lib/schedule-agent/alert";
+import { classifyWindows } from "@/lib/schedule-agent/match-slot";
+import { methodFromFormatField, parseDesiredWindows } from "@/lib/schedule-agent/parse-preferences";
+import { eventTitleWhen, jstIso, reservedRangeLabel } from "@/lib/schedule-agent/jst";
+import type { MeetingMethod } from "@/lib/schedule-agent/reply-templates";
 
 interface CreateScheduleTaskRequest {
   type: "mynavi_new" | "consultation" | "interview";
@@ -12,7 +19,23 @@ interface CreateScheduleTaskRequest {
   advisorName?: string;
   candidateId?: string;
   source?: string;
+  /**
+   * T-194: フォーム送信時の自動仮確定を行うか（オプトイン）。
+   * true かつ type==="mynavi_new" のときだけ動く。未指定・false は従来どおり（挙動完全不変）。
+   */
+  autoReserve?: boolean;
 }
+
+/** T-194: 自動仮確定の時間上限（ms）。超えたら「空きなし」扱いで返し、フォーム送信自体は待たせない。 */
+const AUTO_RESERVE_BUDGET_MS = 8000;
+
+/** T-194: レスポンスに足す自動仮確定の結果（autoReserve=true のときだけ現れる）。 */
+type AutoReserveResponse = {
+  result: "reserved" | "not_reserved";
+  slot?: { start: string; end: string; label: string };
+  method?: MeetingMethod;
+  reason?: "no_slot" | "excluded_only" | "error" | "timeout" | "no_config";
+};
 
 type AssigneeInfo = {
   userId: string;
@@ -44,6 +67,7 @@ export async function POST(request: Request) {
       advisorName,
       candidateId,
       source,
+      autoReserve,
     } = body;
 
     if (!candidateName || !preferredDates || !meetingFormat) {
@@ -226,6 +250,116 @@ export async function POST(request: Request) {
       },
     });
 
+    // 6.5 T-194: フォーム送信時の自動仮確定（オプトイン）。
+    //   - 走るのは autoReserve===true かつ type==="mynavi_new" のときだけ。それ以外は完全に従来どおり。
+    //   - 判定・枠取り・予約後処理は日程調整AI（resolve モードA）と同じ autoReserveFromPreferences。
+    //     土日祝・当日・翌営業日〜2週間以内・9:00〜20:00開始・同一枠の多重仮予約上限は
+    //     すべて既存ルール（match-slot.ts / jst.ts）がそのまま効く＝ここで二重に書かない。
+    //   - **絶対に throw しない**。失敗してもタスク作成とレスポンスは成功させる（従来の送信体験を壊さない）。
+    let autoReserveResult: AutoReserveResponse | null = null;
+    /** LINE通知に足す「9/14(月)19:00-20:00」。仮予約できたときだけ入る。 */
+    let autoReserveWhenLabel: string | null = null;
+    if (autoReserve === true && type === "mynavi_new") {
+      const deadline = Date.now() + AUTO_RESERVE_BUDGET_MS;
+      const now = new Date();
+      const method = methodFromFormatField(meetingFormat);
+      const windows = parseDesiredWindows(preferredDates);
+
+      try {
+        if (windows.length === 0) {
+          // 定型パース0件（想定外の書式）。空振りとして扱い、タスクは従来どおり未着手で残す。
+          console.warn(`[create-schedule-task] autoReserve: 希望日時をパースできませんでした task=${task.id}`);
+          autoReserveResult = { result: "not_reserved", reason: "excluded_only" };
+        } else {
+          const outcome = await autoReserveFromPreferences({
+            candidateName: effectiveName,
+            candidateId: validatedCandidateId,
+            method,
+            windows,
+            now,
+            mode: "task",
+            taskId: task.id,
+            deadline,
+          });
+
+          if (outcome.kind === "reserved") {
+            autoReserveWhenLabel = eventTitleWhen(
+              outcome.slot.date,
+              outcome.slot.startTime,
+              outcome.slot.endTime
+            );
+            autoReserveResult = {
+              result: "reserved",
+              slot: {
+                start: jstIso(outcome.slot.date, outcome.slot.startTime),
+                end: jstIso(outcome.slot.date, outcome.slot.endTime),
+                label: reservedRangeLabel(outcome.slot.date, outcome.slot.startTime, outcome.slot.endTime),
+              },
+              method: outcome.method,
+            };
+
+            // 仮予約が成立したタスクは、RPA経路でモードA返信成功後になる状態（IN_PROGRESS）に揃える。
+            //   RPA は COMPLETED を送るが resolveStoredStatus で IN_PROGRESS に読み替えられる（T-177）。
+            //   コメントは AI_COMMENT_PREFIX 付き＝GET の hasAiReplyComment が true になり、
+            //   RPA 再開時の再処理対象から外れる（二重処理防止）。
+            //   ここで失敗しても仮予約自体は成立済みなので result=reserved のまま返す。
+            try {
+              const systemUserId = await resolveSystemUserId();
+              if (systemUserId) {
+                await prisma.taskComment.create({
+                  data: {
+                    taskId: task.id,
+                    userId: systemUserId,
+                    content:
+                      `${AI_COMMENT_PREFIX}フォーム送信時に自動仮確定: ` +
+                      `${autoReserveWhenLabel} ${outcome.method}`,
+                  },
+                });
+              } else {
+                console.error(`[create-schedule-task] autoReserve: コメント作者を解決できません task=${task.id}`);
+              }
+              await prisma.task.update({
+                where: { id: task.id },
+                data: { status: resolveStoredStatus("COMPLETED") },
+              });
+            } catch (e) {
+              console.error("[create-schedule-task] autoReserve: タスクのコメント/状態更新に失敗:", e);
+              await sendAutoReserveErrorAlert({ candidateName: effectiveName, taskId: task.id, error: e });
+            }
+          } else if (outcome.kind === "timeout") {
+            autoReserveResult = { result: "not_reserved", reason: "timeout" };
+          } else if (outcome.kind === "no_reply") {
+            if (outcome.reason === "no_config") {
+              // staging 等（仮予約カレンダー env 未設定）。何もしない・通知もしない。
+              autoReserveResult = { result: "not_reserved", reason: "no_config" };
+            } else {
+              autoReserveResult = { result: "not_reserved", reason: "error" };
+              if (outcome.reason === "create_failed") {
+                // カレンダー読み取り不能は連携切れアラート（probe）が別途飛ぶため、ここでは書き込み失敗のみ通知。
+                await sendAutoReserveErrorAlert({
+                  candidateName: effectiveName,
+                  taskId: task.id,
+                  error: new Error("仮予約イベントの作成に失敗しました（createReservation が null）"),
+                });
+              }
+            }
+          } else {
+            // today_only ＝ 当日希望のみ、unavailable ＝ 空き無し／全希望が範囲外（土日祝・2週間超）。
+            // 「対象になり得る希望が1つも無かった」か「対象は見たが空いていなかった」かで理由を分ける。
+            const eligible = classifyWindows(windows, now).inRange.length > 0;
+            autoReserveResult = {
+              result: "not_reserved",
+              reason: outcome.kind === "today_only" || !eligible ? "excluded_only" : "no_slot",
+            };
+          }
+        }
+      } catch (e) {
+        console.error("[create-schedule-task] autoReserve failed:", e);
+        autoReserveResult = { result: "not_reserved", reason: "error" };
+        await sendAutoReserveErrorAlert({ candidateName: effectiveName, taskId: task.id, error: e });
+      }
+    }
+
     // 7. LINE WORKS通知
     try {
       const botId = process.env.LINEWORKS_TASK_BOT_ID;
@@ -261,6 +395,16 @@ export async function POST(request: Request) {
           lines.push("", "■ 備考", notes);
         }
 
+        // T-194: 自動仮確定を走らせたときだけ、その結果を1行足す（従来の通知本文は不変）。
+        if (autoReserveResult) {
+          lines.push(
+            "",
+            autoReserveWhenLabel
+              ? `自動仮確定: ${autoReserveWhenLabel}`
+              : "自動仮確定: なし（空きなし／対象外）"
+          );
+        }
+
         lines.push("", "🔗 タスク詳細", `${baseUrl}/tasks/${task.id}`);
 
         // メンション付き通知を試行
@@ -288,11 +432,12 @@ export async function POST(request: Request) {
       console.error("LINE WORKS通知の送信に失敗:", notifyError);
     }
 
-    // 8. レスポンス
+    // 8. レスポンス（T-194: 既存キーは不変。autoReserve=true のときだけ結果を1キー足す）
     return NextResponse.json({
       success: true,
       taskId: task.id,
       taskTitle,
+      ...(autoReserveResult ? { autoReserve: autoReserveResult } : {}),
     });
   } catch (error) {
     console.error("Failed to create schedule task:", error);
