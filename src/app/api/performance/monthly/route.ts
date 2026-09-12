@@ -1,7 +1,7 @@
 // T-071 ②：当月実績タブ用 API。
 // 当月1日起算の週別（月内クランプ・4〜6週）に実績表マトリクス（computeWeeklyMatrix）を集計し、
 // 合計（当月通算ユニーク再集計）＋目標（週按分）＋達成率＋属性集計（当月初回面談者の円グラフ用）を返す。
-// レスポンスは weekly API 互換（columns/total）＋ attributes。集計の数え方は変更せず流用（両ソース統合・MIN方式）。
+// レスポンスは weekly API 互換（columns/total）＋ attributes。集計の数え方は weeklyMatrix と共通（両ソース統合・新規=その暦月の1件目）。
 //
 // 週区切り：weeklyBusinessDays（月曜始まり・月内クランプ。W1=1日〜最初の日曜、以降 月〜日）。
 // 目標：当月の PerformanceTarget を週へ営業日按分（initial面談・提案・エントリーのみ。書類通過以降は週按分せず null＝T-073方針）。
@@ -54,15 +54,14 @@ export async function GET(req: Request) {
   const monthFrom = jstStart(monthFirst);
   const monthTo = jstEnd(monthLastBucket.endDate);
 
-  // 新規/既存(scoped)は当月全体でランク付け（各週=cell, ランク窓=当月）→ Σ週=合計。
-  const rankWindow = { from: monthFrom, to: monthTo };
+  // 新規/既存(scoped)は「その暦月(JST)の1件目=新規 / 2件目以降=既存」で判定する（weeklyMatrix 側で完結）。
   // 各週マトリクス＋TOTAL（当月通算再集計）＋属性を並列。
   const [columnMatrices, totalMatrix, attributes] = await Promise.all([
-    Promise.all(buckets.map((b) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: jstStart(b.startDate), to: jstEnd(b.endDate), allCas, rankWindow }))),
-    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas, rankWindow }),
+    Promise.all(buckets.map((b) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: jstStart(b.startDate), to: jstEnd(b.endDate), allCas }))),
+    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: monthFrom, to: monthTo, allCas }),
     computeInterviewAttributes({ employeeId: resolvedEmployeeId, from: monthFrom, to: monthTo, allCas }),
   ]);
-  // 合計列の人数・件数を各週の合算に置換（縦横一致）。
+  // 合計列：件数は各週の合算に置換（縦横一致）。人数は当月通算の DISTINCT のまま（二重計上しない）。
   applyAdditiveTotals(totalMatrix, columnMatrices);
 
   // 目標（当月の PerformanceTarget。週按分は initial面談・提案・エントリーのみ）。全員モードは全CA合算。

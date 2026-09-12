@@ -227,11 +227,29 @@ model InterviewMemo {
   - count 系=当日窓、率系=当月窓。当月窓は `jstMonthStart` 〜 `jstNextMonthStart - 1ms`（従来の `lt nextMonthStart` と等価）。
 ### 集計の軸と定義（T-071 確定・実績ベース）
 
+#### 件数・人数・新規の数え方（2026-09-12 確定・提案／エントリー共通）
+
+実績表の「人数（件数）」表記のうち **括弧内＝件数・括弧外＝人数**。3点とも `src/lib/performance/weeklyMatrix.ts` の1か所で決まる。
+
+- **件数＝生レコード**。1行＝1件で数える（明細 `/api/performance/detail` の records と一致する）。
+  - ⚠️ 旧実装は `GROUP BY 候補者, external_job_id, JST日` で潰していた。**`external_job_id` は求人未紐付けのとき `0`**（`bookmarks/to-entry/route.ts` の `f.kyuujinJobId ?? 0`）なので、同じ人が同じ日に出した**別会社の応募まで1件に潰れて**いた（2026-09 は 142件→82件、2026-03 は 228件→74件）。本当の重複行は存在しないので潰さない。
+  - 提案側の**移行重複ガード**（同一候補者×同一JST日のクロスソース重複で CF 側を除外する `NOT EXISTS`）は業務上必要なので**残す**。
+- **新規＝その候補者が「その暦月(JST)」に出した1件目だけ**／**既存＝その月の2件目以降**。
+  - 候補者×暦月で `ROW_NUMBER() OVER (PARTITION BY candidate_id, date_trunc(month, JST日) ORDER BY 日付, id)` を振り、`rn=1`＝新規・`rn>=2`＝既存。
+  - 順位付けの母集団は**その月の全イベント**（表示期間に依存しない）。月をまたぐ週は日付の属する月で分ける。表示期間を変えても同じ行が新規になる。
+  - ⚠️ 旧実装は「全期間初回がセル内にある候補者の、セル内の全件」を新規にしていた（合意定義と別物）。
+  - この定義では **新規は1候補者1件/月**なので、月内に収まるセルでは 新規件数＝新規人数。
+- **合計列**：件数＝各列（週/月）の合算（1レコード＝1件なので Σ列＝期間合計）。**人数＝期間全体の重複除去**（DISTINCT）。
+  - ⚠️ 旧 `applyAdditiveTotals` は人数まで Σ週で上書きしていたため、2週にまたいで出た人が二重計上されていた（例：奥村2026-09 は 13人と表示、正しくは 11人）。達成率の分母（`total.uniq`）とも食い違っていた。
+  - 直近6ヶ月（`/api/performance/cohort`）も同じで、合計列の人数は通算 `summaryMx` の DISTINCT を使う（書類通過率の分母もこれ）。
+- **1人当たり＝件数÷人数**（変更なし）。平均列＝合計÷列数。
+- 反映先：`/api/performance/weekly`（実績表）・`/api/performance/monthly`（当月実績）・`/api/performance/cohort`（直近6ヶ月）は同じ `computeWeeklyMatrix` を使うので自動で揃う。目標登録の参考値（`/api/performance/target/reference`）は人数（期間DISTINCT）のみ参照で不変。
+
 実績表は「過去に何件紹介し、何件通過し、何件内定したか」の**累積実績**を見るもの（現在進行中の有効案件ではない）。
 
 - キー対応（厳守）：
   - **求人検索**＝CandidateFile BOOKMARK `createdAt`・User.id（`uploadedByUserId`）。マトリクス上部の「検索」件数は変更しない。
-  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算最古日 `MIN(pdate)` 基準＝entry と同型**：`first_p >= レンジ開始`＝新規候補者、`first_p < レンジ開始`＝既存候補者（**候補者単位で排他、初回+既存=合計**）。`weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS）＋`props` CTE（`MIN(pdate) OVER`）。⚠️ **`ROW_NUMBER`（rn=1/rn>1・イベント単位）方式は誤り**：1人月20件もの提案があると新規候補者も同月に2件目以降を持ち初回・既存に二重計上され「既存≒合計（構成比≒100%）」になる（T-071 修正①で MIN 方式へ是正、2026-06-07）。
+  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は下記「件数・人数・新規の数え方（2026-09-12 確定）」に従う（エントリーと同一定義）。`weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS）＋`ranked` CTE（候補者×暦月の `ROW_NUMBER`）。
   - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
   - **面談ランク**＝`InterviewRating.overallRank`（`overall_rank`、InterviewRecord と 1:1・LEFT JOIN・nullable）。実データの値体系は **A+/A/B+/B/C/D ＋ 未評価(null)**（**S は存在しない**）。約55%のみ rank 付与。円グラフは**初回面談**（担当軸・到達ベース・実施判定・`interview_count = 1`）を rank 別集計、null は「未評価」に寄せ合計＝初回面談数（マトリクスの `interview.first`）。`computeInterviewRankBreakdown()`（weeklyMatrix.ts）。理由：その期間に新規で会った人の質の分布を見るため、2回目以降の再面談（評価重複）を除外。
   - **エントリー以降＝担当軸＝`candidate.employeeId`**。
@@ -275,7 +293,7 @@ model InterviewMemo {
   - **目標（粒度別）**：week＝起算月の月目標を 5 週営業日按分（`allocateToWeeks`、TOTAL=月目標）。day＝月目標÷月営業日数を営業日列に配分（土日祝列0、TOTAL=列合計）。month＝各列の月の登録目標そのまま（未登録は null、TOTAL=登録分の合計）。達成率＝TOTAL実績÷TOTAL目標。
   - 各週の実績＝`src/lib/performance/weeklyMatrix.ts:computeWeeklyMatrix`（raw SQL）。返す内容：
     - 面談：初回(count=1)/2回目(=2)/3回目以降(>=3)/合計、notDeclined。
-    - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者の**初回**提案/エントリー（`MIN(date) OVER (PARTITION BY candidate)` がレンジ内）。既存＝初回がレンジより前。新規uniq+既存uniq=合計uniq を検証済み。
+    - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者が**その暦月(JST)に出した1件目**、既存＝その月の2件目以降（上記「件数・人数・新規の数え方」）。合計列の人数は期間全体の DISTINCT。
     - 選考状況：書類通過/内定/承諾（候補者ユニーク人数）＋決定売上(`SUM(revenue) WHERE acceptanceDate in range`)/決定単価(売上÷承諾人数)。
     - 数え方は `computeCaMetricsForRange` と整合（entry uniq・紹介件数・初回面談が一致することを検証済み）。
   - **TOTAL（5週合計）はユニーク再集計**：週別の単純合計ではなく、起算日〜W5末の全期間で `computeWeeklyMatrix` を再呼び出し（複数週にまたがる同一候補者の重複を排除）。週別合計とTOTALが一致しないことがあるのは仕様。

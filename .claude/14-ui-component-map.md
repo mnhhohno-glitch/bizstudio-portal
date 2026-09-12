@@ -1163,7 +1163,7 @@ extract 成功直後に `initializeCompanyCategoryMap(workHistory, defaultGroupK
 - **下段は2列**（コメント欄を外した分）：当日実績（`300px`・やや広く）｜グラフ（`1fr`・広く）。
 - **求人検索グラフ（行動量＋精度）**：面談系縦棒の隣に **BM数(求人紹介数=createdAt当日)・出力数(提案数=lastExportedAt当日)** の縦棒（棒上に数値＝inline plugin `barValue` afterDatasetsDraw）。**選定率**を見出しに大きく表示（**`出力数÷(BM数+紹介保留数)`**＝T-092 で変更。`aiMatchRating` は参照しない。旧定義 `(A+B+C)÷合計BM` は廃止済み）。**求人評価ドーナツ**＝当日BM の `aiMatchRating` 構成比（**T-146 以降 A/B+/B/C/D/未評価** の5段階＋未評価。`RATING_ORDER`/`RATING_COLORS` L104-105。件数0のランクは `buildPie` が除外するため凡例に出ない）。母数は**紹介保留含む（archivedAt 条件なし）**。`/api/daily-report?date=` の `jobSearch{bmCount,exportCount,ratings,selectionRate}`（`computeJobSearchDay`・`uploadedByUserId`軸）。⚠️ 既存 metrics.ts の jobSearched/jobIntroduced（archivedAt=null）とは別集計（archivedAt=null だとDの77%が保留に逃げ選定率100%固定になるため、グラフ用は archivedAt 条件なし）。
 - 所感保存: `POST /api/daily-report`（`scheduleNote`/`metricsReflection`、CA×日付＝`daily_reports` upsert）。日付移動で各日を再読込。
-- 集計の数え方は実績表と共通（両ソース統合・ユニーク・MIN方式）。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
+- 集計の数え方は実績表と共通（両ソース統合・ユニーク）。新規/既存は「その暦月の1件目/2件目以降」＝03-portal-spec.md「件数・人数・新規の数え方（2026-09-12 確定）」。属性は `computeInterviewAttributes`（`src/lib/performance/attributes.ts`・monthly と共用）。Chart.js cdnjs・テーマ追従。CA 以外は当日実績/グラフ非表示（スケジュール・所感のみ）。
 - 全幅レイアウト：旧・スケジュールタブ右半分への同居（窮屈）をやめ、独立タブで `w-full` のテーブル（`table className="w-full"`）として配置。フォント・余白を `text-[13px]` / `px-3 py-2.5` で広げて可読性を確保。横スクロールは原則発生しない（必要時のみ `overflow-x-auto`）。
 
 #### Googleカレンダー連携UI（日報タブ・共通コンポーネント `CalendarConnectButton`）
@@ -1226,7 +1226,7 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
     - ヘッダは合計＝左罫線太め（`border-l-2 border-[#9CA3AF]`）、平均＝左罫線細め（`border-l border-[#5A5A5A]`）。色は `HEAD_CLS`/`SUBHEAD_CLS` 統一。平均セルの数値は小数1桁、合計セルは整数。
 - **6タブ**: **当月実績**｜面談実績｜求人紹介実績｜エントリー実績｜選考状況｜直近6ヶ月（当月実績が先頭・既定タブ）。
 - **当月実績タブ（T-071②）**: `GET /api/performance/monthly?employeeId=&anchorDate=`。当月（anchorDate の月）を **1日起算で週分割（月内クランプ、`weeklyBusinessDays`：W1=1日〜最初の日曜、以降 月〜日、4〜6週）**。
-  - 上段＝週別表：列＝1W〜（4-6）W｜合計｜平均｜達成率、行＝直近6ヶ月と同項目（人数のみ＝`MONTHLY_ROWS`）。`WeekMatrixTable` を流用（レスポンスは weekly 互換 columns/total）。集計は `computeWeeklyMatrix`（両ソース統合・MIN方式の初回/既存）。目標は当月 PerformanceTarget を週按分（initial面談・提案・エントリーのみ、書類通過以降は週按分せず「—」＝T-073方針）。達成率＝当月通算実績÷月目標。
+  - 上段＝週別表：列＝1W〜（4-6）W｜合計｜平均｜達成率、行＝直近6ヶ月と同項目（人数のみ＝`MONTHLY_ROWS`）。`WeekMatrixTable` を流用（レスポンスは weekly 互換 columns/total）。集計は `computeWeeklyMatrix`（両ソース統合・新規=その暦月の1件目／件数=生レコード／合計列の人数=期間DISTINCT。03-portal-spec.md 参照）。目標は当月 PerformanceTarget を週按分（initial面談・提案・エントリーのみ、書類通過以降は週按分せず「—」＝T-073方針）。達成率＝当月通算実績÷月目標。
   - **行色ルール（直近6ヶ月と統一）**：`Row.band` を `boolean | "orange"` に拡張。**合計面談・合計提案・合計エントリー・決定の4行のみ `band: "orange"`（#FFF4E6）**で強調、他は白。`band: true`（#EFF6FF・薄青）は既存4タブ（面談/提案/エントリー/選考）で維持。
   - 下段グラフ（`MonthlyCharts`・Chart.js）：**折れ線**＝週別 面談/紹介/エントリー数の推移（面談タブの折れ線と同スタイル、面談=青/紹介=緑/エントリー=オレンジ）＋ **円4種**＝当月初回面談者の ランク／男女比／**職種希望（第1希望大分類）**／年齢層。
   - **属性の母集団＝当月の初回面談（`interview_count=1`・辞退系除外・担当軸 candidate.employeeId）**。ランク＝`overall_rank`、性別＝`candidate.gender`、**職種希望＝`interview_details.desired_job_types[0]->>'large'`（candidate.desiredJobType1 は充足率21%で使わない・面談詳細JSONの大分類73%を使う）**、年齢層＝`candidate.birthday`→AGE を6バンド＋不明。各円に「未設定/未評価/不明」スライスを含む。4種とも母数＝初回面談数。

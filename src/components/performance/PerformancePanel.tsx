@@ -146,14 +146,14 @@ const ROWS: Record<Exclude<TabKey, NonMatrixTab>, Row[]> = {
     { label: "既存面談（3回目以降）", actual: (m) => m.interview.thirdPlus, targetKey: "interviewExisting" },
     { label: "合計面談", isTotal: true, actual: (m) => m.interview.total, targetKey: "interviewTotal" },
   ],
-  // 求人紹介：期間内 初回/2回目以降を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
+  // 求人紹介：その暦月の1件目=初回 / 2件目以降=既存 を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
   proposal: [
     { label: "初回提案", band: true, actual: (m) => m.proposal.scoped.fresh.recs, uniq: (m) => m.proposal.scoped.fresh.uniq },
     { label: "既存提案", band: true, actual: (m) => m.proposal.scoped.existing.recs, uniq: (m) => m.proposal.scoped.existing.uniq },
     { label: "合計提案", band: true, isTotal: true, actual: (m) => m.proposal.scoped.total.recs, uniq: (m) => m.proposal.scoped.total.uniq, targetKey: "proposalUniq" },
     { label: "合計提案 1人当たり", indent: true, actual: (m) => m.proposal.total.perPerson, fmt: (v) => numFmt(v, 1) },
   ],
-  // エントリー：期間内 初回/2回目以降を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
+  // エントリー：その暦月の1件目=新規 / 2件目以降=既存 を「人数(件数)」2軸（件数で Σ週=合計）＋ 合計1人当たり。
   entry: [
     { label: "新規エントリー", band: true, actual: (m) => m.entry.scoped.fresh.recs, uniq: (m) => m.entry.scoped.fresh.uniq },
     { label: "既存エントリー", band: true, actual: (m) => m.entry.scoped.existing.recs, uniq: (m) => m.entry.scoped.existing.uniq },

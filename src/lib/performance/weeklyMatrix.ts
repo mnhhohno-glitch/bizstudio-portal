@@ -6,8 +6,9 @@
 //   - 求人紹介（提案）は **JobEntry.jobIntroDate ∪ CandidateFile BOOKMARK.lastExportedAt** の両ソース統合
 //     （記録方式が 2026/4 に移行。片方だけでは過去 or 現在が欠ける）。candidate×同日のクロスソース重複は除外。
 //   - 無効（isActive=false）含む・アーカイブ（archivedAt）除く。
-//   - 件数＝レコード件数、人数＝候補者ユニーク、1人当たり＝件数÷人数。
-//   - 新規/既存：その候補者の**通算最古日（MIN）がレンジ内なら新規・レンジ前なら既存**（提案・エントリーとも候補者単位で排他。初回+既存=合計）。
+//   - 件数＝レコード件数（生レコード＝明細 /api/performance/detail と一致）、人数＝候補者ユニーク、1人当たり＝件数÷人数。
+//   - 新規/既存（2026-09 確定）：**その候補者が「その暦月(JST)」に出した1件目だけが新規**・2件目以降が既存。
+//     月をまたぐ週は日付の属する月で分ける。表示期間を変えても判定は動かない（暦月のみに依存）。
 //   - 面談は notDeclined（辞退系以外、null 含む）でカウント。
 //   - JST 境界は呼び出し側が from/to(Date) で渡す（罠 #17）。列は UTC 保存なので UTC wall-clock で比較。
 
@@ -20,9 +21,9 @@ export interface CountUniqPer {
   perPerson: number | null; // 1人当たり = 件数 ÷ 人数
 }
 
-// 新規/既存 定義（全期間 初回/2回目以降 基準）。
+// 新規/既存 定義（暦月(JST)内 1件目/2件目以降 基準）。
 // 各区分は recs=件数（加算可能・Σ週=合計）と uniq=人数（ユニーク候補者数・非加算）の2軸。
-// fresh=BizStudio全期間で初回（first_all がそのセル内）/ existing=全期間で2回目以降（first_all がセル開始より前）/ total=fresh+existing。
+// fresh=その候補者のその月の1件目 / existing=その月の2件目以降 / total=fresh+existing。
 export interface ScopedSeg {
   recs: number; // 件数（社数）
   uniq: number; // 人数（ユニーク候補者数）
@@ -49,14 +50,17 @@ export interface WeeklyMatrix {
   };
 }
 
-// 合計列を「各列(週/月)の合算」にする（提案/エントリーの新規/既存/合計＝件数・人数、選考の人数・件数）。
-// 期間の実ユニーク(DISTINCT)ではなく Σ列にすることで、縦(新規+既存=合計)・横(Σ週=合計)が件数も人数も一致する。
+// 合計列の扱い（2026-09 確定）：
+//   - 件数（括弧内）＝各列(週/月)の合算。1レコード＝1件なので Σ列＝期間合計が必ず一致する。
+//   - 人数（括弧外）＝**期間全体の重複除去**（total の DISTINCT 値をそのまま残す）。
+//     Σ列にすると2週にまたいで出た人が二重計上され、明細の人数・達成率の分母とズレるため上書きしない。
 // 売上・1人当たり(CUP)・面談は対象外（total の値をそのまま使う）。total を破壊的に上書きする。
 export function applyAdditiveTotals(total: WeeklyMatrix, columns: WeeklyMatrix[]): void {
   const sum = (sel: (m: WeeklyMatrix) => number) => columns.reduce((s, m) => s + sel(m), 0);
+  // 件数だけ Σ列に置き換え、人数は期間全体の DISTINCT（total 側の値）を維持する。
   const seg = (pick: (m: WeeklyMatrix) => ScopedSeg): ScopedSeg => ({
     recs: sum((m) => pick(m).recs),
-    uniq: sum((m) => pick(m).uniq),
+    uniq: pick(total).uniq,
   });
   for (const k of ["proposal", "entry"] as const) {
     total[k].scoped = {
@@ -88,35 +92,31 @@ export async function computeWeeklyMatrix(params: {
   from: Date;
   to: Date;
   allCas?: boolean; // true なら全CA合算（担当・User フィルタを外す。数え方は同じ）
-  // 新規/既存（scoped）の「期間内 初回/2回目以降」ランクを計算する全体窓。
-  // 週セル集計では各週を [from,to]、ランク窓を表示期間全体（全列カバー範囲）にすることで Σ週=合計 が成立する。
-  // 省略時は [from,to]（＝その範囲内ランク）。
-  rankWindow?: { from: Date; to: Date };
+  // ※ 旧 rankWindow（新規/既存を表示期間でランク付けする窓）は廃止。
+  //    新規判定は「暦月(JST)の1件目」に変わり、表示期間に依存しなくなったため不要。
 }): Promise<WeeklyMatrix> {
   const { employeeId, userId, from, to, allCas } = params;
   const F = tsLit(from);
   const T = tsLit(to);
-  const rw = params.rankWindow ?? { from, to };
-  const RF = tsLit(rw.from);
-  const RT = tsLit(rw.to);
   // 全員モードでは担当軸フィルタを外す（対象を全候補者に広げるだけ）。
   const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
   void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
 
-  // 提案イベント（両ソース統合・dedup）の共通 CTE 文。scoped 計算で再利用。
-  // 件数の重複排除：同一求職者・同一日(JST)・同一求人を 1 件に寄せる（GROUP BY、pdate は当日最古）。
-  //   JE 側＝external_job_id、CF(BOOKMARK) 側＝file_name を「求人」キーに使う。
+  // 提案イベント（両ソース統合）の共通 CTE 文。scoped 計算で再利用。
+  // 件数＝生レコード（1行＝1件）。**同一求職者×同一求人×同一日の GROUP BY 潰しはしない**：
+  //   external_job_id は求人未紐付けのとき 0 が入るため、同じ人が同じ日に出した別会社の応募まで 1 件に潰れていた。
+  // ord＝同日内の並び順を決める安定キー（新規＝その月の1件目 の判定に使う）。
+  // 移行期の二重記録ガード（CF 側 NOT EXISTS）は業務上必要なので残す。
   const PROPOSAL_EVENTS = `
-      SELECT je.candidate_id, MIN(je.job_intro_date) AS pdate
+      SELECT je.candidate_id, je.job_intro_date AS pdate, je.id AS ord
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
-      GROUP BY je.candidate_id, je.external_job_id, (je.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
       UNION ALL
       -- T-161 R1/R2: 提案日 = COALESCE(出力日, 紹介日)。出力せず紹介済みにした行（introduced_at のみ）も提案に数える。
       -- 本人応募（origin='candidate' かつ drive_file_id IS NULL）は CA提案に数えない。
       -- T-189: 自動引き当て由来（auto_sourced_at あり）も CA提案に数えない（現状0件・数値不変）。
       -- 既存データは introduced_at 保有行が全件出力済のため COALESCE は従来値と同一（数字は動かない）。
-      SELECT cf.candidate_id, MIN(COALESCE(cf.last_exported_at, cf.introduced_at)) AS pdate
+      SELECT cf.candidate_id, COALESCE(cf.last_exported_at, cf.introduced_at) AS pdate, cf.id AS ord
       FROM candidate_files cf JOIN candidates c ON c.id = cf.candidate_id
       WHERE ${empPred} AND cf.category = 'BOOKMARK' AND COALESCE(cf.last_exported_at, cf.introduced_at) IS NOT NULL
         AND NOT (cf.origin = 'candidate' AND cf.drive_file_id IS NULL) AND cf.auto_sourced_at IS NULL
@@ -125,35 +125,36 @@ export async function computeWeeklyMatrix(params: {
           WHERE je2.candidate_id = cf.candidate_id AND je2.archived_at IS NULL AND je2.job_intro_date IS NOT NULL
             AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
               = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
-        )
-      GROUP BY cf.candidate_id, cf.file_name, (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
+        )`;
   const ENTRY_EVENTS = `
-      SELECT je.candidate_id, MIN(je.entry_date) AS pdate
+      SELECT je.candidate_id, je.entry_date AS pdate, je.id AS ord
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
-      WHERE ${empPred} AND je.archived_at IS NULL
-        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')
-      GROUP BY je.candidate_id, je.external_job_id, (je.entry_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date`;
-  // 新規/既存（scoped）: 「週ごと・求職者単位」で全期間初回(first_all)を基準に振り分け、件数も人数も縦横で加算一致。
-  //   first_all = 候補者の BizStudio 全期間での初回イベント日時（MIN(pdate)・rankWindow に限定しない）。cell 内イベントは
-  //     first_all が cell 内（first_all>=F）→ 新規（全期間で初回がこの週）、first_all<F → 既存（過去に初回あり＝2回目以降）。
-  //   候補者ごとにクラスが一意なので per-cell で 新規+既存=合計（件数・人数とも）。表示期間を変えても新規判定は不変。
-  //   合計列は各週の合算（DISTINCT 再集計しない）＝route 側で Σ列。
+      WHERE ${empPred} AND je.archived_at IS NULL AND je.entry_date IS NOT NULL
+        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')`;
+  // 新規/既存（scoped）: **候補者×暦月(JST)** で日付の早い順（同日は ord 順）に順位を付け、rn=1 を新規・rn>=2 を既存とする。
+  //   順位付けは表示期間に依存しない（月の全イベントが母集団）ので、期間を変えても同じ行が新規になる。
+  //   件数：新規+既存=合計（縦）、Σ週=合計（横・1レコード=1件なので必ず一致）。
+  //   人数：セル内の候補者ユニーク。新規は1候補者1件/月なので、月内に収まるセルでは 人数=件数。
+  //   合計列の人数は route 側で上書きせず、この SQL を全期間レンジで呼んだ DISTINCT 値を使う（applyAdditiveTotals）。
   const scopedSql = (eventsSql: string) => `
     WITH events AS (${eventsSql}),
-    fa AS (SELECT candidate_id, MIN(pdate) AS first_all FROM events GROUP BY candidate_id),
-    win AS (
-      SELECT e.candidate_id, e.pdate, fa.first_all
-      FROM events e JOIN fa ON fa.candidate_id = e.candidate_id
-      WHERE e.pdate BETWEEN TIMESTAMP '${RF}' AND TIMESTAMP '${RT}'
+    ranked AS (
+      SELECT candidate_id, pdate,
+        ROW_NUMBER() OVER (
+          PARTITION BY candidate_id, date_trunc('month', (pdate AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo'))
+          ORDER BY pdate ASC, ord ASC
+        ) AS rn
+      FROM events
     )
     SELECT
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_all >= TIMESTAMP '${F}')::int sc_new,
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_all <  TIMESTAMP '${F}')::int sc_ex,
-      COUNT(*) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot,
-      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_all >= TIMESTAMP '${F}')::int sc_new_u,
-      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}' AND first_all <  TIMESTAMP '${F}')::int sc_ex_u,
-      COUNT(DISTINCT candidate_id) FILTER (WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}')::int sc_tot_u
-    FROM win;`;
+      COUNT(*) FILTER (WHERE rn = 1)::int sc_new,
+      COUNT(*) FILTER (WHERE rn > 1)::int sc_ex,
+      COUNT(*)::int sc_tot,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE rn = 1)::int sc_new_u,
+      COUNT(DISTINCT candidate_id) FILTER (WHERE rn > 1)::int sc_ex_u,
+      COUNT(DISTINCT candidate_id)::int sc_tot_u
+    FROM ranked
+    WHERE pdate BETWEEN TIMESTAMP '${F}' AND TIMESTAMP '${T}';`;
 
   const [iv, prop, ent, sel, propScoped, entScoped] = await Promise.all([
     // 面談（candidate.employeeId 軸・notDeclined）。second は予約語のため別名にする。
@@ -239,9 +240,9 @@ export async function computeWeeklyMatrix(params: {
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL;`),
 
-    // 提案 scoped（全期間 初回/2回目以降）
+    // 提案 scoped（その暦月の1件目=新規 / 2件目以降=既存）
     prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_new_u: number; sc_ex_u: number; sc_tot_u: number }[]>(scopedSql(PROPOSAL_EVENTS)),
-    // エントリー scoped
+    // エントリー scoped（その暦月の1件目=新規 / 2件目以降=既存）
     prisma.$queryRawUnsafe<{ sc_new: number; sc_ex: number; sc_tot: number; sc_new_u: number; sc_ex_u: number; sc_tot_u: number }[]>(scopedSql(ENTRY_EVENTS)),
   ]);
 
