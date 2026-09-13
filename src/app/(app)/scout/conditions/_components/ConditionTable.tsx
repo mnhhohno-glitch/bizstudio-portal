@@ -37,6 +37,8 @@ export default function ConditionTable({
   onRowClick,
   onDuplicate,
   onDelete,
+  onMove,
+  queueBounds,
 }: {
   rows: ConditionDto[];
   holidays: HolidayMap;
@@ -47,6 +49,10 @@ export default function ConditionTable({
   onRowClick: (c: ConditionDto) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
+  /** T-195: 予約（QUEUED）の上へ／下へ。同じ号機の中でだけ入れ替える */
+  onMove: (c: ConditionDto, direction: "up" | "down") => void;
+  /** T-195: 号機内の予約列での先頭／末尾判定（絞り込み前の全件から計算） */
+  queueBounds: Record<string, { canUp: boolean; canDown: boolean }>;
 }) {
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someChecked = !allChecked && rows.some((r) => selected.has(r.id));
@@ -100,6 +106,8 @@ export default function ConditionTable({
             const dry = isDryRow(c);
             const run = c.latestRun;
             const isActive = activeId === c.id;
+            const hasRuns = c.runs.length > 0;
+            const bounds = queueBounds[c.id] ?? { canUp: false, canDown: false };
             return (
               <tr
                 key={c.id}
@@ -183,10 +191,36 @@ export default function ConditionTable({
                     <button
                       type="button"
                       onClick={() => onDelete(c)}
-                      className="rounded border border-[#FECACA] px-2 py-0.5 text-[11px] text-[#B91C1C] hover:bg-white"
+                      disabled={hasRuns}
+                      title={hasRuns ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
+                      className="rounded border border-[#FECACA] px-2 py-0.5 text-[11px] text-[#B91C1C] hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                     >
                       削除
                     </button>
+                    {c.status === "QUEUED" && (
+                      <span className="ml-1 inline-flex overflow-hidden rounded border border-[#D1D5DB]">
+                        <button
+                          type="button"
+                          onClick={() => onMove(c, "up")}
+                          disabled={!bounds.canUp}
+                          title="予約の順番を上へ（同じ号機の中だけ）"
+                          aria-label="上へ"
+                          className="px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onMove(c, "down")}
+                          disabled={!bounds.canDown}
+                          title="予約の順番を下へ（同じ号機の中だけ）"
+                          aria-label="下へ"
+                          className="border-l border-[#D1D5DB] px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▼
+                        </button>
+                      </span>
+                    )}
                   </div>
                 </td>
               </tr>

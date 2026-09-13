@@ -14,7 +14,7 @@ export async function GET() {
   const [machines, templates, holidays, conditions] = await Promise.all([
     prisma.rpaScoutMachine.findMany({
       orderBy: { machineNo: "asc" },
-      select: { id: true, machineNo: true, isActive: true, defaultTemplateId: true },
+      select: { id: true, machineNo: true, isActive: true, defaultTemplateId: true, queueEmptyTaskId: true },
     }),
     prisma.scoutTemplate.findMany({
       orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
@@ -26,8 +26,21 @@ export async function GET() {
     }),
   ]);
 
+  // T-195: 予約切れタスク（未完了のものだけ）を号機に添える。警告帯の「ポータルタスク作成済」リンク用
+  const taskIds = machines.map((m) => m.queueEmptyTaskId).filter((v): v is string => !!v);
+  const openTasks = taskIds.length
+    ? await prisma.task.findMany({
+        where: { id: { in: taskIds }, status: { not: "COMPLETED" } },
+        select: { id: true, title: true },
+      })
+    : [];
+  const openTaskById = new Map(openTasks.map((t) => [t.id, t]));
+
   const res: ConditionsResponse = {
-    machines,
+    machines: machines.map(({ queueEmptyTaskId, ...m }) => ({
+      ...m,
+      queueEmptyTask: (queueEmptyTaskId && openTaskById.get(queueEmptyTaskId)) || null,
+    })),
     templates: templates.map((t) => ({
       id: t.id,
       kind: t.kind,

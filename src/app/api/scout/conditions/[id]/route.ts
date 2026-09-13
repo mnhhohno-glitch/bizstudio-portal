@@ -46,10 +46,17 @@ export async function DELETE(_request: NextRequest, ctx: Ctx) {
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const current = await prisma.scoutCondition.findUnique({ where: { id }, select: { id: true } });
+  const current = await prisma.scoutCondition.findUnique({
+    where: { id },
+    select: { id: true, _count: { select: { runs: true } } },
+  });
   if (!current) return NextResponse.json({ error: "条件が見つかりません" }, { status: 404 });
 
-  // 実績（scout_runs）は onDelete: Cascade で一緒に消える
+  // T-195: 実績（scout_runs）が1件でもある条件は削除不可（状態を「完了」にして残す）
+  if (current._count.runs > 0) {
+    return NextResponse.json({ error: "実績があるため削除できません（状態を「完了」にしてください）" }, { status: 409 });
+  }
+
   await prisma.scoutCondition.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

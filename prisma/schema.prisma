@@ -3126,6 +3126,11 @@ model RpaScoutMachine {
   defaultTemplateId String?        @map("default_template_id")
   defaultTemplate   ScoutTemplate? @relation(fields: [defaultTemplateId], references: [id], onDelete: SetNull)
 
+  // T-195: 予約切れ（QUEUED が0件）を検知したときに起票した「スカウト配信」タスクの ID と最終通知日時。
+  //   同じ号機で未完了タスクがある間は新規起票せず、LINE WORKS 通知も JST 1日1回に抑える（nullable 追加列・既存行は書き換えない）。
+  queueEmptyTaskId     String?   @map("queue_empty_task_id")
+  queueEmptyNotifiedAt DateTime? @map("queue_empty_notified_at")
+
   scoutConditions ScoutCondition[]
   scoutRuns       ScoutRun[]
 

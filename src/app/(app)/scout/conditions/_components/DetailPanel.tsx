@@ -430,7 +430,7 @@ export default function DetailPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {current.runs.map((r) => (
+                    {current.runs.slice(0, 20).map((r) => (
                       <tr key={r.id} className="border-t border-[#F3F4F6]" title={r.rawNotification ?? undefined}>
                         <td className="px-2 py-1">
                           <DateTimeText iso={r.executedAt} holidays={holidays} />
@@ -444,7 +444,10 @@ export default function DetailPanel({
                 </table>
               </div>
             )}
-            {current.runs.length === 0 && <div className="mt-1 text-[11px] text-[#9CA3AF]">実行実績はまだありません（RPA 連携は次タスク）</div>}
+            {current.runs.length > 20 && (
+              <div className="mt-1 text-[10px] text-[#9CA3AF]">新しい順に20件まで表示（全{current.runs.length}件）</div>
+            )}
+            {current.runs.length === 0 && <div className="mt-1 text-[11px] text-[#9CA3AF]">実行実績はまだありません（RPA が配信するたびに記録されます）</div>}
           </>
         )}
       </div>
@@ -456,7 +459,13 @@ export default function DetailPanel({
               <button type="button" onClick={() => onDuplicate(current)} className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] text-[#374151] hover:bg-[#F9FAFB]">
                 複製
               </button>
-              <button type="button" onClick={() => onDelete(current)} className="rounded-[6px] border border-[#FECACA] px-3 py-1.5 text-[13px] text-[#B91C1C] hover:bg-[#FEF2F2]">
+              <button
+                type="button"
+                onClick={() => onDelete(current)}
+                disabled={current.runs.length > 0}
+                title={current.runs.length > 0 ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
+                className="rounded-[6px] border border-[#FECACA] px-3 py-1.5 text-[13px] text-[#B91C1C] hover:bg-[#FEF2F2] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              >
                 削除
               </button>
             </>

@@ -5,6 +5,8 @@ export type MachineDto = {
   machineNo: number;
   isActive: boolean;
   defaultTemplateId: string | null;
+  /** T-195: 予約切れで起票した「スカウト配信」タスクのうち未完了のもの（無ければ null）。警告帯のリンク先 */
+  queueEmptyTask: { id: string; title: string } | null;
 };
 
 export type TemplateDto = {

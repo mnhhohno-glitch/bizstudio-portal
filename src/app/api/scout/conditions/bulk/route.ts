@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { conditionInclude, toConditionDto } from "@/lib/scout-conditions/server";
+import { moveQueuedCondition } from "@/lib/scout-conditions/queue";
 
 export async function POST(request: NextRequest) {
   const actor = await getSessionUser();
@@ -10,14 +11,37 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "リクエストボディが不正です" }, { status: 400 });
-  const { action, ids } = body as { action?: unknown; ids?: unknown };
+  const { action, ids, id, direction } = body as { action?: unknown; ids?: unknown; id?: unknown; direction?: unknown };
+
+  // T-195: 予約の並べ替え（上へ／下へ）。同じ号機の中でだけ入れ替える
+  if (action === "move") {
+    if (typeof id !== "string" || (direction !== "up" && direction !== "down"))
+      return NextResponse.json({ error: "id と direction（up/down）を指定してください" }, { status: 400 });
+    const r = await moveQueuedCondition(id, direction);
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: r.status });
+    return NextResponse.json({ ok: true, conditions: r.conditions, moved: r.moved });
+  }
+
   if (!Array.isArray(ids) || ids.length === 0 || !ids.every((v) => typeof v === "string"))
     return NextResponse.json({ error: "対象を選択してください" }, { status: 400 });
   const targetIds = ids as string[];
 
   if (action === "delete") {
-    const r = await prisma.scoutCondition.deleteMany({ where: { id: { in: targetIds } } });
-    return NextResponse.json({ ok: true, deleted: r.count });
+    // T-195: 実績（scout_runs）がある条件は飛ばして、削除した件数と飛ばした件数を返す
+    const withRuns = await prisma.scoutCondition.findMany({
+      where: { id: { in: targetIds }, runs: { some: {} } },
+      select: { id: true },
+    });
+    const skippedIds = withRuns.map((c) => c.id);
+    const deletable = targetIds.filter((x) => !skippedIds.includes(x));
+    if (deletable.length === 0 && skippedIds.length > 0) {
+      return NextResponse.json(
+        { error: "実績があるため削除できません（状態を「完了」にしてください）", deleted: 0, skipped: skippedIds.length, skippedIds },
+        { status: 409 },
+      );
+    }
+    const r = deletable.length ? await prisma.scoutCondition.deleteMany({ where: { id: { in: deletable } } }) : { count: 0 };
+    return NextResponse.json({ ok: true, deleted: r.count, deletedIds: deletable, skipped: skippedIds.length, skippedIds });
   }
 
   if (action === "duplicate") {
@@ -67,5 +91,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, conditions: created.map(toConditionDto) }, { status: 201 });
   }
 
-  return NextResponse.json({ error: "action は duplicate / delete のいずれかです" }, { status: 400 });
+  return NextResponse.json({ error: "action は duplicate / delete / move のいずれかです" }, { status: 400 });
 }

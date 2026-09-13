@@ -76,14 +76,48 @@ export default function ConditionsClient() {
     [conditions, applied, day, dayYmd, sortKey],
   );
 
-  // 予約切れの警告帯（いまは静的表示のみ。通知・タスク起票は次タスク）
+  // T-195: 予約切れの警告帯（稼働中の号機ごとに QUEUED が0件なら出す）。
+  // 「ポータルタスク作成済」は実際に未完了タスクがあるときだけ表示し、リンクは実タスクに向ける。
   const emptyQueueMachines = useMemo(() => {
     if (!data) return [];
     return data.machines
       .filter((m) => m.isActive)
       .filter((m) => !conditions.some((c) => c.machineId === m.id && c.status === "QUEUED"))
-      .map((m) => m.machineNo);
+      .map((m) => ({ machineNo: m.machineNo, task: m.queueEmptyTask }));
   }, [data, conditions]);
+
+  // T-195: 号機内の予約列（queueOrder 昇順→登録順）での先頭／末尾。絞り込み前の全件から計算する
+  const queueBounds = useMemo(() => {
+    const byMachine = new Map<string, ConditionDto[]>();
+    for (const c of conditions) {
+      if (c.status !== "QUEUED") continue;
+      const list = byMachine.get(c.machineId) ?? [];
+      list.push(c);
+      byMachine.set(c.machineId, list);
+    }
+    const out: Record<string, { canUp: boolean; canDown: boolean }> = {};
+    for (const list of byMachine.values()) {
+      list.sort((a, b) => a.queueOrder - b.queueOrder || a.createdAt.localeCompare(b.createdAt));
+      list.forEach((c, i) => {
+        out[c.id] = { canUp: i > 0, canDown: i < list.length - 1 };
+      });
+    }
+    return out;
+  }, [conditions]);
+
+  const move = async (c: ConditionDto, direction: "up" | "down") => {
+    const res = await fetch("/api/scout/conditions/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "move", id: c.id, direction }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(json.error ?? "並べ替えに失敗しました");
+      return;
+    }
+    for (const x of json.conditions as ConditionDto[]) upsertLocal(x);
+  };
 
   // 詳細パネルは最新の行を参照する（保存後の updatedAt 変化でフォームが入れ替わる）
   const detailMode: DetailMode | null = useMemo(() => {
@@ -108,7 +142,16 @@ export default function ConditionsClient() {
 
   const bulk = async (action: "duplicate" | "delete", ids: string[]) => {
     if (ids.length === 0) return;
-    if (action === "delete" && !window.confirm(`${ids.length}件の条件を削除します。よろしいですか？`)) return;
+    if (action === "delete") {
+      // T-195: 実績がある条件は削除不可。事前に弾けるものは弾き、残りはサーバー側で飛ばして件数を報告する
+      const withRuns = conditions.filter((c) => ids.includes(c.id) && c.runs.length > 0);
+      if (withRuns.length === ids.length) {
+        toast.error("実績があるため削除できません（状態を「完了」にしてください）");
+        return;
+      }
+      const note = withRuns.length ? `（実績がある${withRuns.length}件は削除されません）` : "";
+      if (!window.confirm(`${ids.length - withRuns.length}件の条件を削除します${note}。よろしいですか？`)) return;
+    }
     const res = await fetch("/api/scout/conditions/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -120,8 +163,10 @@ export default function ConditionsClient() {
       return;
     }
     if (action === "delete") {
-      removeLocal(ids);
-      toast.success(`${json.deleted ?? ids.length}件を削除しました`);
+      const deletedIds: string[] = Array.isArray(json.deletedIds) ? json.deletedIds : ids;
+      removeLocal(deletedIds);
+      const skipped = Number(json.skipped ?? 0);
+      toast.success(`${json.deleted ?? deletedIds.length}件を削除しました${skipped ? `（実績がある${skipped}件は削除していません）` : ""}`);
     } else {
       for (const c of json.conditions as ConditionDto[]) upsertLocal(c);
       toast.success(`${(json.conditions as ConditionDto[]).length}件を予約として複製しました`);
@@ -173,15 +218,28 @@ export default function ConditionsClient() {
       {emptyQueueMachines.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[#FCD34D] bg-[#FFFBEB] px-4 py-2.5 text-[13px] text-[#92400E]">
           <div>
-            <span className="mr-1 font-semibold">⚠ {emptyQueueMachines.map((n) => `${n}号機`).join("・")}の予約が空です。</span>
-            現在の条件のまま配信を続けています。
+            <span className="mr-1 font-semibold">
+              ⚠ {emptyQueueMachines.map((m) => `${m.machineNo}号機`).join("・")}の予約が空です。
+            </span>
+            枯渇しても切り替える条件が無く、現在の条件のまま配信を続けます。次の条件を予約してください。
           </div>
-          <div className="flex items-center gap-3 text-[12px]">
-            <span className="rounded bg-white px-2 py-0.5 text-[#6B7280]">LINE WORKS 通知：次タスクで自動化</span>
-            <span className="rounded bg-white px-2 py-0.5 text-[#6B7280]">ポータルタスク作成：次タスクで自動化</span>
-            <Link href="/tasks" className="text-[#2563EB] underline">
-              タスク一覧へ
-            </Link>
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+            {emptyQueueMachines.map((m) =>
+              m.task ? (
+                <Link
+                  key={m.machineNo}
+                  href={`/tasks/${m.task.id}`}
+                  title={m.task.title}
+                  className="rounded bg-white px-2 py-0.5 text-[#2563EB] underline"
+                >
+                  {m.machineNo}号機：ポータルタスク作成済
+                </Link>
+              ) : (
+                <span key={m.machineNo} className="rounded bg-white px-2 py-0.5 text-[#6B7280]">
+                  {m.machineNo}号機：枯渇時に LINE WORKS 通知＋タスク作成
+                </span>
+              ),
+            )}
           </div>
         </div>
       )}
@@ -315,6 +373,8 @@ export default function ConditionsClient() {
               onRowClick={(c) => setDetail({ kind: "edit", condition: c })}
               onDuplicate={(c) => bulk("duplicate", [c.id])}
               onDelete={(c) => bulk("delete", [c.id])}
+              onMove={move}
+              queueBounds={queueBounds}
             />
           )}
         </div>
