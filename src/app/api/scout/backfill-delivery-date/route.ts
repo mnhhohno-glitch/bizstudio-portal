@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
 import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+import { computeMasType } from "@/lib/scout/mas-type";
 
 /**
  * POST /api/scout/backfill-delivery-date
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
   // 4) masType（開放日/通常）自動判定: 配信日・登録日が両方揃った Candidate を全件対象に、
   //    diffDays = 配信日 − 登録日（JST暦日・罠#17）が 0..7（境界含む）→ "開放日"、それ以外（<0 or >7）→ "通常"。
   //    両日付が揃ったときの計算値を正とし、現在値と異なる場合のみ上書き（冪等）。片方欠ける行は対象外＝触らない。
-  const toJstYmd = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD"（罠#17）
+  //    T-190 Step3-1: 判定式は src/lib/scout/mas-type.ts に移設（式は不変）。scout-history 受け口と共用する。
   const datedCandidates = await prisma.candidate.findMany({
     where: { scoutDeliveryDate: { not: null }, mynaviRegisteredDate: { not: null } },
     select: { id: true, scoutDeliveryDate: true, mynaviRegisteredDate: true, masType: true },
@@ -125,12 +126,8 @@ export async function POST(req: NextRequest) {
   const masTypeScanned = datedCandidates.length;
   let masTypeUpdated = 0;
   for (const c of datedCandidates) {
-    if (!c.scoutDeliveryDate || !c.mynaviRegisteredDate) continue;
-    const diffDays = Math.round(
-      (Date.parse(toJstYmd(c.scoutDeliveryDate) + "T00:00:00Z")
-        - Date.parse(toJstYmd(c.mynaviRegisteredDate) + "T00:00:00Z")) / 86_400_000,
-    );
-    const masType = diffDays >= 0 && diffDays <= 7 ? "開放日" : "通常";
+    const masType = computeMasType(c.scoutDeliveryDate, c.mynaviRegisteredDate);
+    if (masType === null) continue; // 片方欠ける行は触らない（従来どおり）
     if (masType !== c.masType) {
       await prisma.candidate.update({ where: { id: c.id }, data: { masType } });
       masTypeUpdated++;

@@ -15,6 +15,7 @@ import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import DashboardTab from "@/components/candidates/DashboardTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
 import ScoutLinkPanel from "@/components/scout/ScoutLinkPanel";
+import MynaviScoutHistoryPanel from "@/components/scout/MynaviScoutHistoryPanel";
 import { Toaster } from "sonner";
 import { REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { REGIONS } from "@/lib/constants/prefectures";
@@ -2007,6 +2008,9 @@ function CandidateDetailPageBody() {
             scoutDeliverySlotId={candidate.scoutDeliverySlotId}
             onLinked={fetchCandidate}
           />
+
+          {/* T-190 Step3-1: マイナビ スカウト履歴一覧（履歴が 0 件なら何も描画しない） */}
+          <MynaviScoutHistoryPanel candidateId={candidate.id} />
 
           {/* サブタブバー */}
           <div className="flex border-b border-gray-200 mt-4">

@@ -64,7 +64,7 @@ function normalizeRecruiterName(s: string): string {
  *
  * マスタは 10件程度なので全件取得 → JS で比較する。
  */
-async function findMachineByRecruiterName(recruiterName: string) {
+export async function findMachineByRecruiterName(recruiterName: string) {
   const trimmed = recruiterName.trim();
   if (!trimmed) return null;
   const target = normalizeRecruiterName(trimmed);
