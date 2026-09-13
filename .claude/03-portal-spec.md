@@ -914,3 +914,82 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     追加（Json 相乗り・テーブル/保存API無変更。speaker なしの過去データは従来表示）。auto-scan・explain へ送る
     テキストにも「CA:」「求職者:」プレフィックスを付け、両 system プロンプトに「話者ラベルは誤りうる。矛盾したら
     内容を優先」を明記。Web Speech フォールバックは話者識別なし（従来表示）。
+
+## スカウト配信条件コンソール（T-194, master, 2026-09-14）
+
+- **目的**: マイナビ側に保存した検索条件を名前で選ぶ現行方式（号機と担当者の組み合わせがズレると別条件で配信されても
+  「成功」で終わる事故が起きた）をやめ、**portal 側で検索条件6軸を持ち、RPA がマイナビの検索フォームへ直接入力する方式**へ
+  移行する。本タスクはその**第1段階＝条件を管理する画面（`/scout/conditions`）とデータモデルまで**。
+  仕様の正本は `スカウト検索条件_新方式_検索軸仕様_2026-09-13.md` / `スカウト配信条件コンソール_UI仕様_2026-09-13.md`（リポジトリ外）。
+- **コミット**: 9f5f202（master へは merge 6fd65f5 で反映）。
+- **マイグレーション**: `20260914090000_t194_scout_conditions`（追加のみ・IF NOT EXISTS／enum と FK は `DO $$ ... EXCEPTION WHEN duplicate_object` で冪等）。
+  既存テーブルへの変更は `rpa_scout_machines` への nullable 列 `default_template_id` 追加のみ。既存レコードの書き換えは無い。
+
+### 号機マスタ: 既存 `RpaScoutMachine`（rpa_scout_machines）を流用
+
+- portal には号機テーブルが2つある。`ScoutDeliverySlot.machineId` が参照する `ScoutMachineMaster`（配信実績集計用。
+  `recruiterName`+`validFrom` がキー・社員行も混在・2026-09-14 時点で5号機が active のまま）ではなく、
+  `RpaScoutMachine`（`machineNo` 一意＝1行/号機・`isActive` が既に 1〜4=稼働 / 5〜6=停止 で仕様一致・RPA 検索条件管理
+  `/admin/rpa-scout` の既存マスタ）を号機マスタとして使う。`ScoutCondition.machineId` / `ScoutRun.machineId` はこちらを参照。
+- 追加したのは nullable `defaultTemplateId`（→ `scout_templates`）のみ。**号機別デフォルト割当は使わない（全号機が全テンプレートを共用）と
+  2026-09-14 に確定**したため、本番は全号機 null のまま（列は残置）。
+- **マイナビ上の担当者名はテーブルに持たない**。画面表示は `src/lib/recruiterDisplay.ts` の `splitRecruiterDisplay(\`${machineNo}号機\`)`
+  で RC_ROSTER から導出する（独自の号機↔担当者対応表を作らない）。
+
+### 新規テーブル（Prisma モデル名 / 物理名）
+
+| モデル | 物理名 | 主な列 |
+|--|--|--|
+| `ScoutTemplate` | `scout_templates` | `kind`(ScoutTemplateKind) / `name` / `subject` / `body`(Text) / `sortOrder` / `isActive`。`@@unique([kind, name])`。件名・本文の差し込みタグ `[担当者]` `[社名]` `[最終学歴]` `[経験職種]` は生のまま保持（RPA 側で置換） |
+| `ScoutCondition` | `scout_conditions` | `machineId`(→rpa_scout_machines) / `status`(ScoutConditionStatus, 既定 QUEUED) / `queueOrder`(予約の並び順) / **1.** `searchTarget`(ScoutSearchTarget) / **2.** `registDateMode`(ScoutRegistDateMode) + `registDays`(1/3/7/14/30/60/90/180/360) + `registDateFrom`/`registDateTo`(@db.Date) / **3.** `lastLoginDays`(既定1) / **4.** `gradYearFrom`/`gradYearTo` / **5.** `companyCount`(null=-- / 0=0社 / 1〜6=～N社 / 7=7社以上) / **6.** `areaMode`(ScoutAreaMode) + `prefectures`(String[]) / `templateId`(→scout_templates, SetNull) / `plannedCount` / `deliveryDate`(@db.Date) / `createdById`(→users, SetNull) / `createdAt`(=予約登録日時) |
+| `ScoutRun` | `scout_runs` | `conditionId`(→scout_conditions, **Cascade**) / `machineId` / `executedAt`(真のUTC instant) / `extractedCount` / `sentCount` / `isDry` / `rawNotification`(完了通知の原文, Text) |
+| `Holiday` | `holidays` | `date`(@db.Date, unique) / `name` |
+
+enum 5種: `ScoutTemplateKind`(UNSENT/SENT/INDIVIDUAL) ・ `ScoutConditionStatus`(RUNNING/QUEUED/DRY/DONE) ・
+`ScoutSearchTarget`(EXCLUDE=含まない〔未送信〕/ ONLY=のみ〔送信済〕/ INCLUDE=含む) ・ `ScoutRegistDateMode`(PERIOD=期間指定 / DATE=日付入力) ・
+`ScoutAreaMode`(NATIONWIDE/EAST/WEST/PREFECTURE)。
+
+**固定値6項目は列を持たない**（RPA が常に固定入力する。schema.prisma と migration.sql のコメントに明記）:
+学歴=不問（チェックを入れない。入れると学歴欄が空の求職者が落ちる）／経験職種=指定なし／居住地=指定なし／0社を除く=チェックなし／
+除外リストの会員=含まない／自社へ応募した会員=含まない。画面の詳細パネルには「固定値」として定数 `FIXED_VALUES` から表示するだけ。
+
+日付の持ち方: `@db.Date` 列は UTC 0時の Date として保持し、読む側は `toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })`
+（UTC 0時＝JST 9時なので同じ日付になる）。`executedAt` / `createdAt` は真の instant（`/admin/rpa-scout` 系の「JST壁時計をUTC欄に載せる」方式とは別）。
+
+### API（ログインセッション必須・`getSessionUser()`。RPA 向け外部 API は未実装）
+
+| ルート | 役割 |
+|--|--|
+| `GET /api/scout/conditions` | 条件全件＋号機（`RpaScoutMachine`）＋テンプレート＋祝日を1レスポンスで返す（`ConditionsResponse`）。絞り込みはクライアント側 |
+| `POST /api/scout/conditions` | 作成。`parseConditionInput()` で検証（PREFECTURE で都道府県0件は 400／PERIOD で registDays 未指定は 400 等）。QUEUED で `queueOrder` 未指定なら号機内の末尾（max+1） |
+| `PATCH /api/scout/conditions/[id]` | 部分更新（渡した項目だけ検証・`createdById` は変えない） |
+| `DELETE /api/scout/conditions/[id]` | 削除（`scout_runs` は Cascade で一緒に消える） |
+| `POST /api/scout/conditions/bulk` | `{ action: "duplicate" \| "delete", ids }`。複製は **status=QUEUED・同じ号機の末尾・`deliveryDate` は引き継がない・登録者=操作者** |
+
+共通処理は `src/lib/scout-conditions/server.ts`（`conditionInclude` / `toConditionDto` / `parseConditionInput` / `toPrismaData`）。
+
+### シード（`scripts/seed-scout-conditions.ts`。upsert・存在チェックで再実行可）
+
+実行: `export DATABASE_URL=<master worktree の .env の値>; npx tsx scripts/seed-scout-conditions.ts`（`railway run` は使わない）。
+
+| 対象 | 元データ | 2026-09-14 投入結果 |
+|--|--|--|
+| 祝日 | `prisma/seed/holidays-2026.json`（UI仕様書の2026年18日。振替休日 5/6・国民の休日 9/22 含む） | 18件 upsert（date unique） |
+| 号機 | `RpaScoutMachine.isActive` を 1〜4=true / 5〜6=false に **updateMany するだけ**（行は作らない） | 更新0件（既に仕様どおり） |
+| テンプレート | `prisma/seed/scout-templates.json` を `(kind, name)` で upsert | 19本（未送信5 / 送信済9 / 個別5） |
+| 初期条件 | `scout_conditions` が空のときだけ、稼働号機ごとに `RpaScoutLog` 最新→`RpaScoutPattern` を6軸へ写像し **RUNNING** で1件ずつ作成。テンプレートはログの件名テンプレ名で照合 | 4件（1号機=EXCLUDE・7日以内、2〜4号機=ONLY） |
+
+- **テンプレート JSON の出所**: 仕様では `prisma/seed/05.集計ファイル.xlsx`「テンプレートマスタ」から生成する想定だったが、
+  xlsx が開発機に無かったため、同じマスタを移行済みの **`rpa_scout_subject_templates`（kind 付き・有効19本＝仕様の内訳と一致）から
+  `scripts/generate-scout-templates-json.ts --from-db` で生成**した。xlsx が入手できたら `--xlsx <path>` で再生成→シード再実行で上書きできる
+  （列名「種別/名称/件名/本文」をヘッダで探す実装。xlsx の実レイアウトは**未確認**）。JSON はコミット、xlsx は `.gitignore`（`prisma/seed/*.xlsx`）。
+- 初期条件の写像規則: `sendStatus` SENT→ONLY / UNSENT→EXCLUDE。`registDirection` WITHIN→PERIOD、**AFTER（N日以降＝既登録）は
+  DATE モードで「終了=当日−N日・開始なし」**、原文「N日前」は from=to=当日−N。`companyCount` は 0〜7 の範囲外なら null。
+
+### 既知制約・未実装
+
+- **条件を削除すると `scout_runs`（実績）がカスケード削除される**。T-195 で「実績がある条件は削除不可」に変更予定。
+- 未実装（T-195 以降）: RPA 向け条件取得 API・実績（完了通知）受け取り API（`scout_runs` へ書くのはこれ。現状0件）・
+  枯渇判定（送信件数10件未満）と予約の自動消化・予約切れの LINE WORKS 通知/タスク自動起票。
+  画面上部の「◯号機の予約が空です」警告帯は **QUEUED が無い稼働号機を数えて出す静的表示のみ**で、通知・起票はしていない。
+- 一覧の枯渇色（送信件数 < 10 または status=DRY）は `isDryRow()`（`_components/filter.ts`）で判定。閾値は `DRY_THRESHOLD`（constants.ts）。

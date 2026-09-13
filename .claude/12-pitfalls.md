@@ -647,3 +647,37 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
   カラムを丸めるだけでは消えないので、本文側も検出して対処する。
 
 **参考**: 実装は `scripts/export-interview-logs.ts`。
+
+## 48. 号機テーブルが2つある（`ScoutMachineMaster` と `RpaScoutMachine`）
+
+**罠**: portal には「RPA 号機」を表すテーブルが2つあり、用途が違う。
+
+| モデル / 物理名 | 用途 | キー | 2026-09-14 時点の中身 |
+|--|--|--|--|
+| `ScoutMachineMaster` / `scout_machine_masters` | 配信実績集計用。`ScoutDeliverySlot.machineId` の参照先 | `recruiterName` + `validFrom`（担当者名が主。`machineNumber` は任意） | 号機1〜6 に加え社員行（`machineLabel="人（社員）"`・`isMachine=false`）が混在。**5号機が `isActive=true` のまま**（6号機のみ false） |
+| `RpaScoutMachine` / `rpa_scout_machines` | RPA 検索条件管理（`/admin/rpa-scout`）と配信条件コンソール（`/scout/conditions`、T-194）用 | `machineNo` 一意（1行/号機） | 1〜4=`isActive=true`、5〜6=false（実運用と一致）。T-194 で nullable `default_template_id` を追加 |
+
+- **配信条件・RPA 連携系（`ScoutCondition` / `ScoutRun` / T-195 以降の外部 API）は `RpaScoutMachine` を使う。**
+  `ScoutMachineMaster.isActive` を稼働判定に使うと5号機が稼働扱いになる。
+- 逆に配信実績（`ScoutDeliverySlot`）の突合・集計は `ScoutMachineMaster`（`aliases` に「RPA1号機」等の表記揺れを持つ）が正で、
+  こちらを `RpaScoutMachine` に付け替えてはいけない（T-064/T-135 の配信実績集計が壊れる）。
+- 担当者名（マイナビ上のアカウント名）は**どちらのテーブルも画面表示の正ではない**。表示は `src/lib/recruiterDisplay.ts` の
+  `RC_ROSTER`（`formatRecruiterName` / `splitRecruiterDisplay`）から導出する。`RpaScoutMachine.accountName` / `mynaviSaveName` は
+  `/admin/rpa-scout` の既存表示用に残っているだけで、T-194 では参照していない。
+- 2つを統合するかは**未決**。新しい号機参照を足すときは「どちらの号機か」をコード上のコメントで明記する。
+
+## 49. スカウト配信文テンプレートのテーブルが2つある（`rpa_scout_subject_templates` と `scout_templates`）
+
+**罠**: テンプレートマスタ（未送信用5 / 送信済用9 / 個別配信用5 の19本）が2テーブルに存在する。
+
+| モデル / 物理名 | 作成経緯 | 使う画面 |
+|--|--|--|
+| `RpaScoutSubjectTemplate` / `rpa_scout_subject_templates` | `/admin/rpa-scout`（2026-08 稼働）が持つ既存マスタ。`kind` null の旧行・無効行を含め21行（Excel からの移行経緯の詳細は未確認） | `/admin/rpa-scout/templates`（件名テンプレ選択・配信計画） |
+| `ScoutTemplate` / `scout_templates` | 2026-09-14 T-194 で、xlsx が手元に無かったため上記の **kind 付き・有効19本から `scripts/generate-scout-templates-json.ts --from-db` で複製**（`prisma/seed/scout-templates.json` → シード upsert） | `/scout/conditions`（配信条件のテンプレート選択・プレビュー） |
+
+- 2026-09-14 時点で19本の件名・本文は**完全一致**（本番で照合済み）。**片方だけを編集すると乖離する**。
+  `/admin/rpa-scout/templates` で編集しても `scout_templates` には反映されないし、逆も同じ。
+- どちらを編集の正にするか、統合するかは**未決**。決まるまでの暫定手順:
+  `rpa_scout_subject_templates` 側を直したら `export DATABASE_URL=...; npx tsx scripts/generate-scout-templates-json.ts --from-db`
+  → `npx tsx scripts/seed-scout-conditions.ts` で `scout_templates` を追従させる（`(kind, name)` で upsert。**名称を変えた場合は別行が増える**ので注意）。
+- `ScoutTemplate` は `@@unique([kind, name])`。同名で種別違い（例「口コミ4.9オーダーメイド」の未送信用と送信済用）は別行として正しく共存する。

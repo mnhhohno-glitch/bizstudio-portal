@@ -1493,3 +1493,48 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 `GET /api/entries` の include（`api/entries/route.ts`）と**常に同一に保つ**こと。現在は
 `id / name / candidateNumber / employeeId / recruiterName / employee.name` の6項目（recruiterName は T-161 で追加）。
 一覧に candidate 由来の列を増やすときは、**更新API 2本のレスポンスにも同時に足す**こと。
+
+## スカウト配信条件 /scout/conditions（T-194, 2026-09-14）
+
+- **タブ**: `src/components/scout/ScoutNav.tsx` の `BASE_TABS` に 配信条件(`/scout/conditions`) を追加（ダッシュボード｜配信枠管理｜**配信条件**｜集計。admin のみ末尾に過去データインポート）。`/scout/layout.tsx` の `ScoutRoleProvider` はそのまま。
+- **ページ**: `src/app/(app)/scout/conditions/page.tsx`（server, async）。`getSessionUser()` 無しなら `/login` へ redirect し、`<ConditionsClient />` を描画するだけ。
+
+### `_components/` の責務
+
+| ファイル | 責務 |
+|--|--|
+| `ConditionsClient.tsx`（client） | 画面本体。`GET /api/scout/conditions` を1回 fetch して `data`（machines / templates / holidays / conditions）を保持。state: 絞り込みの `draft`（左パネルの入力値）と `applied`（「検索」で確定した値）、日付切替 `day`（`prev/today/next/all`、初期 `today`）、`sortKey`、選択 `selected`(Set)、詳細 `detail`(`{kind:"new"} \| {kind:"edit", condition}`)、都道府県モーダル `prefModal`(`{initial, onConfirm}`)。**該当件数は `draft` に即時追従・一覧は `applied`**（「検索」＝`applied=draft`＋再fetch、「リセット」＝両方 `DEFAULT_FILTER`）。予約切れ警告帯（QUEUED の無い稼働号機を列挙・静的）、ツールバー（選択件数／複製／CSV／削除／並び順）、日付切替ボタン（`前日 9/13(日)` のように日付＋曜日を表示・日曜/祝日赤・土曜青）。`bulk()` が `/bulk` API を叩き、成功後は `upsertLocal` / `removeLocal` でローカル state を差し替える（全件再取得しない）。CSV は `buildCsv()` を Blob 化して `<a download>`（選択があれば選択行、無ければ表示中の全行）。都道府県モーダルは1インスタンスを絞り込み・詳細の両方から共用（`onConfirm` コールバックを state に持つ） |
+| `FilterPanel.tsx` | 左の絞り込みパネル（`w-[380px]`）。UI仕様の並び: 号機チップ（`MachineChip`・停止号機は disabled）／状態／検索対象（含まない〔未送信〕・のみ〔送信済〕・含む）／登録日（**指定なし・期間指定・日付入力のラジオ。選んだ方の入力だけ描画し同時には出さない**）／最終ログイン日（select・**初期値 1日以内**・「指定なし」あり）／卒業年度（開始〜終了 select、`gradYearOptions(今年)`=今年+4〜1980）／経験社数／希望勤務地（全国・東日本・西日本のチップ＋「都道府県指定」ボタン→モーダル。確定後はボタンに `都道府県指定：関東` のように集約表示、「解除」リンク）／テンプレート種別／実行日（from/to `DateField`）。下部に「該当 N 件」「リセット」「検索」 |
+| `ConditionTable.tsx` | 右の一覧。`overflow-x-auto` の列表示（☐／号機／状態／予約日・配信日／検索対象／登録日／ログイン／卒業年度／経験社数／希望勤務地／配信テンプレート／予定／抽出／送信／実行日時／操作）。**予約日（`createdAt` を JST 日時）と配信日（`deliveryDate`）は同じ列に2行**。`isDryRow()` の行は `bg-[#FEF2F2]`＋「枯渇」バッジ、送信件数を赤字。QUEUED 行は `#queueOrder` を添える。行クリックで `onRowClick`（詳細を開く）、チェックボックス列と操作列は `stopPropagation`。ヘッダは `sticky top-0` |
+| `DetailPanel.tsx` | 行クリックで右から出る固定パネル（`fixed inset-y-0 right-0 max-w-[560px]`）。**新規作成も同じパネル**（`mode.kind==="new"`）。セクション: 基本（号機 select／状態／配信日 `DateField`／予定件数／QUEUED 時のみ並び順）→ 検索条件6軸（検索対象チップ／登録日ラジオ＋選んだ方だけ表示／最終ログイン select／卒業年度 from〜to／経験社数 select／希望勤務地チップ＋都道府県指定ボタン）→ 固定値（`FIXED_VALUES` を dl 表示）→ 配信文（テンプレート select を種別 optgroup で並べる・号機のデフォルトがあれば「使う」リンク・`TemplatePreview`）→ 実績（配信日／予約登録／最終実行／予定・抽出・送信／登録者＋`runs` の明細表）。フォームは `ConditionInput` 型の state。**別の行を開いたら `modeKey`（id+updatedAt）の変化で `toForm()` し直す**。保存は POST/PATCH を叩き `onSaved(condition, isNew)`。`dirty` で「未保存の変更があります」を表示（閉じる時の確認は無い） |
+| `PrefectureModal.tsx` | 都道府県指定モーダル（マイナビ同等の2段構え）。左 STEP1=地域リスト（**全国／北海道／東北／関東／甲信越／北陸／東海／関西／中国／四国／九州。海外は載せない**・各地域に選択数バッジ）、右 STEP2=「◯◯をすべて選択」親チェック（indeterminate 対応）＋都道府県チェック。フッターに 選択件数 / 47・すべてをクリア・確定する（**0件では確定不可**＝空欄だと海外が含まれるため）。プレビューに `summarizePrefectures()` の集約結果を常時表示。`useOverlayClose` で誤クローズ防止 |
+| `TemplatePreview.tsx` | 件名・本文のプレビュー。`HighlightedText` が `MERGE_TAG_RE` で分割し `[担当者]`=青 `[社名]`=黄 `[最終学歴]`=緑 `[経験職種]`=紫 で色分け（色は `MERGE_TAGS` に一元化）。テンプレート未選択時は破線ボックス |
+| `DateText.tsx` | 日付表示の共通部品。`DateText`（`YYYY-MM-DD(曜)` または `M/D(曜)`。土曜青・日曜/祝日赤・祝日は `title` にフル日付＋名称と小さな「祝」バッジ）／`DateTimeText`（instant → JST の日付(曜)＋時刻）／`DateNote`（日付入力欄の下に「月曜日・敬老の日」）／`DateField`（`<input type=date>`＋`DateNote`） |
+| `MachineLabel.tsx` | 号機表示。`machineRecruiterName(no)` は `splitRecruiterDisplay(\`${no}号機\`)` で RC_ROSTER から実名を引く（独自対応表なし）。`MachineLabel`（色ドット＋「N号機」＋実名）／`MachineChip`（絞り込み用チップ・`title` に実名）。号機色は `MACHINE_COLORS`（constants.ts、表示専用） |
+| `filter.ts` | 画面側ロジック。`FilterState` / `DEFAULT_FILTER`（`lastLoginDays: 1` 以外は空）／`applyFilter()`（各軸は空＝無条件。登録日 DATE は期間の重なり、卒業年度は範囲の重なり、希望勤務地は「チップのモード一致 OR（PREFECTURE 行かつ選択県と重なり）」、実行日は最新実績の JST 日付）／`applyDayFilter()`（`deliveryDate` が当日/前日/翌日に一致。`all` は素通し）／`sortConditions()`（号機順=号機→状態(RUNNING→QUEUED→DRY→DONE)→並び順、送信少ない順・予定多い順・実行日新しい順は null を末尾）／`registDateLabel()`／`isDryRow()`／`buildCsv()`（UTF-8 BOM 付き・20列） |
+
+### 共通 lib `src/lib/scout-conditions/`
+
+| ファイル | 中身 |
+|--|--|
+| `constants.ts` | 状態・検索対象・登録日モード・期間選択肢（1/3/7/14/30/60/90/180/360）・経験社数選択肢・エリアモード・テンプレート種別の**ラベル付き定数と `xxxLabel()`**、`gradYearOptions()`、`summarizePrefectures()`（下記）、`areaLabel()`、`expandAreaToPrefectures()`、`MERGE_TAGS` / `MERGE_TAG_RE`、`FIXED_VALUES`、`DRY_THRESHOLD=10` / `isDrySentCount()`、`MACHINE_COLORS`、`SORT_OPTIONS`。地域↔都道府県の対応は `src/lib/rpa-scout/area.ts`（`ALL_AREA_GROUPS` 等）を再 export して共用（二重定義しない） |
+| `dates.ts` | `jstTodayYmd()` / `instantToJstYmd()` / `instantToJstDateTime()`（いずれも `toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })` 系）、`addDaysYmd()` / `ymdWeekday()`（UTC 正午基準で壁時計のまま演算）、`dayKind()`（weekday/sat/sun/holiday）/ `dayColorClass()`、`formatYmdWithWeekday()` / `formatYmdShort()`、`dbDateToYmd()` / `ymdToDbDate()`（@db.Date ↔ "YYYY-MM-DD"）、`isValidYmd()` |
+| `types.ts` | API↔画面の DTO（`MachineDto` / `TemplateDto` / `HolidayDto` / `RunDto` / `ConditionDto` / `ConditionsResponse` / `ConditionInput`）。Prisma 型に依存せずクライアントから import 可 |
+| `server.ts` | サーバー専用。`conditionInclude`（machine / template / createdBy / runs 新しい順）、`toConditionDto()`、`parseConditionInput(body, base)`（作成は base=null で既定値、更新は現在行を base に部分検証）、`rowToParsed()`、`toPrismaData()` |
+
+### 日付表示のルール（この画面は全面適用）
+
+- **すべての日付に曜日を付ける**。土曜=青 `text-[#2563EB]`、日曜・祝日=赤 `text-[#DC2626]`。祝日は `title` に名称（ホバー表示）＋「祝」バッジ。
+- 日付入力欄の下に、選んだ日の曜日と祝日名を出す（`DateNote`）。日付切替ボタン（前日/当日/翌日）も曜日つき。
+- JST 変換は `toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })` に統一。**`toISOString().slice(0,10)` は使わない**（罠#17）。
+- **祝日の参照元は `holidays` テーブル**（`GET /api/scout/conditions` が `holidays[]` を同梱し、画面で `HolidayMap`（"YYYY-MM-DD"→名称）に変換）。
+  `@holiday-jp/holiday_jp`（実績表の営業日数計算で使用）は**この画面では使わない**。2026年分のみ投入済み。
+
+### 登録日と希望勤務地の表示ルール
+
+- 登録日は「期間指定 / 日付入力」のラジオで**選んだ方の入力だけを描画し、同時には出さない**（絞り込み・詳細とも。絞り込みには「指定なし」もある）。
+  一覧では `期間 7日以内` / `日付 2026-09-12(土)〜2026-09-12(土)` のように先頭にモードの小ラベル。
+- 希望勤務地の集約表示 `summarizePrefectures(prefectures)`: 地域の都道府県が全部入っていれば地域名（関東全選択→「関東」）、
+  東日本4地域が揃えば「東日本」、西日本6地域が揃えば「西日本」、全地域なら「全国」。一部だけの地域は県名を「/」で並べ、地域同士は「・」で結ぶ
+  （例: 東北全選択＋神奈川のみ→「東北・神奈川」）。`areaMode` が NATIONWIDE/EAST/WEST の行はそのラベルを出す（`areaLabel()`）。
+- 都道府県指定は**空にしない**（何もチェックしないとマイナビ側で海外が含まれるため）。API も PREFECTURE で0件は 400。
