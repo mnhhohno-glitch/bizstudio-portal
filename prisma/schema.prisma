@@ -564,6 +564,7 @@ model Candidate {
   savedJobs              CandidateSavedJob[]
   jobApplications        CandidateJobApplication[]
   responseSubmissions    CandidateResponseSubmission[] // T-133 P1: まとめ送信バッチ
+  mynaviScoutHistories   MynaviScoutHistory[] // T-190 Step3-1: マイナビ スカウト履歴一覧の受け口
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -3360,4 +3361,50 @@ model RecommendAnalyzeBatch {
   @@index([status]) // 回収 cron が SUBMITTED を拾うため
   @@index([batchId])
   @@map("recommend_analyze_batches")
+}
+
+/// T-190 Step3-1: マイナビ「スカウト履歴一覧」モーダル（求職者ごと）の行を RPA(PAD) から受け取り、
+/// そのまま保存する一次資料。1行 = 1通のスカウト。
+///
+/// 配信日はこれまで「自社の送信結果Excel／送信明細との照合による推測」で、照合できなければ
+/// 応募日がそのまま入っていた（複数回送っている人は機械では決まらない）。この履歴の
+/// 「状況＝応募済」の行のスカウト日が唯一の確定値なので、判定の根拠を後から検証できるよう
+/// 応募済以外（既読/未読）の行も含めて全行残す。
+model MynaviScoutHistory {
+  id             String     @id @default(cuid())
+  candidateId    String?    @map("candidate_id")
+  candidate      Candidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  mynaviMemberNo String?    @map("mynavi_member_no")
+
+  /// スカウト日（JST暦日を UTC 00:00 で保存。罠#17: toISOString().slice は使わない）
+  scoutDate DateTime @map("scout_date")
+  /// 時刻まで取れた場合のみ（"YYYY-MM-DD HH:MM" で来たとき）。採用行の判定には使わない。
+  scoutSentAt DateTime? @map("scout_sent_at")
+  subject     String?   @db.Text
+  /// 状況欄の生文字列（"応募済" / "既読" / "未読" 等）
+  statusText String  @map("status_text")
+  isApplied  Boolean @default(false) @map("is_applied")
+  /// 担当者（マイナビ画面の生値）
+  recruiterName String? @map("recruiter_name")
+  /// ScoutMachineMaster で引けた正規化名（引けなければ null）
+  recruiterNormalized String? @map("recruiter_normalized")
+
+  /// 冪等キー用の NOT NULL 列。
+  /// Postgres の UNIQUE は NULL 同士を「別物」と扱うため、nullable な candidateId / subject を
+  /// そのまま複合ユニークにすると同じ行が何度でも入ってしまう。そこで
+  ///   ownerKey   = candidateId（無ければ "mn:<会員No>"）
+  ///   subjectKey = 件名の空白除去値（件名が無ければ ""）
+  /// を別列として持ち、[ownerKey, scoutDate, subjectKey] で一意にする。
+  ownerKey   String @map("owner_key")
+  subjectKey String @map("subject_key")
+
+  /// RPA が画面から読み取った日時
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([ownerKey, scoutDate, subjectKey])
+  @@index([mynaviMemberNo])
+  @@index([candidateId])
+  @@map("mynavi_scout_histories")
 }
