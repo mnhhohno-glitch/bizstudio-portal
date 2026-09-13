@@ -156,6 +156,7 @@ model User {
   dailyReportComments      DailyReportComment[]      @relation("DailyReportCommentAuthor")
   // T-147: セキュアファイル送信（リレーション追加のみ・DBカラム変更なし）
   secureTransfersSent      SecureTransfer[]          @relation("SecureTransfersSent")
+  scoutConditionsCreated   ScoutCondition[]          @relation("ScoutConditionCreatedBy")
 
   @@map("users")
 }
@@ -3120,6 +3121,13 @@ model RpaScoutMachine {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  // T-194: 号機ごとのデフォルト配信テンプレート（nullable 追加列。既存レコードは書き換えない）
+  defaultTemplateId String?        @map("default_template_id")
+  defaultTemplate   ScoutTemplate? @relation(fields: [defaultTemplateId], references: [id], onDelete: SetNull)
+
+  scoutConditions ScoutCondition[]
+  scoutRuns       ScoutRun[]
+
   @@map("rpa_scout_machines")
 }
 
@@ -3225,6 +3233,167 @@ model RpaScoutPlan {
   @@index([machineNo, planDate])
   @@map("rpa_scout_plans")
 }
+
+// ============================================================
+// T-194: スカウト配信条件コンソール
+// マイナビ「保存した検索条件」経由をやめ、portal が6軸の検索条件を持ち RPA がフォームへ直接入力する。
+// 号機マスタは既存 RpaScoutMachine（machineNo 一意・isActive あり）を流用する。
+// マイナビ上の担当者名はテーブルに持たず src/lib/recruiterDisplay.ts の RC_ROSTER から導出する。
+//
+// 【固定値（スキーマに持たせない。RPA側で常に以下の値を入力する）】
+//   学歴           = 不問（チェックを一切入れない。入れると学歴欄が空の求職者が除外されるため）
+//   経験職種       = 指定なし
+//   居住地         = 指定なし（希望勤務地で判断するため触らない）
+//   0社を除く      = チェックなし
+//   除外リストの会員 = 含まない
+//   自社へ応募した会員 = 含まない
+// ============================================================
+
+// 配信テンプレートの種別
+enum ScoutTemplateKind {
+  UNSENT     // 未送信用
+  SENT       // 送信済用
+  INDIVIDUAL // 個別配信用
+}
+
+// 配信条件の状態
+enum ScoutConditionStatus {
+  RUNNING // 実行中（号機が現在この条件で配信している）
+  QUEUED  // 予約（枯渇時に queueOrder 順で次に切り替わる）
+  DRY     // 枯渇（送信件数が10件未満）
+  DONE    // 完了
+}
+
+// 検索対象：自社がスカウトを送信（送信予約）した会員の扱い
+enum ScoutSearchTarget {
+  EXCLUDE // 含まない（未送信リスト）
+  ONLY    // のみ（送信済リスト）
+  INCLUDE // 含む（基本使わないが選択肢として用意）
+}
+
+// 登録日の指定方法
+enum ScoutRegistDateMode {
+  PERIOD // 期間指定（registDays: N日以内）
+  DATE   // 日付入力（registDateFrom〜registDateTo）
+}
+
+// 希望勤務地の指定方法
+enum ScoutAreaMode {
+  NATIONWIDE // 全国
+  EAST       // 東日本（北海道・東北・関東・甲信越）
+  WEST       // 西日本（北陸・東海・関西・中国・四国・九州）
+  PREFECTURE // 都道府県指定（prefectures を使う。海外は選ばない・空にしない）
+}
+
+// 配信テンプレート（05.集計ファイル.xlsx「テンプレートマスタ」由来）
+model ScoutTemplate {
+  id        String            @id @default(cuid())
+  kind      ScoutTemplateKind
+  name      String // 名称（例: 【未送信用】口コミ4.9オーダーメイド）
+  subject   String // 件名（差し込みタグ [担当者] [社名] [最終学歴] [経験職種] を生のまま保持）
+  body      String            @db.Text // 本文（同上）
+  sortOrder Int               @default(0) @map("sort_order")
+  isActive  Boolean           @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  conditions         ScoutCondition[]
+  defaultForMachines RpaScoutMachine[]
+
+  @@unique([kind, name])
+  @@index([kind, sortOrder])
+  @@map("scout_templates")
+}
+
+// 配信条件（号機ごとの「実行中」1件と「予約」の列）
+model ScoutCondition {
+  id String @id @default(cuid())
+
+  machineId String          @map("machine_id")
+  machine   RpaScoutMachine @relation(fields: [machineId], references: [id])
+
+  status     ScoutConditionStatus @default(QUEUED)
+  queueOrder Int                  @default(0) @map("queue_order") // 予約の並び順（小さいほど先）
+
+  // 1. 検索対象
+  searchTarget ScoutSearchTarget @default(EXCLUDE) @map("search_target")
+
+  // 2. 登録日（PERIOD なら registDays、DATE なら registDateFrom〜To を使う）
+  registDateMode ScoutRegistDateMode @default(PERIOD) @map("regist_date_mode")
+  registDays     Int?                @map("regist_days") // 1/3/7/14/30/60/90/180/360（日以内）
+  registDateFrom DateTime?           @map("regist_date_from") @db.Date
+  registDateTo   DateTime?           @map("regist_date_to") @db.Date
+
+  // 3. 最終ログイン日（期間指定のみ。マイナビ側で必須・基本1日以内）
+  lastLoginDays Int @default(1) @map("last_login_days")
+
+  // 4. 卒業年度（開始〜終了。年齢不問のときは両方 null）
+  gradYearFrom Int? @map("grad_year_from")
+  gradYearTo   Int? @map("grad_year_to")
+
+  // 5. 経験社数（null=--（指定なし） / 0=0社 / 1〜6=～N社 / 7=7社以上）
+  companyCount Int? @map("company_count")
+
+  // 6. 希望勤務地（PREFECTURE のときのみ prefectures を使う。海外は載せない）
+  areaMode    ScoutAreaMode @default(NATIONWIDE) @map("area_mode")
+  prefectures String[]      @default([])
+
+  // 配信文
+  templateId String?        @map("template_id")
+  template   ScoutTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  plannedCount Int?      @map("planned_count") // 予定件数
+  deliveryDate DateTime? @map("delivery_date") @db.Date // 配信日（JST の日付のみ）
+
+  createdById String? @map("created_by_id") // User.id
+  createdBy   User?   @relation("ScoutConditionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at") // 予約登録日時
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  runs ScoutRun[]
+
+  @@index([machineId, status, queueOrder])
+  @@index([deliveryDate])
+  @@index([status])
+  @@map("scout_conditions")
+}
+
+// 実行実績（RPA の完了通知1通=1行。次フェーズの実績受け取りAPIで書く）
+model ScoutRun {
+  id String @id @default(cuid())
+
+  conditionId String         @map("condition_id")
+  condition   ScoutCondition @relation(fields: [conditionId], references: [id], onDelete: Cascade)
+
+  machineId String          @map("machine_id")
+  machine   RpaScoutMachine @relation(fields: [machineId], references: [id])
+
+  executedAt      DateTime @map("executed_at") // 実行日時（真のUTC instant。表示時に Asia/Tokyo へ）
+  extractedCount  Int      @default(0) @map("extracted_count") // リスト抽出件数
+  sentCount       Int      @default(0) @map("sent_count") // 送信件数（10件未満で枯渇）
+  isDry           Boolean  @default(false) @map("is_dry") // 枯渇フラグ
+  rawNotification String?  @map("raw_notification") @db.Text // 完了通知の原文
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([conditionId, executedAt])
+  @@index([machineId, executedAt])
+  @@map("scout_runs")
+}
+
+// 祝日（振替休日・国民の休日を含む）。日付表示の赤色・ホバー名称に使う
+model Holiday {
+  id   String   @id @default(cuid())
+  date DateTime @unique @db.Date
+  name String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("holidays")
+}
+
 
 // ============================================================
 // T-159: portal → OneDrive 一方向コピーの記録
