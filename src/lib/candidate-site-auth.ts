@@ -29,7 +29,14 @@ export function verifyCandidateSiteKey(request: Request): boolean {
   }
 }
 
-export type ScopedCandidate = { id: string; candidateNumber: string; name: string };
+// T-189 修正: autoRecommendEnabled（自動配信ON/OFF）を追加。候補者サイトが「新着マッチ」タブを
+//   承認済み0件でも出すかの判断に使う（auto-matches API がそのまま返す）。
+export type ScopedCandidate = {
+  id: string;
+  candidateNumber: string;
+  name: string;
+  autoRecommendEnabled: boolean;
+};
 
 function str(v: unknown): string | null {
   if (v === null || v === undefined) return null;
@@ -56,7 +63,7 @@ export async function resolveScopedCandidate(input: {
       : key.startsWith("cm")
         ? { id: key }
         : { candidateNumber: key },
-    select: { id: true, candidateNumber: true, name: true },
+    select: { id: true, candidateNumber: true, name: true, autoRecommendEnabled: true },
   });
   return candidate;
 }

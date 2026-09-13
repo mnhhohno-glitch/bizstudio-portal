@@ -54,6 +54,8 @@ type CandidateRow = {
   supportSubStatus: string | null;
   supportEndReason: string | null;
   jobStatus?: "entry" | "introduced" | "before" | null;
+  // T-189 追加: 自動配信 ON/OFF（絞り込みと「配信」バッジ）。取得元により未定義のことがある
+  autoRecommendEnabled?: boolean | null;
   // T-170: 追加5列（サーバ側 computeCandidateListMetrics の戻り値をそのまま持つ）
   desiredJobType?: string | null;
   desiredJobTypeFull?: string | null;
@@ -98,6 +100,8 @@ interface CandidateListClientProps {
   employees: Employee[];
   currentEmployeeId?: string | null;
   isAdmin?: boolean;
+  // T-189 Phase3-1: 自動配信の承認ページへのリンク表示可否（AUTO_RECOMMEND_ADMIN_IDS）
+  autoRecommendAdmin?: boolean;
 }
 
 type FileBreakdown = Record<string, number>;
@@ -171,6 +175,8 @@ type NonTabFilters = {
   appDateTo: string;
   delDateFrom: string;
   delDateTo: string;
+  /** T-189 追加: 自動配信 ALL / ON / OFF */
+  auto: string;
 };
 
 function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRow[] {
@@ -189,6 +195,11 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
       const empId = c.employee?.id || "";
       const hitCa = empId ? f.caIds.includes(empId) : f.caIds.includes(UNASSIGNED_CA);
       if (!hitCa) return false;
+    }
+    // T-189 追加: 自動配信 ON/OFF。null/undefined は OFF 扱い（DB既定値 false と同義）
+    if (f.auto !== "ALL") {
+      const on = c.autoRecommendEnabled === true;
+      if (f.auto === "ON" ? !on : on) return false;
     }
     if (f.gender !== "ALL" && c.gender !== f.gender) return false;
     if (f.route !== "ALL" && (c.applicationRoute || "") !== f.route) return false;
@@ -223,6 +234,7 @@ export default function CandidateListClient({
   employees,
   currentEmployeeId,
   isAdmin = false,
+  autoRecommendAdmin = false,
 }: CandidateListClientProps) {
   const [candidates, setCandidates] = useState<CandidateRow[]>(initialCandidates);
   const [search, setSearch] = useState("");
@@ -242,6 +254,8 @@ export default function CandidateListClient({
   // T-064: スカウト関連フィルター
   const [routeFilter, setRouteFilter] = useState("ALL");
   const [mediaFilter, setMediaFilter] = useState("ALL");
+  // T-189 追加: 自動配信フィルター（ALL / ON / OFF）。閲覧・絞り込みは全CA可（トグル操作のみ管理者限定）
+  const [autoFilter, setAutoFilter] = useState("ALL");
   // T-101: 応募日 / 配信日 範囲フィルター（JST）
   const [appDateFrom, setAppDateFrom] = useState("");
   const [appDateTo, setAppDateTo] = useState("");
@@ -290,8 +304,9 @@ export default function CandidateListClient({
         appDateTo,
         delDateFrom,
         delDateTo,
+        auto: autoFilter,
       }),
-    [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo]
+    [candidates, debouncedSearch, caFilter, dateFrom, dateTo, genderFilter, routeFilter, mediaFilter, appDateFrom, appDateTo, delDateFrom, delDateTo, autoFilter]
   );
 
   // T-181: 担当CAの選択肢。社員一覧（active・employeeNumber順）に加えて、
@@ -625,12 +640,22 @@ export default function CandidateListClient({
             求職者の基本情報を管理します
           </p>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
-        >
-          + 新規登録
-        </button>
+        <div className="flex items-center gap-2">
+          {autoRecommendAdmin && (
+            <Link
+              href="/admin/auto-recommend"
+              className="rounded-md border border-[#2563EB] bg-white px-4 py-2 text-[13px] font-medium text-[#2563EB] hover:bg-[#EFF6FF] transition-colors"
+            >
+              自動配信
+            </Link>
+          )}
+          <button
+            onClick={() => setModalOpen(true)}
+            className="bg-[#2563EB] text-white rounded-md px-4 py-2 text-[13px] font-medium hover:bg-[#1D4ED8] transition-colors"
+          >
+            + 新規登録
+          </button>
+        </div>
       </div>
 
       {/* 支援ステータスタブ */}
@@ -703,7 +728,7 @@ export default function CandidateListClient({
                 className={`w-56 ${FILTER_INPUT_CLS}`}
               />
             </FilterField>
-            {(caFilter.length > 0 || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
+            {(caFilter.length > 0 || dateFrom || dateTo || genderFilter !== "ALL" || endReasonFilter !== "ALL" || routeFilter !== "ALL" || mediaFilter !== "ALL" || autoFilter !== "ALL" || appDateFrom || appDateTo || delDateFrom || delDateTo) && (
               <FilterClearButton onClick={() => {
                 setCaFilter([]);
                 setDateFrom("");
@@ -712,6 +737,7 @@ export default function CandidateListClient({
                 setEndReasonFilter("ALL");
                 setRouteFilter("ALL");
                 setMediaFilter("ALL");
+                setAutoFilter("ALL");
                 setAppDateFrom("");
                 setAppDateTo("");
                 setDelDateFrom("");
@@ -762,6 +788,18 @@ export default function CandidateListClient({
                 <option value="ALL">ALL</option>
                 <option value="male">男性</option>
                 <option value="female">女性</option>
+              </select>
+            </FilterField>
+            {/* T-189 追加: 自動配信 ON/OFF。件数（タブ・該当N件）も含めて baseRows 側で絞る */}
+            <FilterField label="自動配信">
+              <select
+                value={autoFilter}
+                onChange={(e) => { setAutoFilter(e.target.value); setCurrentPage(1); }}
+                className={`w-28 ${FILTER_INPUT_CLS}`}
+              >
+                <option value="ALL">ALL</option>
+                <option value="ON">ON</option>
+                <option value="OFF">OFF</option>
               </select>
             </FilterField>
             {supportTab === "ENDED" && (
@@ -936,13 +974,26 @@ export default function CandidateListClient({
                       </div>
                     </Td>
                     <Td className="overflow-hidden">
-                      <Link
-                        href={`/candidates/${cand.id}`}
-                        className="block truncate text-[#2563EB] hover:underline cursor-pointer"
-                        title={cand.name}
-                      >
-                        {cand.name}
-                      </Link>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <Link
+                          href={`/candidates/${cand.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block truncate text-[#2563EB] hover:underline cursor-pointer"
+                          title={cand.name}
+                        >
+                          {cand.name}
+                        </Link>
+                        {/* T-189 追加: 自動配信 ON の求職者だけに出す（詳細ヘッダーのトグルと同系色） */}
+                        {cand.autoRecommendEnabled === true && (
+                          <span
+                            className="shrink-0 rounded px-1 py-[1px] text-[10px] font-medium bg-emerald-100 text-emerald-700 border border-emerald-200"
+                            title="自動配信 ON"
+                          >
+                            配信
+                          </span>
+                        )}
+                      </div>
                     </Td>
                     <Td className="overflow-hidden">
                       <div className="truncate text-[13px] text-[#374151]/70" title={cand.nameKana || ""}>

@@ -29,7 +29,15 @@ export async function GET(request: NextRequest) {
     prisma.trainingWorkItem.findMany({
       where: { workKey, isActive: true },
       orderBy: { sortOrder: "asc" },
-      select: { id: true, itemCode: true, sortOrder: true, title: true, jobContent: true },
+      select: {
+        id: true,
+        itemCode: true,
+        sortOrder: true,
+        title: true,
+        jobContent: true,
+        modelAnswer: true, // 管理画面では研修生の回答の下に模範解答を出す（T-192）
+        gradingPoints: true,
+      },
     }),
     prisma.trainingWorkAnswer.findMany({
       where: { workKey },

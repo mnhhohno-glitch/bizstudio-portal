@@ -2,11 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
+import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
+import { fetchCandidateConditions } from "@/lib/recommend/job-platform-conditions";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
 function normalizeSpaces(str: string): string {
   return str.replace(/\u3000/g, " ");
+}
+
+/** JST \u66a6\u65e5 YYYY-MM-DD\uff08\u7f60#17: toISOString \u306f\u4f7f\u308f\u306a\u3044\uff09 */
+function jstYmd(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -76,9 +85,40 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (body.masType !== undefined) {
     updateData.masType = body.masType?.trim() || null;
   }
-  // T-189 Phase1: おすすめ配信 ON/OFF（true 以外は全て false に落とす）
+  // T-189 Phase2a: autoRecommendEnabled の更新は AUTO_RECOMMEND_ADMIN_IDS のユーザーのみ。
+  //   非admin は他フィールドが正当でも 403（部分適用しない）。他フィールドのみの更新は従来どおり。
+  if (body.autoRecommendEnabled !== undefined && !isAutoRecommendAdmin(user)) {
+    return NextResponse.json(
+      { error: "自動配信の変更権限がありません" },
+      { status: 403 }
+    );
+  }
+  // T-189 Phase1: 自動配信 ON/OFF（true 以外は全て false に落とす）
   if (body.autoRecommendEnabled !== undefined) {
     updateData.autoRecommendEnabled = body.autoRecommendEnabled === true;
+  }
+  // T-189 追加: OFF→ON は「求人サイトに配信条件（パターン）が1件以上ある」ことを条件にする。
+  //   ON なのに何も届かない状態を作らせないためのサーバー側ガード（画面側にも同じ判定があるが、
+  //   画面の情報が古い場合・API直叩きの場合はここで止まる）。
+  //   - 0件（404含む）→ 400 condition_not_found（フラグは変えない＝この時点で return）
+  //   - 求人サイトに聞けなかった → 502 job_platform_unreachable（**「条件あり」とみなさない**＝fail-closed）
+  //   - true→false（OFF）と、既に true の求職者への true 再送はチェックしない。
+  if (updateData.autoRecommendEnabled === true && existing.autoRecommendEnabled !== true) {
+    const conditions = await fetchCandidateConditions({
+      candidateNumber: existing.candidateNumber,
+    });
+    if (!conditions.ok) {
+      console.error(
+        `[candidate-update] 配信条件の確認に失敗 candidate=${existing.candidateNumber} status=${conditions.status}: ${conditions.error}`,
+      );
+      return NextResponse.json(
+        { error: "job_platform_unreachable", detail: conditions.error },
+        { status: 502 }
+      );
+    }
+    if (conditions.enabledCount < 1) {
+      return NextResponse.json({ error: "condition_not_found" }, { status: 400 });
+    }
   }
   // T-111: 次回連絡予定（面談非依存・直接設定/修正/クリア）。日時はクライアントが JST→ISO 化して送る前提。
   if (body.nextContactAt !== undefined) {
@@ -169,6 +209,53 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       employee: { select: { id: true, name: true } },
     },
   });
+
+  // T-190: 配信日（scoutDeliveryDate）の JST 暦日が変わったら、紐づく配信枠も張り替える。
+  //   集計 API は ScoutDeliverySlot.deliveryDate しか見ないため、配信日だけ直しても数字が動かない。
+  //   - 対象は applicationRoute="スカウト" かつ recruiterName 非空
+  //   - scoutLinkedById 非 NULL（人が手で紐づけた行）は張り替えない
+  //   - 指定日の枠が無ければ前日に飛ばさず現状維持（disablePreviousDayFallback）
+  //   - 失敗しても求職者の更新自体は成功させる（ログのみ）
+  if (body.scoutDeliveryDate !== undefined) {
+    const beforeYmd = jstYmd(existing.scoutDeliveryDate);
+    const afterYmd = jstYmd(updated.scoutDeliveryDate);
+    if (beforeYmd !== afterYmd) {
+      try {
+        if (updated.scoutLinkedById) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (manual link) candidate=${updated.candidateNumber}`,
+          );
+        } else if (updated.applicationRoute !== "スカウト" || !updated.recruiterName?.trim()) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (route=${updated.applicationRoute ?? "null"} recruiter=${updated.recruiterName ?? "null"}) candidate=${updated.candidateNumber}`,
+          );
+        } else if (!updated.scoutDeliveryDate && !updated.applicationDate) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (no anchor date) candidate=${updated.candidateNumber}`,
+          );
+        } else {
+          const res = await autoLinkCandidateToSlot({
+            candidateId: updated.id,
+            recruiterName: updated.recruiterName,
+            applicationDate: updated.applicationDate ?? updated.scoutDeliveryDate!,
+            scoutDeliveryDate: updated.scoutDeliveryDate,
+            disablePreviousDayFallback: true,
+          });
+          console.log(
+            `[candidate-update] T-190 relink candidate=${updated.candidateNumber} ${beforeYmd ?? "null"}->${afterYmd ?? "null"} linked=${res.linked} reason=${res.reason}`,
+          );
+          // レスポンスの求職者は張り替え前の値を持っているので、成功時だけ整合させる
+          if (res.linked && res.slotId && res.scoutNumber) {
+            updated.scoutDeliverySlotId = res.slotId;
+            updated.scoutNumber = res.scoutNumber;
+            updated.scoutLinkedById = null;
+          }
+        }
+      } catch (e) {
+        console.error("[candidate-update] T-190 relink failed:", e);
+      }
+    }
+  }
 
   // Sync birthday hash to kyuujinPDF when birthday is changed
   if (body.birthday !== undefined) {

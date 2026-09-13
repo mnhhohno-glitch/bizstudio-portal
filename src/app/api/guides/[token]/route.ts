@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { findGuideEntryByToken, guideTokenInvalidResponse } from "@/lib/guides/access";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   });
 
   if (!guideEntry) {
-    return NextResponse.json({ error: "無効なトークンです" }, { status: 404 });
+    return guideTokenInvalidResponse();
   }
 
   return NextResponse.json({
@@ -26,12 +27,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const { token } = await context.params;
 
-  const guideEntry = await prisma.guideEntry.findUnique({
-    where: { token },
-  });
+  const guideEntry = await findGuideEntryByToken(token);
 
   if (!guideEntry) {
-    return NextResponse.json({ error: "無効なトークンです" }, { status: 404 });
+    return guideTokenInvalidResponse();
   }
 
   const body = await request.json();

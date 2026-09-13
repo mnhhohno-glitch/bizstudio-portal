@@ -33,7 +33,8 @@ export type AdvisorEndpoint =
   | "advisor-log-ingest" // T-155: 未読面談ログの取り込み・ダイジェスト統合（Anthropic）
   | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
   | "interview-support-auto-scan" // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
-  | "interview-support-prior-keyterms"; // T-183 Phase 6: 事前情報からの固有名詞抽出（Deepgram Keyterm 用・画面起動時1回）
+  | "interview-support-prior-keyterms" // T-183 Phase 6: 事前情報からの固有名詞抽出（Deepgram Keyterm 用・画面起動時1回）
+  | "recommend-analyze"; // T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・無人実行）
 
 type TokenBreakdown = {
   inputTokens: number;
@@ -103,6 +104,9 @@ export type RecordAdvisorUsageParams = {
   // T-163: 所要時間の実測（optional。渡さない既存呼び出し元は null 記録のまま壊れない）。
   latencyMs?: number | null; // Anthropic API 呼び出しの所要時間(ms)
   contextBuildMs?: number | null; // 候補者contextビルドの所要時間(ms)。キャッシュヒット時は 0
+  // T-189 Phase 2a: Message Batches API 経由のコール。単価が全トークン種別（入力・出力・キャッシュ）
+  //   一律 50% になるため costUsd を ×0.5 する。既存の同期経路（未指定）は従来どおり満額計上。
+  batchApi?: boolean;
 };
 
 /**
@@ -112,7 +116,9 @@ export type RecordAdvisorUsageParams = {
 export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Promise<void> {
   try {
     const tokens = extractTokens(params.usage);
-    const { costUsd, unknownPricing } = computeCostUsd(params.model, tokens);
+    const { costUsd: fullCostUsd, unknownPricing } = computeCostUsd(params.model, tokens);
+    // バッチAPI（50%割引）は全トークン種別が半額のため、算出後の合計に ×0.5 を掛ける。
+    const costUsd = params.batchApi ? fullCostUsd * 0.5 : fullCostUsd;
     const note = unknownPricing
       ? [params.note, "unknown-model-pricing"].filter(Boolean).join("; ")
       : params.note ?? null;

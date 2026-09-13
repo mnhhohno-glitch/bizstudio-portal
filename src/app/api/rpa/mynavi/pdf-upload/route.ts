@@ -230,6 +230,8 @@ export async function POST(req: NextRequest) {
         canSendReply: false,
         reason,
         status: "AI_FAILED",
+        scoutLinkResult: null,
+        scoutLinkedSlotId: null,
       });
     }
 
@@ -258,29 +260,42 @@ export async function POST(req: NextRequest) {
     // 真判定（配信日 − マイナビ登録日 ≤ 7日 → 開放日）は Phase2b で judgeMasType により実装する。
 
     // ---- 二重処理チェック ----
+    // 判定対象は「直近30分以内に同一電話番号で実際に登録され、今も存在し、アーカイブされていない求職者」のみ
+    // （duplicate-check.ts 参照）。窓の起点は実登録時刻で、スキップ自身は窓を延長しない。
     const phoneNormalized = normalizePhoneNumber(parsed.phone);
     if (phoneNormalized) {
       const dup = await checkDuplicateProcessing(phoneNormalized);
       if (dup) {
+        const existing = dup.candidate;
+        const reason = `二重処理スキップ: 電話番号 ${phoneNormalized} が直近30分以内に処理済み`;
         const log = await prisma.mynaviRpaProcessingLog.create({
           data: {
             batchId,
-            status: "DUPLICATE_SKIP",
-            reason: "直近30分以内に同一電話番号の処理あり",
+            status: "DUPLICATE_SKIPPED",
+            reason,
             canSendReply: false,
             candidateName: parsed.name,
             candidateAge: calculateAge(parsed.birthDate),
             phoneNormalized,
+            // 既存求職者への参照（追跡用）。判定側は status で除外するので窓は延びない
+            candidateId: existing?.id ?? null,
           },
         });
-        await notifyMynaviDuplicateSkip(phoneNormalized, parsed.name ?? undefined);
+        await notifyMynaviDuplicateSkip(
+          phoneNormalized,
+          parsed.name ?? undefined,
+          existing?.candidateNumber ?? undefined,
+        );
+        // RPA(PAD) が通常時と同じプロパティを読めるよう、キー構成は NORMAL 時と完全に同一にする
         return NextResponse.json({
           processingLogId: log.id,
-          candidateId: null,
-          candidateNumber: null,
+          candidateId: existing?.id ?? null,
+          candidateNumber: existing?.candidateNumber ?? null,
           canSendReply: false,
-          reason: "二重処理",
-          status: "DUPLICATE_SKIP",
+          reason,
+          status: "DUPLICATE_SKIPPED",
+          scoutLinkResult: null,
+          scoutLinkedSlotId: null,
         });
       }
     }

@@ -25,6 +25,8 @@ export async function POST(
     return NextResponse.json({ error: "保留中ではありません" }, { status: 400 });
   }
 
+  // T-189 修正: 自動配信行（autoSourcedAt 非null）の復元は却下の取り消し＝approvalStatus を PENDING に戻す（承認待ちへ復帰）。
+  const isAuto = file.autoSourcedAt !== null;
   const updated = await prisma.candidateFile.update({
     where: { id: file.id },
     data: {
@@ -32,6 +34,7 @@ export async function POST(
       archivedReason: null,
       archivedNote: null,
       archivedById: null,
+      ...(isAuto ? { approvalStatus: "PENDING", rejectedReason: null } : {}),
     },
   });
 
@@ -43,6 +46,7 @@ export async function POST(
     metadata: {
       candidateId,
       fileName: file.fileName,
+      autoRecommendSynced: isAuto ? { approvalStatus: "PENDING" } : null,
     },
   }).catch((e) => console.error("[BookmarkRestore] audit failed:", e));
 

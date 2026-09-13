@@ -55,6 +55,9 @@ function formatApplyDateTime(date: Date): string {
 /** T-167: 送信失敗の応募者を通知本文に列挙する上限。超過分は「他 N件」でまとめる。 */
 const FAILURE_LIST_LIMIT = 20;
 
+/** batch-finish の errorMessage（RPA側の失敗明細）を完了通知に載せる際の最大文字数。超過分は「…」で省略。 */
+const ERROR_MESSAGE_PREVIEW_LIMIT = 300;
+
 /**
  * バッチ完了通知
  */
@@ -112,6 +115,18 @@ export async function notifyMynaviBatchCompletion(
       }
     }
 
+    // RPA が batch-finish の errorMessage に入れてくる失敗明細（処理n件/返信n件/… 【No.xxx 氏名 / 返信 / [例外] …】）。
+    // 「エラー: n件」だけでは何が失敗したか分からないため、先頭 300 文字を本文に載せる。
+    const errorMessageLines: string[] = [];
+    const rawErrorMessage = batch.errorMessage?.trim();
+    if (rawErrorMessage) {
+      const preview =
+        rawErrorMessage.length > ERROR_MESSAGE_PREVIEW_LIMIT
+          ? `${rawErrorMessage.slice(0, ERROR_MESSAGE_PREVIEW_LIMIT)}…`
+          : rawErrorMessage;
+      errorMessageLines.push(`　RPA報告: ${preview}`);
+    }
+
     const message = [
       "📊 マイナビ転職応募取り込み 完了",
       ...applicantLines,
@@ -123,6 +138,7 @@ export async function notifyMynaviBatchCompletion(
       `　AI解析失敗: ${batch.aiFailedCount}件`,
       `　二重処理スキップ: ${batch.duplicateSkipCount}件`,
       `　エラー: ${batch.errorCount}件`,
+      ...errorMessageLines,
       ...failureLines,
       `詳細: ${baseUrl}/rpa-error/executions/${batch.id}`,
     ].join("\n");
@@ -139,18 +155,19 @@ export async function notifyMynaviBatchCompletion(
 export async function notifyMynaviDuplicateSkip(
   phoneNormalized: string,
   candidateName?: string,
+  existingCandidateNumber?: string,
 ): Promise<void> {
   const ch = getMynaviChannel();
   if (!ch) return;
 
   try {
     const namePart = candidateName ? `（${candidateName}）` : "";
-    const message = [
+    const lines = [
       "⚠️ マイナビ転職応募取り込み 二重処理検知",
       `電話番号 ${phoneNormalized}${namePart} が直近30分以内に処理済みです。スキップしました。`,
-    ].join("\n");
-
-    await sendBotMessage(ch.botId, ch.channelId, message);
+    ];
+    if (existingCandidateNumber) lines.push(`既存求職者: No.${existingCandidateNumber}`);
+    await sendBotMessage(ch.botId, ch.channelId, lines.join("\n"));
   } catch (e) {
     console.error("[mynavi-rpa/notify] 二重処理検知通知失敗:", e);
   }

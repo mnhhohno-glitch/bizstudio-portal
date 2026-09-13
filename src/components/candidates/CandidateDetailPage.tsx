@@ -113,7 +113,7 @@ type SessionUser = {
   name: string;
   email: string;
   role: string;
-  // T-189 Phase1: おすすめ配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS 判定・/api/auth/session が返す）
+  // T-189 Phase1: 自動配信トグルの表示可否（AUTO_RECOMMEND_ADMIN_IDS 判定・/api/auth/session が返す）
   autoRecommendAdmin?: boolean;
 };
 
@@ -1409,7 +1409,7 @@ function CandidateTasksTab({ candidateId, employees }: { candidateId: string; em
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <a href={`/tasks/${t.id}`} className="font-medium text-[#2563EB] hover:underline">
+                    <a href={`/tasks/${t.id}`} target="_blank" rel="noopener noreferrer" className="font-medium text-[#2563EB] hover:underline">
                       {t.title}
                     </a>
                   </td>
@@ -1967,12 +1967,20 @@ function CandidateDetailPageBody() {
         }}
         showAutoRecommendToggle={currentUser?.autoRecommendAdmin === true}
         onAutoRecommendToggle={async (enabled) => {
-          await fetch(`/api/candidates/${candidate.id}/update`, {
+          // T-189 追加: サーバー側ガード（条件未登録は 400 condition_not_found）の結果をヘッダへ返す。
+          const res = await fetch(`/api/candidates/${candidate.id}/update`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ autoRecommendEnabled: enabled }),
           });
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
           fetchCandidate();
+          return { ok: res.ok, error: data.error };
+        }}
+        onRecommendUpdated={() => {
+          // T-189 追加:「今すぐ探す」で求人が増えた／AI評価が終わった時にブックマークタブを取り直す
+          fetchCandidate();
+          setFileRefreshKey((k) => k + 1);
         }}
       />
       )}

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { formatName, validateName } from "@/lib/formatName";
 import { z } from "zod";
 
-// GET: 社員一覧取得
+// GET: 社員一覧取得（T-191: session 必須）
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   try {
     const employees = await prisma.employee.findMany({
       orderBy: { createdAt: "desc" },
@@ -25,7 +31,13 @@ const createSchema = z.object({
   name: z.string().min(1, "氏名を入力してください"),
 });
 
+// T-191: 社員登録は admin 限定（/api/admin/employees と同じ判定）
 export async function POST(request: NextRequest) {
+  const actor = await getSessionUser();
+  if (!actor || actor.role !== "admin") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const parsed = createSchema.safeParse(body);

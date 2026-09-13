@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { dbDateToJstYmd, jstStringToDbDate, ymdWeekday } from "@/lib/rpa-scout/jst";
 import { attachPlanNames, parseExpectedCount } from "@/lib/rpa-scout/plan-serialize";
+import { TIME_SLOT_VALUES } from "@/lib/rpa-scout/constants";
 
 // from/to（"YYYY-MM-DD" JST）で範囲取得。pendingWeekend=1 で「土日×未反映」のみに絞る
 export async function GET(request: NextRequest) {
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   const machineNo = typeof body.machineNo === "number" ? body.machineNo : null;
   if (machineNo == null || machineNo < 1 || machineNo > 6)
     return NextResponse.json({ error: "号機が不正です" }, { status: 400 });
-  if (!["AM", "PM", "EVENING"].includes(body.timeSlot))
+  if (typeof body.timeSlot !== "string" || !TIME_SLOT_VALUES.includes(body.timeSlot))
     return NextResponse.json({ error: "時間帯を選択してください" }, { status: 400 });
   if (typeof body.planDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.planDate))
     return NextResponse.json({ error: "計画日が不正です" }, { status: 400 });

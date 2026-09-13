@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const { memoId } = await params;
   const body = await req.json();
 
@@ -32,6 +38,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; memoId: string }> }
 ) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const { memoId } = await params;
 
   try {

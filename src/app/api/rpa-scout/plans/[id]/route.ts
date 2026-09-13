@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { jstStringToDbDate, nowJstDateTimeLocal, ymdWeekday, dbDateToJstYmd } from "@/lib/rpa-scout/jst";
 import { attachPlanNamesOne, parseExpectedCount } from "@/lib/rpa-scout/plan-serialize";
+import { TIME_SLOT_VALUES } from "@/lib/rpa-scout/constants";
 
 // 編集（時間帯・パターン・件名・メモ）と「マイナビ反映済み」チェック（reflected: true/false）
 export async function PATCH(
@@ -51,7 +52,7 @@ export async function PATCH(
   } = {};
 
   if (typeof body.timeSlot === "string") {
-    if (!["AM", "PM", "EVENING"].includes(body.timeSlot))
+    if (!TIME_SLOT_VALUES.includes(body.timeSlot))
       return NextResponse.json({ error: "時間帯が不正です" }, { status: 400 });
     data.timeSlot = body.timeSlot;
   }

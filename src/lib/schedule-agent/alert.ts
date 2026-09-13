@@ -168,3 +168,62 @@ export async function sendBrokenCalendarAlert(
     return { attempted: false, notifiedUserIds: [], reason: "exception" };
   }
 }
+
+/**
+ * T-194: フォーム送信時の自動仮確定が例外で失敗したときの通知。
+ * 連携切れアラートと同じ経路（Resend → 大野さん）を使うが、日次重複抑止は掛けない
+ * （post-reserve の失敗メールと同じ「発生ごとの単発」扱い。発生頻度が極めて低いため）。
+ * 例外は内部で握りつぶす（呼び出し側のレスポンスを壊さない）。
+ */
+export async function sendAutoReserveErrorAlert(params: {
+  candidateName: string;
+  taskId: string | null;
+  error: unknown;
+}): Promise<void> {
+  try {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      console.warn("[schedule-agent/alert] RESEND_API_KEY 未設定、自動仮確定エラー通知をスキップ");
+      return;
+    }
+    const err = params.error;
+    const detail = err instanceof Error ? [err.message, err.stack ?? ""].join("\n") : String(err);
+    const text = [
+      "日程調整フォームの送信時に行う自動仮確定でエラーが発生しました。",
+      "タスクの作成自体は成功しています（応募者への影響は「仮確定されなかった」だけ）。",
+      "手動で日程を確定してください。",
+      "",
+      `求職者: ${params.candidateName}`,
+      `taskId: ${params.taskId ?? "（なし）"}`,
+      "",
+      "▼エラー内容",
+      detail.slice(0, 2000),
+    ].join("\n");
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(RESEND_API_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: FROM,
+          to: [RECIPIENT],
+          subject: `【日程調整AI】フォーム送信時の自動仮確定でエラー（${params.candidateName}）`,
+          text,
+        }),
+        signal: controller.signal,
+      });
+      if (res.status !== 200 && res.status !== 201) {
+        const t = await res.text().catch(() => "");
+        console.error(
+          `[schedule-agent/alert] auto-reserve error mail failed: status=${res.status} body=${t.slice(0, 300)}`
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (e) {
+    console.error("[schedule-agent/alert] auto-reserve error mail unexpected error:", e);
+  }
+}

@@ -23,6 +23,7 @@ const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const SLOT_BADGE: Record<string, string> = {
   AM: "bg-[#DBEAFE] text-[#1D4ED8]",
   PM: "bg-[#DCFCE7] text-[#166534]",
+  PM2: "bg-[#FEF3C7] text-[#B45309]",
   EVENING: "bg-[#EDE9FE] text-[#6D28D9]",
 };
 

@@ -52,6 +52,7 @@ const LOG_STATUS: Record<string, { label: string; style: string }> = {
   FOREIGN_NG: { label: "外国籍NG", style: "border-[#D97706]/30 bg-[#D97706]/10 text-[#D97706]" },
   AI_FAILED: { label: "AI解析失敗", style: "border-[#9CA3AF]/30 bg-[#9CA3AF]/10 text-[#6B7280]" },
   DUPLICATE_SKIP: { label: "二重処理スキップ", style: "border-[#9CA3AF]/30 bg-[#9CA3AF]/10 text-[#6B7280]" },
+  DUPLICATE_SKIPPED: { label: "二重処理スキップ", style: "border-[#9CA3AF]/30 bg-[#9CA3AF]/10 text-[#6B7280]" },
   ERROR: { label: "エラー", style: "border-[#DC2626]/30 bg-[#DC2626]/10 text-[#DC2626]" },
 };
 

@@ -86,6 +86,14 @@ export async function GET(
       sourceMedia: true,
       // 求職者本人のサイト操作由来（"candidate"）か CA追加（null|"ca"）かの区別。担当列の「サイト経由」表示に使う。
       origin: true,
+      // T-189 Phase3-1: 自動引き当て由来（非null）。担当列を保存者名ではなく「AI自動検索」表示にする（表示のみ・DB不変）。
+      autoSourcedAt: true,
+      // T-189 修正: 出所（経路・配信条件パターン）。担当列「AI自動検索」のホバー表示に使う（null=記録なし）。
+      autoSourceMode: true,
+      autoPatternLabel: true,
+      // T-189 修正: 自動配信行の承認状態。詳細タブの ✓承認/✗却下 ボタン（PENDING のみ）と保留一覧の「（AI）」表示に使う。
+      approvalStatus: true,
+      rejectedReason: true,
       // T-133 FU: 求職者本人のマイページ回答。CA画面の「本人回答」列で表示（読むだけ・書き込みしない）。
       responseStatus: true,
       // T-152: 面談ログの「どの面談のものか」。面談画面の専用アップロード欄の添付済み表示に使う。

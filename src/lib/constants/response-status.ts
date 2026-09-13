@@ -51,3 +51,20 @@ export const PORTAL_INTENT_MAP: Record<string, "INTERESTED" | "WANT_TO_APPLY" | 
 
 export const EXCLUDED_ACTOR_VALUES = ["user", "ca"] as const;
 export type ExcludedActor = (typeof EXCLUDED_ACTOR_VALUES)[number];
+
+// T-189 Phase3-2a: 求職者本人が「対象外」を選んだ理由の定型値（マイページの新着マッチ求人）。
+// 「その他」は自由記述（excludeReasonText）を付けて `その他: 本文` の形で CandidateFile.candidateExcludeReason に保存する。
+export const CANDIDATE_EXCLUDE_REASON_CHOICES = ["職種が違う", "会社の雰囲気", "年収", "その他"] as const;
+export type CandidateExcludeReasonChoice = (typeof CANDIDATE_EXCLUDE_REASON_CHOICES)[number];
+export const CANDIDATE_EXCLUDE_REASON_TEXT_MAX = 200;
+
+export function isCandidateExcludeReasonChoice(v: unknown): v is CandidateExcludeReasonChoice {
+  return typeof v === "string" && (CANDIDATE_EXCLUDE_REASON_CHOICES as readonly string[]).includes(v);
+}
+
+/** 保存形式へ整形: 定型値はそのまま、「その他」は `その他: 本文`（本文は空白正規化・上限200文字）。 */
+export function formatCandidateExcludeReason(choice: CandidateExcludeReasonChoice, text: string | null): string {
+  if (choice !== "その他") return choice;
+  const t = (text ?? "").replace(/\s+/g, " ").trim().slice(0, CANDIDATE_EXCLUDE_REASON_TEXT_MAX);
+  return t ? `その他: ${t}` : "その他";
+}

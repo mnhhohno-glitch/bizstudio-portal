@@ -21,7 +21,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULE_CATEGORY_NAME, isAuthorizedExternal, parseJstDefaultDate } from "@/lib/schedule-tasks";
-import { getReservationConfig, getTargetUserIds } from "@/lib/schedule-agent/config";
 import { jstIso, reservedLabel } from "@/lib/schedule-agent/jst";
 import {
   extractFromMessage,
@@ -33,21 +32,14 @@ import {
   methodFromFormatField,
   parseDesiredWindows,
 } from "@/lib/schedule-agent/parse-preferences";
-import { findAvailableSlot, type DesiredWindow, type Slot } from "@/lib/schedule-agent/match-slot";
-import { brokenUserIds, probeCalendarConnections } from "@/lib/schedule-agent/probe-connections";
-import { sendBrokenCalendarAlert } from "@/lib/schedule-agent/alert";
-import {
-  createReservation,
-  fetchReservedEvents,
-  findExistingReservation,
-} from "@/lib/schedule-agent/reserve";
+import type { DesiredWindow, Slot } from "@/lib/schedule-agent/match-slot";
+import { autoReserveFromPreferences } from "@/lib/schedule-agent/auto-reserve";
 import {
   buildReservedReply,
   buildTodayOnlyReply,
   buildUnavailableReply,
   type MeetingMethod,
 } from "@/lib/schedule-agent/reply-templates";
-import { runPostReservation } from "@/lib/schedule-agent/post-reserve";
 
 export const dynamic = "force-dynamic";
 
@@ -199,76 +191,31 @@ export async function POST(request: Request) {
   }
 
   // ---- 以降は両モード共通 ----
-
-  // env 未設定なら枠取り・カレンダー登録を一切行わず「返信不要」で安全終了（誤送信防止・Q5）
-  const cfg = getReservationConfig();
-  if (!cfg) return noReply();
-
-  const targets = getTargetUserIds();
-  if (targets.length === 0) return simpleResponse("unavailable", candidateName, method);
-
-  // ---- 連携状態プローブ＋アラート（T-167: fetchReservedEvents より前に実行する）----
-  //   従来はこの処理が fetchReservedEvents の後ろにあり、writer（仮予約カレンダーの名義人）の
-  //   連携が切れると L211 相当の early return に阻まれてアラートに永久到達しなかった。
-  //   実際 ScheduleAgentAlertLog は累計0件＝検知メールが一通も飛んでいなかった。
-  //   - 通知は完全に副作用: 失敗しても resolve 応答は正常に返す（例外は内部で握りつぶす）。
-  //   - 壊れた CA は枠探索の対象から明示除外し、「空き」と誤判定されるのを防ぐ。
-  //   - writer が targets に含まれていない構成でも検知できるよう、writer を明示的にプローブ対象へ足す。
-  const probeTargets = targets.includes(cfg.writerUserId) ? targets : [...targets, cfg.writerUserId];
-  const probe = await probeCalendarConnections(probeTargets);
-  const brokenAll = brokenUserIds(probe);
-  const writerBroken = brokenAll.includes(cfg.writerUserId);
-  if (brokenAll.length > 0) {
-    try {
-      await sendBrokenCalendarAlert(brokenAll, { writerBroken });
-    } catch (e) {
-      console.error("[resolve] alert dispatch failed:", e);
-    }
-  }
-  // 枠探索の除外対象は「空き判定の対象CA」のみ（writer は枠の持ち主ではない）
-  const broken = brokenAll.filter((uid) => targets.includes(uid));
-
-  // 仮予約カレンダーを1回だけ走査（二重予約チェック＋枠占有カウントの両方に使う）
-  const reserved = await fetchReservedEvents(now);
-  if (!reserved) return noReply(); // カレンダーが読めない＝安全側（誤送信しない）
-
-  // 二重予約防止: 同一氏名の未来の仮予約が既にあれば、新規登録せず同じ文面を再生成
-  const existing = findExistingReservation(reserved.events, candidateName, now);
-  if (existing) {
-    return reservedResponse(candidateName, existing.slot, existing.method, true);
-  }
-
-  // 枠探索（壊れたCAは除外）
-  const outcome = await findAvailableSlot(windows, targets, reserved.events, now, broken);
-  if (outcome.kind === "today_only") return simpleResponse("today_only", candidateName, method);
-  if (outcome.kind === "unavailable") return simpleResponse("unavailable", candidateName, method);
-
-  // 仮予約登録
-  const eventId = await createReservation({
+  // T-194: 枠取り〜仮予約作成〜後続処理は autoReserveFromPreferences に切り出した
+  //   （フォーム送信時の自動仮確定と同一ロジックを共有するため）。判定・順序・副作用は不変。
+  //   ここに残っているのは「結果 → 返信文面」の対応づけだけ。
+  const outcome = await autoReserveFromPreferences({
     candidateName,
-    slot: outcome.slot,
+    candidateId,
     method,
+    windows,
+    now,
     mode,
     taskId,
   });
-  if (!eventId) return noReply(); // 書き込み失敗 → 誤送信しない（RPAは返信しない）
 
-  // step6: 新規仮予約成立時のみ後続処理（面談登録・LINE通知・タスク作成）を発火。
-  //   - alreadyReserved=true（既存再返信）ではここに来ない＝二重作成しない。
-  //   - runPostReservation は内部で失敗隔離し throw しない設計だが、防御的に try/catch で囲い、
-  //     後続処理の成否を resolve 応答（reserved 文面・HTTPコード）に一切影響させない。
-  try {
-    await runPostReservation({
-      candidateName,
-      candidateId,
-      slot: outcome.slot,
-      method,
-      mode,
-      taskId,
-    });
-  } catch (e) {
-    console.error("[resolve] post-reservation dispatch failed:", e);
+  switch (outcome.kind) {
+    case "reserved":
+      // 既存予約の再利用（alreadyReserved=true）は既存の日時・面談方法で文面を再生成する。
+      return reservedResponse(candidateName, outcome.slot, outcome.method, outcome.alreadyReserved);
+    case "today_only":
+      return simpleResponse("today_only", candidateName, method);
+    case "unavailable":
+      return simpleResponse("unavailable", candidateName, method);
+    case "timeout":
+      // deadline を渡していないため到達しない（型の網羅性のためだけの分岐）。
+      return noReply();
+    case "no_reply":
+      return noReply();
   }
-
-  return reservedResponse(candidateName, outcome.slot, method, false);
 }

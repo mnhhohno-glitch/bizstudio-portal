@@ -55,14 +55,13 @@ export async function GET(req: Request) {
   const anchorMonth = anchorDate.slice(0, 7);
 
   // 各列の実績＋TOTAL（全列カバー範囲で再集計）＋面談ランク割合（円グラフ用・TOTAL範囲）を並列
-  // 新規/既存(scoped)は表示期間全体でランク付けする（各週=cell, ランク窓=全列カバー範囲）→ Σ週=合計。
-  const rankWindow = { from: columns[0].from, to: columns[columns.length - 1].to };
+  // 新規/既存(scoped)は「その暦月(JST)の1件目=新規 / 2件目以降=既存」で判定する（表示期間に依存しない）。
   const [columnMatrices, totalMatrix, interviewRanks] = await Promise.all([
-    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas, rankWindow }))),
-    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas, rankWindow }),
+    Promise.all(columns.map((c) => computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: c.from, to: c.to, allCas }))),
+    computeWeeklyMatrix({ employeeId: resolvedEmployeeId, userId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
     computeInterviewRankBreakdown({ employeeId: resolvedEmployeeId, from: columns[0].from, to: columns[columns.length - 1].to, allCas }),
   ]);
-  // 合計列の人数・件数（提案/エントリー/選考）を各週の合算に置換（DISTINCT 再集計をやめ縦横一致させる）。
+  // 合計列：件数は各週の合算に置換（縦横一致）。人数は期間全体の DISTINCT のまま（二重計上しない）。
   applyAdditiveTotals(totalMatrix, columnMatrices);
 
   // 目標：対象月の PerformanceTarget。全員モードは全CA合算。
