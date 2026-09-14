@@ -5,7 +5,11 @@ import { parseResumeData } from "@/lib/mynavi-rpa/parse-resume-data";
 import { parseResumeWithGemini, type GeminiResumeResult } from "@/lib/gemini-resume-parser";
 import { GeminiJsonError } from "@/lib/gemini-json-call";
 import { normalizePhoneNumber } from "@/lib/phone-normalize";
-import { checkDuplicateProcessing } from "@/lib/mynavi-rpa/duplicate-check";
+import {
+  findDuplicateCandidate,
+  recordReapplication,
+  DUPLICATE_MATCH_LABELS,
+} from "@/lib/mynavi-rpa/duplicate-check";
 import { isAgeNg, isForeignNg, calculateAge } from "@/lib/mynavi-rpa/judgment";
 import { notifyMynaviDuplicateSkip, notifyMynaviError } from "@/lib/mynavi-rpa/notify";
 import { generateNextCandidateNumber } from "@/lib/candidate-number";
@@ -259,45 +263,65 @@ export async function POST(req: NextRequest) {
     // T-067 Phase2a: 旧「1号機=開放日」の誤判定を廃止。masType はこのPhaseでは新規付与しない（null）。
     // 真判定（配信日 − マイナビ登録日 ≤ 7日 → 開放日）は Phase2b で judgeMasType により実装する。
 
-    // ---- 二重処理チェック ----
-    // 判定対象は「直近30分以内に同一電話番号で実際に登録され、今も存在し、アーカイブされていない求職者」のみ
-    // （duplicate-check.ts 参照）。窓の起点は実登録時刻で、スキップ自身は窓を延長しない。
+    // ---- 二重処理チェック（T-190: Candidate ベース・期間で絞らない）----
+    // 判定は Candidate テーブルを直接見る（会員No → 電話番号 → 氏名+生年月日 の順）。
+    // 処理ログだけを見ていた旧実装は「求職者だけ作られてログが無い」中断ケースと
+    // 30分の窓を超えた再応募を取りこぼしていた（duplicate-check.ts 参照）。
+    // T-067 Phase B-3: 会員Noは判定の第一キーなので、ここで先に解決しておく。
     const phoneNormalized = normalizePhoneNumber(parsed.phone);
-    if (phoneNormalized) {
-      const dup = await checkDuplicateProcessing(phoneNormalized);
-      if (dup) {
-        const existing = dup.candidate;
-        const reason = `二重処理スキップ: 電話番号 ${phoneNormalized} が直近30分以内に処理済み`;
-        const log = await prisma.mynaviRpaProcessingLog.create({
-          data: {
-            batchId,
-            status: "DUPLICATE_SKIPPED",
-            reason,
-            canSendReply: false,
-            candidateName: parsed.name,
-            candidateAge: calculateAge(parsed.birthDate),
-            phoneNormalized,
-            // 既存求職者への参照（追跡用）。判定側は status で除外するので窓は延びない
-            candidateId: existing?.id ?? null,
-          },
-        });
-        await notifyMynaviDuplicateSkip(
-          phoneNormalized,
-          parsed.name ?? undefined,
-          existing?.candidateNumber ?? undefined,
-        );
-        // RPA(PAD) が通常時と同じプロパティを読めるよう、キー構成は NORMAL 時と完全に同一にする
-        return NextResponse.json({
-          processingLogId: log.id,
-          candidateId: existing?.id ?? null,
-          candidateNumber: existing?.candidateNumber ?? null,
-          canSendReply: false,
-          reason,
-          status: "DUPLICATE_SKIPPED",
-          scoutLinkResult: null,
-          scoutLinkedSlotId: null,
-        });
+    const mynaviMemberNo = await resolveMynaviMemberNo(
+      mynaviMemberNoFromRequest,
+      resumeData?.mynaviMemberNo,
+      pdfBuffer,
+    );
+    const dup = await findDuplicateCandidate({
+      mynaviMemberNo,
+      phone: phoneNormalized,
+      name: parsed.name,
+      birthday: parsed.birthDate,
+    });
+    if (dup) {
+      const matchLabel = DUPLICATE_MATCH_LABELS[dup.matchedBy];
+      const reason = `二重処理スキップ: ${matchLabel}が既存求職者 No.${dup.candidateNumber} と一致`;
+      // 新規作成せず、既存レコードに再応募を記録する（1人1レコード運用）。
+      // applicationDate は上書きしない。
+      try {
+        await recordReapplication(dup.id);
+      } catch (e) {
+        console.error("[rpa/mynavi/pdf-upload] recordReapplication failed:", e);
       }
+      const log = await prisma.mynaviRpaProcessingLog.create({
+        data: {
+          batchId,
+          status: "DUPLICATE_SKIPPED",
+          reason,
+          canSendReply: false,
+          candidateName: parsed.name,
+          candidateAge: calculateAge(parsed.birthDate),
+          phoneNormalized,
+          // 既存求職者への参照（追跡用）
+          candidateId: dup.id,
+        },
+      });
+      await notifyMynaviDuplicateSkip({
+        matchLabel,
+        phoneNormalized,
+        candidateName: parsed.name ?? undefined,
+        existingCandidateNumber: dup.candidateNumber,
+        reapplicationCount: dup.reapplicationCount + 1,
+      });
+      // RPA(PAD) が通常時と同じプロパティを読めるよう、キー構成は NORMAL 時と完全に同一にする。
+      // candidateId / candidateNumber は「既存レコードのもの」を返す（一次返信の宛先を間違えないため）。
+      return NextResponse.json({
+        processingLogId: log.id,
+        candidateId: dup.id,
+        candidateNumber: dup.candidateNumber,
+        canSendReply: false,
+        reason,
+        status: "DUPLICATE_SKIPPED",
+        scoutLinkResult: null,
+        scoutLinkedSlotId: null,
+      });
     }
 
     // ---- 送信可否判定 ----
@@ -328,35 +352,56 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- Candidate 新規登録 ----
-    // T-067 Phase B-3: マイナビ会員No（10桁）を AI抽出→PDF正規表現フォールバックで解決
-    const mynaviMemberNo = await resolveMynaviMemberNo(mynaviMemberNoFromRequest, resumeData?.mynaviMemberNo, pdfBuffer);
-
+    // T-190: Candidate と処理ログを同一トランザクションで作る。
+    //   従来は「Candidate作成 → Drive → 枠紐付け → 最後にログ作成」の順で、途中で落ちるか
+    //   PADがタイムアウト再送すると「求職者だけあってログが無い」状態になっていた（犬飼ケース）。
+    //   Drive/枠紐付けの結果はトランザクションの外でログに追記する（失敗しても両方残る）。
     const candidateNumber = await generateNextCandidateNumber();
-    const candidate = await prisma.candidate.create({
-      data: {
-        candidateNumber,
-        name: parsed.name,
-        ...(mynaviMemberNo ? { mynaviMemberNo } : {}),
-        ...(parsed.nameKana ? { nameKana: parsed.nameKana } : {}),
-        ...(parsed.gender ? { gender: parsed.gender } : {}),
-        ...(parsed.email ? { email: parsed.email } : {}),
-        ...(phoneNormalized ? { phone: phoneNormalized } : {}),
-        ...(parsed.address ? { address: parsed.address } : {}),
-        ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
-        // マイナビRPA新フローは経路・媒体が固定
-        applicationRoute: "スカウト",
-        mediaSource: "マイナビ転職",
-        // T-067 Phase2a: masType は新規付与しない（旧「1号機=開放日」判定を廃止）。Phase2bで配信日−登録日から判定。
-        birthday: parsed.birthDate,
-        ...(parsed.desiredJobType1 ? { desiredJobType1: parsed.desiredJobType1 } : {}),
-        ...(parsed.desiredJobType2 ? { desiredJobType2: parsed.desiredJobType2 } : {}),
-        ...(parsed.desiredIndustry1 ? { desiredIndustry1: parsed.desiredIndustry1 } : {}),
-        ...(parsed.desiredIndustry2 ? { desiredIndustry2: parsed.desiredIndustry2 } : {}),
-        ...(parsed.desiredPrefecture1 ? { desiredPrefecture1: parsed.desiredPrefecture1 } : {}),
-        ...(parsed.desiredPrefecture2 ? { desiredPrefecture2: parsed.desiredPrefecture2 } : {}),
-        ...(parsed.desiredEmploymentType ? { desiredEmploymentType: parsed.desiredEmploymentType } : {}),
-        ...(typeof parsed.desiredSalaryMin === "number" ? { desiredSalaryMin: parsed.desiredSalaryMin } : {}),
-      },
+    // AI解析失敗の early return を抜けているので氏名は必ずある。
+    // ただしコールバック内では parsed.name の絞り込みが効かないためローカルに退避する。
+    const candidateName: string = parsed.name;
+    const { candidate, log } = await prisma.$transaction(async (tx) => {
+      const created = await tx.candidate.create({
+        data: {
+          candidateNumber,
+          name: candidateName,
+          ...(mynaviMemberNo ? { mynaviMemberNo } : {}),
+          ...(parsed.nameKana ? { nameKana: parsed.nameKana } : {}),
+          ...(parsed.gender ? { gender: parsed.gender } : {}),
+          ...(parsed.email ? { email: parsed.email } : {}),
+          ...(phoneNormalized ? { phone: phoneNormalized } : {}),
+          ...(parsed.address ? { address: parsed.address } : {}),
+          ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
+          // マイナビRPA新フローは経路・媒体が固定
+          applicationRoute: "スカウト",
+          mediaSource: "マイナビ転職",
+          // T-067 Phase2a: masType は新規付与しない（旧「1号機=開放日」判定を廃止）。Phase2bで配信日−登録日から判定。
+          birthday: parsed.birthDate,
+          ...(parsed.desiredJobType1 ? { desiredJobType1: parsed.desiredJobType1 } : {}),
+          ...(parsed.desiredJobType2 ? { desiredJobType2: parsed.desiredJobType2 } : {}),
+          ...(parsed.desiredIndustry1 ? { desiredIndustry1: parsed.desiredIndustry1 } : {}),
+          ...(parsed.desiredIndustry2 ? { desiredIndustry2: parsed.desiredIndustry2 } : {}),
+          ...(parsed.desiredPrefecture1 ? { desiredPrefecture1: parsed.desiredPrefecture1 } : {}),
+          ...(parsed.desiredPrefecture2 ? { desiredPrefecture2: parsed.desiredPrefecture2 } : {}),
+          ...(parsed.desiredEmploymentType ? { desiredEmploymentType: parsed.desiredEmploymentType } : {}),
+          ...(typeof parsed.desiredSalaryMin === "number" ? { desiredSalaryMin: parsed.desiredSalaryMin } : {}),
+        },
+      });
+      // 処理ログは求職者と同時に必ず作る（片方だけ残らないように）。
+      // Drive保存結果・枠紐付け結果はトランザクション後に update で追記する。
+      const createdLog = await tx.mynaviRpaProcessingLog.create({
+        data: {
+          batchId,
+          candidateId: created.id,
+          phoneNormalized,
+          candidateName,
+          candidateAge: age,
+          status,
+          reason,
+          canSendReply,
+        },
+      });
+      return { candidate: created, log: createdLog };
     });
 
     // ---- T-091/T-064/T-067: 応募日・配信日・登録日の自動セット ----
@@ -448,23 +493,22 @@ export async function POST(req: NextRequest) {
       scoutLinkResult = "error";
     }
 
-    const log = await prisma.mynaviRpaProcessingLog.create({
-      data: {
-        batchId,
-        candidateId: candidate.id,
-        phoneNormalized,
-        candidateName: parsed.name,
-        candidateAge: age,
-        status,
-        reason,
-        canSendReply,
-        pdfFileName,
-        pdfFileId,
-        errorMessage: fileWarning,
-        scoutLinkResult,
-        scoutLinkedSlotId,
-      },
-    });
+    // ログ本体は Candidate と同じトランザクションで作成済み。
+    // 外部処理（Drive保存・枠紐付け）の結果だけをここで追記する。失敗しても求職者とログは残る。
+    try {
+      await prisma.mynaviRpaProcessingLog.update({
+        where: { id: log.id },
+        data: {
+          pdfFileName,
+          pdfFileId,
+          errorMessage: fileWarning,
+          scoutLinkResult,
+          scoutLinkedSlotId,
+        },
+      });
+    } catch (e) {
+      console.error("[rpa/mynavi/pdf-upload] 処理ログの追記に失敗:", e);
+    }
 
     try {
       await recalculateSubStatusIfAuto(candidate.id);

@@ -504,6 +504,12 @@ model Candidate {
   // T-067 Phase B-3: マイナビ会員No（応募PDFから抽出した10桁数字）。ScoutSendRecord との照合キー。
   mynaviMemberNo String? @map("mynavi_member_no")
 
+  // T-190: 再応募の記録（1人1レコード運用）。同一人物の再応募を検知するたびに加算・打刻する。
+  //   新規レコードは作らず既存レコードを使うため、「何回来たか」をここだけで持つ。
+  //   applicationDate は初回の値のまま上書きしない（集計が過去にずれるため）。
+  reapplicationCount  Int       @default(0) @map("reapplication_count")
+  lastReapplicationAt DateTime? @map("last_reapplication_at")
+
   // T-111: 次回連絡予定（面談に依存せず直接設定・修正可）。UTC保存・表示時JST（罠#17）。
   nextContactAt      DateTime? @map("next_contact_at")
   nextContactPurpose String?   @map("next_contact_purpose")

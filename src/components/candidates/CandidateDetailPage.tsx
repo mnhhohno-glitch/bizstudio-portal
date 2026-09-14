@@ -102,6 +102,9 @@ type Candidate = {
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
   autoRecommendEnabled: boolean;
+  // T-190: 再応募の記録（1人1レコード運用）
+  reapplicationCount?: number | null;
+  lastReapplicationAt?: string | null;
   oneDriveFolderUrl: string | null;
   guideEntries: GuideEntry[];
   notes: Note[];
