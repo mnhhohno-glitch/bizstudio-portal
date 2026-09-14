@@ -16,18 +16,27 @@ export async function GET(req: NextRequest) {
     parseInt(req.nextUrl.searchParams.get("limit") || "10")
   );
 
+  // 候補一覧（サジェスト）にはアーカイブ済みを出さない。
+  // ただし求職者番号を完全一致で打ち込んだ場合は「明示的な指定」とみなして返す。
   const candidates = await prisma.candidate.findMany({
     where: {
       OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { nameKana: { contains: q, mode: "insensitive" } },
-        { candidateNumber: { startsWith: q } },
+        {
+          supportStatus: { not: "ARCHIVED" },
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { nameKana: { contains: q, mode: "insensitive" } },
+            { candidateNumber: { startsWith: q } },
+          ],
+        },
+        { candidateNumber: q },
       ],
     },
     select: {
       id: true,
       name: true,
       candidateNumber: true,
+      supportStatus: true,
       employee: { select: { name: true } },
     },
     orderBy: { candidateNumber: "desc" },
@@ -39,6 +48,7 @@ export async function GET(req: NextRequest) {
       id: c.id,
       name: c.name,
       candidateNumber: c.candidateNumber,
+      archived: c.supportStatus === "ARCHIVED",
       careerAdvisorName: c.employee?.name || null,
     }))
   );

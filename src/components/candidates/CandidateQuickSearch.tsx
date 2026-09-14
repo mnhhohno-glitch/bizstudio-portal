@@ -7,6 +7,7 @@ type Result = {
   id: string;
   name: string;
   candidateNumber: string;
+  archived?: boolean;
   careerAdvisorName: string | null;
 };
 
@@ -109,6 +110,11 @@ export default function CandidateQuickSearch() {
               >
                 <span className="font-medium text-[#374151]">{r.name}</span>
                 <span className="text-gray-400 ml-1">({r.candidateNumber})</span>
+                {r.archived && (
+                  <span className="ml-1 px-1 py-0.5 text-[11px] rounded bg-gray-100 text-gray-500">
+                    アーカイブ
+                  </span>
+                )}
                 {r.careerAdvisorName && (
                   <span className="text-gray-400 ml-1">— {r.careerAdvisorName}</span>
                 )}
