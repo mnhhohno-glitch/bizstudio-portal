@@ -39,6 +39,7 @@ type Task = {
   // T-196: 日程調整フォームのマイナビ返信（送信は7号機RPA）。日程調整タスク以外では常に null。
   mynaviReplySentAt: string | null;
   mynaviReplySkipReason: string | null;
+  mynaviReplyUnconfirmedAt: string | null;
   attachments: unknown[];
   comments: unknown[];
 };
@@ -400,11 +401,16 @@ export default function TaskDetailPage() {
             <InfoCell label="作成日" value={formatDate(task.createdAt)} />
           </dl>
           {/* T-196: マイナビ返信の状態。CAが「求職者にマイナビでも届いたか」を1目で分かるようにする。 */}
-          {(task.mynaviReplySentAt || task.mynaviReplySkipReason) && (
+          {(task.mynaviReplySentAt || task.mynaviReplyUnconfirmedAt || task.mynaviReplySkipReason) && (
             <div>
               {task.mynaviReplySentAt ? (
                 <span className="inline-block rounded-full bg-green-100 px-3 py-1 text-[12px] font-medium text-green-700">
                   マイナビ返信済み {formatDateTime(task.mynaviReplySentAt)}
+                </span>
+              ) : task.mynaviReplyUnconfirmedAt ? (
+                /* RPAが「送信しました」を確認できなかった。自動再送はしないので人が目で確かめる。 */
+                <span className="inline-block rounded-full bg-red-100 px-3 py-1 text-[12px] font-medium text-red-700">
+                  要目視確認：マイナビ返信が送れたか不明 {formatDateTime(task.mynaviReplyUnconfirmedAt)}
                 </span>
               ) : (
                 <span className="inline-block rounded-full bg-yellow-100 px-3 py-1 text-[12px] font-medium text-yellow-800">

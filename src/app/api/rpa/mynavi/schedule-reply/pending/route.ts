@@ -50,6 +50,9 @@ export async function GET(req: Request) {
     where: {
       mynaviReplyText: { not: null },
       mynaviReplySentAt: null,
+      // 送信結果が不明（要目視確認）の行は二度と出さない。自動再送すると
+      // 実際には送れていた人へ同じメッセージが重ねて届くため、人の目視に委ねる。
+      mynaviReplyUnconfirmedAt: null,
       createdAt: { gte: since },
     },
     orderBy: { createdAt: "asc" },

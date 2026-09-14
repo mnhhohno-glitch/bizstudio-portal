@@ -887,6 +887,9 @@ model Task {
   mynaviReplyMemberNo   String?   @map("mynavi_reply_member_no")
   mynaviReplySentAt     DateTime? @map("mynavi_reply_sent_at")
   mynaviReplySkipReason String?   @map("mynavi_reply_skip_reason")
+  // T-196 追補: RPA が「送信しました」を確認できなかった打刻（＝要目視確認）。失敗回数とは別に持つ。
+  //   ここが入った行は pending に二度と出さない（自動再送しない＝同じ人への重複送信を防ぐ）。
+  mynaviReplyUnconfirmedAt DateTime? @map("mynavi_reply_unconfirmed_at")
 
   assignees        TaskAssignee[]
   assigneeStatuses TaskAssigneeStatus[]

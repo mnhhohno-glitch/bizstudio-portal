@@ -6,6 +6,7 @@
 // の2点だけ。ここでの失敗がフォーム送信（create-schedule-task）を壊してはいけない。
 
 import { prisma } from "@/lib/prisma";
+import { sendBotMessage } from "@/lib/lineworks";
 import {
   buildMynaviScheduleReceivedReply,
   buildMynaviScheduleReservedReply,
@@ -161,3 +162,43 @@ export const MYNAVI_REPLY_MAX_FAILURES = 3;
 
 /** pending の対象にする作成日の範囲（日）。古い申し込みは人の対応に委ねる。 */
 export const MYNAVI_REPLY_PENDING_WINDOW_DAYS = 7;
+
+/**
+ * 送信結果が不明（RPAが「送信しました」の表示を拾えなかった）ときにタスクへ残すコメントの接頭辞。
+ * ★AI_COMMENT_PREFIX（【日程調整AI】）は **含めない**。含めると既存の夜間RPAまで黙らせてしまう。
+ * ★MYNAVI_REPLY_FAILED_PREFIX とも別文字列にする。pending の3回失敗カウントに混ぜないため。
+ */
+export const MYNAVI_REPLY_UNCONFIRMED_PREFIX = "【マイナビ返信】送信結果が不明";
+
+/**
+ * 「送信結果が不明」を受けたことを人に知らせる LINE WORKS 通知。
+ * 経路は既存のタスク通知と同じ（LINEWORKS_TASK_BOT_ID / LINEWORKS_TASK_CHANNEL_ID）。
+ * **絶対に throw しない**。通知の失敗で受け口のレスポンスを落とさない。
+ */
+export async function notifyMynaviReplyUnconfirmed(params: {
+  taskId: string;
+  candidateName: string;
+  memberNo: string;
+}): Promise<boolean> {
+  const botId = process.env.LINEWORKS_TASK_BOT_ID;
+  const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
+  const baseUrl = process.env.PORTAL_BASE_URL ?? "";
+  const message = [
+    "【要目視確認】日程調整のマイナビ返信が送れたか不明です",
+    `氏名: ${params.candidateName || "（氏名不明）"} / 会員No: ${params.memberNo || "-"}`,
+    "マイナビのメール履歴で送信済みか確認し、未送信なら手動で送ってください",
+    `${baseUrl}/tasks/${params.taskId}`,
+  ].join("\n");
+
+  if (!botId || !channelId) {
+    console.error("[mynavi-reply] LINEWORKS_TASK_* が未設定のため通知をスキップ:", message);
+    return false;
+  }
+  try {
+    await sendBotMessage(botId, channelId, message);
+    return true;
+  } catch (e) {
+    console.error("[mynavi-reply] 要目視確認の通知に失敗:", e);
+    return false;
+  }
+}
