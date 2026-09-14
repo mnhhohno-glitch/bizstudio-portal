@@ -7,6 +7,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendBotMessage } from "@/lib/lineworks";
+import { PORTAL_PROD_URL } from "@/lib/task-notification";
 import {
   buildMynaviScheduleReceivedReply,
   buildMynaviScheduleReservedReply,
@@ -173,6 +174,9 @@ export const MYNAVI_REPLY_UNCONFIRMED_PREFIX = "【マイナビ返信】送信�
 /**
  * 「送信結果が不明」を受けたことを人に知らせる LINE WORKS 通知。
  * 経路は既存のタスク通知と同じ（LINEWORKS_TASK_BOT_ID / LINEWORKS_TASK_CHANNEL_ID）。
+ * 末尾のタスクURLは **本番ドメイン固定**（PORTAL_PROD_URL）。PORTAL_BASE_URL は
+ * サービスごとに staging / 本番 が入るうえ未設定もあり得るため使わない
+ * （task-notification.ts / dailyReport の流儀に合わせる）。
  * **絶対に throw しない**。通知の失敗で受け口のレスポンスを落とさない。
  */
 export async function notifyMynaviReplyUnconfirmed(params: {
@@ -182,12 +186,11 @@ export async function notifyMynaviReplyUnconfirmed(params: {
 }): Promise<boolean> {
   const botId = process.env.LINEWORKS_TASK_BOT_ID;
   const channelId = process.env.LINEWORKS_TASK_CHANNEL_ID;
-  const baseUrl = process.env.PORTAL_BASE_URL ?? "";
   const message = [
     "【要目視確認】日程調整のマイナビ返信が送れたか不明です",
     `氏名: ${params.candidateName || "（氏名不明）"} / 会員No: ${params.memberNo || "-"}`,
     "マイナビのメール履歴で送信済みか確認し、未送信なら手動で送ってください",
-    `${baseUrl}/tasks/${params.taskId}`,
+    `${PORTAL_PROD_URL}/tasks/${params.taskId}`,
   ].join("\n");
 
   if (!botId || !channelId) {
