@@ -8,6 +8,7 @@ import { classifyWindows } from "@/lib/schedule-agent/match-slot";
 import { methodFromFormatField, parseDesiredWindows } from "@/lib/schedule-agent/parse-preferences";
 import { eventTitleWhen, jstIso, reservedRangeLabel } from "@/lib/schedule-agent/jst";
 import type { MeetingMethod } from "@/lib/schedule-agent/reply-templates";
+import { stageMynaviScheduleReply } from "@/lib/schedule-agent/mynavi-reply";
 
 interface CreateScheduleTaskRequest {
   type: "mynavi_new" | "consultation" | "interview";
@@ -356,6 +357,27 @@ export async function POST(request: Request) {
       } catch (e) {
         console.error("[create-schedule-task] autoReserve failed:", e);
         autoReserveResult = { result: "not_reserved", reason: "error" };
+        await sendAutoReserveErrorAlert({ candidateName: effectiveName, taskId: task.id, error: e });
+      }
+    }
+
+// 6.6 T-196: マイナビのメッセージでも同内容を返信するため、送信待ちの文面をタスクに積む。
+    //   実際の送信は7号機RPAが /api/rpa/mynavi/schedule-reply/* 経由で行う（portal は送らない）。
+    //   仮確定できた／できなかったの両方で積む（メールの出し分けと揃える）。
+    //   **絶対に throw しない**。積めなくてもタスク作成とレスポンスは成功させる。
+    if (autoReserveResult) {
+      try {
+        await stageMynaviScheduleReply({
+          taskId: task.id,
+          candidateId: validatedCandidateId,
+          candidateName: effectiveName,
+          meetingFormat,
+          preferredDates,
+          reservedLabel: autoReserveResult.slot?.label ?? null,
+          reservedMethod: autoReserveResult.method ?? null,
+        });
+      } catch (e) {
+        console.error("[create-schedule-task] mynavi reply staging failed:", e);
         await sendAutoReserveErrorAlert({ candidateName: effectiveName, taskId: task.id, error: e });
       }
     }

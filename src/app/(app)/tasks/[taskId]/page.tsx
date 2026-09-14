@@ -36,6 +36,9 @@ type Task = {
   assignees: { employee: { id: string; name: string } }[];
   assigneeStatuses: AssigneeStatus[];
   fieldValues: FieldValue[];
+  // T-196: 日程調整フォームのマイナビ返信（送信は7号機RPA）。日程調整タスク以外では常に null。
+  mynaviReplySentAt: string | null;
+  mynaviReplySkipReason: string | null;
   attachments: unknown[];
   comments: unknown[];
 };
@@ -396,6 +399,22 @@ export default function TaskDetailPage() {
             {task.createdByUser && <InfoCell label="作成者" value={task.createdByUser.name} />}
             <InfoCell label="作成日" value={formatDate(task.createdAt)} />
           </dl>
+          {/* T-196: マイナビ返信の状態。CAが「求職者にマイナビでも届いたか」を1目で分かるようにする。 */}
+          {(task.mynaviReplySentAt || task.mynaviReplySkipReason) && (
+            <div>
+              {task.mynaviReplySentAt ? (
+                <span className="inline-block rounded-full bg-green-100 px-3 py-1 text-[12px] font-medium text-green-700">
+                  マイナビ返信済み {formatDateTime(task.mynaviReplySentAt)}
+                </span>
+              ) : (
+                <span className="inline-block rounded-full bg-yellow-100 px-3 py-1 text-[12px] font-medium text-yellow-800">
+                  {task.mynaviReplySkipReason === "no_member_no"
+                    ? "マイナビ返信対象外（会員No.なし）"
+                    : `マイナビ返信対象外（${task.mynaviReplySkipReason}）`}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* field values */}

@@ -879,6 +879,15 @@ model Task {
   source     String? @map("source") // null | "AI_ADVISOR"
   sourceKind String? @map("source_kind") // null | "JOB_SEARCH_SEND" | "FORM_SURVEY"
 
+  // T-196: 日程調整フォームの返信をマイナビのメッセージでも送るための持ち回り（送信は7号機RPA）。
+  //   text/subject/memberNo が揃った行だけが RPA の取得対象。sentAt は送信済みの打刻（二重送信防止の掴み）。
+  //   skipReason は送らないと決めた理由（例 no_member_no＝マイナビ会員No.が引けず人が対応）。
+  mynaviReplyText       String?   @map("mynavi_reply_text") @db.Text
+  mynaviReplySubject    String?   @map("mynavi_reply_subject")
+  mynaviReplyMemberNo   String?   @map("mynavi_reply_member_no")
+  mynaviReplySentAt     DateTime? @map("mynavi_reply_sent_at")
+  mynaviReplySkipReason String?   @map("mynavi_reply_skip_reason")
+
   assignees        TaskAssignee[]
   assigneeStatuses TaskAssigneeStatus[]
   fieldValues      TaskFieldValue[]
