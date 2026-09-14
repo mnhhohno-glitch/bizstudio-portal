@@ -157,7 +157,7 @@ export default function ConditionTable({
                   {areaLabel(c.residenceMode, c.residencePrefectures)}
                 </td>
                 <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.workPrefectures.join("/") || undefined}>
-                  {workPrefLabel(c.workPrefMode, c.workPrefectures)}
+                  <span className="whitespace-nowrap">{workPrefLabel(c.workPrefMode, c.workPrefectures)}</span>
                   {c.workPrefMode !== "ALL" && c.workPrefectures.length > 0 && !isDefaultWorkPrefectures(c.workPrefectures) && (
                     <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
                   )}

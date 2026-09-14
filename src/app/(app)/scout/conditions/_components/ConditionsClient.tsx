@@ -203,7 +203,7 @@ export default function ConditionsClient() {
         <div>
           <h1 className="text-[20px] font-bold text-[#374151]">スカウト配信条件</h1>
           <p className="mt-1 text-[13px] text-[#6B7280]">
-            号機ごとのマイナビ検索条件（6軸）と予約・配信テンプレートを管理します。RPA はここで持つ条件をフォームへ直接入力します。
+            号機ごとのマイナビ検索条件（7軸）と予約・配信テンプレートを管理します。RPA はここで持つ条件をフォームへ直接入力します。
           </p>
         </div>
         <button
