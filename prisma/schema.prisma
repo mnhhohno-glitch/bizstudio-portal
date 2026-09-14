@@ -3309,6 +3309,12 @@ enum ScoutAreaMode {
   PREFECTURE // 都道府県指定（prefectures を使う。海外は選ばない・空にしない）
 }
 
+// T-196: 希望勤務地の指定方法（ALL=指定しない〔マイナビ上は「全国」を入れる〕 / SELECTED=workPrefectures を指定）
+enum ScoutWorkPrefMode {
+  ALL
+  SELECTED
+}
+
 // 配信テンプレート（05.集計ファイル.xlsx「テンプレートマスタ」由来）
 model ScoutTemplate {
   id        String            @id @default(cuid())
@@ -3359,9 +3365,14 @@ model ScoutCondition {
   // 5. 経験社数（null=--（指定なし） / 0=0社 / 1〜6=～N社 / 7=7社以上）
   companyCount Int? @map("company_count")
 
-  // 6. 希望勤務地（PREFECTURE のときのみ prefectures を使う。海外は載せない）
-  areaMode    ScoutAreaMode @default(NATIONWIDE) @map("area_mode")
-  prefectures String[]      @default([])
+  // 6. 居住地（PREFECTURE のときのみ residencePrefectures を使う。海外は載せない）
+  //    T-196: T-194/195 で「希望勤務地」として作った列は実際には居住地だったため area_mode / prefectures をリネーム
+  residenceMode        ScoutAreaMode @default(NATIONWIDE) @map("residence_mode")
+  residencePrefectures String[]      @default([]) @map("residence_prefectures")
+
+  // 7. 希望勤務地（T-196。ALL=指定しない〔RPA は「全国」を入れる〕 / SELECTED=workPrefectures を指定。既定は有効エリア8都府県）
+  workPrefMode    ScoutWorkPrefMode? @default(SELECTED) @map("work_pref_mode")
+  workPrefectures String[]           @default([]) @map("work_prefectures")
 
   // 配信文
   templateId String?        @map("template_id")

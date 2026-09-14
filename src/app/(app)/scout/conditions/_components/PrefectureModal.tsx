@@ -10,10 +10,13 @@ const NATIONWIDE_KEY = "全国";
 
 export default function PrefectureModal({
   initial,
+  title = "都道府県指定",
   onClose,
   onConfirm,
 }: {
   initial: string[];
+  /** 見出し（居住地／希望勤務地で使い分ける。T-196） */
+  title?: string;
   onClose: () => void;
   onConfirm: (prefectures: string[]) => void;
 }) {
@@ -52,7 +55,7 @@ export default function PrefectureModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3">
-          <div className="text-[15px] font-semibold text-[#374151]">希望勤務地（都道府県指定）</div>
+          <div className="text-[15px] font-semibold text-[#374151]">{title}</div>
           <button type="button" onClick={onClose} className="text-[13px] text-[#6B7280] hover:text-[#374151]">
             閉じる
           </button>

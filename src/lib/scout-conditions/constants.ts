@@ -87,7 +87,7 @@ export function companyCountLabel(v: number | null | undefined): string {
   return COMPANY_COUNT_OPTIONS.find((o) => o.value === (v ?? null))?.label ?? String(v);
 }
 
-// ---- 6. 希望勤務地 ----
+// ---- 6. 居住地（T-196: T-194/195 で「希望勤務地」として作った軸は実際には居住地だった） ----
 export const AREA_MODES = [
   { value: "NATIONWIDE", label: "全国" },
   { value: "EAST", label: "東日本" },
@@ -136,6 +136,36 @@ export function areaLabel(mode: string, prefectures: string[]): string {
   return AREA_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
 
+// ---- 7. 希望勤務地（T-196） ----
+// ALL=指定しない（マイナビ上は「全国」を入れる。空欄にはしない） / SELECTED=workPrefectures の都道府県を指定
+export const WORK_PREF_MODES = [
+  { value: "ALL", label: "指定なし（全国）" },
+  { value: "SELECTED", label: "都道府県指定" },
+] as const;
+export type WorkPrefMode = (typeof WORK_PREF_MODES)[number]["value"];
+export const WORK_PREF_MODE_VALUES: readonly string[] = WORK_PREF_MODES.map((s) => s.value);
+
+/** 有効エリア8都府県（新規作成時の初期値。表記は ALL_PREFECTURES と同じ短縮形・定義順） */
+export const DEFAULT_WORK_PREFECTURES: string[] = ALL_PREFECTURES.filter((p) =>
+  ["東京", "埼玉", "神奈川", "千葉", "愛知", "大阪", "兵庫", "京都"].includes(p),
+);
+export const DEFAULT_WORK_PREFECTURES_LABEL = "有効エリア";
+
+/** 有効エリア8都府県ちょうど（順不同）か */
+export function isDefaultWorkPrefectures(prefectures: string[]): boolean {
+  if (prefectures.length !== DEFAULT_WORK_PREFECTURES.length) return false;
+  const set = new Set(prefectures);
+  return DEFAULT_WORK_PREFECTURES.every((p) => set.has(p));
+}
+
+/** 一覧・CSV 用の短い表示。「指定なし（全国）」／「有効エリア」／「N都道府県」 */
+export function workPrefLabel(mode: string | null | undefined, prefectures: string[]): string {
+  if (mode === "ALL") return WORK_PREF_MODES[0].label;
+  if (isDefaultWorkPrefectures(prefectures)) return DEFAULT_WORK_PREFECTURES_LABEL;
+  if (prefectures.length === 0) return "未選択";
+  return `${prefectures.length}都道府県`;
+}
+
 /** 条件のエリア指定を都道府県の集合に展開する（絞り込みの重なり判定用） */
 export function expandAreaToPrefectures(mode: string, prefectures: string[]): string[] {
   if (mode === "NATIONWIDE") return ALL_PREFECTURES;
@@ -170,7 +200,6 @@ export const MERGE_TAG_RE = /(\[担当者\]|\[社名\]|\[最終学歴\]|\[経験
 export const FIXED_VALUES = [
   { label: "学歴", value: "不問（チェックを入れない）" },
   { label: "経験職種", value: "指定なし" },
-  { label: "居住地", value: "指定なし" },
   { label: "0社を除く", value: "チェックなし" },
   { label: "除外リストの会員", value: "含まない" },
   { label: "自社へ応募した会員", value: "含まない" },

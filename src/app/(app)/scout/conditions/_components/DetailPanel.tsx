@@ -1,6 +1,7 @@
 "use client";
 
-// T-194: 行クリックで右から出る詳細パネル。検索条件6軸（編集可）・固定値・配信文プレビュー・実績を表示する。
+// T-194: 行クリックで右から出る詳細パネル。検索条件7軸（編集可）・固定値・配信文プレビュー・実績を表示する。
+// T-196: 6軸目は居住地（旧「希望勤務地」）に改め、7軸目に希望勤務地を新設。
 // 新規作成も同じパネル（mode="new"）で行う。
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -8,11 +9,15 @@ import {
   AREA_MODES,
   COMPANY_COUNT_OPTIONS,
   CONDITION_STATUSES,
+  DEFAULT_WORK_PREFECTURES,
+  DEFAULT_WORK_PREFECTURES_LABEL,
   FIXED_VALUES,
+  isDefaultWorkPrefectures,
   PERIOD_DAYS_OPTIONS,
   REGIST_DATE_MODES,
   SEARCH_TARGETS,
   TEMPLATE_KINDS,
+  WORK_PREF_MODES,
   gradYearOptions,
   summarizePrefectures,
   templateKindLabel,
@@ -63,8 +68,10 @@ function toForm(c: ConditionDto | null, machines: MachineDto[], today: string): 
       gradYearFrom: c.gradYearFrom,
       gradYearTo: c.gradYearTo,
       companyCount: c.companyCount,
-      areaMode: c.areaMode,
-      prefectures: c.prefectures,
+      residenceMode: c.residenceMode,
+      residencePrefectures: c.residencePrefectures,
+      workPrefMode: c.workPrefMode,
+      workPrefectures: c.workPrefectures,
       templateId: c.templateId,
       plannedCount: c.plannedCount,
       deliveryDate: c.deliveryDate,
@@ -84,8 +91,10 @@ function toForm(c: ConditionDto | null, machines: MachineDto[], today: string): 
     gradYearFrom: null,
     gradYearTo: null,
     companyCount: null,
-    areaMode: "NATIONWIDE",
-    prefectures: [],
+    residenceMode: "NATIONWIDE",
+    residencePrefectures: [],
+    workPrefMode: "SELECTED",
+    workPrefectures: DEFAULT_WORK_PREFECTURES,
     templateId: firstActive?.defaultTemplateId ?? null,
     plannedCount: null,
     deliveryDate: today,
@@ -111,7 +120,7 @@ export default function DetailPanel({
   onSaved: (c: ConditionDto, isNew: boolean) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
-  onOpenPrefModal: (current: string[], onConfirm: (prefs: string[]) => void) => void;
+  onOpenPrefModal: (current: string[], onConfirm: (prefs: string[]) => void, title: string) => void;
 }) {
   const today = jstTodayYmd();
   const current = mode.kind === "edit" ? mode.condition : null;
@@ -234,7 +243,7 @@ export default function DetailPanel({
           )}
         </div>
 
-        <SectionTitle>検索条件（6軸）</SectionTitle>
+        <SectionTitle>検索条件（7軸）</SectionTitle>
         <div className="space-y-3">
           <Field label="1. 検索対象（自社がスカウトを送信した会員）">
             <div className="flex flex-wrap gap-1.5">
@@ -319,29 +328,78 @@ export default function DetailPanel({
             </select>
           </Field>
 
-          <Field label="6. 希望勤務地" hint="居住地は触らない。空欄にはしない（海外が含まれるため）">
+          <Field label="6. 居住地" hint="毎回指定する。空欄にはしない（海外が含まれるため）">
             <div className="flex flex-wrap gap-1.5">
               {AREA_MODES.filter((m) => m.value !== "PREFECTURE").map((m) => (
-                <button key={m.value} type="button" className={CHIP(form.areaMode === m.value)} onClick={() => { set("areaMode", m.value); set("prefectures", []); }}>
+                <button key={m.value} type="button" className={CHIP(form.residenceMode === m.value)} onClick={() => { set("residenceMode", m.value); set("residencePrefectures", []); }}>
                   {m.label}
                 </button>
               ))}
               <button
                 type="button"
-                className={CHIP(form.areaMode === "PREFECTURE")}
+                className={CHIP(form.residenceMode === "PREFECTURE")}
                 onClick={() =>
-                  onOpenPrefModal(form.prefectures, (prefs) => {
-                    set("areaMode", "PREFECTURE");
-                    set("prefectures", prefs);
-                  })
+                  onOpenPrefModal(
+                    form.residencePrefectures,
+                    (prefs) => {
+                      set("residenceMode", "PREFECTURE");
+                      set("residencePrefectures", prefs);
+                    },
+                    "居住地（都道府県指定）",
+                  )
                 }
               >
                 都道府県指定
-                {form.areaMode === "PREFECTURE" && form.prefectures.length > 0 ? `：${summarizePrefectures(form.prefectures)}` : ""}
+                {form.residenceMode === "PREFECTURE" && form.residencePrefectures.length > 0 ? `：${summarizePrefectures(form.residencePrefectures)}` : ""}
               </button>
             </div>
-            {form.areaMode === "PREFECTURE" && form.prefectures.length > 0 && (
-              <div className="mt-1 text-[11px] text-[#6B7280]">{form.prefectures.join("/")}</div>
+            {form.residenceMode === "PREFECTURE" && form.residencePrefectures.length > 0 && (
+              <div className="mt-1 text-[11px] text-[#6B7280]">{form.residencePrefectures.join("/")}</div>
+            )}
+          </Field>
+
+          <Field label="7. 希望勤務地" hint="基本は有効エリア8都府県（東京・埼玉・神奈川・千葉・愛知・大阪・兵庫・京都）で固定。個別配信で稀に絞る">
+            <div className="flex flex-wrap gap-1.5">
+              {WORK_PREF_MODES.map((m) =>
+                m.value === "ALL" ? (
+                  <button key={m.value} type="button" className={CHIP(form.workPrefMode === "ALL")} onClick={() => { set("workPrefMode", "ALL"); set("workPrefectures", []); }}>
+                    {m.label}
+                  </button>
+                ) : (
+                  <button
+                    key={m.value}
+                    type="button"
+                    className={CHIP(form.workPrefMode === "SELECTED")}
+                    onClick={() =>
+                      onOpenPrefModal(
+                        form.workPrefectures.length > 0 ? form.workPrefectures : DEFAULT_WORK_PREFECTURES,
+                        (prefs) => {
+                          set("workPrefMode", "SELECTED");
+                          set("workPrefectures", prefs);
+                        },
+                        "希望勤務地（都道府県指定）",
+                      )
+                    }
+                  >
+                    {m.label}
+                    {form.workPrefMode === "SELECTED" && form.workPrefectures.length > 0
+                      ? `：${isDefaultWorkPrefectures(form.workPrefectures) ? DEFAULT_WORK_PREFECTURES_LABEL : summarizePrefectures(form.workPrefectures)}`
+                      : ""}
+                  </button>
+                ),
+              )}
+              {form.workPrefMode === "SELECTED" && !isDefaultWorkPrefectures(form.workPrefectures) && (
+                <button
+                  type="button"
+                  className="text-[11px] text-[#2563EB] underline"
+                  onClick={() => { set("workPrefMode", "SELECTED"); set("workPrefectures", DEFAULT_WORK_PREFECTURES); }}
+                >
+                  有効エリアに戻す
+                </button>
+              )}
+            </div>
+            {form.workPrefMode === "SELECTED" && form.workPrefectures.length > 0 && (
+              <div className="mt-1 text-[11px] text-[#6B7280]">{form.workPrefectures.join("/")}</div>
             )}
           </Field>
         </div>

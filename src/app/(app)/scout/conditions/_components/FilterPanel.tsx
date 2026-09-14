@@ -1,6 +1,6 @@
 "use client";
 
-// T-194: 左の絞り込みパネル（UI仕様の並び：号機／状態／検索対象／登録日／最終ログイン日／卒業年度／経験社数／希望勤務地／テンプレート種別／実行日）
+// T-194: 左の絞り込みパネル（UI仕様の並び：号機／状態／検索対象／登録日／最終ログイン日／卒業年度／経験社数／居住地／テンプレート種別／実行日）
 import {
   AREA_CHIP_MODES,
   COMPANY_COUNT_OPTIONS,
@@ -209,26 +209,26 @@ export default function FilterPanel({
           </select>
         </Section>
 
-        <Section title="希望勤務地">
+        <Section title="居住地">
           <div className="flex flex-wrap gap-1.5">
             {AREA_CHIP_MODES.map((m) => (
               <button
                 key={m.value}
                 type="button"
-                className={CHIP(filter.areaModes.includes(m.value))}
-                onClick={() => set("areaModes", toggleIn(filter.areaModes, m.value))}
+                className={CHIP(filter.residenceModes.includes(m.value))}
+                onClick={() => set("residenceModes", toggleIn(filter.residenceModes, m.value))}
               >
                 {m.label}
               </button>
             ))}
-            <button type="button" className={CHIP(filter.prefectures.length > 0)} onClick={onOpenPrefModal}>
-              都道府県指定{filter.prefectures.length > 0 ? `：${summarizePrefectures(filter.prefectures)}` : ""}
+            <button type="button" className={CHIP(filter.residencePrefectures.length > 0)} onClick={onOpenPrefModal}>
+              都道府県指定{filter.residencePrefectures.length > 0 ? `：${summarizePrefectures(filter.residencePrefectures)}` : ""}
             </button>
-            {filter.prefectures.length > 0 && (
+            {filter.residencePrefectures.length > 0 && (
               <button
                 type="button"
                 className="text-[11px] text-[#6B7280] underline hover:text-[#374151]"
-                onClick={() => set("prefectures", [])}
+                onClick={() => set("residencePrefectures", [])}
               >
                 解除
               </button>

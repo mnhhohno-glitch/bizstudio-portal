@@ -9,6 +9,7 @@ import {
   periodDaysLabel,
   searchTargetLabel,
   templateKindLabel,
+  workPrefLabel,
   type SortKey,
 } from "@/lib/scout-conditions/constants";
 import {
@@ -31,8 +32,8 @@ export type FilterState = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: string; // "" = 指定なし / "null" = -- / "0".."7"
-  areaModes: string[]; // NATIONWIDE / EAST / WEST のチップ
-  prefectures: string[]; // 都道府県指定
+  residenceModes: string[]; // 居住地: NATIONWIDE / EAST / WEST のチップ（T-196 で areaModes から改名）
+  residencePrefectures: string[]; // 居住地の都道府県指定
   templateKinds: string[];
   execFrom: string;
   execTo: string;
@@ -50,8 +51,8 @@ export const DEFAULT_FILTER: FilterState = {
   gradYearFrom: null,
   gradYearTo: null,
   companyCount: "",
-  areaModes: [],
-  prefectures: [],
+  residenceModes: [],
+  residencePrefectures: [],
   templateKinds: [],
   execFrom: "",
   execTo: "",
@@ -68,7 +69,7 @@ function overlaps(aFrom: string | null, aTo: string | null, bFrom: string, bTo: 
 }
 
 export function applyFilter(rows: ConditionDto[], f: FilterState): ConditionDto[] {
-  const prefSet = new Set(f.prefectures);
+  const prefSet = new Set(f.residencePrefectures);
   return rows.filter((c) => {
     if (f.machineNos.length && !f.machineNos.includes(c.machineNo)) return false;
     if (f.statuses.length && !f.statuses.includes(c.status)) return false;
@@ -99,9 +100,10 @@ export function applyFilter(rows: ConditionDto[], f: FilterState): ConditionDto[
       } else if (c.companyCount !== Number(f.companyCount)) return false;
     }
 
-    if (f.areaModes.length || prefSet.size) {
-      const byMode = f.areaModes.includes(c.areaMode);
-      const byPref = prefSet.size > 0 && c.areaMode === "PREFECTURE" && c.prefectures.some((p) => prefSet.has(p));
+    if (f.residenceModes.length || prefSet.size) {
+      const byMode = f.residenceModes.includes(c.residenceMode);
+      const byPref =
+        prefSet.size > 0 && c.residenceMode === "PREFECTURE" && c.residencePrefectures.some((p) => prefSet.has(p));
       if (!byMode && !byPref) return false;
     }
 
@@ -193,8 +195,10 @@ export function buildCsv(rows: ConditionDto[]): string {
     "最終ログイン",
     "卒業年度",
     "経験社数",
+    "居住地",
+    "居住地の都道府県",
     "希望勤務地",
-    "都道府県",
+    "希望勤務地の都道府県",
     "テンプレート種別",
     "テンプレート",
     "予定件数",
@@ -216,8 +220,10 @@ export function buildCsv(rows: ConditionDto[]): string {
       periodDaysLabel(c.lastLoginDays),
       gradYearRangeLabel(c.gradYearFrom, c.gradYearTo),
       companyCountLabel(c.companyCount),
-      areaLabel(c.areaMode, c.prefectures),
-      c.prefectures.join("/"),
+      areaLabel(c.residenceMode, c.residencePrefectures),
+      c.residencePrefectures.join("/"),
+      workPrefLabel(c.workPrefMode, c.workPrefectures),
+      c.workPrefectures.join("/"),
       templateKindLabel(c.templateKind),
       c.templateName ?? "",
       c.plannedCount ?? "",

@@ -4,6 +4,8 @@ import {
   ALL_PREFECTURES,
   AREA_MODE_VALUES,
   CONDITION_STATUS_VALUES,
+  DEFAULT_WORK_PREFECTURES,
+  WORK_PREF_MODE_VALUES,
   PERIOD_DAYS_OPTIONS,
   REGIST_DATE_MODE_VALUES,
   SEARCH_TARGET_VALUES,
@@ -50,8 +52,10 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     gradYearFrom: c.gradYearFrom,
     gradYearTo: c.gradYearTo,
     companyCount: c.companyCount,
-    areaMode: c.areaMode,
-    prefectures: c.prefectures,
+    residenceMode: c.residenceMode,
+    residencePrefectures: c.residencePrefectures,
+    workPrefMode: c.workPrefMode ?? "SELECTED",
+    workPrefectures: c.workPrefectures,
     templateId: c.templateId,
     templateKind: c.template?.kind ?? null,
     templateName: c.template?.name ?? null,
@@ -79,8 +83,10 @@ export type ParsedCondition = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: number | null;
-  areaMode: string;
-  prefectures: string[];
+  residenceMode: string;
+  residencePrefectures: string[];
+  workPrefMode: string;
+  workPrefectures: string[];
   templateId: string | null;
   plannedCount: number | null;
   deliveryDate: Date | null;
@@ -89,6 +95,13 @@ export type ParsedCondition = {
 type ParseResult = { ok: true; data: ParsedCondition } | { ok: false; error: string };
 
 const PREF_SET = new Set(ALL_PREFECTURES);
+
+/** 都道府県配列の検証と定義順への正規化（重複除去）。不正なら null */
+function normalizePrefectures(v: unknown): string[] | null {
+  if (!Array.isArray(v) || !v.every((p) => typeof p === "string" && PREF_SET.has(p))) return null;
+  const set = new Set(v as string[]);
+  return ALL_PREFECTURES.filter((p) => set.has(p));
+}
 
 function intOrNull(v: unknown): number | null | undefined {
   if (v === undefined) return undefined;
@@ -100,7 +113,7 @@ function intOrNull(v: unknown): number | null | undefined {
 
 /**
  * 作成（full=true: 必須項目を欠くとエラー）／更新（full=false: 渡された項目だけ検証）の入力検証。
- * 仕様の固定値（学歴・経験職種・居住地・0社を除く・除外リスト・自社へ応募）は受け付けない（列が無い）。
+ * 仕様の固定値（学歴・経験職種・0社を除く・除外リスト・自社へ応募）は受け付けない（列が無い）。
  */
 export function parseConditionInput(
   body: Record<string, unknown>,
@@ -121,8 +134,10 @@ export function parseConditionInput(
         gradYearFrom: null,
         gradYearTo: null,
         companyCount: null,
-        areaMode: "NATIONWIDE",
-        prefectures: [],
+        residenceMode: "NATIONWIDE",
+        residencePrefectures: [],
+        workPrefMode: "SELECTED",
+        workPrefectures: DEFAULT_WORK_PREFECTURES,
         templateId: null,
         plannedCount: null,
         deliveryDate: null,
@@ -205,21 +220,34 @@ export function parseConditionInput(
     out.companyCount = v;
   }
 
-  if (body.areaMode !== undefined) {
-    if (typeof body.areaMode !== "string" || !AREA_MODE_VALUES.includes(body.areaMode))
+  if (body.residenceMode !== undefined) {
+    if (typeof body.residenceMode !== "string" || !AREA_MODE_VALUES.includes(body.residenceMode))
+      return { ok: false, error: "居住地の指定方法が不正です" };
+    out.residenceMode = body.residenceMode;
+  }
+  if (body.residencePrefectures !== undefined) {
+    const prefs = normalizePrefectures(body.residencePrefectures);
+    if (!prefs) return { ok: false, error: "居住地の都道府県の値が不正です（海外は指定できません）" };
+    out.residencePrefectures = prefs;
+  }
+  if (out.residenceMode === "PREFECTURE" && out.residencePrefectures.length === 0)
+    return { ok: false, error: "居住地を都道府県指定にするときは最低1つ選んでください（空欄だと海外が含まれます）" };
+  if (out.residenceMode !== "PREFECTURE") out.residencePrefectures = [];
+
+  // T-196: 希望勤務地（ALL=指定しない〔RPA は「全国」を入れる〕 / SELECTED=都道府県指定）
+  if (body.workPrefMode !== undefined) {
+    if (typeof body.workPrefMode !== "string" || !WORK_PREF_MODE_VALUES.includes(body.workPrefMode))
       return { ok: false, error: "希望勤務地の指定方法が不正です" };
-    out.areaMode = body.areaMode;
+    out.workPrefMode = body.workPrefMode;
   }
-  if (body.prefectures !== undefined) {
-    if (!Array.isArray(body.prefectures) || !body.prefectures.every((p) => typeof p === "string" && PREF_SET.has(p)))
-      return { ok: false, error: "都道府県の値が不正です（海外は指定できません）" };
-    // 定義順に正規化・重複除去
-    const set = new Set(body.prefectures as string[]);
-    out.prefectures = ALL_PREFECTURES.filter((p) => set.has(p));
+  if (body.workPrefectures !== undefined) {
+    const prefs = normalizePrefectures(body.workPrefectures);
+    if (!prefs) return { ok: false, error: "希望勤務地の都道府県の値が不正です（海外は指定できません）" };
+    out.workPrefectures = prefs;
   }
-  if (out.areaMode === "PREFECTURE" && out.prefectures.length === 0)
-    return { ok: false, error: "都道府県指定のときは最低1つ選んでください（空欄だと海外が含まれます）" };
-  if (out.areaMode !== "PREFECTURE") out.prefectures = [];
+  if (out.workPrefMode === "SELECTED" && out.workPrefectures.length === 0)
+    return { ok: false, error: "希望勤務地を都道府県指定にするときは最低1つ選んでください" };
+  if (out.workPrefMode !== "SELECTED") out.workPrefectures = [];
 
   if (body.templateId !== undefined) {
     if (body.templateId === null || body.templateId === "") out.templateId = null;
@@ -250,8 +278,10 @@ export function rowToParsed(c: ConditionRow): ParsedCondition {
     gradYearFrom: c.gradYearFrom,
     gradYearTo: c.gradYearTo,
     companyCount: c.companyCount,
-    areaMode: c.areaMode,
-    prefectures: c.prefectures,
+    residenceMode: c.residenceMode,
+    residencePrefectures: c.residencePrefectures,
+    workPrefMode: c.workPrefMode ?? "SELECTED",
+    workPrefectures: c.workPrefectures,
     templateId: c.templateId,
     plannedCount: c.plannedCount,
     deliveryDate: c.deliveryDate,
@@ -273,8 +303,10 @@ export function toPrismaData(p: ParsedCondition, createdById: string | null) {
     gradYearFrom: p.gradYearFrom,
     gradYearTo: p.gradYearTo,
     companyCount: p.companyCount,
-    areaMode: p.areaMode as Prisma.ScoutConditionUncheckedCreateInput["areaMode"],
-    prefectures: p.prefectures,
+    residenceMode: p.residenceMode as Prisma.ScoutConditionUncheckedCreateInput["residenceMode"],
+    residencePrefectures: p.residencePrefectures,
+    workPrefMode: p.workPrefMode as Prisma.ScoutConditionUncheckedCreateInput["workPrefMode"],
+    workPrefectures: p.workPrefectures,
     templateId: p.templateId,
     plannedCount: p.plannedCount,
     deliveryDate: p.deliveryDate,

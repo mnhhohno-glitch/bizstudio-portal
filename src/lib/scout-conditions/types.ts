@@ -45,8 +45,10 @@ export type ConditionDto = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: number | null;
-  areaMode: string; // NATIONWIDE / EAST / WEST / PREFECTURE
-  prefectures: string[];
+  residenceMode: string; // 居住地: NATIONWIDE / EAST / WEST / PREFECTURE（T-196 で areaMode から改名）
+  residencePrefectures: string[];
+  workPrefMode: string; // 希望勤務地: ALL / SELECTED（T-196）
+  workPrefectures: string[];
   templateId: string | null;
   templateKind: string | null;
   templateName: string | null;
@@ -81,8 +83,10 @@ export type ConditionInput = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: number | null;
-  areaMode: string;
-  prefectures: string[];
+  residenceMode: string;
+  residencePrefectures: string[];
+  workPrefMode: string;
+  workPrefectures: string[];
   templateId: string | null;
   plannedCount: number | null;
   deliveryDate: string | null;

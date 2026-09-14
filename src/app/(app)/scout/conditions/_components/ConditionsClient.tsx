@@ -23,7 +23,7 @@ import FilterPanel from "./FilterPanel";
 import PrefectureModal from "./PrefectureModal";
 import { applyDayFilter, applyFilter, buildCsv, DEFAULT_FILTER, sortConditions, type DayFilter, type FilterState } from "./filter";
 
-type PrefModalState = { initial: string[]; onConfirm: (prefs: string[]) => void } | null;
+type PrefModalState = { initial: string[]; title: string; onConfirm: (prefs: string[]) => void } | null;
 
 export default function ConditionsClient() {
   const [data, setData] = useState<ConditionsResponse | null>(null);
@@ -263,8 +263,9 @@ export default function ConditionsClient() {
             }}
             onOpenPrefModal={() =>
               setPrefModal({
-                initial: draft.prefectures,
-                onConfirm: (prefs) => setDraft((f) => ({ ...f, prefectures: prefs })),
+                initial: draft.residencePrefectures,
+                title: "居住地（都道府県指定）",
+                onConfirm: (prefs) => setDraft((f) => ({ ...f, residencePrefectures: prefs })),
               })
             }
           />
@@ -393,13 +394,14 @@ export default function ConditionsClient() {
           }}
           onDuplicate={(c) => bulk("duplicate", [c.id])}
           onDelete={(c) => bulk("delete", [c.id])}
-          onOpenPrefModal={(current, onConfirm) => setPrefModal({ initial: current, onConfirm })}
+          onOpenPrefModal={(current, onConfirm, title) => setPrefModal({ initial: current, title, onConfirm })}
         />
       )}
 
       {prefModal && (
         <PrefectureModal
           initial={prefModal.initial}
+          title={prefModal.title}
           onClose={() => setPrefModal(null)}
           onConfirm={(prefs) => {
             prefModal.onConfirm(prefs);

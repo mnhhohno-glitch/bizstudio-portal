@@ -2,14 +2,14 @@
 
 対象: マイナビ転職スカウト RPA（Power Automate Desktop）担当者
 ポータル側担当: 大野 将幸
-版: 2026-09-14（T-195 確定版。**この契約は変更しません**。差分があれば本書側を実装に合わせます）
+版: 2026-09-14 改2（T-196。`area` を `residence`（居住地）と `workLocation`（希望勤務地）に分けました。RPA 切替前のため後方互換なしで契約を置き換えています。以後この契約は変更しません）
 
 ---
 
 ## 0. 概要
 
 ポータルの「スカウト配信条件コンソール」（`/scout/conditions`）で号機ごとに持っている
-マイナビ検索条件（6軸）と配信テンプレートを、RPA が **配信前に取りに来て**、配信後に **結果を返す** ための API です。
+マイナビ検索条件（7軸）と配信テンプレートを、RPA が **配信前に取りに来て**、配信後に **結果を返す** ための API です。
 
 | 用途 | メソッド | パス |
 |--|--|--|
@@ -43,10 +43,14 @@
     "lastLoginDays": 1,
     "gradYear": { "from": 2015, "to": 2025 },
     "companyCount": "～2社",
-    "area": {
+    "residence": {
       "mode": "NATIONWIDE",
       "regions": ["全国"],
       "prefectures": []
+    },
+    "workLocation": {
+      "mode": "SELECTED",
+      "prefectures": ["埼玉", "千葉", "東京", "神奈川", "愛知", "京都", "大阪", "兵庫"]
     },
     "template": { "templateId": "clx...", "name": "…", "subject": "…", "body": "…" },
     "plannedCount": 99
@@ -54,7 +58,6 @@
   "fixed": {
     "education": "指定なし（チェックしない）",
     "jobCategory": "指定なし",
-    "residence": "指定なし",
     "excludeZeroCompany": false,
     "excludeList": "含まない",
     "appliedToUs": "含まない"
@@ -72,12 +75,14 @@
 | `lastLoginDays` | 1/3/7/…（日以内）。null=指定なし（基本は必ず入る） |
 | `gradYear.from` / `to` | 西暦4桁 or null（指定なし） |
 | `companyCount` | マイナビのプルダウン表示そのまま（`0社` / `～1社` … `～6社` / `7社以上`）。指定なしは null |
-| `area.mode` | `NATIONWIDE` / `EAST` / `WEST` / `PREFECTURE` |
-| `area.regions` | 親チェックを入れる地域名の配列。NATIONWIDE→`["全国"]`、EAST→`["北海道","東北","関東","甲信越"]`、WEST→`["北陸","東海","関西","中国","四国","九州"]`。PREFECTURE のときは「全都道府県が選ばれている地域」がここに入る |
-| `area.prefectures` | PREFECTURE のとき、地域ごと選ばれていない個別の都道府県名（例 `["東京","神奈川"]`）。**`regions` → `prefectures` の順にチェック**してください |
+| `residence.mode` | **居住地**の指定方法。`NATIONWIDE` / `EAST` / `WEST` / `PREFECTURE` |
+| `residence.regions` | 居住地で親チェックを入れる地域名の配列。NATIONWIDE→`["全国"]`、EAST→`["北海道","東北","関東","甲信越"]`、WEST→`["北陸","東海","関西","中国","四国","九州"]`。PREFECTURE のときは「全都道府県が選ばれている地域」がここに入る |
+| `residence.prefectures` | PREFECTURE のとき、地域ごと選ばれていない個別の都道府県名（例 `["東京","神奈川"]`）。**`regions` → `prefectures` の順にチェック**してください |
+| `workLocation.mode` | **希望勤務地**の指定方法。`ALL`（指定しない。**マイナビ上は「全国」を入れる。空欄にはしない**）/ `SELECTED`（`prefectures` の都道府県を指定） |
+| `workLocation.prefectures` | SELECTED のときにチェックする都道府県名の配列（例 `["埼玉","千葉","東京","神奈川","愛知","京都","大阪","兵庫"]`＝有効エリア8都府県）。`ALL` のときは常に `[]` |
 | `template.subject` / `body` | 差し込み記号（`[担当者]` `[社名]` `[最終学歴]` `[経験職種]`）は **展開せず原文のまま**。展開は RPA 側の既存処理で行ってください。`template` 自体が null のこともあります（テンプレート未設定） |
 | `plannedCount` | 予定件数（参考値）。null あり |
-| `fixed` | 常にこの値でフォームに入力する固定値（学歴はチェックしない・経験職種/居住地は指定なし・0社を除くはチェックなし・除外リスト/自社応募は含まない） |
+| `fixed` | 常にこの値でフォームに入力する固定値（学歴はチェックしない・経験職種は指定なし・0社を除くはチェックなし・除外リスト/自社応募は含まない）。**居住地は固定値ではなくなりました**（`condition.residence` を使ってください） |
 
 ### 条件が無い・号機が使えないとき
 

@@ -12,8 +12,8 @@ export type ConditionLabelRow = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: number | null;
-  areaMode: string;
-  prefectures: string[];
+  residenceMode: string;
+  residencePrefectures: string[];
   template: { name: string } | null;
 };
 
@@ -35,6 +35,6 @@ export function conditionLabel(c: ConditionLabelRow): string {
     regist,
     `卒${gradYearRangeLabel(c.gradYearFrom, c.gradYearTo)}`,
     companyCountLabel(c.companyCount),
-    areaLabel(c.areaMode, c.prefectures),
+    areaLabel(c.residenceMode, c.residencePrefectures),
   ].join("/");
 }

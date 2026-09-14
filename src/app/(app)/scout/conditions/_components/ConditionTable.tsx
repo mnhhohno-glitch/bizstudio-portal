@@ -10,6 +10,9 @@ import {
   periodDaysLabel,
   searchTargetLabel,
   templateKindLabel,
+  workPrefLabel,
+  isDefaultWorkPrefectures,
+  summarizePrefectures,
 } from "@/lib/scout-conditions/constants";
 import type { HolidayMap } from "@/lib/scout-conditions/dates";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
@@ -85,6 +88,7 @@ export default function ConditionTable({
             <th className={TH}>ログイン</th>
             <th className={TH}>卒業年度</th>
             <th className={TH}>経験社数</th>
+            <th className={TH}>居住地</th>
             <th className={TH}>希望勤務地</th>
             <th className={TH}>配信テンプレート</th>
             <th className={`${TH} text-right`}>予定</th>
@@ -97,7 +101,7 @@ export default function ConditionTable({
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={16} className="px-4 py-10 text-center text-[13px] text-[#9CA3AF]">
+              <td colSpan={17} className="px-4 py-10 text-center text-[13px] text-[#9CA3AF]">
                 該当する配信条件はありません
               </td>
             </tr>
@@ -149,8 +153,14 @@ export default function ConditionTable({
                 <td className={TD}>{periodDaysLabel(c.lastLoginDays)}</td>
                 <td className={TD}>{gradYearRangeLabel(c.gradYearFrom, c.gradYearTo)}</td>
                 <td className={TD}>{companyCountLabel(c.companyCount)}</td>
-                <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.prefectures.join("/") || undefined}>
-                  {areaLabel(c.areaMode, c.prefectures)}
+                <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.residencePrefectures.join("/") || undefined}>
+                  {areaLabel(c.residenceMode, c.residencePrefectures)}
+                </td>
+                <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.workPrefectures.join("/") || undefined}>
+                  {workPrefLabel(c.workPrefMode, c.workPrefectures)}
+                  {c.workPrefMode !== "ALL" && c.workPrefectures.length > 0 && !isDefaultWorkPrefectures(c.workPrefectures) && (
+                    <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
+                  )}
                 </td>
                 <td className={`${TD} max-w-[260px] truncate`} title={c.templateName ?? undefined}>
                   {c.templateName ? (

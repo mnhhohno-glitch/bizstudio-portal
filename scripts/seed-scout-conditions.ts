@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { prisma } from "@/lib/prisma";
 import { addDaysYmd, jstTodayYmd, ymdToDbDate } from "@/lib/scout-conditions/dates";
-import { ALL_PREFECTURES } from "@/lib/scout-conditions/constants";
+import { ALL_PREFECTURES, DEFAULT_WORK_PREFECTURES } from "@/lib/scout-conditions/constants";
 
 type MappedCondition = {
   searchTarget: "EXCLUDE" | "ONLY" | "INCLUDE";
@@ -24,8 +24,10 @@ type MappedCondition = {
   gradYearFrom: number | null;
   gradYearTo: number | null;
   companyCount: number | null;
-  areaMode: "NATIONWIDE" | "EAST" | "WEST" | "PREFECTURE";
-  prefectures: string[];
+  residenceMode: "NATIONWIDE" | "EAST" | "WEST" | "PREFECTURE";
+  residencePrefectures: string[];
+  workPrefMode: "ALL" | "SELECTED";
+  workPrefectures: string[];
 };
 
 const ACTIVE_MACHINE_NOS = [1, 2, 3, 4];
@@ -127,13 +129,13 @@ function mapPattern(p: {
     registDateTo = registDateFrom;
   }
 
-  let areaMode: "NATIONWIDE" | "EAST" | "WEST" | "PREFECTURE" = "NATIONWIDE";
+  let residenceMode: "NATIONWIDE" | "EAST" | "WEST" | "PREFECTURE" = "NATIONWIDE";
   let prefectures: string[] = [];
-  if (p.areaType === "EAST" || p.areaType === "WEST") areaMode = p.areaType;
+  if (p.areaType === "EAST" || p.areaType === "WEST") residenceMode = p.areaType;
   else if (p.areaType === "PREFECTURES" && Array.isArray(p.prefectures)) {
     const set = new Set(p.prefectures.filter((x): x is string => typeof x === "string"));
     prefectures = ALL_PREFECTURES.filter((x) => set.has(x));
-    if (prefectures.length > 0) areaMode = "PREFECTURE";
+    if (prefectures.length > 0) residenceMode = "PREFECTURE";
   }
 
   return {
@@ -146,8 +148,10 @@ function mapPattern(p: {
     gradYearFrom: p.gradYearFrom,
     gradYearTo: p.gradYearTo,
     companyCount: p.companyCount != null && p.companyCount >= 0 && p.companyCount <= 7 ? p.companyCount : null,
-    areaMode,
-    prefectures,
+    residenceMode,
+    residencePrefectures: prefectures,
+    workPrefMode: "SELECTED",
+    workPrefectures: DEFAULT_WORK_PREFECTURES,
   };
 }
 
@@ -173,8 +177,10 @@ async function seedInitialConditions(): Promise<{ created: number; skipped: stri
           gradYearFrom: null,
           gradYearTo: null,
           companyCount: null,
-          areaMode: "NATIONWIDE",
-          prefectures: [],
+          residenceMode: "NATIONWIDE",
+          residencePrefectures: [],
+          workPrefMode: "SELECTED",
+          workPrefectures: DEFAULT_WORK_PREFECTURES,
         } satisfies MappedCondition);
     const template = log?.subjectName ? await prisma.scoutTemplate.findFirst({ where: { name: log.subjectName } }) : null;
     await prisma.scoutCondition.create({
