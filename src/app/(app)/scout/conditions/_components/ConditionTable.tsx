@@ -1,7 +1,8 @@
 "use client";
 
-// T-194: 右の一覧（列で分ける形）。横幅が足りない分は横スクロール。
+// T-194: 一覧（列で分ける形）。横幅が足りない分は横スクロール。
 // 予約日と配信日は同じ列に2行（1行目=予約登録日時、2行目=配信日）。送信件数10件未満は枯渇として行ごと色を変える。
+// T-197: 先頭に NO（レコード番号 1-001）列、予約日/配信日の右に作成日列を追加。操作列の「詳細」は「条件設定」に置き換え。
 import {
   areaLabel,
   companyCountLabel,
@@ -14,7 +15,7 @@ import {
   isDefaultWorkPrefectures,
   summarizePrefectures,
 } from "@/lib/scout-conditions/constants";
-import type { HolidayMap } from "@/lib/scout-conditions/dates";
+import { instantToJstYmd, type HolidayMap } from "@/lib/scout-conditions/dates";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
 import { DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
@@ -29,15 +30,15 @@ const STATUS_BADGE: Record<string, string> = {
 
 const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-2 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
 const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-2 py-1.5 align-top text-[12px] text-[#374151]";
+const COLUMN_COUNT = 19;
 
 export default function ConditionTable({
   rows,
   holidays,
   selected,
-  activeId,
   onToggle,
   onToggleAll,
-  onRowClick,
+  onEdit,
   onDuplicate,
   onDelete,
   onMove,
@@ -46,10 +47,10 @@ export default function ConditionTable({
   rows: ConditionDto[];
   holidays: HolidayMap;
   selected: Set<string>;
-  activeId: string | null;
   onToggle: (id: string) => void;
   onToggleAll: (checked: boolean) => void;
-  onRowClick: (c: ConditionDto) => void;
+  /** 行クリック／「条件設定」で値入りの中央モーダルを開く */
+  onEdit: (c: ConditionDto) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
   /** T-195: 予約（QUEUED）の上へ／下へ。同じ号機の中でだけ入れ替える */
@@ -76,6 +77,7 @@ export default function ConditionTable({
                 aria-label="すべて選択"
               />
             </th>
+            <th className={TH}>NO</th>
             <th className={TH}>号機</th>
             <th className={TH}>状態</th>
             <th className={TH}>
@@ -83,6 +85,7 @@ export default function ConditionTable({
               <br />
               配信日
             </th>
+            <th className={TH}>作成日</th>
             <th className={TH}>検索対象</th>
             <th className={TH}>登録日</th>
             <th className={TH}>ログイン</th>
@@ -101,7 +104,7 @@ export default function ConditionTable({
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={17} className="px-4 py-10 text-center text-[13px] text-[#9CA3AF]">
+              <td colSpan={COLUMN_COUNT} className="px-4 py-10 text-center text-[13px] text-[#9CA3AF]">
                 該当する配信条件はありません
               </td>
             </tr>
@@ -109,22 +112,18 @@ export default function ConditionTable({
           {rows.map((c) => {
             const dry = isDryRow(c);
             const run = c.latestRun;
-            const isActive = activeId === c.id;
             const hasRuns = c.runs.length > 0;
             const bounds = queueBounds[c.id] ?? { canUp: false, canDown: false };
             return (
               <tr
                 key={c.id}
-                onClick={() => onRowClick(c)}
-                className={[
-                  "cursor-pointer transition-colors",
-                  dry ? "bg-[#FEF2F2] hover:bg-[#FEE2E2]" : "hover:bg-[#F9FAFB]",
-                  isActive ? "outline outline-2 -outline-offset-2 outline-[#2563EB]" : "",
-                ].join(" ")}
+                onClick={() => onEdit(c)}
+                className={["cursor-pointer transition-colors", dry ? "bg-[#FEF2F2] hover:bg-[#FEE2E2]" : "hover:bg-[#F9FAFB]"].join(" ")}
               >
                 <td className={TD} onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selected.has(c.id)} onChange={() => onToggle(c.id)} aria-label="選択" />
                 </td>
+                <td className={`${TD} font-mono font-semibold tabular-nums`}>{c.recordNo ?? "-"}</td>
                 <td className={TD}>
                   <MachineLabel machineNo={c.machineNo} />
                 </td>
@@ -144,6 +143,9 @@ export default function ConditionTable({
                   <div className="font-medium">
                     <DateText ymd={c.deliveryDate} holidays={holidays} />
                   </div>
+                </td>
+                <td className={TD}>
+                  <DateText ymd={instantToJstYmd(c.createdAt)} holidays={holidays} />
                 </td>
                 <td className={TD}>{searchTargetLabel(c.searchTarget)}</td>
                 <td className={TD}>
@@ -186,10 +188,10 @@ export default function ConditionTable({
                   <div className="flex gap-1">
                     <button
                       type="button"
-                      onClick={() => onRowClick(c)}
-                      className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[11px] text-[#374151] hover:bg-white"
+                      onClick={() => onEdit(c)}
+                      className="rounded border border-[#2563EB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#EFF6FF]"
                     >
-                      詳細
+                      条件設定
                     </button>
                     <button
                       type="button"

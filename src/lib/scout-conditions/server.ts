@@ -10,6 +10,7 @@ import {
   REGIST_DATE_MODE_VALUES,
   SEARCH_TARGET_VALUES,
   GRAD_YEAR_MIN,
+  formatRecordNo,
 } from "./constants";
 import { dbDateToYmd, isValidYmd, ymdToDbDate } from "./dates";
 import type { ConditionDto, ConditionInput, RunDto } from "./types";
@@ -41,6 +42,8 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     id: c.id,
     machineId: c.machineId,
     machineNo: c.machine.machineNo,
+    seqNo: c.seqNo,
+    recordNo: formatRecordNo(c.machine.machineNo, c.seqNo),
     status: c.status,
     queueOrder: c.queueOrder,
     searchTarget: c.searchTarget,

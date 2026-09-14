@@ -1,9 +1,9 @@
-// T-194: 絞り込み・並び順・CSV 生成（画面側のロジック。API は全件を返し、絞り込みはここで行う）
+// T-194: 日付切替・並び順・CSV 生成（画面側のロジック。API は全件を返し、日付の絞り込みはここで行う）
+// T-197: 左の絞り込みパネル（7軸検索）は廃止したので、その絞り込みロジックは削除した
 import {
   areaLabel,
   companyCountLabel,
   conditionStatusLabel,
-  DEFAULT_LAST_LOGIN_DAYS,
   gradYearRangeLabel,
   isDrySentCount,
   periodDaysLabel,
@@ -20,104 +20,7 @@ import {
 } from "@/lib/scout-conditions/dates";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
 
-export type FilterState = {
-  machineNos: number[];
-  statuses: string[];
-  searchTargets: string[];
-  registMode: "" | "PERIOD" | "DATE"; // "" = 指定なし
-  registDays: number | null;
-  registFrom: string; // "YYYY-MM-DD" or ""
-  registTo: string;
-  lastLoginDays: number | null; // null = 指定なし。初期値は 1日以内（UI仕様）
-  gradYearFrom: number | null;
-  gradYearTo: number | null;
-  companyCount: string; // "" = 指定なし / "null" = -- / "0".."7"
-  residenceModes: string[]; // 居住地: NATIONWIDE / EAST / WEST のチップ（T-196 で areaModes から改名）
-  residencePrefectures: string[]; // 居住地の都道府県指定
-  templateKinds: string[];
-  execFrom: string;
-  execTo: string;
-};
-
-export const DEFAULT_FILTER: FilterState = {
-  machineNos: [],
-  statuses: [],
-  searchTargets: [],
-  registMode: "",
-  registDays: null,
-  registFrom: "",
-  registTo: "",
-  lastLoginDays: DEFAULT_LAST_LOGIN_DAYS,
-  gradYearFrom: null,
-  gradYearTo: null,
-  companyCount: "",
-  residenceModes: [],
-  residencePrefectures: [],
-  templateKinds: [],
-  execFrom: "",
-  execTo: "",
-};
-
 export type DayFilter = "prev" | "today" | "next" | "all";
-
-function overlaps(aFrom: string | null, aTo: string | null, bFrom: string, bTo: string): boolean {
-  const af = aFrom ?? "0000-00-00";
-  const at = aTo ?? "9999-99-99";
-  const bf = bFrom || "0000-00-00";
-  const bt = bTo || "9999-99-99";
-  return af <= bt && at >= bf;
-}
-
-export function applyFilter(rows: ConditionDto[], f: FilterState): ConditionDto[] {
-  const prefSet = new Set(f.residencePrefectures);
-  return rows.filter((c) => {
-    if (f.machineNos.length && !f.machineNos.includes(c.machineNo)) return false;
-    if (f.statuses.length && !f.statuses.includes(c.status)) return false;
-    if (f.searchTargets.length && !f.searchTargets.includes(c.searchTarget)) return false;
-
-    if (f.registMode === "PERIOD") {
-      if (c.registDateMode !== "PERIOD") return false;
-      if (f.registDays != null && c.registDays !== f.registDays) return false;
-    } else if (f.registMode === "DATE") {
-      if (c.registDateMode !== "DATE") return false;
-      if ((f.registFrom || f.registTo) && !overlaps(c.registDateFrom, c.registDateTo, f.registFrom, f.registTo))
-        return false;
-    }
-
-    if (f.lastLoginDays != null && c.lastLoginDays !== f.lastLoginDays) return false;
-
-    if (f.gradYearFrom != null || f.gradYearTo != null) {
-      const cf = c.gradYearFrom ?? -Infinity;
-      const ct = c.gradYearTo ?? Infinity;
-      const ff = f.gradYearFrom ?? -Infinity;
-      const ft = f.gradYearTo ?? Infinity;
-      if (!(cf <= ft && ct >= ff)) return false;
-    }
-
-    if (f.companyCount !== "") {
-      if (f.companyCount === "null") {
-        if (c.companyCount != null) return false;
-      } else if (c.companyCount !== Number(f.companyCount)) return false;
-    }
-
-    if (f.residenceModes.length || prefSet.size) {
-      const byMode = f.residenceModes.includes(c.residenceMode);
-      const byPref =
-        prefSet.size > 0 && c.residenceMode === "PREFECTURE" && c.residencePrefectures.some((p) => prefSet.has(p));
-      if (!byMode && !byPref) return false;
-    }
-
-    if (f.templateKinds.length && !(c.templateKind && f.templateKinds.includes(c.templateKind))) return false;
-
-    if (f.execFrom || f.execTo) {
-      if (!c.latestRun) return false;
-      const ymd = instantToJstYmd(c.latestRun.executedAt);
-      if (f.execFrom && ymd < f.execFrom) return false;
-      if (f.execTo && ymd > f.execTo) return false;
-    }
-    return true;
-  });
-}
 
 export function applyDayFilter(rows: ConditionDto[], day: DayFilter, ymd: string | null): ConditionDto[] {
   if (day === "all" || !ymd) return rows;
@@ -184,10 +87,12 @@ function csvCell(v: unknown): string {
 
 export function buildCsv(rows: ConditionDto[]): string {
   const header = [
+    "NO",
     "号機",
     "状態",
     "予約登録日時",
     "配信日",
+    "作成日",
     "配信日曜日",
     "検索対象",
     "登録日指定",
@@ -209,11 +114,13 @@ export function buildCsv(rows: ConditionDto[]): string {
   ];
   const lines = rows.map((c) =>
     [
+      c.recordNo ?? "",
       `${c.machineNo}号機`,
       conditionStatusLabel(c.status),
       instantToJstDateTime(c.createdAt),
       c.deliveryDate ?? "",
       c.deliveryDate ? ymdWeekdayLabel(c.deliveryDate) : "",
+      instantToJstYmd(c.createdAt),
       searchTargetLabel(c.searchTarget),
       c.registDateMode === "PERIOD" ? "期間指定" : "日付入力",
       registDateLabel(c),

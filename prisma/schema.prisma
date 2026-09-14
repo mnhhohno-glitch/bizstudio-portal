@@ -3343,6 +3343,10 @@ model ScoutCondition {
   machineId String          @map("machine_id")
   machine   RpaScoutMachine @relation(fields: [machineId], references: [id])
 
+  // T-197: 号機ごとの通し番号（表示は「1-001」）。一度振った番号は変えない（削除しても詰めない）。
+  //   nullable なのは旧コードが動く数分間の INSERT を壊さないため。採番は create.ts に一本化し、null 行は一覧取得時に補う
+  seqNo Int? @map("seq_no")
+
   status     ScoutConditionStatus @default(QUEUED)
   queueOrder Int                  @default(0) @map("queue_order") // 予約の並び順（小さいほど先）
 
@@ -3389,6 +3393,7 @@ model ScoutCondition {
 
   runs ScoutRun[]
 
+  @@unique([machineId, seqNo])
   @@index([machineId, status, queueOrder])
   @@index([deliveryDate])
   @@index([status])

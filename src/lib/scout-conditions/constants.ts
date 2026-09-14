@@ -205,6 +205,12 @@ export const FIXED_VALUES = [
   { label: "自社へ応募した会員", value: "含まない" },
 ] as const;
 
+// ---- レコード番号（T-197）: 号機番号-3桁ゼロ埋めの通し番号。例 1-001 ----
+export function formatRecordNo(machineNo: number, seqNo: number | null | undefined): string | null {
+  if (seqNo == null) return null;
+  return `${machineNo}-${String(seqNo).padStart(3, "0")}`;
+}
+
 // ---- 枯渇判定：送信件数が10件未満 ----
 export const DRY_THRESHOLD = 10;
 export function isDrySentCount(sentCount: number | null | undefined): boolean {

@@ -34,6 +34,8 @@ export type ConditionDto = {
   id: string;
   machineId: string;
   machineNo: number;
+  seqNo: number | null; // T-197: 号機ごとの通し番号（旧コードで作られた直後だけ null になり得る）
+  recordNo: string | null; // T-197: 表示用「1-001」
   status: string; // RUNNING / QUEUED / DRY / DONE
   queueOrder: number;
   searchTarget: string; // EXCLUDE / ONLY / INCLUDE
@@ -69,7 +71,8 @@ export type ConditionsResponse = {
   conditions: ConditionDto[];
 };
 
-// 作成・更新の入力（PATCH は部分更新可）
+// 作成・更新の入力（PATCH は部分更新可）。
+// T-197: 作成（POST）では status / queueOrder はサーバーが自動決定するため無視される（編集＝PATCH でのみ有効）
 export type ConditionInput = {
   machineId: string;
   status: string;

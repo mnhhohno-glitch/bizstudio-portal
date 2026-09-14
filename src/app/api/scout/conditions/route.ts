@@ -1,15 +1,20 @@
 // T-194: スカウト配信条件コンソール API（一覧＋マスタ取得 / 作成）
-// 認証はログインセッション（getSessionUser）。RPA 向け外部 API は次タスクで別途用意する。
+// 認証はログインセッション（getSessionUser）。RPA 向け外部 API は /api/external/scout-conditions（T-195）。
+// T-197: 作成時の状態（RUNNING/QUEUED）と並び順・レコード番号はサーバー側（create.ts）で決める。body の status/queueOrder は無視する。
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { conditionInclude, parseConditionInput, toConditionDto, toPrismaData } from "@/lib/scout-conditions/server";
+import { createScoutCondition, ensureSeqNos } from "@/lib/scout-conditions/create";
 import { dbDateToYmd } from "@/lib/scout-conditions/dates";
 import type { ConditionsResponse } from "@/lib/scout-conditions/types";
 
 export async function GET() {
   const actor = await getSessionUser();
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // T-197: 旧コードが動いていた窓で作られた seq_no 空の行があれば番号を振る（通常は0件）
+  await ensureSeqNos();
 
   const [machines, templates, holidays, conditions] = await Promise.all([
     prisma.rpaScoutMachine.findMany({
@@ -73,16 +78,10 @@ export async function POST(request: NextRequest) {
     if (!t) return NextResponse.json({ error: "テンプレートが見つかりません" }, { status: 400 });
   }
 
-  // queueOrder 未指定（0）の予約は号機内の末尾に付ける
-  let data = toPrismaData(parsed.data, actor.id);
-  if (data.status === "QUEUED" && (body as Record<string, unknown>).queueOrder === undefined) {
-    const max = await prisma.scoutCondition.aggregate({
-      where: { machineId: data.machineId, status: "QUEUED" },
-      _max: { queueOrder: true },
-    });
-    data = { ...data, queueOrder: (max._max.queueOrder ?? 0) + 1 };
-  }
-
-  const created = await prisma.scoutCondition.create({ data, include: conditionInclude });
+  // T-197: 状態・並び順・レコード番号はサーバーが決める（号機に実行中が無ければ実行中、あれば予約の末尾）
+  const { status: _status, queueOrder: _order, ...data } = toPrismaData(parsed.data, actor.id);
+  void _status;
+  void _order;
+  const created = await createScoutCondition(data);
   return NextResponse.json({ condition: toConditionDto(created) }, { status: 201 });
 }

@@ -2,8 +2,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { conditionInclude, toConditionDto } from "@/lib/scout-conditions/server";
+import { toConditionDto } from "@/lib/scout-conditions/server";
 import { moveQueuedCondition } from "@/lib/scout-conditions/queue";
+import { createScoutCondition } from "@/lib/scout-conditions/create";
 
 export async function POST(request: NextRequest) {
   const actor = await getSessionUser();
@@ -51,45 +52,33 @@ export async function POST(request: NextRequest) {
     });
     if (sources.length === 0) return NextResponse.json({ error: "条件が見つかりません" }, { status: 404 });
 
-    // 複製は「予約」として同じ号機の末尾へ。配信日は引き継がない（登録者は操作者）
-    const maxes = await prisma.scoutCondition.groupBy({
-      by: ["machineId"],
-      where: { machineId: { in: [...new Set(sources.map((s) => s.machineId))] }, status: "QUEUED" },
-      _max: { queueOrder: true },
-    });
-    const nextOrder = new Map(maxes.map((m) => [m.machineId, (m._max.queueOrder ?? 0) + 1]));
-
-    const created = await prisma.$transaction(
-      sources.map((s) => {
-        const order = nextOrder.get(s.machineId) ?? 1;
-        nextOrder.set(s.machineId, order + 1);
-        return prisma.scoutCondition.create({
-          data: {
-            machineId: s.machineId,
-            status: "QUEUED",
-            queueOrder: order,
-            searchTarget: s.searchTarget,
-            registDateMode: s.registDateMode,
-            registDays: s.registDays,
-            registDateFrom: s.registDateFrom,
-            registDateTo: s.registDateTo,
-            lastLoginDays: s.lastLoginDays,
-            gradYearFrom: s.gradYearFrom,
-            gradYearTo: s.gradYearTo,
-            companyCount: s.companyCount,
-            residenceMode: s.residenceMode,
-            residencePrefectures: s.residencePrefectures,
-            workPrefMode: s.workPrefMode,
-            workPrefectures: s.workPrefectures,
-            templateId: s.templateId,
-            plannedCount: s.plannedCount,
-            deliveryDate: null,
-            createdById: actor.id,
-          },
-          include: conditionInclude,
-        });
-      }),
-    );
+    // 複製は同じ号機へ新規作成として登録する。状態は T-197 の自動決定（実行中が無ければ実行中、あれば予約の末尾）。
+    // 配信日は引き継がない（登録者は操作者）。1件ずつ号機ロックの中で採番するため直列に作る
+    const created = [];
+    for (const s of sources) {
+      created.push(
+        await createScoutCondition({
+          machineId: s.machineId,
+          searchTarget: s.searchTarget,
+          registDateMode: s.registDateMode,
+          registDays: s.registDays,
+          registDateFrom: s.registDateFrom,
+          registDateTo: s.registDateTo,
+          lastLoginDays: s.lastLoginDays,
+          gradYearFrom: s.gradYearFrom,
+          gradYearTo: s.gradYearTo,
+          companyCount: s.companyCount,
+          residenceMode: s.residenceMode,
+          residencePrefectures: s.residencePrefectures,
+          workPrefMode: s.workPrefMode,
+          workPrefectures: s.workPrefectures,
+          templateId: s.templateId,
+          plannedCount: s.plannedCount,
+          deliveryDate: null,
+          createdById: actor.id,
+        }),
+      );
+    }
     return NextResponse.json({ ok: true, conditions: created.map(toConditionDto) }, { status: 201 });
   }
 

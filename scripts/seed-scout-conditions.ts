@@ -13,6 +13,7 @@ import { join } from "path";
 import { prisma } from "@/lib/prisma";
 import { addDaysYmd, jstTodayYmd, ymdToDbDate } from "@/lib/scout-conditions/dates";
 import { ALL_PREFECTURES, DEFAULT_WORK_PREFECTURES } from "@/lib/scout-conditions/constants";
+import { createScoutCondition } from "@/lib/scout-conditions/create";
 
 type MappedCondition = {
   searchTarget: "EXCLUDE" | "ONLY" | "INCLUDE";
@@ -183,17 +184,14 @@ async function seedInitialConditions(): Promise<{ created: number; skipped: stri
           workPrefectures: DEFAULT_WORK_PREFECTURES,
         } satisfies MappedCondition);
     const template = log?.subjectName ? await prisma.scoutTemplate.findFirst({ where: { name: log.subjectName } }) : null;
-    await prisma.scoutCondition.create({
-      data: {
-        machineId: m.id,
-        status: "RUNNING",
-        queueOrder: 0,
-        ...mapped,
-        templateId: template?.id ?? m.defaultTemplateId ?? null,
-        plannedCount: log?.searchCount ?? null,
-        deliveryDate: ymdToDbDate(today),
-        createdById: null,
-      },
+    // T-197: 状態・並び順・レコード番号は createScoutCondition が決める（空の号機なので RUNNING になる）
+    await createScoutCondition({
+      machineId: m.id,
+      ...mapped,
+      templateId: template?.id ?? m.defaultTemplateId ?? null,
+      plannedCount: log?.searchCount ?? null,
+      deliveryDate: ymdToDbDate(today),
+      createdById: null,
     });
     created++;
   }
