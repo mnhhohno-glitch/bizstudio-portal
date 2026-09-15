@@ -346,6 +346,11 @@ type BookmarkFile = {
   // DB名/DBNO列用: externalJobRef=job-platform source_job_id、sourceMedia=元媒体コード（webhook由来のみ）。
   externalJobRef?: string | null;
   sourceMedia?: string | null;
+  // T-196: エリア・職種列。job-platform が取り込み時に自社マスタで確定した値のコピー（portal は表示のみ）。
+  //   null=未取得 → 画面は「—」。jobCategoryPath は職種セルのホバー（大＞中＞小フルパス）に使う。
+  jobArea?: string | null;
+  jobCategory?: string | null;
+  jobCategoryPath?: string | null;
   uploadedBy: { id: string; name: string };
   createdAt: string;
   archivedAt?: string | null;
@@ -2257,6 +2262,9 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
           <span className="w-[80px] shrink-0">DB名</span>
           <span className="w-[120px] shrink-0">DBNO</span>
           <span className="flex-1 min-w-0">会社名</span>
+          {/* T-196: エリア・職種（job-platform の確定値のコピー）。表示のみ・並び替え/絞り込みの対象外。 */}
+          <span className="w-[100px] shrink-0">エリア</span>
+          <span className="w-[150px] shrink-0">職種</span>
           <span onClick={() => activateBasis("wish")}
             className={`w-[56px] shrink-0 cursor-pointer hover:text-gray-700 flex items-center gap-0.5 ${degreeOf("wish") ? "text-[#2563EB]" : ""}`}>
             希望<DirArrows dir={keyOf("wish")?.dir ?? null} /><OrderBadge n={degreeOf("wish")} />
@@ -2413,6 +2421,17 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                     ) : null;
                   })()}
                 </div>
+                {/* T-196: エリア・職種。job-platform の確定値をそのまま表示（portal では加工・推測しない）。
+                    値が無ければ「—」。長い値は truncate ＋ ホバー（職種は大＞中＞小フルパスを優先）。 */}
+                <span className="w-[100px] shrink-0 text-[11px] text-gray-600 truncate" title={file.jobArea ?? undefined}>
+                  {file.jobArea ?? <span className="text-gray-300">—</span>}
+                </span>
+                <span
+                  className="w-[150px] shrink-0 text-[11px] text-gray-600 truncate"
+                  title={file.jobCategoryPath ?? file.jobCategory ?? undefined}
+                >
+                  {file.jobCategory ?? <span className="text-gray-300">—</span>}
+                </span>
                 {(() => {
                   // サイト経由（PDF未保管）は AI評価対象外。空「—」だと「未分析」と紛らわしいので明示する。
                   const isSiteNoPdf = file.origin === "candidate" && !file.driveFileId;

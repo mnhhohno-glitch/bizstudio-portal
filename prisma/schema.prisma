@@ -1551,6 +1551,13 @@ model CandidateFile {
   //   埋め込み（変えない）。受信できなかった項目は null のまま（捏造しない）。エントリー化（to-entry）で JobEntry へ引き継ぐ。
   jobTitle          String?               @map("job_title")
   jobCategory       String?               @map("job_category")
+  // T-196: ブックマーク一覧の「エリア」「職種」列。値は job-platform（求人プラットフォーム）が取り込み時に
+  //   自社マスタの対応表で機械的に確定したもののコピー。portal 側では推測・生成をしない（AI呼び出しなし）。
+  //   入り口は2つ: ①ブックマーク受信API(from-job-platform)の任意項目 ②埋め戻しAPI(/api/external/bookmarks/job-attributes)。
+  //   職種の表示名は既存の jobCategory 列を流用（T-161/T-185 と同一列）。jobCategoryPath はホバー表示専用の
+  //   大＞中＞小フルパス。どちらも null は「未取得」＝画面は「—」。
+  jobArea           String?               @map("job_area") // 表示用エリア。例「東京都 港区」
+  jobCategoryPath   String?               @map("job_category_path") // 例「技術職（機械・電気）＞設計＞CAD・CAMオペレーター」
   // T-131: 手動アップPDFの job-platform 自動投入（フルデータ化）。投入試行時刻。
   //   externalJobRef が入れば紐付け完了。null のまま2h超過は滞留として拾い直し対象。
   platformSubmittedAt DateTime?           @map("platform_submitted_at")
