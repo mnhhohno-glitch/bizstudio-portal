@@ -56,7 +56,7 @@ const CMP_LABEL: Record<Exclude<Comparison, "none">, string> = {
 
 /** 土曜=薄い青 / 日曜=薄い赤。棒・線の視認性を損なわない濃さに抑える */
 const WEEKEND_FILL: Record<number, string> = { 6: "#2563EB", 0: "#DC2626" };
-const WEEKEND_OPACITY = 0.07;
+const WEEKEND_OPACITY = 0.12; // T-199: 0.07 では薄すぎて土日が判別しにくかったため上げた
 
 function unitSuffix(unit: Unit): string {
   return unit === "day" ? "日" : unit === "hour" ? "時" : "月";

@@ -28,6 +28,37 @@ export function applyDayFilter(rows: ConditionDto[], day: DayFilter, ymd: string
   return rows.filter((c) => c.deliveryDate === ymd);
 }
 
+/** T-199: 期間指定の基準。reserved=予約日（createdAt を JST の日付に直したもの）/ delivery=配信日 */
+export type RangeBasis = "reserved" | "delivery";
+export type DateRange = { from: string; to: string };
+
+/** 行の「基準日」（YYYY-MM-DD）。配信日が未設定の行は delivery 基準では null（期間指定時は除外される） */
+export function basisYmd(c: ConditionDto, basis: RangeBasis): string | null {
+  return basis === "reserved" ? instantToJstYmd(c.createdAt) : c.deliveryDate;
+}
+
+/**
+ * T-199: 任意期間での絞り込み。開始のみ＝その日以降、終了のみ＝その日以前、両方＝その範囲。
+ * 開始・終了とも空なら何もしない（呼び出し側が日付タブを使う）。
+ */
+export function applyRangeFilter(rows: ConditionDto[], range: DateRange, basis: RangeBasis): ConditionDto[] {
+  if (!range.from && !range.to) return rows;
+  return rows.filter((c) => {
+    const ymd = basisYmd(c, basis);
+    if (!ymd) return false;
+    if (range.from && ymd < range.from) return false;
+    if (range.to && ymd > range.to) return false;
+    return true;
+  });
+}
+
+/** T-199: 号機の絞り込み（複数選択・OR）。空配列＝絞り込みなし（担当CAフィルタと同じ約束） */
+export function applyMachineFilter(rows: ConditionDto[], machineNos: number[]): ConditionDto[] {
+  if (machineNos.length === 0) return rows;
+  const set = new Set(machineNos);
+  return rows.filter((c) => set.has(c.machineNo));
+}
+
 const STATUS_ORDER: Record<string, number> = { RUNNING: 0, QUEUED: 1, DRY: 2, DONE: 3 };
 
 export function sortConditions(rows: ConditionDto[], key: SortKey): ConditionDto[] {

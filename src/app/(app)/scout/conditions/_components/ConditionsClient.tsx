@@ -18,10 +18,20 @@ import {
   type HolidayMap,
 } from "@/lib/scout-conditions/dates";
 import type { ConditionDto, ConditionsResponse } from "@/lib/scout-conditions/types";
+import { FilterField, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 import ConditionTable from "./ConditionTable";
 import ConditionModal, { type ModalMode } from "./ConditionModal";
 import PrefectureModal from "./PrefectureModal";
-import { applyDayFilter, buildCsv, sortConditions, type DayFilter } from "./filter";
+import {
+  applyDayFilter,
+  applyMachineFilter,
+  applyRangeFilter,
+  buildCsv,
+  sortConditions,
+  type DateRange,
+  type DayFilter,
+  type RangeBasis,
+} from "./filter";
 
 type PrefModalState = { initial: string[]; title: string; onConfirm: (prefs: string[]) => void } | null;
 
@@ -29,6 +39,11 @@ export default function ConditionsClient() {
   const [data, setData] = useState<ConditionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState<DayFilter>("today");
+  // T-199: 任意期間（開始のみ/終了のみ可）。どちらかが入っている間は日付タブは効かない（併用しない）
+  const [range, setRange] = useState<DateRange>({ from: "", to: "" });
+  const [basis, setBasis] = useState<RangeBasis>("delivery");
+  // T-199: 号機の絞り込み。null＝まだ触っていない（＝全号機選択）。空配列＝全解除（担当CAフィルタと同じく絞り込みなし）
+  const [machineSel, setMachineSel] = useState<number[] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("machine");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalMode | null>(null);
@@ -64,10 +79,24 @@ export default function ConditionsClient() {
   );
   const conditions = useMemo(() => data?.conditions ?? [], [data?.conditions]);
 
-  const rows = useMemo(
-    () => sortConditions(applyDayFilter(conditions, day, day === "all" ? null : dayYmd[day]), sortKey),
-    [conditions, day, dayYmd, sortKey],
+  const rangeActive = Boolean(range.from || range.to);
+  const machineOptions = useMemo(
+    () =>
+      [...(data?.machines ?? [])]
+        .sort((a, b) => a.machineNo - b.machineNo)
+        .map((m) => ({ value: String(m.machineNo), label: `${m.machineNo}号機` })),
+    [data?.machines],
   );
+  const allMachineNos = useMemo(() => machineOptions.map((o) => Number(o.value)), [machineOptions]);
+  const selectedMachineNos = machineSel ?? allMachineNos;
+
+  // T-199: 期間（または日付タブ）と号機は AND。CSV（表示中）や「表示 N 件」もこの rows を使う
+  const rows = useMemo(() => {
+    const byDate = rangeActive
+      ? applyRangeFilter(conditions, range, basis)
+      : applyDayFilter(conditions, day, day === "all" ? null : dayYmd[day]);
+    return sortConditions(applyMachineFilter(byDate, selectedMachineNos), sortKey);
+  }, [conditions, rangeActive, range, basis, day, dayYmd, selectedMachineNos, sortKey]);
 
   // T-195: 予約切れの警告帯（稼働中の号機ごとに QUEUED が0件なら出す）。
   // 「ポータルタスク作成済」は実際に未完了タスクがあるときだけ表示し、リンクは実タスクに向ける。
@@ -257,54 +286,123 @@ export default function ConditionsClient() {
       )}
 
       <div className="min-w-0 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
-        {/* 日付切替 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E7EB] px-4 py-3">
-          <div className="flex items-center gap-1">
-            {/* T-198: この切替が見ているのは配信日（作成日ではない）。基準を画面上でも明記する */}
-            <span className="mr-1 text-[12px] text-[#6B7280]">配信日</span>
-            {DAY_BUTTONS.map((b) => {
-              const ymd = b.key === "all" ? null : dayYmd[b.key];
-              const kind = ymd ? dayKind(ymd, holidays) : "weekday";
-              const active = day === b.key;
-              return (
+        {/* 日付切替・期間・号機・並び順（T-199: 期間と号機を追加。ラベルは求職者一覧のフィルタと同じく入力の上） */}
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b border-[#E5E7EB] px-4 py-3">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+            {/* T-198: この切替が見ているのは配信日（作成日ではない）。基準を画面上でも明記する。期間指定中は選択が外れる */}
+            <FilterField label="配信日">
+              <div className="flex items-center gap-1">
+                {DAY_BUTTONS.map((b) => {
+                  const ymd = b.key === "all" ? null : dayYmd[b.key];
+                  const kind = ymd ? dayKind(ymd, holidays) : "weekday";
+                  const active = !rangeActive && day === b.key;
+                  return (
+                    <button
+                      key={b.key}
+                      type="button"
+                      onClick={() => {
+                        // 日付タブを押したら期間指定は解除して切り替える（併用しない）
+                        setRange({ from: "", to: "" });
+                        setDay(b.key);
+                      }}
+                      title={ymd && holidays[ymd] ? holidays[ymd] : undefined}
+                      className={[
+                        "rounded-[6px] border px-3 py-1.5 text-[13px] transition-colors",
+                        active ? "border-[#2563EB] bg-[#EFF6FF] font-medium text-[#1D4ED8]" : "border-[#D1D5DB] bg-white text-[#374151] hover:bg-[#F9FAFB]",
+                      ].join(" ")}
+                    >
+                      {b.label}
+                      {ymd && (
+                        <span className={`ml-1 text-[12px] ${active ? "" : dayColorClass(kind)}`}>
+                          {formatYmdShort(ymd)}
+                          {holidays[ymd] ? "祝" : ""}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </FilterField>
+
+            {/* T-199: 任意期間。基準（予約日/配信日）を切り替えられる。片側のみの指定も可 */}
+            <FilterField label="期間">
+              <div className="flex items-center gap-1">
+                <div className="mr-1 flex overflow-hidden rounded-md border border-gray-300 text-[12px]">
+                  {(
+                    [
+                      { value: "reserved", label: "予約日" },
+                      { value: "delivery", label: "配信日" },
+                    ] as { value: RangeBasis; label: string }[]
+                  ).map((b) => (
+                    <button
+                      key={b.value}
+                      type="button"
+                      onClick={() => setBasis(b.value)}
+                      className={[
+                        "px-2 py-1.5 transition-colors",
+                        basis === b.value ? "bg-[#2563EB] font-medium text-white" : "bg-white text-[#374151] hover:bg-[#F9FAFB]",
+                      ].join(" ")}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="date"
+                  value={range.from}
+                  onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+                  className={`w-[140px] ${FILTER_INPUT_CLS}`}
+                />
+                <span className="text-xs text-gray-400">〜</span>
+                <input
+                  type="date"
+                  value={range.to}
+                  onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+                  className={`w-[140px] ${FILTER_INPUT_CLS}`}
+                />
                 <button
-                  key={b.key}
                   type="button"
-                  onClick={() => setDay(b.key)}
-                  title={ymd && holidays[ymd] ? holidays[ymd] : undefined}
-                  className={[
-                    "rounded-[6px] border px-3 py-1.5 text-[13px] transition-colors",
-                    active ? "border-[#2563EB] bg-[#EFF6FF] font-medium text-[#1D4ED8]" : "border-[#D1D5DB] text-[#374151] hover:bg-[#F9FAFB]",
-                  ].join(" ")}
+                  onClick={() => setRange({ from: "", to: "" })}
+                  disabled={!rangeActive}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-[#2563EB] hover:bg-gray-50 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-white"
                 >
-                  {b.label}
-                  {ymd && (
-                    <span className={`ml-1 text-[12px] ${active ? "" : dayColorClass(kind)}`}>
-                      {formatYmdShort(ymd)}
-                      {holidays[ymd] ? "祝" : ""}
-                    </span>
-                  )}
+                  クリア
                 </button>
-              );
-            })}
+              </div>
+            </FilterField>
+
+            {/* T-199: 号機の複数選択（求職者一覧の担当CAフィルタと同じ部品）。空＝絞り込みなし */}
+            <FilterMultiSelectField
+              label="号機"
+              options={machineOptions}
+              selected={selectedMachineNos.map(String)}
+              onChange={(next) => setMachineSel(next.map(Number))}
+              width="w-44"
+              panelWidth="w-44"
+              allLabel="全号機"
+              allSelectedLabel="全号機"
+              listSeparator=", "
+            />
           </div>
-          <div className="flex items-center gap-2 text-[12px] text-[#6B7280]">
-            <span>並び順</span>
-            <select
-              className="rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-1 text-[12px] text-[#374151]"
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <button type="button" onClick={() => void load()} className="ml-2 text-[#2563EB] underline" title="最新の状態を読み直す">
-              再読込
-            </button>
-          </div>
+
+          <FilterField label="並び順">
+            <div className="flex items-center gap-2 text-[12px] text-[#6B7280]">
+              <select
+                className={`${FILTER_INPUT_CLS} text-[12px]`}
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void load()} className="ml-1 text-[#2563EB] underline" title="最新の状態を読み直す">
+                再読込
+              </button>
+            </div>
+          </FilterField>
         </div>
 
         {/* ツールバー */}

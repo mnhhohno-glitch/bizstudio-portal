@@ -4,6 +4,8 @@
 // 新規作成（空）と編集（値入り）を同じコンポーネントで行う。旧「配信条件の詳細」右パネルの置き換え。
 // - 新規作成: 状態・並び順・レコード番号はサーバーが決める（号機に実行中が無ければ実行中、あれば予約の末尾）
 // - 編集:     状態のプルダウンで自動決定された値を手で直せる
+// T-199: レイアウトをマイナビ「検索項目設定」画面の形式（グループ見出しバー＋左=項目名/右=入力欄の2列テーブル）に揃えた。
+//   入力項目・選択肢・バリデーション・保存の挙動は T-198 のまま。見た目の配置だけを変えている。
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -29,35 +31,17 @@ import { jstTodayYmd, type HolidayMap } from "@/lib/scout-conditions/dates";
 import type { ConditionDto, ConditionInput, MachineDto, TemplateDto } from "@/lib/scout-conditions/types";
 import { DateField, DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
+import { FormGroup, FormRow } from "./FormTable";
 import TemplatePreview from "./TemplatePreview";
 
-const SELECT = "w-full rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-1.5 text-[13px] text-[#374151]";
-const INPUT = "w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151]";
+// 入力欄は右列の左端から始めて右に余白を残す（w-full にしない）
+const SELECT = "rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-1.5 text-[13px] text-[#374151]";
+const INPUT = "rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151]";
 const CHIP = (selected: boolean) =>
   [
     "rounded-full border px-3 py-1 text-[12px] font-medium transition-colors",
     selected ? "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]" : "border-[#D1D5DB] bg-white text-[#6B7280] hover:bg-[#F9FAFB]",
   ].join(" ");
-
-/** マイナビの検索条件画面に寄せた1行＝1軸のレイアウト（左に軸名・右に入力） */
-function AxisRow({ no, label, hint, children }: { no?: string; label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[170px_1fr] items-start gap-3 border-b border-[#F3F4F6] py-3 last:border-b-0">
-      <div className="pt-1">
-        <div className="text-[12px] font-semibold text-[#374151]">
-          {no && <span className="mr-1 text-[#9CA3AF]">{no}</span>}
-          {label}
-        </div>
-        {hint && <div className="mt-0.5 text-[10px] leading-snug text-[#9CA3AF]">{hint}</div>}
-      </div>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="mb-1 mt-5 border-b border-[#E5E7EB] pb-1 text-[13px] font-semibold text-[#374151]">{children}</div>;
-}
 
 export type ModalMode = { kind: "new" } | { kind: "edit"; condition: ConditionDto };
 
@@ -218,13 +202,13 @@ export default function ConditionModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" {...overlayClose}>
       <div
-        className="flex max-h-[calc(100vh-2rem)] w-full max-w-[880px] flex-col rounded-[10px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.25)]"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1100px] flex-col rounded-[10px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.25)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        {/* 見出し: 例「1-001　1号機　藤本 なつみ」 */}
-        <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-3">
+        {/* 見出し（スクロールしても固定）: 例「1-001　1号機　藤本 なつみ　検索設定の編集」 */}
+        <div className="flex shrink-0 items-center justify-between border-b border-[#E5E7EB] px-5 py-3">
           <div className="flex items-center gap-3">
             {current ? (
               <>
@@ -237,7 +221,8 @@ export default function ConditionModal({
               </>
             ) : (
               <>
-                <span className="text-[15px] font-semibold text-[#374151]">検索設定（新規）</span>
+                <span className="rounded bg-[#111827] px-2 py-0.5 text-[13px] font-semibold tracking-wide text-white">新規</span>
+                <span className="text-[15px] font-semibold text-[#374151]">検索設定</span>
                 <span className="text-[12px] text-[#6B7280]">NO は保存時に号機ごとの通し番号で採番されます</span>
               </>
             )}
@@ -247,23 +232,30 @@ export default function ConditionModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
-          <SectionTitle>基本</SectionTitle>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div>
-              <div className="mb-1 text-[11px] font-semibold text-[#6B7280]">号機</div>
-              <select className={SELECT} value={form.machineId} onChange={(e) => set("machineId", e.target.value)}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-3">
+          {/* ---- 基本 ---- */}
+          <FormGroup title="基本">
+            <FormRow label="号機">
+              <select className={`${SELECT} w-[240px]`} value={form.machineId} onChange={(e) => set("machineId", e.target.value)}>
                 {machines.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.machineNo}号機{m.isActive ? "" : "（停止）"}
                   </option>
                 ))}
               </select>
-            </div>
-            <div>
-              <div className="mb-1 text-[11px] font-semibold text-[#6B7280]">状態</div>
+            </FormRow>
+            <FormRow
+              label="状態"
+              note={
+                current
+                  ? undefined
+                  : machineHasRunning
+                    ? "この号機には実行中の条件があるため、保存時に「予約（末尾）」になります"
+                    : "この号機に実行中の条件が無いため、保存時に「実行中」になります"
+              }
+            >
               {current ? (
-                <select className={SELECT} value={form.status} onChange={(e) => set("status", e.target.value)}>
+                <select className={`${SELECT} w-[240px]`} value={form.status} onChange={(e) => set("status", e.target.value)}>
                   {CONDITION_STATUSES.map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.label}
@@ -271,58 +263,39 @@ export default function ConditionModal({
                   ))}
                 </select>
               ) : (
-                <div className="rounded-[6px] border border-dashed border-[#D1D5DB] bg-[#F9FAFB] px-2 py-1.5 text-[12px] text-[#374151]">
-                  保存時に自動決定：
-                  <span className="font-semibold">{machineHasRunning ? "予約（末尾）" : "実行中"}</span>
-                  <div className="text-[10px] text-[#9CA3AF]">
-                    {machineHasRunning ? "この号機には実行中の条件があります" : "この号機に実行中の条件が無いため"}
-                  </div>
+                <div className="inline-block rounded-[6px] border border-dashed border-[#D1D5DB] bg-[#F9FAFB] px-3 py-1.5 text-[12px] text-[#374151]">
+                  保存時に自動決定：<span className="font-semibold">{machineHasRunning ? "予約（末尾）" : "実行中"}</span>
                 </div>
               )}
-            </div>
-            <div>
-              <div className="mb-1 text-[11px] font-semibold text-[#6B7280]">配信日</div>
-              <DateField value={form.deliveryDate ?? ""} onChange={(v) => set("deliveryDate", v || null)} holidays={holidays} />
-            </div>
-            <div>
-              <div className="mb-1 text-[11px] font-semibold text-[#6B7280]">予定件数</div>
-              <input
-                type="number"
-                min={0}
-                className={INPUT}
-                value={form.plannedCount ?? ""}
-                onChange={(e) => set("plannedCount", e.target.value === "" ? null : Number(e.target.value))}
-              />
-            </div>
+            </FormRow>
             {current && form.status === "QUEUED" && (
-              <div>
-                <div className="mb-1 text-[11px] font-semibold text-[#6B7280]">予約の並び順</div>
+              <FormRow label="予約の並び順" note="小さいほど先に消化">
                 <input
                   type="number"
                   min={0}
-                  className={INPUT}
+                  className={`${INPUT} w-[120px]`}
                   value={form.queueOrder}
                   onChange={(e) => set("queueOrder", Number(e.target.value) || 0)}
                 />
-                <div className="mt-0.5 text-[10px] text-[#9CA3AF]">小さいほど先に消化</div>
-              </div>
+              </FormRow>
             )}
-          </div>
+            <FormRow label="配信日">
+              <DateField className="w-[240px]" value={form.deliveryDate ?? ""} onChange={(v) => set("deliveryDate", v || null)} holidays={holidays} />
+            </FormRow>
+            <FormRow label="予定件数">
+              <input
+                type="number"
+                min={0}
+                className={`${INPUT} w-[120px]`}
+                value={form.plannedCount ?? ""}
+                onChange={(e) => set("plannedCount", e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </FormRow>
+          </FormGroup>
 
-          <SectionTitle>検索条件（7軸）</SectionTitle>
-          <div>
-            <AxisRow no="1." label="検索対象" hint="自社がスカウトを送信した会員">
-              <div className="flex flex-wrap gap-1.5">
-                {SEARCH_TARGETS.map((s) => (
-                  <button key={s.value} type="button" className={CHIP(form.searchTarget === s.value)} onClick={() => set("searchTarget", s.value)}>
-                    {s.label}
-                    {s.sub && <span className="ml-1 text-[10px] opacity-70">({s.sub})</span>}
-                  </button>
-                ))}
-              </div>
-            </AxisRow>
-
-            <AxisRow no="2." label="登録日">
+          {/* ---- 会員情報 ---- */}
+          <FormGroup title="会員情報">
+            <FormRow no="2." label="登録日">
               <div className="mb-2 flex gap-4 text-[12px] text-[#374151]">
                 {REGIST_DATE_MODES.map((m) => (
                   <label key={m.value} className="flex items-center gap-1">
@@ -333,7 +306,7 @@ export default function ConditionModal({
               </div>
               {form.registDateMode === "PERIOD" ? (
                 <select
-                  className={`${SELECT} max-w-[240px]`}
+                  className={`${SELECT} w-[240px]`}
                   value={form.registDays ?? ""}
                   onChange={(e) => set("registDays", e.target.value === "" ? null : Number(e.target.value))}
                 >
@@ -345,60 +318,25 @@ export default function ConditionModal({
                   ))}
                 </select>
               ) : (
-                <div className="grid max-w-[480px] grid-cols-2 gap-2">
-                  <DateField value={form.registDateFrom ?? ""} onChange={(v) => set("registDateFrom", v || null)} holidays={holidays} />
-                  <DateField value={form.registDateTo ?? ""} onChange={(v) => set("registDateTo", v || null)} holidays={holidays} />
+                <div className="flex items-start gap-2">
+                  <DateField className="w-[200px]" value={form.registDateFrom ?? ""} onChange={(v) => set("registDateFrom", v || null)} holidays={holidays} />
+                  <span className="pt-1.5 text-[12px] text-[#6B7280]">〜</span>
+                  <DateField className="w-[200px]" value={form.registDateTo ?? ""} onChange={(v) => set("registDateTo", v || null)} holidays={holidays} />
                 </div>
               )}
-            </AxisRow>
+            </FormRow>
 
-            <AxisRow no="3." label="最終ログイン日" hint="マイナビ側で必須。基本は1日以内">
-              <select className={`${SELECT} max-w-[240px]`} value={form.lastLoginDays} onChange={(e) => set("lastLoginDays", Number(e.target.value))}>
+            <FormRow no="3." label="最終ログイン日" note="マイナビ側で必須。基本は1日以内">
+              <select className={`${SELECT} w-[240px]`} value={form.lastLoginDays} onChange={(e) => set("lastLoginDays", Number(e.target.value))}>
                 {PERIOD_DAYS_OPTIONS.map((d) => (
                   <option key={d} value={d}>
                     {d}日以内
                   </option>
                 ))}
               </select>
-            </AxisRow>
+            </FormRow>
 
-            <AxisRow no="4." label="卒業年度" hint="配信調整の最重要レバー。年齢不問なら両方とも指定なし">
-              <div className="flex max-w-[480px] items-center gap-2">
-                <select className={SELECT} value={form.gradYearFrom ?? ""} onChange={(e) => set("gradYearFrom", e.target.value === "" ? null : Number(e.target.value))}>
-                  <option value="">指定なし</option>
-                  {years.map((y) => (
-                    <option key={y} value={y}>
-                      {y}年
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[12px] text-[#6B7280]">〜</span>
-                <select className={SELECT} value={form.gradYearTo ?? ""} onChange={(e) => set("gradYearTo", e.target.value === "" ? null : Number(e.target.value))}>
-                  <option value="">指定なし</option>
-                  {years.map((y) => (
-                    <option key={y} value={y}>
-                      {y}年
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </AxisRow>
-
-            <AxisRow no="5." label="経験社数" hint="「0社を除く」は常にチェックなし（固定）">
-              <select
-                className={`${SELECT} max-w-[240px]`}
-                value={form.companyCount === null ? "null" : String(form.companyCount)}
-                onChange={(e) => set("companyCount", e.target.value === "null" ? null : Number(e.target.value))}
-              >
-                {COMPANY_COUNT_OPTIONS.map((o) => (
-                  <option key={String(o.value)} value={o.value === null ? "null" : String(o.value)}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </AxisRow>
-
-            <AxisRow no="6." label="居住地" hint="毎回指定する。空欄にはしない（海外が含まれるため）">
+            <FormRow no="6." label="居住地" note="毎回指定する。空欄にはしない（海外が含まれるため）">
               <div className="flex flex-wrap gap-1.5">
                 {AREA_MODES.filter((m) => m.value !== "PREFECTURE").map((m) => (
                   <button
@@ -434,9 +372,54 @@ export default function ConditionModal({
               {form.residenceMode === "PREFECTURE" && form.residencePrefectures.length > 0 && (
                 <div className="mt-1 text-[11px] text-[#6B7280]">{form.residencePrefectures.join("/")}</div>
               )}
-            </AxisRow>
+            </FormRow>
+          </FormGroup>
 
-            <AxisRow no="7." label="希望勤務地" hint="基本は有効エリア8都府県（東京・埼玉・神奈川・千葉・愛知・大阪・兵庫・京都）で固定。個別配信で稀に絞る">
+          {/* ---- 最終学歴 ---- */}
+          <FormGroup title="最終学歴">
+            <FormRow no="4." label="卒業年度" note="配信調整の最重要レバー。年齢不問なら両方とも指定なし">
+              <div className="flex items-center gap-2">
+                <select className={`${SELECT} w-[160px]`} value={form.gradYearFrom ?? ""} onChange={(e) => set("gradYearFrom", e.target.value === "" ? null : Number(e.target.value))}>
+                  <option value="">指定なし</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}年
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[12px] text-[#6B7280]">〜</span>
+                <select className={`${SELECT} w-[160px]`} value={form.gradYearTo ?? ""} onChange={(e) => set("gradYearTo", e.target.value === "" ? null : Number(e.target.value))}>
+                  <option value="">指定なし</option>
+                  {years.map((y) => (
+                    <option key={y} value={y}>
+                      {y}年
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </FormRow>
+          </FormGroup>
+
+          {/* ---- 経験 ---- */}
+          <FormGroup title="経験">
+            <FormRow no="5." label="経験社数" note="「0社を除く」は常にチェックなし（固定）">
+              <select
+                className={`${SELECT} w-[240px]`}
+                value={form.companyCount === null ? "null" : String(form.companyCount)}
+                onChange={(e) => set("companyCount", e.target.value === "null" ? null : Number(e.target.value))}
+              >
+                {COMPANY_COUNT_OPTIONS.map((o) => (
+                  <option key={String(o.value)} value={o.value === null ? "null" : String(o.value)}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+          </FormGroup>
+
+          {/* ---- 希望条件 ---- */}
+          <FormGroup title="希望条件">
+            <FormRow no="7." label="希望勤務地" note="基本は有効エリア8都府県（東京・埼玉・神奈川・千葉・愛知・大阪・兵庫・京都）で固定。個別配信で稀に絞る">
               <div className="flex flex-wrap items-center gap-1.5">
                 {WORK_PREF_MODES.map((m) =>
                   m.value === "ALL" ? (
@@ -490,120 +473,129 @@ export default function ConditionModal({
               {form.workPrefMode === "SELECTED" && form.workPrefectures.length > 0 && (
                 <div className="mt-1 text-[11px] text-[#6B7280]">{form.workPrefectures.join("/")}</div>
               )}
-            </AxisRow>
-          </div>
+            </FormRow>
+          </FormGroup>
 
-          <SectionTitle>固定値（RPA が常にこの値で入力）</SectionTitle>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px] md:grid-cols-3">
-            {FIXED_VALUES.map((f) => (
-              <div key={f.label} className="flex justify-between gap-2 rounded bg-[#F9FAFB] px-2 py-1">
-                <dt className="text-[#6B7280]">{f.label}</dt>
-                <dd className="text-[#374151]">{f.value}</dd>
+          {/* ---- 検索対象 ---- */}
+          <FormGroup title="検索対象">
+            <FormRow no="1." label="検索対象" note="自社がスカウトを送信した会員">
+              <div className="flex flex-wrap gap-1.5">
+                {SEARCH_TARGETS.map((s) => (
+                  <button key={s.value} type="button" className={CHIP(form.searchTarget === s.value)} onClick={() => set("searchTarget", s.value)}>
+                    {s.label}
+                    {s.sub && <span className="ml-1 text-[10px] opacity-70">({s.sub})</span>}
+                  </button>
+                ))}
               </div>
+            </FormRow>
+          </FormGroup>
+
+          {/* ---- 固定値（RPA が常にこの値で入力・表示のみ） ---- */}
+          <FormGroup title="固定値" titleNote="RPA が常にこの値で入力（表示のみ）">
+            {FIXED_VALUES.map((f) => (
+              <FormRow key={f.label} label={f.label} dense>
+                <span className="text-[12px] text-[#374151]">{f.value}</span>
+              </FormRow>
             ))}
-          </dl>
+          </FormGroup>
 
-          <SectionTitle>配信文</SectionTitle>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[320px_1fr]">
-            <div>
-              <select className={`${SELECT} mb-2`} value={form.templateId ?? ""} onChange={(e) => set("templateId", e.target.value || null)}>
-                <option value="">未設定</option>
-                {templatesByKind.map((g) =>
-                  g.items.length ? (
-                    <optgroup key={g.kind.value} label={g.kind.label}>
-                      {g.items.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                          {t.isActive ? "" : "（無効）"}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null,
+          {/* ---- 配信文 ---- */}
+          <FormGroup title="配信文">
+            <FormRow label="配信文" note={template ? `種別: ${templateKindLabel(template.kind)}` : undefined}>
+              <div className="flex flex-wrap items-center gap-3">
+                <select className={`${SELECT} w-[320px]`} value={form.templateId ?? ""} onChange={(e) => set("templateId", e.target.value || null)}>
+                  <option value="">未設定</option>
+                  {templatesByKind.map((g) =>
+                    g.items.length ? (
+                      <optgroup key={g.kind.value} label={g.kind.label}>
+                        {g.items.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                            {t.isActive ? "" : "（無効）"}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null,
+                  )}
+                </select>
+                {machine?.defaultTemplateId && machine.defaultTemplateId !== form.templateId && (
+                  <button type="button" className="text-[11px] text-[#2563EB] underline" onClick={() => set("templateId", machine.defaultTemplateId)}>
+                    {machine.machineNo}号機のデフォルト（{templates.find((t) => t.id === machine.defaultTemplateId)?.name ?? "-"}）を使う
+                  </button>
                 )}
-              </select>
-              {machine?.defaultTemplateId && machine.defaultTemplateId !== form.templateId && (
-                <button
-                  type="button"
-                  className="mb-2 block text-[11px] text-[#2563EB] underline"
-                  onClick={() => set("templateId", machine.defaultTemplateId)}
-                >
-                  {machine.machineNo}号機のデフォルト（{templates.find((t) => t.id === machine.defaultTemplateId)?.name ?? "-"}）を使う
-                </button>
-              )}
-              {template && <div className="text-[10px] text-[#6B7280]">種別: {templateKindLabel(template.kind)}</div>}
+              </div>
+            </FormRow>
+            {/* プレビューは行の下に全幅で置く（左右に並べない） */}
+            <div className="p-3">
+              <TemplatePreview template={template} />
             </div>
-            <TemplatePreview template={template} />
-          </div>
+          </FormGroup>
 
+          {/* ---- 実績 ---- */}
           {current && (
-            <>
-              <SectionTitle>実績</SectionTitle>
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px] md:grid-cols-4">
-                <div className="flex justify-between rounded bg-[#F9FAFB] px-2 py-1">
-                  <dt className="text-[#6B7280]">配信日</dt>
-                  <dd>
-                    <DateText ymd={current.deliveryDate} holidays={holidays} />
-                  </dd>
-                </div>
-                <div className="flex justify-between rounded bg-[#F9FAFB] px-2 py-1">
-                  <dt className="text-[#6B7280]">作成日時</dt>
-                  <dd>
-                    <DateTimeText iso={current.createdAt} holidays={holidays} />
-                  </dd>
-                </div>
-                <div className="flex justify-between rounded bg-[#F9FAFB] px-2 py-1">
-                  <dt className="text-[#6B7280]">最終実行</dt>
-                  <dd>
-                    <DateTimeText iso={latest?.executedAt} holidays={holidays} />
-                  </dd>
-                </div>
-                <div className="flex justify-between rounded bg-[#F9FAFB] px-2 py-1">
-                  <dt className="text-[#6B7280]">予定/抽出/送信</dt>
-                  <dd className="tabular-nums">
-                    {current.plannedCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
-                    <span className={dry ? "font-semibold text-[#B91C1C]" : ""}>{latest?.sentCount ?? "-"}</span>
-                  </dd>
-                </div>
-                <div className="col-span-2 flex justify-between rounded bg-[#F9FAFB] px-2 py-1 md:col-span-4">
-                  <dt className="text-[#6B7280]">登録者</dt>
-                  <dd>{current.createdByName ?? "-"}</dd>
-                </div>
-              </dl>
-              {current.runs.length > 0 && (
-                <div className="mt-2 overflow-x-auto rounded border border-[#E5E7EB]">
-                  <table className="min-w-full text-[11px]">
-                    <thead className="bg-[#F9FAFB] text-[#6B7280]">
-                      <tr>
-                        <th className="px-2 py-1 text-left">実行日時</th>
-                        <th className="px-2 py-1 text-right">抽出</th>
-                        <th className="px-2 py-1 text-right">送信</th>
-                        <th className="px-2 py-1 text-left">枯渇</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {current.runs.slice(0, 20).map((r) => (
-                        <tr key={r.id} className="border-t border-[#F3F4F6]" title={r.rawNotification ?? undefined}>
-                          <td className="px-2 py-1">
-                            <DateTimeText iso={r.executedAt} holidays={holidays} />
-                          </td>
-                          <td className="px-2 py-1 text-right tabular-nums">{r.extractedCount}</td>
-                          <td className={`px-2 py-1 text-right tabular-nums ${isDrySentCount(r.sentCount) ? "font-semibold text-[#B91C1C]" : ""}`}>{r.sentCount}</td>
-                          <td className="px-2 py-1">{r.isDry || isDrySentCount(r.sentCount) ? "枯渇" : ""}</td>
+            <FormGroup title="実績">
+              <FormRow label="配信日" dense>
+                <span className="text-[12px]">
+                  <DateText ymd={current.deliveryDate} holidays={holidays} />
+                </span>
+              </FormRow>
+              <FormRow label="作成日時" dense>
+                <span className="text-[12px]">
+                  <DateTimeText iso={current.createdAt} holidays={holidays} />
+                </span>
+              </FormRow>
+              <FormRow label="最終実行" dense>
+                <span className="text-[12px]">
+                  <DateTimeText iso={latest?.executedAt} holidays={holidays} />
+                </span>
+              </FormRow>
+              <FormRow label="予定 / 抽出 / 送信" dense>
+                <span className="text-[12px] tabular-nums">
+                  {current.plannedCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
+                  <span className={dry ? "font-semibold text-[#B91C1C]" : ""}>{latest?.sentCount ?? "-"}</span>
+                </span>
+              </FormRow>
+              <FormRow label="登録者" dense>
+                <span className="text-[12px]">{current.createdByName ?? "-"}</span>
+              </FormRow>
+              <div className="p-3">
+                {current.runs.length > 0 && (
+                  <div className="overflow-x-auto rounded border border-[#E5E7EB]">
+                    <table className="min-w-full text-[11px]">
+                      <thead className="bg-[#F9FAFB] text-[#6B7280]">
+                        <tr>
+                          <th className="px-2 py-1 text-left">実行日時</th>
+                          <th className="px-2 py-1 text-right">抽出</th>
+                          <th className="px-2 py-1 text-right">送信</th>
+                          <th className="px-2 py-1 text-left">枯渇</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {current.runs.length > 20 && (
-                <div className="mt-1 text-[10px] text-[#9CA3AF]">新しい順に20件まで表示（全{current.runs.length}件）</div>
-              )}
-              {current.runs.length === 0 && <div className="mt-1 text-[11px] text-[#9CA3AF]">実行実績はまだありません（RPA が配信するたびに記録されます）</div>}
-            </>
+                      </thead>
+                      <tbody>
+                        {current.runs.slice(0, 20).map((r) => (
+                          <tr key={r.id} className="border-t border-[#F3F4F6]" title={r.rawNotification ?? undefined}>
+                            <td className="px-2 py-1">
+                              <DateTimeText iso={r.executedAt} holidays={holidays} />
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums">{r.extractedCount}</td>
+                            <td className={`px-2 py-1 text-right tabular-nums ${isDrySentCount(r.sentCount) ? "font-semibold text-[#B91C1C]" : ""}`}>{r.sentCount}</td>
+                            <td className="px-2 py-1">{r.isDry || isDrySentCount(r.sentCount) ? "枯渇" : ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {current.runs.length > 20 && (
+                  <div className="mt-1 text-[10px] text-[#9CA3AF]">新しい順に20件まで表示（全{current.runs.length}件）</div>
+                )}
+                {current.runs.length === 0 && <div className="text-[11px] text-[#9CA3AF]">実行実績はまだありません（RPA が配信するたびに記録されます）</div>}
+              </div>
+            </FormGroup>
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-[#E5E7EB] px-5 py-3">
+        {/* 下部ボタン（スクロールしても固定。主ボタンは右下） */}
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[#E5E7EB] px-5 py-3">
           <div className="flex gap-2">
             {current && (
               <>
