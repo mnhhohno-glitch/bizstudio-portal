@@ -128,7 +128,8 @@ export default function ConditionModal({
   conditions: ConditionDto[];
   holidays: HolidayMap;
   onClose: () => void;
-  onSaved: (c: ConditionDto, isNew: boolean) => void;
+  /** T-198: demoted = 実行中を1件に保つため「完了」へ畳まれた同じ号機の条件（画面の表示を合わせる） */
+  onSaved: (c: ConditionDto, isNew: boolean, demoted: ConditionDto[]) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
   onOpenPrefModal: (current: string[], onConfirm: (prefs: string[]) => void, title: string) => void;
@@ -194,13 +195,18 @@ export default function ConditionModal({
         return;
       }
       const saved = json.condition as ConditionDto;
+      // T-198: 実行中は号機ごとに1件。手動で実行中に戻したときは畳まれた条件をトーストで伝える
+      const demoted = (Array.isArray(json.demoted) ? json.demoted : []) as ConditionDto[];
+      const demotedNos = demoted.map((d) => d.recordNo ?? "").join("・");
       toast.success(
         isNew
           ? `${saved.recordNo ?? ""} を${saved.status === "RUNNING" ? "「実行中」" : "「予約」（末尾）"}として登録しました`
-          : "保存しました",
+          : demoted.length
+            ? `保存しました（実行中は号機ごとに1件のため ${demotedNos} を「完了」にしました）`
+            : "保存しました",
       );
       setDirty(false);
-      onSaved(saved, isNew);
+      onSaved(saved, isNew, demoted);
     } finally {
       setSaving(false);
     }

@@ -22,6 +22,7 @@ import type { ConditionDto } from "@/lib/scout-conditions/types";
 
 export type DayFilter = "prev" | "today" | "next" | "all";
 
+/** 日付タブ（前日/当日/翌日/すべて）の絞り込み。基準は配信日（deliveryDate）。作成日では絞らない（T-198 で明記） */
 export function applyDayFilter(rows: ConditionDto[], day: DayFilter, ymd: string | null): ConditionDto[] {
   if (day === "all" || !ymd) return rows;
   return rows.filter((c) => c.deliveryDate === ymd);

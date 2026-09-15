@@ -13,6 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma, RpaScoutMachine } from "@prisma/client";
 import { DRY_THRESHOLD, isDrySentCount } from "./constants";
+import { demoteOtherRunning } from "./create";
 import { jstTodayYmd, ymdToDbDate } from "./dates";
 import { conditionLabel } from "./label";
 import { handleQueueEmpty, sendScoutLine, type QueueEmptyOutcome } from "./queue-empty";
@@ -144,6 +145,8 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
           where: { id: next.id },
           data: { status: "RUNNING", deliveryDate: next.deliveryDate ?? ymdToDbDate(jstTodayYmd()) },
         });
+        // T-198: 実行中は号機ごとに1件。切替元は上で DRY にしているので通常は0件だが、念のため他の RUNNING を畳む
+        await demoteOtherRunning(t, machine.id, next.id);
       }
       const remaining = await t.scoutCondition.count({ where: { machineId: machine.id, status: "QUEUED", id: { not: next.id } } });
       return { ...base, switched: true, nextId: next.id, nextLabel: conditionLabel(next), queueEmpty: remaining === 0 };

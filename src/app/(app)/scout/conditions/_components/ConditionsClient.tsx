@@ -259,7 +259,9 @@ export default function ConditionsClient() {
       <div className="min-w-0 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
         {/* 日付切替 */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E7EB] px-4 py-3">
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
+            {/* T-198: この切替が見ているのは配信日（作成日ではない）。基準を画面上でも明記する */}
+            <span className="mr-1 text-[12px] text-[#6B7280]">配信日</span>
             {DAY_BUTTONS.map((b) => {
               const ymd = b.key === "all" ? null : dayYmd[b.key];
               const kind = ymd ? dayKind(ymd, holidays) : "weekday";
@@ -375,8 +377,10 @@ export default function ConditionsClient() {
           conditions={conditions}
           holidays={holidays}
           onClose={() => setModal(null)}
-          onSaved={(c, isNew) => {
+          onSaved={(c, isNew, demoted) => {
             upsertLocal(c);
+            // T-198: 実行中を1件に保つため「完了」へ畳まれた行も反映する（再読込しなくても一覧が合う）
+            for (const d of demoted) upsertLocal(d);
             if (isNew) setModal({ kind: "edit", condition: c });
           }}
           onDuplicate={(c) => bulk("duplicate", [c.id])}

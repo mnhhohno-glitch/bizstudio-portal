@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ScoutNav from "@/components/scout/ScoutNav";
 import ScoutTrendChart, { type TrendPoint, type Comparison, type Unit } from "./_components/ScoutTrendChart";
+import { ymdWeekday } from "@/lib/scout-conditions/dates";
 
 type Bucket = { key: string; deliveryCount: number; openCount: number; applyCount: number };
 type StatsResponse = { overall: Bucket[]; subBuckets: Record<string, Bucket[]> };
@@ -69,6 +70,17 @@ function domainLabels(unit: Unit, primary: Period): string[] {
   return Array.from({ length: lastDay }, (_, i) => String(i + 1)); // 1..末日
 }
 
+/**
+ * T-198: 日別グラフのラベル（日番号）→ 曜日番号（0=日…6=土）。
+ * 日付は期間（サーバーに渡した JST の YYYY-MM-DD）から組み立て、曜日は UTC 正午基準で求めるため、
+ * 端末のタイムゾーン設定で土日の位置が1日ずれることはない。時間別・月別は曜日を出さないので null。
+ * 比較表示（前月/前年）でも primary（表示中の月）から作るので、背景色は当月の土日のまま。
+ */
+function weekdayOf(unit: Unit, primary: Period, label: string): number | null {
+  if (unit !== "day") return null;
+  return ymdWeekday(`${primary.from.slice(0, 7)}-${pad(Number(label))}`);
+}
+
 const UNIT_LABELS: Record<Unit, string> = { day: "日別", hour: "時間別", month: "月別" };
 const CMP_LABELS: Record<Comparison, string> = { none: "比較なし", prevMonth: "前月", prevYear: "前年" };
 
@@ -127,6 +139,7 @@ export default function ScoutDashboardPage() {
       const rate = (b?: Bucket): number | null => (b && b.deliveryCount > 0 ? (b.applyCount / b.deliveryCount) * 100 : null);
       return {
         label: lbl,
+        weekday: weekdayOf(unit, primary, lbl),
         delivery: p ? p.deliveryCount : null,
         apply: p ? p.applyCount : null,
         applyRate: rate(p),
@@ -217,7 +230,7 @@ export default function ScoutDashboardPage() {
         </div>
 
         <p className="mt-1 text-[12px] text-[#9CA3AF]">
-          棒=配信数・応募数（左軸）／ 線=応募率（右軸）。{comparison !== "none" && `${CMP_LABELS[comparison]}を半透明＋点線で重ね描き。`}配信0の点は応募率の線を切ります。
+          棒=配信数・応募数（左軸）／ 線=応募率（右軸）。{comparison !== "none" && `${CMP_LABELS[comparison]}を半透明＋点線で重ね描き。`}配信0の点は応募率の線を切ります。{unit === "day" && "土曜は薄い青、日曜は薄い赤の背景を敷いています。"}
         </p>
 
         <div className="mt-3">

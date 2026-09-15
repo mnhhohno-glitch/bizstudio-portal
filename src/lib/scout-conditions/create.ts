@@ -6,6 +6,11 @@
 //   既にあれば QUEUED で予約列の末尾（queueOrder = MAX+1）。画面からの作成・複製・シード・外部経路のすべてがここを通る。
 // - 排他: 号機単位の pg_advisory_xact_lock。キーは runs.ts（T-195 の枯渇→予約消化）と同じ `scout-runs:<machineId>` を使い、
 //   「作成で RUNNING にする」と「枯渇で予約を RUNNING に切り替える」が同時に走っても直列化されるようにする。
+//
+// T-198: 実行中（RUNNING）は号機ごとに1件まで。RPA は実行中の条件を1件しか取らないため、2件あると
+//   意図と違う条件・テンプレートで配信されても「成功」で終わる（2026-09-10 の2号機不具合と同じ構図）。
+//   状態が RUNNING になりうる経路（作成の自動決定 / 編集での手動変更 / 枯渇時の予約消化 / 複製・シード）は
+//   すべて demoteOtherRunning() を号機ロックの中で通し、他の RUNNING を DONE（完了）へ畳む。
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { jstTodayYmd, ymdToDbDate } from "./dates";
@@ -38,6 +43,18 @@ export async function decideInitialStatus(
   return { status: "QUEUED", queueOrder: await nextQueueOrder(t, machineId) };
 }
 
+/**
+ * T-198: 実行中を号機ごとに1件に保つ。keepId 以外の RUNNING を DONE（完了）へ畳んで畳んだ件数を返す。
+ * 必ず lockMachine() を取った同じトランザクションの中で呼ぶこと（同時実行で2件になるのを防ぐため）。
+ */
+export async function demoteOtherRunning(t: Client, machineId: string, keepId: string): Promise<number> {
+  const r = await t.scoutCondition.updateMany({
+    where: { machineId, status: "RUNNING", id: { not: keepId } },
+    data: { status: "DONE" },
+  });
+  return r.count;
+}
+
 /** 作成入力（status / queueOrder / seqNo はここで決めるので受け取らない） */
 export type CreateConditionData = Omit<Prisma.ScoutConditionUncheckedCreateInput, "status" | "queueOrder" | "seqNo" | "id">;
 
@@ -55,10 +72,14 @@ export async function createScoutCondition(data: CreateConditionData): Promise<C
       const seqNo = await nextSeqNo(t, data.machineId);
       const deliveryDate =
         decided.status === "RUNNING" && data.deliveryDate == null ? ymdToDbDate(jstTodayYmd()) : data.deliveryDate;
-      return t.scoutCondition.create({
+      const created = await t.scoutCondition.create({
         data: { ...data, deliveryDate, status: decided.status, queueOrder: decided.queueOrder, seqNo },
         include: conditionInclude,
       });
+      // T-198: 自動決定が RUNNING を選ぶのは「実行中が0件のとき」だけなので通常は0件だが、
+      // 同時作成で取りこぼしが起きても実行中が2件にならないよう、ここでも畳んでおく
+      if (decided.status === "RUNNING") await demoteOtherRunning(t, data.machineId, created.id);
+      return created;
     },
     { timeout: 20000 },
   );

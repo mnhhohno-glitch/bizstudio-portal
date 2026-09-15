@@ -2,7 +2,8 @@
 
 // T-194: 一覧（列で分ける形）。横幅が足りない分は横スクロール。
 // 予約日と配信日は同じ列に2行（1行目=予約登録日時、2行目=配信日）。送信件数10件未満は枯渇として行ごと色を変える。
-// T-197: 先頭に NO（レコード番号 1-001）列、予約日/配信日の右に作成日列を追加。操作列の「詳細」は「条件設定」に置き換え。
+// T-197: 先頭に NO（レコード番号 1-001）列を追加。操作列の「詳細」は「条件設定」に置き換え。
+// T-198: 作成日列を削除し、実行日時列を予約日/配信日の右隣へ移した（実行済みかどうかを左寄りで確認できるようにするため）。
 import {
   areaLabel,
   companyCountLabel,
@@ -15,7 +16,7 @@ import {
   isDefaultWorkPrefectures,
   summarizePrefectures,
 } from "@/lib/scout-conditions/constants";
-import { instantToJstYmd, type HolidayMap } from "@/lib/scout-conditions/dates";
+import { type HolidayMap } from "@/lib/scout-conditions/dates";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
 import { DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
@@ -30,7 +31,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-2 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
 const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-2 py-1.5 align-top text-[12px] text-[#374151]";
-const COLUMN_COUNT = 19;
+const COLUMN_COUNT = 18;
 
 export default function ConditionTable({
   rows,
@@ -85,7 +86,7 @@ export default function ConditionTable({
               <br />
               配信日
             </th>
-            <th className={TH}>作成日</th>
+            <th className={TH}>実行日時</th>
             <th className={TH}>検索対象</th>
             <th className={TH}>登録日</th>
             <th className={TH}>ログイン</th>
@@ -97,7 +98,6 @@ export default function ConditionTable({
             <th className={`${TH} text-right`}>予定</th>
             <th className={`${TH} text-right`}>抽出</th>
             <th className={`${TH} text-right`}>送信</th>
-            <th className={TH}>実行日時</th>
             <th className={TH}>操作</th>
           </tr>
         </thead>
@@ -145,7 +145,7 @@ export default function ConditionTable({
                   </div>
                 </td>
                 <td className={TD}>
-                  <DateText ymd={instantToJstYmd(c.createdAt)} holidays={holidays} />
+                  <DateTimeText iso={run?.executedAt} holidays={holidays} />
                 </td>
                 <td className={TD}>{searchTargetLabel(c.searchTarget)}</td>
                 <td className={TD}>
@@ -180,9 +180,6 @@ export default function ConditionTable({
                 <td className={`${TD} text-right tabular-nums`}>{run ? run.extractedCount : "-"}</td>
                 <td className={`${TD} text-right tabular-nums ${dry ? "font-semibold text-[#B91C1C]" : ""}`}>
                   {run ? run.sentCount : "-"}
-                </td>
-                <td className={TD}>
-                  <DateTimeText iso={run?.executedAt} holidays={holidays} />
                 </td>
                 <td className={TD} onClick={(e) => e.stopPropagation()}>
                   <div className="flex gap-1">
