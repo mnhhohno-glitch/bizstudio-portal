@@ -993,3 +993,67 @@ enum 5種: `ScoutTemplateKind`(UNSENT/SENT/INDIVIDUAL) ・ `ScoutConditionStatus
   枯渇判定（送信件数10件未満）と予約の自動消化・予約切れの LINE WORKS 通知/タスク自動起票。
   画面上部の「◯号機の予約が空です」警告帯は **QUEUED が無い稼働号機を数えて出す静的表示のみ**で、通知・起票はしていない。
 - 一覧の枯渇色（送信件数 < 10 または status=DRY）は `isDryRow()`（`_components/filter.ts`）で判定。閾値は `DRY_THRESHOLD`（constants.ts）。
+
+## ブックマークのエリア・職種（T-196, master, 2026-09-15）
+
+求職者詳細のブックマーク一覧（HistoryTab / BookmarkSection）に「エリア」「職種」列を追加した。
+**値の source of truth は job-platform（求人プラットフォーム）**。取り込み時に自社マスタの対応表
+（職種 大＞中＞小、エリア 都道府県／市区）で機械的に確定した値を portal にコピーして保持するだけで、
+**portal 側では推測も生成もしない（AI 呼び出しは一切なし）**。null は「未取得」＝画面は「—」。
+
+### CandidateFile の列
+
+| 列 | DB 列名 | 用途 | 例 |
+|--|--|--|--|
+| `jobArea` | `job_area` | エリア（表示用・T-196 新設） | 「東京都 港区」 |
+| `jobCategory` | `job_category` | 職種（**T-161/T-185 の既存列を流用**・新設していない） | 「CAD・CAMオペレーター」 |
+| `jobCategoryPath` | `job_category_path` | 職種フルパス（ホバー表示専用・T-196 新設） | 「技術職（機械・電気）＞設計＞CAD・CAMオペレーター」 |
+
+- migration: `20260915120000_t196_candidate_file_job_area_category`（`ADD COLUMN IF NOT EXISTS` ×3・冪等）。
+- `jobCategory` は T-185 で求人本文からの抽出も入っているため、埋め戻し前から値がある行がある
+  （本番 BOOKMARK 11,302 行中 1,558 行が 2026-09-15 時点で値あり）。job-platform からの値が来たら上書きされる。
+
+### 値の入り口（2つ・どちらも job-platform 側から）
+
+**① 既存のブックマーク受信 API（任意項目として追加・後方互換）**
+
+`POST /api/external/bookmarks/from-job-platform`（認証 `x-api-secret`: `JOB_PLATFORM_API_SECRET`）
+
+```jsonc
+{ "candidateNumber": "5008587",
+  "jobs": [{ "externalJobRef": "hl-ap-xxx", "companyName": "…", "extractedText": "…",
+             "jobArea": "東京都 港区",            // 任意・string|null|undefined
+             "jobCategory": "CAD・CAMオペレーター", // 任意（既存項目。jobType でも可）
+             "jobCategoryPath": "技術職（機械・電気）＞設計＞CAD・CAMオペレーター" }] }  // 任意
+```
+
+- 未指定なら**既存挙動と完全同一**（新規作成は null、既存行の更新では既存値を消さない）。
+- バリデーションは文字列長上限 200 文字のみ（超過は切り詰め・受信自体は失敗させない）。
+- `origin: "auto"`（T-189 自動引き当て）経路でも同じ3項目を受け取る。
+
+**② 埋め戻し用 API（既存分の一括更新・T-196 新設）**
+
+`POST /api/external/bookmarks/job-attributes`（認証は ① と同じ）
+
+```jsonc
+{ "items": [{ "externalJobRef": "hl-ap-xxx", "jobArea": "東京都 港区",
+              "jobCategory": "CAD・CAMオペレーター", "jobCategoryPath": "技術職…＞…" }] }
+// → { "ok": true, "received": 1, "matchedRefs": 1, "updatedRows": 3, "errors": [] }
+```
+
+- 1リクエスト最大 **500 件**（超過は 400）。
+- `externalJobRef` が一致する**全** `CandidateFile`（`category="BOOKMARK"`・`archivedAt` 問わず・求職者をまたぐ）を
+  `updateMany` で更新。**既に値が入っている行も上書きする**（job-platform が正）。
+  3項目とも「送られてきた値で上書き」＝部分更新はしない（未指定は null で消える）。
+- `matchedRefs` = 1行以上更新できた求人IDの数 / `updatedRows` = 実際に更新した行数。
+
+`GET /api/external/bookmarks/job-refs?onlyMissing=true`（認証は ① と同じ）
+
+- BOOKMARK の `externalJobRef` を distinct で返す → `{ "refs": [...], "count": N }`。
+- `onlyMissing=true` で `jobArea` と `jobCategory` が**両方 null** の行に限定（どちらか埋まっていれば取得済み扱い）。
+
+### 画面
+
+- 列順: `☑ | DB名 | DBNO | 会社名 | エリア(100px) | 職種(150px) | 希望 | 通過 | 総合 | 本人回答 | 担当 | 紹介日 | 操作`
+- 職種セルのホバーは `jobCategoryPath ?? jobCategory`。長い値は `truncate`。
+- **並び替え・絞り込みは対象外**（表示のみ）。紹介保留タブ（ArchivedBookmarkSection）にも出していない。

@@ -326,10 +326,12 @@ HistoryTab
   │   │   └─ 右: RatingBreakdown（L678 で定義）
   │   │        総数 + 総合 A/B+/B/C/D/未評価 の件数と整数% + 希望/通過の補助表示
   │   │        母数＝filteredFiles（絞り込み後）から「AI評価対象外」を除いたもの
-  │   ├─ ヘッダー行（チェック / DB名 / DBNO / 会社名 / 希望 / 通過 / 総合 /
-  │   │              本人回答 / 担当 / 紹介日 / 操作）
+  │   ├─ ヘッダー行（チェック / DB名 / DBNO / 会社名 / エリア / 職種 / 希望 /
+  │   │              通過 / 総合 / 本人回答 / 担当 / 紹介日 / 操作）
+  │   │   ※ エリア(w-100px) / 職種(w-150px) は T-196 追加。表示のみ
+  │   │     （並び替え・絞り込みの対象外。activateBasis を持たない素の span）
   │   ├─ ファイル一覧（filteredFiles.map）
-  │   │   └─ 各行: チェック + DB名/DBNO + ファイル名 + 3 軸バッジ + 本人回答
+  │   │   └─ 各行: チェック + DB名/DBNO + ファイル名 + エリア/職種 + 3 軸バッジ + 本人回答
   │   │            + 担当 + 日時 + DL/CAコメント/保留ボタン
   │   │        ※ サイト経由（origin="candidate" かつ driveFileId=null かつ
   │   │          aiAnalysisComment 無し）は 3 軸バッジではなく
@@ -461,9 +463,24 @@ T-099 のBM比較・操作ロジックを **accessor 駆動に汎用化** し、
 - **Jobs の accessor**: `getCompanyName=job.company_name`、`getRank=findBookmarkRating(company_name)?.[axis]`（BM評価のクロス参照, `bookmarkRatings` Map）、`getResponse=job.candidate_response`（行に直接）、`getDate=job.created_at`。**担当(uploader)・DB列はソート対象外**（getUploader 省略, DB ヘッダー非クリック）。
 - **Jobs state**: `jobSortKeys`（旧 `jobSortField`/`jobSortDir`/`handleJobSort` を置換廃止）。初期=紹介日降順。旧デフォルト（candidate_response 順）は廃止。UI は抽出結果ツールバー直下に `SortBasisButtons`+`SortChipBar`、列ヘッダー（希望/通過/総合/紹介日）が `jobActivateBasis` 参加＋`DirArrows`/`OrderBadge`。
 
+### エリア・職種列（T-196）
+
+| 項目 | CandidateFile 列 | 表示 |
+|--|--|--|
+| エリア | `jobArea` (`job_area`) | w-100px・truncate・ホバーは値そのもの |
+| 職種 | `jobCategory` (`job_category`) | w-150px・truncate・ホバーは `jobCategoryPath ?? jobCategory` |
+| （職種フルパス） | `jobCategoryPath` (`job_category_path`) | 列としては出さない。職種セルの title のみ |
+
+- 値は **job-platform（求人プラットフォーム）が取り込み時に自社マスタの対応表で確定した値のコピー**。
+  portal 側では推測も生成もしない（**AI 呼び出しなし**）。null は「未取得」＝画面は「—」。
+- `jobCategory` は T-161/T-185 からある既存列の流用（新設していない）。そのため T-196 以前に
+  求人本文から抽出できていた行は、埋め戻し前から職種が表示される。
+- ArchivedBookmarkSection（紹介保留）には出していない。
+
 ### 関連 API
 
 - 一覧取得: `src/app/api/candidates/[candidateId]/files/route.ts`
+  （T-196 で select に `jobArea` / `jobCategory` / `jobCategoryPath` を追加）
 - 個別 PATCH: `src/app/api/candidates/[candidateId]/files/[fileId]/route.ts`（T-055 で aiMatchRating 同期追加）
 - AI 分析: `src/app/api/candidates/[candidateId]/bookmarks/analyze-batch/route.ts`
 - マイページ送信: `src/app/api/candidates/[candidateId]/bookmarks/send-to-job-tool/route.ts`
@@ -517,6 +534,7 @@ T-099 のBM比較・操作ロジックを **accessor 駆動に汎用化** し、
 ### 修正履歴
 
 - 2026/5/15: ArchivedBookmarkSection に一括復元・一括削除機能追加（master 3f1c9d5 / staging 3af1c8b）
+- 2026/9/15: BookmarkSection にエリア・職種列を追加（T-196・master b97baee）
 
 ---
 
