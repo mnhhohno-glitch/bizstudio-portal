@@ -78,6 +78,7 @@ export function DateField({
   className = "",
   min,
   max,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -85,6 +86,8 @@ export function DateField({
   className?: string;
   min?: string;
   max?: string;
+  /** T-201: 実績のある条件など編集させない行でグレーアウトする */
+  disabled?: boolean;
 }) {
   return (
     <div className={className}>
@@ -93,8 +96,9 @@ export function DateField({
         value={value}
         min={min}
         max={max}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151]"
+        className="w-full rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151] disabled:cursor-not-allowed disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]"
       />
       <DateNote ymd={value} holidays={holidays} />
     </div>

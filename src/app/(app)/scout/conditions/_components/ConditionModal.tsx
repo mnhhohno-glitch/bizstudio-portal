@@ -6,6 +6,9 @@
 // - 編集:     状態のプルダウンで自動決定された値を手で直せる
 // T-199: レイアウトをマイナビ「検索項目設定」画面の形式（グループ見出しバー＋左=項目名/右=入力欄の2列テーブル）に揃えた。
 //   入力項目・選択肢・バリデーション・保存の挙動は T-198 のまま。見た目の配置だけを変えている。
+// T-201: 配信実績（scout_runs）が1件でもある条件は「状態」以外を編集不可にする（locked）。
+//   配信日や検索条件を後から上書きされると、その実績がどの条件によるものか分からなくなるため。
+//   内容を変えたいときの逃げ道として「複製」は押せるままにしている。サーバー側（PATCH）でも同じ規則で弾く。
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -35,12 +38,15 @@ import { FormGroup, FormRow } from "./FormTable";
 import TemplatePreview from "./TemplatePreview";
 
 // 入力欄は右列の左端から始めて右に余白を残す（w-full にしない）
-const SELECT = "rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-1.5 text-[13px] text-[#374151]";
-const INPUT = "rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151]";
-const CHIP = (selected: boolean) =>
+// T-201: disabled:* は編集不可の行（実績あり）で使う。無効なことが一目で分かるよう地をグレーにする
+const DISABLED = "disabled:cursor-not-allowed disabled:bg-[#F3F4F6] disabled:text-[#9CA3AF]";
+const SELECT = `rounded-[6px] border border-[#D1D5DB] bg-white px-2 py-1.5 text-[13px] text-[#374151] ${DISABLED}`;
+const INPUT = `rounded-[6px] border border-[#D1D5DB] px-2 py-1.5 text-[13px] text-[#374151] ${DISABLED}`;
+const CHIP = (selected: boolean, disabled = false) =>
   [
     "rounded-full border px-3 py-1 text-[12px] font-medium transition-colors",
-    selected ? "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]" : "border-[#D1D5DB] bg-white text-[#6B7280] hover:bg-[#F9FAFB]",
+    selected ? "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]" : "border-[#D1D5DB] bg-white text-[#6B7280]",
+    disabled ? "cursor-not-allowed opacity-50" : "hover:bg-[#F9FAFB]",
   ].join(" ");
 
 export type ModalMode = { kind: "new" } | { kind: "edit"; condition: ConditionDto };
@@ -120,6 +126,8 @@ export default function ConditionModal({
 }) {
   const today = jstTodayYmd();
   const current = mode.kind === "edit" ? mode.condition : null;
+  // T-201: 一度でも配信された条件は状態以外を編集不可にする（判定は実績の有無だけ。状態では見ない）
+  const locked = (current?.runs.length ?? 0) > 0;
   const [form, setForm] = useState<ConditionInput>(() => toForm(current, machines, today));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -233,10 +241,18 @@ export default function ConditionModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-3">
+          {/* T-201: 編集できない理由を先頭に出す。逃げ道（複製）も同じ場所で案内する */}
+          {locked && (
+            <div className="mb-3 rounded-[6px] border border-[#FCD34D] bg-[#FFFBEB] px-3 py-2 text-[12px] leading-relaxed text-[#92400E]">
+              <span className="mr-1 font-semibold">配信実績があるため、状態以外は変更できません。</span>
+              内容を変えるには下の「複製」から新しい条件を作ってください（複製した条件は実績が無いのですべて編集できます）。
+            </div>
+          )}
+
           {/* ---- 基本 ---- */}
           <FormGroup title="基本">
             <FormRow label="号機">
-              <select className={`${SELECT} w-[240px]`} value={form.machineId} onChange={(e) => set("machineId", e.target.value)}>
+              <select className={`${SELECT} w-[240px]`} value={form.machineId} disabled={locked} onChange={(e) => set("machineId", e.target.value)}>
                 {machines.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.machineNo}号機{m.isActive ? "" : "（停止）"}
@@ -248,7 +264,9 @@ export default function ConditionModal({
               label="状態"
               note={
                 current
-                  ? undefined
+                  ? locked
+                    ? "この条件で変更できるのは状態だけです（配信を止めるときは「完了」にしてください）"
+                    : undefined
                   : machineHasRunning
                     ? "この号機には実行中の条件があるため、保存時に「予約（末尾）」になります"
                     : "この号機に実行中の条件が無いため、保存時に「実行中」になります"
@@ -275,12 +293,19 @@ export default function ConditionModal({
                   min={0}
                   className={`${INPUT} w-[120px]`}
                   value={form.queueOrder}
+                  disabled={locked}
                   onChange={(e) => set("queueOrder", Number(e.target.value) || 0)}
                 />
               </FormRow>
             )}
             <FormRow label="配信日">
-              <DateField className="w-[240px]" value={form.deliveryDate ?? ""} onChange={(v) => set("deliveryDate", v || null)} holidays={holidays} />
+              <DateField
+                className="w-[240px]"
+                value={form.deliveryDate ?? ""}
+                onChange={(v) => set("deliveryDate", v || null)}
+                holidays={holidays}
+                disabled={locked}
+              />
             </FormRow>
             <FormRow label="予定件数">
               <input
@@ -288,6 +313,7 @@ export default function ConditionModal({
                 min={0}
                 className={`${INPUT} w-[120px]`}
                 value={form.plannedCount ?? ""}
+                disabled={locked}
                 onChange={(e) => set("plannedCount", e.target.value === "" ? null : Number(e.target.value))}
               />
             </FormRow>
@@ -296,10 +322,16 @@ export default function ConditionModal({
           {/* ---- 会員情報 ---- */}
           <FormGroup title="会員情報">
             <FormRow no="2." label="登録日">
-              <div className="mb-2 flex gap-4 text-[12px] text-[#374151]">
+              <div className={`mb-2 flex gap-4 text-[12px] ${locked ? "text-[#9CA3AF]" : "text-[#374151]"}`}>
                 {REGIST_DATE_MODES.map((m) => (
-                  <label key={m.value} className="flex items-center gap-1">
-                    <input type="radio" name="d-regist" checked={form.registDateMode === m.value} onChange={() => set("registDateMode", m.value)} />
+                  <label key={m.value} className={`flex items-center gap-1 ${locked ? "cursor-not-allowed" : ""}`}>
+                    <input
+                      type="radio"
+                      name="d-regist"
+                      checked={form.registDateMode === m.value}
+                      disabled={locked}
+                      onChange={() => set("registDateMode", m.value)}
+                    />
                     {m.label}
                   </label>
                 ))}
@@ -308,6 +340,7 @@ export default function ConditionModal({
                 <select
                   className={`${SELECT} w-[240px]`}
                   value={form.registDays ?? ""}
+                  disabled={locked}
                   onChange={(e) => set("registDays", e.target.value === "" ? null : Number(e.target.value))}
                 >
                   <option value="">選択してください</option>
@@ -319,15 +352,27 @@ export default function ConditionModal({
                 </select>
               ) : (
                 <div className="flex items-start gap-2">
-                  <DateField className="w-[200px]" value={form.registDateFrom ?? ""} onChange={(v) => set("registDateFrom", v || null)} holidays={holidays} />
+                  <DateField
+                    className="w-[200px]"
+                    value={form.registDateFrom ?? ""}
+                    onChange={(v) => set("registDateFrom", v || null)}
+                    holidays={holidays}
+                    disabled={locked}
+                  />
                   <span className="pt-1.5 text-[12px] text-[#6B7280]">〜</span>
-                  <DateField className="w-[200px]" value={form.registDateTo ?? ""} onChange={(v) => set("registDateTo", v || null)} holidays={holidays} />
+                  <DateField
+                    className="w-[200px]"
+                    value={form.registDateTo ?? ""}
+                    onChange={(v) => set("registDateTo", v || null)}
+                    holidays={holidays}
+                    disabled={locked}
+                  />
                 </div>
               )}
             </FormRow>
 
             <FormRow no="3." label="最終ログイン日" note="マイナビ側で必須。基本は1日以内">
-              <select className={`${SELECT} w-[240px]`} value={form.lastLoginDays} onChange={(e) => set("lastLoginDays", Number(e.target.value))}>
+              <select className={`${SELECT} w-[240px]`} value={form.lastLoginDays} disabled={locked} onChange={(e) => set("lastLoginDays", Number(e.target.value))}>
                 {PERIOD_DAYS_OPTIONS.map((d) => (
                   <option key={d} value={d}>
                     {d}日以内
@@ -342,7 +387,8 @@ export default function ConditionModal({
                   <button
                     key={m.value}
                     type="button"
-                    className={CHIP(form.residenceMode === m.value)}
+                    disabled={locked}
+                    className={CHIP(form.residenceMode === m.value, locked)}
                     onClick={() => {
                       set("residenceMode", m.value);
                       set("residencePrefectures", []);
@@ -353,7 +399,8 @@ export default function ConditionModal({
                 ))}
                 <button
                   type="button"
-                  className={CHIP(form.residenceMode === "PREFECTURE")}
+                  disabled={locked}
+                  className={CHIP(form.residenceMode === "PREFECTURE", locked)}
                   onClick={() =>
                     onOpenPrefModal(
                       form.residencePrefectures,
@@ -379,7 +426,12 @@ export default function ConditionModal({
           <FormGroup title="最終学歴">
             <FormRow no="4." label="卒業年度" note="配信調整の最重要レバー。年齢不問なら両方とも指定なし">
               <div className="flex items-center gap-2">
-                <select className={`${SELECT} w-[160px]`} value={form.gradYearFrom ?? ""} onChange={(e) => set("gradYearFrom", e.target.value === "" ? null : Number(e.target.value))}>
+                <select
+                  className={`${SELECT} w-[160px]`}
+                  value={form.gradYearFrom ?? ""}
+                  disabled={locked}
+                  onChange={(e) => set("gradYearFrom", e.target.value === "" ? null : Number(e.target.value))}
+                >
                   <option value="">指定なし</option>
                   {years.map((y) => (
                     <option key={y} value={y}>
@@ -388,7 +440,12 @@ export default function ConditionModal({
                   ))}
                 </select>
                 <span className="text-[12px] text-[#6B7280]">〜</span>
-                <select className={`${SELECT} w-[160px]`} value={form.gradYearTo ?? ""} onChange={(e) => set("gradYearTo", e.target.value === "" ? null : Number(e.target.value))}>
+                <select
+                  className={`${SELECT} w-[160px]`}
+                  value={form.gradYearTo ?? ""}
+                  disabled={locked}
+                  onChange={(e) => set("gradYearTo", e.target.value === "" ? null : Number(e.target.value))}
+                >
                   <option value="">指定なし</option>
                   {years.map((y) => (
                     <option key={y} value={y}>
@@ -406,6 +463,7 @@ export default function ConditionModal({
               <select
                 className={`${SELECT} w-[240px]`}
                 value={form.companyCount === null ? "null" : String(form.companyCount)}
+                disabled={locked}
                 onChange={(e) => set("companyCount", e.target.value === "null" ? null : Number(e.target.value))}
               >
                 {COMPANY_COUNT_OPTIONS.map((o) => (
@@ -426,7 +484,8 @@ export default function ConditionModal({
                     <button
                       key={m.value}
                       type="button"
-                      className={CHIP(form.workPrefMode === "ALL")}
+                      disabled={locked}
+                      className={CHIP(form.workPrefMode === "ALL", locked)}
                       onClick={() => {
                         set("workPrefMode", "ALL");
                         set("workPrefectures", []);
@@ -438,7 +497,8 @@ export default function ConditionModal({
                     <button
                       key={m.value}
                       type="button"
-                      className={CHIP(form.workPrefMode === "SELECTED")}
+                      disabled={locked}
+                      className={CHIP(form.workPrefMode === "SELECTED", locked)}
                       onClick={() =>
                         onOpenPrefModal(
                           form.workPrefectures.length > 0 ? form.workPrefectures : DEFAULT_WORK_PREFECTURES,
@@ -457,7 +517,7 @@ export default function ConditionModal({
                     </button>
                   ),
                 )}
-                {form.workPrefMode === "SELECTED" && !isDefaultWorkPrefectures(form.workPrefectures) && (
+                {!locked && form.workPrefMode === "SELECTED" && !isDefaultWorkPrefectures(form.workPrefectures) && (
                   <button
                     type="button"
                     className="text-[11px] text-[#2563EB] underline"
@@ -481,7 +541,13 @@ export default function ConditionModal({
             <FormRow no="1." label="検索対象" note="自社がスカウトを送信した会員">
               <div className="flex flex-wrap gap-1.5">
                 {SEARCH_TARGETS.map((s) => (
-                  <button key={s.value} type="button" className={CHIP(form.searchTarget === s.value)} onClick={() => set("searchTarget", s.value)}>
+                  <button
+                    key={s.value}
+                    type="button"
+                    disabled={locked}
+                    className={CHIP(form.searchTarget === s.value, locked)}
+                    onClick={() => set("searchTarget", s.value)}
+                  >
                     {s.label}
                     {s.sub && <span className="ml-1 text-[10px] opacity-70">({s.sub})</span>}
                   </button>
@@ -503,7 +569,12 @@ export default function ConditionModal({
           <FormGroup title="配信文">
             <FormRow label="配信文" note={template ? `種別: ${templateKindLabel(template.kind)}` : undefined}>
               <div className="flex flex-wrap items-center gap-3">
-                <select className={`${SELECT} w-[320px]`} value={form.templateId ?? ""} onChange={(e) => set("templateId", e.target.value || null)}>
+                <select
+                  className={`${SELECT} w-[320px]`}
+                  value={form.templateId ?? ""}
+                  disabled={locked}
+                  onChange={(e) => set("templateId", e.target.value || null)}
+                >
                   <option value="">未設定</option>
                   {templatesByKind.map((g) =>
                     g.items.length ? (
@@ -518,7 +589,7 @@ export default function ConditionModal({
                     ) : null,
                   )}
                 </select>
-                {machine?.defaultTemplateId && machine.defaultTemplateId !== form.templateId && (
+                {!locked && machine?.defaultTemplateId && machine.defaultTemplateId !== form.templateId && (
                   <button type="button" className="text-[11px] text-[#2563EB] underline" onClick={() => set("templateId", machine.defaultTemplateId)}>
                     {machine.machineNo}号機のデフォルト（{templates.find((t) => t.id === machine.defaultTemplateId)?.name ?? "-"}）を使う
                   </button>
@@ -605,8 +676,8 @@ export default function ConditionModal({
                 <button
                   type="button"
                   onClick={() => onDelete(current)}
-                  disabled={current.runs.length > 0}
-                  title={current.runs.length > 0 ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
+                  disabled={locked}
+                  title={locked ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
                   className="rounded-[6px] border border-[#FECACA] px-3 py-1.5 text-[13px] text-[#B91C1C] hover:bg-[#FEF2F2] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   削除

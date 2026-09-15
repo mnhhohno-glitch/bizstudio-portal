@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import {
+  changedLockedFields,
   conditionInclude,
   parseConditionInput,
   rowToParsed,
@@ -28,6 +29,23 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
 
   const parsed = parseConditionInput(body as Record<string, unknown>, rowToParsed(current));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+  // T-201: 配信実績（scout_runs）がある条件は状態以外を変更できない。
+  //   画面側でも入力欄を無効化しているが、直接 PATCH を投げられても通らないようここでも弾く。
+  //   比較の基準は「今の行を parseConditionInput に通した値」にする（正規化前の行と比べると誤検知する）。
+  if (current.runs.length > 0) {
+    const baseParsed = parseConditionInput({}, rowToParsed(current));
+    const before = baseParsed.ok ? baseParsed.data : rowToParsed(current);
+    const changed = changedLockedFields(before, parsed.data);
+    if (changed.length > 0) {
+      return NextResponse.json(
+        {
+          error: `配信実績があるため、状態以外は変更できません（${changed.join("・")}）。内容を変えるには複製してください`,
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   if (parsed.data.machineId !== current.machineId) {
     const machine = await prisma.rpaScoutMachine.findUnique({ where: { id: parsed.data.machineId } });

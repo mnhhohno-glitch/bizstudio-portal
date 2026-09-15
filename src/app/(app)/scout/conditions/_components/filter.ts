@@ -59,6 +59,13 @@ export function applyMachineFilter(rows: ConditionDto[], machineNos: number[]): 
   return rows.filter((c) => set.has(c.machineNo));
 }
 
+/** T-201: 状態の絞り込み（複数選択・OR）。空配列＝絞り込みなし（号機フィルタと同じ約束） */
+export function applyStatusFilter(rows: ConditionDto[], statuses: string[]): ConditionDto[] {
+  if (statuses.length === 0) return rows;
+  const set = new Set(statuses);
+  return rows.filter((c) => set.has(c.status));
+}
+
 const STATUS_ORDER: Record<string, number> = { RUNNING: 0, QUEUED: 1, DRY: 2, DONE: 3 };
 
 export function sortConditions(rows: ConditionDto[], key: SortKey): ConditionDto[] {

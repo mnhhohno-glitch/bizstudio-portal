@@ -267,6 +267,55 @@ export function parseConditionInput(
   return { ok: true, data: out };
 }
 
+// ---- T-201: 実績のある条件の固定 ----
+// 一度でも配信された条件（scout_runs が1件以上）は、状態以外を後から変えられないようにする。
+// 配信日や検索条件を上書きされると、その実績がどの条件によるものか分からなくなり記録として使えないため。
+// 状態（status）だけは「その条件をこれから使うかどうか」を表すもので過去の実績そのものではなく、
+// 固定すると実績のある条件を手で「完了」にできず運用が詰まるため対象から外している。
+const LOCKED_FIELDS: { key: Exclude<keyof ParsedCondition, "status">; label: string }[] = [
+  { key: "machineId", label: "号機" },
+  { key: "queueOrder", label: "予約の並び順" },
+  { key: "deliveryDate", label: "配信日" },
+  { key: "plannedCount", label: "予定件数" },
+  { key: "searchTarget", label: "検索対象" },
+  { key: "registDateMode", label: "登録日の指定方法" },
+  { key: "registDays", label: "登録日（期間指定）" },
+  { key: "registDateFrom", label: "登録日（開始）" },
+  { key: "registDateTo", label: "登録日（終了）" },
+  { key: "lastLoginDays", label: "最終ログイン日" },
+  { key: "gradYearFrom", label: "卒業年度（開始）" },
+  { key: "gradYearTo", label: "卒業年度（終了）" },
+  { key: "companyCount", label: "経験社数" },
+  { key: "residenceMode", label: "居住地" },
+  { key: "residencePrefectures", label: "居住地の都道府県" },
+  { key: "workPrefMode", label: "希望勤務地" },
+  { key: "workPrefectures", label: "希望勤務地の都道府県" },
+  { key: "templateId", label: "配信文" },
+];
+
+/** 日付は instant、都道府県は配列なので値で比べる（参照比較では常に「変更あり」になる） */
+function sameFieldValue(a: unknown, b: unknown): boolean {
+  if (a instanceof Date || b instanceof Date) {
+    const t = (v: unknown) => (v instanceof Date ? v.getTime() : v == null ? null : NaN);
+    return t(a) === t(b);
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const x = Array.isArray(a) ? a : [];
+    const y = Array.isArray(b) ? b : [];
+    return x.length === y.length && x.every((v, i) => v === y[i]);
+  }
+  return a === b;
+}
+
+/**
+ * T-201: 実績のある条件への更新で、状態以外の項目が動いていないかを調べる。
+ * 戻り値は変更されている項目の表示名（空配列なら状態だけの更新なので通してよい）。
+ * before は parseConditionInput を通した正規化済みの値を渡すこと（正規化前と比べると誤検知する）。
+ */
+export function changedLockedFields(before: ParsedCondition, after: ParsedCondition): string[] {
+  return LOCKED_FIELDS.filter((f) => !sameFieldValue(before[f.key], after[f.key])).map((f) => f.label);
+}
+
 export function rowToParsed(c: ConditionRow): ParsedCondition {
   return {
     machineId: c.machineId,

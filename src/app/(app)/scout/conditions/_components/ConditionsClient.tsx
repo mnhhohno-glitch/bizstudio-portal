@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Toaster, toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
-import { SORT_OPTIONS, conditionStatusLabel, type SortKey } from "@/lib/scout-conditions/constants";
+import { CONDITION_STATUSES, SORT_OPTIONS, conditionStatusLabel, type SortKey } from "@/lib/scout-conditions/constants";
 import {
   addDaysYmd,
   formatYmdShort,
@@ -26,6 +26,7 @@ import {
   applyDayFilter,
   applyMachineFilter,
   applyRangeFilter,
+  applyStatusFilter,
   buildCsv,
   sortConditions,
   type DateRange,
@@ -44,6 +45,8 @@ export default function ConditionsClient() {
   const [basis, setBasis] = useState<RangeBasis>("delivery");
   // T-199: 号機の絞り込み。null＝まだ触っていない（＝全号機選択）。空配列＝全解除（担当CAフィルタと同じく絞り込みなし）
   const [machineSel, setMachineSel] = useState<number[] | null>(null);
+  // T-201: 状態の絞り込み。号機と同じ約束（null＝まだ触っていない＝全状態選択。空配列＝全解除で絞り込みなし）
+  const [statusSel, setStatusSel] = useState<string[] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("machine");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalMode | null>(null);
@@ -90,13 +93,19 @@ export default function ConditionsClient() {
   const allMachineNos = useMemo(() => machineOptions.map((o) => Number(o.value)), [machineOptions]);
   const selectedMachineNos = machineSel ?? allMachineNos;
 
-  // T-199: 期間（または日付タブ）と号機は AND。CSV（表示中）や「表示 N 件」もこの rows を使う
+  // T-201: 状態の選択肢は CONDITION_STATUSES（実行中/予約/枯渇/完了）をそのまま使う
+  const statusOptions = useMemo(() => CONDITION_STATUSES.map((s) => ({ value: s.value, label: s.label })), []);
+  const allStatusValues = useMemo(() => statusOptions.map((o) => o.value), [statusOptions]);
+  const selectedStatuses = statusSel ?? allStatusValues;
+
+  // T-199/T-201: 期間（または日付タブ）と号機と状態は AND。CSV（表示中）や「表示 N 件」もこの rows を使う
   const rows = useMemo(() => {
     const byDate = rangeActive
       ? applyRangeFilter(conditions, range, basis)
       : applyDayFilter(conditions, day, day === "all" ? null : dayYmd[day]);
-    return sortConditions(applyMachineFilter(byDate, selectedMachineNos), sortKey);
-  }, [conditions, rangeActive, range, basis, day, dayYmd, selectedMachineNos, sortKey]);
+    const byMachine = applyMachineFilter(byDate, selectedMachineNos);
+    return sortConditions(applyStatusFilter(byMachine, selectedStatuses), sortKey);
+  }, [conditions, rangeActive, range, basis, day, dayYmd, selectedMachineNos, selectedStatuses, sortKey]);
 
   // T-195: 予約切れの警告帯（稼働中の号機ごとに QUEUED が0件なら出す）。
   // 「ポータルタスク作成済」は実際に未完了タスクがあるときだけ表示し、リンクは実タスクに向ける。
@@ -381,6 +390,19 @@ export default function ConditionsClient() {
               panelWidth="w-44"
               allLabel="全号機"
               allSelectedLabel="全号機"
+              listSeparator=", "
+            />
+
+            {/* T-201: 状態の複数選択（号機と同じ部品・同じ約束）。期間・号機とは AND で効く */}
+            <FilterMultiSelectField
+              label="状態"
+              options={statusOptions}
+              selected={selectedStatuses}
+              onChange={(next) => setStatusSel(next)}
+              width="w-44"
+              panelWidth="w-44"
+              allLabel="全状態"
+              allSelectedLabel="全状態"
               listSeparator=", "
             />
           </div>
