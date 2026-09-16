@@ -38,6 +38,11 @@ function toRunDto(r: ConditionRow["runs"][number]): RunDto {
 
 export function toConditionDto(c: ConditionRow): ConditionDto {
   const runs = c.runs.map(toRunDto);
+  // T-203: 一覧の「抽出 / 送信」はこの条件の全実行の合計。以前は最新1件だけを出していたため、
+  //   同じ条件で2回目以降が届くと前回の数字が画面から消え、その条件で通算何件送ったか分からなかった。
+  //   scout_runs は毎回 insert なので DB には履歴が残っている（表示だけの問題）。
+  //   枯渇回（isDry=送信10件未満）も実際に配信した回なので合計に含める。
+  const sum = (pick: (r: (typeof runs)[number]) => number) => (runs.length ? runs.reduce((a, r) => a + pick(r), 0) : null);
   return {
     id: c.id,
     machineId: c.machineId,
@@ -70,6 +75,8 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     updatedAt: c.updatedAt.toISOString(),
     latestRun: runs[0] ?? null,
     runs,
+    totalExtractedCount: sum((r) => r.extractedCount),
+    totalSentCount: sum((r) => r.sentCount),
   };
 }
 

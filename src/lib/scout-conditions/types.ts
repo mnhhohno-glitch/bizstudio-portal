@@ -62,6 +62,10 @@ export type ConditionDto = {
   updatedAt: string;
   latestRun: RunDto | null;
   runs: RunDto[]; // 新しい順
+  // T-203: この条件の全実行の合計（一覧の「抽出 / 送信」列。実行が1件も無ければ null＝画面は "-"）
+  //   枯渇回（isDry）も実際に配信しているので合計に含める。dryRun の検証リクエストは DB に書かれないため元から入らない。
+  totalExtractedCount: number | null;
+  totalSentCount: number | null;
 };
 
 export type ConditionsResponse = {

@@ -4,6 +4,7 @@
 // 予約日と配信日は同じ列に2行（1行目=予約登録日時、2行目=配信日）。送信件数10件未満は枯渇として行ごと色を変える。
 // T-197: 先頭に NO（レコード番号 1-001）列を追加。操作列の「詳細」は「条件設定」に置き換え。
 // T-198: 作成日列を削除し、実行日時列を予約日/配信日の右隣へ移した（実行済みかどうかを左寄りで確認できるようにするため）。
+// T-203: 抽出・送信は最新1件ではなくその条件の全実行の合計（枯渇回も含む）。実行日時は最新のまま。枯渇判定は従来どおり最新1件で見る（isDryRow）。
 import {
   areaLabel,
   companyCountLabel,
@@ -113,6 +114,8 @@ export default function ConditionTable({
             const dry = isDryRow(c);
             const run = c.latestRun;
             const hasRuns = c.runs.length > 0;
+            // T-203: 抽出・送信は全実行の合計を出すので、何回分かをホバーで補う
+            const runsTitle = hasRuns ? `全${c.runs.length}回の合計` : undefined;
             const bounds = queueBounds[c.id] ?? { canUp: false, canDown: false };
             return (
               <tr
@@ -177,9 +180,11 @@ export default function ConditionTable({
                   )}
                 </td>
                 <td className={`${TD} text-right tabular-nums`}>{c.plannedCount ?? "-"}</td>
-                <td className={`${TD} text-right tabular-nums`}>{run ? run.extractedCount : "-"}</td>
-                <td className={`${TD} text-right tabular-nums ${dry ? "font-semibold text-[#B91C1C]" : ""}`}>
-                  {run ? run.sentCount : "-"}
+                <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
+                  {c.totalExtractedCount ?? "-"}
+                </td>
+                <td className={`${TD} text-right tabular-nums ${dry ? "font-semibold text-[#B91C1C]" : ""}`} title={runsTitle}>
+                  {c.totalSentCount ?? "-"}
                 </td>
                 <td className={TD} onClick={(e) => e.stopPropagation()}>
                   <div className="flex gap-1">
