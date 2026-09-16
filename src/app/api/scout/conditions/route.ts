@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { conditionInclude, parseConditionInput, toConditionDto, toPrismaData } from "@/lib/scout-conditions/server";
 import { createScoutCondition, ensureSeqNos } from "@/lib/scout-conditions/create";
+import { activateDueConditionsForActiveMachines } from "@/lib/scout-conditions/activate";
 import { ensureTemplateSeqNos, templateOrderBy, toTemplateDto } from "@/lib/scout-conditions/templates";
 import { dbDateToYmd } from "@/lib/scout-conditions/dates";
 import type { ConditionsResponse } from "@/lib/scout-conditions/types";
@@ -18,6 +19,10 @@ export async function GET() {
   await ensureSeqNos();
   // T-207: テンプレート番号（T-001）も同じ理由で空行を補っておく（通常は0件）
   await ensureTemplateSeqNos();
+
+  // T-209: 配信日が当日（JST）以前になった予約を、有効が無い号機で1件ずつ有効にする。
+  //   人が手で有効にしなくても、その日の朝に一覧を開いた時点で配信が走る状態になる（RPA の GET /current でも同じ判定をする）。
+  await activateDueConditionsForActiveMachines();
 
   const [machines, templates, holidays, conditions] = await Promise.all([
     prisma.rpaScoutMachine.findMany({

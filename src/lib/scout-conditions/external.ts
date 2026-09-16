@@ -3,6 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, companyCountLabel, formatTemplateNo } from "./constants";
+import { activateDueCondition } from "./activate";
 import { dbDateToYmd } from "./dates";
 
 /** 固定値（スキーマに列を持たない。RPA は常にこの値でフォームに入力する） */
@@ -124,7 +125,13 @@ export async function buildCurrentResponse(machineNoRaw: string | null): Promise
   if (!machine) return { ok: false, machineNo: n, ...base, message: `${n}号機は存在しません` };
   if (!machine.isActive) return { ok: false, machineNo: n, ...base, message: `${n}号機は停止中です` };
 
-  const running = await findRunningCondition(machine.id);
+  let running = await findRunningCondition(machine.id);
+  // T-209: 有効が無いときは、配信日が当日（JST）以前の予約を1件だけ有効に上げてから返す（activate.ts）。
+  //   レスポンスの形は変えない（RPA は従来どおり condition を読むだけ）。上げられる予約が無ければ従来どおり null。
+  if (!running) {
+    const activatedId = await activateDueCondition(machine.id);
+    if (activatedId) running = await findRunningCondition(machine.id);
+  }
   if (!running) return { ok: true, machineNo: n, ...base, message: "RUNNING の条件がありません" };
   return { ok: true, machineNo: n, condition: toExternalCondition(running), fixed: EXTERNAL_FIXED_VALUES, message: null };
 }

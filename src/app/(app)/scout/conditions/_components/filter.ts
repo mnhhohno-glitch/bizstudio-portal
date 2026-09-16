@@ -184,3 +184,34 @@ export function buildCsv(rows: ConditionDto[]): string {
   // Excel で文字化けしないよう UTF-8 BOM を先頭に付ける
   return "﻿" + [header.join(","), ...lines].join("\r\n") + "\r\n";
 }
+
+/**
+ * T-209: 「翌朝有効」を出す条件の id（号機ごとに最大1件）。
+ * 明日の朝、自動で有効になる予定の予約に印を付けるためのもので、判定そのものは持たない
+ * （実際に有効へ上げるのはサーバー側の activate.ts。こちらは同じ規則を画面に映すだけ）。
+ *
+ *   - 状態が予約（QUEUED）
+ *   - その号機に有効（RUNNING）が無い
+ *   - 配信日が「翌日」ちょうど（当日以前は開いた時点で有効に上がっているので出さない。明後日以降も出さない）
+ *   - 同じ号機で該当が複数あれば ▲▼ の並び順が一番上の1件だけ
+ *
+ * activeMachineIds には稼働中の号機だけを渡す（停止中の号機は RPA が条件を取りに来ないため上がらない）。
+ */
+export function nextMorningConditionIds(
+  conditions: ConditionDto[],
+  tomorrowYmd: string,
+  activeMachineIds: string[],
+): string[] {
+  const active = new Set(activeMachineIds);
+  const hasRunning = new Set(conditions.filter((c) => c.status === "RUNNING").map((c) => c.machineId));
+  const candidates = new Map<string, ConditionDto>();
+  for (const c of conditions) {
+    if (c.status !== "QUEUED" || c.deliveryDate !== tomorrowYmd) continue;
+    if (!active.has(c.machineId) || hasRunning.has(c.machineId)) continue;
+    const cur = candidates.get(c.machineId);
+    if (!cur || c.queueOrder < cur.queueOrder || (c.queueOrder === cur.queueOrder && c.createdAt < cur.createdAt)) {
+      candidates.set(c.machineId, c);
+    }
+  }
+  return [...candidates.values()].map((c) => c.id);
+}

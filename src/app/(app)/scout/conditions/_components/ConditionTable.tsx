@@ -20,6 +20,7 @@
 //   （% が中身より狭い列は中身の幅を取り、残りの列が比に応じて分け合う）。
 //   文字が長くなりやすい列（希望勤務地/配信テンプレート・検索対象/登録日）へ多めに、
 //   中身の長さが安定している列（状態・号機・NO・複製/削除・数値）へは窮屈さが取れる程度に配る。
+// T-209: 状態欄に「翌朝有効」バッジ（配信日が翌日で、翌朝に自動で有効になる予約）。「予約 #1」の並び順表示は従来どおり残す。
 // T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
 //   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
 //   数字は 予測/結果・抽出/送信 の2列4段。下段には達成率（結果÷予測）・送信率（送信÷抽出）を小数点第1位まで出す。
@@ -87,6 +88,7 @@ export default function ConditionTable({
   onMove,
   queueBounds,
   pinnedIds,
+  nextMorningIds,
 }: {
   rows: ConditionDto[];
   holidays: HolidayMap;
@@ -101,10 +103,13 @@ export default function ConditionTable({
   onMove: (c: ConditionDto, direction: "up" | "down") => void;
   /** T-204: 絞り込みの対象外でも表示している行（複製元・複製先）。黄色で塗って区別する */
   pinnedIds: string[];
+  /** T-209: 翌朝に自動で有効になる予約（号機ごとに1件）。「翌朝有効」バッジを出す */
+  nextMorningIds: string[];
   /** T-195: 号機内の予約列での先頭／末尾判定（絞り込み前の全件から計算） */
   queueBounds: Record<string, { canUp: boolean; canDown: boolean }>;
 }) {
   const pinned = new Set(pinnedIds);
+  const nextMorning = new Set(nextMorningIds);
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someChecked = !allChecked && rows.some((r) => selected.has(r.id));
 
@@ -284,6 +289,10 @@ export default function ConditionTable({
                   </span>
                   {dry && c.status !== "DRY" && (
                     <span className="ml-1 rounded bg-[#FEE2E2] px-1.5 py-0.5 text-[11px] font-medium text-[#B91C1C]">枯渇</span>
+                  )}
+                  {/* T-209: 配信日が翌日で、翌朝そのまま有効になる予約（号機ごとに1件）。当日以前は既に有効に上がっている */}
+                  {c.status === "QUEUED" && nextMorning.has(c.id) && (
+                    <span className="ml-1 rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[11px] font-medium text-[#B45309]">翌朝有効</span>
                   )}
                   {c.status === "QUEUED" && <span className="ml-1 text-[10px] text-[#6B7280]">#{c.queueOrder}</span>}
                 </td>
