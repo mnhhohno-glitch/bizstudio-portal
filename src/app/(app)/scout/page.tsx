@@ -81,12 +81,22 @@ function weekdayOf(unit: Unit, primary: Period, label: string): number | null {
   return ymdWeekday(`${primary.from.slice(0, 7)}-${pad(Number(label))}`);
 }
 
+/**
+ * T-202: 配信日ベース / 応募日ベースの切り替え。
+ * API の dateMode をそのまま渡す。dateMode=applied のとき /api/scout/stats は
+ * 「配信数・開封数は配信日バケット、応募数だけ応募日バケット」で返す（集計ロジックは変更していない）。
+ * そのため画面上も応募数・応募率だけが応募日基準に差し替わり、配信数・開封数・開封率は配信日基準のまま残る。
+ */
+type DateMode = "sent" | "applied";
+
 const UNIT_LABELS: Record<Unit, string> = { day: "日別", hour: "時間別", month: "月別" };
+const DATE_MODE_LABELS: Record<DateMode, string> = { sent: "配信日ベース", applied: "応募日ベース" };
 const CMP_LABELS: Record<Comparison, string> = { none: "比較なし", prevMonth: "前月", prevYear: "前年" };
 
 export default function ScoutDashboardPage() {
   const [unit, setUnit] = useState<Unit>("day");
   const [comparison, setComparison] = useState<Comparison>("none");
+  const [dateMode, setDateMode] = useState<DateMode>("sent");
   const [anchor, setAnchor] = useState<string>(jstToday());
 
   const [primaryBuckets, setPrimaryBuckets] = useState<Bucket[]>([]);
@@ -101,10 +111,10 @@ export default function ScoutDashboardPage() {
 
   useEffect(() => {
     let active = true;
-    const pUrl = `/api/scout/stats?axis=overall&dateMode=sent&from=${primary.from}&to=${primary.to}&groupBy=${primary.groupBy}`;
+    const pUrl = `/api/scout/stats?axis=overall&dateMode=${dateMode}&from=${primary.from}&to=${primary.to}&groupBy=${primary.groupBy}`;
     const fetches: Promise<StatsResponse>[] = [fetch(pUrl).then((r) => r.json())];
     if (cmp) {
-      const cUrl = `/api/scout/stats?axis=overall&dateMode=sent&from=${cmp.from}&to=${cmp.to}&groupBy=${cmp.groupBy}`;
+      const cUrl = `/api/scout/stats?axis=overall&dateMode=${dateMode}&from=${cmp.from}&to=${cmp.to}&groupBy=${cmp.groupBy}`;
       fetches.push(fetch(cUrl).then((r) => r.json()));
     }
     Promise.all(fetches)
@@ -119,7 +129,7 @@ export default function ScoutDashboardPage() {
     return () => {
       active = false;
     };
-  }, [primary.from, primary.to, primary.groupBy, cmp]);
+  }, [primary.from, primary.to, primary.groupBy, cmp, dateMode]);
 
   // KPI（主系列の合計）
   const totals = primaryBuckets.reduce(
@@ -128,6 +138,7 @@ export default function ScoutDashboardPage() {
   );
   const openRate = totals.delivery > 0 ? (totals.open / totals.delivery) * 100 : 0;
   const applyRate = totals.delivery > 0 ? (totals.apply / totals.delivery) * 100 : 0;
+  const appliedMode = dateMode === "applied";
 
   // グラフ用にバケットをラベル領域へマージ
   const chartData: TrendPoint[] = useMemo(() => {
@@ -136,16 +147,22 @@ export default function ScoutDashboardPage() {
     return domainLabels(unit, primary).map((lbl) => {
       const p = pMap.get(lbl);
       const c = cMap.get(lbl);
-      const rate = (b?: Bucket): number | null => (b && b.deliveryCount > 0 ? (b.applyCount / b.deliveryCount) * 100 : null);
+      // 配信数0 の点は率を null にして線を切る（0%と「配信なし」の混同を避ける／0除算も回避）
+      const rateOpen = (b?: Bucket): number | null => (b && b.deliveryCount > 0 ? (b.openCount / b.deliveryCount) * 100 : null);
+      const rateApply = (b?: Bucket): number | null => (b && b.deliveryCount > 0 ? (b.applyCount / b.deliveryCount) * 100 : null);
       return {
         label: lbl,
         weekday: weekdayOf(unit, primary, lbl),
         delivery: p ? p.deliveryCount : null,
+        open: p ? p.openCount : null,
         apply: p ? p.applyCount : null,
-        applyRate: rate(p),
+        openRate: rateOpen(p),
+        applyRate: rateApply(p),
         cmpDelivery: c ? c.deliveryCount : null,
+        cmpOpen: c ? c.openCount : null,
         cmpApply: c ? c.applyCount : null,
-        cmpApplyRate: rate(c),
+        cmpOpenRate: rateOpen(c),
+        cmpApplyRate: rateApply(c),
       };
     });
   }, [primaryBuckets, cmpBuckets, unit, primary]);
@@ -183,8 +200,8 @@ export default function ScoutDashboardPage() {
         <Card label="配信数" value={totals.delivery.toLocaleString()} />
         <Card label="開封数" value={totals.open.toLocaleString()} />
         <Card label="開封率" value={`${openRate.toFixed(1)}%`} />
-        <Card label="応募数" value={totals.apply.toLocaleString()} />
-        <Card label="応募率" value={`${applyRate.toFixed(2)}%`} />
+        <Card label={appliedMode ? "応募数(応募日)" : "応募数"} value={totals.apply.toLocaleString()} />
+        <Card label={appliedMode ? "応募率(応募日)" : "応募率"} value={`${applyRate.toFixed(2)}%`} />
       </div>
 
       {/* グラフセクション */}
@@ -220,6 +237,20 @@ export default function ScoutDashboardPage() {
                 </button>
               ))}
             </div>
+            {/* T-202: 配信日ベース / 応募日ベース */}
+            <div className="inline-flex rounded-lg border border-[#E5E7EB] p-1">
+              {(["sent", "applied"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setDateMode(m)}
+                  className={`rounded-md px-3 py-1 text-[12px] font-medium transition-colors ${
+                    dateMode === m ? "bg-[#EA580C] text-white" : "text-[#6B7280] hover:text-[#374151]"
+                  }`}
+                >
+                  {DATE_MODE_LABELS[m]}
+                </button>
+              ))}
+            </div>
             {/* ◀｜当月/当年｜▶ */}
             <div className="flex rounded-md border border-[#E5E7EB]">
               <button onClick={goPrev} className="flex h-[30px] w-[30px] items-center justify-center rounded-l-md text-[14px] text-[#6B7280] hover:bg-[#F9FAFB]" title={`前${stepUnit}`}>◀</button>
@@ -230,8 +261,13 @@ export default function ScoutDashboardPage() {
         </div>
 
         <p className="mt-1 text-[12px] text-[#9CA3AF]">
-          棒=配信数・応募数（左軸）／ 線=応募率（右軸）。{comparison !== "none" && `${CMP_LABELS[comparison]}を半透明＋点線で重ね描き。`}配信0の点は応募率の線を切ります。{unit === "day" && "土曜は薄い青、日曜は薄い赤の背景を敷いています。"}
+          棒=配信数・開封数・応募数（左軸）／ 線=開封率・応募率（右軸2本）。{comparison !== "none" && `${CMP_LABELS[comparison]}を半透明＋点線で重ね描き。`}配信0の点は開封率・応募率の線を切ります。{unit === "day" && "土曜は薄い青、日曜は薄い赤の背景を敷いています。"}
         </p>
+        {appliedMode && (
+          <p className="mt-1 text-[12px] font-medium text-[#EA580C]">
+            応募日ベース表示中: 応募数・応募率は応募日基準、配信数・開封数・開封率は配信日基準です。
+          </p>
+        )}
 
         <div className="mt-3">
           {loading ? (
@@ -246,7 +282,7 @@ export default function ScoutDashboardPage() {
 
       {/* 明細テーブル（主系列） */}
       <div className="mt-6 rounded-lg border border-[#E5E7EB] bg-white p-5">
-        <h2 className="text-[16px] font-semibold text-[#374151]">{UNIT_LABELS[unit]}推移（{periodLabel}）</h2>
+        <h2 className="text-[16px] font-semibold text-[#374151]">{UNIT_LABELS[unit]}推移（{periodLabel}）{appliedMode && <span className="ml-2 text-[12px] font-normal text-[#EA580C]">応募は応募日基準</span>}</h2>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="text-[#6B7280]">
@@ -254,6 +290,7 @@ export default function ScoutDashboardPage() {
                 <th className="px-3 py-2 text-left">{unit === "hour" ? "時間帯" : unit === "month" ? "月" : "日付"}</th>
                 <th className="px-3 py-2 text-right">配信</th>
                 <th className="px-3 py-2 text-right">開封</th>
+                <th className="px-3 py-2 text-right">開封率</th>
                 <th className="px-3 py-2 text-right">応募</th>
                 <th className="px-3 py-2 text-right">応募率</th>
               </tr>
@@ -264,13 +301,14 @@ export default function ScoutDashboardPage() {
                   <td className="px-3 py-1.5">{unit === "hour" ? `${b.key}時` : b.key}</td>
                   <td className="px-3 py-1.5 text-right">{b.deliveryCount.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{b.openCount.toLocaleString()}</td>
+                  <td className="px-3 py-1.5 text-right">{b.deliveryCount > 0 ? `${((b.openCount / b.deliveryCount) * 100).toFixed(1)}%` : "—"}</td>
                   <td className="px-3 py-1.5 text-right">{b.applyCount.toLocaleString()}</td>
                   <td className="px-3 py-1.5 text-right">{b.deliveryCount > 0 ? `${((b.applyCount / b.deliveryCount) * 100).toFixed(2)}%` : "—"}</td>
                 </tr>
               ))}
               {primaryBuckets.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-[#9CA3AF]">データがありません</td>
+                  <td colSpan={6} className="px-3 py-6 text-center text-[#9CA3AF]">データがありません</td>
                 </tr>
               )}
             </tbody>
