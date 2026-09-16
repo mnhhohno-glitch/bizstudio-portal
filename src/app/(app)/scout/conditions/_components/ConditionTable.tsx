@@ -13,8 +13,13 @@
 //   枯渇であることは「枯渇」バッジと送信件数の赤字が残るので分かる）。
 // T-206-fix: 行内ボタンは w-full をやめて固定幅（設定・複製・削除で同じ幅）。w-full のままだと
 //   whitespace-nowrap の中で複製と削除が横に並んでしまい、削除が列の外へはみ出して見えなくなっていた。
-//   列幅は TH=w-0（中身ぴったり）にして中身に合わせ、余った幅は右端の列（TH_FLEX=w-full）だけが引き受ける。
 //   数値列（予測/結果・抽出/送信）は他の列に合わせて左寄せ。2段組みの上下は同じ文字サイズにする。
+// T-206-fix2: 全 th を w-0（中身ぴったり）にしたせいで余った横幅が右端に固まり、左は全列が窮屈なままだった。
+//   そこで 14 列すべてに % の幅を振り、合計 100% になるようにした（COL_W）。表は幅指定のない列に最低幅を配ってから
+//   余りを % の比で配るので、% は「余りをどの列にどれだけ配るか」の重みとして効き、横スクロールは増えない
+//   （% が中身より狭い列は中身の幅を取り、残りの列が比に応じて分け合う）。
+//   文字が長くなりやすい列（希望勤務地/配信テンプレート・検索対象/登録日）へ多めに、
+//   中身の長さが安定している列（状態・号機・NO・複製/削除・数値）へは窮屈さが取れる程度に配る。
 // T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
 //   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
 //   数字は 予測/結果・抽出/送信 の2列4段。下段には達成率（結果÷予測）・送信率（送信÷抽出）を小数点第1位まで出す。
@@ -45,12 +50,26 @@ const STATUS_BADGE: Record<string, string> = {
   DONE: "bg-[#E5E7EB] text-[#4B5563]",
 };
 
-const TH_BASE = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
-// T-206-fix: 表は min-w-full なので、余った横幅は既定だと文字の多い列（検索対象など）へ配られて間延びする。
-//   そこで幅の指定を 0（＝中身ぴったり）にし、余りは右端の列（TH_FLEX）だけが引き受ける。
-const TH = `${TH_BASE} w-0`;
-const TH_FLEX = `${TH_BASE} w-full`;
-const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-1.5 py-1.5 align-top text-[12px] text-[#374151]";
+const TH_BASE = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-2 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
+// T-206-fix2: 列幅の配分（合計 100%）。数字を変えるときはここだけを直す。
+const COL_W = {
+  check: "w-[2%]",
+  move: "w-[1.5%]",
+  no: "w-[4%]",
+  copy: "w-[4%]",
+  machine: "w-[5%]",
+  status: "w-[6%]",
+  date: "w-[7.5%]",
+  executed: "w-[6.5%]",
+  search: "w-[11%]",
+  login: "w-[8%]",
+  company: "w-[9.5%]",
+  workPref: "w-[22.5%]",
+  planned: "w-[6%]",
+  sent: "w-[6.5%]",
+} as const;
+const th = (w: string) => `${TH_BASE} ${w}`;
+const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-2 py-1.5 align-top text-[12px] text-[#374151]";
 const MOVE_BTN = "px-1 py-0.5 text-[10px] leading-none text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30";
 // T-206: 2段組みに収めた行内ボタン（従来の「操作」列と同じ色・同じ押せる条件）
 const ROW_BTN = "block w-[46px] rounded border px-1.5 py-0.5 text-center text-[11px] leading-[1.4]";
@@ -94,7 +113,7 @@ export default function ConditionTable({
       <table className="min-w-full border-collapse">
         <thead>
           <tr>
-            <th className={TH}>
+            <th className={th(COL_W.check)}>
               <input
                 type="checkbox"
                 checked={allChecked}
@@ -105,58 +124,57 @@ export default function ConditionTable({
                 aria-label="すべて選択"
               />
             </th>
-            <th className={`${TH} px-1`}>
+            <th className={`${th(COL_W.move)} px-1`}>
               <span className="sr-only">予約の並び替え</span>
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.no)}>
               NO
               <br />
               設定
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.copy)}>
               複製
               <br />
               削除
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.machine)}>
               号機
               <br />
               担当者
             </th>
-            <th className={TH}>状態</th>
-            <th className={TH}>
+            <th className={th(COL_W.status)}>状態</th>
+            <th className={th(COL_W.date)}>
               予約日
               <br />
               配信日
             </th>
-            <th className={TH}>実行日時</th>
-            <th className={TH}>
+            <th className={th(COL_W.executed)}>実行日時</th>
+            <th className={th(COL_W.search)}>
               検索対象
               <br />
               登録日
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.login)}>
               ログイン
               <br />
               卒業年度
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.company)}>
               経験社数
               <br />
               居住地
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.workPref)}>
               希望勤務地
               <br />
               配信テンプレート
             </th>
-            <th className={TH}>
+            <th className={th(COL_W.planned)}>
               予測
               <br />
               結果
             </th>
-            {/* T-206-fix: 余った横幅は右端のこの列が引き受ける（内容は左に寄ったまま、余白は表の右端に残る） */}
-            <th className={TH_FLEX}>
+            <th className={th(COL_W.sent)}>
               抽出
               <br />
               送信
@@ -301,13 +319,13 @@ export default function ConditionTable({
                   </div>
                 </td>
                 <td className={TD}>
-                  <div className="max-w-[200px] whitespace-normal" title={c.workPrefectures.join("/") || undefined}>
+                  <div className="max-w-[380px] whitespace-normal" title={c.workPrefectures.join("/") || undefined}>
                     <span className="whitespace-nowrap">{workPrefLabel(c.workPrefMode, c.workPrefectures)}</span>
                     {c.workPrefMode !== "ALL" && c.workPrefectures.length > 0 && !isDefaultWorkPrefectures(c.workPrefectures) && (
                       <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
                     )}
                   </div>
-                  <div className="max-w-[320px] truncate" title={c.templateName ?? undefined}>
+                  <div className="max-w-[380px] truncate" title={c.templateName ?? undefined}>
                     {c.templateName ? (
                       <>
                         <span className="mr-1 rounded bg-[#F3F4F6] px-1 text-[10px] text-[#6B7280]">
