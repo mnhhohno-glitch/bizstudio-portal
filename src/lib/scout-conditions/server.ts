@@ -31,9 +31,16 @@ function toRunDto(r: ConditionRow["runs"][number]): RunDto {
     executedAt: r.executedAt.toISOString(),
     extractedCount: r.extractedCount,
     sentCount: r.sentCount,
+    searchResultCount: r.searchResultCount,
     isDry: r.isDry,
     rawNotification: r.rawNotification,
   };
+}
+
+/** T-206: 値を持つ実行だけの合計。全て null なら null（画面は "-"） */
+function searchResultTotal(runs: RunDto[]): number | null {
+  const withValue = runs.filter((r) => r.searchResultCount != null);
+  return withValue.length ? withValue.reduce((a, r) => a + (r.searchResultCount ?? 0), 0) : null;
 }
 
 export function toConditionDto(c: ConditionRow): ConditionDto {
@@ -77,6 +84,8 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     runs,
     totalExtractedCount: sum((r) => r.extractedCount),
     totalSentCount: sum((r) => r.sentCount),
+    // T-206: 検索結果件数は RPA 未改修の間ずっと null なので、値を持つ実行だけを足す（1件も無ければ null）
+    totalSearchResultCount: searchResultTotal(runs),
   };
 }
 
@@ -267,7 +276,7 @@ export function parseConditionInput(
 
   if (body.plannedCount !== undefined) {
     const v = intOrNull(body.plannedCount);
-    if (v === undefined || (v !== null && v < 0)) return { ok: false, error: "予定件数は0以上の整数です" };
+    if (v === undefined || (v !== null && v < 0)) return { ok: false, error: "予測件数は0以上の整数です" };
     out.plannedCount = v;
   }
 
@@ -283,7 +292,7 @@ const LOCKED_FIELDS: { key: Exclude<keyof ParsedCondition, "status">; label: str
   { key: "machineId", label: "号機" },
   { key: "queueOrder", label: "予約の並び順" },
   { key: "deliveryDate", label: "配信日" },
-  { key: "plannedCount", label: "予定件数" },
+  { key: "plannedCount", label: "予測件数" },
   { key: "searchTarget", label: "検索対象" },
   { key: "registDateMode", label: "登録日の指定方法" },
   { key: "registDays", label: "登録日（期間指定）" },

@@ -13,8 +13,10 @@ export { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, ALL_PREFECTURES };
 export type { AreaGroup };
 
 // ---- 状態 ----
+// T-206: label は画面表示専用。「実行中」は RPA が動いていない時間帯でも配信中と誤解されるため「有効」に改めた。
+//   value（RUNNING / QUEUED / DRY / DONE）は DB の enum・外部API・RPA の GET /current が見ているので変更禁止。
 export const CONDITION_STATUSES = [
-  { value: "RUNNING", label: "実行中" },
+  { value: "RUNNING", label: "有効" },
   { value: "QUEUED", label: "予約" },
   { value: "DRY", label: "枯渇" },
   { value: "DONE", label: "完了" },
@@ -217,6 +219,13 @@ export function isDrySentCount(sentCount: number | null | undefined): boolean {
   return sentCount != null && sentCount < DRY_THRESHOLD;
 }
 
+// ---- T-206: 達成率（結果÷予測）・送信率（送信÷抽出） ----
+// 小数点第1位まで。母数が 0 または未入力のときは null（画面は % を出さない）。100% を超えてよい。
+export function ratePercentLabel(numerator: number | null | undefined, denominator: number | null | undefined): string | null {
+  if (numerator == null || denominator == null || denominator === 0) return null;
+  return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
 // ---- 号機の色（画面表示専用。号機↔担当者の対応は recruiterDisplay.ts の RC_ROSTER に一本化） ----
 export const MACHINE_COLORS: Record<number, { chip: string; dot: string }> = {
   1: { chip: "border-[#2563EB] bg-[#EFF6FF] text-[#1D4ED8]", dot: "bg-[#2563EB]" },
@@ -234,7 +243,7 @@ export function machineColor(no: number) {
 export const SORT_OPTIONS = [
   { value: "machine", label: "号機順" },
   { value: "sentAsc", label: "送信件数が少ない順" },
-  { value: "plannedDesc", label: "予定件数が多い順" },
+  { value: "plannedDesc", label: "予測件数が多い順" },
   { value: "executedDesc", label: "実行日が新しい順" },
 ] as const;
 export type SortKey = (typeof SORT_OPTIONS)[number]["value"];

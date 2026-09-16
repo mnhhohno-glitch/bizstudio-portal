@@ -145,7 +145,7 @@ export function buildCsv(rows: ConditionDto[]): string {
     "希望勤務地の都道府県",
     "テンプレート種別",
     "テンプレート",
-    "予定件数",
+    "予測件数",
     "抽出件数",
     "送信件数",
     "実行日時",

@@ -100,7 +100,7 @@ export default function ConditionsClient() {
   const allMachineNos = useMemo(() => machineOptions.map((o) => Number(o.value)), [machineOptions]);
   const selectedMachineNos = machineSel ?? allMachineNos;
 
-  // T-201: 状態の選択肢は CONDITION_STATUSES（実行中/予約/枯渇/完了）をそのまま使う
+  // T-201: 状態の選択肢は CONDITION_STATUSES（有効/予約/枯渇/完了）をそのまま使う（T-206 で「実行中」の表示を「有効」に改称。値は RUNNING のまま）
   const statusOptions = useMemo(() => CONDITION_STATUSES.map((s) => ({ value: s.value, label: s.label })), []);
   const allStatusValues = useMemo(() => statusOptions.map((o) => o.value), [statusOptions]);
   const selectedStatuses = statusSel ?? allStatusValues;
@@ -136,7 +136,7 @@ export default function ConditionsClient() {
       .map((m) => ({ machineNo: m.machineNo, task: m.queueEmptyTask }));
   }, [data, conditions]);
 
-  // T-197: 稼働中なのに実行中が1件も無い号機（RPA が条件を取れず配信が走らない）
+  // T-197: 稼働中なのに「有効」（RUNNING）が1件も無い号機（RPA が条件を取れず配信が走らない）
   const noRunningMachines = useMemo(() => {
     if (!data) return [];
     return data.machines
@@ -233,7 +233,7 @@ export default function ConditionsClient() {
     for (const c of created) upsertLocal(c);
     // T-204: 複製元と複製先は、いまの絞り込みに合わなくても一覧に出し続ける（複製した条件が画面から消えないように）
     setPinnedIds([...ids, ...created.map((c) => c.id)]);
-    // T-197: 複製も自動決定（実行中が無ければ実行中、あれば予約の末尾）なので結果の状態を伝える
+    // T-197: 複製も自動決定（有効が無ければ有効、あれば予約の末尾）なので結果の状態を伝える
     const summary = created.map((c) => `${c.recordNo ?? ""}(${conditionStatusLabel(c.status)})`).join("・");
     toast.success(`${created.length}件を複製しました：${summary}`);
     return created;
@@ -279,7 +279,7 @@ export default function ConditionsClient() {
         <div>
           <h1 className="text-[20px] font-bold text-[#374151]">スカウト配信条件</h1>
           <p className="mt-1 text-[13px] text-[#6B7280]">
-            号機ごとのマイナビ検索条件（7軸）と配信テンプレートを登録します。RPA は「実行中」の条件をフォームへ直接入力します。
+            号機ごとのマイナビ検索条件（7軸）と配信テンプレートを登録します。RPA は「有効」の条件をフォームへ直接入力します。
           </p>
         </div>
         <button
@@ -293,8 +293,8 @@ export default function ConditionsClient() {
 
       {noRunningMachines.length > 0 && (
         <div className="mb-3 rounded-[8px] border border-[#FCA5A5] bg-[#FEF2F2] px-4 py-2.5 text-[13px] text-[#991B1B]">
-          <span className="mr-1 font-semibold">⚠ {noRunningMachines.map((n) => `${n}号機`).join("・")}に「実行中」の条件がありません。</span>
-          RPA は実行中の条件しか取得しないため配信が走りません。「検索設定」から条件を登録すると自動で実行中になります。
+          <span className="mr-1 font-semibold">⚠ {noRunningMachines.map((n) => `${n}号機`).join("・")}に「有効」の条件がありません。</span>
+          RPA は「有効」の条件しか取得しないため配信が走りません。「検索設定」から条件を登録すると自動で「有効」になります。
         </div>
       )}
 
@@ -560,7 +560,7 @@ export default function ConditionsClient() {
           onClose={() => setModal(null)}
           onSaved={(c, isNew, demoted) => {
             upsertLocal(c);
-            // T-198: 実行中を1件に保つため「完了」へ畳まれた行も反映する（再読込しなくても一覧が合う）
+            // T-198: 「有効」を1件に保つため「完了」へ畳まれた行も反映する（再読込しなくても一覧が合う）
             for (const d of demoted) upsertLocal(d);
             if (isNew) setModal({ kind: "edit", condition: c });
           }}

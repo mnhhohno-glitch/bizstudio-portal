@@ -25,6 +25,8 @@ export type RunInput = {
   executedAt: Date;
   extractedCount: number;
   sentCount: number;
+  /** T-206: マイナビの検索結果件数（母数）。RPA が送ってこない・数値に直せない場合は null */
+  searchResultCount: number | null;
   rawNotification: string | null;
   dryRun: boolean;
 };
@@ -115,6 +117,7 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
             executedAt: input.executedAt,
             extractedCount: input.extractedCount,
             sentCount: input.sentCount,
+            searchResultCount: input.searchResultCount,
             isDry,
             rawNotification: input.rawNotification,
           },
@@ -238,6 +241,12 @@ export function parseRunInput(body: unknown): { ok: true; data: RunInput } | { o
   if (typeof sentCount === "string") return { ok: false, error: sentCount };
   if (b.sentCount == null) return { ok: false, error: "sentCount は必須です" };
 
+  // T-206: 検索結果件数は任意項目。数値に直せなくても結果送信そのものは失敗させない（null で保存して警告だけ出す）
+  const searchResult = parseSearchResultCount(b.searchResultCount);
+  if (searchResult.invalidRaw != null) {
+    console.warn(`[scout-conditions/runs] searchResultCount を数値に直せませんでした: ${searchResult.invalidRaw.slice(0, 50)}`);
+  }
+
   const rawNotification = b.rawNotification == null ? null : String(b.rawNotification);
   const dryRun = b.dryRun === true || b.dryRun === "true";
 
@@ -249,10 +258,35 @@ export function parseRunInput(body: unknown): { ok: true; data: RunInput } | { o
       executedAt: executedAt ?? new Date(),
       extractedCount,
       sentCount,
+      searchResultCount: searchResult.value,
       rawNotification,
       dryRun,
     },
   };
+}
+
+/**
+ * T-206: 検索結果件数（マイナビの「検索結果：全1299件」の数字）の掃除。
+ * RPA は画面から取った文字列をそのまま送ってくるため "1,299" / "1,299件" / "1299 件" / "全1,299件" の形で届き得る。
+ * カンマ・「件」・空白（全角含む）を落とし、全角数字は半角に直してから数値にする。
+ * 数値に直せなければ value=null・invalidRaw=受け取った原文（呼び出し側が console.warn に先頭50文字を出す）。
+ * 未指定・空文字は「送ってきていない」だけなので警告は出さない（RPA 未改修の間はこちらが通常）。
+ */
+export function parseSearchResultCount(v: unknown): { value: number | null; invalidRaw: string | null } {
+  if (v == null || v === "") return { value: null, invalidRaw: null };
+  if (typeof v === "number") {
+    return Number.isInteger(v) && v >= 0 ? { value: v, invalidRaw: null } : { value: null, invalidRaw: String(v) };
+  }
+  if (typeof v !== "string") return { value: null, invalidRaw: String(v) };
+  const cleaned = v
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[,，、\s　]/g, "")
+    .replace(/件/g, "");
+  // 掃除した後に数字だけ、または数字のかたまりが1つだけ（「全1299」「検索結果：1299」）なら受ける
+  const m = cleaned.match(/^\D*(\d+)\D*$/);
+  if (!m) return { value: null, invalidRaw: v };
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) ? { value: n, invalidRaw: null } : { value: null, invalidRaw: v };
 }
 
 /**

@@ -3420,6 +3420,8 @@ model ScoutRun {
   executedAt      DateTime @map("executed_at") // 実行日時（真のUTC instant。表示時に Asia/Tokyo へ）
   extractedCount  Int      @default(0) @map("extracted_count") // リスト抽出件数
   sentCount       Int      @default(0) @map("sent_count") // 送信件数（10件未満で枯渇）
+  // T-206: マイナビの検索結果件数（「検索結果：全1299件」の数字＝母数）。RPA が送ってこない場合と、数値に直せなかった場合は null
+  searchResultCount Int? @map("search_result_count")
   isDry           Boolean  @default(false) @map("is_dry") // 枯渇フラグ
   rawNotification String?  @map("raw_notification") @db.Text // 完了通知の原文
 

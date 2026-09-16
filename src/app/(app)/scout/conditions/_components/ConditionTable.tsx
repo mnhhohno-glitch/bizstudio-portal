@@ -11,12 +11,17 @@
 // T-204: 複製直後の複製元・複製先（pinnedIds）は絞り込みの対象外でも出すので、どの行かが分かるよう黄色で塗る。
 //   枯渇（送信10件未満）の赤とは別色にし、枯渇と重なったときは黄色を優先する（例外表示であることを見失わないため。
 //   枯渇であることは「枯渇」バッジと送信件数の赤字が残るので分かる）。
+// T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
+//   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
+//   数字は 予測/結果・抽出/送信 の2列4段。下段には達成率（結果÷予測）・送信率（送信÷抽出）を小数点第1位まで出す。
+//   「予定」は人が感覚で入れている想定件数なので呼称を「予測」に、マイナビの検索結果件数（母数）を「結果」として並べる。
 import {
   areaLabel,
   companyCountLabel,
   conditionStatusLabel,
   gradYearRangeLabel,
   periodDaysLabel,
+  ratePercentLabel,
   searchTargetLabel,
   templateKindLabel,
   workPrefLabel,
@@ -39,7 +44,9 @@ const STATUS_BADGE: Record<string, string> = {
 const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
 const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-1.5 py-1.5 align-top text-[12px] text-[#374151]";
 const MOVE_BTN = "px-1 py-0.5 text-[10px] leading-none text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30";
-const COLUMN_COUNT = 15;
+// T-206: 2段組みに収めた行内ボタン（従来の「操作」列と同じ色・同じ押せる条件）
+const ROW_BTN = "w-full rounded border px-1.5 py-0.5 text-center text-[11px] leading-[1.4]";
+const COLUMN_COUNT = 14;
 
 export default function ConditionTable({
   rows,
@@ -59,7 +66,7 @@ export default function ConditionTable({
   selected: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: (checked: boolean) => void;
-  /** 行クリック／「条件設定」で値入りの中央モーダルを開く */
+  /** 行クリック／「設定」で値入りの中央モーダルを開く */
   onEdit: (c: ConditionDto) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
@@ -93,8 +100,21 @@ export default function ConditionTable({
             <th className={`${TH} px-1`}>
               <span className="sr-only">予約の並び替え</span>
             </th>
-            <th className={TH}>NO</th>
-            <th className={TH}>号機</th>
+            <th className={TH}>
+              NO
+              <br />
+              設定
+            </th>
+            <th className={TH}>
+              複製
+              <br />
+              削除
+            </th>
+            <th className={TH}>
+              号機
+              <br />
+              担当者
+            </th>
             <th className={TH}>状態</th>
             <th className={TH}>
               予約日
@@ -122,10 +142,16 @@ export default function ConditionTable({
               <br />
               配信テンプレート
             </th>
-            <th className={`${TH} text-right`}>予定</th>
-            <th className={`${TH} text-right`}>抽出</th>
-            <th className={`${TH} text-right`}>送信</th>
-            <th className={TH}>操作</th>
+            <th className={`${TH} text-right`}>
+              予測
+              <br />
+              結果
+            </th>
+            <th className={`${TH} text-right`}>
+              抽出
+              <br />
+              送信
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -146,6 +172,9 @@ export default function ConditionTable({
             const bounds = queueBounds[c.id] ?? { canUp: false, canDown: false };
             // T-202: 並び替えは従来どおり「予約」の行だけ。予約以外は押せない見た目で置いておく
             const queued = c.status === "QUEUED";
+            // T-206: 達成率（結果÷予測）・送信率（送信÷抽出）。母数が 0 / 未入力なら % は出さない
+            const achieveRate = ratePercentLabel(c.totalSearchResultCount, c.plannedCount);
+            const sentRate = ratePercentLabel(c.totalSentCount, c.totalExtractedCount);
             return (
               <tr
                 key={c.id}
@@ -186,9 +215,41 @@ export default function ConditionTable({
                     </button>
                   </span>
                 </td>
-                <td className={`${TD} font-mono font-semibold tabular-nums`}>{c.recordNo ?? "-"}</td>
+                {/* T-206: NO（上段）＋「設定」ボタン（下段）。行クリックと同じ編集モーダルを開く */}
                 <td className={TD}>
-                  <MachineLabel machineNo={c.machineNo} />
+                  <div className="font-mono font-semibold tabular-nums">{c.recordNo ?? "-"}</div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(c);
+                    }}
+                    className={`${ROW_BTN} mt-0.5 border-[#2563EB] bg-white font-medium text-[#1D4ED8] hover:bg-[#EFF6FF]`}
+                  >
+                    設定
+                  </button>
+                </td>
+                {/* T-206: 複製（上段）／削除（下段）。実績がある条件は従来どおり削除できない */}
+                <td className={TD} onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={() => onDuplicate(c)}
+                    className={`${ROW_BTN} border-[#D1D5DB] text-[#374151] hover:bg-white`}
+                  >
+                    複製
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(c)}
+                    disabled={hasRuns}
+                    title={hasRuns ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
+                    className={`${ROW_BTN} mt-0.5 border-[#FECACA] text-[#B91C1C] hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent`}
+                  >
+                    削除
+                  </button>
+                </td>
+                <td className={TD}>
+                  <MachineLabel machineNo={c.machineNo} stacked />
                 </td>
                 <td className={TD}>
                   <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE[c.status] ?? ""}`}>
@@ -250,38 +311,20 @@ export default function ConditionTable({
                     )}
                   </div>
                 </td>
-                <td className={`${TD} text-right tabular-nums`}>{c.plannedCount ?? "-"}</td>
+                {/* T-206: 予測（人の想定件数）＋結果（マイナビの検索結果件数＝母数）と達成率 */}
                 <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
-                  {c.totalExtractedCount ?? "-"}
+                  <div>{c.plannedCount ?? "-"}</div>
+                  <div className="text-[#6B7280]">
+                    {c.totalSearchResultCount == null
+                      ? "-"
+                      : `${c.totalSearchResultCount}${achieveRate ? ` (${achieveRate})` : ""}`}
+                  </div>
                 </td>
-                <td className={`${TD} text-right tabular-nums ${dry ? "font-semibold text-[#B91C1C]" : ""}`} title={runsTitle}>
-                  {c.totalSentCount ?? "-"}
-                </td>
-                <td className={TD} onClick={(e) => e.stopPropagation()}>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onEdit(c)}
-                      className="rounded border border-[#2563EB] bg-white px-1.5 py-0.5 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#EFF6FF]"
-                    >
-                      条件設定
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDuplicate(c)}
-                      className="rounded border border-[#D1D5DB] px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white"
-                    >
-                      複製
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDelete(c)}
-                      disabled={hasRuns}
-                      title={hasRuns ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
-                      className="rounded border border-[#FECACA] px-1.5 py-0.5 text-[11px] text-[#B91C1C] hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      削除
-                    </button>
+                {/* T-206: 抽出（RPA が取り込んだ件数）＋送信と送信率 */}
+                <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
+                  <div>{c.totalExtractedCount ?? "-"}</div>
+                  <div className={dry ? "font-semibold text-[#B91C1C]" : "text-[#6B7280]"}>
+                    {c.totalSentCount == null ? "-" : `${c.totalSentCount}${sentRate ? ` (${sentRate})` : ""}`}
                   </div>
                 </td>
               </tr>

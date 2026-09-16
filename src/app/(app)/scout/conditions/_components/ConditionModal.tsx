@@ -2,7 +2,8 @@
 
 // T-197: 画面中央の「検索設定」モーダル。マイナビの検索条件画面と同じく検索7軸を縦に並べ、
 // 新規作成（空）と編集（値入り）を同じコンポーネントで行う。旧「配信条件の詳細」右パネルの置き換え。
-// - 新規作成: 状態・並び順・レコード番号はサーバーが決める（号機に実行中が無ければ実行中、あれば予約の末尾）
+// - 新規作成: 状態・並び順・レコード番号はサーバーが決める（号機に「有効」が無ければ「有効」、あれば予約の末尾）
+// T-206: 状態「実行中」の表示を「有効」に改称（値は RUNNING のまま）。「予定件数」は「予測件数」に改称（列名 planned_count は据え置き）。
 // - 編集:     状態のプルダウンで自動決定された値を手で直せる
 // T-199: レイアウトをマイナビ「検索項目設定」画面の形式（グループ見出しバー＋左=項目名/右=入力欄の2列テーブル）に揃えた。
 //   入力項目・選択肢・バリデーション・保存の挙動は T-198 のまま。見た目の配置だけを変えている。
@@ -114,11 +115,11 @@ export default function ConditionModal({
   mode: ModalMode;
   machines: MachineDto[];
   templates: TemplateDto[];
-  /** 全条件（新規作成時に「この号機は実行中が有るか」を案内するため） */
+  /** 全条件（新規作成時に「この号機は有効が有るか」を案内するため） */
   conditions: ConditionDto[];
   holidays: HolidayMap;
   onClose: () => void;
-  /** T-198: demoted = 実行中を1件に保つため「完了」へ畳まれた同じ号機の条件（画面の表示を合わせる） */
+  /** T-198: demoted = 「有効」を1件に保つため「完了」へ畳まれた同じ号機の条件（画面の表示を合わせる） */
   onSaved: (c: ConditionDto, isNew: boolean, demoted: ConditionDto[]) => void;
   onDuplicate: (c: ConditionDto) => void;
   onDelete: (c: ConditionDto) => void;
@@ -165,7 +166,7 @@ export default function ConditionModal({
     () => TEMPLATE_KINDS.map((k) => ({ kind: k, items: templates.filter((t) => t.kind === k.value && (t.isActive || t.id === form.templateId)) })),
     [templates, form.templateId],
   );
-  // 新規作成時の案内: 選んだ号機に実行中が有るか（保存時の状態はサーバーが同じ規則で決める）
+  // 新規作成時の案内: 選んだ号機に「有効」が有るか（保存時の状態はサーバーが同じ規則で決める）
   const machineHasRunning = useMemo(
     () => conditions.some((c) => c.machineId === form.machineId && c.status === "RUNNING"),
     [conditions, form.machineId],
@@ -187,14 +188,14 @@ export default function ConditionModal({
         return;
       }
       const saved = json.condition as ConditionDto;
-      // T-198: 実行中は号機ごとに1件。手動で実行中に戻したときは畳まれた条件をトーストで伝える
+      // T-198: 「有効」は号機ごとに1件。手動で「有効」に戻したときは畳まれた条件をトーストで伝える
       const demoted = (Array.isArray(json.demoted) ? json.demoted : []) as ConditionDto[];
       const demotedNos = demoted.map((d) => d.recordNo ?? "").join("・");
       toast.success(
         isNew
-          ? `${saved.recordNo ?? ""} を${saved.status === "RUNNING" ? "「実行中」" : "「予約」（末尾）"}として登録しました`
+          ? `${saved.recordNo ?? ""} を${saved.status === "RUNNING" ? "「有効」" : "「予約」（末尾）"}として登録しました`
           : demoted.length
-            ? `保存しました（実行中は号機ごとに1件のため ${demotedNos} を「完了」にしました）`
+            ? `保存しました（「有効」は号機ごとに1件のため ${demotedNos} を「完了」にしました）`
             : "保存しました",
       );
       setDirty(false);
@@ -268,8 +269,8 @@ export default function ConditionModal({
                     ? "この条件で変更できるのは状態だけです（配信を止めるときは「完了」にしてください）"
                     : undefined
                   : machineHasRunning
-                    ? "この号機には実行中の条件があるため、保存時に「予約（末尾）」になります"
-                    : "この号機に実行中の条件が無いため、保存時に「実行中」になります"
+                    ? "この号機には「有効」の条件があるため、保存時に「予約（末尾）」になります"
+                    : "この号機に「有効」の条件が無いため、保存時に「有効」になります"
               }
             >
               {current ? (
@@ -282,7 +283,7 @@ export default function ConditionModal({
                 </select>
               ) : (
                 <div className="inline-block rounded-[6px] border border-dashed border-[#D1D5DB] bg-[#F9FAFB] px-3 py-1.5 text-[12px] text-[#374151]">
-                  保存時に自動決定：<span className="font-semibold">{machineHasRunning ? "予約（末尾）" : "実行中"}</span>
+                  保存時に自動決定：<span className="font-semibold">{machineHasRunning ? "予約（末尾）" : "有効"}</span>
                 </div>
               )}
             </FormRow>
@@ -307,7 +308,7 @@ export default function ConditionModal({
                 disabled={locked}
               />
             </FormRow>
-            <FormRow label="予定件数">
+            <FormRow label="予測件数" note="人が見込みで入れる想定件数（マイナビの検索結果件数は「結果」として実績に記録されます）">
               <input
                 type="number"
                 min={0}
@@ -620,9 +621,10 @@ export default function ConditionModal({
                   <DateTimeText iso={latest?.executedAt} holidays={holidays} />
                 </span>
               </FormRow>
-              <FormRow label="予定 / 抽出 / 送信" dense>
+              {/* T-206: 予測（人の想定）／結果（マイナビの検索結果件数＝母数。RPA 未送信の間は "-"）／抽出／送信 */}
+              <FormRow label="予測 / 結果 / 抽出 / 送信" dense>
                 <span className="text-[12px] tabular-nums">
-                  {current.plannedCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
+                  {current.plannedCount ?? "-"} / {latest?.searchResultCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
                   <span className={dry ? "font-semibold text-[#B91C1C]" : ""}>{latest?.sentCount ?? "-"}</span>
                 </span>
               </FormRow>
@@ -636,6 +638,7 @@ export default function ConditionModal({
                       <thead className="bg-[#F9FAFB] text-[#6B7280]">
                         <tr>
                           <th className="px-2 py-1 text-left">実行日時</th>
+                          <th className="px-2 py-1 text-right">結果</th>
                           <th className="px-2 py-1 text-right">抽出</th>
                           <th className="px-2 py-1 text-right">送信</th>
                           <th className="px-2 py-1 text-left">枯渇</th>
@@ -647,6 +650,7 @@ export default function ConditionModal({
                             <td className="px-2 py-1">
                               <DateTimeText iso={r.executedAt} holidays={holidays} />
                             </td>
+                            <td className="px-2 py-1 text-right tabular-nums">{r.searchResultCount ?? "-"}</td>
                             <td className="px-2 py-1 text-right tabular-nums">{r.extractedCount}</td>
                             <td className={`px-2 py-1 text-right tabular-nums ${isDrySentCount(r.sentCount) ? "font-semibold text-[#B91C1C]" : ""}`}>{r.sentCount}</td>
                             <td className="px-2 py-1">{r.isDry || isDrySentCount(r.sentCount) ? "枯渇" : ""}</td>

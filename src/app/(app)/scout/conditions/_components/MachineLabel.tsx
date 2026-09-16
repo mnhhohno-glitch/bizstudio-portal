@@ -9,9 +9,32 @@ export function machineRecruiterName(machineNo: number): string {
   return d.unit ? d.name : "";
 }
 
-export function MachineLabel({ machineNo, compact = false }: { machineNo: number; compact?: boolean }) {
+/**
+ * compact=true: 担当者名を出さない。
+ * stacked=true: T-206 の一覧「号機/担当者」列。1段目に色ドット＋号機、2段目に担当者名（他の2段組み列と同じ形）。
+ */
+export function MachineLabel({
+  machineNo,
+  compact = false,
+  stacked = false,
+}: {
+  machineNo: number;
+  compact?: boolean;
+  stacked?: boolean;
+}) {
   const name = machineRecruiterName(machineNo);
   const c = machineColor(machineNo);
+  if (stacked) {
+    return (
+      <span className="inline-flex flex-col">
+        <span className="inline-flex items-center gap-1.5">
+          <span className={`inline-block h-2 w-2 rounded-full ${c.dot}`} />
+          <span className="font-semibold text-[#374151]">{machineNo}号機</span>
+        </span>
+        <span className="text-[11px] text-[#6B7280]">{name || "-"}</span>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`inline-block h-2 w-2 rounded-full ${c.dot}`} />

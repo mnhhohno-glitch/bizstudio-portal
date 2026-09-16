@@ -26,6 +26,8 @@ export type RunDto = {
   executedAt: string; // ISO（真のUTC instant）
   extractedCount: number;
   sentCount: number;
+  /** T-206: マイナビの検索結果件数（母数）。RPA 未改修の間は null */
+  searchResultCount: number | null;
   isDry: boolean;
   rawNotification: string | null;
 };
@@ -66,6 +68,8 @@ export type ConditionDto = {
   //   枯渇回（isDry）も実際に配信しているので合計に含める。dryRun の検証リクエストは DB に書かれないため元から入らない。
   totalExtractedCount: number | null;
   totalSentCount: number | null;
+  // T-206: 検索結果件数の合計（値を持つ実行が1件も無ければ null＝画面は "-"）
+  totalSearchResultCount: number | null;
 };
 
 export type ConditionsResponse = {
