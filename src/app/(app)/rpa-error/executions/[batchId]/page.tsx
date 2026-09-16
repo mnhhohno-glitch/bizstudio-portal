@@ -39,6 +39,21 @@ type Batch = {
   processingLogs: ProcessingLog[];
 };
 
+/** 返信送信日時を JST で表示する（罠#17: toISOString().slice は使わない） */
+function formatReplySentAtJst(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+
+const REPLY_RESULT_LABEL: Record<string, string> = {
+  SUCCESS: "成功",
+  FAILED: "失敗",
+  FAILURE: "失敗",
+  SKIP: "スキップ",
+};
+
 const BATCH_STATUS_LABEL: Record<string, string> = {
   RUNNING: "実行中",
   COMPLETED: "完了",
@@ -48,6 +63,11 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
 
 const LOG_STATUS: Record<string, { label: string; style: string }> = {
   NORMAL: { label: "通常送信", style: "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]" },
+  // 応答未達→RPAリトライ時の救済。NORMAL と同じく返信可で処理している
+  RETRY_RECOVERED: {
+    label: "リトライ救済",
+    style: "border-[#16A34A]/30 bg-[#16A34A]/10 text-[#16A34A]",
+  },
   AGE_NG: { label: "年齢NG", style: "border-[#D97706]/30 bg-[#D97706]/10 text-[#D97706]" },
   FOREIGN_NG: { label: "外国籍NG", style: "border-[#D97706]/30 bg-[#D97706]/10 text-[#D97706]" },
   AI_FAILED: { label: "AI解析失敗", style: "border-[#9CA3AF]/30 bg-[#9CA3AF]/10 text-[#6B7280]" },
@@ -135,13 +155,16 @@ export default function RpaExecutionDetailPage() {
                   <th className="px-4 py-3 text-left font-medium">電話番号</th>
                   <th className="px-4 py-3 text-left font-medium">ステータス</th>
                   <th className="px-4 py-3 text-left font-medium">理由</th>
+                  <th className="px-4 py-3 text-left font-medium">返信可否</th>
+                  <th className="px-4 py-3 text-left font-medium">返信結果</th>
+                  <th className="px-4 py-3 text-left font-medium">返信送信日時</th>
                   <th className="px-4 py-3 text-left font-medium">求職者</th>
                 </tr>
               </thead>
               <tbody>
                 {batch.processingLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-[#9CA3AF]">
+                    <td colSpan={9} className="px-4 py-8 text-center text-[#9CA3AF]">
                       処理ログがありません
                     </td>
                   </tr>
@@ -169,6 +192,17 @@ export default function RpaExecutionDetailPage() {
                         </td>
                         <td className="px-4 py-3 text-[13px] text-[#374151]">
                           {log.reason || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-[13px] text-[#374151]">
+                          {log.canSendReply ? "可" : "不可"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-[13px] text-[#374151]">
+                          {log.replyResult
+                            ? REPLY_RESULT_LABEL[log.replyResult] || log.replyResult
+                            : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-[13px] text-[#6B7280]">
+                          {formatReplySentAtJst(log.replySentAt)}
                         </td>
                         <td className="px-4 py-3 text-[13px]">
                           {log.candidate ? (

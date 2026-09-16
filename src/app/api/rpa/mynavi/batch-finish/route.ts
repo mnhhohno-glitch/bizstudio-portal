@@ -48,7 +48,8 @@ export async function POST(req: Request) {
     const countOf = (s: string) =>
       grouped.find((g) => g.status === s)?._count._all ?? 0;
 
-    const normalCount = countOf("NORMAL");
+    // RETRY_RECOVERED（リトライ救済）は返信可で処理した側なので NORMAL と同じく「通常送信」に数える
+    const normalCount = countOf("NORMAL") + countOf("RETRY_RECOVERED");
     const ageNgCount = countOf("AGE_NG");
     const foreignNgCount = countOf("FOREIGN_NG");
     const aiFailedCount = countOf("AI_FAILED");

@@ -8,6 +8,7 @@ import { normalizePhoneNumber } from "@/lib/phone-normalize";
 import {
   findDuplicateCandidate,
   recordReapplication,
+  evaluateRetryRecovery,
   DUPLICATE_MATCH_LABELS,
 } from "@/lib/mynavi-rpa/duplicate-check";
 import { isAgeNg, isForeignNg, calculateAge } from "@/lib/mynavi-rpa/judgment";
@@ -281,6 +282,53 @@ export async function POST(req: NextRequest) {
       birthday: parsed.birthDate,
     });
     if (dup) {
+      // ---- リトライ救済（2026-09-16 の取り残し対策）----
+      // portal は登録に成功したのに応答が RPA へ届かず（502）、RPA がリトライすると
+      // 1回目で作った自分自身と会員Noが一致して DUPLICATE_SKIPPED になり、一次返信の
+      // 経路が永久に塞がる。返信が未送信であることを確かめたうえで、この場合だけ返信可に戻す。
+      const recovery = await evaluateRetryRecovery(dup);
+      if (recovery.recovered) {
+        const reason = `リトライ救済: 会員No が既存求職者 No.${dup.candidateNumber} と一致、一次返信未送信のため返信可`;
+        // 再応募の記録は DUPLICATE_SKIPPED 時と同じ扱いにする（既存レコードは他に更新しない）
+        try {
+          await recordReapplication(dup.id);
+        } catch (e) {
+          console.error("[rpa/mynavi/pdf-upload] recordReapplication failed:", e);
+        }
+        const log = await prisma.mynaviRpaProcessingLog.create({
+          data: {
+            batchId,
+            status: "RETRY_RECOVERED",
+            reason,
+            canSendReply: true,
+            candidateName: parsed.name,
+            candidateAge: calculateAge(parsed.birthDate),
+            phoneNormalized,
+            candidateId: dup.id,
+            // 枠紐付けは既存 Candidate のものを引き継ぐ（新たに紐付け直さない）
+            scoutLinkedSlotId: recovery.scoutDeliverySlotId,
+            scoutLinkResult: recovery.scoutDeliverySlotId ? "matched" : null,
+          },
+        });
+        console.log(
+          `[rpa/mynavi/pdf-upload] retry-recovered candidateId=${dup.id} batchId=${batchId} existingLogIds=[${recovery.existingLogIds.join(",")}]`,
+        );
+        // キー構成は NORMAL 時と完全に同一（RPA は processingLogId と canSendReply を見る）
+        return NextResponse.json({
+          processingLogId: log.id,
+          candidateId: dup.id,
+          candidateNumber: dup.candidateNumber,
+          canSendReply: true,
+          reason,
+          status: "RETRY_RECOVERED",
+          scoutLinkResult: recovery.scoutDeliverySlotId ? "matched" : null,
+          scoutLinkedSlotId: recovery.scoutDeliverySlotId,
+        });
+      }
+      console.log(
+        `[rpa/mynavi/pdf-upload] duplicate-skipped candidateId=${dup.id} batchId=${batchId} recoverySkipReason=${recovery.skipReason}`,
+      );
+
       const matchLabel = DUPLICATE_MATCH_LABELS[dup.matchedBy];
       const reason = `二重処理スキップ: ${matchLabel}が既存求職者 No.${dup.candidateNumber} と一致`;
       // 新規作成せず、既存レコードに再応募を記録する（1人1レコード運用）。

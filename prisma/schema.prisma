@@ -1427,7 +1427,7 @@ model MynaviRpaProcessingLog {
   phoneNormalized   String?           @map("phone_normalized")
   candidateName     String?           @map("candidate_name")
   candidateAge      Int?              @map("candidate_age")
-  status            String // "NORMAL" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIPPED"（旧: "DUPLICATE_SKIP"） | "ERROR"
+  status            String // "NORMAL" | "RETRY_RECOVERED" | "AGE_NG" | "FOREIGN_NG" | "AI_FAILED" | "DUPLICATE_SKIPPED"（旧: "DUPLICATE_SKIP"） | "ERROR"
   reason            String?           @db.Text
   canSendReply      Boolean           @default(false) @map("can_send_reply")
   replySentAt       DateTime?         @map("reply_sent_at")
