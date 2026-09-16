@@ -1568,7 +1568,7 @@ model CandidateFile {
   caComment         String?               @map("ca_comment") @db.Text // CA が求人に付けるアドバイザーコメント（求職者サイト「担当CAのおすすめ」表示用）
   // T-133 FU-13a: CAによる求職者向け表示の上書き。元求人データ（job-platform/kyuujin Job）は非破壊。
   //   キー=表示項目名（旧EditJobModal準拠の13項目: companyName/jobTitle/workLocation/nearestStation/salary/
-  //   salaryMonthly/bonus/jobDescription/requirements/holidays/overtime/benefits/transfer）、値=上書き文字列。
+  //   salaryMonthly/bonus/jobDescription/requirements/holidays/overtime/benefits/transfer ＋ access(2026-09-16追加)）、値=上書き文字列。
   //   表示時に mypage BFF が元データへマージ。NULL=上書きなし。caComment は上記 caComment 列で別管理（本JSONに入れない）。
   displayOverrides  Json?                 @map("display_overrides")
   // T-133 FU-14a: CAによる手動並び順（候補者×求人行ごと。他の求職者には波及しない）。
