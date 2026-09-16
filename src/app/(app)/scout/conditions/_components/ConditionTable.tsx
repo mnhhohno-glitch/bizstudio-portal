@@ -5,6 +5,9 @@
 // T-197: 先頭に NO（レコード番号 1-001）列を追加。操作列の「詳細」は「条件設定」に置き換え。
 // T-198: 作成日列を削除し、実行日時列を予約日/配信日の右隣へ移した（実行済みかどうかを左寄りで確認できるようにするため）。
 // T-203: 抽出・送信は最新1件ではなくその条件の全実行の合計（枯渇回も含む）。実行日時は最新のまま。枯渇判定は従来どおり最新1件で見る（isDryRow）。
+// T-202: 横スクロールを減らすため、検索対象/登録日・ログイン/卒業年度・経験社数/居住地・希望勤務地/配信テンプレートを
+//   予約日/配信日と同じ「1列2段」にまとめた（各段の書式は従来のまま）。予約の並び替え（▲▼）はチェックボックスの右隣へ移動。
+//   ▲▼の更新は PATCH ではなく bulk(action=move) を通るので、T-201 の「実績があると状態以外は変えられない」ロックの対象外（従来どおり動く）。
 import {
   areaLabel,
   companyCountLabel,
@@ -30,9 +33,10 @@ const STATUS_BADGE: Record<string, string> = {
   DONE: "bg-[#E5E7EB] text-[#4B5563]",
 };
 
-const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-2 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
-const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-2 py-1.5 align-top text-[12px] text-[#374151]";
-const COLUMN_COUNT = 18;
+const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
+const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-1.5 py-1.5 align-top text-[12px] text-[#374151]";
+const MOVE_BTN = "px-1 py-0.5 text-[10px] leading-none text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30";
+const COLUMN_COUNT = 15;
 
 export default function ConditionTable({
   rows,
@@ -79,6 +83,9 @@ export default function ConditionTable({
                 aria-label="すべて選択"
               />
             </th>
+            <th className={`${TH} px-1`}>
+              <span className="sr-only">予約の並び替え</span>
+            </th>
             <th className={TH}>NO</th>
             <th className={TH}>号機</th>
             <th className={TH}>状態</th>
@@ -88,14 +95,26 @@ export default function ConditionTable({
               配信日
             </th>
             <th className={TH}>実行日時</th>
-            <th className={TH}>検索対象</th>
-            <th className={TH}>登録日</th>
-            <th className={TH}>ログイン</th>
-            <th className={TH}>卒業年度</th>
-            <th className={TH}>経験社数</th>
-            <th className={TH}>居住地</th>
-            <th className={TH}>希望勤務地</th>
-            <th className={TH}>配信テンプレート</th>
+            <th className={TH}>
+              検索対象
+              <br />
+              登録日
+            </th>
+            <th className={TH}>
+              ログイン
+              <br />
+              卒業年度
+            </th>
+            <th className={TH}>
+              経験社数
+              <br />
+              居住地
+            </th>
+            <th className={TH}>
+              希望勤務地
+              <br />
+              配信テンプレート
+            </th>
             <th className={`${TH} text-right`}>予定</th>
             <th className={`${TH} text-right`}>抽出</th>
             <th className={`${TH} text-right`}>送信</th>
@@ -117,6 +136,8 @@ export default function ConditionTable({
             // T-203: 抽出・送信は全実行の合計を出すので、何回分かをホバーで補う
             const runsTitle = hasRuns ? `全${c.runs.length}回の合計` : undefined;
             const bounds = queueBounds[c.id] ?? { canUp: false, canDown: false };
+            // T-202: 並び替えは従来どおり「予約」の行だけ。予約以外は押せない見た目で置いておく
+            const queued = c.status === "QUEUED";
             return (
               <tr
                 key={c.id}
@@ -125,6 +146,30 @@ export default function ConditionTable({
               >
                 <td className={TD} onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selected.has(c.id)} onChange={() => onToggle(c.id)} aria-label="選択" />
+                </td>
+                <td className={`${TD} px-1`} onClick={(e) => e.stopPropagation()}>
+                  <span className="inline-flex flex-col overflow-hidden rounded border border-[#D1D5DB]">
+                    <button
+                      type="button"
+                      onClick={() => onMove(c, "up")}
+                      disabled={!queued || !bounds.canUp}
+                      title="予約の順番を上へ（同じ号機の中だけ）"
+                      aria-label="上へ"
+                      className={MOVE_BTN}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onMove(c, "down")}
+                      disabled={!queued || !bounds.canDown}
+                      title="予約の順番を下へ（同じ号機の中だけ）"
+                      aria-label="下へ"
+                      className={`${MOVE_BTN} border-t border-[#D1D5DB]`}
+                    >
+                      ▼
+                    </button>
+                  </span>
                 </td>
                 <td className={`${TD} font-mono font-semibold tabular-nums`}>{c.recordNo ?? "-"}</td>
                 <td className={TD}>
@@ -150,34 +195,45 @@ export default function ConditionTable({
                 <td className={TD}>
                   <DateTimeText iso={run?.executedAt} holidays={holidays} />
                 </td>
-                <td className={TD}>{searchTargetLabel(c.searchTarget)}</td>
                 <td className={TD}>
-                  <span className="text-[10px] text-[#6B7280]">{c.registDateMode === "PERIOD" ? "期間" : "日付"}</span>{" "}
-                  {registDateLabel(c)}
+                  <div>{searchTargetLabel(c.searchTarget)}</div>
+                  <div>
+                    <span className="text-[10px] text-[#6B7280]">{c.registDateMode === "PERIOD" ? "期間" : "日付"}</span>{" "}
+                    {registDateLabel(c)}
+                  </div>
                 </td>
-                <td className={TD}>{periodDaysLabel(c.lastLoginDays)}</td>
-                <td className={TD}>{gradYearRangeLabel(c.gradYearFrom, c.gradYearTo)}</td>
-                <td className={TD}>{companyCountLabel(c.companyCount)}</td>
-                <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.residencePrefectures.join("/") || undefined}>
-                  {areaLabel(c.residenceMode, c.residencePrefectures)}
+                <td className={TD}>
+                  <div>{periodDaysLabel(c.lastLoginDays)}</div>
+                  <div>{gradYearRangeLabel(c.gradYearFrom, c.gradYearTo)}</div>
                 </td>
-                <td className={`${TD} max-w-[220px] !whitespace-normal`} title={c.workPrefectures.join("/") || undefined}>
-                  <span className="whitespace-nowrap">{workPrefLabel(c.workPrefMode, c.workPrefectures)}</span>
-                  {c.workPrefMode !== "ALL" && c.workPrefectures.length > 0 && !isDefaultWorkPrefectures(c.workPrefectures) && (
-                    <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
-                  )}
+                <td className={TD}>
+                  <div>{companyCountLabel(c.companyCount)}</div>
+                  <div
+                    className="max-w-[160px] whitespace-normal"
+                    title={c.residencePrefectures.join("/") || undefined}
+                  >
+                    {areaLabel(c.residenceMode, c.residencePrefectures)}
+                  </div>
                 </td>
-                <td className={`${TD} max-w-[260px] truncate`} title={c.templateName ?? undefined}>
-                  {c.templateName ? (
-                    <>
-                      <span className="mr-1 rounded bg-[#F3F4F6] px-1 text-[10px] text-[#6B7280]">
-                        {templateKindLabel(c.templateKind)}
-                      </span>
-                      {c.templateName}
-                    </>
-                  ) : (
-                    <span className="text-[#9CA3AF]">未設定</span>
-                  )}
+                <td className={TD}>
+                  <div className="max-w-[200px] whitespace-normal" title={c.workPrefectures.join("/") || undefined}>
+                    <span className="whitespace-nowrap">{workPrefLabel(c.workPrefMode, c.workPrefectures)}</span>
+                    {c.workPrefMode !== "ALL" && c.workPrefectures.length > 0 && !isDefaultWorkPrefectures(c.workPrefectures) && (
+                      <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
+                    )}
+                  </div>
+                  <div className="max-w-[160px] truncate" title={c.templateName ?? undefined}>
+                    {c.templateName ? (
+                      <>
+                        <span className="mr-1 rounded bg-[#F3F4F6] px-1 text-[10px] text-[#6B7280]">
+                          {templateKindLabel(c.templateKind)}
+                        </span>
+                        {c.templateName}
+                      </>
+                    ) : (
+                      <span className="text-[#9CA3AF]">未設定</span>
+                    )}
+                  </div>
                 </td>
                 <td className={`${TD} text-right tabular-nums`}>{c.plannedCount ?? "-"}</td>
                 <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
@@ -191,14 +247,14 @@ export default function ConditionTable({
                     <button
                       type="button"
                       onClick={() => onEdit(c)}
-                      className="rounded border border-[#2563EB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#EFF6FF]"
+                      className="rounded border border-[#2563EB] bg-white px-1.5 py-0.5 text-[11px] font-medium text-[#1D4ED8] hover:bg-[#EFF6FF]"
                     >
                       条件設定
                     </button>
                     <button
                       type="button"
                       onClick={() => onDuplicate(c)}
-                      className="rounded border border-[#D1D5DB] px-2 py-0.5 text-[11px] text-[#374151] hover:bg-white"
+                      className="rounded border border-[#D1D5DB] px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white"
                     >
                       複製
                     </button>
@@ -207,34 +263,10 @@ export default function ConditionTable({
                       onClick={() => onDelete(c)}
                       disabled={hasRuns}
                       title={hasRuns ? "実績があるため削除できません（状態を「完了」にしてください）" : undefined}
-                      className="rounded border border-[#FECACA] px-2 py-0.5 text-[11px] text-[#B91C1C] hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                      className="rounded border border-[#FECACA] px-1.5 py-0.5 text-[11px] text-[#B91C1C] hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                     >
                       削除
                     </button>
-                    {c.status === "QUEUED" && (
-                      <span className="ml-1 inline-flex overflow-hidden rounded border border-[#D1D5DB]">
-                        <button
-                          type="button"
-                          onClick={() => onMove(c, "up")}
-                          disabled={!bounds.canUp}
-                          title="予約の順番を上へ（同じ号機の中だけ）"
-                          aria-label="上へ"
-                          className="px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onMove(c, "down")}
-                          disabled={!bounds.canDown}
-                          title="予約の順番を下へ（同じ号機の中だけ）"
-                          aria-label="下へ"
-                          className="border-l border-[#D1D5DB] px-1.5 py-0.5 text-[11px] text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▼
-                        </button>
-                      </span>
-                    )}
                   </div>
                 </td>
               </tr>
