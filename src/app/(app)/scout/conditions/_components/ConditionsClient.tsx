@@ -4,6 +4,9 @@
 // T-197: 「条件を組んで登録する」画面に一本化。左の絞り込みパネルは廃止し、
 //   ヘッダーの「検索設定」（新規）と各行の「条件設定」（編集）から同じ中央モーダルを開く。
 //   一覧上部の「前日｜当日｜翌日｜すべて」と並び順はそのまま。複数選択で複製・削除・CSV。
+// T-204: 行の「複製」は複製した条件の編集モーダルをそのまま開く。あわせて複製元・複製先の2行を
+//   pinnedIds に入れ、現在の絞り込みに合わない行でも例外的に一覧へ出す（絞り込み自体はこちらで変えない）。
+//   例外表示は再読込か絞り込み操作で解除する。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Toaster, toast } from "sonner";
@@ -51,6 +54,8 @@ export default function ConditionsClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalMode | null>(null);
   const [prefModal, setPrefModal] = useState<PrefModalState>(null);
+  // T-204: 絞り込みの対象外でも出し続ける行（複製元・複製先）。再読込／絞り込み操作で空に戻す
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
 
   const today = jstTodayYmd();
   const dayYmd = useMemo<Record<Exclude<DayFilter, "all">, string>>(
@@ -60,6 +65,8 @@ export default function ConditionsClient() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    // T-204: 再読込したら例外表示は解除して通常の絞り込みに戻す
+    setPinnedIds([]);
     try {
       const res = await fetch("/api/scout/conditions", { cache: "no-store" });
       if (!res.ok) {
@@ -99,13 +106,25 @@ export default function ConditionsClient() {
   const selectedStatuses = statusSel ?? allStatusValues;
 
   // T-199/T-201: 期間（または日付タブ）と号機と状態は AND。CSV（表示中）や「表示 N 件」もこの rows を使う
+  // T-204: 絞り込みで落ちた pinnedIds の行はここで足し戻す。以降の「表示 N 件」・全選択・CSV は
+  //   すべてこの rows を見ているので、例外表示した行も件数・一括選択・CSV の対象に含まれる。
   const rows = useMemo(() => {
     const byDate = rangeActive
       ? applyRangeFilter(conditions, range, basis)
       : applyDayFilter(conditions, day, day === "all" ? null : dayYmd[day]);
     const byMachine = applyMachineFilter(byDate, selectedMachineNos);
-    return sortConditions(applyStatusFilter(byMachine, selectedStatuses), sortKey);
-  }, [conditions, rangeActive, range, basis, day, dayYmd, selectedMachineNos, selectedStatuses, sortKey]);
+    const filtered = applyStatusFilter(byMachine, selectedStatuses);
+    const shown = new Set(filtered.map((r) => r.id));
+    const extra = pinnedIds
+      .filter((id) => !shown.has(id))
+      .map((id) => conditions.find((c) => c.id === id))
+      .filter((c): c is ConditionDto => c != null);
+    return sortConditions(extra.length ? [...filtered, ...extra] : filtered, sortKey);
+  }, [conditions, rangeActive, range, basis, day, dayYmd, selectedMachineNos, selectedStatuses, sortKey, pinnedIds]);
+
+  // T-204: 絞り込みを操作したら例外表示は解除する（日付タブ・期間・基準・号機・状態）
+  const clearPinned = useCallback(() => setPinnedIds((ids) => (ids.length ? [] : ids)), []);
+  const pinnedShown = useMemo(() => rows.filter((r) => pinnedIds.includes(r.id)).length, [rows, pinnedIds]);
 
   // T-195: 予約切れの警告帯（稼働中の号機ごとに QUEUED が0件なら出す）。
   // 「ポータルタスク作成済」は実際に未完了タスクがあるときだけ表示し、リンクは実タスクに向ける。
@@ -180,17 +199,18 @@ export default function ConditionsClient() {
     setModal((m) => (m && m.kind === "edit" && set.has(m.condition.id) ? null : m));
   };
 
-  const bulk = async (action: "duplicate" | "delete", ids: string[]) => {
-    if (ids.length === 0) return;
+  /** 複製／削除。複製したときだけ作成された行を返す（T-204 でモーダルを開くために使う） */
+  const bulk = async (action: "duplicate" | "delete", ids: string[]): Promise<ConditionDto[] | null> => {
+    if (ids.length === 0) return null;
     if (action === "delete") {
       // T-195: 実績がある条件は削除不可。事前に弾けるものは弾き、残りはサーバー側で飛ばして件数を報告する
       const withRuns = conditions.filter((c) => ids.includes(c.id) && c.runs.length > 0);
       if (withRuns.length === ids.length) {
         toast.error("実績があるため削除できません（状態を「完了」にしてください）");
-        return;
+        return null;
       }
       const note = withRuns.length ? `（実績がある${withRuns.length}件は削除されません）` : "";
-      if (!window.confirm(`${ids.length - withRuns.length}件の条件を削除します${note}。よろしいですか？`)) return;
+      if (!window.confirm(`${ids.length - withRuns.length}件の条件を削除します${note}。よろしいですか？`)) return null;
     }
     const res = await fetch("/api/scout/conditions/bulk", {
       method: "POST",
@@ -200,20 +220,33 @@ export default function ConditionsClient() {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(json.error ?? "操作に失敗しました");
-      return;
+      return null;
     }
     if (action === "delete") {
       const deletedIds: string[] = Array.isArray(json.deletedIds) ? json.deletedIds : ids;
       removeLocal(deletedIds);
       const skipped = Number(json.skipped ?? 0);
       toast.success(`${json.deleted ?? deletedIds.length}件を削除しました${skipped ? `（実績がある${skipped}件は削除していません）` : ""}`);
-    } else {
-      const created = json.conditions as ConditionDto[];
-      for (const c of created) upsertLocal(c);
-      // T-197: 複製も自動決定（実行中が無ければ実行中、あれば予約の末尾）なので結果の状態を伝える
-      const summary = created.map((c) => `${c.recordNo ?? ""}(${conditionStatusLabel(c.status)})`).join("・");
-      toast.success(`${created.length}件を複製しました：${summary}`);
+      return null;
     }
+    const created = json.conditions as ConditionDto[];
+    for (const c of created) upsertLocal(c);
+    // T-204: 複製元と複製先は、いまの絞り込みに合わなくても一覧に出し続ける（複製した条件が画面から消えないように）
+    setPinnedIds([...ids, ...created.map((c) => c.id)]);
+    // T-197: 複製も自動決定（実行中が無ければ実行中、あれば予約の末尾）なので結果の状態を伝える
+    const summary = created.map((c) => `${c.recordNo ?? ""}(${conditionStatusLabel(c.status)})`).join("・");
+    toast.success(`${created.length}件を複製しました：${summary}`);
+    return created;
+  };
+
+  /**
+   * T-204: 1件の複製。複製したあと、その条件の編集モーダルをそのまま開く。
+   * 複製レコードは開く時点で作成済み（キャンセルで閉じても残る）。元と複製先の2行は pinnedIds で表示し続ける。
+   */
+  const duplicateAndOpen = async (c: ConditionDto) => {
+    const created = await bulk("duplicate", [c.id]);
+    const first = created?.[0];
+    if (first) setModal({ kind: "edit", condition: first });
   };
 
   const downloadCsv = (ids: string[]) => {
@@ -311,6 +344,7 @@ export default function ConditionsClient() {
                       type="button"
                       onClick={() => {
                         // 日付タブを押したら期間指定は解除して切り替える（併用しない）
+                        clearPinned();
                         setRange({ from: "", to: "" });
                         setDay(b.key);
                       }}
@@ -346,7 +380,10 @@ export default function ConditionsClient() {
                     <button
                       key={b.value}
                       type="button"
-                      onClick={() => setBasis(b.value)}
+                      onClick={() => {
+                        clearPinned();
+                        setBasis(b.value);
+                      }}
                       className={[
                         "px-2 py-1.5 transition-colors",
                         basis === b.value ? "bg-[#2563EB] font-medium text-white" : "bg-white text-[#374151] hover:bg-[#F9FAFB]",
@@ -359,19 +396,28 @@ export default function ConditionsClient() {
                 <input
                   type="date"
                   value={range.from}
-                  onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+                  onChange={(e) => {
+                    clearPinned();
+                    setRange((r) => ({ ...r, from: e.target.value }));
+                  }}
                   className={`w-[140px] ${FILTER_INPUT_CLS}`}
                 />
                 <span className="text-xs text-gray-400">〜</span>
                 <input
                   type="date"
                   value={range.to}
-                  onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+                  onChange={(e) => {
+                    clearPinned();
+                    setRange((r) => ({ ...r, to: e.target.value }));
+                  }}
                   className={`w-[140px] ${FILTER_INPUT_CLS}`}
                 />
                 <button
                   type="button"
-                  onClick={() => setRange({ from: "", to: "" })}
+                  onClick={() => {
+                    clearPinned();
+                    setRange({ from: "", to: "" });
+                  }}
                   disabled={!rangeActive}
                   className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-[#2563EB] hover:bg-gray-50 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-white"
                 >
@@ -385,7 +431,10 @@ export default function ConditionsClient() {
               label="号機"
               options={machineOptions}
               selected={selectedMachineNos.map(String)}
-              onChange={(next) => setMachineSel(next.map(Number))}
+              onChange={(next) => {
+                clearPinned();
+                setMachineSel(next.map(Number));
+              }}
               width="w-44"
               panelWidth="w-44"
               allLabel="全号機"
@@ -398,7 +447,10 @@ export default function ConditionsClient() {
               label="状態"
               options={statusOptions}
               selected={selectedStatuses}
-              onChange={(next) => setStatusSel(next)}
+              onChange={(next) => {
+                clearPinned();
+                setStatusSel(next);
+              }}
               width="w-44"
               panelWidth="w-44"
               allLabel="全状態"
@@ -435,7 +487,7 @@ export default function ConditionsClient() {
           <button
             type="button"
             disabled={selected.size === 0}
-            onClick={() => bulk("duplicate", [...selected])}
+            onClick={() => void bulk("duplicate", [...selected])}
             className="rounded border border-[#D1D5DB] bg-white px-2 py-1 text-[#374151] hover:bg-[#F3F4F6] disabled:opacity-40"
           >
             複製
@@ -451,7 +503,7 @@ export default function ConditionsClient() {
           <button
             type="button"
             disabled={selected.size === 0}
-            onClick={() => bulk("delete", [...selected])}
+            onClick={() => void bulk("delete", [...selected])}
             className="rounded border border-[#FECACA] bg-white px-2 py-1 text-[#B91C1C] hover:bg-[#FEF2F2] disabled:opacity-40"
           >
             削除
@@ -460,6 +512,14 @@ export default function ConditionsClient() {
             <button type="button" onClick={() => setSelected(new Set())} className="text-[#6B7280] underline">
               選択解除
             </button>
+          )}
+          {pinnedShown > 0 && (
+            <span className="flex items-center gap-1 rounded bg-[#FFFBEB] px-2 py-1 text-[11px] text-[#92400E]">
+              複製した{pinnedShown}件をハイライト表示中（絞り込みの対象外でも出します）
+              <button type="button" onClick={clearPinned} className="underline">
+                解除
+              </button>
+            </span>
           )}
           <span className="ml-auto text-[11px] text-[#9CA3AF]">送信件数が10件未満の行は枯渇として赤く表示します</span>
         </div>
@@ -481,10 +541,11 @@ export default function ConditionsClient() {
             }
             onToggleAll={(checked) => setSelected(checked ? new Set(rows.map((r) => r.id)) : new Set())}
             onEdit={(c) => setModal({ kind: "edit", condition: c })}
-            onDuplicate={(c) => bulk("duplicate", [c.id])}
-            onDelete={(c) => bulk("delete", [c.id])}
+            onDuplicate={(c) => void duplicateAndOpen(c)}
+            onDelete={(c) => void bulk("delete", [c.id])}
             onMove={move}
             queueBounds={queueBounds}
+            pinnedIds={pinnedIds}
           />
         )}
       </div>
@@ -503,8 +564,8 @@ export default function ConditionsClient() {
             for (const d of demoted) upsertLocal(d);
             if (isNew) setModal({ kind: "edit", condition: c });
           }}
-          onDuplicate={(c) => bulk("duplicate", [c.id])}
-          onDelete={(c) => bulk("delete", [c.id])}
+          onDuplicate={(c) => void duplicateAndOpen(c)}
+          onDelete={(c) => void bulk("delete", [c.id])}
           onOpenPrefModal={(current, onConfirm, title) => setPrefModal({ initial: current, title, onConfirm })}
         />
       )}

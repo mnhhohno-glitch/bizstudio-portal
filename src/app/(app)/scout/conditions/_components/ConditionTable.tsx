@@ -8,6 +8,9 @@
 // T-202: 横スクロールを減らすため、検索対象/登録日・ログイン/卒業年度・経験社数/居住地・希望勤務地/配信テンプレートを
 //   予約日/配信日と同じ「1列2段」にまとめた（各段の書式は従来のまま）。予約の並び替え（▲▼）はチェックボックスの右隣へ移動。
 //   ▲▼の更新は PATCH ではなく bulk(action=move) を通るので、T-201 の「実績があると状態以外は変えられない」ロックの対象外（従来どおり動く）。
+// T-204: 複製直後の複製元・複製先（pinnedIds）は絞り込みの対象外でも出すので、どの行かが分かるよう黄色で塗る。
+//   枯渇（送信10件未満）の赤とは別色にし、枯渇と重なったときは黄色を優先する（例外表示であることを見失わないため。
+//   枯渇であることは「枯渇」バッジと送信件数の赤字が残るので分かる）。
 import {
   areaLabel,
   companyCountLabel,
@@ -49,6 +52,7 @@ export default function ConditionTable({
   onDelete,
   onMove,
   queueBounds,
+  pinnedIds,
 }: {
   rows: ConditionDto[];
   holidays: HolidayMap;
@@ -61,9 +65,12 @@ export default function ConditionTable({
   onDelete: (c: ConditionDto) => void;
   /** T-195: 予約（QUEUED）の上へ／下へ。同じ号機の中でだけ入れ替える */
   onMove: (c: ConditionDto, direction: "up" | "down") => void;
+  /** T-204: 絞り込みの対象外でも表示している行（複製元・複製先）。黄色で塗って区別する */
+  pinnedIds: string[];
   /** T-195: 号機内の予約列での先頭／末尾判定（絞り込み前の全件から計算） */
   queueBounds: Record<string, { canUp: boolean; canDown: boolean }>;
 }) {
+  const pinned = new Set(pinnedIds);
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someChecked = !allChecked && rows.some((r) => selected.has(r.id));
 
@@ -131,6 +138,7 @@ export default function ConditionTable({
           )}
           {rows.map((c) => {
             const dry = isDryRow(c);
+            const isPinned = pinned.has(c.id);
             const run = c.latestRun;
             const hasRuns = c.runs.length > 0;
             // T-203: 抽出・送信は全実行の合計を出すので、何回分かをホバーで補う
@@ -142,7 +150,14 @@ export default function ConditionTable({
               <tr
                 key={c.id}
                 onClick={() => onEdit(c)}
-                className={["cursor-pointer transition-colors", dry ? "bg-[#FEF2F2] hover:bg-[#FEE2E2]" : "hover:bg-[#F9FAFB]"].join(" ")}
+                className={[
+                  "cursor-pointer transition-colors",
+                  isPinned
+                    ? "bg-[#FEF9C3] hover:bg-[#FEF08A]"
+                    : dry
+                      ? "bg-[#FEF2F2] hover:bg-[#FEE2E2]"
+                      : "hover:bg-[#F9FAFB]",
+                ].join(" ")}
               >
                 <td className={TD} onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={selected.has(c.id)} onChange={() => onToggle(c.id)} aria-label="選択" />

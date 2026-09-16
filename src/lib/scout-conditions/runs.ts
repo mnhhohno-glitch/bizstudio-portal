@@ -1,8 +1,9 @@
 // T-195: RPA からの実績受け取り（POST /api/external/scout-conditions/runs）の本体。
 //
 // 1. scout_runs に記録
-// 2. sentCount < 10（DRY_THRESHOLD）なら is_dry=true、条件を DRY に
-// 3. その号機の QUEUED を queue_order 昇順で先頭から RUNNING に（delivery_date が空なら当日 JST）
+// 2. sentCount < 10（DRY_THRESHOLD）なら is_dry=true
+// 3. その号機の QUEUED を queue_order 昇順で先頭から RUNNING に（delivery_date が空なら当日 JST）。
+//    切替元は DONE（完了）にする（T-205。使い終わった条件なので「完了」。枯渇だったことは最新実行の is_dry から出る「枯渇」バッジで分かる）
 // 4. 切替できた → LINE WORKS に1行通知
 // 5. 予約が空 → 枯渇した条件を RUNNING のまま残す（配信は止めない）＋通知＋タスク起票（queue-empty.ts）
 // 6. sentCount >= 10 は記録のみ
@@ -140,12 +141,15 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
         return { ...base, queueEmpty: true };
       }
       if (!input.dryRun) {
-        await t.scoutCondition.update({ where: { id: condition.id }, data: { status: "DRY" } });
+        // T-205: 次の条件に切り替わった時点でこの条件は使い終わり。以前は DRY（枯渇）のまま残していたが、
+        //   まだ配信中に見えるため DONE（完了）にする。一覧では最新実行が送信10件未満なので「完了」＋「枯渇」が並ぶ。
+        //   予約が空で切り替わらなかったときは上の分岐で return しており、RUNNING のまま配信を続ける（据え置き）。
+        await t.scoutCondition.update({ where: { id: condition.id }, data: { status: "DONE" } });
         await t.scoutCondition.update({
           where: { id: next.id },
           data: { status: "RUNNING", deliveryDate: next.deliveryDate ?? ymdToDbDate(jstTodayYmd()) },
         });
-        // T-198: 実行中は号機ごとに1件。切替元は上で DRY にしているので通常は0件だが、念のため他の RUNNING を畳む
+        // T-198: 実行中は号機ごとに1件。切替元は上で DONE にしているので通常は0件だが、念のため他の RUNNING を畳む
         await demoteOtherRunning(t, machine.id, next.id);
       }
       const remaining = await t.scoutCondition.count({ where: { machineId: machine.id, status: "QUEUED", id: { not: next.id } } });
@@ -161,7 +165,8 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
       runId: tx.runId,
       isDry: tx.existingIsDry,
       // 既存 run が枯渇扱いで、その条件が既に RUNNING でなければ「切替済み」として返す
-      switched: tx.existingIsDry && fresh?.status === "DRY",
+      // （切替元は T-205 で DRY → DONE に変わったが、旧データの DRY や手で完了にした行も同じ「RUNNING でない」で拾える）
+      switched: tx.existingIsDry && fresh?.status !== "RUNNING",
       currentConditionId: await currentRunningId(prisma, machine.id),
       queueEmpty: await isQueueEmpty(prisma, machine.id),
       message: `同一内容（号機・条件・実行日時が分単位で一致）の再送のため、記録済みの実績を返します（runId=${tx.runId}）`,
