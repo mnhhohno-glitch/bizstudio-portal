@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { conditionInclude, parseConditionInput, toConditionDto, toPrismaData } from "@/lib/scout-conditions/server";
 import { createScoutCondition, ensureSeqNos } from "@/lib/scout-conditions/create";
+import { ensureTemplateSeqNos, templateOrderBy, toTemplateDto } from "@/lib/scout-conditions/templates";
 import { dbDateToYmd } from "@/lib/scout-conditions/dates";
 import type { ConditionsResponse } from "@/lib/scout-conditions/types";
 
@@ -15,15 +16,15 @@ export async function GET() {
 
   // T-197: 旧コードが動いていた窓で作られた seq_no 空の行があれば番号を振る（通常は0件）
   await ensureSeqNos();
+  // T-207: テンプレート番号（T-001）も同じ理由で空行を補っておく（通常は0件）
+  await ensureTemplateSeqNos();
 
   const [machines, templates, holidays, conditions] = await Promise.all([
     prisma.rpaScoutMachine.findMany({
       orderBy: { machineNo: "asc" },
       select: { id: true, machineNo: true, isActive: true, defaultTemplateId: true, queueEmptyTaskId: true },
     }),
-    prisma.scoutTemplate.findMany({
-      orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
-    }),
+    prisma.scoutTemplate.findMany({ orderBy: templateOrderBy }),
     prisma.holiday.findMany({ orderBy: { date: "asc" } }),
     prisma.scoutCondition.findMany({
       include: conditionInclude,
@@ -46,15 +47,7 @@ export async function GET() {
       ...m,
       queueEmptyTask: (queueEmptyTaskId && openTaskById.get(queueEmptyTaskId)) || null,
     })),
-    templates: templates.map((t) => ({
-      id: t.id,
-      kind: t.kind,
-      name: t.name,
-      subject: t.subject,
-      body: t.body,
-      sortOrder: t.sortOrder,
-      isActive: t.isActive,
-    })),
+    templates: templates.map(toTemplateDto),
     holidays: holidays.map((h) => ({ date: dbDateToYmd(h.date)!, name: h.name })),
     conditions: conditions.map(toConditionDto),
   };

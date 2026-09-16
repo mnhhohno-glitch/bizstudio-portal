@@ -207,6 +207,26 @@ export const FIXED_VALUES = [
   { label: "自社へ応募した会員", value: "含まない" },
 ] as const;
 
+// ---- テンプレート番号（T-207）: T-3桁ゼロ埋めの通し番号。例 T-001 ----
+//   種別に関係ない1本の連番。一度振った番号は変えない（削除しても詰めない）。自動採番で人は編集できない。
+export function formatTemplateNo(seqNo: number | null | undefined): string | null {
+  if (seqNo == null) return null;
+  return `T-${String(seqNo).padStart(3, "0")}`;
+}
+
+// 件名がこの文字数を超えると、マイナビ側で定型文に落ちる（社名を差し込んだ後の長さで判定される）。
+// 判定そのものは RPA 側（1人ごとのデータを見る必要がある）。画面では目安として文字数を出す。
+export const TEMPLATE_SUBJECT_LIMIT = 50;
+
+// CSV 取り込みの列（1行目のヘッダー。UTF-8 BOM 付き）
+export const TEMPLATE_CSV_HEADERS = ["テンプレート名", "種別", "件名", "本文"] as const;
+
+/** CSV の「種別」表記（未送信用 / 送信済用 / 個別配信用）を enum 値へ。不正なら null */
+export function templateKindFromLabel(label: string): string | null {
+  const v = label.trim();
+  return TEMPLATE_KINDS.find((k) => k.label === v)?.value ?? null;
+}
+
 // ---- レコード番号（T-197）: 号機番号-3桁ゼロ埋めの通し番号。例 1-001 ----
 export function formatRecordNo(machineNo: number, seqNo: number | null | undefined): string | null {
   if (seqNo == null) return null;

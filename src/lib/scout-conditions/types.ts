@@ -11,12 +11,43 @@ export type MachineDto = {
 
 export type TemplateDto = {
   id: string;
+  seqNo: number | null; // T-207: テンプレート番号（デプロイ中の窓で作られた直後だけ null になり得る）
+  templateNo: string | null; // T-207: 表示用「T-001」
   kind: string; // UNSENT / SENT / INDIVIDUAL
   name: string;
   subject: string;
   body: string;
   sortOrder: number;
   isActive: boolean;
+};
+
+// T-207: テンプレート管理画面（/scout/templates）の一覧レスポンス
+export type TemplatesResponse = {
+  templates: TemplateDto[];
+  /** そのテンプレートを使っている配信条件の件数。1件以上なら削除できない */
+  usageById: Record<string, number>;
+};
+
+// T-207: CSV 取り込みのプレビュー（execute=false）と実行（execute=true）の結果
+export type TemplateImportRowDto = {
+  lineNo: number; // CSV の行番号（ヘッダーを1行目とした人が数える番号）
+  name: string;
+  kind: string;
+  subject: string;
+  body: string;
+  action: "CREATE" | "UPDATE";
+  templateNo: string | null; // 上書きのとき維持される番号（新規は取り込み時に採番するので null）
+};
+export type TemplateImportErrorDto = { lineNo: number; name: string; reason: string };
+export type TemplateImportResponse = {
+  executed: boolean;
+  rows: TemplateImportRowDto[];
+  errors: TemplateImportErrorDto[];
+  createCount: number;
+  updateCount: number;
+  /** executed=true のときだけ入る実績 */
+  created: number | null;
+  updated: number | null;
 };
 
 export type HolidayDto = { date: string; name: string }; // date = "YYYY-MM-DD"

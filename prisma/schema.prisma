@@ -3325,6 +3325,13 @@ enum ScoutWorkPrefMode {
 // 配信テンプレート（05.集計ファイル.xlsx「テンプレートマスタ」由来）
 model ScoutTemplate {
   id        String            @id @default(cuid())
+
+  // T-207: テンプレート番号（表示は「T-001」）。種別に関係ない通し番号で、一度振った番号は変えない
+  //   （削除しても後続を詰め直さない）。配信条件のレコード番号（1-001）と同じ考え方。
+  //   nullable なのはデプロイ中の窓で旧コードが INSERT しても壊れないようにするため。採番は templates.ts に一本化し、
+  //   null 行は一覧取得時に ensureTemplateSeqNos() が補う。
+  seqNo Int? @unique @map("seq_no")
+
   kind      ScoutTemplateKind
   name      String // 名称（例: 【未送信用】口コミ4.9オーダーメイド）
   subject   String // 件名（差し込みタグ [担当者] [社名] [最終学歴] [経験職種] を生のまま保持）

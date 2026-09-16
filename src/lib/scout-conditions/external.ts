@@ -2,7 +2,7 @@
 // ★PAD はレスポンスのキー欠落で例外停止するため、全レスポンスで同じキー集合を返す（値が無ければ null）。
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, companyCountLabel } from "./constants";
+import { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, companyCountLabel, formatTemplateNo } from "./constants";
 import { dbDateToYmd } from "./dates";
 
 /** 固定値（スキーマに列を持たない。RPA は常にこの値でフォームに入力する） */
@@ -25,7 +25,12 @@ export type ExternalConditionPayload = {
   residence: { mode: string; regions: string[]; prefectures: string[] };
   /** 希望勤務地（T-196）。mode=ALL のときは prefectures=[]（RPA は「全国」を入れる） */
   workLocation: { mode: "ALL" | "SELECTED"; prefectures: string[] };
-  template: { templateId: string; name: string; subject: string; body: string } | null;
+  /**
+   * 配信文。T-207 で templateNo（「T-001」形式のテンプレート番号）を追加した。
+   * 既存キー（templateId / name / subject / body）は従来どおり返す（RPA が読まなくても動く追加のみ）。
+   * 未採番の窓では templateNo が null になり得る。
+   */
+  template: { templateId: string; templateNo: string | null; name: string; subject: string; body: string } | null;
   plannedCount: number | null;
 };
 
@@ -38,7 +43,7 @@ export type ExternalCurrentResponse = {
 };
 
 export const externalConditionInclude = {
-  template: { select: { id: true, name: true, subject: true, body: true } },
+  template: { select: { id: true, seqNo: true, name: true, subject: true, body: true } },
 } satisfies Prisma.ScoutConditionInclude;
 
 type ExternalConditionRow = Prisma.ScoutConditionGetPayload<{ include: typeof externalConditionInclude }>;
@@ -86,7 +91,14 @@ export function toExternalCondition(c: ExternalConditionRow): ExternalConditionP
     workLocation: toExternalWorkLocation(c.workPrefMode, c.workPrefectures),
     // 差し込み記号（[担当者] 等）は展開せず原文のまま返す（展開は RPA 側の既存処理）
     template: c.template
-      ? { templateId: c.template.id, name: c.template.name, subject: c.template.subject, body: c.template.body }
+      ? {
+          templateId: c.template.id,
+          // T-207: 実績とテンプレートを後から突き合わせるための番号（「T-001」）
+          templateNo: formatTemplateNo(c.template.seqNo),
+          name: c.template.name,
+          subject: c.template.subject,
+          body: c.template.body,
+        }
       : null,
     plannedCount: c.plannedCount,
   };
