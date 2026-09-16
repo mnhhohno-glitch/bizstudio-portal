@@ -31,7 +31,8 @@ export function MachineLabel({
           <span className={`inline-block h-2 w-2 rounded-full ${c.dot}`} />
           <span className="font-semibold text-[#374151]">{machineNo}号機</span>
         </span>
-        <span className="text-[11px] text-[#6B7280]">{name || "-"}</span>
+        {/* T-206-fix: 他の2段組み列に合わせ、担当者名も号機と同じ文字サイズ（色だけ変える） */}
+        <span className="text-[#6B7280]">{name || "-"}</span>
       </span>
     );
   }

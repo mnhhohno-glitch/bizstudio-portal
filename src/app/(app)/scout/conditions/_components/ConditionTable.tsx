@@ -11,6 +11,10 @@
 // T-204: 複製直後の複製元・複製先（pinnedIds）は絞り込みの対象外でも出すので、どの行かが分かるよう黄色で塗る。
 //   枯渇（送信10件未満）の赤とは別色にし、枯渇と重なったときは黄色を優先する（例外表示であることを見失わないため。
 //   枯渇であることは「枯渇」バッジと送信件数の赤字が残るので分かる）。
+// T-206-fix: 行内ボタンは w-full をやめて固定幅（設定・複製・削除で同じ幅）。w-full のままだと
+//   whitespace-nowrap の中で複製と削除が横に並んでしまい、削除が列の外へはみ出して見えなくなっていた。
+//   列幅は TH=w-0（中身ぴったり）にして中身に合わせ、余った幅は右端の列（TH_FLEX=w-full）だけが引き受ける。
+//   数値列（予測/結果・抽出/送信）は他の列に合わせて左寄せ。2段組みの上下は同じ文字サイズにする。
 // T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
 //   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
 //   数字は 予測/結果・抽出/送信 の2列4段。下段には達成率（結果÷予測）・送信率（送信÷抽出）を小数点第1位まで出す。
@@ -41,11 +45,15 @@ const STATUS_BADGE: Record<string, string> = {
   DONE: "bg-[#E5E7EB] text-[#4B5563]",
 };
 
-const TH = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
+const TH_BASE = "sticky top-0 z-[1] whitespace-nowrap border-b border-[#E5E7EB] bg-[#F9FAFB] px-1.5 py-2 text-left text-[11px] font-semibold text-[#6B7280]";
+// T-206-fix: 表は min-w-full なので、余った横幅は既定だと文字の多い列（検索対象など）へ配られて間延びする。
+//   そこで幅の指定を 0（＝中身ぴったり）にし、余りは右端の列（TH_FLEX）だけが引き受ける。
+const TH = `${TH_BASE} w-0`;
+const TH_FLEX = `${TH_BASE} w-full`;
 const TD = "whitespace-nowrap border-b border-[#F3F4F6] px-1.5 py-1.5 align-top text-[12px] text-[#374151]";
 const MOVE_BTN = "px-1 py-0.5 text-[10px] leading-none text-[#374151] hover:bg-white disabled:cursor-not-allowed disabled:opacity-30";
 // T-206: 2段組みに収めた行内ボタン（従来の「操作」列と同じ色・同じ押せる条件）
-const ROW_BTN = "w-full rounded border px-1.5 py-0.5 text-center text-[11px] leading-[1.4]";
+const ROW_BTN = "block w-[46px] rounded border px-1.5 py-0.5 text-center text-[11px] leading-[1.4]";
 const COLUMN_COUNT = 14;
 
 export default function ConditionTable({
@@ -142,12 +150,13 @@ export default function ConditionTable({
               <br />
               配信テンプレート
             </th>
-            <th className={`${TH} text-right`}>
+            <th className={TH}>
               予測
               <br />
               結果
             </th>
-            <th className={`${TH} text-right`}>
+            {/* T-206-fix: 余った横幅は右端のこの列が引き受ける（内容は左に寄ったまま、余白は表の右端に残る） */}
+            <th className={TH_FLEX}>
               抽出
               <br />
               送信
@@ -261,7 +270,7 @@ export default function ConditionTable({
                   {c.status === "QUEUED" && <span className="ml-1 text-[10px] text-[#6B7280]">#{c.queueOrder}</span>}
                 </td>
                 <td className={TD}>
-                  <div className="text-[11px] text-[#6B7280]">
+                  <div className="text-[#6B7280]">
                     <DateTimeText iso={c.createdAt} holidays={holidays} />
                   </div>
                   <div className="font-medium">
@@ -298,7 +307,7 @@ export default function ConditionTable({
                       <div className="text-[10px] text-[#6B7280]">{summarizePrefectures(c.workPrefectures)}</div>
                     )}
                   </div>
-                  <div className="max-w-[160px] truncate" title={c.templateName ?? undefined}>
+                  <div className="max-w-[320px] truncate" title={c.templateName ?? undefined}>
                     {c.templateName ? (
                       <>
                         <span className="mr-1 rounded bg-[#F3F4F6] px-1 text-[10px] text-[#6B7280]">
@@ -312,7 +321,7 @@ export default function ConditionTable({
                   </div>
                 </td>
                 {/* T-206: 予測（人の想定件数）＋結果（マイナビの検索結果件数＝母数）と達成率 */}
-                <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
+                <td className={`${TD} tabular-nums`} title={runsTitle}>
                   <div>{c.plannedCount ?? "-"}</div>
                   <div className="text-[#6B7280]">
                     {c.totalSearchResultCount == null
@@ -321,7 +330,7 @@ export default function ConditionTable({
                   </div>
                 </td>
                 {/* T-206: 抽出（RPA が取り込んだ件数）＋送信と送信率 */}
-                <td className={`${TD} text-right tabular-nums`} title={runsTitle}>
+                <td className={`${TD} tabular-nums`} title={runsTitle}>
                   <div>{c.totalExtractedCount ?? "-"}</div>
                   <div className={dry ? "font-semibold text-[#B91C1C]" : "text-[#6B7280]"}>
                     {c.totalSentCount == null ? "-" : `${c.totalSentCount}${sentRate ? ` (${sentRate})` : ""}`}
