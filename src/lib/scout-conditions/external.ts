@@ -3,7 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, companyCountLabel, formatTemplateNo } from "./constants";
-import { activateDueCondition } from "./activate";
+import { runDateRollover } from "./activate";
 import { dbDateToYmd } from "./dates";
 
 /** 固定値（スキーマに列を持たない。RPA は常にこの値でフォームに入力する） */
@@ -125,13 +125,11 @@ export async function buildCurrentResponse(machineNoRaw: string | null): Promise
   if (!machine) return { ok: false, machineNo: n, ...base, message: `${n}号機は存在しません` };
   if (!machine.isActive) return { ok: false, machineNo: n, ...base, message: `${n}号機は停止中です` };
 
-  let running = await findRunningCondition(machine.id);
-  // T-209: 有効が無いときは、配信日が当日（JST）以前の予約を1件だけ有効に上げてから返す（activate.ts）。
+  // T-210: 条件を返す前に日付切替を通す（activate.ts）。前日の有効を完了にし、予約の先頭を有効にする。
+  //   T-209 は「有効が無いとき」だけ判定していたが、前日の有効が残っている号機が動かないため常に通す。
   //   レスポンスの形は変えない（RPA は従来どおり condition を読むだけ）。上げられる予約が無ければ従来どおり null。
-  if (!running) {
-    const activatedId = await activateDueCondition(machine.id);
-    if (activatedId) running = await findRunningCondition(machine.id);
-  }
+  await runDateRollover(machine.id);
+  const running = await findRunningCondition(machine.id);
   if (!running) return { ok: true, machineNo: n, ...base, message: "RUNNING の条件がありません" };
   return { ok: true, machineNo: n, condition: toExternalCondition(running), fixed: EXTERNAL_FIXED_VALUES, message: null };
 }

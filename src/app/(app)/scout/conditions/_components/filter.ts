@@ -18,6 +18,7 @@ import {
   instantToJstYmd,
   ymdWeekdayLabel,
 } from "@/lib/scout-conditions/dates";
+import { pickQueuedToActivate, shouldCompleteRunning } from "@/lib/scout-conditions/rollover";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
 
 export type DayFilter = "prev" | "today" | "next" | "all";
@@ -186,15 +187,15 @@ export function buildCsv(rows: ConditionDto[]): string {
 }
 
 /**
- * T-209: 「翌朝有効」を出す条件の id（号機ごとに最大1件）。
+ * T-210: 「翌朝有効」を出す条件の id（号機ごとに最大1件）。
  * 明日の朝、自動で有効になる予定の予約に印を付けるためのもので、判定そのものは持たない
- * （実際に有効へ上げるのはサーバー側の activate.ts。こちらは同じ規則を画面に映すだけ）。
+ * （実際に切り替えるのはサーバー側の activate.ts。こちらは同じ規則〔rollover.ts〕を画面に映すだけ）。
  *
- *   - 状態が予約（QUEUED）
- *   - その号機に有効（RUNNING）が無い
- *   - 配信日が「翌日」ちょうど（当日以前は開いた時点で有効に上がっているので出さない。明後日以降も出さない）
- *   - 同じ号機で該当が複数あれば ▲▼ の並び順が一番上の1件だけ
+ *   - 今の有効（RUNNING）が明朝の判定で完了になる見込み（配信日が今日以前、または配信日が空で最新実行が今日以前）、
+ *     または今の有効が無い
+ *   - そのうえで、配信日が「空、または明日以前」の予約のうち ▲▼ の並び順が一番上の1件
  *
+ * 今の有効の配信日が明後日以降なら、その号機にはバッジを出さない（明朝は切り替わらないため）。
  * activeMachineIds には稼働中の号機だけを渡す（停止中の号機は RPA が条件を取りに来ないため上がらない）。
  */
 export function nextMorningConditionIds(
@@ -203,15 +204,33 @@ export function nextMorningConditionIds(
   activeMachineIds: string[],
 ): string[] {
   const active = new Set(activeMachineIds);
-  const hasRunning = new Set(conditions.filter((c) => c.status === "RUNNING").map((c) => c.machineId));
-  const candidates = new Map<string, ConditionDto>();
+  const toRow = (c: ConditionDto) => ({
+    id: c.id,
+    deliveryYmd: c.deliveryDate,
+    queueOrder: c.queueOrder,
+    createdAtIso: c.createdAt,
+    lastRunYmd: c.latestRun ? instantToJstYmd(c.latestRun.executedAt) : null,
+  });
+
+  // 号機ごとに「明朝も有効が残る」＝バッジを出さない号機を先に決める。
+  // shouldCompleteRunning に明日を渡すと「配信日が今日以前なら完了」＝仕様どおりの判定になる（今日を別に渡す必要は無い）。
+  const staysRunning = new Set<string>();
   for (const c of conditions) {
-    if (c.status !== "QUEUED" || c.deliveryDate !== tomorrowYmd) continue;
-    if (!active.has(c.machineId) || hasRunning.has(c.machineId)) continue;
-    const cur = candidates.get(c.machineId);
-    if (!cur || c.queueOrder < cur.queueOrder || (c.queueOrder === cur.queueOrder && c.createdAt < cur.createdAt)) {
-      candidates.set(c.machineId, c);
-    }
+    if (c.status !== "RUNNING" || !active.has(c.machineId)) continue;
+    if (!shouldCompleteRunning(toRow(c), tomorrowYmd)) staysRunning.add(c.machineId);
   }
-  return [...candidates.values()].map((c) => c.id);
+  const queuedByMachine = new Map<string, ReturnType<typeof toRow>[]>();
+  for (const c of conditions) {
+    if (c.status !== "QUEUED" || !active.has(c.machineId) || staysRunning.has(c.machineId)) continue;
+    const list = queuedByMachine.get(c.machineId) ?? [];
+    list.push(toRow(c));
+    queuedByMachine.set(c.machineId, list);
+  }
+
+  const ids: string[] = [];
+  for (const list of queuedByMachine.values()) {
+    const next = pickQueuedToActivate(list, tomorrowYmd);
+    if (next) ids.push(next.id);
+  }
+  return ids;
 }

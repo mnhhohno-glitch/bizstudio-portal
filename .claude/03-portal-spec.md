@@ -994,6 +994,32 @@ enum 5種: `ScoutTemplateKind`(UNSENT/SENT/INDIVIDUAL) ・ `ScoutConditionStatus
   画面上部の「◯号機の予約が空です」警告帯は **QUEUED が無い稼働号機を数えて出す静的表示のみ**で、通知・起票はしていない。
 - 一覧の枯渇色（送信件数 < 10 または status=DRY）は `isDryRow()`（`_components/filter.ts`）で判定。閾値は `DRY_THRESHOLD`（constants.ts）。
 
+## 配信条件の日付切替（T-209 → T-210, master, 2026-09-18）
+
+`/scout/conditions` の「前日の有効を完了にして、当日の予約を有効にする」を自動化した。
+T-209 は**その号機に有効（RUNNING）が無いときだけ**予約を上げる作りで、前日の有効が残っていると翌日の予約が
+永久に始まらなかった（2026-09-18 朝に1〜4号機すべてで発生し、人が手で完了→有効にした）。T-210 で下記に変更。
+
+| 論点 | T-209 | **T-210（現行）** |
+|--|--|--|
+| 前日の有効 | 触らない（残り続ける） | **配信日が今日（JST）より前なら自動で DONE**。配信日が空なら最新実行日が今日より前かで判定（実行も無ければ何もしない） |
+| 上げる予約の対象 | 配信日が今日以前のみ（**配信日が空は永久に上がらなかった**） | **配信日が空、または今日以前** |
+| 上げる予約の選び方 | 配信日の古い順 → 並び順 | **一覧の ▲▼ の並び順（queueOrder→登録順）で一番上**の1件 |
+| 通知 | なし | 入れ替わったときだけ LINE WORKS に1行（文面に「日付切替」。枯渇通知とは別） |
+
+- **判定の単一ソースは `src/lib/scout-conditions/rollover.ts`（純関数・DB も現在時刻も見ない）**。
+  `shouldCompleteRunning()` と `pickQueuedToActivate()` を、サーバー側（`activate.ts`）と一覧の「翌朝有効」バッジ
+  （`_components/filter.ts` の `nextMorningConditionIds`）が共用する。規則を変えるときはここ1か所。
+- 実行は `activate.ts` の `runDateRollover(machineId)`（号機ロックの中で 完了 → 有効化 の順）。呼び口は2つ:
+  `GET /api/external/scout-conditions/current`（RPA。**有効の有無にかかわらず毎回通す**）と `GET /api/scout/conditions`（一覧表示）。
+  cron は無い（RPA か人が触った時点で切り替わる。1号機の夜間フローが 5:00 に取りに来るのでその時点で当日扱いになる）。
+- 「翌朝有効」バッジ: 今の有効が明朝の判定で完了になる見込み（配信日が今日以前 / 配信日が空で最新実行が今日以前）か、
+  今の有効が無い号機にだけ、配信日が空 or 明日以前の予約の先頭1件へ出す。今の有効の配信日が明後日以降なら出さない。
+- **有効にした条件の配信日が空なら当日（JST）を入れる**（`create.ts` / `runs.ts` の枯渇切替と同じ扱い。翌日の判定材料になる）。
+- 副作用として、**配信日が今日以前の予約が1件も無い号機は有効なしになる**（RPA は `condition: null` で停止）。
+  この場合の「予約が空」通知・ポータルタスク起票は既存の枯渇経路（`queue-empty.ts`）のままで、T-210 では足していない。
+- 日付は必ず `jstTodayYmd()`（`toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })`）基準。`toISOString().slice(0,10)` は使わない（罠#17）。
+
 ## ブックマークのエリア・職種（T-196, master, 2026-09-15）
 
 求職者詳細のブックマーク一覧（HistoryTab / BookmarkSection）に「エリア」「職種」列を追加した。

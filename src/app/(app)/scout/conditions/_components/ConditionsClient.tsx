@@ -146,8 +146,8 @@ export default function ConditionsClient() {
       .map((m) => m.machineNo);
   }, [data, conditions]);
 
-  // T-209: 「翌朝有効」の印。配信日が翌日の予約のうち、有効が無い号機ごとに1件だけ（絞り込み前の全件から計算する）。
-  //   当日以前の予約は一覧を開いた時点でサーバー側が有効に上げているので、ここには出てこない。
+  // T-210: 「翌朝有効」の印。明朝の日付切替で有効になる見込みの予約に、号機ごとに1件だけ付ける（絞り込み前の全件から計算する）。
+  //   今の有効の配信日が明後日以降の号機には出ない。判定は rollover.ts をサーバー側と共用している。
   const nextMorningIds = useMemo(
     () =>
       nextMorningConditionIds(
