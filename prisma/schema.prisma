@@ -3439,6 +3439,18 @@ model ScoutRun {
   @@map("scout_runs")
 }
 
+// T-212: 朝の「本日の配信条件」まとめ通知を JST 1日1回に抑えるための送信済みマーク。
+//   RPA が 07:00 以降に最初に GET /api/external/scout-conditions/current を呼んだときに、
+//   その日の行を INSERT できた呼び出しだけが LINE WORKS へ1通送る（主キーの一意制約が唯一の排他）。
+//   既存レコードの書き換えは無い追加テーブル。
+model ScoutDailyNotification {
+  /// 通知した日（JST の日付）。1日1行なのでそのまま主キーにする
+  date   DateTime @id @db.Date
+  sentAt DateTime @default(now()) @map("sent_at")
+
+  @@map("scout_daily_notifications")
+}
+
 // 祝日（振替休日・国民の休日を含む）。日付表示の赤色・ホバー名称に使う
 model Holiday {
   id   String   @id @default(cuid())

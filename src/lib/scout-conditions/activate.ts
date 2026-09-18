@@ -5,7 +5,8 @@
 //   2-1. 前日以前の有効を完了（DONE）にする
 //   2-2. 配信日が過ぎた予約を完了（DONE）にする（通知なし）
 //   2-3. 有効が無ければ「配信日が今日」の予約のうち ▲▼ 順で一番上を有効にする
-//   2-4. 2-1 で完了にしたのに 2-3 で上げられなかったら「本日の配信条件がありません」を LINE WORKS に1行通知
+// T-212: この切替そのものの LINE WORKS 通知（「条件Aを完了 → 条件Bに切替」「本日の配信条件がありません」）は廃止した。
+//   通知は朝の「本日の配信条件」まとめ1通（daily-summary.ts）に一本化し、ここは DB の状態を直すだけにする。
 // 判定そのものは rollover.ts（純関数）に置き、一覧の「翌朝有効」バッジ・枯渇時の予約消化（runs.ts）と同じ規則を使う。
 //
 // T-210 は「配信日が今日以前の予約」を対象にしていたため、配信日が過去の予約（9/13）が9/18 に走り出し、
@@ -21,8 +22,6 @@
 import { prisma } from "@/lib/prisma";
 import { demoteOtherRunning, lockMachine } from "./create";
 import { dbDateToYmd, instantToJstYmd, jstTodayYmd } from "./dates";
-import { conditionLabel } from "./label";
-import { sendScoutLine } from "./queue-empty";
 import { pickQueuedToActivate, shouldCompleteQueued, shouldCompleteRunning, type RolloverRow } from "./rollover";
 
 /** 1号機ぶんの結果。何も起きなければ全部空 */
@@ -34,12 +33,10 @@ export type RolloverOutcome = {
   completedQueuedIds: string[];
   /** 新しく有効（RUNNING）にした条件の id */
   activatedId: string | null;
-  /** 2-4 の「本日の配信条件がありません」通知を出したか */
-  noConditionNotified: boolean;
 };
 
+// 「配信日が空の有効」を完了にしてよいかは最新実行の日付で決まる（rollover.ts）。それ以外の列は判定に要らない
 const rolloverInclude = {
-  template: { select: { name: true } },
   runs: { orderBy: { executedAt: "desc" as const }, take: 1, select: { executedAt: true } },
 };
 
@@ -61,15 +58,9 @@ function toRolloverRow(c: RolloverRowSource): RolloverRow {
   };
 }
 
-/** "2026-09-19" → "9/19"（通知文の「本日（9/19）」用。曜日は付けない） */
-function shortYmd(ymd: string): string {
-  const [, m, d] = ymd.split("-");
-  return `${Number(m)}/${Number(d)}`;
-}
-
 /**
  * 1号機ぶんの日付切替。判定はロックの中でやり直すので、呼ぶ前の下読み（有効が無さそう等）が古くなっていても安全。
- * LINE WORKS 通知はトランザクションの外で送る（通知の失敗で DB をロールバックしないため）。
+ * T-212 以降、ここからは LINE WORKS へ何も送らない（通知は朝のまとめ1通だけ。daily-summary.ts）。
  */
 export async function runDateRollover(machineId: string): Promise<RolloverOutcome> {
   const todayYmd = jstTodayYmd();
@@ -108,56 +99,23 @@ export async function runDateRollover(machineId: string): Promise<RolloverOutcom
       };
 
       // 有効が残っているなら（配信日が今日、または未来日付を人が手で有効にした場合）そのまま。予約は上げない
-      if (runnings.length > stale.length) return { ...base, activated: null, prevLabel: null };
+      if (runnings.length > stale.length) return { ...base, activatedId: null };
 
       // 2-3. 「配信日が今日」の予約のうち ▲▼ 順で一番上を有効にする（該当が無ければ有効なしのまま）
-      const next = pickQueuedToActivate(
-        queued.filter((c) => !expired.includes(c)).map((c) => ({ ...toRolloverRow(c), row: c })),
-        todayYmd,
-      );
-      if (!next) return { ...base, activated: null, prevLabel: null };
+      const next = pickQueuedToActivate(queued.filter((c) => !expired.includes(c)).map(toRolloverRow), todayYmd);
+      if (!next) return { ...base, activatedId: null };
 
       // 配信日は今日ちょうどの行しか選ばないので、deliveryDate はそのまま（補完は不要）
       await t.scoutCondition.update({ where: { id: next.id }, data: { status: "RUNNING" } });
       // T-198: 実行中は号機ごとに1件。上で0件になっているはずだが、念のため畳んでおく
       await demoteOtherRunning(t, machineId, next.id);
 
-      return {
-        ...base,
-        activated: { id: next.id, label: conditionLabel(next.row) },
-        prevLabel: stale.length > 0 ? conditionLabel(stale[0]) : null,
-      };
+      return { ...base, activatedId: next.id };
     },
     { timeout: 20000 },
   );
 
-  const machineNo = async () =>
-    (await prisma.rpaScoutMachine.findUnique({ where: { id: machineId }, select: { machineNo: true } }))?.machineNo ?? "?";
-
-  // 有効が入れ替わったときだけ1行通知する（枯渇時の通知とは別。文面に「日付切替」を入れて見分けられるようにする）
-  if (tx.activated && tx.completedRunningIds.length > 0 && tx.prevLabel) {
-    await sendScoutLine(
-      `【スカウト】${await machineNo()}号機：日付切替により条件「${tx.prevLabel}」を完了 → 条件「${tx.activated.label}」に切替`,
-    );
-  }
-
-  // 2-4. 前日の有効を完了にしたのに当日の条件が無い＝その号機は今日配信されない。
-  //   通知はこの遷移が起きた1回だけ（有効なしの状態で一覧を何度開いても、2回目以降は 2-1 で完了にする行が無く再送されない）。
-  //   ポータルタスクは作らない（枯渇の予約切れタスクと混ざらないようにする）。
-  let noConditionNotified = false;
-  if (!tx.activated && tx.completedRunningIds.length > 0) {
-    noConditionNotified = await sendScoutLine(
-      `【スカウト】${await machineNo()}号機：本日（${shortYmd(todayYmd)}）の配信条件がありません。配信は行われません`,
-    );
-  }
-
-  return {
-    machineId,
-    completedRunningIds: tx.completedRunningIds,
-    completedQueuedIds: tx.completedQueuedIds,
-    activatedId: tx.activated?.id ?? null,
-    noConditionNotified,
-  };
+  return { machineId, ...tx };
 }
 
 /**

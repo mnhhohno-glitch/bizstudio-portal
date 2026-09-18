@@ -8,6 +8,11 @@ export function jstTodayYmd(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
+/** 現在の JST の「時」（0〜23）。T-212 の朝まとめ通知が「07:00 以降か」を見るのに使う */
+export function jstNowHour(): number {
+  return Number(new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(11, 13));
+}
+
 /** 真の instant（ISO文字列/Date）→ JST の "YYYY-MM-DD" */
 export function instantToJstYmd(v: string | Date): string {
   return new Date(v).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });

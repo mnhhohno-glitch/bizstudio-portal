@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ALL_AREA_GROUPS, EAST_AREA_GROUPS, WEST_AREA_GROUPS, companyCountLabel, formatTemplateNo } from "./constants";
 import { runDateRollover } from "./activate";
+import { notifyDailySummaryIfDue } from "./daily-summary";
 import { dbDateToYmd } from "./dates";
 
 /** 固定値（スキーマに列を持たない。RPA は常にこの値でフォームに入力する） */
@@ -129,6 +130,10 @@ export async function buildCurrentResponse(machineNoRaw: string | null): Promise
   //   T-209 は「有効が無いとき」だけ判定していたが、前日の有効が残っている号機が動かないため常に通す。
   //   レスポンスの形は変えない（RPA は従来どおり condition を読むだけ）。上げられる予約が無ければ従来どおり null。
   await runDateRollover(machine.id);
+  // T-212: 日付切替を終えたあと、その日（JST）07:00 以降の最初の呼び出しなら
+  //   「本日の配信条件」を全号機分まとめて1通だけ LINE WORKS へ送る（1号機の夜間フロー 5:00 では送らない）。
+  //   送信の成否はレスポンスに影響させない（throw しない・RPA を止めない）。
+  await notifyDailySummaryIfDue();
   const running = await findRunningCondition(machine.id);
   if (!running) return { ok: true, machineNo: n, ...base, message: "RUNNING の条件がありません" };
   return { ok: true, machineNo: n, condition: toExternalCondition(running), fixed: EXTERNAL_FIXED_VALUES, message: null };
