@@ -146,8 +146,9 @@ export default function ConditionsClient() {
       .map((m) => m.machineNo);
   }, [data, conditions]);
 
-  // T-210: 「翌朝有効」の印。明朝の日付切替で有効になる見込みの予約に、号機ごとに1件だけ付ける（絞り込み前の全件から計算する）。
-  //   今の有効の配信日が明後日以降の号機には出ない。判定は rollover.ts をサーバー側と共用している。
+  // T-210 / T-211: 「翌朝有効」の印。明朝の日付切替で有効になる見込みの予約（配信日が明日ちょうど）に、
+  //   号機ごとに1件だけ付ける（絞り込み前の全件から計算する）。今の有効の配信日が明日以降の号機には出ない。
+  //   判定は rollover.ts をサーバー側と共用している。
   const nextMorningIds = useMemo(
     () =>
       nextMorningConditionIds(
@@ -307,7 +308,7 @@ export default function ConditionsClient() {
       {noRunningMachines.length > 0 && (
         <div className="mb-3 rounded-[8px] border border-[#FCA5A5] bg-[#FEF2F2] px-4 py-2.5 text-[13px] text-[#991B1B]">
           <span className="mr-1 font-semibold">⚠ {noRunningMachines.map((n) => `${n}号機`).join("・")}に「有効」の条件がありません。</span>
-          RPA は「有効」の条件しか取得しないため配信が走りません。「検索設定」から条件を登録すると自動で「有効」になります。
+          RPA は「有効」の条件しか取得しないため配信が走りません。配信日が今日の条件を登録すると「有効」になります。明日以降の配信日は「予約」になり、当日の朝に自動で「有効」になります。
         </div>
       )}
 

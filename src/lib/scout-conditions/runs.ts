@@ -2,10 +2,12 @@
 //
 // 1. scout_runs に記録
 // 2. sentCount < 10（DRY_THRESHOLD）なら is_dry=true
-// 3. その号機の QUEUED を queue_order 昇順で先頭から RUNNING に（delivery_date が空なら当日 JST）。
+// 3. その号機の QUEUED のうち **配信日が今日（JST）のもの**を queue_order 昇順で先頭から RUNNING に
+//    （T-211。候補の絞り込みだけ日付切替〔rollover.ts の pickQueuedToActivate〕と同じ規則に揃えた）。
 //    切替元は DONE（完了）にする（T-205。使い終わった条件なので「完了」。枯渇だったことは最新実行の is_dry から出る「枯渇」バッジで分かる）
 // 4. 切替できた → LINE WORKS に1行通知
-// 5. 予約が空 → 枯渇した条件を RUNNING のまま残す（配信は止めない）＋通知＋タスク起票（queue-empty.ts）
+// 5. 配信日が今日の予約が無い → 枯渇した条件を RUNNING のまま残す（配信は止めない）＋通知＋タスク起票（queue-empty.ts）
+//    ※通知・タスクの文面は「予約が空」のまま（T-211 で変えたのは候補の絞り込みだけ。queue-empty.ts は不変）
 // 6. sentCount >= 10 は記録のみ
 //
 // 冪等: 同じ machineNo＋conditionId＋executedAt（分単位）の再送は新規記録せず既存 run の内容を返す。
@@ -15,9 +17,10 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma, RpaScoutMachine } from "@prisma/client";
 import { DRY_THRESHOLD, isDrySentCount } from "./constants";
 import { demoteOtherRunning } from "./create";
-import { jstTodayYmd, ymdToDbDate } from "./dates";
+import { dbDateToYmd, jstTodayYmd } from "./dates";
 import { conditionLabel } from "./label";
 import { handleQueueEmpty, sendScoutLine, type QueueEmptyOutcome } from "./queue-empty";
+import { pickQueuedToActivate } from "./rollover";
 
 export type RunInput = {
   machineNo: number;
@@ -134,13 +137,26 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
         return { ...base, queueEmpty: await isQueueEmpty(t, machine.id) };
       }
 
-      const next = await t.scoutCondition.findFirst({
+      // T-211: 次に有効にする候補は「配信日が今日の予約」だけ（▲▼ 順の一番上）。日付切替（activate.ts）と同じ規則。
+      //   枯渇のしきい値・is_dry の計算・下の「予約が空」通知とタスク起票は変えていない（候補の絞り込みだけ）。
+      const queued = await t.scoutCondition.findMany({
         where: { machineId: machine.id, status: "QUEUED" },
-        orderBy: [{ queueOrder: "asc" }, { createdAt: "asc" }],
         include: labelInclude,
       });
+      const picked = pickQueuedToActivate(
+        queued.map((c) => ({
+          id: c.id,
+          deliveryYmd: dbDateToYmd(c.deliveryDate),
+          queueOrder: c.queueOrder,
+          createdAtIso: c.createdAt.toISOString(),
+          lastRunYmd: null,
+          row: c,
+        })),
+        jstTodayYmd(),
+      );
+      const next = picked?.row ?? null;
       if (!next) {
-        // 予約が空: 枯渇した条件を RUNNING のまま残す（配信は止めない）
+        // 配信日が今日の予約が無い: 枯渇した条件を RUNNING のまま残す（配信は止めない）
         return { ...base, queueEmpty: true };
       }
       if (!input.dryRun) {
@@ -148,10 +164,8 @@ export async function recordScoutRun(input: RunInput): Promise<RecordRunOutcome>
         //   まだ配信中に見えるため DONE（完了）にする。一覧では最新実行が送信10件未満なので「完了」＋「枯渇」が並ぶ。
         //   予約が空で切り替わらなかったときは上の分岐で return しており、RUNNING のまま配信を続ける（据え置き）。
         await t.scoutCondition.update({ where: { id: condition.id }, data: { status: "DONE" } });
-        await t.scoutCondition.update({
-          where: { id: next.id },
-          data: { status: "RUNNING", deliveryDate: next.deliveryDate ?? ymdToDbDate(jstTodayYmd()) },
-        });
+        // T-211: 配信日が今日ちょうどの行しか選ばないので deliveryDate の補完は不要
+        await t.scoutCondition.update({ where: { id: next.id }, data: { status: "RUNNING" } });
         // T-198: 実行中は号機ごとに1件。切替元は上で DONE にしているので通常は0件だが、念のため他の RUNNING を畳む
         await demoteOtherRunning(t, machine.id, next.id);
       }

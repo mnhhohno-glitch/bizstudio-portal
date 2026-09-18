@@ -2,8 +2,11 @@
 //
 // - レコード番号: 号機ごとの通し番号 seq_no（表示は「1-001」）。号機内の MAX+1 を号機ロックの中で採る。
 //   一度振った番号は変更しない（削除しても詰めない）。同一号機内の重複は @@unique([machineId, seqNo]) が最後の砦。
-// - 状態の自動決定: その号機に RUNNING が1件も無ければ RUNNING（配信が止まらないようにする）、
-//   既にあれば QUEUED で予約列の末尾（queueOrder = MAX+1）。画面からの作成・複製・シード・外部経路のすべてがここを通る。
+// - 状態の自動決定（T-211 で変更）: **配信日が今日（JST）で、その号機に RUNNING が1件も無いときだけ RUNNING**。
+//   それ以外（配信日が明日以降・昨日以前・空、または既に RUNNING がある）は QUEUED で予約列の末尾（queueOrder = MAX+1）。
+//   画面からの作成・複製・シード・外部経路のすべてがここを通る。
+//   T-197 は配信日を見ずに「RUNNING が無ければ RUNNING」にしていたため、9/21 配信予定の条件を登録した当日に
+//   有効になってしまった。明日以降の配信日は予約に入り、当日の朝に activate.ts の日付切替が有効にする。
 // - 排他: 号機単位の pg_advisory_xact_lock。キーは runs.ts（T-195 の枯渇→予約消化）と同じ `scout-runs:<machineId>` を使い、
 //   「作成で RUNNING にする」と「枯渇で予約を RUNNING に切り替える」が同時に走っても直列化されるようにする。
 //
@@ -13,7 +16,7 @@
 //   すべて demoteOtherRunning() を号機ロックの中で通し、他の RUNNING を DONE（完了）へ畳む。
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import { jstTodayYmd, ymdToDbDate } from "./dates";
+import { dbDateToYmd, jstTodayYmd } from "./dates";
 import { conditionInclude } from "./server";
 
 type Client = Prisma.TransactionClient;
@@ -33,13 +36,24 @@ async function nextQueueOrder(t: Client, machineId: string): Promise<number> {
   return (max._max.queueOrder ?? 0) + 1;
 }
 
-/** 状態を自動で決める（RUNNING が無ければ RUNNING、あれば QUEUED の末尾） */
+/**
+ * 状態を自動で決める（T-211）。deliveryYmd は JST の "YYYY-MM-DD"（未設定なら null）。
+ *
+ *  - 配信日が今日ちょうど かつ その号機に RUNNING が無い → RUNNING
+ *  - 配信日が明日以降・昨日以前・空、または既に RUNNING がある → QUEUED（予約列の末尾）
+ *
+ * 明日以降の配信日は予約に入れておけば、当日の朝に activate.ts の日付切替が有効にする。
+ * 人が状態欄を手で「有効」に変える操作はここでは制限しない（PATCH 側で demoteOtherRunning を通す既存挙動のまま）。
+ */
 export async function decideInitialStatus(
   t: Client,
   machineId: string,
+  deliveryYmd: string | null,
 ): Promise<{ status: "RUNNING" | "QUEUED"; queueOrder: number }> {
-  const running = await t.scoutCondition.count({ where: { machineId, status: "RUNNING" } });
-  if (running === 0) return { status: "RUNNING", queueOrder: 0 };
+  if (deliveryYmd !== null && deliveryYmd === jstTodayYmd()) {
+    const running = await t.scoutCondition.count({ where: { machineId, status: "RUNNING" } });
+    if (running === 0) return { status: "RUNNING", queueOrder: 0 };
+  }
   return { status: "QUEUED", queueOrder: await nextQueueOrder(t, machineId) };
 }
 
@@ -62,18 +76,18 @@ export type CreatedCondition = Prisma.ScoutConditionGetPayload<{ include: typeof
 
 /**
  * 配信条件を1件作成する。状態・並び順・レコード番号はサーバー側で決める。
- * 自動で RUNNING になり配信日が空のときは当日（JST）を入れる（T-195 の枯渇切替と同じ扱い）。
+ * T-211: RUNNING になるのは配信日が今日の行だけなので、配信日の補完（空なら当日を入れる）はしない。
  */
 export async function createScoutCondition(data: CreateConditionData): Promise<CreatedCondition> {
   return prisma.$transaction(
     async (t) => {
       await lockMachine(t, data.machineId);
-      const decided = await decideInitialStatus(t, data.machineId);
+      // deliveryDate は Prisma の入力型上 Date | string もあり得るので Date に揃えてから JST の日付に直す
+      const deliveryYmd = data.deliveryDate == null ? null : dbDateToYmd(new Date(data.deliveryDate));
+      const decided = await decideInitialStatus(t, data.machineId, deliveryYmd);
       const seqNo = await nextSeqNo(t, data.machineId);
-      const deliveryDate =
-        decided.status === "RUNNING" && data.deliveryDate == null ? ymdToDbDate(jstTodayYmd()) : data.deliveryDate;
       const created = await t.scoutCondition.create({
-        data: { ...data, deliveryDate, status: decided.status, queueOrder: decided.queueOrder, seqNo },
+        data: { ...data, status: decided.status, queueOrder: decided.queueOrder, seqNo },
         include: conditionInclude,
       });
       // T-198: 自動決定が RUNNING を選ぶのは「実行中が0件のとき」だけなので通常は0件だが、
