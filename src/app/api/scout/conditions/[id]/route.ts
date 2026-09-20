@@ -28,14 +28,18 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "リクエストボディが不正です" }, { status: 400 });
 
-  const parsed = parseConditionInput(body as Record<string, unknown>, rowToParsed(current));
+  // T-200: 配信日は必須。ただし実績があって状態以外を変えられない行（T-201 のロック）は、
+  //   配信日が空のまま実績を持ってしまった古い行の「状態だけ変える」操作を止めないよう必須チェックを飛ばす。
+  const locked = current.runs.length > 0;
+  const parseOpts = { requireDeliveryDate: !locked };
+  const parsed = parseConditionInput(body as Record<string, unknown>, rowToParsed(current), parseOpts);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   // T-201: 配信実績（scout_runs）がある条件は状態以外を変更できない。
   //   画面側でも入力欄を無効化しているが、直接 PATCH を投げられても通らないようここでも弾く。
   //   比較の基準は「今の行を parseConditionInput に通した値」にする（正規化前の行と比べると誤検知する）。
-  if (current.runs.length > 0) {
-    const baseParsed = parseConditionInput({}, rowToParsed(current));
+  if (locked) {
+    const baseParsed = parseConditionInput({}, rowToParsed(current), parseOpts);
     const before = baseParsed.ok ? baseParsed.data : rowToParsed(current);
     const changed = changedLockedFields(before, parsed.data);
     if (changed.length > 0) {

@@ -26,6 +26,8 @@ export function FormRow({
   no,
   label,
   note,
+  required = false,
+  error,
   dense = false,
   children,
 }: {
@@ -34,6 +36,10 @@ export function FormRow({
   label: string;
   /** 補足文。入力欄の直下に小さい文字で置く（マイナビの赤い注意書きに相当） */
   note?: string;
+  /** T-200: 必須項目。項目名の右に赤い * を付ける */
+  required?: boolean;
+  /** T-200: 入力エラー。入力欄の直下に赤字で出す（どの項目が問題か分かるようにする） */
+  error?: string;
   /** 表示専用の行など高さを詰めたいとき */
   dense?: boolean;
   children: ReactNode;
@@ -43,10 +49,18 @@ export function FormRow({
     <div className="grid border-b border-[#E5E7EB] last:border-b-0" style={{ gridTemplateColumns: `${LABEL_COL_WIDTH} minmax(0, 1fr)` }}>
       <div className={`flex items-start gap-1 bg-[#F3F4F6] text-[12px] font-semibold text-[#374151] ${pad}`}>
         {no && <span className="w-[18px] shrink-0 text-[11px] font-normal text-[#9CA3AF]">{no}</span>}
-        <span>{label}</span>
+        <span>
+          {label}
+          {required && (
+            <span className="ml-0.5 text-[#DC2626]" aria-hidden="true">
+              *
+            </span>
+          )}
+        </span>
       </div>
       <div className={`min-w-0 ${pad}`}>
         {children}
+        {error && <div className="mt-1 text-[11px] font-medium leading-snug text-[#DC2626]">{error}</div>}
         {note && <div className="mt-1 text-[10px] leading-snug text-[#6B7280]">{note}</div>}
       </div>
     </div>

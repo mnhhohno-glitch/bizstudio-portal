@@ -158,11 +158,16 @@ function intOrNull(v: unknown): number | null | undefined {
 /**
  * 作成（full=true: 必須項目を欠くとエラー）／更新（full=false: 渡された項目だけ検証）の入力検証。
  * 仕様の固定値（学歴・経験職種・0社を除く・除外リスト・自社へ応募）は受け付けない（列が無い）。
+ *
+ * T-200: requireDeliveryDate を false にするのは「実績があり状態以外を変えられない行（T-201 のロック）」だけ。
+ * 配信日が空のまま実績を持ってしまった古い行の「状態だけ変える」操作を、必須チェックで止めないため。
  */
 export function parseConditionInput(
   body: Record<string, unknown>,
   base: ParsedCondition | null,
+  opts: { requireDeliveryDate?: boolean } = {},
 ): ParseResult {
+  const requireDeliveryDate = opts.requireDeliveryDate ?? true;
   const out: ParsedCondition = base
     ? { ...base }
     : {
@@ -240,6 +245,11 @@ export function parseConditionInput(
     return { ok: false, error: "登録日（日付入力）の開始または終了を入力してください" };
   if (out.registDateFrom && out.registDateTo && out.registDateFrom > out.registDateTo)
     return { ok: false, error: "登録日の開始が終了より後になっています" };
+  // T-200: 配信日は必須。空だと期間フィルタ（配信日基準）にも日付タブ（前日/当日/翌日）にも出ず、
+  // 「すべて」でしか見えなくなるため、作成（POST）・更新（PATCH）のどちらでも空を弾く。
+  // ただしロック中（実績あり＝状態以外変更不可）の行は例外。
+  if (requireDeliveryDate && out.deliveryDate == null)
+    return { ok: false, error: "配信日を入力してください" };
 
   if (body.lastLoginDays !== undefined) {
     const v = intOrNull(body.lastLoginDays);

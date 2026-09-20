@@ -312,9 +312,15 @@ export default function ConditionTable({
                   <div className="text-[#6B7280]">
                     <DateTimeText iso={c.createdAt} holidays={holidays} />
                   </div>
-                  <div className="font-medium">
-                    <DateText ymd={c.deliveryDate} holidays={holidays} />
-                  </div>
+                  {/* T-200: 配信日は必須になったが、それ以前に作られた空の行が残っている。
+                      期間フィルタにも日付タブにも出ない＝取りこぼしやすいので赤字で目立たせる */}
+                  {c.deliveryDate ? (
+                    <div className="font-medium">
+                      <DateText ymd={c.deliveryDate} holidays={holidays} />
+                    </div>
+                  ) : (
+                    <div className="font-medium text-[#DC2626]">配信日なし</div>
+                  )}
                 </td>
                 {/* T-213: 上段=最新の実行日時（従来どおり）／下段=実行回数（0回なら "-"） */}
                 <td className={TD}>

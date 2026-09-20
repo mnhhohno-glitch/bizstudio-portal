@@ -15,7 +15,7 @@
 //   GET /api/scout/conditions/same-day で取り、配信日・号機が変わったら取り直す。重なり（7軸すべてが交わる。overlap.ts）は
 //   フォームを変えるたびにクライアントで判定し直し、重なる行を赤くしてフォームの一番上に赤字1行を出す。**保存は止めない**。
 //   1280px 未満（xl 未満）では右パネルをフォームの下に回す。実績ブロックは「作成」「更新」（更新者/更新日時）に整理。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import {
@@ -139,6 +139,9 @@ export default function ConditionModal({
   const [form, setForm] = useState<ConditionInput>(() => toForm(current, machines, today));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // T-200: 配信日は必須。保存を押した時点で空ならエラーを入力欄の直下に出す
+  const [deliveryDateError, setDeliveryDateError] = useState<string | null>(null);
+  const deliveryDateRef = useRef<HTMLDivElement | null>(null);
   const overlayClose = useOverlayClose(onClose);
 
   // 別の行を開いたらフォームを入れ替える
@@ -148,6 +151,7 @@ export default function ConditionModal({
     if (loadedKey !== modeKey) {
       setForm(toForm(current, machines, today));
       setDirty(false);
+      setDeliveryDateError(null);
       setLoadedKey(modeKey);
     }
   }, [modeKey, loadedKey, current, machines, today]);
@@ -219,6 +223,15 @@ export default function ConditionModal({
 
   const save = async () => {
     if (saving) return;
+    // T-200: 配信日が空のままでは保存しない（サーバー側でも parseConditionInput が弾く）。
+    //   ただしロック中（実績あり＝状態以外は編集不可）の行は、配信日が空のまま実績を持ってしまった
+    //   古い行の「状態だけ変える」操作を止めないよう必須チェックを飛ばす（サーバー側も同じ判定）。
+    if (!locked && !form.deliveryDate) {
+      setDeliveryDateError("配信日を入力してください");
+      deliveryDateRef.current?.scrollIntoView({ block: "center" });
+      return;
+    }
+    setDeliveryDateError(null);
     setSaving(true);
     try {
       const isNew = mode.kind === "new";
@@ -353,15 +366,20 @@ export default function ConditionModal({
                 />
               </FormRow>
             )}
-            <FormRow label="配信日">
-              <DateField
-                className="w-[240px]"
-                value={form.deliveryDate ?? ""}
-                onChange={(v) => set("deliveryDate", v || null)}
-                holidays={holidays}
-                disabled={locked}
-              />
-            </FormRow>
+            <div ref={deliveryDateRef}>
+              <FormRow label="配信日" required error={deliveryDateError ?? undefined}>
+                <DateField
+                  className="w-[240px]"
+                  value={form.deliveryDate ?? ""}
+                  onChange={(v) => {
+                    set("deliveryDate", v || null);
+                    if (v) setDeliveryDateError(null);
+                  }}
+                  holidays={holidays}
+                  disabled={locked}
+                />
+              </FormRow>
+            </div>
             <FormRow label="予測件数" note="人が見込みで入れる想定件数（マイナビの検索結果件数は「結果」として実績に記録されます）">
               <input
                 type="number"

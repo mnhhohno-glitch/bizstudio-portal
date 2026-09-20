@@ -53,7 +53,9 @@ export async function POST(request: NextRequest) {
     if (sources.length === 0) return NextResponse.json({ error: "条件が見つかりません" }, { status: 404 });
 
     // 複製は同じ号機へ新規作成として登録する。状態は T-197 の自動決定（実行中が無ければ実行中、あれば予約の末尾）。
-    // 配信日は引き継がない（登録者は操作者）。1件ずつ号機ロックの中で採番するため直列に作る
+    // 配信日は引き継がない（サーバー側の補完もしないので空のまま作られる）。画面の「複製」は作成後に
+    // そのままモーダルを開くので、そこで配信日を入れて保存する（T-200: 保存時に空だと弾かれる）。
+    // 登録者は操作者。1件ずつ号機ロックの中で採番するため直列に作る
     const created = [];
     for (const s of sources) {
       created.push(
