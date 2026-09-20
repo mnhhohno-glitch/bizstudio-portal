@@ -157,6 +157,8 @@ model User {
   // T-147: セキュアファイル送信（リレーション追加のみ・DBカラム変更なし）
   secureTransfersSent      SecureTransfer[]          @relation("SecureTransfersSent")
   scoutConditionsCreated   ScoutCondition[]          @relation("ScoutConditionCreatedBy")
+  // T-214: 配信条件を最後に手で保存した人（リレーション追加のみ）
+  scoutConditionsEdited    ScoutCondition[]          @relation("ScoutConditionEditedBy")
 
   @@map("users")
 }
@@ -3401,6 +3403,13 @@ model ScoutCondition {
 
   createdById String? @map("created_by_id") // User.id
   createdBy   User?   @relation("ScoutConditionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // T-214: 人が保存した最後の操作（編集モーダルの保存・手動の状態変更）の日時と操作者。
+  //   updatedAt（@updatedAt）は日付切替・枯渇切替・RPA の結果受信など自動処理でも動くため、別に持つ。
+  //   ▲▼の並び替え・自動処理では書かない。nullable 追加列（既存行は null のまま＝画面は "-"）
+  editedAt   DateTime? @map("edited_at")
+  editedById String?   @map("edited_by_id") // User.id
+  editedBy   User?     @relation("ScoutConditionEditedBy", fields: [editedById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at") // 予約登録日時
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -13,6 +13,7 @@ import {
   formatRecordNo,
 } from "./constants";
 import { dbDateToYmd, isValidYmd, ymdToDbDate } from "./dates";
+import { computeListOverlaps } from "./overlap";
 import type { ConditionDto, ConditionInput, RunDto } from "./types";
 
 // 一覧・詳細で共通の include（実績は新しい順に全件。1条件あたり数件〜数十件を想定）
@@ -20,8 +21,18 @@ export const conditionInclude = {
   machine: { select: { id: true, machineNo: true } },
   template: { select: { id: true, kind: true, name: true } },
   createdBy: { select: { id: true, name: true } },
+  editedBy: { select: { id: true, name: true } }, // T-214
   runs: { orderBy: { executedAt: "desc" as const } },
 } satisfies Prisma.ScoutConditionInclude;
+
+/**
+ * T-214: 「人が保存した」操作にだけ付ける更新者・更新日時。
+ * 付ける: 編集モーダルの保存（PATCH）・一覧/モーダルからの手動の状態変更（同じ PATCH）。
+ * 付けない: ▲▼の並び替え（bulk move）・日付切替（activate.ts）・枯渇切替（runs.ts）・朝のまとめ通知・RPA の結果受信。
+ */
+export function editorStamp(actorId: string): { editedAt: Date; editedById: string } {
+  return { editedAt: new Date(), editedById: actorId };
+}
 
 type ConditionRow = Prisma.ScoutConditionGetPayload<{ include: typeof conditionInclude }>;
 
@@ -89,6 +100,10 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     createdByName: c.createdBy?.name ?? null,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+    editedAt: c.editedAt?.toISOString() ?? null,
+    editedById: c.editedById,
+    editedByName: c.editedBy?.name ?? null,
+    overlapRecordNos: [], // 一覧 GET が attachListOverlaps で埋める
     latestRun: runs[0] ?? null,
     runs,
     totalExtractedCount: sum((r) => r.extractedCount),
@@ -364,6 +379,19 @@ export function rowToParsed(c: ConditionRow): ParsedCondition {
     plannedCount: c.plannedCount,
     deliveryDate: c.deliveryDate,
   };
+}
+
+/**
+ * T-214: 一覧の「重なり」印。有効・予約の条件について、同じ日（配信日。空なら今日）の他の稼働中号機の有効・予約の条件で
+ * 7軸すべてが交わるもののレコード番号を overlapRecordNos に入れる（判定は overlap.ts の computeListOverlaps）。
+ */
+export function attachListOverlaps(conditions: ConditionDto[], activeMachineIds: Set<string>, todayYmd: string): ConditionDto[] {
+  const hits = computeListOverlaps(conditions, activeMachineIds, todayYmd);
+  if (hits.size === 0) return conditions;
+  return conditions.map((c) => {
+    const list = hits.get(c.id);
+    return list ? { ...c, overlapRecordNos: list.map((o) => o.recordNo ?? `${o.machineNo}-?`) } : c;
+  });
 }
 
 /** ParsedCondition → Prisma の unchecked 入力（enum は文字列のまま渡す。検証済みなのでキャスト） */

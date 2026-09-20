@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   changedLockedFields,
   conditionInclude,
+  editorStamp,
   parseConditionInput,
   rowToParsed,
   toConditionDto,
@@ -56,8 +57,10 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
     if (!t) return NextResponse.json({ error: "テンプレートが見つかりません" }, { status: 400 });
   }
 
-  const { createdById: _ignored, ...data } = toPrismaData(parsed.data, current.createdById);
+  const { createdById: _ignored, ...baseData } = toPrismaData(parsed.data, current.createdById);
   void _ignored;
+  // T-214: 編集モーダルの保存・手動の状態変更はどちらもこの PATCH を通る＝人が保存した操作なので更新者・更新日時を付ける
+  const data = { ...baseData, ...editorStamp(actor.id) };
 
   // T-198: RUNNING にする更新は号機ロックの中で行い、他の RUNNING を DONE に畳む
   const goesRunning = data.status === "RUNNING";

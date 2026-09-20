@@ -93,6 +93,13 @@ export type ConditionDto = {
   createdByName: string | null;
   createdAt: string; // ISO（予約登録日時）
   updatedAt: string;
+  // T-214: 人が最後に保存した日時・操作者（自動処理・▲▼では動かない）。未更新なら null（画面は "-"）
+  editedAt: string | null;
+  editedById: string | null;
+  editedByName: string | null;
+  // T-214: 同日の他号機（稼働中）の有効・予約の条件で 7 軸すべてが交わるもののレコード番号（一覧の「重なり」印用。
+  //   一覧 GET でサーバーが付ける。単件の POST/PATCH のレスポンスでは空配列）
+  overlapRecordNos: string[];
   latestRun: RunDto | null;
   runs: RunDto[]; // 新しい順
   // T-203: この条件の全実行の合計（一覧の「抽出 / 送信」列。実行が1件も無ければ null＝画面は "-"）

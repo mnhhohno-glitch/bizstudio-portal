@@ -10,6 +10,11 @@
 // T-201: 配信実績（scout_runs）が1件でもある条件は「状態」以外を編集不可にする（locked）。
 //   配信日や検索条件を後から上書きされると、その実績がどの条件によるものか分からなくなるため。
 //   内容を変えたいときの逃げ道として「複製」は押せるままにしている。サーバー側（PATCH）でも同じ規則で弾く。
+// T-214: モーダルを左右2列にし、右に「同日の他号機」パネル（SameDayPanel.tsx）を置く。
+//   対象は他の稼働中号機の有効・予約で配信日がフォームの配信日と同じもの（空なら今日）。内部 API
+//   GET /api/scout/conditions/same-day で取り、配信日・号機が変わったら取り直す。重なり（7軸すべてが交わる。overlap.ts）は
+//   フォームを変えるたびにクライアントで判定し直し、重なる行を赤くしてフォームの一番上に赤字1行を出す。**保存は止めない**。
+//   1280px 未満（xl 未満）では右パネルをフォームの下に回す。実績ブロックは「作成」「更新」（更新者/更新日時）に整理。
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
@@ -32,10 +37,12 @@ import {
   isDrySentCount,
 } from "@/lib/scout-conditions/constants";
 import { jstTodayYmd, type HolidayMap } from "@/lib/scout-conditions/dates";
+import { isOverlapping } from "@/lib/scout-conditions/overlap";
 import type { ConditionDto, ConditionInput, MachineDto, TemplateDto } from "@/lib/scout-conditions/types";
 import { DateField, DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
 import { FormGroup, FormRow } from "./FormTable";
+import SameDayPanel from "./SameDayPanel";
 import TemplatePreview from "./TemplatePreview";
 
 // 入力欄は右列の左端から始めて右に余白を残す（w-full にしない）
@@ -172,6 +179,44 @@ export default function ConditionModal({
     [conditions, form.machineId],
   );
 
+  // T-214: 同日の他号機の条件（右パネル）。配信日が空なら今日。配信日・号機が変わったら取り直す（初回はモーダルを開いたとき）
+  const sameDayDate = form.deliveryDate || today;
+  const sameDayKey = `${sameDayDate}|${form.machineId}`;
+  // key が今の配信日・号機と一致している間だけ rows を使う（取り直し中は読み込み中扱い。effect 内で同期的に setState しない）
+  const [sameDay, setSameDay] = useState<{ key: string; rows: ConditionDto[] }>({ key: "", rows: [] });
+  useEffect(() => {
+    let cancelled = false;
+    const sp = new URLSearchParams({ date: sameDayDate });
+    if (form.machineId) sp.set("machineId", form.machineId);
+    fetch(`/api/scout/conditions/same-day?${sp.toString()}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          toast.error("同日の他号機の条件を読み込めませんでした");
+          setSameDay({ key: sameDayKey, rows: [] });
+          return;
+        }
+        const json = (await res.json()) as { conditions: ConditionDto[] };
+        if (!cancelled) setSameDay({ key: sameDayKey, rows: json.conditions });
+      })
+      .catch(() => {
+        if (!cancelled) setSameDay({ key: sameDayKey, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sameDayDate, sameDayKey, form.machineId]);
+  const sameDayLoaded = sameDay.key === sameDayKey;
+  const sameDayRows = useMemo(() => (sameDayLoaded ? sameDay.rows : []), [sameDayLoaded, sameDay.rows]);
+
+  // T-214: フォームを変えるたびにクライアント側で判定し直す（右パネルのデータは取得済みのものを使う）
+  const overlapRows = useMemo(
+    () => sameDayRows.filter((c) => c.machineId !== form.machineId && isOverlapping(form, c, today)),
+    [sameDayRows, form, today],
+  );
+  const overlapIds = useMemo(() => new Set(overlapRows.map((c) => c.id)), [overlapRows]);
+  const overlapText = useMemo(() => overlapRows.map((c) => `${c.machineNo}号機 ${c.recordNo ?? "-"}`).join("、"), [overlapRows]);
+
   const save = async () => {
     if (saving) return;
     setSaving(true);
@@ -211,7 +256,7 @@ export default function ConditionModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" {...overlayClose}>
       <div
-        className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1100px] flex-col rounded-[10px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.25)]"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1560px] flex-col rounded-[10px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.25)]"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -241,7 +286,16 @@ export default function ConditionModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-3">
+        {/* T-214: 左＝フォーム（従来どおり）／右＝同日の他号機パネル。xl（1280px）未満では右パネルをフォームの下に回す */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 pb-4 pt-3 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="min-w-0">
+          {/* T-214: 同日の他号機と重なるときは一番上に赤字1行（保存は止めない） */}
+          {overlapRows.length > 0 && (
+            <div className="mb-3 rounded-[6px] border border-[#FCA5A5] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold text-[#B91C1C]">
+              {overlapText} と重なっています
+            </div>
+          )}
+
           {/* T-201: 編集できない理由を先頭に出す。逃げ道（複製）も同じ場所で案内する */}
           {locked && (
             <div className="mb-3 rounded-[6px] border border-[#FCD34D] bg-[#FFFBEB] px-3 py-2 text-[12px] leading-relaxed text-[#92400E]">
@@ -611,9 +665,24 @@ export default function ConditionModal({
                   <DateText ymd={current.deliveryDate} holidays={holidays} />
                 </span>
               </FormRow>
-              <FormRow label="作成日時" dense>
+              {/* T-214: 作成日時と登録者を1行に。「登録者」の単独行は廃止 */}
+              <FormRow label="作成" dense>
                 <span className="text-[12px]">
                   <DateTimeText iso={current.createdAt} holidays={holidays} />
+                  <span className="ml-3">{current.createdByName ?? "-"}</span>
+                </span>
+              </FormRow>
+              {/* T-214: 人が最後に保存した日時・操作者（自動処理・▲▼では動かない）。未更新なら "-" */}
+              <FormRow label="更新" dense>
+                <span className="text-[12px]">
+                  {current.editedAt ? (
+                    <>
+                      <DateTimeText iso={current.editedAt} holidays={holidays} />
+                      <span className="ml-3">{current.editedByName ?? "-"}</span>
+                    </>
+                  ) : (
+                    <span className="text-[#9CA3AF]">-</span>
+                  )}
                 </span>
               </FormRow>
               <FormRow label="最終実行" dense>
@@ -628,9 +697,6 @@ export default function ConditionModal({
                   {current.plannedCount ?? "-"} / {current.firstSearchResultCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
                   <span className={dry ? "font-semibold text-[#B91C1C]" : ""}>{latest?.sentCount ?? "-"}</span>
                 </span>
-              </FormRow>
-              <FormRow label="登録者" dense>
-                <span className="text-[12px]">{current.createdByName ?? "-"}</span>
               </FormRow>
               <div className="p-3">
                 {current.runs.length > 0 && (
@@ -668,6 +734,12 @@ export default function ConditionModal({
               </div>
             </FormGroup>
           )}
+        </div>
+
+        {/* T-214: 右パネル（xl 以上ではスクロールしても上に留まる。xl 未満ではフォームの下） */}
+        <div className="min-w-0 xl:sticky xl:top-0 xl:self-start">
+          <SameDayPanel date={sameDayDate} rows={sameDayRows} loading={!sameDayLoaded} overlapIds={overlapIds} />
+        </div>
         </div>
 
         {/* 下部ボタン（スクロールしても固定。主ボタンは右下） */}

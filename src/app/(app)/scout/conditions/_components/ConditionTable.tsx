@@ -297,6 +297,15 @@ export default function ConditionTable({
                   {c.status === "QUEUED" && nextMorning.has(c.id) && (
                     <span className="ml-1 rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[11px] font-medium text-[#B45309]">翌朝有効</span>
                   )}
+                  {/* T-214: 同日の他号機（稼働中）の有効・予約と 7 軸すべてが交わる（サーバー側で一覧取得時に判定）。警告のみで保存は止めない */}
+                  {c.overlapRecordNos.length > 0 && (
+                    <span
+                      className="ml-1 rounded border border-[#FCA5A5] bg-white px-1 py-0.5 text-[10px] font-medium text-[#B91C1C]"
+                      title={`同日の ${c.overlapRecordNos.join("・")} と検索条件が重なっています`}
+                    >
+                      重なり
+                    </span>
+                  )}
                   {c.status === "QUEUED" && <span className="ml-1 text-[10px] text-[#6B7280]">#{c.queueOrder}</span>}
                 </td>
                 <td className={TD}>
