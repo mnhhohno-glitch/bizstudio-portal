@@ -7,8 +7,11 @@
 // T-204: 行の「複製」は複製した条件の編集モーダルをそのまま開く。あわせて複製元・複製先の2行を
 //   pinnedIds に入れ、現在の絞り込みに合わない行でも例外的に一覧へ出す（絞り込み自体はこちらで変えない）。
 //   例外表示は再読込か絞り込み操作で解除する。
+// T-213: ページ内サブタブ「条件一覧」「実行履歴」。状態は URL クエリ ?view=runs に持ち、リロードしても保持する。
+//   実行履歴（RunHistory.tsx）は自前で /api/scout/runs を読む。レコード番号クリックは条件一覧と同じ編集モーダルを開く。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Toaster, toast } from "sonner";
 import ScoutNav from "@/components/scout/ScoutNav";
 import { CONDITION_STATUSES, SORT_OPTIONS, conditionStatusLabel, type SortKey } from "@/lib/scout-conditions/constants";
@@ -25,6 +28,7 @@ import { FilterField, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/compone
 import ConditionTable from "./ConditionTable";
 import ConditionModal, { type ModalMode } from "./ConditionModal";
 import PrefectureModal from "./PrefectureModal";
+import RunHistory from "./RunHistory";
 import {
   applyDayFilter,
   applyMachineFilter,
@@ -40,7 +44,26 @@ import {
 
 type PrefModalState = { initial: string[]; title: string; onConfirm: (prefs: string[]) => void } | null;
 
+// T-213: ページ内サブタブ。URL クエリ ?view=runs で「実行履歴」、それ以外は「条件一覧」
+type View = "list" | "runs";
+const VIEW_TABS: { key: View; label: string }[] = [
+  { key: "list", label: "条件一覧" },
+  { key: "runs", label: "実行履歴" },
+];
+
 export default function ConditionsClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view: View = searchParams.get("view") === "runs" ? "runs" : "list";
+  const setView = (v: View) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (v === "runs") sp.set("view", "runs");
+    else sp.delete("view");
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+
   const [data, setData] = useState<ConditionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState<DayFilter>("today");
@@ -341,7 +364,41 @@ export default function ConditionsClient() {
         </div>
       )}
 
-      <div className="min-w-0 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+      {/* T-213: ページ内サブタブ（条件一覧／実行履歴）。URL の ?view= に持つのでリロードしても保持される */}
+      <div className="mb-3 flex items-center gap-1 border-b border-[#E5E7EB]">
+        {VIEW_TABS.map((t) => {
+          const active = view === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setView(t.key)}
+              className={[
+                "-mb-px rounded-t-md border border-b-0 px-4 py-2 text-[13px] font-medium transition-colors",
+                active ? "border-[#E5E7EB] bg-white text-[#2563EB]" : "border-transparent text-[#6B7280] hover:bg-[#F9FAFB] hover:text-[#374151]",
+              ].join(" ")}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === "runs" && (
+        <div className="min-w-0 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+          <RunHistory
+            machines={data?.machines ?? []}
+            holidays={holidays}
+            onOpenCondition={(conditionId) => {
+              const c = conditions.find((x) => x.id === conditionId);
+              if (c) setModal({ kind: "edit", condition: c });
+              else toast.error("条件が見つかりません（削除された可能性があります）。再読込してください");
+            }}
+          />
+        </div>
+      )}
+
+      <div className={view === "list" ? "min-w-0 rounded-[8px] border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]" : "hidden"}>
         {/* 日付切替・期間・号機・並び順（T-199: 期間と号機を追加。ラベルは求職者一覧のフィルタと同じく入力の上） */}
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b border-[#E5E7EB] px-4 py-3">
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">

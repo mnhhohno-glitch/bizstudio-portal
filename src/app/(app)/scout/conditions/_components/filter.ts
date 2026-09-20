@@ -7,6 +7,7 @@ import {
   gradYearRangeLabel,
   isDrySentCount,
   periodDaysLabel,
+  ratePercentLabel,
   searchTargetLabel,
   templateKindLabel,
   workPrefLabel,
@@ -19,7 +20,7 @@ import {
   ymdWeekdayLabel,
 } from "@/lib/scout-conditions/dates";
 import { pickQueuedToActivate, shouldCompleteRunning } from "@/lib/scout-conditions/rollover";
-import type { ConditionDto } from "@/lib/scout-conditions/types";
+import type { ConditionDto, RunHistoryRowDto } from "@/lib/scout-conditions/types";
 
 export type DayFilter = "prev" | "today" | "next" | "all";
 
@@ -108,8 +109,8 @@ export function sortConditions(rows: ConditionDto[], key: SortKey): ConditionDto
   });
 }
 
-/** 登録日の表示（期間指定なら「7日以内」、日付入力なら「9/1(月)〜9/7(日)」） */
-export function registDateLabel(c: ConditionDto): string {
+/** 登録日の表示（期間指定なら「7日以内」、日付入力なら「9/1(月)〜9/7(日)」）。T-213: 実行履歴の行（RunHistoryRowDto）でも使うため Pick にした */
+export function registDateLabel(c: Pick<ConditionDto, "registDateMode" | "registDays" | "registDateFrom" | "registDateTo">): string {
   if (c.registDateMode === "PERIOD") return periodDaysLabel(c.registDays);
   const f = c.registDateFrom ? formatYmdWithWeekday(c.registDateFrom) : "";
   const t = c.registDateTo ? formatYmdWithWeekday(c.registDateTo) : "";
@@ -147,9 +148,11 @@ export function buildCsv(rows: ConditionDto[]): string {
     "テンプレート種別",
     "テンプレート",
     "予測件数",
+    "結果件数（初回）", // T-213: マイナビの検索結果件数。値を持つ最も古い実行の値（一覧・モーダルと同じ）
     "抽出件数",
     "送信件数",
     "実行日時",
+    "実行回数", // T-213
     "枯渇",
   ];
   const lines = rows.map((c) =>
@@ -174,15 +177,71 @@ export function buildCsv(rows: ConditionDto[]): string {
       templateKindLabel(c.templateKind),
       c.templateName ?? "",
       c.plannedCount ?? "",
+      c.firstSearchResultCount ?? "",
       c.latestRun?.extractedCount ?? "",
       c.latestRun?.sentCount ?? "",
       c.latestRun ? instantToJstDateTime(c.latestRun.executedAt) : "",
+      c.runCount,
       isDryRow(c) ? "枯渇" : "",
     ]
       .map(csvCell)
       .join(","),
   );
   // Excel で文字化けしないよう UTF-8 BOM を先頭に付ける
+  return "﻿" + [header.join(","), ...lines].join("\r\n") + "\r\n";
+}
+
+/**
+ * T-213: 実行履歴タブの CSV（表示中の行）。列は画面の並び（実行日時／号機・担当者／条件／検索条件の要約／結果／抽出／送信）。
+ * 文字コード・改行は buildCsv と同じ（UTF-8 BOM＋CRLF）。
+ */
+export function buildRunsCsv(rows: RunHistoryRowDto[]): string {
+  const header = [
+    "実行日時",
+    "枯渇",
+    "号機",
+    "担当者",
+    "NO",
+    "状態",
+    "検索対象",
+    "登録日",
+    "最終ログイン",
+    "卒業年度",
+    "経験社数",
+    "居住地",
+    "希望勤務地",
+    "テンプレート種別",
+    "テンプレート",
+    "結果件数",
+    "抽出件数",
+    "送信件数",
+    "送信率",
+  ];
+  const lines = rows.map((r) =>
+    [
+      instantToJstDateTime(r.executedAt),
+      r.isDry || isDrySentCount(r.sentCount) ? "枯渇" : "",
+      `${r.machineNo}号機`,
+      r.recruiterName,
+      r.recordNo ?? "",
+      conditionStatusLabel(r.status),
+      searchTargetLabel(r.searchTarget),
+      registDateLabel(r),
+      periodDaysLabel(r.lastLoginDays),
+      gradYearRangeLabel(r.gradYearFrom, r.gradYearTo),
+      companyCountLabel(r.companyCount),
+      areaLabel(r.residenceMode, r.residencePrefectures),
+      workPrefLabel(r.workPrefMode, r.workPrefectures),
+      templateKindLabel(r.templateKind),
+      r.templateName ?? "",
+      r.searchResultCount ?? "",
+      r.extractedCount,
+      r.sentCount,
+      ratePercentLabel(r.sentCount, r.extractedCount) ?? "",
+    ]
+      .map(csvCell)
+      .join(","),
+  );
   return "﻿" + [header.join(","), ...lines].join("\r\n") + "\r\n";
 }
 

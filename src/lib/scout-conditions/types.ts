@@ -99,8 +99,12 @@ export type ConditionDto = {
   //   枯渇回（isDry）も実際に配信しているので合計に含める。dryRun の検証リクエストは DB に書かれないため元から入らない。
   totalExtractedCount: number | null;
   totalSentCount: number | null;
-  // T-206: 検索結果件数の合計（値を持つ実行が1件も無ければ null＝画面は "-"）
-  totalSearchResultCount: number | null;
+  // T-213: 検索結果件数は「初回の値」（値を持つ実行のうち executed_at が最も古いもの）。
+  //   T-206 までは実行回数分を合算していたため、1日に何回も走る条件で 26859 のような母数になっていた。
+  //   マイナビの検索結果件数はその条件の母数なので、最初に測った値を代表値にする（1件も無ければ null＝画面は "-"）。
+  firstSearchResultCount: number | null;
+  // T-213: 実行回数（runs.length と同じ。一覧の「実行日時」下段に「3回」と出す）
+  runCount: number;
 };
 
 export type ConditionsResponse = {
@@ -132,4 +136,54 @@ export type ConditionInput = {
   templateId: string | null;
   plannedCount: number | null;
   deliveryDate: string | null;
+};
+
+// ---- T-213: 実行履歴タブ（GET /api/scout/runs） ----
+// 1行＝scout_runs 1件。条件側の表示項目は「その条件に現在設定されているもの」（実行時の値は RPA から届かない）。
+export type RunHistoryRowDto = {
+  id: string;
+  executedAt: string; // ISO（真のUTC instant）
+  extractedCount: number;
+  sentCount: number;
+  searchResultCount: number | null;
+  isDry: boolean;
+  machineId: string;
+  machineNo: number;
+  /** 号機の担当者名（RC_ROSTER 由来。無ければ ""） */
+  recruiterName: string;
+  conditionId: string;
+  recordNo: string | null;
+  /** 条件の現在の状態（RUNNING / QUEUED / DRY / DONE） */
+  status: string;
+  searchTarget: string;
+  registDateMode: string;
+  registDays: number | null;
+  registDateFrom: string | null;
+  registDateTo: string | null;
+  lastLoginDays: number;
+  gradYearFrom: number | null;
+  gradYearTo: number | null;
+  companyCount: number | null;
+  residenceMode: string;
+  residencePrefectures: string[];
+  workPrefMode: string;
+  workPrefectures: string[];
+  templateKind: string | null;
+  templateName: string | null;
+};
+
+export type RunHistoryQuery = {
+  from: string | null; // "YYYY-MM-DD"（実行日時の JST 日付・含む）
+  to: string | null;
+  machineNos: number[]; // 空＝絞り込みなし
+  dryOnly: boolean;
+  q: string; // 部分一致（レコード番号／条件の要約／テンプレート名／担当者名）
+  page: number; // 1始まり
+};
+
+export type RunHistoryResponse = {
+  rows: RunHistoryRowDto[];
+  total: number;
+  page: number;
+  pageSize: number;
 };

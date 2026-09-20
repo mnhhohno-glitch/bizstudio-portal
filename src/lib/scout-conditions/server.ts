@@ -37,10 +37,19 @@ function toRunDto(r: ConditionRow["runs"][number]): RunDto {
   };
 }
 
-/** T-206: 値を持つ実行だけの合計。全て null なら null（画面は "-"） */
-function searchResultTotal(runs: RunDto[]): number | null {
-  const withValue = runs.filter((r) => r.searchResultCount != null);
-  return withValue.length ? withValue.reduce((a, r) => a + (r.searchResultCount ?? 0), 0) : null;
+/**
+ * T-213: 検索結果件数の「初回の値」。値を持つ実行のうち executedAt が最も古い1件の値（無ければ null＝画面は "-"）。
+ * T-206 は値を持つ実行を合算していたが、同じ条件が1日に何回も走る（1回50人前後）ため回数分が積み上がり、
+ * 母数として意味の無い数字（26859 など）になっていた。母数は最初に測った値を代表値にする。
+ * runs は新しい順で渡される前提だが、順序に依存しないよう executedAt で比べる。
+ */
+export function firstSearchResultCount(runs: Pick<RunDto, "executedAt" | "searchResultCount">[]): number | null {
+  let best: Pick<RunDto, "executedAt" | "searchResultCount"> | null = null;
+  for (const r of runs) {
+    if (r.searchResultCount == null) continue;
+    if (best === null || r.executedAt < best.executedAt) best = r;
+  }
+  return best?.searchResultCount ?? null;
 }
 
 export function toConditionDto(c: ConditionRow): ConditionDto {
@@ -84,8 +93,9 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     runs,
     totalExtractedCount: sum((r) => r.extractedCount),
     totalSentCount: sum((r) => r.sentCount),
-    // T-206: 検索結果件数は RPA 未改修の間ずっと null なので、値を持つ実行だけを足す（1件も無ければ null）
-    totalSearchResultCount: searchResultTotal(runs),
+    // T-213: 検索結果件数（母数）は合算ではなく初回の値（値を持つ実行のうち最も古い1件）
+    firstSearchResultCount: firstSearchResultCount(runs),
+    runCount: runs.length,
   };
 }
 

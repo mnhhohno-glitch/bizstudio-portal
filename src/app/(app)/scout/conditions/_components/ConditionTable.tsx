@@ -21,6 +21,7 @@
 //   文字が長くなりやすい列（希望勤務地/配信テンプレート・検索対象/登録日）へ多めに、
 //   中身の長さが安定している列（状態・号機・NO・複製/削除・数値）へは窮屈さが取れる程度に配る。
 // T-209: 状態欄に「翌朝有効」バッジ（配信日が翌日で、翌朝に自動で有効になる予約）。「予約 #1」の並び順表示は従来どおり残す。
+// T-213: 「結果」（検索結果件数）は合算ではなく初回の値（値を持つ最も古い実行）。「実行日時」の下段に実行回数を出す。
 // T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
 //   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
 //   数字は 予測/結果・抽出/送信 の2列4段。下段には達成率（結果÷予測）・送信率（送信÷抽出）を小数点第1位まで出す。
@@ -44,7 +45,8 @@ import { DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
 import { isDryRow, registDateLabel } from "./filter";
 
-const STATUS_BADGE: Record<string, string> = {
+// T-213: 実行履歴タブ（RunHistory.tsx）でも同じ状態バッジを使うため export
+export const STATUS_BADGE: Record<string, string> = {
   RUNNING: "bg-[#DCFCE7] text-[#15803D]",
   QUEUED: "bg-[#DBEAFE] text-[#1D4ED8]",
   DRY: "bg-[#FEE2E2] text-[#B91C1C]",
@@ -205,7 +207,8 @@ export default function ConditionTable({
             // T-202: 並び替えは従来どおり「予約」の行だけ。予約以外は押せない見た目で置いておく
             const queued = c.status === "QUEUED";
             // T-206: 達成率（結果÷予測）・送信率（送信÷抽出）。母数が 0 / 未入力なら % は出さない
-            const achieveRate = ratePercentLabel(c.totalSearchResultCount, c.plannedCount);
+            // T-213: 「結果」は合算ではなく初回の検索結果件数（値を持つ最も古い実行）
+            const achieveRate = ratePercentLabel(c.firstSearchResultCount, c.plannedCount);
             const sentRate = ratePercentLabel(c.totalSentCount, c.totalExtractedCount);
             return (
               <tr
@@ -304,8 +307,12 @@ export default function ConditionTable({
                     <DateText ymd={c.deliveryDate} holidays={holidays} />
                   </div>
                 </td>
+                {/* T-213: 上段=最新の実行日時（従来どおり）／下段=実行回数（0回なら "-"） */}
                 <td className={TD}>
-                  <DateTimeText iso={run?.executedAt} holidays={holidays} />
+                  <div>
+                    <DateTimeText iso={run?.executedAt} holidays={holidays} />
+                  </div>
+                  <div className="text-[#6B7280]">{c.runCount > 0 ? `${c.runCount}回` : "-"}</div>
                 </td>
                 <td className={TD}>
                   <div>{searchTargetLabel(c.searchTarget)}</div>
@@ -351,9 +358,9 @@ export default function ConditionTable({
                 <td className={`${TD} tabular-nums`} title={runsTitle}>
                   <div>{c.plannedCount ?? "-"}</div>
                   <div className="text-[#6B7280]">
-                    {c.totalSearchResultCount == null
+                    {c.firstSearchResultCount == null
                       ? "-"
-                      : `${c.totalSearchResultCount}${achieveRate ? ` (${achieveRate})` : ""}`}
+                      : `${c.firstSearchResultCount}${achieveRate ? ` (${achieveRate})` : ""}`}
                   </div>
                 </td>
                 {/* T-206: 抽出（RPA が取り込んだ件数）＋送信と送信率 */}

@@ -622,9 +622,10 @@ export default function ConditionModal({
                 </span>
               </FormRow>
               {/* T-206: 予測（人の想定）／結果（マイナビの検索結果件数＝母数。RPA 未送信の間は "-"）／抽出／送信 */}
+              {/* T-213: 結果は最新ではなく初回の値（値を持つ最も古い実行）。一覧・CSV と同じ firstSearchResultCount を使う */}
               <FormRow label="予測 / 結果 / 抽出 / 送信" dense>
                 <span className="text-[12px] tabular-nums">
-                  {current.plannedCount ?? "-"} / {latest?.searchResultCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
+                  {current.plannedCount ?? "-"} / {current.firstSearchResultCount ?? "-"} / {latest?.extractedCount ?? "-"} /{" "}
                   <span className={dry ? "font-semibold text-[#B91C1C]" : ""}>{latest?.sentCount ?? "-"}</span>
                 </span>
               </FormRow>
