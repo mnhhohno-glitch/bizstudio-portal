@@ -7,6 +7,8 @@
 // T-204: 行の「複製」は複製した条件の編集モーダルをそのまま開く。あわせて複製元・複製先の2行を
 //   pinnedIds に入れ、現在の絞り込みに合わない行でも例外的に一覧へ出す（絞り込み自体はこちらで変えない）。
 //   例外表示は再読込か絞り込み操作で解除する。
+// T-215: 絞り込みエリア右端の「号機設定」から号機の稼働オン/オフ（RpaScoutMachine.isActive）を切り替える
+//   （MachineSettingsModal.tsx）。号機の絞り込みは停止中の号機もこれまでどおり出す。
 // T-213: ページ内サブタブ「条件一覧」「実行履歴」。状態は URL クエリ ?view=runs に持ち、リロードしても保持する。
 //   実行履歴（RunHistory.tsx）は自前で /api/scout/runs を読む。レコード番号クリックは条件一覧と同じ編集モーダルを開く。
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -28,6 +30,7 @@ import { FilterField, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/compone
 import ConditionTable from "./ConditionTable";
 import ConditionModal, { type ModalMode } from "./ConditionModal";
 import PrefectureModal from "./PrefectureModal";
+import MachineSettingsModal from "./MachineSettingsModal";
 import RunHistory from "./RunHistory";
 import {
   applyDayFilter,
@@ -78,6 +81,8 @@ export default function ConditionsClient() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<ModalMode | null>(null);
   const [prefModal, setPrefModal] = useState<PrefModalState>(null);
+  // T-215: 号機の稼働オン/オフを切り替えるモーダル
+  const [machineModal, setMachineModal] = useState(false);
   // T-204: 絞り込みの対象外でも出し続ける行（複製元・複製先）。再読込／絞り込み操作で空に戻す
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
 
@@ -530,24 +535,37 @@ export default function ConditionsClient() {
             />
           </div>
 
-          <FilterField label="並び順">
-            <div className="flex items-center gap-2 text-[12px] text-[#6B7280]">
-              <select
-                className={`${FILTER_INPUT_CLS} text-[12px]`}
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as SortKey)}
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => void load()} className="ml-1 text-[#2563EB] underline" title="最新の状態を読み直す">
-                再読込
-              </button>
-            </div>
-          </FilterField>
+          <div className="flex items-end gap-3">
+            <FilterField label="並び順">
+              <div className="flex items-center gap-2 text-[12px] text-[#6B7280]">
+                <select
+                  className={`${FILTER_INPUT_CLS} text-[12px]`}
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => void load()} className="ml-1 text-[#2563EB] underline" title="最新の状態を読み直す">
+                  再読込
+                </button>
+              </div>
+            </FilterField>
+
+            {/* T-215: 号機の稼働オン/オフ。停止中の号機は朝のまとめ通知・警告帯・重なり判定・日付切替・外部 API の対象から外れる */}
+            <button
+              type="button"
+              onClick={() => setMachineModal(true)}
+              disabled={!data}
+              className="rounded-[6px] border border-[#D1D5DB] bg-white px-3 py-1.5 text-[12px] text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-40"
+              title="号機の稼働オン/オフを切り替えます"
+            >
+              号機設定
+            </button>
+          </div>
         </div>
 
         {/* ツールバー */}
@@ -639,6 +657,18 @@ export default function ConditionsClient() {
           onDuplicate={(c) => void duplicateAndOpen(c)}
           onDelete={(c) => void bulk("delete", [c.id])}
           onOpenPrefModal={(current, onConfirm, title) => setPrefModal({ initial: current, title, onConfirm })}
+        />
+      )}
+
+      {machineModal && data && (
+        <MachineSettingsModal
+          machines={data.machines}
+          onClose={() => setMachineModal(false)}
+          onChanged={(machineId, isActive) =>
+            setData((prev) =>
+              prev ? { ...prev, machines: prev.machines.map((m) => (m.id === machineId ? { ...m, isActive } : m)) } : prev,
+            )
+          }
         />
       )}
 
