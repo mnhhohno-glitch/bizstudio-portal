@@ -121,6 +121,15 @@ export function isDryRow(c: ConditionDto): boolean {
   return c.status === "DRY" || isDrySentCount(c.latestRun?.sentCount);
 }
 
+/**
+ * T-216: 一覧の狭い列に出す「姓だけ」。User.name は「大野 将幸」のように姓と名の間が空白（半角・全角）なので先頭の塊を取る。
+ * 空白が無い名前はそのまま返す（切り詰めない）。CSV には姓ではなくフルネームを出す。
+ */
+export function surnameOf(name: string | null | undefined): string {
+  if (!name) return "";
+  return name.trim().split(/[ 　]+/)[0] ?? "";
+}
+
 function csvCell(v: unknown): string {
   const s = v == null ? "" : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -132,9 +141,13 @@ export function buildCsv(rows: ConditionDto[]): string {
     "号機",
     "状態",
     "予約登録日時",
+    // T-216: 人が最後に保存した日時・操作者（自動処理・▲▼では動かない edited_at / edited_by。未更新は空）
+    "更新日時",
+    "更新者",
     "配信日",
-    "作成日",
+    // T-216-fix: ここから2列は値の並びが「配信日曜日 → 作成日」なのに見出しが逆だった（T-194 からの取り違え）。見出しを値に合わせた
     "配信日曜日",
+    "作成日",
     "検索対象",
     "登録日指定",
     "登録日",
@@ -161,6 +174,8 @@ export function buildCsv(rows: ConditionDto[]): string {
       `${c.machineNo}号機`,
       conditionStatusLabel(c.status),
       instantToJstDateTime(c.createdAt),
+      c.editedAt ? instantToJstDateTime(c.editedAt) : "",
+      c.editedByName ?? "",
       c.deliveryDate ?? "",
       c.deliveryDate ? ymdWeekdayLabel(c.deliveryDate) : "",
       instantToJstYmd(c.createdAt),

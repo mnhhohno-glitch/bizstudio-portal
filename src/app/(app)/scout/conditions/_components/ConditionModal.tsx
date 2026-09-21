@@ -12,10 +12,15 @@
 //   内容を変えたいときの逃げ道として「複製」は押せるままにしている。サーバー側（PATCH）でも同じ規則で弾く。
 // T-214: モーダルを左右2列にし、右に「同日の他号機」パネル（SameDayPanel.tsx）を置く。
 //   対象は他の稼働中号機の有効・予約で配信日がフォームの配信日と同じもの（空なら今日）。内部 API
-//   GET /api/scout/conditions/same-day で取り、配信日・号機が変わったら取り直す。重なり（7軸すべてが交わる。overlap.ts）は
-//   フォームを変えるたびにクライアントで判定し直し、重なる行を赤くしてフォームの一番上に赤字1行を出す。**保存は止めない**。
+//   GET /api/scout/conditions/same-day で取り、配信日・号機が変わったら取り直す。該当判定（T-216 で「重複」＝7軸すべてが一致。duplicate.ts）は
+//   フォームを変えるたびにクライアントで判定し直し、該当する行を赤くしてフォームの一番上に赤字1行を出す。**保存は止めない**。
 //   1280px 未満（xl 未満）では右パネルをフォームの下に回す。実績ブロックは「作成」「更新」（更新者/更新日時）に整理。
-import { useEffect, useMemo, useRef, useState } from "react";
+// T-216: ① 「保存する」を押しても即保存せず、モーダルの中身を**保存前の確認画面**に差し替える（別モーダルは重ねない）。
+//   表示は 号機・担当者／状態（保存後にどうなるか）／配信日／検索条件7軸／配信文（T-001＋名前）／予測件数／重複の有無。
+//   ボタンは「戻る」（入力は保持したまま編集へ）と「この内容で保存」の2つだけ。保存に失敗したら確認画面に赤字で出して閉じない。
+//   Enter では保存しない（フォーム部品の上の Enter は無効化し、保存はボタンの明示的な操作だけ）。ロック中の行も同じ確認画面を通す。
+//   ② 「重なり」→「**重複**」。判定も「7軸すべてが交わる」から「**7軸すべてが一致する**」に変えた（duplicate.ts）。
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import {
@@ -35,12 +40,20 @@ import {
   summarizePrefectures,
   templateKindLabel,
   isDrySentCount,
+  areaLabel,
+  companyCountLabel,
+  conditionStatusLabel,
+  gradYearRangeLabel,
+  periodDaysLabel,
+  searchTargetLabel,
+  workPrefLabel,
 } from "@/lib/scout-conditions/constants";
 import { jstTodayYmd, type HolidayMap } from "@/lib/scout-conditions/dates";
-import { isOverlapping } from "@/lib/scout-conditions/overlap";
+import { isDuplicate } from "@/lib/scout-conditions/duplicate";
 import type { ConditionDto, ConditionInput, MachineDto, TemplateDto } from "@/lib/scout-conditions/types";
 import { DateField, DateText, DateTimeText } from "./DateText";
-import { MachineLabel } from "./MachineLabel";
+import { MachineLabel, machineRecruiterName } from "./MachineLabel";
+import { registDateLabel } from "./filter";
 import { FormGroup, FormRow } from "./FormTable";
 import SameDayPanel from "./SameDayPanel";
 import TemplatePreview from "./TemplatePreview";
@@ -141,6 +154,10 @@ export default function ConditionModal({
   const [dirty, setDirty] = useState(false);
   // T-200: 配信日は必須。保存を押した時点で空ならエラーを入力欄の直下に出す
   const [deliveryDateError, setDeliveryDateError] = useState<string | null>(null);
+  // T-216: 「保存する」を押した後の確認画面（モーダルの中身を差し替える。別モーダルは重ねない）
+  const [confirming, setConfirming] = useState(false);
+  // T-216: 確認画面で保存に失敗したときのエラー文（確認画面に赤字で出し、モーダルは閉じない）
+  const [saveError, setSaveError] = useState<string | null>(null);
   const deliveryDateRef = useRef<HTMLDivElement | null>(null);
   const overlayClose = useOverlayClose(onClose);
 
@@ -152,18 +169,23 @@ export default function ConditionModal({
       setForm(toForm(current, machines, today));
       setDirty(false);
       setDeliveryDateError(null);
+      // T-216: 別の行を開いたら確認画面は畳む（前の行の確認内容を出したままにしない）
+      setConfirming(false);
+      setSaveError(null);
       setLoadedKey(modeKey);
     }
   }, [modeKey, loadedKey, current, machines, today]);
 
-  // Esc で閉じる
+  // Esc で閉じる。T-216: 確認画面では編集に戻る（入力を捨てない）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (confirming) setConfirming(false);
+      else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, confirming]);
 
   const set = <K extends keyof ConditionInput>(key: K, value: ConditionInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -213,15 +235,20 @@ export default function ConditionModal({
   const sameDayLoaded = sameDay.key === sameDayKey;
   const sameDayRows = useMemo(() => (sameDayLoaded ? sameDay.rows : []), [sameDayLoaded, sameDay.rows]);
 
-  // T-214: フォームを変えるたびにクライアント側で判定し直す（右パネルのデータは取得済みのものを使う）
-  const overlapRows = useMemo(
-    () => sameDayRows.filter((c) => c.machineId !== form.machineId && isOverlapping(form, c, today)),
-    [sameDayRows, form, today],
+  // T-216: フォームを変えるたびにクライアント側で判定し直す（右パネルのデータは取得済みのものを使う）。
+  //   判定は「7軸すべてが一致する」＝重複（T-214 の「範囲が交わる」判定は廃止）。同じ号機どうしは対象外。
+  const duplicateRows = useMemo(
+    () => sameDayRows.filter((c) => c.machineId !== form.machineId && isDuplicate(form, c)),
+    [sameDayRows, form],
   );
-  const overlapIds = useMemo(() => new Set(overlapRows.map((c) => c.id)), [overlapRows]);
-  const overlapText = useMemo(() => overlapRows.map((c) => `${c.machineNo}号機 ${c.recordNo ?? "-"}`).join("、"), [overlapRows]);
+  const duplicateIds = useMemo(() => new Set(duplicateRows.map((c) => c.id)), [duplicateRows]);
+  const duplicateText = useMemo(() => duplicateRows.map((c) => `${c.machineNo}号機 ${c.recordNo ?? "-"}`).join("、"), [duplicateRows]);
 
-  const save = async () => {
+  /**
+   * T-216: 「保存する」は即保存せず確認画面へ切り替えるだけ。
+   * 必須チェック（配信日）はここで先に通し、不正な値のまま確認画面に進ませない。
+   */
+  const requestConfirm = () => {
     if (saving) return;
     // T-200: 配信日が空のままでは保存しない（サーバー側でも parseConditionInput が弾く）。
     //   ただしロック中（実績あり＝状態以外は編集不可）の行は、配信日が空のまま実績を持ってしまった
@@ -232,6 +259,14 @@ export default function ConditionModal({
       return;
     }
     setDeliveryDateError(null);
+    setSaveError(null);
+    setConfirming(true);
+  };
+
+  /** T-216: 確認画面の「この内容で保存」。成功したら親がモーダルを閉じて一覧を更新する */
+  const save = async () => {
+    if (saving) return;
+    setSaveError(null);
     setSaving(true);
     try {
       const isNew = mode.kind === "new";
@@ -242,7 +277,10 @@ export default function ConditionModal({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(json.error ?? "保存に失敗しました");
+        // T-216: 失敗したら確認画面に留まり、理由をその場に赤字で出す（入力内容は保持される）
+        const message = typeof json.error === "string" ? json.error : "保存に失敗しました";
+        setSaveError(message);
+        toast.error(message);
         return;
       }
       const saved = json.condition as ConditionDto;
@@ -257,11 +295,46 @@ export default function ConditionModal({
             : "保存しました",
       );
       setDirty(false);
+      setConfirming(false);
       onSaved(saved, isNew, demoted);
     } finally {
       setSaving(false);
     }
   };
+
+  // T-216: 保存後の状態（確認画面に出す）。新規は保存時にサーバーが決める規則（T-211）と同じ案内、編集はプルダウンで選ばれている値。
+  const statusAfterSave = current ? conditionStatusLabel(form.status) : machineHasRunning ? "予約（末尾）" : "有効";
+
+  // T-216: 確認画面の表示項目（1行1項目）。文言は一覧・右パネルの要約と同じものを使う
+  const confirmRows: { label: string; value: ReactNode }[] = [
+    {
+      label: "号機・担当者",
+      value: machine
+        ? `${machine.machineNo}号機${machineRecruiterName(machine.machineNo) ? `　${machineRecruiterName(machine.machineNo)}` : ""}${machine.isActive ? "" : "（停止中）"}`
+        : "-",
+    },
+    { label: "状態", value: statusAfterSave },
+    { label: "配信日", value: <DateText ymd={form.deliveryDate} holidays={holidays} /> },
+    { label: "検索対象", value: searchTargetLabel(form.searchTarget) },
+    { label: "登録日", value: `${form.registDateMode === "PERIOD" ? "期間指定" : "日付入力"}　${registDateLabel(form)}` },
+    { label: "最終ログイン日", value: periodDaysLabel(form.lastLoginDays) },
+    { label: "卒業年度", value: gradYearRangeLabel(form.gradYearFrom, form.gradYearTo) },
+    { label: "経験社数", value: companyCountLabel(form.companyCount) },
+    {
+      label: "居住地",
+      value:
+        areaLabel(form.residenceMode, form.residencePrefectures) +
+        (form.residenceMode === "PREFECTURE" && form.residencePrefectures.length > 0 ? `（${form.residencePrefectures.join("/")}）` : ""),
+    },
+    {
+      label: "希望勤務地",
+      value:
+        workPrefLabel(form.workPrefMode, form.workPrefectures) +
+        (form.workPrefMode === "SELECTED" && form.workPrefectures.length > 0 ? `（${form.workPrefectures.join("/")}）` : ""),
+    },
+    { label: "配信文", value: template ? `${template.templateNo ?? "-"}　${template.name}` : "未設定" },
+    { label: "予測件数", value: form.plannedCount == null ? "-" : `${form.plannedCount}件` },
+  ];
 
   const latest = current?.latestRun ?? null;
   const dry = current ? current.status === "DRY" || isDrySentCount(latest?.sentCount) : false;
@@ -271,6 +344,14 @@ export default function ConditionModal({
       <div
         className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1560px] flex-col rounded-[10px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.25)]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // T-216: Enter で誤って保存されないようにする。保存は「保存する」→「この内容で保存」の明示的な2操作だけ。
+          //   入力欄・プルダウンの上での Enter は何もしない（ボタン・リンク・複数行入力の Enter はそのまま通す）。
+          if (e.key !== "Enter") return;
+          const tag = (e.target as HTMLElement | null)?.tagName;
+          if (tag === "BUTTON" || tag === "A" || tag === "TEXTAREA") return;
+          e.preventDefault();
+        }}
         role="dialog"
         aria-modal="true"
       >
@@ -284,13 +365,16 @@ export default function ConditionModal({
                 </span>
                 <MachineLabel machineNo={current.machineNo} />
                 {dry && <span className="rounded bg-[#FEE2E2] px-1.5 py-0.5 text-[11px] font-medium text-[#B91C1C]">枯渇</span>}
-                <span className="text-[12px] text-[#6B7280]">検索設定の編集</span>
+                {/* T-216: 確認画面では見出しを「保存内容の確認」に差し替える */}
+                <span className={confirming ? "text-[15px] font-semibold text-[#374151]" : "text-[12px] text-[#6B7280]"}>
+                  {confirming ? "保存内容の確認" : "検索設定の編集"}
+                </span>
               </>
             ) : (
               <>
                 <span className="rounded bg-[#111827] px-2 py-0.5 text-[13px] font-semibold tracking-wide text-white">新規</span>
-                <span className="text-[15px] font-semibold text-[#374151]">検索設定</span>
-                <span className="text-[12px] text-[#6B7280]">NO は保存時に号機ごとの通し番号で採番されます</span>
+                <span className="text-[15px] font-semibold text-[#374151]">{confirming ? "保存内容の確認" : "検索設定"}</span>
+                {!confirming && <span className="text-[12px] text-[#6B7280]">NO は保存時に号機ごとの通し番号で採番されます</span>}
               </>
             )}
           </div>
@@ -299,13 +383,46 @@ export default function ConditionModal({
           </button>
         </div>
 
-        {/* T-214: 左＝フォーム（従来どおり）／右＝同日の他号機パネル。xl（1280px）未満では右パネルをフォームの下に回す */}
+        {/* T-216: 保存前の確認画面。モーダルの中身をそのまま差し替える（別モーダルを重ねない） */}
+        {confirming ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-3">
+            <div className="mx-auto max-w-[760px]">
+              <p className="mb-3 text-[12px] text-[#6B7280]">
+                この内容で保存します。直すところがあれば「戻る」で編集に戻ってください（入力した内容はそのまま残ります）。
+              </p>
+              <FormGroup title="保存内容の確認">
+                {confirmRows.map((r) => (
+                  <FormRow key={r.label} label={r.label} dense>
+                    <span className="text-[13px] text-[#374151]">{r.value}</span>
+                  </FormRow>
+                ))}
+                {/* T-216: 同じ配信日・別の号機で 7軸すべてが一致する条件（duplicate.ts）。あっても保存は止めない */}
+                <FormRow label="重複" dense>
+                  {duplicateRows.length > 0 ? (
+                    <span className="text-[13px] font-semibold text-[#B91C1C]">{duplicateText} と重複しています</span>
+                  ) : sameDayLoaded ? (
+                    <span className="text-[13px] text-[#6B7280]">なし</span>
+                  ) : (
+                    // 同日の他号機をまだ読めていないときは「なし」と言い切らない
+                    <span className="text-[13px] text-[#9CA3AF]">確認中…</span>
+                  )}
+                </FormRow>
+              </FormGroup>
+              {saveError && (
+                <div className="mt-3 rounded-[6px] border border-[#FCA5A5] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold leading-relaxed text-[#B91C1C]">
+                  {saveError}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+        /* T-214: 左＝フォーム（従来どおり）／右＝同日の他号機パネル。xl（1280px）未満では右パネルをフォームの下に回す */
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 pb-4 pt-3 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0">
-          {/* T-214: 同日の他号機と重なるときは一番上に赤字1行（保存は止めない） */}
-          {overlapRows.length > 0 && (
+          {/* T-216: 同じ配信日の他号機と検索条件がまったく同じときは一番上に赤字1行（保存は止めない） */}
+          {duplicateRows.length > 0 && (
             <div className="mb-3 rounded-[6px] border border-[#FCA5A5] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold text-[#B91C1C]">
-              {overlapText} と重なっています
+              {duplicateText} と重複しています
             </div>
           )}
 
@@ -756,11 +873,33 @@ export default function ConditionModal({
 
         {/* T-214: 右パネル（xl 以上ではスクロールしても上に留まる。xl 未満ではフォームの下） */}
         <div className="min-w-0 xl:sticky xl:top-0 xl:self-start">
-          <SameDayPanel date={sameDayDate} rows={sameDayRows} loading={!sameDayLoaded} overlapIds={overlapIds} />
+          <SameDayPanel date={sameDayDate} rows={sameDayRows} loading={!sameDayLoaded} duplicateIds={duplicateIds} />
         </div>
         </div>
+        )}
 
         {/* 下部ボタン（スクロールしても固定。主ボタンは右下） */}
+        {/* T-216: 確認画面では「戻る」「この内容で保存」の2つだけにする */}
+        {confirming ? (
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[#E5E7EB] px-5 py-3">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={saving}
+              className="rounded-[6px] border border-[#D1D5DB] px-4 py-1.5 text-[13px] text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-50"
+            >
+              戻る
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving}
+              className="rounded-[6px] bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+            >
+              {saving ? "保存中…" : "この内容で保存"}
+            </button>
+          </div>
+        ) : (
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[#E5E7EB] px-5 py-3">
           <div className="flex gap-2">
             {current && (
@@ -785,16 +924,18 @@ export default function ConditionModal({
             <button type="button" onClick={onClose} className="rounded-[6px] border border-[#D1D5DB] px-3 py-1.5 text-[13px] text-[#374151] hover:bg-[#F9FAFB]">
               キャンセル
             </button>
+            {/* T-216: ここでは保存せず確認画面へ進む */}
             <button
               type="button"
-              onClick={save}
+              onClick={requestConfirm}
               disabled={saving}
               className="rounded-[6px] bg-[#2563EB] px-4 py-1.5 text-[13px] font-medium text-white hover:bg-[#1D4ED8] disabled:opacity-50"
             >
-              {saving ? "保存中…" : mode.kind === "new" ? "登録する" : "保存する"}
+              {mode.kind === "new" ? "登録する" : "保存する"}
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

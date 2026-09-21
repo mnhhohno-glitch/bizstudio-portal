@@ -21,6 +21,10 @@
 //   文字が長くなりやすい列（希望勤務地/配信テンプレート・検索対象/登録日）へ多めに、
 //   中身の長さが安定している列（状態・号機・NO・複製/削除・数値）へは窮屈さが取れる程度に配る。
 // T-209: 状態欄に「翌朝有効」バッジ（配信日が翌日で、翌朝に自動で有効になる予約）。「予約 #1」の並び順表示は従来どおり残す。
+// T-216: 「予約日/配信日」列の上段を、人が最後に保存した日時（edited_at / edited_by）に差し替えた。
+//   更新があれば「更新 2026-09-21(月) 10:02 大野」、無ければ従来どおり予約日（createdAt）。下段の配信日は変えない。
+//   並び替え・絞り込みの基準（予約日＝createdAt／配信日）は従来のまま（表示だけの変更）。
+//   状態欄の「重なり」バッジは「重複」に改称し、判定も同日・別号機・7軸完全一致だけになった（duplicate.ts）。
 // T-213: 「結果」（検索結果件数）は合算ではなく初回の値（値を持つ最も古い実行）。「実行日時」の下段に実行回数を出す。
 // T-206: 右端の「操作」列を廃止し、ボタンを左側の2段組み列に移した（NO/設定・複製/削除）。号機も「号機/担当者」の2段に。
 //   押せる条件は変えていない（削除は実績がある条件では従来どおり押せない）。
@@ -39,11 +43,11 @@ import {
   isDefaultWorkPrefectures,
   summarizePrefectures,
 } from "@/lib/scout-conditions/constants";
-import { type HolidayMap } from "@/lib/scout-conditions/dates";
+import { instantToJstDateTime, type HolidayMap } from "@/lib/scout-conditions/dates";
 import type { ConditionDto } from "@/lib/scout-conditions/types";
 import { DateText, DateTimeText } from "./DateText";
 import { MachineLabel } from "./MachineLabel";
-import { isDryRow, registDateLabel } from "./filter";
+import { isDryRow, registDateLabel, surnameOf } from "./filter";
 
 // T-213: 実行履歴タブ（RunHistory.tsx）でも同じ状態バッジを使うため export
 export const STATUS_BADGE: Record<string, string> = {
@@ -150,8 +154,9 @@ export default function ConditionTable({
               担当者
             </th>
             <th className={th(COL_W.status)}>状態</th>
+            {/* T-216: 上段は「更新があれば更新日時、無ければ予約日」。見出しも両方を出す */}
             <th className={th(COL_W.date)}>
-              予約日
+              予約日/更新
               <br />
               配信日
             </th>
@@ -297,20 +302,29 @@ export default function ConditionTable({
                   {c.status === "QUEUED" && nextMorning.has(c.id) && (
                     <span className="ml-1 rounded bg-[#FEF3C7] px-1.5 py-0.5 text-[11px] font-medium text-[#B45309]">翌朝有効</span>
                   )}
-                  {/* T-214: 同日の他号機（稼働中）の有効・予約と 7 軸すべてが交わる（サーバー側で一覧取得時に判定）。警告のみで保存は止めない */}
-                  {c.overlapRecordNos.length > 0 && (
+                  {/* T-216: 同じ配信日の他号機（稼働中）の有効・予約と 7軸すべてが一致する（サーバー側で一覧取得時に判定）。警告のみで保存は止めない */}
+                  {c.duplicateRecordNos.length > 0 && (
                     <span
                       className="ml-1 rounded border border-[#FCA5A5] bg-white px-1 py-0.5 text-[10px] font-medium text-[#B91C1C]"
-                      title={`同日の ${c.overlapRecordNos.join("・")} と検索条件が重なっています`}
+                      title={`同じ配信日の ${c.duplicateRecordNos.join("・")} と検索条件がまったく同じです`}
                     >
-                      重なり
+                      重複
                     </span>
                   )}
                   {c.status === "QUEUED" && <span className="ml-1 text-[10px] text-[#6B7280]">#{c.queueOrder}</span>}
                 </td>
                 <td className={TD}>
+                  {/* T-216: 人が最後に保存した日時があればそれを出す（自動処理・▲▼では動かない edited_at）。無ければ予約日 */}
                   <div className="text-[#6B7280]">
-                    <DateTimeText iso={c.createdAt} holidays={holidays} />
+                    {c.editedAt ? (
+                      <span title={`予約日 ${instantToJstDateTime(c.createdAt)}`}>
+                        <span className="mr-0.5 text-[10px] text-[#B45309]">更新</span>
+                        <DateTimeText iso={c.editedAt} holidays={holidays} />
+                        <span className="ml-1 text-[10px]">{surnameOf(c.editedByName)}</span>
+                      </span>
+                    ) : (
+                      <DateTimeText iso={c.createdAt} holidays={holidays} />
+                    )}
                   </div>
                   {/* T-200: 配信日は必須になったが、それ以前に作られた空の行が残っている。
                       期間フィルタにも日付タブにも出ない＝取りこぼしやすいので赤字で目立たせる */}

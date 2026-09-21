@@ -1,6 +1,6 @@
 // T-215: 号機の稼働オン/オフ（RpaScoutMachine.isActive）を画面から切り替える内部 API。
 //   これまで isActive は seed / スクリプトでしか変えられなかった。切替の影響は既存ロジックがそのまま拾う:
-//   一覧の警告帯（予約切れ・有効なし）・同日の他号機パネル・重なり判定・日付切替（activate.ts）・
+//   一覧の警告帯（予約切れ・有効なし）・同日の他号機パネル・重複判定・日付切替（activate.ts）・
 //   朝のまとめ通知（daily-summary.ts）・外部 API（external.ts は停止中の号機を拒否する）。
 //   稼働オフにしてもその号機の条件・実績は消さない（行はそのまま残り、一覧・CSV にも出る）。
 import { NextRequest, NextResponse } from "next/server";

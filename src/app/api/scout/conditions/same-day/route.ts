@@ -2,7 +2,7 @@
 //   GET /api/scout/conditions/same-day?date=YYYY-MM-DD&machineId=<自分の号機>
 //   date（配信日）が同じ、**他の稼働中号機**の有効・予約の条件を 号機順 → ▲▼順 で返す。
 //   date が無効・省略なら今日（JST）。machineId が無ければ全号機を対象（新規作成で号機未選択のとき）。
-//   重なりの判定は返さない（画面側でフォームの入力と突き合わせて overlap.ts で判定する）。
+//   重複の判定は返さない（画面側でフォームの入力と突き合わせて duplicate.ts で判定する）。
 // 認証はログインセッション。外部 API とは無関係。
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";

@@ -11,6 +11,9 @@
 //   （MachineSettingsModal.tsx）。号機の絞り込みは停止中の号機もこれまでどおり出す。
 // T-213: ページ内サブタブ「条件一覧」「実行履歴」。状態は URL クエリ ?view=runs に持ち、リロードしても保持する。
 //   実行履歴（RunHistory.tsx）は自前で /api/scout/runs を読む。レコード番号クリックは条件一覧と同じ編集モーダルを開く。
+// T-216: 保存（確認画面の「この内容で保存」）が通ったらモーダルを閉じ、一覧を読み直す。
+//   「重複」印（duplicateRecordNos）はサーバーが一覧 GET のときに付けるので、保存後の印を合わせるには読み直しが要る。
+//   読み直しは refresh()（スピナーを出さず pinnedIds も消さない）で行い、load() は従来どおり手動の「再読込」用に残す。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -92,21 +95,26 @@ export default function ConditionsClient() {
     [today],
   );
 
+  /** T-216: 一覧を取り直すだけ（スピナーを出さない・複製ハイライトを消さない）。保存後に「重複」印を合わせるために使う */
+  const refresh = useCallback(async () => {
+    const res = await fetch("/api/scout/conditions", { cache: "no-store" });
+    if (!res.ok) {
+      toast.error("読み込みに失敗しました");
+      return;
+    }
+    setData((await res.json()) as ConditionsResponse);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     // T-204: 再読込したら例外表示は解除して通常の絞り込みに戻す
     setPinnedIds([]);
     try {
-      const res = await fetch("/api/scout/conditions", { cache: "no-store" });
-      if (!res.ok) {
-        toast.error("読み込みに失敗しました");
-        return;
-      }
-      setData((await res.json()) as ConditionsResponse);
+      await refresh();
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     void load();
@@ -555,7 +563,7 @@ export default function ConditionsClient() {
               </div>
             </FilterField>
 
-            {/* T-215: 号機の稼働オン/オフ。停止中の号機は朝のまとめ通知・警告帯・重なり判定・日付切替・外部 API の対象から外れる */}
+            {/* T-215: 号機の稼働オン/オフ。停止中の号機は朝のまとめ通知・警告帯・重複判定・日付切替・外部 API の対象から外れる */}
             <button
               type="button"
               onClick={() => setMachineModal(true)}
@@ -648,11 +656,14 @@ export default function ConditionsClient() {
           conditions={conditions}
           holidays={holidays}
           onClose={() => setModal(null)}
-          onSaved={(c, isNew, demoted) => {
+          onSaved={(c, _isNew, demoted) => {
             upsertLocal(c);
             // T-198: 「有効」を1件に保つため「完了」へ畳まれた行も反映する（再読込しなくても一覧が合う）
             for (const d of demoted) upsertLocal(d);
-            if (isNew) setModal({ kind: "edit", condition: c });
+            // T-216: 保存が通ったらモーダルを閉じて一覧へ戻る（新規作成でも開き直さない）。
+            //   そのうえで一覧を取り直し、サーバーが付ける「重複」印を保存後の内容に合わせる。
+            setModal(null);
+            void refresh();
           }}
           onDuplicate={(c) => void duplicateAndOpen(c)}
           onDelete={(c) => void bulk("delete", [c.id])}

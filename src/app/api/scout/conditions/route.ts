@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { attachListOverlaps, conditionInclude, parseConditionInput, toConditionDto, toPrismaData } from "@/lib/scout-conditions/server";
+import { attachListDuplicates, conditionInclude, parseConditionInput, toConditionDto, toPrismaData } from "@/lib/scout-conditions/server";
 import { createScoutCondition, ensureSeqNos } from "@/lib/scout-conditions/create";
 import { runDateRolloverForActiveMachines } from "@/lib/scout-conditions/activate";
 import { ensureTemplateSeqNos, templateOrderBy, toTemplateDto } from "@/lib/scout-conditions/templates";
@@ -55,8 +55,8 @@ export async function GET() {
     })),
     templates: templates.map(toTemplateDto),
     holidays: holidays.map((h) => ({ date: dbDateToYmd(h.date)!, name: h.name })),
-    // T-214: 有効・予約の条件に、同日の他号機（稼働中）と 7 軸すべて交わる相手のレコード番号を付ける（一覧の「重なり」印）
-    conditions: attachListOverlaps(
+    // T-216: 有効・予約の条件に、同じ配信日の他号機（稼働中）で 7軸すべてが一致する相手のレコード番号を付ける（一覧の「重複」印）
+    conditions: attachListDuplicates(
       conditions.map(toConditionDto),
       new Set(machines.filter((m) => m.isActive).map((m) => m.id)),
       jstTodayYmd(),

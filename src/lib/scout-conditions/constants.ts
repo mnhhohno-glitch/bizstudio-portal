@@ -168,7 +168,7 @@ export function workPrefLabel(mode: string | null | undefined, prefectures: stri
   return `${prefectures.length}都道府県`;
 }
 
-/** 条件のエリア指定を都道府県の集合に展開する（絞り込みの重なり判定用） */
+/** 条件のエリア指定を都道府県の集合に展開する（T-216 の重複判定で居住地・希望勤務地を集合で比べるために使う） */
 export function expandAreaToPrefectures(mode: string, prefectures: string[]): string[] {
   if (mode === "NATIONWIDE") return ALL_PREFECTURES;
   if (mode === "EAST") return EAST_AREA_GROUPS.flatMap((g) => g.prefectures);

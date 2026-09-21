@@ -3,7 +3,8 @@
 // T-214: 編集モーダルの右パネル「同日の他号機の条件」。
 // 対象は他の稼働中号機の条件で、配信日がフォームの配信日と同じもの（配信日が空なら今日）。状態は有効・予約のみ。
 // 1行: 号機・レコード番号・状態バッジ・検索条件の要約（一覧の2段の要約を横に詰めたもの）・テンプレート名。
-// 重なる行（フォームの入力と 7 軸すべてが交わる。判定は overlap.ts）は赤い背景にする。データは親（モーダル）が持つ。
+// T-216: 重複する行（フォームの入力と 7軸すべてが一致する。判定は duplicate.ts）は赤い背景にする。データは親（モーダル）が持つ。
+//   T-214 の「重なり」＝範囲が少しでも交わる判定は廃止した。
 import {
   areaLabel,
   companyCountLabel,
@@ -23,15 +24,15 @@ export default function SameDayPanel({
   date,
   rows,
   loading,
-  overlapIds,
+  duplicateIds,
   onOpen,
 }: {
   /** 見出しに出す日付（"YYYY-MM-DD"） */
   date: string;
   rows: ConditionDto[];
   loading: boolean;
-  /** フォームの入力と重なる行の id */
-  overlapIds: Set<string>;
+  /** フォームの入力と検索条件が完全に一致する行の id */
+  duplicateIds: Set<string>;
   /** 行のレコード番号クリックでその条件を開く（任意） */
   onOpen?: (c: ConditionDto) => void;
 }) {
@@ -40,8 +41,8 @@ export default function SameDayPanel({
       <div className="flex items-baseline gap-2 border-l-4 border-[#6B7280] bg-[#F3F4F6] px-3 py-1.5">
         <span className="text-[13px] font-bold text-[#374151]">同日の他号機</span>
         <span className="text-[11px] text-[#6B7280]">{formatYmdWithWeekday(date)}・有効/予約のみ</span>
-        {overlapIds.size > 0 && (
-          <span className="ml-auto rounded bg-[#FEE2E2] px-1.5 py-0.5 text-[10px] font-semibold text-[#B91C1C]">重なり {overlapIds.size}件</span>
+        {duplicateIds.size > 0 && (
+          <span className="ml-auto rounded bg-[#FEE2E2] px-1.5 py-0.5 text-[10px] font-semibold text-[#B91C1C]">重複 {duplicateIds.size}件</span>
         )}
       </div>
       <div className="max-h-[70vh] overflow-y-auto">
@@ -50,12 +51,12 @@ export default function SameDayPanel({
           <div className="px-3 py-6 text-center text-[12px] text-[#9CA3AF]">同日の他号機の条件はありません</div>
         )}
         {rows.map((c) => {
-          const hit = overlapIds.has(c.id);
+          const hit = duplicateIds.has(c.id);
           return (
             <div
               key={c.id}
               className={["border-b border-[#F3F4F6] px-3 py-2 text-[11px] leading-snug last:border-b-0", hit ? "bg-[#FEE2E2]" : "bg-white"].join(" ")}
-              title={hit ? "この条件と検索条件が重なっています（7軸すべてが交わる）" : undefined}
+              title={hit ? "この条件と検索条件がまったく同じです（7軸すべてが一致）" : undefined}
             >
               <div className="flex flex-wrap items-center gap-1.5">
                 <MachineLabel machineNo={c.machineNo} compact />
@@ -68,7 +69,7 @@ export default function SameDayPanel({
                 </button>
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_BADGE[c.status] ?? ""}`}>{conditionStatusLabel(c.status)}</span>
                 {c.status === "QUEUED" && <span className="text-[10px] text-[#6B7280]">#{c.queueOrder}</span>}
-                {hit && <span className="rounded border border-[#FCA5A5] bg-white px-1 py-0.5 text-[10px] font-medium text-[#B91C1C]">重なり</span>}
+                {hit && <span className="rounded border border-[#FCA5A5] bg-white px-1 py-0.5 text-[10px] font-medium text-[#B91C1C]">重複</span>}
               </div>
               {/* 一覧の2段の要約を横に詰めたもの（検索対象/登録日・ログイン/卒業年度・経験社数/居住地・希望勤務地） */}
               <div className="mt-1 whitespace-normal text-[#374151]">

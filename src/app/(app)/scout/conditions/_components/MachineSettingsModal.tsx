@@ -5,7 +5,7 @@
 //   - 号機番号順に一覧。担当者名は MachineLabel と同じ既存の紐付け（recruiterDisplay の RC_ROSTER）をそのまま表示する。
 //   - 切替は即時保存（PATCH /api/scout/machines/[id]）。失敗したら元に戻してトーストを出す。
 //   - 稼働オフにしても、その号機の条件・実績は消さない（一覧・CSV には従来どおり出る）。
-//   - 稼働オフが効くのは既存ロジック側: 一覧の警告帯（予約切れ・有効なし）・重なり判定・同日の他号機パネル・
+//   - 稼働オフが効くのは既存ロジック側: 一覧の警告帯（予約切れ・有効なし）・重複判定・同日の他号機パネル・
 //     日付切替（activate.ts）・朝のまとめ通知（daily-summary.ts）・外部 API（停止中の号機は拒否）。
 //   - 「配信条件の絞り込みの号機選択」はこれまでどおり全号機を出す（停止中の号機の過去実績も見られるように）。
 import { useState } from "react";
@@ -71,7 +71,7 @@ export default function MachineSettingsModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <p className="mb-3 text-[12px] leading-snug text-[#6B7280]">
-            稼働オフにした号機は、朝のまとめ通知・予約切れの警告・同日の重なり判定・日付切替の対象から外れ、RPA の外部 API も受け付けなくなります。
+            稼働オフにした号機は、朝のまとめ通知・予約切れの警告・同日の重複判定・日付切替の対象から外れ、RPA の外部 API も受け付けなくなります。
             条件・実績は消えません（一覧の号機の絞り込みには停止中の号機も出ます）。
           </p>
           <div className="overflow-hidden rounded-[8px] border border-[#E5E7EB]">

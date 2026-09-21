@@ -13,7 +13,7 @@ import {
   formatRecordNo,
 } from "./constants";
 import { dbDateToYmd, isValidYmd, ymdToDbDate } from "./dates";
-import { computeListOverlaps } from "./overlap";
+import { computeListDuplicates } from "./duplicate";
 import type { ConditionDto, ConditionInput, RunDto } from "./types";
 
 // 一覧・詳細で共通の include（実績は新しい順に全件。1条件あたり数件〜数十件を想定）
@@ -103,7 +103,7 @@ export function toConditionDto(c: ConditionRow): ConditionDto {
     editedAt: c.editedAt?.toISOString() ?? null,
     editedById: c.editedById,
     editedByName: c.editedBy?.name ?? null,
-    overlapRecordNos: [], // 一覧 GET が attachListOverlaps で埋める
+    duplicateRecordNos: [], // 一覧 GET が attachListDuplicates で埋める
     latestRun: runs[0] ?? null,
     runs,
     totalExtractedCount: sum((r) => r.extractedCount),
@@ -392,15 +392,16 @@ export function rowToParsed(c: ConditionRow): ParsedCondition {
 }
 
 /**
- * T-214: 一覧の「重なり」印。有効・予約の条件について、同じ日（配信日。空なら今日）の他の稼働中号機の有効・予約の条件で
- * 7軸すべてが交わるもののレコード番号を overlapRecordNos に入れる（判定は overlap.ts の computeListOverlaps）。
+ * T-216: 一覧の「重複」印。有効・予約の条件について、同じ日（配信日。空なら今日）の他の稼働中号機の有効・予約の条件で
+ * **7軸すべてが一致する**もののレコード番号を duplicateRecordNos に入れる（判定は duplicate.ts の computeListDuplicates）。
+ * T-214 の「重なり」＝範囲が少しでも交わる判定は廃止した。
  */
-export function attachListOverlaps(conditions: ConditionDto[], activeMachineIds: Set<string>, todayYmd: string): ConditionDto[] {
-  const hits = computeListOverlaps(conditions, activeMachineIds, todayYmd);
+export function attachListDuplicates(conditions: ConditionDto[], activeMachineIds: Set<string>, todayYmd: string): ConditionDto[] {
+  const hits = computeListDuplicates(conditions, activeMachineIds, todayYmd);
   if (hits.size === 0) return conditions;
   return conditions.map((c) => {
     const list = hits.get(c.id);
-    return list ? { ...c, overlapRecordNos: list.map((o) => o.recordNo ?? `${o.machineNo}-?`) } : c;
+    return list ? { ...c, duplicateRecordNos: list.map((o) => o.recordNo ?? `${o.machineNo}-?`) } : c;
   });
 }
 
