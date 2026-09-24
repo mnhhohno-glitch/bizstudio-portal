@@ -6,6 +6,7 @@ import { AREA_GROUPS, OTHER_PREFECTURES } from "@/lib/constants/target-areas";
 import { stripFileMetadata, stripCorpSuffixes, extractCompanyNameCandidates } from "@/lib/normalize-filename";
 import { resolveJobDbFromBookmark, extractJobNoFromRef, resolveBookmarkMedia } from "@/lib/constants/source-media";
 import { openJobPlatformDetail } from "@/lib/openJobPlatformDetail";
+import { buildEnteredJobIndex, matchEnteredJob, type EnteredJobIndex } from "@/lib/candidates/entered-job-match";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import { RATING_VALUE, RANK_ORDER, RANK_UNRANKED, extractAxis } from "@/lib/ai-rating";
 import { parseCaAnalysisBlocks, type CaMark } from "@/lib/ca-analysis-format";
@@ -66,6 +67,10 @@ const RESPONSE_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   SELECTION_ENDED: { label: "選考終了", cls: "bg-gray-100 text-gray-500" },
 };
 
+// エントリー済み求人（JobEntry.entryFlag が応募以降）の本人回答表示を差し替えるバッジ。表示専用で回答データは不変。
+// エントリー管理画面に「エントリー」専用色は無いため、既存バッジ（選考中=blue）と被らない indigo。
+const ENTERED_BADGE = { label: "エントリー", cls: "bg-indigo-100 text-indigo-700" };
+
 type JobsResponse = {
   jobs: Job[];
   total_jobs: number;
@@ -81,6 +86,8 @@ type Entry = {
   externalJobId: number;
   // T-161: 求人単位の引き当てキー（job-platform source_job_id）。portal 由来行の「エントリー済」判定に使う。
   externalJobRef?: string | null;
+  externalJobNo?: string | null;
+  entryFlag?: string | null;
   companyName: string;
   jobTitle: string;
   jobDb: string | null;
@@ -1140,7 +1147,7 @@ function formatFileDate(iso: string): string {
 //   variant="bookmark"  … 未紹介行のみ（introducedAt なし）。従来どおりアップロード可。
 //   variant="introduced" … 紹介済み行のみ（introducedAt あり）。アップロード不可・「ブックマークに戻す」あり。
 // 区分による差分は「振り分けフィルタ・ヘッダー文言・紹介日列の値・フッターのボタン構成」だけに限定する。
-function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onIntroducedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; /** T-189 修正: 紹介求人区分の件数だけ更新する（タブは切り替えない） */ onIntroducedChange?: () => void; onEntryCreated?: () => void }) {
+function BookmarkSection({ candidateId, jobResponseMap, enteredJobIndex, archivedCount = 0, variant = "bookmark", onCountChange, onSwitchToJobs, onSwitchToBookmark, onArchivedChange, onIntroducedChange, onEntryCreated }: { candidateId: string; jobResponseMap: Map<string, string>; /** エントリー済み求人の索引（本人回答表示を「エントリー」に差し替える・表示専用） */ enteredJobIndex?: EnteredJobIndex; /** 紹介保留の件数（親が保持・評価内訳の詳細に表示する） */ archivedCount?: number; variant?: "bookmark" | "introduced"; onCountChange?: (count: number) => void; onSwitchToJobs?: () => void; onSwitchToBookmark?: () => void; onArchivedChange?: () => void; /** T-189 修正: 紹介求人区分の件数だけ更新する（タブは切り替えない） */ onIntroducedChange?: () => void; onEntryCreated?: () => void }) {
   const [files, setFiles] = useState<BookmarkFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -2388,6 +2395,14 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                   )}
                   {file.extractedAt && <span className="shrink-0 text-[10px] text-green-500" title="テキスト化済">✅</span>}
                   {(() => {
+                    // エントリー済みなら元の回答（未回答含む）に関係なく「エントリー」表示。並び替えは元の回答のまま。
+                    if (enteredJobIndex && matchEnteredJob(file, enteredJobIndex)) {
+                      return (
+                        <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${ENTERED_BADGE.cls}`}>
+                          {ENTERED_BADGE.label}
+                        </span>
+                      );
+                    }
                     const resp = findJobResponse(file.fileName);
                     return resp && RESPONSE_BADGE[resp] ? (
                       <span className={`shrink-0 text-[10px] rounded px-1.5 py-0 font-medium ${RESPONSE_BADGE[resp].cls}`}>
@@ -2463,7 +2478,10 @@ function BookmarkSection({ candidateId, jobResponseMap, archivedCount = 0, varia
                 })()}
                 {(() => {
                   // T-133 FU: 求職者本人のマイページ回答（responseStatus）。UNANSWERED/null/不明は「—」。内部値は出さず日本語表示。
-                  const b = file.responseStatus ? RESPONSE_STATUS_BADGE[file.responseStatus] : null;
+                  // エントリー済みは「エントリー」に差し替え（表示のみ。responseStatus・並び替えは元の値）。
+                  const b = enteredJobIndex && matchEnteredJob(file, enteredJobIndex)
+                    ? ENTERED_BADGE
+                    : file.responseStatus ? RESPONSE_STATUS_BADGE[file.responseStatus] : null;
                   return (
                     <span className="w-[84px] shrink-0 text-center">
                       {b ? (
@@ -3686,6 +3704,9 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
       ? !!j.external_job_ref && enteredJobRefs.has(j.external_job_ref)
       : enteredJobIds.has(j.id);
 
+  // 紹介履歴の本人回答表示を「エントリー」に差し替えるための索引（エントリーサブタブと同じ entries を流用）。
+  const enteredJobIndex = useMemo(() => buildEnteredJobIndex(entries), [entries]);
+
   // Job candidate responses for cross-referencing with bookmarks
   const jobResponseMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -4254,7 +4275,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
 
       {/* ===== ブックマークサブタブ ===== */}
       {activeSubTab === "bookmark" && (
-        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onIntroducedChange={() => { fetchJobs(); fetchBookmarkRatings(); }} onEntryCreated={fetchEntries} />
+        <BookmarkSection candidateId={candidateId} jobResponseMap={jobResponseMap} enteredJobIndex={enteredJobIndex} archivedCount={archivedCount} onCountChange={setBookmarkCount} onSwitchToJobs={() => { setActiveSubTab("jobs"); fetchJobs(); }} onArchivedChange={fetchArchivedCount} onIntroducedChange={() => { fetchJobs(); fetchBookmarkRatings(); }} onEntryCreated={fetchEntries} />
       )}
 
       {/* ===== 紹介保留サブタブ ===== */}
@@ -4270,6 +4291,7 @@ export default function HistoryTab({ candidateId, candidateName, initialSubTab }
         <BookmarkSection
           candidateId={candidateId}
           jobResponseMap={jobResponseMap}
+          enteredJobIndex={enteredJobIndex}
           archivedCount={archivedCount}
           variant="introduced"
           onCountChange={setIntroducedCount}
