@@ -531,6 +531,13 @@ T-099 のBM比較・操作ロジックを **accessor 駆動に汎用化** し、
 - モデル: `prisma/schema.prisma` の `CandidateFile`
 - 関連罠: AuditLog（罠 #15）、supportSubStatus 自動再計算（罠 #11）、Drive 二重保存（罠 #13）
 
+### 本人回答の「エントリー」表示（2026-09-24）
+
+- エントリー済みの求人は、ファイル名右の本人回答バッジと「本人回答」列を **「エントリー」（indigo）に差し替える**。ブックマーク区分・紹介求人区分とも（同じ `BookmarkSection`）。
+- **表示だけ**。`CandidateFile.responseStatus`・`CandidateJobResponse`・kyuujinPDF の回答は書き換えない。並び替え（応募したい順・気になる順・本人回答列）は元の回答のまま。
+- エントリー済み = `JobEntry.entryFlag` が 応募/エントリー/書類選考/面接/内定/入社済（「求人紹介」は含めない）。データはエントリーサブタブと同じ `GET /api/candidates/[id]/entries`。
+- 突き合わせは `src/lib/candidates/entered-job-match.ts` の1か所: ① `externalJobRef` 一致 → ② ファイル ref `hl-ap-<番号>` と ref 無し HITO-Link エントリーの `externalJobNo`（5桁以上）一致 → ③ キーで比較できない組だけ会社名（ファイル名キーが会社名を含む・片方向）。③は同じ会社の別職種もまとめて「エントリー」になる（許容）。
+
 ### 修正履歴
 
 - 2026/5/15: ArchivedBookmarkSection に一括復元・一括削除機能追加（master 3f1c9d5 / staging 3af1c8b）

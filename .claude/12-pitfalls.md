@@ -681,3 +681,10 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
   `rpa_scout_subject_templates` 側を直したら `export DATABASE_URL=...; npx tsx scripts/generate-scout-templates-json.ts --from-db`
   → `npx tsx scripts/seed-scout-conditions.ts` で `scout_templates` を追従させる（`(kind, name)` で upsert。**名称を変えた場合は別行が増える**ので注意）。
 - `ScoutTemplate` は `@@unique([kind, name])`。同名で種別違い（例「口コミ4.9オーダーメイド」の未送信用と送信済用）は別行として正しく共存する。
+
+## 50. 大量更新APIを1件ずつ直列更新で作ると、まとめて投げたときに 502 になる
+
+**罠**: portal の `POST /api/external/bookmarks/job-attributes`（T-200 の埋め戻し受け口）は1件ずつ直列に更新する作りのため、500件/回で投げると 502 になった。100件×並列3本に分けたら完走した（T-200・7,956件）。
+
+- 呼ぶ側: 1回あたりの件数を絞り、少数の並列で回す（100件×3本が実績値）。
+- 作る側: 大量更新APIを新設するときは、1回あたりの上限件数を決めて超過は 400 で返す、または一括更新（`updateMany`／まとめたSQL）にする。
