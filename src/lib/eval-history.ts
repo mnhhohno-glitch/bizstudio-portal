@@ -27,6 +27,12 @@ export type EvalPartKind = "fixed" | "instruction" | "context_core" | "context_f
 
 const LOG = "[eval-history]";
 
+/** 変更なしスキップの停止スイッチ（EVAL_SKIP_UNCHANGED=0 / false / off）。既定は有効。 */
+export function isSkipUnchangedDisabled(): boolean {
+  const v = process.env.EVAL_SKIP_UNCHANGED?.trim().toLowerCase();
+  return v === "0" || v === "false" || v === "off";
+}
+
 export function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -147,6 +153,8 @@ export async function findReusableEvaluations(params: {
 }): Promise<Map<string, ReusableEvaluation>> {
   const reusable = new Map<string, ReusableEvaluation>();
   if (params.files.length === 0) return reusable;
+  // 止め方: Railway の環境変数 EVAL_SKIP_UNCHANGED=0 で変更なしスキップを無効化（保存は続ける）。
+  if (isSkipUnchangedDisabled()) return reusable;
   try {
     const rows = await prisma.jobEvalRecord.findMany({
       where: { candidateFileId: { in: params.files.map((f) => f.id) }, status: "SAVED" },
