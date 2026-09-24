@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
+import { evalRequestParams, evalResponseText } from "@/lib/eval-model";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
 import { matchCaItemLine } from "@/lib/ca-analysis-format";
@@ -286,6 +286,9 @@ export async function POST(
     batchInstruction: systemPrompt,
   });
 
+  // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（src/lib/eval-model.ts）。
+  const evalParams = evalRequestParams();
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -298,9 +301,7 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL_ANALYSIS,
-        max_tokens: 16000,
-        temperature: 0.7,
+        ...evalParams,
         system: systemBlocks,
         messages: messagesArray,
       }),
@@ -315,7 +316,7 @@ export async function POST(
       // T-126: 失敗コールも記録（課金トークンは無いが失敗率の可視化に使う）。
       await recordAdvisorUsage({
         endpoint: "analyze-batch",
-        model: CLAUDE_MODEL_ANALYSIS,
+        model: evalParams.model,
         usage: null,
         candidateId,
         batchIndex,
@@ -341,18 +342,25 @@ export async function POST(
     const u = data.usage ?? {};
     console.log(`[analyze-batch usage] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens}`);
     // T-126: usage を永続化。invalid-only は再実行経路なので isRetry=true。
+    // 出力が上限で途切れた回は note に残す（途中までの本文は fail-closed 保存で欠けた求人が保存されないだけ）
+    if (data.stop_reason === "max_tokens") {
+      console.warn(`[AnalyzeBatch] stop_reason=max_tokens (max_tokens=${evalParams.max_tokens}, output=${u.output_tokens})`);
+    }
     await recordAdvisorUsage({
       endpoint: "analyze-batch",
-      model: CLAUDE_MODEL_ANALYSIS,
+      model: evalParams.model,
       usage: u,
       candidateId,
       batchIndex,
       batchTotal: Math.ceil(totalFiles / batchSize),
       fileCount: batchFiles.length,
       isRetry: mode === "invalid-only",
-      note: isLastBatch ? "last-batch" : null,
+      note: [isLastBatch ? "last-batch" : null, data.stop_reason === "max_tokens" ? "stop-max_tokens" : null]
+        .filter(Boolean)
+        .join("; ") || null,
     });
-    const analysisText = data.content?.[0]?.text || "";
+    // Opus 5.5 は先頭が thinking ブロックになるため、text ブロックだけを連結して読む
+    const analysisText = evalResponseText(data.content);
 
     // 8. T-163: 中間バッチはチャットへ書き込まない。
     //    従来はバッチごとに user/assistant 1組を advisor_chat_messages へ書き込んでいたが、
