@@ -7,9 +7,13 @@ import { useScoutRole } from "@/components/scout/ScoutRoleContext";
 // T-135 T-C: タブ再編。ダッシュボード｜配信枠管理｜集計 の3本。
 // 「集計」は by-sent/by-applied/by-media を統合した /scout/analytics。
 // 「過去データインポート」は管理者のみ末尾に追加。開封数入力はタブから撤去（ページは温存）。
+// T-194: 「配信条件」を追加（号機ごとのマイナビ検索条件6軸・予約・テンプレート）。
+// T-207: 「配信テンプレート」を追加（件名・本文の管理。配信条件から1本選ぶ）。
 const BASE_TABS = [
   { href: "/scout", label: "ダッシュボード" },
   { href: "/scout/slots", label: "配信枠管理" },
+  { href: "/scout/conditions", label: "配信条件" },
+  { href: "/scout/templates", label: "配信テンプレート" },
   { href: "/scout/analytics", label: "集計" },
 ];
 

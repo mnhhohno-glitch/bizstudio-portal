@@ -618,3 +618,73 @@ setFilledCount(r.filled);
 **実例**: `src/app/(app)/admin/users/[id]/useResumeAiFill.ts`（コミット 888a75c で修正）。
 同コミットでは、この誤表示に隠れて「AI読み取り結果が一度も保存されない」不具合も併せて修正している
 （社員詳細は保存ボタンを持たない自動保存方式。`14-ui-component-map.md`「社員詳細の保存方式」節を参照）。
+
+## 47. 面談ログの匿名化はDBの氏名だけでは漏れる
+
+2026-09-10 のLP用エクスポート（直近2か月・145人・219ログ）で、`candidates.name` / `name_kana` だけを
+置換対象にしたところ、**氏名残存が196件**発生した。原因は次の2つ。
+
+- **DB登録名とDriveファイル名の綴りが違う**（実測10件）。例: DB「田中 亜実」／ファイル名「田中 亜美」、
+  DB「出口 香南子」／ファイル名「出口 可南子」、DB「渡邉 ひより」／ファイル名「渡邊ひより」。
+  文字起こしツールが出すログ本文はファイル名側の綴りを使うため、DBの氏名では消えない。
+- **テスト名義レコードのファイル名に実在氏名が入っている**。例: DB「大野 テスト」／ファイル名「中村 恵莉華」。
+  DB側には実在氏名がどこにも無いので、DBだけを見ていると気付けない。
+
+**面談ログを匿名化する際は、DBの氏名・カナに加えて、ファイル名から抽出した氏名も必ず置換対象に含める。**
+ファイル名からの抽出は「初回面談／新規面談／既存面談／N回目面談」等の接頭辞と通し番号を落として取り出し、
+一般語を氏名扱いしないよう 長さ・文字種（ASCIIを含まない）・ストップワード で絞る。
+
+置換後は、スクリプト自身の自己申告とは別に、**独立した残存検査**を必ず走らせる。
+DBから 氏名・カナ・社員名・メール・電話・生年月日・住所 を引き直して出力全文と突合する
+（上記の対処後、出力344万字に対して候補者フルネーム0／カナ0／社員名0／メール0／生年月日0 を確認した）。
+
+あわせて2点。
+
+- **姓・名の断片（2文字）で残存検査をすると使い物にならない。** カナの2文字断片（「サイ」「マイ」「リン」等）は
+  「サイト」「マイナビ」「リンク」に当たり、漢字の2文字姓（「伊藤」「田中」）も企業名や同姓の第三者に当たる。
+  残存検査で他人の氏名を見るときは**フルネーム形（3文字以上）のみ**にする。本人・社員の氏名は断片も含めてよい。
+- **ログ本文には登録書類の転記として生年月日・現住所が書かれていることがある**（219ログ中1件）。
+  カラムを丸めるだけでは消えないので、本文側も検出して対処する。
+
+**参考**: 実装は `scripts/export-interview-logs.ts`。
+
+## 48. 号機テーブルが2つある（`ScoutMachineMaster` と `RpaScoutMachine`）
+
+**罠**: portal には「RPA 号機」を表すテーブルが2つあり、用途が違う。
+
+| モデル / 物理名 | 用途 | キー | 2026-09-14 時点の中身 |
+|--|--|--|--|
+| `ScoutMachineMaster` / `scout_machine_masters` | 配信実績集計用。`ScoutDeliverySlot.machineId` の参照先 | `recruiterName` + `validFrom`（担当者名が主。`machineNumber` は任意） | 号機1〜6 に加え社員行（`machineLabel="人（社員）"`・`isMachine=false`）が混在。**5号機が `isActive=true` のまま**（6号機のみ false） |
+| `RpaScoutMachine` / `rpa_scout_machines` | RPA 検索条件管理（`/admin/rpa-scout`）と配信条件コンソール（`/scout/conditions`、T-194）用 | `machineNo` 一意（1行/号機） | 1〜4=`isActive=true`、5〜6=false（実運用と一致）。T-194 で nullable `default_template_id` を追加 |
+
+- **配信条件・RPA 連携系（`ScoutCondition` / `ScoutRun` / T-195 以降の外部 API）は `RpaScoutMachine` を使う。**
+  `ScoutMachineMaster.isActive` を稼働判定に使うと5号機が稼働扱いになる。
+- 逆に配信実績（`ScoutDeliverySlot`）の突合・集計は `ScoutMachineMaster`（`aliases` に「RPA1号機」等の表記揺れを持つ）が正で、
+  こちらを `RpaScoutMachine` に付け替えてはいけない（T-064/T-135 の配信実績集計が壊れる）。
+- 担当者名（マイナビ上のアカウント名）は**どちらのテーブルも画面表示の正ではない**。表示は `src/lib/recruiterDisplay.ts` の
+  `RC_ROSTER`（`formatRecruiterName` / `splitRecruiterDisplay`）から導出する。`RpaScoutMachine.accountName` / `mynaviSaveName` は
+  `/admin/rpa-scout` の既存表示用に残っているだけで、T-194 では参照していない。
+- 2つを統合するかは**未決**。新しい号機参照を足すときは「どちらの号機か」をコード上のコメントで明記する。
+
+## 49. スカウト配信文テンプレートのテーブルが2つある（`rpa_scout_subject_templates` と `scout_templates`）
+
+**罠**: テンプレートマスタ（未送信用5 / 送信済用9 / 個別配信用5 の19本）が2テーブルに存在する。
+
+| モデル / 物理名 | 作成経緯 | 使う画面 |
+|--|--|--|
+| `RpaScoutSubjectTemplate` / `rpa_scout_subject_templates` | `/admin/rpa-scout`（2026-08 稼働）が持つ既存マスタ。`kind` null の旧行・無効行を含め21行（Excel からの移行経緯の詳細は未確認） | `/admin/rpa-scout/templates`（件名テンプレ選択・配信計画） |
+| `ScoutTemplate` / `scout_templates` | 2026-09-14 T-194 で、xlsx が手元に無かったため上記の **kind 付き・有効19本から `scripts/generate-scout-templates-json.ts --from-db` で複製**（`prisma/seed/scout-templates.json` → シード upsert） | `/scout/conditions`（配信条件のテンプレート選択・プレビュー） |
+
+- 2026-09-14 時点で19本の件名・本文は**完全一致**（本番で照合済み）。**片方だけを編集すると乖離する**。
+  `/admin/rpa-scout/templates` で編集しても `scout_templates` には反映されないし、逆も同じ。
+- どちらを編集の正にするか、統合するかは**未決**。決まるまでの暫定手順:
+  `rpa_scout_subject_templates` 側を直したら `export DATABASE_URL=...; npx tsx scripts/generate-scout-templates-json.ts --from-db`
+  → `npx tsx scripts/seed-scout-conditions.ts` で `scout_templates` を追従させる（`(kind, name)` で upsert。**名称を変えた場合は別行が増える**ので注意）。
+- `ScoutTemplate` は `@@unique([kind, name])`。同名で種別違い（例「口コミ4.9オーダーメイド」の未送信用と送信済用）は別行として正しく共存する。
+
+## 50. 大量更新APIを1件ずつ直列更新で作ると、まとめて投げたときに 502 になる
+
+**罠**: portal の `POST /api/external/bookmarks/job-attributes`（T-200 の埋め戻し受け口）は1件ずつ直列に更新する作りのため、500件/回で投げると 502 になった。100件×並列3本に分けたら完走した（T-200・7,956件）。
+
+- 呼ぶ側: 1回あたりの件数を絞り、少数の並列で回す（100件×3本が実績値）。
+- 作る側: 大量更新APIを新設するときは、1回あたりの上限件数を決めて超過は 400 で返す、または一括更新（`updateMany`／まとめたSQL）にする。

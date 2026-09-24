@@ -9,25 +9,42 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
+  ReferenceArea,
   ResponsiveContainer,
+  DefaultZIndexes,
 } from "recharts";
+import { WEEKDAY_JA } from "@/lib/scout-conditions/dates";
 
 // T-135 T-B: スカウトダッシュボード専用の推移グラフ（analytics とは独立）。
-// 棒=配信数・応募数（左軸・件数）／ 折れ線=応募率（右軸・％）。
+// 棒=配信数・開封数・応募数（左軸・件数）／ 折れ線=開封率・応募率（右軸2本・％）。
 // 比較系列（前月/前年）は同色の半透明＋点線で重ね描き。
-// 応募率は「配信数0 の点は null（0%ではなく欠損）」として線を切る（0%と配信なしの混同防止）。
+// 各率は「配信数0 の点は null（0%ではなく欠損）」として線を切る（0%と配信なしの混同防止）。
 //
 // 応募数の軸の扱い（実装判断=(a)）: 応募数は配信数より2桁小さいため左軸では棒が小さく見えるが、
 // 右軸の応募率ラインが応募パフォーマンスを可視化し、正確な応募件数は Tooltip で読める。
 // シンプル優先で応募数も左軸の棒に置く（(a)）。
+//
+// T-202: 開封数の棒と開封率の線を追加。開封率（5%前後）と応募率（0.2%前後）は桁が2つ違い、
+// 同一軸に乗せると応募率が潰れて読めないため、右軸を「開封率」「応募率」の2本に分けている。
+// どちらの軸がどの線かは軸ラベルの色を線の色と揃えて示す。
+//
+// T-198: 日別のときだけ横軸に曜日を出す（「1日(月)」）。土曜=薄い青・日曜=薄い赤の背景を棒／線より下のレイヤーに敷く。
+// 曜日は page.tsx がサーバー由来の JST 日付（YYYY-MM-DD）から算出して weekday（0=日…6=土）で渡す。
+// 比較表示（前月/前年）でも背景色は表示中の月の曜日のまま（weekday は主系列の日付から作るため自動的にそうなる）。
 
 export type TrendPoint = {
   label: string;
+  /** 0=日 … 6=土。日別のときだけ入る（時間別・月別は null） */
+  weekday: number | null;
   delivery: number | null;
+  open: number | null;
   apply: number | null;
+  openRate: number | null;
   applyRate: number | null;
   cmpDelivery: number | null;
+  cmpOpen: number | null;
   cmpApply: number | null;
+  cmpOpenRate: number | null;
   cmpApplyRate: number | null;
 };
 
@@ -36,14 +53,20 @@ export type Unit = "day" | "hour" | "month";
 
 const COLOR = {
   delivery: "#2563EB",
+  open: "#7C3AED",
   apply: "#16A34A",
-  rate: "#EA580C",
+  openRate: "#DB2777",
+  applyRate: "#EA580C",
 };
 
 const CMP_LABEL: Record<Exclude<Comparison, "none">, string> = {
   prevMonth: "前月",
   prevYear: "前年",
 };
+
+/** 土曜=薄い青 / 日曜=薄い赤。棒・線の視認性を損なわない濃さに抑える */
+const WEEKEND_FILL: Record<number, string> = { 6: "#2563EB", 0: "#DC2626" };
+const WEEKEND_OPACITY = 0.12; // T-199: 0.07 では薄すぎて土日が判別しにくかったため上げた
 
 function unitSuffix(unit: Unit): string {
   return unit === "day" ? "日" : unit === "hour" ? "時" : "月";
@@ -62,39 +85,77 @@ export default function ScoutTrendChart({
   const cmpName = showCmp ? CMP_LABEL[comparison] : "";
   const suffix = unitSuffix(unit);
 
+  // T-198: ラベル → 曜日。日別のときだけ中身が入る
+  const weekdayByLabel = new Map<string, number>();
+  if (unit === "day") for (const d of data) if (d.weekday != null) weekdayByLabel.set(d.label, d.weekday);
+  const weekendPoints = unit === "day" ? data.filter((d) => d.weekday === 0 || d.weekday === 6) : [];
+
+  const formatTick = (v: string) => {
+    const wd = weekdayByLabel.get(v);
+    return wd == null ? `${v}${suffix}` : `${v}${suffix}(${WEEKDAY_JA[wd]})`;
+  };
+
   return (
     <ResponsiveContainer width="100%" height={340}>
-      <ComposedChart data={data} margin={{ top: 10, right: 16, bottom: 4, left: 0 }}>
+      <ComposedChart data={data} margin={{ top: 10, right: 8, bottom: 4, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+        {/* T-198: 土日の帯。zIndex を棒・線より下（グリッドと棒背景の間）に固定する */}
+        {weekendPoints.map((d) => (
+          <ReferenceArea
+            key={`weekend-${d.label}`}
+            x1={d.label}
+            x2={d.label}
+            yAxisId="count"
+            zIndex={DefaultZIndexes.barBackground - 10}
+            fill={WEEKEND_FILL[d.weekday as 0 | 6]}
+            fillOpacity={WEEKEND_OPACITY}
+            stroke="none"
+            ifOverflow="visible"
+          />
+        ))}
         <XAxis
           dataKey="label"
-          tick={{ fontSize: 12, fill: "#6B7280" }}
-          tickFormatter={(v: string) => `${v}${suffix}`}
+          tick={{ fontSize: unit === "day" ? 11 : 12, fill: "#6B7280" }}
+          tickFormatter={formatTick}
+          {...(unit === "day"
+            ? { interval: 0 as const, angle: -40, textAnchor: "end" as const, height: 52 }
+            : {})}
         />
-        {/* 左軸: 件数 */}
+        {/* 左軸: 件数（配信数・開封数・応募数で共通） */}
         <YAxis
           yAxisId="count"
           tick={{ fontSize: 12, fill: "#6B7280" }}
           allowDecimals={false}
           label={{ value: "件数", angle: -90, position: "insideLeft", fontSize: 11, fill: "#9CA3AF" }}
         />
-        {/* 右軸: 応募率(%) */}
+        {/* 右軸その1（内側）: 開封率(%)。軸ラベル・目盛りの色を開封率の線と揃える */}
         <YAxis
-          yAxisId="rate"
+          yAxisId="openRate"
           orientation="right"
-          tick={{ fontSize: 12, fill: "#6B7280" }}
+          width={56}
+          tick={{ fontSize: 12, fill: COLOR.openRate }}
           tickFormatter={(v: number) => `${v}%`}
           domain={[0, "auto"]}
-          label={{ value: "応募率", angle: 90, position: "insideRight", fontSize: 11, fill: "#9CA3AF" }}
+          label={{ value: "開封率", angle: 90, position: "insideRight", fontSize: 11, fill: COLOR.openRate }}
+        />
+        {/* 右軸その2（外側）: 応募率(%)。軸ラベル・目盛りの色を応募率の線と揃える */}
+        <YAxis
+          yAxisId="applyRate"
+          orientation="right"
+          width={62}
+          tick={{ fontSize: 12, fill: COLOR.applyRate }}
+          tickFormatter={(v: number) => `${v}%`}
+          domain={[0, "auto"]}
+          label={{ value: "応募率", angle: 90, position: "insideRight", fontSize: 11, fill: COLOR.applyRate }}
         />
         <Tooltip
           formatter={(value, name) => {
             const n = String(name);
             const v = typeof value === "number" ? value : null;
             if (v == null) return ["—", n];
-            return n.includes("応募率") ? [`${v.toFixed(2)}%`, n] : [v.toLocaleString(), n];
+            return n.includes("率") ? [`${v.toFixed(2)}%`, n] : [v.toLocaleString(), n];
           }}
-          labelFormatter={(label) => `${label}${suffix}`}
+          labelFormatter={(label) => formatTick(String(label))}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
 
@@ -103,21 +164,39 @@ export default function ScoutTrendChart({
           <Bar yAxisId="count" dataKey="cmpDelivery" name={`${cmpName}配信数`} fill={COLOR.delivery} fillOpacity={0.28} />
         )}
         {showCmp && (
+          <Bar yAxisId="count" dataKey="cmpOpen" name={`${cmpName}開封数`} fill={COLOR.open} fillOpacity={0.28} />
+        )}
+        {showCmp && (
           <Bar yAxisId="count" dataKey="cmpApply" name={`${cmpName}応募数`} fill={COLOR.apply} fillOpacity={0.28} />
         )}
 
         {/* 主系列（棒） */}
         <Bar yAxisId="count" dataKey="delivery" name="配信数" fill={COLOR.delivery} />
+        <Bar yAxisId="count" dataKey="open" name="開封数" fill={COLOR.open} />
         <Bar yAxisId="count" dataKey="apply" name="応募数" fill={COLOR.apply} />
 
-        {/* 比較の応募率（点線・半透明） */}
+        {/* 比較の各率（点線・半透明） */}
         {showCmp && (
           <Line
-            yAxisId="rate"
+            yAxisId="openRate"
+            type="monotone"
+            dataKey="cmpOpenRate"
+            name={`${cmpName}開封率`}
+            stroke={COLOR.openRate}
+            strokeWidth={2}
+            strokeDasharray="5 4"
+            strokeOpacity={0.55}
+            dot={false}
+            connectNulls={false}
+          />
+        )}
+        {showCmp && (
+          <Line
+            yAxisId="applyRate"
             type="monotone"
             dataKey="cmpApplyRate"
             name={`${cmpName}応募率`}
-            stroke={COLOR.rate}
+            stroke={COLOR.applyRate}
             strokeWidth={2}
             strokeDasharray="5 4"
             strokeOpacity={0.55}
@@ -126,13 +205,25 @@ export default function ScoutTrendChart({
           />
         )}
 
-        {/* 主系列の応募率（右軸・実線・配信0はnullで線を切る） */}
+        {/* 主系列の開封率（右軸その1・実線・配信0はnullで線を切る） */}
         <Line
-          yAxisId="rate"
+          yAxisId="openRate"
+          type="monotone"
+          dataKey="openRate"
+          name="開封率"
+          stroke={COLOR.openRate}
+          strokeWidth={2}
+          dot={{ r: 2 }}
+          connectNulls={false}
+        />
+
+        {/* 主系列の応募率（右軸その2・実線・配信0はnullで線を切る） */}
+        <Line
+          yAxisId="applyRate"
           type="monotone"
           dataKey="applyRate"
           name="応募率"
-          stroke={COLOR.rate}
+          stroke={COLOR.applyRate}
           strokeWidth={2}
           dot={{ r: 2 }}
           connectNulls={false}

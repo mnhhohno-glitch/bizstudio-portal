@@ -10,7 +10,8 @@
 // どちらも同じ関数を通るため、無人経路と手動経路で評価内容がズレない。
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { anthropic, CLAUDE_MODEL_ANALYSIS } from "@/lib/claude";
+import { anthropic, MODEL_PRICING_PER_MTOK } from "@/lib/claude";
+import { evalRequestParams, evalResponseText, getEvalModel } from "@/lib/eval-model";
 import { buildAnalyzeBatchSystemBlocks } from "@/lib/analyze-batch-cache";
 import {
   buildAnalyzeFixedSystem,
@@ -59,9 +60,12 @@ const EST_TOKENS_PER_CHAR = 0.92;
 const EST_FIXED_TOKENS = 21308;
 const EST_CONTEXT_TOKENS = 4424;
 const EST_OUTPUT_TOKENS_PER_FILE = 1000;
-const PRICE_INPUT_PER_MTOK = 5; // Opus 4.6
-const PRICE_OUTPUT_PER_MTOK = 25;
+// T-XXX: 試算の単価は評価モデル（EVAL_MODEL）の料金表から引く（未知モデルは Opus 4.6 相当で概算）。
 const BATCH_DISCOUNT = 0.5;
+function estimatePricing(model: string): { input: number; output: number } {
+  const p = MODEL_PRICING_PER_MTOK[model];
+  return p ? { input: p.input, output: p.output } : { input: 5, output: 25 };
+}
 
 export type AnalyzeSubmitResult = {
   mode: "EXECUTE" | "DRY-RUN";
@@ -243,9 +247,9 @@ export async function runAnalyzeSubmit(opts: {
     planned.length * (EST_FIXED_TOKENS + EST_CONTEXT_TOKENS + 500) + jobChars * EST_TOKENS_PER_CHAR,
   );
   const estOutputTokens = capped.length * EST_OUTPUT_TOKENS_PER_FILE;
+  const estPrice = estimatePricing(getEvalModel());
   const estCostUsd =
-    ((estInputTokens * PRICE_INPUT_PER_MTOK + estOutputTokens * PRICE_OUTPUT_PER_MTOK) /
-      1_000_000) *
+    ((estInputTokens * estPrice.input + estOutputTokens * estPrice.output) / 1_000_000) *
     BATCH_DISCOUNT;
 
   const summary: AnalyzeSubmitResult = {
@@ -290,6 +294,8 @@ export async function runAnalyzeSubmit(opts: {
   let batch: { id: string };
   try {
     const fixedSystem = buildAnalyzeFixedSystem();
+    // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（手動評価と同じ src/lib/eval-model.ts）。
+    const evalParams = evalRequestParams();
     const fileById = new Map(capped.map((f) => [f.id, f]));
     const contextByCandidate = new Map<string, string>();
     const requests = [];
@@ -315,9 +321,7 @@ export async function runAnalyzeSubmit(opts: {
       requests.push({
         custom_id: r.customId,
         params: {
-          model: CLAUDE_MODEL_ANALYSIS,
-          max_tokens: 16000,
-          temperature: 0.7,
+          ...evalParams,
           system: systemBlocks,
           messages: [
             {
@@ -548,7 +552,8 @@ export async function runAnalyzeCollect(opts: {
 
         if (result.result.type === "succeeded") {
           const message = result.result.message;
-          const analysisText = message.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+          // thinking ブロック（Opus 5.5）は飛ばして text だけを読む
+          const analysisText = evalResponseText(message.content as { type: string; text?: string }[]);
           const batchFiles = await prisma.candidateFile.findMany({
             where: { id: { in: fileIds } },
             select: { id: true, fileName: true },
@@ -581,7 +586,7 @@ export async function runAnalyzeCollect(opts: {
             candidateId: row.candidateId,
             fileCount: fileIds.length,
             batchApi: true, // バッチ割引（全トークン種別 ×0.5）を費用計上に反映
-            note: `batch=${batchId}`,
+            note: `batch=${batchId}${message.stop_reason === "max_tokens" ? "; stop-max_tokens" : ""}`,
           });
 
           await prisma.recommendAnalyzeBatch.update({

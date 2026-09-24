@@ -93,6 +93,14 @@ export default function CandidateRegistrationModal({
   const [createdCandidateName, setCreatedCandidateName] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("BEFORE");
   const [savingStatus, setSavingStatus] = useState(false);
+  // T-190: 同一人物の重複確認ダイアログ（null のときは出さない）
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    matchedLabel: string;
+    candidateNumber: string;
+    name: string;
+    applicationDate: string | null;
+    mediaSource: string | null;
+  } | null>(null);
   const router = useRouter();
 
   // Auto-fetch next number on open
@@ -140,6 +148,7 @@ export default function CandidateRegistrationModal({
     setDesiredSalaryMin("");
     setPdfFile(null);
     setErrors({});
+    setDuplicateInfo(null);
     onClose();
   };
 
@@ -206,7 +215,7 @@ export default function CandidateRegistrationModal({
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (forceCreate = false) => {
     if (!validate()) return;
     setLoading(true);
     setErrors({});
@@ -215,6 +224,7 @@ export default function CandidateRegistrationModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(forceCreate ? { forceCreate: true } : {}),
           candidateNumber: candidateNumber.trim(),
           name: normalizeName(candidateName),
           nameKana: normalizeName(nameKana),
@@ -253,6 +263,19 @@ export default function CandidateRegistrationModal({
       }
 
       const createdCandidate = await res.json();
+
+      // T-190: 同じ人がすでに登録されている場合は作成されず確認が返る。
+      //   CAが意図して別レコードを作ることもあるので、判断は人に委ねる（続行で forceCreate 再送）。
+      if (createdCandidate?.duplicateFound) {
+        setDuplicateInfo({
+          matchedLabel: createdCandidate.matchedLabel ?? "登録内容",
+          candidateNumber: createdCandidate.existing?.candidateNumber ?? "",
+          name: createdCandidate.existing?.name ?? "",
+          applicationDate: createdCandidate.existing?.applicationDate ?? null,
+          mediaSource: createdCandidate.existing?.mediaSource ?? null,
+        });
+        return;
+      }
 
       // PDF自動解析で登録した場合、PDFを原本として保存
       if (pdfFile) {
@@ -315,6 +338,48 @@ export default function CandidateRegistrationModal({
     "mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-[13px] focus:border-[#2563EB] focus:outline-none focus:ring-1 focus:ring-[#2563EB]";
   const errorInputClass =
     "mt-1 w-full rounded-md border border-red-400 px-3 py-2 text-[13px] focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500";
+
+  // T-190: 同一人物の重複確認ダイアログ（弾かず、続けるかどうかをCAに委ねる）
+  if (duplicateInfo) {
+    const appliedAt = duplicateInfo.applicationDate
+      ? new Date(duplicateInfo.applicationDate).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })
+      : "—";
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+          <h2 className="text-[16px] font-bold text-[#374151] mb-2">同じ人がすでに登録されています</h2>
+          <p className="text-[13px] text-[#6B7280] mb-4">
+            {duplicateInfo.matchedLabel}が既存の求職者と一致しました。
+          </p>
+          <div className="rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 mb-5 text-[13px] text-[#374151] space-y-1">
+            <div>求職者番号: <span className="font-bold">{duplicateInfo.candidateNumber}</span></div>
+            <div>氏名: {duplicateInfo.name || "—"}</div>
+            <div>応募日: {appliedAt}</div>
+            <div>媒体: {duplicateInfo.mediaSource || "—"}</div>
+          </div>
+          <p className="text-[13px] text-[#6B7280] mb-4">それでも新規に登録しますか？</p>
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setDuplicateInfo(null)}
+              className="rounded-md border border-[#E5E7EB] px-5 py-2.5 text-[13px] text-[#374151] hover:bg-[#F5F7FA] transition-colors"
+            >
+              やめる（入力に戻る）
+            </button>
+            <button
+              onClick={() => {
+                setDuplicateInfo(null);
+                void handleSubmit(true);
+              }}
+              disabled={loading}
+              className="rounded-md bg-[#2563EB] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors"
+            >
+              それでも登録する
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Show support status dialog
   if (showStatusDialog) {
@@ -591,7 +656,7 @@ export default function CandidateRegistrationModal({
 
         <div className="mt-5 flex gap-3 justify-end">
           <button onClick={handleClose} className="rounded-md border border-[#E5E7EB] px-5 py-2.5 text-[13px] text-[#374151] hover:bg-[#F5F7FA] transition-colors">キャンセル</button>
-          <button onClick={handleSubmit} disabled={loading} className="rounded-md bg-[#2563EB] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors">
+          <button onClick={() => handleSubmit()} disabled={loading} className="rounded-md bg-[#2563EB] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors">
             {loading ? "登録中..." : "登録する"}
           </button>
         </div>

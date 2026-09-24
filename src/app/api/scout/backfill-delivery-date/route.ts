@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyRpaSecret } from "@/lib/mynavi-rpa/auth";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+import { computeMasType } from "@/lib/scout/mas-type";
 
 /**
  * POST /api/scout/backfill-delivery-date
@@ -35,7 +37,17 @@ export async function POST(req: NextRequest) {
       mynaviMemberNo: { not: null },
       ...(overwriteExisting ? {} : { scoutDeliveryDate: null }),
     },
-    select: { id: true, mynaviMemberNo: true },
+    select: {
+      id: true,
+      mynaviMemberNo: true,
+      candidateNumber: true,
+      // T-190: 配信日を書き換えたら枠も張り替えるため、判定材料をここで取っておく
+      scoutDeliveryDate: true,
+      applicationDate: true,
+      applicationRoute: true,
+      recruiterName: true,
+      scoutLinkedById: true,
+    },
   });
   const scanned = candidates.length;
 
@@ -55,15 +67,49 @@ export async function POST(req: NextRequest) {
   }
 
   // 3) 見つかった対象に正しい配信日をセット
+  //    T-190: 配信日の JST 暦日が変わったレコードは、紐づく配信枠も同じ日の枠へ張り替える。
+  //      集計 API は ScoutDeliverySlot.deliveryDate しか見ないため、配信日だけ直すと数字が動かない
+  //      （このバッチが 144 件の「配信日は正しいが枠は応募日のまま」を作った本体）。
+  //      - scoutLinkedById 非 NULL（人が手で紐づけた行）は対象外
+  //      - 指定日の枠が無ければ前日へ飛ばさず現状維持（relinkFailed に計上）
+  //      - 張り替えに失敗してもバッチは止めない
+  const toJstYmdOrNull = (d: Date | null) =>
+    d ? d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : null; // 罠#17
   let updated = 0;
+  let relinked = 0;
+  let relinkFailed = 0;
   for (const c of candidates) {
     const d = c.mynaviMemberNo ? latestByMember.get(c.mynaviMemberNo) : undefined;
     if (!d) continue; // 配信明細が無い会員No は null のまま（誤セットしない）
+    const changedDay = toJstYmdOrNull(c.scoutDeliveryDate) !== toJstYmdOrNull(d);
     await prisma.candidate.update({
       where: { id: c.id },
       data: { scoutDeliveryDate: d }, // @db.Date 由来 Date をそのまま（罠#17: 文字列変換なし）
     });
     updated++;
+
+    if (!changedDay) continue;
+    if (c.scoutLinkedById) continue; // 手動紐付けは触らない
+    if (c.applicationRoute !== "スカウト" || !c.recruiterName?.trim()) continue;
+    try {
+      const res = await autoLinkCandidateToSlot({
+        candidateId: c.id,
+        recruiterName: c.recruiterName,
+        applicationDate: c.applicationDate ?? d,
+        scoutDeliveryDate: d,
+        disablePreviousDayFallback: true,
+      });
+      if (res.linked) relinked++;
+      else {
+        relinkFailed++;
+        console.warn(
+          `[BackfillDeliveryDate] T-190 relink 不可 candidate=${c.candidateNumber} reason=${res.reason}`,
+        );
+      }
+    } catch (e) {
+      relinkFailed++;
+      console.error(`[BackfillDeliveryDate] T-190 relink failed candidate=${c.candidateNumber}:`, e);
+    }
   }
 
   const matched = updated;
@@ -72,7 +118,7 @@ export async function POST(req: NextRequest) {
   // 4) masType（開放日/通常）自動判定: 配信日・登録日が両方揃った Candidate を全件対象に、
   //    diffDays = 配信日 − 登録日（JST暦日・罠#17）が 0..7（境界含む）→ "開放日"、それ以外（<0 or >7）→ "通常"。
   //    両日付が揃ったときの計算値を正とし、現在値と異なる場合のみ上書き（冪等）。片方欠ける行は対象外＝触らない。
-  const toJstYmd = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); // "YYYY-MM-DD"（罠#17）
+  //    T-190 Step3-1: 判定式は src/lib/scout/mas-type.ts に移設（式は不変）。scout-history 受け口と共用する。
   const datedCandidates = await prisma.candidate.findMany({
     where: { scoutDeliveryDate: { not: null }, mynaviRegisteredDate: { not: null } },
     select: { id: true, scoutDeliveryDate: true, mynaviRegisteredDate: true, masType: true },
@@ -80,18 +126,14 @@ export async function POST(req: NextRequest) {
   const masTypeScanned = datedCandidates.length;
   let masTypeUpdated = 0;
   for (const c of datedCandidates) {
-    if (!c.scoutDeliveryDate || !c.mynaviRegisteredDate) continue;
-    const diffDays = Math.round(
-      (Date.parse(toJstYmd(c.scoutDeliveryDate) + "T00:00:00Z")
-        - Date.parse(toJstYmd(c.mynaviRegisteredDate) + "T00:00:00Z")) / 86_400_000,
-    );
-    const masType = diffDays >= 0 && diffDays <= 7 ? "開放日" : "通常";
+    const masType = computeMasType(c.scoutDeliveryDate, c.mynaviRegisteredDate);
+    if (masType === null) continue; // 片方欠ける行は触らない（従来どおり）
     if (masType !== c.masType) {
       await prisma.candidate.update({ where: { id: c.id }, data: { masType } });
       masTypeUpdated++;
     }
   }
 
-  console.log(`[BackfillDeliveryDate] scanned=${scanned} matched=${matched} updated=${updated} skipped=${skipped} masTypeScanned=${masTypeScanned} masTypeUpdated=${masTypeUpdated} overwriteExisting=${overwriteExisting}`);
-  return NextResponse.json({ scanned, matched, updated, skipped, masTypeScanned, masTypeUpdated });
+  console.log(`[BackfillDeliveryDate] scanned=${scanned} matched=${matched} updated=${updated} skipped=${skipped} relinked=${relinked} relinkFailed=${relinkFailed} masTypeScanned=${masTypeScanned} masTypeUpdated=${masTypeUpdated} overwriteExisting=${overwriteExisting}`);
+  return NextResponse.json({ scanned, matched, updated, skipped, relinked, relinkFailed, masTypeScanned, masTypeUpdated });
 }

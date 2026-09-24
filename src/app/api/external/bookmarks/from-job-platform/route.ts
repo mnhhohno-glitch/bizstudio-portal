@@ -35,6 +35,10 @@ type JobInput = {
   // T-185: 職種。jobCategory / jobType のどちらの名前でも受け付ける（送られてこなければ本文から抽出）。
   jobCategory?: unknown;
   jobType?: unknown;
+  // T-196: エリア・職種（自社マスタで確定済みの値）。任意項目・後方互換（未送信なら既存挙動と完全同一）。
+  //   jobArea: 表示用エリア（例「東京都 港区」）/ jobCategoryPath: 大＞中＞小のフルパス（ホバー表示用）
+  jobArea?: unknown;
+  jobCategoryPath?: unknown;
   extractedText?: unknown;
   jobUrl?: unknown;
   fileNumericId?: unknown; // ファイル名用の数値ID（10桁以上推奨）。無ければ会社名のみ。
@@ -51,6 +55,14 @@ function str(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s.length ? s : null;
+}
+
+// T-196: エリア・職種は表示用の短い文字列。上限200文字（超過は切り詰め。受信自体は失敗させない）。
+const JOB_ATTR_MAX_LEN = 200;
+function strMax(v: unknown): string | null {
+  const s = str(v);
+  if (!s) return null;
+  return s.length > JOB_ATTR_MAX_LEN ? s.slice(0, JOB_ATTR_MAX_LEN) : s;
 }
 
 // ファイル名の数値ID：fileNumericId が 10桁以上の数字ならそれ、
@@ -206,7 +218,10 @@ export async function POST(request: Request) {
         const fileSize = Buffer.byteLength(extractedText, "utf8");
         const sourceMedia = str(j.sourceMedia);
         const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
-        const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+        // T-196: 自社マスタ確定値（jobCategory）が来ていればそれが最優先。無ければ従来どおり本文抽出。
+        const jobCategory = strMax(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+        const jobArea = strMax(j.jobArea);
+        const jobCategoryPath = strMax(j.jobCategoryPath);
         await prisma.candidateFile.create({
           data: {
             candidateId: candidate.id,
@@ -226,6 +241,9 @@ export async function POST(request: Request) {
             memo,
             jobTitle,
             jobCategory,
+            // T-196: 未送信は null（＝画面は「—」）。捏造しない。
+            jobArea,
+            jobCategoryPath,
             origin: "auto",
             autoSourcedAt: new Date(),
             approvalStatus: "PENDING",
@@ -302,7 +320,10 @@ export async function POST(request: Request) {
     //   payload に無い場合は求人本文（extractedText）から抽出する（job-platform の構造化テキスト
     //   「【求人タイトル】」/ HITO-Link 求人票PDFの「求人名」行）。どちらでも取れなければ null のまま。
     const jobTitle = str(j.jobTitle) ?? extractJobTitleFromText(extractedText);
-    const jobCategory = str(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+    const jobCategory = strMax(j.jobCategory ?? j.jobType) ?? extractJobCategoryFromText(extractedText);
+    // T-196: エリア・職種パス（job-platform の確定値）。未送信は null のまま＝既存挙動と完全同一。
+    const jobArea = strMax(j.jobArea);
+    const jobCategoryPath = strMax(j.jobCategoryPath);
 
     try {
       // 冪等: 同一求職者×同一求人（job-platform）の既存BOOKMARK行を探す。
@@ -329,6 +350,9 @@ export async function POST(request: Request) {
             // T-185: 求人名・職種は取れたときだけ上書き（取れないときに既存値を消さない）。
             ...(jobTitle ? { jobTitle } : {}),
             ...(jobCategory ? { jobCategory } : {}),
+            // T-196: 取れたときだけ上書き（未送信で既存値を消さない）。
+            ...(jobArea ? { jobArea } : {}),
+            ...(jobCategoryPath ? { jobCategoryPath } : {}),
             ...(existing.extractedAt ? {} : { extractedAt: new Date() }),
             ...(savedBy ? { uploadedByUserId: savedBy } : {}),
             // T-128 Phase2-1: sourceMedia が来ていれば更新（未送信＝undefined は既存値維持）。
@@ -362,6 +386,9 @@ export async function POST(request: Request) {
               // T-185: 求人名・職種のスナップショット（to-entry で JobEntry へ引き継ぐ）。
               jobTitle,
               jobCategory,
+              // T-196: エリア・職種パス（未送信は null）。
+              jobArea,
+              jobCategoryPath,
               uploadedByUserId: uploaderUserId,
             },
             select: { id: true },

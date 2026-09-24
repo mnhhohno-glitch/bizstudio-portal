@@ -112,6 +112,7 @@ export function FilterMultiSelectField({
   allLabel = "ALL",
   allSelectedLabel,
   moreUnit = "件",
+  listSeparator,
 }: {
   label: string;
   options: FilterMultiOption[];
@@ -125,6 +126,11 @@ export function FilterMultiSelectField({
   allSelectedLabel?: string;
   /** 「他N件」の単位（人を数えるフィールドなら "名"） */
   moreUnit?: string;
+  /**
+   * T-199: 指定すると複数選択時のボタン表示を「◯◯ 他N件」ではなく、選択中のラベルをこの区切りで全部並べる
+   * （例 ", " → 「1号機, 2号機」）。選択肢が少なく全部見せたいフィールド向け。
+   */
+  listSeparator?: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -163,6 +169,7 @@ export function FilterMultiSelectField({
   if (ordered.length === 0) buttonLabel = allLabel;
   else if (allSelectedLabel && isAllMainSelected) buttonLabel = allSelectedLabel;
   else if (ordered.length === 1) buttonLabel = ordered[0].label;
+  else if (listSeparator != null) buttonLabel = ordered.map((o) => o.label).join(listSeparator);
   else buttonLabel = `${ordered[0].label} 他${ordered.length - 1}${moreUnit}`;
 
   const renderItem = (o: FilterMultiOption) => (

@@ -22,6 +22,17 @@ export type AutoLinkReason =
   | "no_candidate_yesterday"
   | "error";
 
+/**
+ * T-190: 既存紐付けの「張り替え」用途では前日フォールバックを使わない。
+ *   新規取り込み（PDF/一括登録）は「当日の枠が無ければ前日」で救う設計のままにしたいが、
+ *   配信日を人が直したときの張り替えでは、指定された日の枠が無いのに前日へ飛ばすと
+ *   集計が別の日に乗ってしまう。張り替え経路だけ true を渡して抑止する。
+ */
+export type AutoLinkOptions = {
+  /** true のとき、指定日の枠が無くても前日にフォールバックしない（既定 false＝現行動作） */
+  disablePreviousDayFallback?: boolean;
+};
+
 export type MatchedSlot = {
   slotId: string;
   scoutNumber: string;
@@ -53,7 +64,7 @@ function normalizeRecruiterName(s: string): string {
  *
  * マスタは 10件程度なので全件取得 → JS で比較する。
  */
-async function findMachineByRecruiterName(recruiterName: string) {
+export async function findMachineByRecruiterName(recruiterName: string) {
   const trimmed = recruiterName.trim();
   if (!trimmed) return null;
   const target = normalizeRecruiterName(trimmed);
@@ -142,7 +153,7 @@ export async function autoLinkCandidateToSlot(params: {
   applicationDate: Date;
   /** T-135: 配信日（Excel照合値）。あれば応募日より優先して枠を探す。 */
   scoutDeliveryDate?: Date | null;
-}): Promise<{
+} & AutoLinkOptions): Promise<{
   linked: boolean;
   slotId?: string;
   scoutNumber?: string;
@@ -166,7 +177,7 @@ export async function autoLinkCandidateToSlot(params: {
     const dayJst = toJstDateOnly(anchorDate);
     let slot = await pickBestSlot(machine.id, dayJst);
     let usedYesterday = false;
-    if (!slot) {
+    if (!slot && !params.disablePreviousDayFallback) {
       const yesterdayJst = addDays(dayJst, -1);
       slot = await pickBestSlot(machine.id, yesterdayJst);
       usedYesterday = true;

@@ -41,6 +41,9 @@ type Candidate = {
   desiredEmploymentType: string | null;
   desiredSalaryMin: number | null;
   autoRecommendEnabled: boolean;
+  // T-190: 再応募の記録（1人1レコード運用）。0回のときは表示しない。
+  reapplicationCount?: number | null;
+  lastReapplicationAt?: string | null;
   createdAt: string;
 };
 
@@ -469,6 +472,18 @@ export default function CandidateHeader({
                 <span>経路:{candidate.applicationRoute || "-"}</span>
                 <span className="text-gray-300">|</span>
                 <span>媒体:{candidate.mediaSource || "-"}</span>
+                {/* T-190: 再応募の記録。0回（＝通常）のときは何も出さない */}
+                {(candidate.reapplicationCount ?? 0) > 0 && (
+                  <>
+                    <span className="text-gray-300">|</span>
+                    <span className="text-[#B45309]">
+                      再応募 {candidate.reapplicationCount}回
+                      {candidate.lastReapplicationAt
+                        ? `（最終 ${formatRegistrationDate(candidate.lastReapplicationAt)}）`
+                        : ""}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>

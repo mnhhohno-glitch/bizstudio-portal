@@ -227,11 +227,29 @@ model InterviewMemo {
   - count 系=当日窓、率系=当月窓。当月窓は `jstMonthStart` 〜 `jstNextMonthStart - 1ms`（従来の `lt nextMonthStart` と等価）。
 ### 集計の軸と定義（T-071 確定・実績ベース）
 
+#### 件数・人数・新規の数え方（2026-09-12 確定・提案／エントリー共通）
+
+実績表の「人数（件数）」表記のうち **括弧内＝件数・括弧外＝人数**。3点とも `src/lib/performance/weeklyMatrix.ts` の1か所で決まる。
+
+- **件数＝生レコード**。1行＝1件で数える（明細 `/api/performance/detail` の records と一致する）。
+  - ⚠️ 旧実装は `GROUP BY 候補者, external_job_id, JST日` で潰していた。**`external_job_id` は求人未紐付けのとき `0`**（`bookmarks/to-entry/route.ts` の `f.kyuujinJobId ?? 0`）なので、同じ人が同じ日に出した**別会社の応募まで1件に潰れて**いた（2026-09 は 142件→82件、2026-03 は 228件→74件）。本当の重複行は存在しないので潰さない。
+  - 提案側の**移行重複ガード**（同一候補者×同一JST日のクロスソース重複で CF 側を除外する `NOT EXISTS`）は業務上必要なので**残す**。
+- **新規＝その候補者が「その暦月(JST)」に出した1件目だけ**／**既存＝その月の2件目以降**。
+  - 候補者×暦月で `ROW_NUMBER() OVER (PARTITION BY candidate_id, date_trunc(month, JST日) ORDER BY 日付, id)` を振り、`rn=1`＝新規・`rn>=2`＝既存。
+  - 順位付けの母集団は**その月の全イベント**（表示期間に依存しない）。月をまたぐ週は日付の属する月で分ける。表示期間を変えても同じ行が新規になる。
+  - ⚠️ 旧実装は「全期間初回がセル内にある候補者の、セル内の全件」を新規にしていた（合意定義と別物）。
+  - この定義では **新規は1候補者1件/月**なので、月内に収まるセルでは 新規件数＝新規人数。
+- **合計列**：件数＝各列（週/月）の合算（1レコード＝1件なので Σ列＝期間合計）。**人数＝期間全体の重複除去**（DISTINCT）。
+  - ⚠️ 旧 `applyAdditiveTotals` は人数まで Σ週で上書きしていたため、2週にまたいで出た人が二重計上されていた（例：奥村2026-09 は 13人と表示、正しくは 11人）。達成率の分母（`total.uniq`）とも食い違っていた。
+  - 直近6ヶ月（`/api/performance/cohort`）も同じで、合計列の人数は通算 `summaryMx` の DISTINCT を使う（書類通過率の分母もこれ）。
+- **1人当たり＝件数÷人数**（変更なし）。平均列＝合計÷列数。
+- 反映先：`/api/performance/weekly`（実績表）・`/api/performance/monthly`（当月実績）・`/api/performance/cohort`（直近6ヶ月）は同じ `computeWeeklyMatrix` を使うので自動で揃う。目標登録の参考値（`/api/performance/target/reference`）は人数（期間DISTINCT）のみ参照で不変。
+
 実績表は「過去に何件紹介し、何件通過し、何件内定したか」の**累積実績**を見るもの（現在進行中の有効案件ではない）。
 
 - キー対応（厳守）：
   - **求人検索**＝CandidateFile BOOKMARK `createdAt`・User.id（`uploadedByUserId`）。マトリクス上部の「検索」件数は変更しない。
-  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は統合イベントの候補者**通算最古日 `MIN(pdate)` 基準＝entry と同型**：`first_p >= レンジ開始`＝新規候補者、`first_p < レンジ開始`＝既存候補者（**候補者単位で排他、初回+既存=合計**）。`weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS）＋`props` CTE（`MIN(pdate) OVER`）。⚠️ **`ROW_NUMBER`（rn=1/rn>1・イベント単位）方式は誤り**：1人月20件もの提案があると新規候補者も同月に2件目以降を持ち初回・既存に二重計上され「既存≒合計（構成比≒100%）」になる（T-071 修正①で MIN 方式へ是正、2026-06-07）。
+  - **求人紹介（提案）＝両ソース統合**：`JobEntry.jobIntroDate` ∪ `CandidateFile BOOKMARK.lastExportedAt`。担当は両方とも `candidate.employeeId` 軸に統一。記録方式が **2026/4 に移行**（jobIntroDate 〜2026/4、lastExportedAt 2026/4〜）したため、片方だけでは過去 or 現在が欠ける。同一候補者×同一JST日のクロスソース重複は CF 側を除外（移行重複ガード、実データ衝突0件）。初回/既存は下記「件数・人数・新規の数え方（2026-09-12 確定）」に従う（エントリーと同一定義）。`weeklyMatrix.ts` の `events` CTE（UNION ALL＋NOT EXISTS）＋`ranked` CTE（候補者×暦月の `ROW_NUMBER`）。
   - **面談＝担当軸＝候補者の担当 CA `candidate.employeeId`（Employee.id）**。実施者軸（`interviewerUserId`）は使わない。
   - **面談ランク**＝`InterviewRating.overallRank`（`overall_rank`、InterviewRecord と 1:1・LEFT JOIN・nullable）。実データの値体系は **A+/A/B+/B/C/D ＋ 未評価(null)**（**S は存在しない**）。約55%のみ rank 付与。円グラフは**初回面談**（担当軸・到達ベース・実施判定・`interview_count = 1`）を rank 別集計、null は「未評価」に寄せ合計＝初回面談数（マトリクスの `interview.first`）。`computeInterviewRankBreakdown()`（weeklyMatrix.ts）。理由：その期間に新規で会った人の質の分布を見るため、2回目以降の再面談（評価重複）を除外。
   - **エントリー以降＝担当軸＝`candidate.employeeId`**。
@@ -275,7 +293,7 @@ model InterviewMemo {
   - **目標（粒度別）**：week＝起算月の月目標を 5 週営業日按分（`allocateToWeeks`、TOTAL=月目標）。day＝月目標÷月営業日数を営業日列に配分（土日祝列0、TOTAL=列合計）。month＝各列の月の登録目標そのまま（未登録は null、TOTAL=登録分の合計）。達成率＝TOTAL実績÷TOTAL目標。
   - 各週の実績＝`src/lib/performance/weeklyMatrix.ts:computeWeeklyMatrix`（raw SQL）。返す内容：
     - 面談：初回(count=1)/2回目(=2)/3回目以降(>=3)/合計、notDeclined。
-    - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者の**初回**提案/エントリー（`MIN(date) OVER (PARTITION BY candidate)` がレンジ内）。既存＝初回がレンジより前。新規uniq+既存uniq=合計uniq を検証済み。
+    - 求人紹介・エントリー：**新規/既存/合計 × 件数(レコード)・人数(候補者ユニーク)・1人当たり(件数÷人数)**。新規＝その候補者が**その暦月(JST)に出した1件目**、既存＝その月の2件目以降（上記「件数・人数・新規の数え方」）。合計列の人数は期間全体の DISTINCT。
     - 選考状況：書類通過/内定/承諾（候補者ユニーク人数）＋決定売上(`SUM(revenue) WHERE acceptanceDate in range`)/決定単価(売上÷承諾人数)。
     - 数え方は `computeCaMetricsForRange` と整合（entry uniq・紹介件数・初回面談が一致することを検証済み）。
   - **TOTAL（5週合計）はユニーク再集計**：週別の単純合計ではなく、起算日〜W5末の全期間で `computeWeeklyMatrix` を再呼び出し（複数週にまたがる同一候補者の重複を排除）。週別合計とTOTALが一致しないことがあるのは仕様。
@@ -896,3 +914,381 @@ UNIQUE `(user_id, date)`, INDEX `date`）。既存テーブルの変更なし。
     追加（Json 相乗り・テーブル/保存API無変更。speaker なしの過去データは従来表示）。auto-scan・explain へ送る
     テキストにも「CA:」「求職者:」プレフィックスを付け、両 system プロンプトに「話者ラベルは誤りうる。矛盾したら
     内容を優先」を明記。Web Speech フォールバックは話者識別なし（従来表示）。
+
+## スカウト配信条件コンソール（T-194, master, 2026-09-14）
+
+- **目的**: マイナビ側に保存した検索条件を名前で選ぶ現行方式（号機と担当者の組み合わせがズレると別条件で配信されても
+  「成功」で終わる事故が起きた）をやめ、**portal 側で検索条件6軸を持ち、RPA がマイナビの検索フォームへ直接入力する方式**へ
+  移行する。本タスクはその**第1段階＝条件を管理する画面（`/scout/conditions`）とデータモデルまで**。
+  仕様の正本は `スカウト検索条件_新方式_検索軸仕様_2026-09-13.md` / `スカウト配信条件コンソール_UI仕様_2026-09-13.md`（リポジトリ外）。
+- **コミット**: 9f5f202（master へは merge 6fd65f5 で反映）。
+- **マイグレーション**: `20260914090000_t194_scout_conditions`（追加のみ・IF NOT EXISTS／enum と FK は `DO $$ ... EXCEPTION WHEN duplicate_object` で冪等）。
+  既存テーブルへの変更は `rpa_scout_machines` への nullable 列 `default_template_id` 追加のみ。既存レコードの書き換えは無い。
+
+### 号機マスタ: 既存 `RpaScoutMachine`（rpa_scout_machines）を流用
+
+- portal には号機テーブルが2つある。`ScoutDeliverySlot.machineId` が参照する `ScoutMachineMaster`（配信実績集計用。
+  `recruiterName`+`validFrom` がキー・社員行も混在・2026-09-14 時点で5号機が active のまま）ではなく、
+  `RpaScoutMachine`（`machineNo` 一意＝1行/号機・`isActive` が既に 1〜4=稼働 / 5〜6=停止 で仕様一致・RPA 検索条件管理
+  `/admin/rpa-scout` の既存マスタ）を号機マスタとして使う。`ScoutCondition.machineId` / `ScoutRun.machineId` はこちらを参照。
+- 追加したのは nullable `defaultTemplateId`（→ `scout_templates`）のみ。**号機別デフォルト割当は使わない（全号機が全テンプレートを共用）と
+  2026-09-14 に確定**したため、本番は全号機 null のまま（列は残置）。
+- **マイナビ上の担当者名はテーブルに持たない**。画面表示は `src/lib/recruiterDisplay.ts` の `splitRecruiterDisplay(\`${machineNo}号機\`)`
+  で RC_ROSTER から導出する（独自の号機↔担当者対応表を作らない）。
+
+### 新規テーブル（Prisma モデル名 / 物理名）
+
+| モデル | 物理名 | 主な列 |
+|--|--|--|
+| `ScoutTemplate` | `scout_templates` | `kind`(ScoutTemplateKind) / `name` / `subject` / `body`(Text) / `sortOrder` / `isActive`。`@@unique([kind, name])`。件名・本文の差し込みタグ `[担当者]` `[社名]` `[最終学歴]` `[経験職種]` は生のまま保持（RPA 側で置換） |
+| `ScoutCondition` | `scout_conditions` | `machineId`(→rpa_scout_machines) / `status`(ScoutConditionStatus, 既定 QUEUED) / `queueOrder`(予約の並び順) / **1.** `searchTarget`(ScoutSearchTarget) / **2.** `registDateMode`(ScoutRegistDateMode) + `registDays`(1/3/7/14/30/60/90/180/360) + `registDateFrom`/`registDateTo`(@db.Date) / **3.** `lastLoginDays`(既定1) / **4.** `gradYearFrom`/`gradYearTo` / **5.** `companyCount`(null=-- / 0=0社 / 1〜6=～N社 / 7=7社以上) / **6.** `areaMode`(ScoutAreaMode) + `prefectures`(String[]) / `templateId`(→scout_templates, SetNull) / `plannedCount` / `deliveryDate`(@db.Date) / `createdById`(→users, SetNull) / `createdAt`(=予約登録日時) |
+| `ScoutRun` | `scout_runs` | `conditionId`(→scout_conditions, **Cascade**) / `machineId` / `executedAt`(真のUTC instant) / `extractedCount` / `sentCount` / `isDry` / `rawNotification`(完了通知の原文, Text) |
+| `Holiday` | `holidays` | `date`(@db.Date, unique) / `name` |
+
+enum 5種: `ScoutTemplateKind`(UNSENT/SENT/INDIVIDUAL) ・ `ScoutConditionStatus`(RUNNING/QUEUED/DRY/DONE) ・
+`ScoutSearchTarget`(EXCLUDE=含まない〔未送信〕/ ONLY=のみ〔送信済〕/ INCLUDE=含む) ・ `ScoutRegistDateMode`(PERIOD=期間指定 / DATE=日付入力) ・
+`ScoutAreaMode`(NATIONWIDE/EAST/WEST/PREFECTURE)。
+
+**固定値6項目は列を持たない**（RPA が常に固定入力する。schema.prisma と migration.sql のコメントに明記）:
+学歴=不問（チェックを入れない。入れると学歴欄が空の求職者が落ちる）／経験職種=指定なし／居住地=指定なし／0社を除く=チェックなし／
+除外リストの会員=含まない／自社へ応募した会員=含まない。画面の詳細パネルには「固定値」として定数 `FIXED_VALUES` から表示するだけ。
+
+日付の持ち方: `@db.Date` 列は UTC 0時の Date として保持し、読む側は `toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })`
+（UTC 0時＝JST 9時なので同じ日付になる）。`executedAt` / `createdAt` は真の instant（`/admin/rpa-scout` 系の「JST壁時計をUTC欄に載せる」方式とは別）。
+
+### API（ログインセッション必須・`getSessionUser()`。RPA 向け外部 API は未実装）
+
+| ルート | 役割 |
+|--|--|
+| `GET /api/scout/conditions` | 条件全件＋号機（`RpaScoutMachine`）＋テンプレート＋祝日を1レスポンスで返す（`ConditionsResponse`）。絞り込みはクライアント側 |
+| `POST /api/scout/conditions` | 作成。`parseConditionInput()` で検証（PREFECTURE で都道府県0件は 400／PERIOD で registDays 未指定は 400 等）。QUEUED で `queueOrder` 未指定なら号機内の末尾（max+1） |
+| `PATCH /api/scout/conditions/[id]` | 部分更新（渡した項目だけ検証・`createdById` は変えない） |
+| `DELETE /api/scout/conditions/[id]` | 削除（`scout_runs` は Cascade で一緒に消える） |
+| `POST /api/scout/conditions/bulk` | `{ action: "duplicate" \| "delete", ids }`。複製は **status=QUEUED・同じ号機の末尾・`deliveryDate` は引き継がない・登録者=操作者** |
+
+共通処理は `src/lib/scout-conditions/server.ts`（`conditionInclude` / `toConditionDto` / `parseConditionInput` / `toPrismaData`）。
+
+### シード（`scripts/seed-scout-conditions.ts`。upsert・存在チェックで再実行可）
+
+実行: `export DATABASE_URL=<master worktree の .env の値>; npx tsx scripts/seed-scout-conditions.ts`（`railway run` は使わない）。
+
+| 対象 | 元データ | 2026-09-14 投入結果 |
+|--|--|--|
+| 祝日 | `prisma/seed/holidays-2026.json`（UI仕様書の2026年18日。振替休日 5/6・国民の休日 9/22 含む） | 18件 upsert（date unique） |
+| 号機 | `RpaScoutMachine.isActive` を 1〜4=true / 5〜6=false に **updateMany するだけ**（行は作らない） | 更新0件（既に仕様どおり） |
+| テンプレート | `prisma/seed/scout-templates.json` を `(kind, name)` で upsert | 19本（未送信5 / 送信済9 / 個別5） |
+| 初期条件 | `scout_conditions` が空のときだけ、稼働号機ごとに `RpaScoutLog` 最新→`RpaScoutPattern` を6軸へ写像し **RUNNING** で1件ずつ作成。テンプレートはログの件名テンプレ名で照合 | 4件（1号機=EXCLUDE・7日以内、2〜4号機=ONLY） |
+
+- **テンプレート JSON の出所**: 仕様では `prisma/seed/05.集計ファイル.xlsx`「テンプレートマスタ」から生成する想定だったが、
+  xlsx が開発機に無かったため、同じマスタを移行済みの **`rpa_scout_subject_templates`（kind 付き・有効19本＝仕様の内訳と一致）から
+  `scripts/generate-scout-templates-json.ts --from-db` で生成**した。xlsx が入手できたら `--xlsx <path>` で再生成→シード再実行で上書きできる
+  （列名「種別/名称/件名/本文」をヘッダで探す実装。xlsx の実レイアウトは**未確認**）。JSON はコミット、xlsx は `.gitignore`（`prisma/seed/*.xlsx`）。
+- 初期条件の写像規則: `sendStatus` SENT→ONLY / UNSENT→EXCLUDE。`registDirection` WITHIN→PERIOD、**AFTER（N日以降＝既登録）は
+  DATE モードで「終了=当日−N日・開始なし」**、原文「N日前」は from=to=当日−N。`companyCount` は 0〜7 の範囲外なら null。
+
+### 既知制約・未実装
+
+- **条件を削除すると `scout_runs`（実績）がカスケード削除される**。T-195 で「実績がある条件は削除不可」に変更予定。
+- 未実装（T-195 以降）: RPA 向け条件取得 API・実績（完了通知）受け取り API（`scout_runs` へ書くのはこれ。現状0件）・
+  枯渇判定（送信件数10件未満）と予約の自動消化・予約切れの LINE WORKS 通知/タスク自動起票。
+  画面上部の「◯号機の予約が空です」警告帯は **QUEUED が無い稼働号機を数えて出す静的表示のみ**で、通知・起票はしていない。
+- 一覧の枯渇色（送信件数 < 10 または status=DRY）は `isDryRow()`（`_components/filter.ts`）で判定。閾値は `DRY_THRESHOLD`（constants.ts）。
+
+## 配信条件の日付切替（T-209 → T-210 → T-211, master, 2026-09-18）
+
+**運用ルール（T-211 で確定）: 有効になるのは「配信日が今日」の条件だけ。前日のうちに翌日分を予約しておけば翌朝に
+自動で有効になる。配信日が過ぎたものは自動で完了。**
+
+T-209 は**その号機に有効（RUNNING）が無いときだけ**予約を上げる作りで、前日の有効が残っていると翌日の予約が
+永久に始まらなかった（2026-09-18 朝に1〜4号機すべてで発生し、人が手で完了→有効にした）。T-210 で「前日の有効を自動で完了」を
+足したが、**対象を「配信日が今日以前」にしたため**配信日が過去の予約（9/13）が拾われ、過去日付の有効が一覧を開くたびに
+完了→切替→LINE通知を繰り返した。さらに保存時の状態自動決定（T-197）が配信日を見ないため 9/21 配信予定の条件が当日に有効になった。
+T-211 で下記に変更。
+
+| 論点 | T-210 | **T-211（現行）** |
+|--|--|--|
+| 前日以前の有効 | 配信日が今日より前なら DONE（配信日が空なら最新実行日で判定・実行も無ければ何もしない） | 同じ（変更なし） |
+| 期限切れの予約 | 触らない（有効に上げてしまっていた） | **配信日が今日より前なら自動で DONE**（通知なし。配信日が空の予約は触らない） |
+| 上げる予約の対象 | 配信日が空、または今日以前 | **配信日が今日と一致するものだけ**（過去・未来・空欄は対象外） |
+| 上げる予約の選び方 | 一覧の ▲▼ の並び順（queueOrder→登録順）で一番上 | 同じ（変更なし） |
+| 有効が無くなった号機 | 通知なし | 通知なし（T-211 で1行通知を足したが **T-212 で廃止**。朝のまとめ通知の「条件なし」で分かる） |
+| 保存時の状態決定 | 号機に有効が無ければ有効（配信日は見ない） | **配信日が今日 かつ 号機に有効が無い → 有効。それ以外は予約の末尾** |
+| 枯渇時の予約消化の候補 | 予約の ▲▼ 先頭（配信日は見ない） | **配信日が今日の予約の ▲▼ 先頭**（しきい値10件・is_dry・通知・タスクは不変） |
+
+- **判定の単一ソースは `src/lib/scout-conditions/rollover.ts`（純関数・DB も現在時刻も見ない）**。
+  `shouldCompleteRunning()` / `shouldCompleteQueued()` / `pickQueuedToActivate()` を、サーバー側（`activate.ts`）・
+  枯渇時の予約消化（`runs.ts`）・一覧の「翌朝有効」バッジ（`_components/filter.ts` の `nextMorningConditionIds`）が共用する。
+  規則を変えるときはここ1か所。境界（今日ちょうど／昨日／明日／空欄）は各関数の JSDoc に明記してある。
+- 実行は `activate.ts` の `runDateRollover(machineId)`（号機ロックの中で 2-1 有効の完了 → 2-2 期限切れ予約の完了 →
+  2-3 当日の予約を有効化 の順）。呼び口は2つ:
+  `GET /api/external/scout-conditions/current`（RPA。**有効の有無にかかわらず毎回通す**）と `GET /api/scout/conditions`（一覧表示）。
+  cron は無い（RPA か人が触った時点で切り替わる。1号機の夜間フローが 5:00 に取りに来るのでその時点で当日扱いになる）。
+- **T-212: `runDateRollover()` は LINE WORKS へ何も送らない**（DB の状態を直すだけ）。通知は下の朝のまとめ1通に一本化した。
+- 「翌朝有効」バッジ: 今の有効が明朝の判定で完了になる見込み（配信日が今日以前 / 配信日が空で最新実行が今日以前）か、
+  今の有効が無い号機にだけ、**配信日が明日ちょうど**の予約の先頭1件へ出す。今の有効の配信日が明日以降なら出さない。
+- **配信日の自動補完はしない**（T-210 までは「有効にするとき配信日が空なら当日を入れる」をしていたが、
+  有効になるのは配信日が今日の行だけになったので `create.ts` / `activate.ts` / `runs.ts` の補完はすべて削除した）。
+- 副作用として、**配信日が今日の予約が1件も無い号機は有効なしになる**（RPA は `condition: null` で停止）。
+  枯渇経路の「予約が空」通知・ポータルタスク起票（`queue-empty.ts`）は不変。
+- 日付は必ず `jstTodayYmd()`（`toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })`）基準。`toISOString().slice(0,10)` は使わない（罠#17）。
+
+## 朝の「本日の配信条件」まとめ通知（T-212, master, 2026-09-19）
+
+**スカウト配信条件の LINE WORKS 通知を「朝1通のまとめ」に一本化した。**
+
+T-210/T-211 は日付切替のたびに号機ごとに「条件Aを完了 → 条件Bに切替」を送っていたが、
+**1号機の夜間フローが 5:00 に `/current` を取りに来るため通知が早朝に飛び**、しかも完了した条件が無い号機には出なかった。
+運用の求めは「RPA が動き出す8時前後に、全号機の本日の配信条件を1通で」。
+
+| 通知 | T-211 | **T-212（現行）** |
+|--|--|--|
+| 日付切替の「条件Aを完了 → 条件Bに切替」 | 号機ごとに1行 | **廃止** |
+| 「本日の配信条件がありません」 | 有効が無くなった号機に1行 | **廃止** |
+| **朝の「本日の配信条件」まとめ** | – | **新規（1日1通・全号機分）** |
+| 枯渇して次の予約に切り替わった通知 | あり | 変更なし |
+| 枯渇したのに次が無い通知＋ポータルタスク | あり | 変更なし |
+
+- 送るタイミング: `GET /api/external/scout-conditions/current` が **その日（JST）の 07:00 以降に最初に呼ばれたとき**、
+  日付切替（`runDateRollover`）を終えた**あと**。**07:00 より前（1号機の夜間フロー 5:00）では送らない**（切替自体は走る）。
+  RPA が一度も動かない日は送られない（許容済み）。cron は無い。
+- 実装は `src/lib/scout-conditions/daily-summary.ts` の `notifyDailySummaryIfDue()` 1か所。呼び口は `external.ts` のみ。
+  文面の組み立ては**純関数 `buildDailySummaryMessage(todayYmd, lines)`**（DB も現在時刻も見ない）。
+  行は稼働中（`isActive`）の号機を号機番号順に、有効（RUNNING）の条件を `conditionLabel()` の要約＋レコード番号（`1-017`）で1行ずつ。
+  有効が無い号機は「条件なし」。**テンプレート名は入れない**（長くなるため）。
+- 1日1回の担保: **新規テーブル `scout_daily_notifications`**（`date` @db.Date が主キー・`sent_at`）。
+  `createMany({ skipDuplicates: true })`（= ON CONFLICT DO NOTHING）1文で行を取れた呼び出しだけが送るので、
+  複数号機が同時に取りに来ても1通に絞られる。
+- 呼んできた号機以外はまだ当日の切替を通っていないことがあるため、文面を作る前に `runDateRolloverForActiveMachines()` を通す
+  （判定は `rollover.ts` のまま。ここに規則は足さない）。
+- **送信失敗で RPA を止めない**: この経路は throw せず `console.warn` に残すだけ。`/current` のレスポンスは常に正常に返る。
+
+```
+【スカウト】本日（9/19 土）の配信条件が有効になりました
+1号機: 未送信/7日以内/卒15-26/～3社/全国（1-017）
+2号機: 送信済/2026-09-17〜2026-09-17/卒15-26/～3社/全国（2-010）
+5号機: 条件なし
+```
+
+## 配信条件の実行履歴タブ・結果＝初回値・実行回数（T-213, master, 2026-09-20）
+
+1条件が1日に何回も実行される（1回50人前後）ため、条件一覧の「最新の実行日時」だけでは履歴が追えず、
+RPA から届く「検索結果件数」を回数分合算していたため 26859 のような母数になっていた。
+
+- **「実行履歴」サブタブ**: `/scout/conditions?view=runs`。1行＝`scout_runs` 1件を実行日時の新しい順。
+  列は条件一覧と同じ2段組み（実行日時/枯渇・号機/担当者・条件NO/状態・検索対象/登録日・ログイン/卒業年度・経験社数/居住地・
+  希望勤務地/テンプレート・結果・抽出/送信）。条件側の項目は**その条件に現在設定されているもの**（実行時の値は RPA から届かない。
+  T-201 の編集ロックで実績のある条件は状態以外変わらないため一致する）。
+  絞り込みは期間（実行日時基準・既定は今日を含む直近7日）／号機／枯渇のみ／文字検索（NO・条件要約・テンプレート名・担当者名の部分一致）。
+  100件ずつページング・総件数表示・表示中の CSV。NO クリックで既存の編集モーダル。
+  内部 API `GET /api/scout/runs?from=&to=&machines=&dry=&q=&page=`（`src/lib/scout-conditions/run-history.ts`）。
+  期間・号機・枯渇は DB で絞り、文字検索とページングは在庫で行う（照合対象が表示用の合成文字列のため）。
+  **外部 API（`/api/external/scout-conditions/*`）は不変。**
+- **「結果」（検索結果件数）は初回の値**: 値を持つ実行のうち `executed_at` が最も古い1件の値（`firstSearchResultCount`。
+  `server.ts` の `firstSearchResultCount()` 1か所）。適用先は条件一覧の「予測/結果」下段（達成率も同じ値で計算）・
+  編集モーダルの実績「結果」・条件一覧 CSV（「結果件数（初回）」列を追加）。集計・グラフに合算箇所は無かった。
+  `totalSearchResultCount` は廃止。抽出・送信の累計（T-203）は変えていない。
+- **条件一覧の「実行日時」下段に実行回数**（`3回`。0回は `-`）。CSV にも「実行回数」列。
+
+## 配信条件の更新者/更新日時・同日他号機との重なり表示（T-214, master, 2026-09-20）
+
+### 更新者・更新日時（マイグレーション `20260920120000_t214_scout_condition_edited_by`）
+
+`scout_conditions` に nullable の `edited_at` / `edited_by_id`（User 参照・ON DELETE SET NULL）を追加。
+`updated_at`（`@updatedAt`）は日付切替・枯渇切替・RPA の結果受信など自動処理でも動くため、**人が保存した操作だけ**に付ける別列。
+付与は `server.ts` の `editorStamp(actorId)` 1か所。
+
+| 操作 | 書く |
+|--|--|
+| 編集モーダルの「保存する」（PATCH `/api/scout/conditions/[id]`） | ○ |
+| 一覧・モーダルからの手動の状態変更（同じ PATCH） | ○ |
+| 一括操作（`bulk/route.ts`）: 複製＝新規作成なので作成者のみ（更新は `-`）／削除＝行が消える | – |
+| ▲▼の並び替え（bulk `move`） | × |
+| 日付切替（`activate.ts` / `rollover.ts`）・枯渇による切替（`runs.ts`）・朝のまとめ通知・RPA の結果受信 | × |
+
+編集モーダルの実績ブロックは 配信日／**作成**（作成日時＋登録者を1行）／**更新**（更新日時＋更新者。未更新は `-`）／最終実行／予測・結果・抽出・送信。
+「登録者」の単独行は「作成」に統合して廃止。既存レコードは null のまま。
+
+### 同日の他号機パネル（`SameDayPanel.tsx`）
+
+編集モーダルを左右2列（最大幅 1560px）にし、右に「同日の他号機」パネル。
+対象は**他の稼働中号機**（`RpaScoutMachine.isActive`）の**有効・予約**で、配信日がフォームの配信日と同じもの（**空なら今日**）。
+内部 API `GET /api/scout/conditions/same-day?date=&machineId=`（号機順→▲▼順）。モーダルを開いたとき、配信日・号機が変わったときに取り直す。
+**1280px（xl）未満では右パネルをフォームの下に回す**。xl 以上ではスクロールしても右パネルは上に留まる（sticky）。
+
+> ⚠️ T-214 で入れた「**重なり**」（7軸すべてが**交わる**）は **T-216 で廃止**し、「**重複**」（7軸すべてが**一致する**）に置き換えた。
+> 判定の中身は下の「T-216」の節を参照。`overlap.ts` は `duplicate.ts` になり、`overlapRecordNos` は `duplicateRecordNos` になっている。
+
+- 触っていないもの: 外部 API のレスポンス構造・受け入れ処理、状態の内部値、日付切替・枯渇判定・通知、保存時の状態決定、編集ロック。
+
+## 配信条件の配信日を必須にする（T-200, master, 2026-09-21）
+
+**配信日が空の配信条件は作れない・保存できない。** 空だと一覧の期間フィルタ（予約日/配信日基準）にも
+日付タブ（前日/当日/翌日）にも出ず、「すべて」でしか見つからない行になるため。
+T-211 で「空なら当日を入れる」サーバー側の補完は廃止しているので、**空は空のまま保存させない**方針に揃えた。
+
+| 場所 | 挙動 |
+|--|--|
+| 編集モーダル（新規作成・複製後・編集） | 項目名「配信日」に赤い `*`。空のまま「保存する」を押すと入力欄の直下に赤字「配信日を入力してください」を出し、保存しない（`FormRow` の `required` / `error`） |
+| サーバー（POST `/api/scout/conditions`・PATCH `/api/scout/conditions/[id]`） | `parseConditionInput` が空を 400 で弾く |
+| **実績のある条件（T-201 のロック中）** | **必須チェックを飛ばす**。判定は PATCH の `const locked = current.runs.length > 0`（`parseConditionInput(..., { requireDeliveryDate: !locked })`）。配信日が空のまま実績を持ってしまった古い行の「状態だけ変える」操作を止めないため。画面側も同じ判定（`locked` なら save のチェックをしない） |
+| 一括複製（bulk `duplicate`） | 配信日は引き継がず**空のまま作る**（サーバー側の補完もしない）。画面の「複製」は作成後そのままモーダルを開くので、そこで配信日を入れて保存する |
+| 一覧の「予約日/配信日」列 | 下段が空の行は赤字で **`配信日なし`**（2026-09-21 時点で 3-018 の1件） |
+
+- `requireDeliveryDate` を false にしてよいのはロック中の行だけ。既定は true。
+- 触っていないもの: 外部 API のレスポンス構造・受け入れ処理、状態の内部値、日付切替（`rollover.ts`/`activate.ts`）、朝のまとめ通知、枯渇判定・通知・予約消化、保存時の状態決定（T-211）。
+
+## 保存前の確認画面・一覧の更新日時・「重複」の新定義（T-216, master, 2026-09-21）
+
+スカウト配信条件コンソール（`/scout/conditions`）の運用要望3件。**スキーマ変更なし**（`edited_at` / `edited_by_id` は T-214 で追加済み）。
+
+### 1. 保存前の確認画面（`ConditionModal.tsx`）
+
+編集モーダル（新規・編集・複製のすべて。**ロック中〔T-201〕の行も同じ**）で「保存する／登録する」を押すと、
+**すぐには保存せず、モーダルの中身を確認画面に差し替える**（別モーダルは重ねない）。見出しは「保存内容の確認」。
+
+| | |
+|--|--|
+| 表示項目（`FormGroup`/`FormRow` の1行1項目） | 号機・担当者／**状態（保存後にどうなるか**。新規は T-211 の規則で「有効」か「予約（末尾）」、編集・ロック中は変更後の値）／配信日／検索条件7軸（一覧と同じ要約文言）／配信文（`T-001　テンプレート名`）／予測件数／**重複**の有無 |
+| 重複あり | その行に赤字で `2号機 2-018 と重複しています`（§3 の新定義。同日の他号機がまだ読めていない間は「確認中…」） |
+| ボタン | 「戻る」（編集へ。**入力内容は保持**）／「この内容で保存」の2つだけ |
+| 成功 | モーダルを閉じて一覧へ戻り、一覧を読み直す（新規作成でも開き直さない）。「重複」印はサーバーが一覧 GET で付けるため読み直しが要る（`ConditionsClient` の `refresh()`。スピナーを出さず複製ハイライト〔T-204〕も消さない） |
+| 失敗（400/409 等） | 確認画面に留まり、エラー文をその場に赤字で出す（閉じない） |
+| Enter | 保存しない。モーダル内の入力欄・プルダウン上の Enter は `onKeyDown` で無効化（ボタン・リンク・textarea は通す）。保存は2回の明示的なクリックだけ |
+| Esc | 確認画面では**編集に戻る**（入力を捨てない）。編集画面では従来どおり閉じる |
+
+- 配信日の必須チェック（T-200）は確認画面へ進む前（`requestConfirm`）で行う。不正な値のまま確認画面に進ませない。
+- 実処理は `save()`（従来どおり POST / PATCH）。ボタンの押し口が `requestConfirm` → `save` の2段になっただけで、送る中身・サーバー側は不変。
+
+### 2. 一覧の「予約日/配信日」列の上段を更新日時に（`ConditionTable.tsx`）
+
+- 上段: `edited_at` があれば **`更新 2026-09-21(月) 10:02 大野`**（更新者は**姓だけ**。`filter.ts` の `surnameOf`。ホバーで予約日）。無ければ従来どおり予約日（`createdAt`）。見出しは「予約日/更新」。
+- 下段: 配信日（変更なし。空なら赤字「配信日なし」も従来どおり）。
+- **並び替え・絞り込みの基準は変えない**（期間フィルタの「予約日」は従来どおり `createdAt`、日付タブは配信日）。実行履歴タブも変更なし。
+- 条件一覧 CSV に **「更新日時」「更新者」**（フルネーム）の2列を「予約登録日時」の右へ追加。
+  あわせて **T-194 から見出しと値が入れ替わっていた「作成日」「配信日曜日」の2列の見出しを値に合わせて直した**（値の並びは不変）。
+
+### 3. 「重なり」→「重複」・判定は同一条件のみ（`src/lib/scout-conditions/duplicate.ts`）
+
+T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しでも触れる）だったが、最終ログイン日「N日以内」は必ず今日を含むため実質つねに交わり、
+居住地「全国」・希望勤務地「指定なし」も何とでも交わるので、**条件がまったく違う組にまで印が付いていた**（2026-09-21 時点で15行）。
+印を見に行く意味が無くなっていたため、**7軸すべての値が一致する組だけ**を「重複」とする定義に変えた。**旧判定は廃止**。
+
+**重複＝次をすべて満たす**: ① 同じ配信日（配信日が空の有効・予約は「今日」とみなす。T-214 と同じ約束） ② 別の号機（同じ号機どうしは対象外）
+③ 相手の状態が有効（RUNNING）または予約（QUEUED）・相手の号機が稼働中 ④ **7軸すべてが同じ値**。
+
+判定は軸ごとに「正規化した文字列キー（`axisKey`）が等しいか」。**境界の考え方は一致のみで、範囲の交差は見ない。**
+
+| 軸 | 一致とみなす値（`axisKey`） |
+|--|--|
+| 検索対象 | 値そのもの（`EXCLUDE` / `ONLY` / `INCLUDE`） |
+| 登録日 | 指定方法＋値。期間指定は `PERIOD:7`（未選択＝指定なしは `PERIOD:`）、日付入力は `DATE:2026-09-01~2026-09-07`（端が空はそのまま空）。**指定方法が違えば別物** |
+| 最終ログイン日 | 日数そのもの（`1日以内` と `3日以内` は別物） |
+| 卒業年度 | 開始と終了の組（`2015-2026`。指定なしは空文字。`15-26` と `21-22` は**別物**） |
+| 経験社数 | 値そのもの（指定なしは空文字。`～3社` と `～1社` は**別物**） |
+| 居住地 | 都道府県の集合（全国/東日本/西日本は `expandAreaToPrefectures` で展開してから比較。「全国」と「47都道府県を選んだ都道府県指定」は一致） |
+| 希望勤務地 | 都道府県の集合（指定なし〔ALL〕は RPA が「全国」を入れるので全都道府県に展開して比較） |
+
+- 関数: `isDuplicate(a, b)`（真偽）／`conditionKey(c)`（7軸をまとめた1本のキー）／`axisKey(key, c)`／`duplicateAxes(a, b)`（軸ごとの内訳）／
+  `findDuplicates(target, others)`／一覧用 `computeListDuplicates(rows, activeMachineIds, todayYmd)`（「同じ日 × 同じ7軸キー」でまとめてから他号機を拾う）。
+  **`todayYmd` を使うのは「配信日が空なら今日」の読み替えだけ**で、軸の判定は現在時刻に依存しない（旧判定は「N日以内」を今日基準の区間に直していた）。
+- 文言はすべて「**重複**」に統一: 一覧の赤い印／モーダル上部の赤字 `… と重複しています`／右パネルの見出し `重複 N件` と行バッジ／確認画面の「重複」行。
+- DTO は `overlapRecordNos` → **`duplicateRecordNos`**、サーバー側は `attachListOverlaps` → **`attachListDuplicates`**、ファイルは `overlap.ts` → **`duplicate.ts`**。
+
+**本番（読み取りのみ）での印の変化（2026-09-21・全82件／判定対象26件）**
+
+| | 印の付いた行 |
+|--|--|
+| 変更前（T-214「重なり」） | 15行: 1-016・2-008・2-009・2-012・2-014・3-007・3-008・3-011・3-018・3-019・4-011・4-012・4-014・4-018・5-005 |
+| 変更後（T-216「重複」） | **0行** |
+
+当日タブに出る8行（1-016・2-008・2-009・3-007・3-008・4-011・4-012・5-005）の印は全部消える。
+7軸キーを並べると差が見えるので妥当: 3-007 と 4-011 は居住地だけが違う（東日本17県 / 西日本30県）、3-007 と 3-008 は卒業年度・経験社数が違う、など。
+
+- 触っていないもの: 外部 API（`/api/external/scout-conditions/current`・`/runs`）、状態の内部値（`RUNNING`/`QUEUED`/`DRY`/`DONE`）、
+  保存時の状態決定（T-211）、編集ロック（T-201）、日付切替・朝のまとめ通知・枯渇判定・通知・タスク作成、`seq_no`/`T-001` 採番、`scout_templates`、都道府県短縮表記、スキーマ。
+
+## 号機の稼働オン/オフを画面から切り替える（T-215, master, 2026-09-21）
+
+`RpaScoutMachine.isActive` は seed / スクリプトでしか変えられなかった。**スキーマ変更なし**（既存列）で切替 UI を足した。
+
+- 場所: `/scout/conditions`（条件一覧）の**絞り込みエリア右端の「号機設定」ボタン** → 中央モーダル `MachineSettingsModal.tsx`。
+  号機番号順（1〜6号機）に「号機／担当者／稼働トグル」の3列。担当者名は `MachineLabel` と同じ既存の紐付け（`recruiterDisplay` の `RC_ROSTER`）で、独自の対応表は持たない。
+- 保存: 切替のたびに即時 `PATCH /api/scout/machines/[id]`（body `{ isActive: boolean }`・ログインセッション認証）。
+  画面へ先に反映し、失敗したら元に戻してトーストを出す。
+- 稼働オフの効き方は**既存ロジックがそのまま拾う**（`isActive` を見ている箇所は変更していない）。
+
+| 見ている場所 | 稼働オフのとき |
+|--|--|
+| 朝のまとめ通知（`daily-summary.ts`） | 対象外 |
+| 日付切替（`activate.ts` の `runDateRolloverForActiveMachines`） | 対象外 |
+| 一覧の警告帯（予約切れ／「有効」なし） | 対象外 |
+| 同日の他号機パネル（`/api/scout/conditions/same-day`）・一覧の「重なり」印（`attachListOverlaps`） | 対象外 |
+| 外部 API（`external.ts`） | `N号機は停止中です` で拒否 |
+| **条件一覧の「号機」絞り込み** | **これまでどおり全号機を出す**（停止中の号機の過去実績も見られるように） |
+
+- 稼働オフにしてもその号機の条件・実績は消さない（行はそのまま残り、一覧・CSV にも出る）。
+- 触っていないもの: 外部 API のレスポンス構造・受け入れ処理、状態の内部値、日付切替・朝のまとめ通知・枯渇判定/通知/予約消化のロジック、`seq_no` 採番。
+
+## ブックマークのエリア・職種（T-196, master, 2026-09-15）
+
+求職者詳細のブックマーク一覧（HistoryTab / BookmarkSection）に「エリア」「職種」列を追加した。
+**値の source of truth は job-platform（求人プラットフォーム）**。取り込み時に自社マスタの対応表
+（職種 大＞中＞小、エリア 都道府県／市区）で機械的に確定した値を portal にコピーして保持するだけで、
+**portal 側では推測も生成もしない（AI 呼び出しは一切なし）**。null は「未取得」＝画面は「—」。
+
+### CandidateFile の列
+
+| 列 | DB 列名 | 用途 | 例 |
+|--|--|--|--|
+| `jobArea` | `job_area` | エリア（表示用・T-196 新設） | 「東京都 港区」 |
+| `jobCategory` | `job_category` | 職種（**T-161/T-185 の既存列を流用**・新設していない） | 「CAD・CAMオペレーター」 |
+| `jobCategoryPath` | `job_category_path` | 職種フルパス（ホバー表示専用・T-196 新設） | 「技術職（機械・電気）＞設計＞CAD・CAMオペレーター」 |
+
+- migration: `20260915120000_t196_candidate_file_job_area_category`（`ADD COLUMN IF NOT EXISTS` ×3・冪等）。
+- `jobCategory` は T-185 で求人本文からの抽出も入っているため、埋め戻し前から値がある行がある
+  （本番 BOOKMARK 11,302 行中 1,558 行が 2026-09-15 時点で値あり）。job-platform からの値が来たら上書きされる。
+
+### 値の入り口（2つ・どちらも job-platform 側から）
+
+**① 既存のブックマーク受信 API（任意項目として追加・後方互換）**
+
+`POST /api/external/bookmarks/from-job-platform`（認証 `x-api-secret`: `JOB_PLATFORM_API_SECRET`）
+
+```jsonc
+{ "candidateNumber": "5008587",
+  "jobs": [{ "externalJobRef": "hl-ap-xxx", "companyName": "…", "extractedText": "…",
+             "jobArea": "東京都 港区",            // 任意・string|null|undefined
+             "jobCategory": "CAD・CAMオペレーター", // 任意（既存項目。jobType でも可）
+             "jobCategoryPath": "技術職（機械・電気）＞設計＞CAD・CAMオペレーター" }] }  // 任意
+```
+
+- 未指定なら**既存挙動と完全同一**（新規作成は null、既存行の更新では既存値を消さない）。
+- バリデーションは文字列長上限 200 文字のみ（超過は切り詰め・受信自体は失敗させない）。
+- `origin: "auto"`（T-189 自動引き当て）経路でも同じ3項目を受け取る。
+
+**② 埋め戻し用 API（既存分の一括更新・T-196 新設）**
+
+`POST /api/external/bookmarks/job-attributes`（認証は ① と同じ）
+
+```jsonc
+{ "items": [{ "externalJobRef": "hl-ap-xxx", "jobArea": "東京都 港区",
+              "jobCategory": "CAD・CAMオペレーター", "jobCategoryPath": "技術職…＞…" }] }
+// → { "ok": true, "received": 1, "matchedRefs": 1, "updatedRows": 3, "errors": [] }
+```
+
+- 1リクエスト最大 **500 件**（超過は 400）。
+- `externalJobRef` が一致する**全** `CandidateFile`（`category="BOOKMARK"`・`archivedAt` 問わず・求職者をまたぐ）を
+  `updateMany` で更新。**既に値が入っている行も上書きする**（job-platform が正）。
+  3項目とも「送られてきた値で上書き」＝部分更新はしない（未指定は null で消える）。
+- `matchedRefs` = 1行以上更新できた求人IDの数 / `updatedRows` = 実際に更新した行数。
+
+`GET /api/external/bookmarks/job-refs?onlyMissing=true`（認証は ① と同じ）
+
+- BOOKMARK の `externalJobRef` を distinct で返す → `{ "refs": [...], "count": N }`。
+- `onlyMissing=true` で `jobArea` と `jobCategory` が**両方 null** の行に限定（どちらか埋まっていれば取得済み扱い）。
+
+### 画面
+
+- 列順: `☑ | DB名 | DBNO | 会社名 | エリア(100px) | 職種(150px) | 希望 | 通過 | 総合 | 本人回答 | 担当 | 紹介日 | 操作`
+- 職種セルのホバーは `jobCategoryPath ?? jobCategory`。長い値は `truncate`。
+- **並び替え・絞り込みは対象外**（表示のみ）。紹介保留タブ（ArchivedBookmarkSection）にも出していない。

@@ -26,13 +26,15 @@ import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-
 //   - 認証は X-Auth-Key（共有鍵・mypage BFF 信頼境界）。actor は body 申告（response-status と同一慣例）。
 //     プレビューの管理者ゲート（P4 の actor=ca 経路）を通ったリクエストのみ actor="ca" で到達する想定。
 
-// 旧 EditJobModal の14項目のうち displayOverrides(JSON) に格納する13キー。
+// 旧 EditJobModal の14項目のうち displayOverrides(JSON) に格納する13キー + access（アクセス欄・2026-09-16 追加。
+// 勤務地/最寄駅を上書きしてもアクセス欄だけ元データの道順が残る不具合の対処。mypage 側 OVERRIDE_KEYS と一致させる）。
 // caComment は本JSONに入れず既存 ca_comment 列で管理（設計方針: 二重管理回避）。
 const DISPLAY_OVERRIDE_KEYS = [
   "companyName",
   "jobTitle",
   "workLocation",
   "nearestStation",
+  "access",
   "salary",
   "salaryMonthly",
   "bonus",

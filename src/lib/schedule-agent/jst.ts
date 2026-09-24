@@ -134,6 +134,12 @@ export function reservedLabel(ymd: string, hhmm: string): string {
   return `${m}月${d}日（${dowJa(ymd)}）${hhmm}～`;
 }
 
+/** "2026-07-15","19:00","20:00" → "7月15日（火）19:00〜20:00"（autoReserve レスポンスの label 用） */
+export function reservedRangeLabel(ymd: string, start: string, end: string): string {
+  const [, m, d] = ymd.split("-").map(Number);
+  return `${m}月${d}日（${dowJa(ymd)}）${start}〜${end}`;
+}
+
 /** "2026-07-15","19:00","20:00" → "7/15(火)19:00-20:00"（仮予約イベントのタイトル用） */
 export function eventTitleWhen(ymd: string, start: string, end: string): string {
   const [, m, d] = ymd.split("-").map(Number);

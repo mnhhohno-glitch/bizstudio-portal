@@ -35,6 +35,8 @@ export async function GET(request: NextRequest) {
         title: true,
         jobContent: true,
         hintNote: true,
+        modelAnswer: true,
+        gradingPoints: true,
       },
     }),
     prisma.trainingWorkAnswer.findMany({
@@ -50,6 +52,20 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
+  // 模範解答・採点ポイントは「本人が回答済みの設問」にしか返さない（送信前に見せないため）。
+  // 送信前は hasModelAnswer（あり/なし）だけを返し、画面のボタン文言に使う
+  const answeredCodes = new Set(answers.map((a) => a.itemCode));
+  const itemsForClient = items.map(({ modelAnswer, gradingPoints, ...rest }) => {
+    const hasModelAnswer = modelAnswer !== null;
+    const revealed = hasModelAnswer && answeredCodes.has(rest.itemCode);
+    return {
+      ...rest,
+      hasModelAnswer,
+      modelAnswer: revealed ? modelAnswer : null,
+      gradingPoints: revealed ? gradingPoints : null,
+    };
+  });
+
   return NextResponse.json({
     sets: sets.map((s) => ({
       workKey: s.workKey,
@@ -64,7 +80,7 @@ export async function GET(request: NextRequest) {
       description: current.description,
       fieldLabels: normalizeFieldLabels(current.fieldLabels),
     },
-    items,
+    items: itemsForClient,
     answers,
   });
 }
@@ -115,7 +131,7 @@ export async function POST(request: NextRequest) {
   // 存在しない設問への回答は弾く
   const item = await prisma.trainingWorkItem.findUnique({
     where: { workKey_itemCode: { workKey, itemCode } },
-    select: { id: true, isActive: true },
+    select: { id: true, isActive: true, modelAnswer: true, gradingPoints: true },
   });
   if (!item || !item.isActive) {
     return NextResponse.json({ error: "存在しない設問です" }, { status: 400 });
@@ -129,5 +145,12 @@ export async function POST(request: NextRequest) {
     create: { employeeId: actor.id, workKey, itemCode, ...answers },
   });
 
-  return NextResponse.json({ id: saved.id, itemCode: saved.itemCode, updatedAt: saved.updatedAt });
+  // 保存できた時点で、その設問の模範解答・採点ポイントを返す（回答送信後にのみ表示するため）
+  return NextResponse.json({
+    id: saved.id,
+    itemCode: saved.itemCode,
+    updatedAt: saved.updatedAt,
+    modelAnswer: item.modelAnswer,
+    gradingPoints: item.gradingPoints,
+  });
 }

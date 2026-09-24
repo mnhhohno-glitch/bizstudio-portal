@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import type { AnswerKey, FieldLabel } from "@/lib/training-work";
 import { ANSWER_KEYS } from "@/lib/training-work";
+import ModelAnswerPanel from "@/components/training/ModelAnswerPanel";
 
 type WorkItem = {
   id: string;
@@ -12,7 +13,13 @@ type WorkItem = {
   title: string;
   jobContent: string;
   hintNote: string | null;
+  // 模範解答（T-192）。API は本人が回答済みの設問にしか本文を返さない（送信前は hasModelAnswer のみ）
+  hasModelAnswer: boolean;
+  modelAnswer: string | null;
+  gradingPoints: string | null;
 };
+
+type ModelInfo = { modelAnswer: string; gradingPoints: string | null };
 
 type SavedAnswer = {
   itemCode: string;
@@ -70,6 +77,8 @@ export default function WorkClient() {
   // 入力途中の内容は親で保持する（求人を移動しても画面上は消えない。ただし未保存なのでリロードでは消える）
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
   const [saved, setSaved] = useState<Map<string, SavedEntry>>(new Map());
+  // 回答送信後に開示された模範解答（送信前の設問は入らない）
+  const [models, setModels] = useState<Map<string, ModelInfo>>(new Map());
   const [currentIndex, setCurrentIndex] = useState(0);
   const [finished, setFinished] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -98,6 +107,13 @@ export default function WorkClient() {
         draftMap.set(a.itemCode, d);
         savedMap.set(a.itemCode, { ...d, updatedAt: a.updatedAt });
       }
+      const modelMap = new Map<string, ModelInfo>();
+      for (const it of loadedItems) {
+        if (it.modelAnswer !== null && savedMap.has(it.itemCode)) {
+          modelMap.set(it.itemCode, { modelAnswer: it.modelAnswer, gradingPoints: it.gradingPoints });
+        }
+      }
+      setModels(modelMap);
       setSets(data.sets ?? []);
       setSet(data.set ?? null);
       setWorkKey(data.workKey ?? null);
@@ -122,6 +138,9 @@ export default function WorkClient() {
   const current = items[currentIndex];
   const currentDraft = current ? drafts.get(current.itemCode) ?? EMPTY_DRAFT : EMPTY_DRAFT;
   const currentSaved = current ? saved.get(current.itemCode) ?? null : null;
+  const currentModel = current ? models.get(current.itemCode) ?? null : null;
+  // 模範解答は「保存済み」かつ「開示済み」のときだけ出す（送信前は絶対に出さない）
+  const revealed = !!(currentSaved && currentModel);
   const isLast = currentIndex === items.length - 1;
   const savedCount = items.filter((i) => saved.has(i.itemCode)).length;
   const unsavedItems = items.filter((i) => !saved.has(i.itemCode));
@@ -206,6 +225,14 @@ export default function WorkClient() {
       };
       setSaved((m) => new Map(m).set(item.itemCode, { ...stored, updatedAt: data.updatedAt }));
       setDrafts((m) => new Map(m).set(item.itemCode, stored));
+      if (typeof data.modelAnswer === "string") {
+        setModels((m) =>
+          new Map(m).set(item.itemCode, {
+            modelAnswer: data.modelAnswer,
+            gradingPoints: typeof data.gradingPoints === "string" ? data.gradingPoints : null,
+          })
+        );
+      }
       return true;
     } catch {
       setError("保存に失敗しました");
@@ -231,6 +258,8 @@ export default function WorkClient() {
     if (!allEmpty) {
       const ok = await save(current, currentDraft);
       if (!ok) return; // 失敗時は移動しない
+      // 模範解答がある設問は、保存後にその場で答え合わせ（自己採点）してから「次へ」で進む
+      if (current.hasModelAnswer) return;
     }
     advance();
   };
@@ -403,6 +432,15 @@ export default function WorkClient() {
                   ))}
                 </div>
 
+                {revealed && currentModel && (
+                  <ModelAnswerPanel
+                    key={current.itemCode}
+                    modelAnswer={currentModel.modelAnswer}
+                    gradingPoints={currentModel.gradingPoints}
+                    idPrefix={`work-${current.itemCode}`}
+                  />
+                )}
+
                 {error && <p className="mt-2 text-[13px] text-[#DC2626]">{error}</p>}
 
                 {/* ナビゲーション */}
@@ -428,8 +466,25 @@ export default function WorkClient() {
                     disabled={saving}
                     className="ml-auto px-5 py-2 text-[14px] bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8] disabled:opacity-50"
                   >
-                    {saving ? "保存中..." : isLast ? "保存して完了" : "保存して次へ →"}
+                    {saving
+                      ? "保存中..."
+                      : revealed
+                        ? "保存し直す"
+                        : current.hasModelAnswer
+                          ? "保存して答え合わせ"
+                          : isLast
+                            ? "保存して完了"
+                            : "保存して次へ →"}
                   </button>
+                  {revealed && (
+                    <button
+                      type="button"
+                      onClick={advance}
+                      className="px-5 py-2 text-[14px] bg-[#2563EB] text-white rounded-md hover:bg-[#1D4ED8]"
+                    >
+                      {isLast ? "完了" : "次へ →"}
+                    </button>
+                  )}
                 </div>
               </div>
             )

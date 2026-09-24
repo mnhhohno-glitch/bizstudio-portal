@@ -616,7 +616,7 @@ const TASK_STATUS_LABEL: Record<string, string> = {
  * 通知内リンクは常に **本番ドメイン** へ。PORTAL_BASE_URL はサービスごとに staging/本番 が
  * 異なるため使わない（dailyReport/lineworks-notify.ts と同じ流儀）。
  */
-const PORTAL_PROD_URL =
+export const PORTAL_PROD_URL =
   process.env.PORTAL_PUBLIC_URL || "https://bizstudio-portal-production.up.railway.app";
 
 /**

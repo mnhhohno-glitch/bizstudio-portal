@@ -58,3 +58,6 @@ scripts/.t151_verify_state.json
 
 # T-181: 分析用CSVはコミットしない（個票データのため）
 docs/analysis/*.csv
+
+# T-194: テンプレートマスタの元 xlsx はコミットしない（生成した scout-templates.json をコミットする）
+prisma/seed/*.xlsx

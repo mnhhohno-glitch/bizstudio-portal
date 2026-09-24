@@ -84,6 +84,11 @@ export async function GET(
       sourceType: true,
       externalJobRef: true,
       sourceMedia: true,
+      // T-196: ブックマーク一覧の「エリア」「職種」列。job-platform が確定した値のコピー（null=未取得＝画面は「—」）。
+      //   jobCategoryPath は職種セルのホバー（大＞中＞小フルパス）に使う。
+      jobArea: true,
+      jobCategory: true,
+      jobCategoryPath: true,
       // 求職者本人のサイト操作由来（"candidate"）か CA追加（null|"ca"）かの区別。担当列の「サイト経由」表示に使う。
       origin: true,
       // T-189 Phase3-1: 自動引き当て由来（非null）。担当列を保存者名ではなく「AI自動検索」表示にする（表示のみ・DB不変）。

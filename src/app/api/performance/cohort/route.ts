@@ -4,7 +4,7 @@
 //   - 内定＝その月に offer_date がある人数/件数
 //   - 決定＝その月に acceptance_date がある人数/件数（決定粗利・単価も同じ acceptance_date 軸）
 //   - %は段階間比率（書類通過÷合計エントリー人数／内定÷書類通過／決定÷内定）＝当月タブと同一。
-//   - 提案/エントリーは scoped（期間内 初回/2回目以降・人数(件数)・縦横加算一致）を維持。
+//   - 提案/エントリーは scoped（その暦月の1件目/2件目以降・人数(件数)）。合計列の人数だけ通算 DISTINCT。
 // 対象：6ヶ月前〜前月（当月は含まない）。JST 基準。computeWeeklyMatrix を6ヶ月分回す。
 
 import { NextResponse } from "next/server";
@@ -47,11 +47,7 @@ export async function GET(req: Request) {
   const targetMonths: string[] = [];
   for (let i = months; i >= 1; i--) targetMonths.push(shiftMonth(thisMonth, -i));
 
-  // 新規/既存(scoped)は直近6ヶ月全体でランク付け（各月=cell, ランク窓=全期間）→ Σ月=合計。
-  const cohortRankWindow = {
-    from: new Date(`${targetMonths[0]}-01T00:00:00+09:00`),
-    to: new Date(new Date(`${shiftMonth(targetMonths[targetMonths.length - 1], 1)}-01T00:00:00+09:00`).getTime() - 1),
-  };
+  // 新規/既存(scoped)は「その暦月(JST)の1件目=新規 / 2件目以降=既存」で判定する（weeklyMatrix 側で完結・月列とそのまま一致）。
 
   // 各月の userId 解決（全員は不要）。個別は employee の userId が要る（求人紹介＝User.id 軸）。
   let userId = "__nonexistent__";
@@ -92,7 +88,7 @@ export async function GET(req: Request) {
     targetMonths.map(async (ym) => {
       const from = new Date(`${ym}-01T00:00:00+09:00`);
       const to = new Date(new Date(`${shiftMonth(ym, 1)}-01T00:00:00+09:00`).getTime() - 1);
-      const mx = await computeWeeklyMatrix({ employeeId, userId, from, to, allCas, rankWindow: cohortRankWindow });
+      const mx = await computeWeeklyMatrix({ employeeId, userId, from, to, allCas });
 
       // 選考＝発生月ベース（document_pass_date / offer_date / acceptance_date がその月）。当月/月次タブと同一軸。
       const dp = mx.selection.documentPass;
@@ -103,9 +99,9 @@ export async function GET(req: Request) {
         yearMonth: ym,
         // 面談（月別人数・record）。%（構成比）は UI で ÷合計面談。
         interview: { first: mx.interview.first, second: mx.interview.second, thirdPlus: mx.interview.thirdPlus, total: mx.interview.total },
-        // 求人紹介（全期間 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計提案。
+        // 求人紹介（その暦月の1件目/2件目以降・人数(件数)=scoped）。% は UI で ÷合計提案。
         proposal: { fresh: mx.proposal.scoped.fresh, existing: mx.proposal.scoped.existing, total: mx.proposal.scoped.total },
-        // エントリー（全期間 初回/2回目以降・人数(件数)=scoped）。% は UI で ÷合計エントリー。
+        // エントリー（その暦月の1件目/2件目以降・人数(件数)=scoped）。% は UI で ÷合計エントリー。
         entry: { fresh: mx.entry.scoped.fresh, existing: mx.entry.scoped.existing, total: mx.entry.scoped.total },
         documentPass: dp,
         offer,
@@ -136,24 +132,25 @@ export async function GET(req: Request) {
     avgTargets[k] = vals.length === 0 ? null : sum / vals.length;
   }
 
-  // 合計列：各月の合算（縦横一致・DISTINCT 再集計しない）。面談 total のみ通算 mx を使う。
+  // 合計列：件数は各月の合算（縦横一致）。人数は通算 mx の DISTINCT（6ヶ月にまたがって出た人を二重計上しない）。
   const summaryRange = {
     from: new Date(`${targetMonths[0]}-01T00:00:00+09:00`),
     to: new Date(new Date(`${shiftMonth(targetMonths[targetMonths.length - 1], 1)}-01T00:00:00+09:00`).getTime() - 1),
   };
-  const summaryMx = await computeWeeklyMatrix({ employeeId, userId, from: summaryRange.from, to: summaryRange.to, allCas, rankWindow: cohortRankWindow });
+  const summaryMx = await computeWeeklyMatrix({ employeeId, userId, from: summaryRange.from, to: summaryRange.to, allCas });
   // 売上は月の加算（決定売上＝粗利は単純合計）。売上単価は通算粗利 ÷ 通算決定人数（acceptance_date 軸）。
   const sumRevenue = results.reduce((s, r) => s + (r.decidedRevenue ?? 0), 0);
   const sumR = (sel: (r: (typeof results)[number]) => number) => results.reduce((s, r) => s + sel(r), 0);
-  const segSum = (pick: (r: (typeof results)[number]) => { recs: number; uniq: number }) => ({
+  // 件数＝Σ月、人数＝通算 DISTINCT（summaryMx の同じ区分）。実績表の合計列と同じ数え方。
+  const seg = (pick: (r: (typeof results)[number]) => { recs: number; uniq: number }, sumUniq: number) => ({
     recs: sumR((r) => pick(r).recs),
-    uniq: sumR((r) => pick(r).uniq),
+    uniq: sumUniq,
   });
   // 段階間比率の分子・分母（合計列・発生月ベースの Σ）。
   const tDP = sumR((r) => r.documentPass);
   const tOffer = sumR((r) => r.offer);
   const tDecided = sumR((r) => r.decided);
-  const tEntryUniq = sumR((r) => r.entry.total.uniq);
+  const tEntryUniq = summaryMx.entry.scoped.total.uniq; // 書類通過率の分母＝合計列に表示するエントリー人数と同じ値
   const total = {
     interview: {
       first: summaryMx.interview.first,
@@ -161,8 +158,16 @@ export async function GET(req: Request) {
       thirdPlus: summaryMx.interview.thirdPlus,
       total: summaryMx.interview.total,
     },
-    proposal: { fresh: segSum((r) => r.proposal.fresh), existing: segSum((r) => r.proposal.existing), total: segSum((r) => r.proposal.total) },
-    entry: { fresh: segSum((r) => r.entry.fresh), existing: segSum((r) => r.entry.existing), total: segSum((r) => r.entry.total) },
+    proposal: {
+      fresh: seg((r) => r.proposal.fresh, summaryMx.proposal.scoped.fresh.uniq),
+      existing: seg((r) => r.proposal.existing, summaryMx.proposal.scoped.existing.uniq),
+      total: seg((r) => r.proposal.total, summaryMx.proposal.scoped.total.uniq),
+    },
+    entry: {
+      fresh: seg((r) => r.entry.fresh, summaryMx.entry.scoped.fresh.uniq),
+      existing: seg((r) => r.entry.existing, summaryMx.entry.scoped.existing.uniq),
+      total: seg((r) => r.entry.total, tEntryUniq),
+    },
     documentPass: tDP,
     offer: tOffer,
     decided: tDecided,

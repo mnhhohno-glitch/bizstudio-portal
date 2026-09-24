@@ -5,6 +5,8 @@ import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+// T-190: 同一人物の重複チェック（RPA経路と共通）
+import { findDuplicateCandidate, DUPLICATE_MATCH_LABELS } from "@/lib/mynavi-rpa/duplicate-check";
 // T-170: 求職者管理一覧の追加5列（include=metrics 指定時のみ付与）
 import { computeCandidateListMetrics, EMPTY_CANDIDATE_LIST_METRICS } from "@/lib/candidates/list-metrics";
 
@@ -112,6 +114,8 @@ const createSchema = z.object({
   desiredPrefecture2: z.string().optional().nullable(),
   desiredEmploymentType: z.string().optional().nullable(),
   desiredSalaryMin: z.number().int().optional().nullable(),
+  // T-190: 重複確認ダイアログで「それでも登録する」を選んだときだけ true で再送される
+  forceCreate: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -156,6 +160,7 @@ export async function POST(request: NextRequest) {
       desiredPrefecture2,
       desiredEmploymentType,
       desiredSalaryMin,
+      forceCreate,
     } = parsed.data;
 
     // 氏名バリデーション
@@ -176,6 +181,31 @@ export async function POST(request: NextRequest) {
         { error: "この求職者番号は既に登録されています" },
         { status: 400 }
       );
+    }
+
+    // T-190: 同一人物の重複チェック（RPA経路と同じ判定関数）。
+    //   勝手に弾かない。CAが意図して別レコードを作る場合があるため、見つかったら
+    //   作成せずに画面へ確認を返し、続行が選ばれたら forceCreate:true で再送してもらう。
+    if (!forceCreate) {
+      const dup = await findDuplicateCandidate({
+        phone,
+        name: formatName(name),
+        birthday: birthday ? new Date(birthday + "T12:00:00.000Z") : null,
+      });
+      if (dup) {
+        return NextResponse.json({
+          duplicateFound: true,
+          matchedBy: dup.matchedBy,
+          matchedLabel: DUPLICATE_MATCH_LABELS[dup.matchedBy],
+          existing: {
+            id: dup.id,
+            candidateNumber: dup.candidateNumber,
+            name: dup.name,
+            applicationDate: dup.applicationDate,
+            mediaSource: dup.mediaSource,
+          },
+        });
+      }
     }
 
     // 担当キャリアアドバイザーの存在確認（指定時のみ）

@@ -152,21 +152,28 @@ export async function notifyMynaviBatchCompletion(
 /**
  * 二重処理検知通知
  */
-export async function notifyMynaviDuplicateSkip(
-  phoneNormalized: string,
-  candidateName?: string,
-  existingCandidateNumber?: string,
-): Promise<void> {
+export async function notifyMynaviDuplicateSkip(params: {
+  /** 一致したキーの表示名（例: "マイナビ会員No"） */
+  matchLabel: string;
+  phoneNormalized?: string | null;
+  candidateName?: string;
+  existingCandidateNumber?: string;
+  /** 今回を含む再応募回数 */
+  reapplicationCount?: number;
+}): Promise<void> {
   const ch = getMynaviChannel();
   if (!ch) return;
 
   try {
+    const { matchLabel, phoneNormalized, candidateName, existingCandidateNumber, reapplicationCount } = params;
     const namePart = candidateName ? `（${candidateName}）` : "";
+    const phonePart = phoneNormalized ? ` / 電話番号 ${phoneNormalized}` : "";
     const lines = [
       "⚠️ マイナビ転職応募取り込み 二重処理検知",
-      `電話番号 ${phoneNormalized}${namePart} が直近30分以内に処理済みです。スキップしました。`,
+      `${matchLabel}が既存求職者と一致${namePart}${phonePart}。新規登録せずスキップしました。`,
     ];
     if (existingCandidateNumber) lines.push(`既存求職者: No.${existingCandidateNumber}`);
+    if (typeof reapplicationCount === "number") lines.push(`再応募 ${reapplicationCount}回目`);
     await sendBotMessage(ch.botId, ch.channelId, lines.join("\n"));
   } catch (e) {
     console.error("[mynavi-rpa/notify] 二重処理検知通知失敗:", e);

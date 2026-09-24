@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 import { validateInternalApiKey } from "@/lib/internal-auth";
 
 const CORS_HEADERS = {
@@ -9,24 +10,32 @@ const CORS_HEADERS = {
 
 /**
  * GET /api/employees
- * 有効な社員一覧を返す（他アプリからの参照用）
+ * 有効な社員一覧を返す
  *
- * - 既定（パラメータなし）: status="active" のみ。認証不要・CORS開放。
- *   portal 自身の画面（tasks / EntryBoard / CandidateDetailPage 等）と
- *   candidate-intake のブラウザから直接叩かれているため、この経路に認証は掛けられない。
+ * - 既定（パラメータなし）: status="active" のみ。
+ *   T-191 で session 必須化（candidate-intake 旧画面は廃止）。呼び出し元は portal 自身の画面
+ *   （tasks / EntryBoard / CandidateDetailPage 等）のみなので、ログイン必須で問題ない。
+ *   CORS ヘッダは残すが credentials を伴わない `*` なので、認証後は情報が漏れない。
  * - `?includeInactive=true`: disabled（退社者等）も含めた全ステータスを返す。
- *   退社者まで匿名公開はしたくないので、こちらだけ x-api-key（INTERNAL_API_KEY）を必須にする。
+ *   こちらは従来どおり x-api-key（INTERNAL_API_KEY）で認証する（サーバー間連携用）。
  */
 export async function GET(request: NextRequest) {
   try {
     const includeInactive =
       request.nextUrl.searchParams.get("includeInactive") === "true";
 
-    if (includeInactive && !validateInternalApiKey(request)) {
-      return NextResponse.json(
-        { error: "Unauthorized: includeInactive には x-api-key が必要です" },
-        { status: 401 }
-      );
+    if (includeInactive) {
+      if (!validateInternalApiKey(request)) {
+        return NextResponse.json(
+          { error: "Unauthorized: includeInactive には x-api-key が必要です" },
+          { status: 401 }
+        );
+      }
+    } else {
+      const user = await getSessionUser();
+      if (!user) {
+        return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+      }
     }
 
     const employees = await prisma.employee.findMany({

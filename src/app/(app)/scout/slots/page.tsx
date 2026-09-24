@@ -579,7 +579,8 @@ export default function ScoutSlotsPage() {
                     }),
                     { deliveryCount: 0, openCount: 0, applyCount: 0, a20: 0, a30: 0, a40: 0, a50: 0, foreign: 0, valid: 0, invalid: 0 },
                   );
-                  const pct = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(1) : "0.0");
+                  // 配信数0の枠では率を出さない（0除算回避＋「0.0%」と実測0%の混同を避ける）
+                  const pct = (num: number, den: number) => (den > 0 ? `${((num / den) * 100).toFixed(1)}%` : "-");
                   // T-064 step40: 応募率は小数第2位（開封率は第1位を維持）
                   const pctApply = (num: number, den: number) => (den > 0 ? ((num / den) * 100).toFixed(2) : "0.00");
                   return (
@@ -591,7 +592,7 @@ export default function ScoutSlotsPage() {
                       <td className="px-1 py-2 border-r border-[#E5E7EB]"></td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.deliveryCount.toLocaleString()}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.openCount.toLocaleString()}</td>
-                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.openCount, t.deliveryCount)}%</td>
+                      <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pct(t.openCount, t.deliveryCount)}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{t.applyCount.toLocaleString()}</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pctApply(t.applyCount, t.deliveryCount)}%</td>
                       <td className="px-2 py-2 text-right border-r border-[#E5E7EB]">{pctApply(t.applyCount, t.openCount)}%</td>
@@ -654,7 +655,9 @@ export default function ScoutSlotsPage() {
                       </td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.deliveryCount.toLocaleString()}</td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openCount.toLocaleString()}</td>
-                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">{r.openRate.toFixed(1)}%</td>
+                      <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">
+                        {r.deliveryCount > 0 ? `${r.openRate.toFixed(1)}%` : "-"}
+                      </td>
                       <td className="px-2 py-1.5 text-right border-r border-[#E5E7EB]">
                         {r.applyCount > 0 ? (
                           <button

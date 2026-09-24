@@ -94,6 +94,10 @@ T-067 以降、面談ログ・添付ファイルを含む全ての求職者関�
 |--|--|--|
 | RPA エラー履歴 | portal `RpaError` （長期目標）| 現状は分散、portal集約は未着手 |
 | Power Automate Desktop 7号機 | ローカルPC上 | Mynavi Scouting と連携 |
+| スカウト配信条件（6軸） | portal `scout_conditions` | 2026-09-14〜（T-194）。RPA はまだ読んでいない（T-195 で連携予定）。固定値6項目（学歴不問・経験職種/居住地指定なし・0社を除くなし・除外リスト/自社応募含まない）は列を持たず RPA 側の固定入力 |
+| 号機マスタ（RPA用） | portal `RpaScoutMachine`（rpa_scout_machines） | machineNo 一意・1行/号機・isActive（1〜4=稼働 / 5〜6=停止）。**`ScoutMachineMaster` は配信実績集計用の別物**（担当者名+validFrom がキー、社員行も混在、5号機が active のまま）。担当者名は `recruiterDisplay.ts` の RC_ROSTER が正 |
+| スカウト配信文テンプレート | portal `scout_templates` | 2026-09-14 に `rpa_scout_subject_templates`（kind 付き・有効19本）から複製して作成（同日時点で件名・本文とも完全一致を確認）。**以後どちらを編集の正とするかは未決** |
+| 祝日 | portal `holidays` | 2026年分（18日）投入済み。2027年分は未投入。`/scout/conditions` の赤表示・ホバー名称の参照元 |
 
 ## 経理関連
 

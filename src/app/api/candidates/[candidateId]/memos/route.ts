@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ candidateId: string }> }
 ) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const { candidateId } = await params;
 
   const memos = await prisma.candidateMemo.findMany({
@@ -21,6 +27,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ candidateId: string }> }
 ) {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+  }
+
   const { candidateId } = await params;
   const body = await req.json();
 

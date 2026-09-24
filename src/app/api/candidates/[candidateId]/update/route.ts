@@ -4,11 +4,18 @@ import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
 import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
 import { fetchCandidateConditions } from "@/lib/recommend/job-platform-conditions";
+import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
 function normalizeSpaces(str: string): string {
   return str.replace(/\u3000/g, " ");
+}
+
+/** JST \u66a6\u65e5 YYYY-MM-DD\uff08\u7f60#17: toISOString \u306f\u4f7f\u308f\u306a\u3044\uff09 */
+function jstYmd(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -202,6 +209,53 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       employee: { select: { id: true, name: true } },
     },
   });
+
+  // T-190: 配信日（scoutDeliveryDate）の JST 暦日が変わったら、紐づく配信枠も張り替える。
+  //   集計 API は ScoutDeliverySlot.deliveryDate しか見ないため、配信日だけ直しても数字が動かない。
+  //   - 対象は applicationRoute="スカウト" かつ recruiterName 非空
+  //   - scoutLinkedById 非 NULL（人が手で紐づけた行）は張り替えない
+  //   - 指定日の枠が無ければ前日に飛ばさず現状維持（disablePreviousDayFallback）
+  //   - 失敗しても求職者の更新自体は成功させる（ログのみ）
+  if (body.scoutDeliveryDate !== undefined) {
+    const beforeYmd = jstYmd(existing.scoutDeliveryDate);
+    const afterYmd = jstYmd(updated.scoutDeliveryDate);
+    if (beforeYmd !== afterYmd) {
+      try {
+        if (updated.scoutLinkedById) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (manual link) candidate=${updated.candidateNumber}`,
+          );
+        } else if (updated.applicationRoute !== "スカウト" || !updated.recruiterName?.trim()) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (route=${updated.applicationRoute ?? "null"} recruiter=${updated.recruiterName ?? "null"}) candidate=${updated.candidateNumber}`,
+          );
+        } else if (!updated.scoutDeliveryDate && !updated.applicationDate) {
+          console.log(
+            `[candidate-update] T-190 relink skipped (no anchor date) candidate=${updated.candidateNumber}`,
+          );
+        } else {
+          const res = await autoLinkCandidateToSlot({
+            candidateId: updated.id,
+            recruiterName: updated.recruiterName,
+            applicationDate: updated.applicationDate ?? updated.scoutDeliveryDate!,
+            scoutDeliveryDate: updated.scoutDeliveryDate,
+            disablePreviousDayFallback: true,
+          });
+          console.log(
+            `[candidate-update] T-190 relink candidate=${updated.candidateNumber} ${beforeYmd ?? "null"}->${afterYmd ?? "null"} linked=${res.linked} reason=${res.reason}`,
+          );
+          // レスポンスの求職者は張り替え前の値を持っているので、成功時だけ整合させる
+          if (res.linked && res.slotId && res.scoutNumber) {
+            updated.scoutDeliverySlotId = res.slotId;
+            updated.scoutNumber = res.scoutNumber;
+            updated.scoutLinkedById = null;
+          }
+        }
+      } catch (e) {
+        console.error("[candidate-update] T-190 relink failed:", e);
+      }
+    }
+  }
 
   // Sync birthday hash to kyuujinPDF when birthday is changed
   if (body.birthday !== undefined) {

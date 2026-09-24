@@ -676,6 +676,12 @@ export default function InterviewForm({
         toast.error("他のセッションで変更されました。リロードしてください。");
         setSaveStatus("error");
         return;
+      } else if (res.status === 401 || res.status === 403) {
+        // T-191: autosave は session 必須になった。セッション切れは
+        // トーストを積み上げず、保存失敗表示（saveStatus="error"）だけに留める。
+        console.error("[T-191] autosave unauthorized:", res.status);
+        setSaveStatus("error");
+        return;
       } else {
         setSaveStatus("error");
         return;
