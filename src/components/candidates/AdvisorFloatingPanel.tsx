@@ -375,6 +375,8 @@ export default function AdvisorFloatingPanel({
       const totalBatches = Math.ceil(totalFiles / batchSize);
       const queryStr = invalidOnlyMode ? "?mode=invalid-only" : "";
       const allSkippedFileIds: string[] = [];
+      // T-XXX: 変更がないため前回の結果を使った求人（AI に送っていない）の件数。
+      let reusedCount = 0;
 
       for (let i = 0; i < totalBatches; i++) {
         setAnalysisProgress(`分析中... (${i + 1}/${totalBatches}バッチ)`);
@@ -401,6 +403,7 @@ export default function AdvisorFloatingPanel({
           if (Array.isArray(data?.skippedFileIds) && data.skippedFileIds.length > 0) {
             allSkippedFileIds.push(...data.skippedFileIds);
           }
+          if (Array.isArray(data?.reusedFileIds)) reusedCount += data.reusedFileIds.length;
 
           // Refresh messages to show new results
           await fetchMessages(activeSessionId);
@@ -418,10 +421,11 @@ export default function AdvisorFloatingPanel({
 
       const skipped = allSkippedFileIds.length;
       const succeeded = Math.max(0, totalFiles - skipped);
+      const reusedNote = reusedCount > 0 ? `（変更がないため${reusedCount}件は前回の結果を使用）` : "";
       toast.success(
         skipped > 0
-          ? `${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
-          : `全${totalFiles}件の分析が完了しました`
+          ? `${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）${reusedNote}`
+          : `全${totalFiles}件の分析が完了しました${reusedNote}`
       );
       if (skipped > 0) {
         // T-126 Phase2: 再実行で成功済みファイルまで再生成(=二重課金)しないよう、
@@ -475,6 +479,10 @@ export default function AdvisorFloatingPanel({
     const batchSize = 5;
     const totalBatches = Math.ceil(totalFiles / batchSize);
     const allSkippedFileIds: string[] = [];
+    // T-XXX: 変更がないため前回の結果を使った求人（AI に送っていない）の件数。
+    //   途中で止まった run の後の追加分析は基準時刻が古くなり評価済みの求人まで対象に入るが、
+    //   サーバ側の変更なしスキップで AI には送られない（費用 0）。
+    let reusedCount = 0;
 
     try {
       for (let i = 0; i < totalBatches; i++) {
@@ -503,6 +511,7 @@ export default function AdvisorFloatingPanel({
           if (Array.isArray(data?.skippedFileIds) && data.skippedFileIds.length > 0) {
             allSkippedFileIds.push(...data.skippedFileIds);
           }
+          if (Array.isArray(data?.reusedFileIds)) reusedCount += data.reusedFileIds.length;
 
           await fetchMessages(activeSessionId);
 
@@ -518,10 +527,11 @@ export default function AdvisorFloatingPanel({
 
       const skipped = allSkippedFileIds.length;
       const succeeded = Math.max(0, totalFiles - skipped);
+      const reusedNote = reusedCount > 0 ? `（変更がないため${reusedCount}件は前回の結果を使用）` : "";
       toast.success(
         skipped > 0
-          ? `追加${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）`
-          : `追加${totalFiles}件の分析が完了しました`
+          ? `追加${succeeded}件の分析が完了しました（${skipped}件はフォーマット不正でスキップ）${reusedNote}`
+          : `追加${totalFiles}件の分析が完了しました${reusedNote}`
       );
       if (skipped > 0) {
         toast.warning(

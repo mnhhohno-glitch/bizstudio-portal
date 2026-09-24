@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { evalRequestParams, evalResponseText } from "@/lib/eval-model";
+// T-XXX: 評価の入力・結果の保存と、変更なしスキップ（全件分析・追加分析のみ）。
+import {
+  saveEvalInputParts,
+  findReusableEvaluations,
+  recordEvaluationResults,
+  recordReusedEvaluations,
+  type EvalRoute,
+  type ReusableEvaluation,
+} from "@/lib/eval-history";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { RATING_VALUE } from "@/lib/ai-rating";
 import { matchCaItemLine } from "@/lib/ca-analysis-format";
@@ -108,6 +117,29 @@ function clearRunBatchResults(sessionId: string): void {
   runBatchResultsCache.delete(sessionId);
 }
 
+// T-XXX: run 内で「変更がないため前回の結果を使った」件数を積む（完了カードの文言用）。
+const runReusedCache = new Map<string, { count: number; ts: number }>();
+
+function addRunReused(sessionId: string, n: number): void {
+  const now = Date.now();
+  for (const [k, v] of runReusedCache) {
+    if (now - v.ts >= RUN_CONTEXT_TTL_MS) runReusedCache.delete(k);
+  }
+  const entry = runReusedCache.get(sessionId);
+  if (entry && now - entry.ts < RUN_CONTEXT_TTL_MS) {
+    entry.count += n;
+    entry.ts = now;
+  } else {
+    runReusedCache.set(sessionId, { count: n, ts: now });
+  }
+}
+
+function takeRunReused(sessionId: string): number {
+  const entry = runReusedCache.get(sessionId);
+  runReusedCache.delete(sessionId);
+  return entry && Date.now() - entry.ts < RUN_CONTEXT_TTL_MS ? entry.count : 0;
+}
+
 // T-163: 完了カード用に、最終バッチ出力から総合まとめセクションだけを取り出す。
 // 見つからなければ空文字を返す（呼び出し側は件数のみのカードにする。AIは再度呼ばない）。
 function extractOverallSummary(analysisText: string): string {
@@ -172,6 +204,7 @@ export async function POST(
       fileName: true,
       extractedText: true,
       aiAnalysisComment: true,
+      aiMatchRating: true, // T-XXX: 変更なしスキップの判定（前回の結果が今も残っているか）
     },
     orderBy: { createdAt: "desc" },
   });
@@ -203,7 +236,10 @@ export async function POST(
   //    （第2キャッシュブロックを read 化＋主要書類の再OCRを1回に削減）。
   //    context の組み立て（評価一覧の除去・20,000字切り詰め）は lib（buildAnalyzeCandidateContext）へ
   //    切り出し済み。runContextCache は CA 画面 run 制御のため route に残す。
-  let candidateContext = getCachedRunContext(sessionId) ?? "";
+  //    T-XXX: run の先頭（batchIndex=0）では必ず組み立て直す。同じチャットセッションで30分以内に
+  //    押し直した run が前の run の候補者情報を使い回すと、書類・面談記録の更新が評価に反映されず、
+  //    変更なしスキップも「変わっていない」と誤判定するため。run 内（2バッチ目以降）は従来どおり再利用。
+  let candidateContext = batchIndex === 0 ? "" : getCachedRunContext(sessionId) ?? "";
   if (!candidateContext) {
     candidateContext = await buildAnalyzeCandidateContext(candidateId);
     // 空文字はキャッシュしない（次バッチで再取得を試みる）。
@@ -212,16 +248,150 @@ export async function POST(
     }
   }
 
-  // 4. Build job posting section for this batch (uses DB-stored extracted text - no PDF binary)
-  //    組み立ては lib（buildAnalyzeJobsSection）へ切り出し済み。出力は切り出し前と同一。
-  const jobsSection = buildAnalyzeJobsSection(batchFiles, start);
-
   // 5. Build system prompt
   //    固定プレフィックス（SKILL_HEADER+EVAL_RULES）とバッチ指示の組み立ては lib
   //    （src/lib/analyze-bookmarks.ts）へ切り出し済み。文言は切り出し前と byte 同一
   //    （自動評価経路と 1h プロンプトキャッシュを共有する条件でもある）。
   const FIXED_SYSTEM = buildAnalyzeFixedSystem();
   const systemPrompt = buildBatchInstruction({ totalFiles, start, end, isLastBatch });
+
+  // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（src/lib/eval-model.ts）。
+  const evalParams = evalRequestParams();
+  const evalEffort = evalParams.output_config?.effort ?? null;
+  const evalRoute: EvalRoute =
+    mode === "invalid-only" ? "invalid-only" : sinceDate ? "incremental" : "full";
+
+  // T-XXX: AI に送る中身を部品（共通部分・指示文・求職者情報・求人本文）に分けて保存し、
+  //   「全件分析」「追加分析」では前回と中身・モデル・effort が同じ求人を AI に送らず前回の結果を使う。
+  //   ブックマーク一覧の増減だけでは評価し直さない（判定に使う求職者情報はブックマーク一覧を除いた部分）。
+  //   保存に失敗しても評価は止めない（history=null → 従来どおり全件を送る）。dryRun（T-182）は保存も
+  //   スキップもしない。
+  const history = dryRun
+    ? null
+    : await saveEvalInputParts({
+        fixedSystem: FIXED_SYSTEM,
+        instruction: systemPrompt,
+        candidateContext,
+        files: batchFiles,
+      });
+  const historyBase = history
+    ? {
+        candidateId,
+        route: evalRoute,
+        model: evalParams.model,
+        effort: evalEffort,
+        requestKey: `${sessionId}:${batchIndex}`,
+        hashes: history.hashes,
+        jobHashById: history.jobHashById,
+      }
+    : null;
+  const reusable: Map<string, ReusableEvaluation> =
+    history && evalRoute !== "invalid-only"
+      ? await findReusableEvaluations({
+          files: batchFiles,
+          hashes: history.hashes,
+          jobHashById: history.jobHashById,
+          model: evalParams.model,
+          effort: evalEffort,
+        })
+      : new Map();
+  const sendFiles = batchFiles.filter((f) => !reusable.has(f.id));
+  const reusedFiles = batchFiles.filter((f) => reusable.has(f.id));
+  if (reusedFiles.length > 0) {
+    console.log(
+      `[AnalyzeBatch] 変更なしのため前回の結果を使用: ${reusedFiles.length}/${batchFiles.length}件 (batch=${batchIndex})`,
+    );
+    if (historyBase) await recordReusedEvaluations(historyBase, reusable);
+    addRunReused(sessionId, reusedFiles.length);
+    // 総合まとめ（最終バッチ）が前回の評価を参照できるよう、AI 出力と同じ圧縮形式で run 内キャッシュへ積む。
+    for (const f of reusedFiles) {
+      if (f.aiAnalysisComment) appendRunBatchResult(sessionId, compressBatchResultForSummary(f.aiAnalysisComment));
+    }
+  }
+
+  // T-XXX: 完了カード（最終バッチ）の書き込み。AI を呼ばなかった（全件が前回の結果）場合も書く
+  //   ＝「追加分析」の基準（最後の【求人分析】カード）と件数集計を従来どおり残す。
+  const writeCompletionCard = async (analysisText: string) => {
+    try {
+      // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
+      // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
+      // （= 実行対象は allBookmarks.slice(0, end)）。allBookmarks 全体を数えると、
+      // 絞り込み（追加のみ / 未評価・破損のみ）で対象外だった過去評価分まで混入し、
+      // 見出しの件数がまとめ本文の「全N件」と矛盾する。
+      const runTargetFiles = allBookmarks.slice(0, end);
+      const runFiles = await prisma.candidateFile.findMany({
+        where: { id: { in: runTargetFiles.map((f) => f.id) } },
+        select: { aiMatchRating: true },
+      });
+      // 幅表記（"A〜B"等）は先頭の評価値で読む。B+ を B と誤読しないよう RATING_VALUE（B\+ 先行の交替）を使う。
+      const headRatingRe = new RegExp(`^(${RATING_VALUE})`);
+      const counts: Record<string, number> = { A: 0, "B+": 0, B: 0, C: 0, D: 0 };
+      let unrated = 0;
+      for (const f of runFiles) {
+        const m = (f.aiMatchRating ?? "").match(headRatingRe);
+        if (m && m[1] in counts) counts[m[1]]++;
+        else unrated++;
+      }
+      const runReused = takeRunReused(sessionId);
+      const header =
+        `【求人分析 完了】${runFiles.length}件を評価しました` +
+        (runReused > 0 ? `（変更がないため${runReused}件は前回の結果を使用）` : "") +
+        `\n総合 A:${counts["A"]}件 / B+:${counts["B+"]}件 / B:${counts["B"]}件 / C:${counts["C"]}件 / D:${counts["D"]}件 / 未評価:${unrated}件`;
+      const footer = `※ 各求人の評価コメントは、求人一覧の評価バッジをクリックすると開きます。`;
+      // 本文全体を 2,000 字以内に収める（超過分は総合まとめ側を削り、件数と案内文は必ず残す）。
+      const MAX_CARD_CHARS = 2000;
+      let summary = extractOverallSummary(analysisText);
+      const fixedLen = header.length + footer.length + 4; // 区切りの空行ぶん
+      const OMIT_SUFFIX = "\n…（省略）";
+      if (summary && fixedLen + summary.length > MAX_CARD_CHARS) {
+        summary =
+          summary.substring(0, Math.max(0, MAX_CARD_CHARS - fixedLen - OMIT_SUFFIX.length)) +
+          OMIT_SUFFIX;
+      }
+      const cardContent = summary ? `${header}\n\n${summary}\n\n${footer}` : `${header}\n\n${footer}`;
+
+      await prisma.advisorChatMessage.create({
+        data: {
+          sessionId,
+          role: "user",
+          content: `ブックマーク求人分析（全${totalFiles}件）を実行`,
+          kind: "ANALYSIS",
+        },
+      });
+      await prisma.advisorChatMessage.create({
+        data: { sessionId, role: "assistant", content: cardContent, kind: "ANALYSIS" },
+      });
+    } catch (cardErr) {
+      console.error("[AnalyzeBatch] completion card create failed (non-fatal):", cardErr);
+    } finally {
+      clearRunBatchResults(sessionId);
+    }
+  };
+
+  const label = isLastBatch
+    ? `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）+ 総合まとめ】`
+    : `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）】`;
+
+  // T-XXX: このバッチの全件が前回の結果で足りる場合は AI を呼ばない（費用 0）。
+  if (sendFiles.length === 0) {
+    if (isLastBatch && !dryRun) await writeCompletionCard("");
+    return NextResponse.json({
+      batchIndex,
+      startIndex: start + 1,
+      endIndex: end,
+      totalFiles: allBookmarks.length,
+      isLastBatch: end >= allBookmarks.length,
+      analysisText: `${label}\n\n（変更がないため${reusedFiles.length}件は前回の結果を使用）`,
+      remainingFiles: allBookmarks.length - end,
+      skippedFileIds: [],
+      reusedFileIds: reusedFiles.map((f) => f.id),
+    });
+  }
+
+  // 4. Build job posting section for this batch (uses DB-stored extracted text - no PDF binary)
+  //    組み立ては lib（buildAnalyzeJobsSection）へ切り出し済み。出力は切り出し前と同一。
+  //    T-XXX: 前回の結果を使う求人は含めない（送る求人だけ）。
+  const jobsSection = buildAnalyzeJobsSection(sendFiles, start);
 
   // 6. 過去バッチ結果 — 最終バッチ（総合まとめ生成）のみ同梱する。
   //    中間バッチは各求人単体分析に履歴不要のため非同梱（input 削減・質不変）。
@@ -286,9 +456,6 @@ export async function POST(
     batchInstruction: systemPrompt,
   });
 
-  // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（src/lib/eval-model.ts）。
-  const evalParams = evalRequestParams();
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -314,17 +481,28 @@ export async function POST(
       const errText = await response.text();
       console.error("[AnalyzeBatch] Anthropic error:", response.status, errText);
       // T-126: 失敗コールも記録（課金トークンは無いが失敗率の可視化に使う）。
-      await recordAdvisorUsage({
+      const failedUsage = await recordAdvisorUsage({
         endpoint: "analyze-batch",
         model: evalParams.model,
         usage: null,
         candidateId,
         batchIndex,
         batchTotal: Math.ceil(totalFiles / batchSize),
-        fileCount: batchFiles.length,
+        fileCount: sendFiles.length,
         isRetry: mode === "invalid-only",
         note: `error-${response.status}`,
       });
+      if (historyBase) {
+        await recordEvaluationResults(historyBase, {
+          files: sendFiles,
+          results: new Map(),
+          skippedFileIds: [],
+          failed: true,
+          evaluatedAt: new Date(),
+          costUsd: null,
+          usageLogId: failedUsage?.id ?? null,
+        });
+      }
       if (response.status === 429) {
         return NextResponse.json({ error: "APIのレート制限に達しました。少し待ってから再度お試しください。" }, { status: 429 });
       }
@@ -346,14 +524,14 @@ export async function POST(
     if (data.stop_reason === "max_tokens") {
       console.warn(`[AnalyzeBatch] stop_reason=max_tokens (max_tokens=${evalParams.max_tokens}, output=${u.output_tokens})`);
     }
-    await recordAdvisorUsage({
+    const usageRecord = await recordAdvisorUsage({
       endpoint: "analyze-batch",
       model: evalParams.model,
       usage: u,
       candidateId,
       batchIndex,
       batchTotal: Math.ceil(totalFiles / batchSize),
-      fileCount: batchFiles.length,
+      fileCount: sendFiles.length,
       isRetry: mode === "invalid-only",
       note: [isLastBatch ? "last-batch" : null, data.stop_reason === "max_tokens" ? "stop-max_tokens" : null]
         .filter(Boolean)
@@ -369,10 +547,6 @@ export async function POST(
     //    CandidateFile.aiMatchRating / aiAnalysisComment に保存され一覧バッジから閲覧できる。
     //    中間バッチの結果は総合まとめ生成用にプロセス内キャッシュへ圧縮して積み、
     //    最終バッチ完了後に「完了カード」1組だけを書き込む（step 9 の後）。
-    const label = isLastBatch
-      ? `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）+ 総合まとめ】`
-      : `【求人分析 バッチ${batchIndex + 1}（${start + 1}〜${end}件目）】`;
-
     if (!isLastBatch) {
       appendRunBatchResult(sessionId, compressBatchResultForSummary(analysisText));
     }
@@ -380,12 +554,25 @@ export async function POST(
     // 9. Extract ratings + comments and save to CandidateFile
     //    抽出と fail-closed 保存（3点セット揃い時のみ・T-182 dryRun 対応）は lib（applyAnalysisResults）へ
     //    切り出し済み。挙動・ログ・保存ロジックは切り出し前と同一。
-    const { skippedFileIds } = await applyAnalysisResults({
+    //    T-XXX: 対象は AI に送った求人（sendFiles）だけ。
+    const { ratingsAndComments, skippedFileIds } = await applyAnalysisResults({
       analysisText,
-      batchFiles,
+      batchFiles: sendFiles,
       candidateId,
       dryRun,
     });
+
+    // T-XXX: 評価の結果を履歴に残す（保存できた求人=SAVED / 3点セット不揃い=SKIPPED）。失敗しても本体は止めない。
+    if (historyBase) {
+      await recordEvaluationResults(historyBase, {
+        files: sendFiles,
+        results: ratingsAndComments,
+        skippedFileIds,
+        evaluatedAt: new Date(),
+        costUsd: usageRecord?.costUsd ?? null,
+        usageLogId: usageRecord?.id ?? null,
+      });
+    }
 
     // T-163: 最終バッチ完了後、チャットへは「完了カード」1組のみを書き込む。
     //   - 件数はAIに数えさせず、DB保存済みの aiMatchRating をプログラムで集計する
@@ -393,58 +580,7 @@ export async function POST(
     //   - 総合まとめ本文は最終バッチのAI出力から抽出。失敗時は件数のみのカード（AIは再度呼ばない）。
     //   - カード作成の失敗で分析本体（評価保存・レスポンス）を落とさない。
     if (isLastBatch && !dryRun) {
-      try {
-        // T-165: 集計母集団は「今回の実行対象」に限定する。バッチは allBookmarks を先頭から
-        // batchSize 刻みで順に切るため、最終バッチの end が run 全体でカバーした末尾
-        // （= 実行対象は allBookmarks.slice(0, end)）。allBookmarks 全体を数えると、
-        // 絞り込み（追加のみ / 未評価・破損のみ）で対象外だった過去評価分まで混入し、
-        // 見出しの件数がまとめ本文の「全N件」と矛盾する。
-        const runTargetFiles = allBookmarks.slice(0, end);
-        const runFiles = await prisma.candidateFile.findMany({
-          where: { id: { in: runTargetFiles.map((f) => f.id) } },
-          select: { aiMatchRating: true },
-        });
-        // 幅表記（"A〜B"等）は先頭の評価値で読む。B+ を B と誤読しないよう RATING_VALUE（B\+ 先行の交替）を使う。
-        const headRatingRe = new RegExp(`^(${RATING_VALUE})`);
-        const counts: Record<string, number> = { A: 0, "B+": 0, B: 0, C: 0, D: 0 };
-        let unrated = 0;
-        for (const f of runFiles) {
-          const m = (f.aiMatchRating ?? "").match(headRatingRe);
-          if (m && m[1] in counts) counts[m[1]]++;
-          else unrated++;
-        }
-        const header =
-          `【求人分析 完了】${runFiles.length}件を評価しました\n` +
-          `総合 A:${counts["A"]}件 / B+:${counts["B+"]}件 / B:${counts["B"]}件 / C:${counts["C"]}件 / D:${counts["D"]}件 / 未評価:${unrated}件`;
-        const footer = `※ 各求人の評価コメントは、求人一覧の評価バッジをクリックすると開きます。`;
-        // 本文全体を 2,000 字以内に収める（超過分は総合まとめ側を削り、件数と案内文は必ず残す）。
-        const MAX_CARD_CHARS = 2000;
-        let summary = extractOverallSummary(analysisText);
-        const fixedLen = header.length + footer.length + 4; // 区切りの空行ぶん
-        const OMIT_SUFFIX = "\n…（省略）";
-        if (summary && fixedLen + summary.length > MAX_CARD_CHARS) {
-          summary =
-            summary.substring(0, Math.max(0, MAX_CARD_CHARS - fixedLen - OMIT_SUFFIX.length)) +
-            OMIT_SUFFIX;
-        }
-        const cardContent = summary ? `${header}\n\n${summary}\n\n${footer}` : `${header}\n\n${footer}`;
-
-        await prisma.advisorChatMessage.create({
-          data: {
-            sessionId,
-            role: "user",
-            content: `ブックマーク求人分析（全${totalFiles}件）を実行`,
-            kind: "ANALYSIS",
-          },
-        });
-        await prisma.advisorChatMessage.create({
-          data: { sessionId, role: "assistant", content: cardContent, kind: "ANALYSIS" },
-        });
-      } catch (cardErr) {
-        console.error("[AnalyzeBatch] completion card create failed (non-fatal):", cardErr);
-      } finally {
-        clearRunBatchResults(sessionId);
-      }
+      await writeCompletionCard(analysisText);
     }
 
     return NextResponse.json({
@@ -456,6 +592,7 @@ export async function POST(
       analysisText: `${label}\n\n${analysisText}`,
       remainingFiles: allBookmarks.length - end,
       skippedFileIds,
+      reusedFileIds: reusedFiles.map((f) => f.id),
     });
   } catch (e: unknown) {
     clearTimeout(timeoutId);
