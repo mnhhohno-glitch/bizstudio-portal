@@ -3653,3 +3653,60 @@ model MynaviScoutHistory {
   @@index([candidateId])
   @@map("mynavi_scout_histories")
 }
+
+/// T-XXX: 求人評価（手動 analyze-batch・自動配信の評価）で AI に送った入力の「部品」。
+/// 内容の SHA-256 を主キーにして同じ中身は1回だけ保存し、評価行（JobEvalRecord）からハッシュで参照する。
+/// kind: fixed（SKILL 定義＋評価ルール）/ instruction（バッチ指示）/ context_core（求職者情報のうち
+///       ブックマーク一覧を除いた部分）/ context_files（求職者情報のブックマーク一覧の行）/ job（求人本文）。
+/// 追加のみ（更新・削除はしない）。書き込みは src/lib/eval-history.ts に集約。
+model JobEvalPart {
+  hash      String   @id
+  kind      String
+  content   String   @db.Text
+  chars     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([kind])
+  @@map("job_eval_parts")
+}
+
+/// T-XXX: 求人評価の履歴。評価1回 × 求人1件で1行（同じ送信に入った求人は requestKey が同じ）。
+/// route:  full（全件分析）/ incremental（追加分析）/ invalid-only（未評価・破損のみ）/ auto（自動配信）
+/// status: PENDING（自動配信: 投入済み・未回収）/ SAVED（結果を CandidateFile に保存）/
+///         SKIPPED（AI は応答したが3点セット不揃いで保存せず）/ FAILED（API エラー・バッチ失敗/期限切れ）/
+///         REUSED（入力・モデルが前回と同じため AI に送らず前回の結果を使用。reusedFromId が前回の行）
+/// 各ハッシュは JobEvalPart.hash。instructionTemplateHash は件数・位置の数字を固定した指示文のハッシュ
+/// （スキップ判定用。文言が変わった時だけ変わる）。costUsd は AdvisorUsageLog の費用を送信件数で割った値。
+model JobEvalRecord {
+  id                      String    @id @default(cuid())
+  createdAt               DateTime  @default(now()) @map("created_at")
+  candidateId             String    @map("candidate_id")
+  candidateFileId         String    @map("candidate_file_id")
+  route                   String
+  status                  String
+  model                   String
+  effort                  String?
+  evaluatedAt             DateTime? @map("evaluated_at")
+  desireRating            String?   @map("desire_rating")
+  passRating              String?   @map("pass_rating")
+  overallRating           String?   @map("overall_rating")
+  comment                 String?   @db.Text
+  costUsd                 Float?    @map("cost_usd")
+  usageLogId              String?   @map("usage_log_id")
+  requestKey              String    @map("request_key")
+  ledgerId                String?   @map("ledger_id")
+  reusedFromId            String?   @map("reused_from_id")
+  fixedHash               String    @map("fixed_hash")
+  instructionHash         String    @map("instruction_hash")
+  instructionTemplateHash String    @map("instruction_template_hash")
+  contextCoreHash         String    @map("context_core_hash")
+  contextFilesHash        String?   @map("context_files_hash")
+  jobHash                 String    @map("job_hash")
+
+  @@index([candidateFileId, createdAt])
+  @@index([candidateId, createdAt])
+  @@index([createdAt])
+  @@index([status])
+  @@index([ledgerId])
+  @@map("job_eval_records")
+}

@@ -112,8 +112,11 @@ export type RecordAdvisorUsageParams = {
 /**
  * 1コール分の usage を AdvisorUsageLog に保存する。
  * 失敗しても例外を投げない（分析本体から隔離）。呼び出し側は await してもしなくてもよい。
+ * T-XXX: 保存した行の id と費用を返す（評価履歴 JobEvalRecord が参照する）。失敗時は null。
  */
-export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Promise<void> {
+export async function recordAdvisorUsage(
+  params: RecordAdvisorUsageParams,
+): Promise<{ id: string; costUsd: number } | null> {
   try {
     const tokens = extractTokens(params.usage);
     const { costUsd: fullCostUsd, unknownPricing } = computeCostUsd(params.model, tokens);
@@ -123,7 +126,8 @@ export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Prom
       ? [params.note, "unknown-model-pricing"].filter(Boolean).join("; ")
       : params.note ?? null;
 
-    await prisma.advisorUsageLog.create({
+    const row = await prisma.advisorUsageLog.create({
+      select: { id: true },
       data: {
         endpoint: params.endpoint,
         candidateId: params.candidateId ?? null,
@@ -142,8 +146,10 @@ export async function recordAdvisorUsage(params: RecordAdvisorUsageParams): Prom
         contextBuildMs: params.contextBuildMs ?? null,
       },
     });
+    return { id: row.id, costUsd };
   } catch (e) {
     // 記録失敗は本体処理に影響させない（ログのみ）。
     console.error("[recordAdvisorUsage] failed to persist usage:", e);
+    return null;
   }
 }

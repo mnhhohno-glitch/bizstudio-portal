@@ -21,6 +21,13 @@ import {
   applyAnalysisResults,
 } from "@/lib/analyze-bookmarks";
 import { recordAdvisorUsage, type AnthropicUsage } from "@/lib/advisor-usage";
+// T-XXX: 評価の入力（部品）と結果の保存。投入時に PENDING 行を作り、回収時に埋める。
+import {
+  saveEvalInputParts,
+  recordPendingEvaluations,
+  completePendingEvaluations,
+  type EvalInputHashes,
+} from "@/lib/eval-history";
 import { AUTO_REJECT_REASON_D } from "@/lib/recommend/auto-approval";
 import { rejectAutoFiles } from "@/lib/recommend/auto-approval-sync";
 import { AUTO_FILE_PDF_SELECT, generatePdfForAutoFile } from "@/lib/recommend/auto-approval-pdf";
@@ -292,10 +299,15 @@ export async function runAnalyzeSubmit(opts: {
 
   // 5. 実投入: 候補者contextを1回ずつ組み立て、全リクエストを1つの Message Batch にまとめる。
   let batch: { id: string };
+  // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（手動評価と同じ src/lib/eval-model.ts）。
+  const evalParams = evalRequestParams();
+  const evalEffort = evalParams.output_config?.effort ?? null;
+  const historyByRequest = new Map<
+    string,
+    { hashes: EvalInputHashes; jobHashById: Map<string, string> }
+  >();
   try {
     const fixedSystem = buildAnalyzeFixedSystem();
-    // T-XXX: モデルと送り方は EVAL_MODEL / EVAL_EFFORT で決まる（手動評価と同じ src/lib/eval-model.ts）。
-    const evalParams = evalRequestParams();
     const fileById = new Map(capped.map((f) => [f.id, f]));
     const contextByCandidate = new Map<string, string>();
     const requests = [];
@@ -307,17 +319,26 @@ export async function runAnalyzeSubmit(opts: {
       }
       const batchFiles = r.fileIds.map((id) => fileById.get(id)!);
       const jobsSection = buildAnalyzeJobsSection(batchFiles, r.start);
+      // 総合まとめは自動経路では生成しない（常に非最終バッチの指示文）。
+      const batchInstruction = buildBatchInstruction({
+        totalFiles: r.totalFiles,
+        start: r.start,
+        end: r.end,
+        isLastBatch: false,
+      });
       const systemBlocks = buildAnalyzeBatchSystemBlocks({
         fixedSystem,
         candidateContext: context,
-        // 総合まとめは自動経路では生成しない（常に非最終バッチの指示文）。
-        batchInstruction: buildBatchInstruction({
-          totalFiles: r.totalFiles,
-          start: r.start,
-          end: r.end,
-          isLastBatch: false,
-        }),
+        batchInstruction,
       });
+      // T-XXX: 送った中身を部品として保存（失敗しても投入は続行。その場合この request の履歴行は作らない）。
+      const history = await saveEvalInputParts({
+        fixedSystem,
+        instruction: batchInstruction,
+        candidateContext: context,
+        files: batchFiles,
+      });
+      if (history) historyByRequest.set(r.customId, history);
       requests.push({
         custom_id: r.customId,
         params: {
@@ -359,6 +380,25 @@ export async function runAnalyzeSubmit(opts: {
       dbErr,
     );
     return { ...summary, batchId: batch.id, ledgerSaveFailed: true };
+  }
+
+  // T-XXX: 評価履歴の PENDING 行（求人ごと）。回収時に結果で埋める。失敗しても投入結果は変えない。
+  for (const r of planned) {
+    const history = historyByRequest.get(r.customId);
+    if (!history) continue;
+    await recordPendingEvaluations(
+      {
+        candidateId: r.candidateId,
+        route: "auto",
+        model: evalParams.model,
+        effort: evalEffort,
+        requestKey: r.customId,
+        ledgerId: r.customId,
+        hashes: history.hashes,
+        jobHashById: history.jobHashById,
+      },
+      r.fileIds.map((id) => ({ id })),
+    );
   }
 
   console.log(
@@ -579,7 +619,7 @@ export async function runAnalyzeCollect(opts: {
             });
           }
 
-          await recordAdvisorUsage({
+          const usageRecord = await recordAdvisorUsage({
             endpoint: "recommend-analyze",
             model: message.model,
             usage: message.usage as AnthropicUsage,
@@ -587,6 +627,16 @@ export async function runAnalyzeCollect(opts: {
             fileCount: fileIds.length,
             batchApi: true, // バッチ割引（全トークン種別 ×0.5）を費用計上に反映
             note: `batch=${batchId}${message.stop_reason === "max_tokens" ? "; stop-max_tokens" : ""}`,
+          });
+          // T-XXX: 投入時の PENDING 行に結果を書く（失敗しても回収は止めない）。
+          await completePendingEvaluations({
+            ledgerId: row.id,
+            model: message.model,
+            results: ratingsAndComments,
+            skippedFileIds,
+            evaluatedAt: new Date(),
+            costUsd: usageRecord?.costUsd ?? null,
+            usageLogId: usageRecord?.id ?? null,
           });
 
           await prisma.recommendAnalyzeBatch.update({
@@ -603,6 +653,17 @@ export async function runAnalyzeCollect(opts: {
           await prisma.recommendAnalyzeBatch.update({
             where: { id: row.id },
             data: { status, completedAt: new Date() },
+          });
+          // T-XXX: 評価履歴の PENDING 行を FAILED にする。
+          await completePendingEvaluations({
+            ledgerId: row.id,
+            model: getEvalModel(),
+            results: new Map(),
+            skippedFileIds: [],
+            failed: true,
+            evaluatedAt: new Date(),
+            costUsd: null,
+            usageLogId: null,
           });
           claimed.delete(row.id);
           if (status === "EXPIRED") expiredRows++;
