@@ -3701,6 +3701,8 @@ model JobEvalRecord {
   instructionTemplateHash String    @map("instruction_template_hash")
   contextCoreHash         String    @map("context_core_hash")
   contextFilesHash        String?   @map("context_files_hash")
+  /// T-XXX step8: 判定の同一性キー（EVAL_LOGIC_VERSION + SKILL 本文の SHA-256）。null は step8 より前の行（eval-history.ts で読み替え）
+  logicKey                String?   @map("logic_key")
   jobHash                 String    @map("job_hash")
 
   @@index([candidateFileId, createdAt])

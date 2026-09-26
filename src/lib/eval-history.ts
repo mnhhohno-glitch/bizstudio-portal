@@ -1,8 +1,9 @@
 // T-XXX: 求人評価の「入力の部品」と「結果」の保存、および変更なしスキップの判定。
 //
 // 目的:
-//   ① 中身（SKILL 等の共通部分・指示文・求職者情報・求人本文）とモデル・effort が前回の評価と同じ求人は
+//   ① 判定の版（EVAL_LOGIC_VERSION + SKILL 本文）・求職者情報・求人本文とモデル・effort が前回の評価と同じ求人は
 //      AI に送らず前回の結果を使う（全件分析・追加分析のみ。未評価/破損のみ・自動配信は対象外）
+//      指示文の書き方（出力フォーマット等）だけの変更では評価し直さない（T-XXX step8）
 //   ② 後日、実際の選考結果と答え合わせできるよう、評価のたびに AI に送った中身と結果を残す
 //
 // 保存の形:
@@ -19,7 +20,12 @@ import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { extractAxis } from "@/lib/ai-rating";
-import { buildBatchInstruction, hasValidThreeAxisMarkers, JOB_TEXT_MAX_CHARS } from "@/lib/analyze-bookmarks";
+import {
+  buildBatchInstruction,
+  evalLogicKey,
+  hasValidThreeAxisMarkers,
+  JOB_TEXT_MAX_CHARS,
+} from "@/lib/analyze-bookmarks";
 
 export type EvalRoute = "full" | "incremental" | "invalid-only" | "auto";
 export type EvalRecordStatus = "PENDING" | "SAVED" | "SKIPPED" | "FAILED" | "REUSED";
@@ -78,7 +84,28 @@ export type EvalInputHashes = {
   instructionTemplateHash: string;
   contextCoreHash: string;
   contextFilesHash: string | null;
+  /** 判定の同一性キー（EVAL_LOGIC_VERSION + SKILL 本文）。スキップ判定は fixed / 指示文ではなくこれを見る */
+  logicKey: string;
 };
+
+/**
+ * logic_key 列ができる前（step8 より前）に保存された行の読み替え。
+ * 当時の固定部（SKILL＋評価ルール＋旧出力フォーマット）のハッシュ → その判定の logic_key（版1 + 当時の SKILL 本文）。
+ * 値は本番 job_eval_parts に保存された固定部から SKILL 本文を取り出して計算した（報告書 T-XXX_comment-compact.md）。
+ * 当時の指示文テンプレート（instruction_template_hash）も一致する行だけ読み替える。
+ */
+const LEGACY_LOGIC_KEY_BY_FIXED_HASH: Record<string, { instructionTemplateHash: string; logicKey: string }> = {
+  cc30328ffc1076bc982cdc2e86f2c0ca2ccbc2e21e2f39f9d5ad73b042f73dc6: {
+    instructionTemplateHash: "70b1ce898a908d086f9e78abfc2ac0e35f22491943c70ff94d3b28ec2ebe6e95",
+    logicKey: "2ce84e216da083f4ed954fe64830b57e440aa692143d7e2fb08ab00f6f56a44e",
+  },
+};
+
+function logicKeyOf(row: { logicKey: string | null; fixedHash: string; instructionTemplateHash: string }): string | null {
+  if (row.logicKey) return row.logicKey;
+  const legacy = LEGACY_LOGIC_KEY_BY_FIXED_HASH[row.fixedHash];
+  return legacy && legacy.instructionTemplateHash === row.instructionTemplateHash ? legacy.logicKey : null;
+}
 
 /**
  * 1回の送信の部品（共通部分・指示文・求職者情報2分割・求人本文）を保存し、ハッシュを返す。
@@ -123,6 +150,7 @@ export async function saveEvalInputParts(params: {
         instructionTemplateHash: instructionTemplateHash(),
         contextCoreHash: parts[2].hash,
         contextFilesHash: files !== "" ? sha256(files) : null,
+        logicKey: evalLogicKey(),
       },
       jobHashById,
     };
@@ -140,7 +168,9 @@ export type ReusableEvaluation = {
 
 /**
  * 変更なしスキップの判定。各求人について「前回 SAVED の評価」が次の全てで一致すれば再利用できる:
- *   共通部分・指示文（テンプレート）・求職者情報（ブックマーク一覧を除く）・求人本文・モデル・effort
+ *   判定の版（logic_key = EVAL_LOGIC_VERSION + SKILL 本文）・求職者情報（ブックマーク一覧を除く）・求人本文・モデル・effort
+ * T-XXX step8: 共通部分・指示文の中身そのもの（fixed / instruction_template ハッシュ）は見ない。
+ *   書き方だけを変えても評価し直しにならないようにするため。判定が変わる変更は EVAL_LOGIC_VERSION を上げる。
  * 加えて、CandidateFile に今も同じ結果が残っていること（総合ランクが一致し、3軸マーカーが揃っている）。
  * 保存データが無い求人（この仕組みより前の評価）は再利用しない＝従来どおり評価する。
  */
@@ -167,6 +197,7 @@ export async function findReusableEvaluations(params: {
         effort: true,
         fixedHash: true,
         instructionTemplateHash: true,
+        logicKey: true,
         contextCoreHash: true,
         jobHash: true,
         overallRating: true,
@@ -180,8 +211,7 @@ export async function findReusableEvaluations(params: {
       const same =
         prev.model === params.model &&
         (prev.effort ?? null) === (params.effort ?? null) &&
-        prev.fixedHash === params.hashes.fixedHash &&
-        prev.instructionTemplateHash === params.hashes.instructionTemplateHash &&
+        logicKeyOf(prev) === params.hashes.logicKey &&
         prev.contextCoreHash === params.hashes.contextCoreHash &&
         prev.jobHash === params.jobHashById.get(f.id);
       if (!same) continue;
@@ -259,6 +289,7 @@ export async function recordEvaluationResults(
         instructionTemplateHash: base.hashes.instructionTemplateHash,
         contextCoreHash: base.hashes.contextCoreHash,
         contextFilesHash: base.hashes.contextFilesHash,
+        logicKey: base.hashes.logicKey,
         jobHash: base.jobHashById.get(f.id) ?? "",
       };
     });
@@ -299,6 +330,7 @@ export async function recordReusedEvaluations(
       instructionTemplateHash: base.hashes.instructionTemplateHash,
       contextCoreHash: base.hashes.contextCoreHash,
       contextFilesHash: base.hashes.contextFilesHash,
+      logicKey: base.hashes.logicKey,
       jobHash: base.jobHashById.get(fileId) ?? "",
     }));
     const r = await prisma.jobEvalRecord.createMany({ data });
@@ -332,6 +364,7 @@ export async function recordPendingEvaluations(
         instructionTemplateHash: base.hashes.instructionTemplateHash,
         contextCoreHash: base.hashes.contextCoreHash,
         contextFilesHash: base.hashes.contextFilesHash,
+        logicKey: base.hashes.logicKey,
         jobHash: base.jobHashById.get(f.id) ?? "",
       })),
     });
