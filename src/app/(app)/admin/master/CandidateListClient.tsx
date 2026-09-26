@@ -275,10 +275,16 @@ export default function CandidateListClient({
   const [hardDeleteAck, setHardDeleteAck] = useState(false);
   const [hardDeleteLoading, setHardDeleteLoading] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  // 直近に debouncedSearch へ反映した検索語。検索語が変わっていないのに debounce が走って
+  // ページを1に戻す（＝sessionStorage から復元したページが消える）のを防ぐ。
+  const appliedSearchRef = useRef("");
+  const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    if (search === appliedSearchRef.current) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      appliedSearchRef.current = search;
       setDebouncedSearch(search);
       setCurrentPage(1);
     }, 300);
@@ -286,6 +292,58 @@ export default function CandidateListClient({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [search]);
+
+  // 2026-09-26: 詳細→「一覧に戻る」/ブラウザの戻るで絞り込みを維持する（InterviewListClient の
+  // interviewlist-filters と同じ作法）。復元値がある項目は既定値（ログイン中の担当CA等）より優先。
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("candidatelist-filters");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (typeof s.supportTab === "string") setSupportTab(s.supportTab);
+        if (Array.isArray(s.caFilter) && s.caFilter.every((v: unknown) => typeof v === "string")) setCaFilter(s.caFilter);
+        if (typeof s.search === "string") {
+          appliedSearchRef.current = s.search;
+          setSearch(s.search);
+          setDebouncedSearch(s.search);
+        }
+        if (typeof s.dateFrom === "string") setDateFrom(s.dateFrom);
+        if (typeof s.dateTo === "string") setDateTo(s.dateTo);
+        if (typeof s.appDateFrom === "string") setAppDateFrom(s.appDateFrom);
+        if (typeof s.appDateTo === "string") setAppDateTo(s.appDateTo);
+        if (typeof s.delDateFrom === "string") setDelDateFrom(s.delDateFrom);
+        if (typeof s.delDateTo === "string") setDelDateTo(s.delDateTo);
+        if (typeof s.routeFilter === "string") setRouteFilter(s.routeFilter);
+        if (typeof s.mediaFilter === "string") setMediaFilter(s.mediaFilter);
+        if (typeof s.genderFilter === "string") setGenderFilter(s.genderFilter);
+        if (typeof s.autoFilter === "string") setAutoFilter(s.autoFilter);
+        if (typeof s.endReasonFilter === "string") setEndReasonFilter(s.endReasonFilter);
+        if (
+          s.desiredSort === null ||
+          ((s.desiredSort?.key === "job" || s.desiredSort?.key === "area") &&
+            (s.desiredSort?.dir === "asc" || s.desiredSort?.dir === "desc"))
+        ) setDesiredSort(s.desiredSort);
+        if (typeof s.currentPage === "number" && s.currentPage > 0) setCurrentPage(s.currentPage);
+      }
+    } catch { /* 破損データ → デフォルト初期値のまま */ }
+    setRestored(true);
+  }, []);
+
+  // 絞り込み・並び替え・ページを sessionStorage に保存（restored 後のみ＝復元前の既定値で上書きしない）。
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      sessionStorage.setItem("candidatelist-filters", JSON.stringify({
+        supportTab, caFilter, search,
+        dateFrom, dateTo, appDateFrom, appDateTo, delDateFrom, delDateTo,
+        routeFilter, mediaFilter, genderFilter, autoFilter, endReasonFilter,
+        desiredSort, currentPage,
+      }));
+    } catch { /* quota/private-mode → 無視 */ }
+  }, [restored, supportTab, caFilter, search,
+      dateFrom, dateTo, appDateFrom, appDateTo, delDateFrom, delDateTo,
+      routeFilter, mediaFilter, genderFilter, autoFilter, endReasonFilter,
+      desiredSort, currentPage]);
 
   // 絞り込みは1回だけ実行し、タブ件数・一覧の両方をこの結果から導出する。
   // 旧実装は filtered と tabCounts で別々にフィルタを書いており、後から追加された
@@ -744,6 +802,7 @@ export default function CandidateListClient({
                 setDelDateTo("");
                 // フリー検索もクリア（debouncedSearch も即時に空へ＝結果も全件に戻す）
                 setSearch("");
+                appliedSearchRef.current = "";
                 setDebouncedSearch("");
                 setCurrentPage(1);
               }} />
@@ -977,8 +1036,6 @@ export default function CandidateListClient({
                       <div className="flex items-center gap-1 min-w-0">
                         <Link
                           href={`/candidates/${cand.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
                           className="block truncate text-[#2563EB] hover:underline cursor-pointer"
                           title={cand.name}
                         >

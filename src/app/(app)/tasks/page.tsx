@@ -211,6 +211,45 @@ export default function TasksPage() {
     } catch { /* ignore */ }
   };
 
+  // 2026-09-26: 詳細→一覧に戻ったとき（完了後の自動遷移・ブラウザの戻る）に絞り込みを維持する。
+  // InterviewListClient の interviewlist-filters と同じ作法。復元→setRestored(true)→fetchTasks の順。
+  // 並び替え（列ソート・ドラッグ順）は保存しない。
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("tasklist-filters");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.viewMode === "mine" || s.viewMode === "requested" || s.viewMode === "all") setViewMode(s.viewMode);
+        if (typeof s.includeCompleted === "boolean") setIncludeCompleted(s.includeCompleted);
+        if (typeof s.filterStatus === "string") setFilterStatus(s.filterStatus);
+        if (typeof s.filterGroupId === "string") setFilterGroupId(s.filterGroupId);
+        if (typeof s.filterCategoryId === "string") setFilterCategoryId(s.filterCategoryId);
+        if (typeof s.filterPriority === "string") setFilterPriority(s.filterPriority);
+        if (typeof s.filterCandidateName === "string") setFilterCandidateName(s.filterCandidateName);
+        if (typeof s.filterAssigneeId === "string") setFilterAssigneeId(s.filterAssigneeId);
+        if (typeof s.page === "number" && s.page > 0) setPage(s.page);
+      }
+    } catch { /* 破損データ → デフォルト初期値のまま */ }
+    setRestored(true);
+  }, []);
+
+  // 絞り込み・ページを sessionStorage に保存（restored 後のみ）。
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      sessionStorage.setItem("tasklist-filters", JSON.stringify({
+        viewMode, includeCompleted,
+        filterStatus, filterGroupId, filterCategoryId, filterPriority,
+        filterCandidateName, filterAssigneeId,
+        page,
+      }));
+    } catch { /* quota/private-mode → 無視 */ }
+  }, [restored, viewMode, includeCompleted,
+      filterStatus, filterGroupId, filterCategoryId, filterPriority,
+      filterCandidateName, filterAssigneeId,
+      page]);
+
   // fetch user & master data
   useEffect(() => {
     Promise.all([
@@ -227,6 +266,7 @@ export default function TasksPage() {
 
   // fetch tasks
   const fetchTasks = useCallback(async () => {
+    if (!restored) return; // 復元前は fetch しない（既定値で1回＋復元後に1回の二重取得を防ぐ）
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -257,7 +297,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterGroupId, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, viewMode, includeCompleted, page, sortBy, sortOrder, categories]);
+  }, [restored, filterStatus, filterGroupId, filterCategoryId, filterPriority, filterCandidateName, filterAssigneeId, viewMode, includeCompleted, page, sortBy, sortOrder, categories]);
 
   useEffect(() => {
     fetchTasks();

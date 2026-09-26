@@ -730,6 +730,8 @@ export default function InterviewListClient({ employees, currentEmployeeId }: Pr
                   <td className="px-2 py-2 overflow-hidden" title={`${r.candidate.name} (${r.candidate.candidateNumber})`}>
                     <Link
                       href={`/candidates/${r.candidate.id}?view=interview&from=interviews`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="text-[13px] text-[#2563EB] hover:underline block truncate"
                     >{r.candidate.name}</Link>
                     <div className="text-[11px] text-gray-400 truncate">{r.candidate.candidateNumber}</div>

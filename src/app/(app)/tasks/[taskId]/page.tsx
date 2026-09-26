@@ -116,6 +116,13 @@ export default function TaskDetailPage() {
         alert(err.error || "ステータス更新に失敗しました");
         return;
       }
+      // 2026-09-26: 完了（全員完了タイプの「自分を完了」含む）が成功したら一覧へ戻る。
+      // 一覧はマウント時に取り直すので、refresh はサーバー側キャッシュの念のため。
+      if (newStatus === "COMPLETED") {
+        router.push("/tasks");
+        router.refresh();
+        return;
+      }
       // 全員完了タイプの場合はサーバーの最新状態を再取得
       if (isAllCompletion) {
         await fetchTask();
