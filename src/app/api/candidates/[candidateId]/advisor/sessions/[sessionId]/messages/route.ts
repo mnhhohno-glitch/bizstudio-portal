@@ -10,7 +10,7 @@ import {
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
 import { computeContextFingerprint } from "@/lib/advisor-context";
 import { isAnalysisMessage } from "@/lib/advisor-message-kind";
-import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { getChatModel, chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { isDiagnosisContent, runDiagnosisExtraction } from "@/lib/advisor/diagnosis-extract";
 // T-184: タイプ診断のついでに未読の面談ログを要約保存＋既読化する。部品は T-155 の取り込み実装と共有。
@@ -146,8 +146,10 @@ function selectModel(message: string, hasFile: boolean): string {
     return "claude-opus-4-6";
   }
   */
-  console.log("[Advisor] Model: Sonnet (all-sonnet mode)");
-  return CLAUDE_MODEL_DEFAULT;
+  // T-XXX step9: モデルは CHAT_MODEL（既定 Sonnet 5）。
+  const model = getChatModel();
+  console.log(`[Advisor] Model: ${model} (all-sonnet mode)`);
+  return model;
 }
 
 export async function GET(
@@ -412,12 +414,11 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: usedModel,
         // T-184: ダイジェスト同梱時のみ出力上限を広げる。診断本文（従来4,000で足りている）に
         // 最大4,000字のダイジェストが後続するため、据え置きだと本文か区切り文字が途中で切れる。
         // 同梱しない通常のチャット・診断は従来どおり 4,000。
-        max_tokens: digestBundle ? 10000 : 4000,
-        temperature: 0.7,
+        // T-XXX step9: モデルごとの送り方（Sonnet 5 は temperature を送らず思考を無効化）は chatRequestParams。
+        ...chatRequestParams({ maxTokens: digestBundle ? 10000 : 4000, temperature: 0.7 }),
         system: systemBlocks,
         messages: apiMessages,
       }),
@@ -460,7 +461,7 @@ export async function POST(
       latencyMs,
       contextBuildMs,
     });
-    const rawContent = data.content?.[0]?.text;
+    const rawContent = chatResponseText(data.content);
     const aiContent = rawContent && rawContent.trim() !== ""
       ? rawContent
       : "応答の生成に失敗しました。もう一度お試しください。";

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { downloadFileFromDrive } from "@/lib/google-drive";
 import { parsePdfWithAI, parseDocWithAI, parseTextFile } from "@/lib/file-parser";
-import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 const API_TIMEOUT_MS = 120000;
@@ -175,6 +175,9 @@ export async function POST(
   userContent += `## これまでのチャット履歴\n${chatHistory}\n\n`;
   userContent += `上記の情報をもとに、${format === "line" ? "LINE" : "メール"}向けの面談後挨拶文を作成してください。`;
 
+  // T-XXX step9: モデル（CHAT_MODEL・既定 Sonnet 5）と送り方は chatRequestParams。
+  const chatParams = chatRequestParams({ maxTokens: 2000, temperature: 0.7 });
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -187,9 +190,7 @@ export async function POST(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: 2000,
-        temperature: 0.7,
+        ...chatParams,
         system: systemPrompt,
         messages: [
           { role: "user", content: userContent },
@@ -206,7 +207,7 @@ export async function POST(
       // T-126: 失敗コールも記録。
       await recordAdvisorUsage({
         endpoint: "greeting",
-        model: CLAUDE_MODEL_DEFAULT,
+        model: chatParams.model,
         usage: null,
         candidateId,
         note: `error-${response.status}`,
@@ -221,12 +222,12 @@ export async function POST(
     // T-126: usage を永続化（greeting は単発・低頻度）。
     await recordAdvisorUsage({
       endpoint: "greeting",
-      model: CLAUDE_MODEL_DEFAULT,
+      model: chatParams.model,
       usage: data.usage,
       candidateId,
       note: format,
     });
-    const rawContent = data.content?.[0]?.text;
+    const rawContent = chatResponseText(data.content);
     const greetingText = rawContent && rawContent.trim() !== ""
       ? rawContent
       : "挨拶文の生成に失敗しました。もう一度お試しください。";

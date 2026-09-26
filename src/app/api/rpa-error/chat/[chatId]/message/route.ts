@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "@/lib/rpa-error/system-prompt";
-import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { chatRequestParams, chatResponseText } from "@/lib/claude";
 
 export async function POST(
   req: Request,
@@ -41,8 +41,7 @@ export async function POST(
 
   try {
     const response = await client.messages.create({
-      model: CLAUDE_MODEL_DEFAULT,
-      max_tokens: 2048,
+      ...chatRequestParams({ maxTokens: 2048 }),
       system: systemPrompt,
       messages: messages.map((m) => ({
         role: m.role as "user" | "assistant",
@@ -51,7 +50,7 @@ export async function POST(
     });
 
     const assistantContent =
-      response.content[0].type === "text" ? response.content[0].text : "";
+      chatResponseText(response.content);
 
     // アシスタントメッセージ保存
     const saved = await prisma.rpaErrorChatMessage.create({

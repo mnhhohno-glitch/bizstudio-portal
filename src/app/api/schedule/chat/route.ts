@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { anthropic, chatRequestParams, chatResponseText } from "@/lib/claude";
 import { buildScheduleSystemPrompt } from "@/lib/schedulePrompt";
 
 export async function POST(req: Request) {
@@ -48,13 +48,12 @@ export async function POST(req: Request) {
 
   try {
     const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL_DEFAULT,
-      max_tokens: 4096,
+      ...chatRequestParams({ maxTokens: 4096 }),
       system: systemPrompt,
       messages,
     });
 
-    assistantText = response.content[0].type === "text" ? response.content[0].text : "";
+    assistantText = chatResponseText(response.content);
   } catch (e) {
     console.error("Claude API error:", e);
     return NextResponse.json({ error: "AIの応答取得に失敗しました" }, { status: 500 });
@@ -69,8 +68,7 @@ export async function POST(req: Request) {
     // Retry once with instruction
     try {
       const retryResponse = await anthropic.messages.create({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: 4096,
+        ...chatRequestParams({ maxTokens: 4096 }),
         system: systemPrompt,
         messages: [
           ...messages,
@@ -78,7 +76,7 @@ export async function POST(req: Request) {
           { role: "user" as const, content: "前回のレスポンスがJSON形式ではありませんでした。必ず { \"message\": \"...\", \"entries\": [...] } の形式で返してください。マークダウンのコードブロック記法は使わないでください。" },
         ],
       });
-      const retryText = retryResponse.content[0].type === "text" ? retryResponse.content[0].text : "";
+      const retryText = chatResponseText(retryResponse.content);
       const retryClean = retryText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
       parsed = JSON.parse(retryClean);
     } catch {
