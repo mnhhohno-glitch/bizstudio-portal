@@ -8,7 +8,7 @@
 //
 // ここに置くもの:
 //   - 固定 system プレフィックス（SKILL_HEADER + EVAL_RULES）の組み立て … buildAnalyzeFixedSystem
-//   - 候補者 context の組み立て（評価一覧の除去・20,000字切り詰め）… buildAnalyzeCandidateContext
+//   - 候補者 context の組み立て（評価一覧の除去・50,000字切り詰め）… buildAnalyzeCandidateContext
 //   - バッチ指示（system 第3ブロック）… buildBatchInstruction
 //   - user 側の求人票セクション組み立て … buildAnalyzeJobsSection
 //   - 出力の解析と fail-closed 保存 … extractRatingsAndComments / hasValidThreeAxisMarkers /
@@ -17,7 +17,12 @@
 //   - 総合まとめ（最終バッチ）・完了カード・runContextCache 等の run 制御（CA 画面専用）
 
 import { prisma } from "@/lib/prisma";
-import { getCandidateContext, RATINGS_SECTION_MARKER } from "@/lib/advisor-context";
+import {
+  EVAL_CONTEXT_MAX_CHARS,
+  getCandidateContext,
+  RATINGS_SECTION_MARKER,
+  type KeyFileTextReader,
+} from "@/lib/advisor-context";
 import { getJobMatchingSkill } from "@/lib/load-job-matching-skill";
 import { RATING_VALUE } from "@/lib/ai-rating";
 import { CA_MARK_CLASS } from "@/lib/ca-analysis-format";
@@ -292,7 +297,10 @@ function normalizeCompanyName(name: string): string {
     .toLowerCase();
 }
 
-const MAX_CONTEXT_CHARS = 20000;
+// T-XXX step7: 求職者情報の全体上限は評価だけ 50,000字（EVAL_CONTEXT_MAX_CHARS・advisor-context.ts）。
+//   求人本文は 3,000字 → 12,000字（直近30日に評価された求人 2,743件の 99.8%・有効な求人 9,711件の 99.7% が収まる。
+//   p99 は 10,191字 / 10,993字、最大 15,131字）。
+export const JOB_TEXT_MAX_CHARS = 12000;
 
 const EVAL_RULES = `## 評価ルール
 
@@ -589,13 +597,23 @@ export function buildBatchInstruction(params: {
 
 /**
  * 候補者 context（system 第2ブロック）の組み立て。
- * 評価一覧・ブックマーク求人票セクションの除去と 20,000字切り詰めを含む。
+ * 評価一覧・ブックマーク求人票セクションの除去と 50,000字切り詰めを含む。
+ * T-XXX step7: getCandidateContext を mode="evaluation" で呼ぶ（最新の面談は全文・4件枠の外・先頭／
+ *   要約に入っていない面談も入れる／上限を超える分は古い書類から削る）。チャットの組み立ては変えない。
+ *   ★組み立てが変わると job_eval_parts の context_core ハッシュが変わり、変更なしスキップが外れる。
  * 取得失敗時は空文字を返す（呼び出し側でキャッシュ可否を判断する）。
+ * options.readKeyFileText は確認スクリプト用（Drive・OCR・書き込みを避ける）。本番経路では渡さない。
  */
-export async function buildAnalyzeCandidateContext(candidateId: string): Promise<string> {
+export async function buildAnalyzeCandidateContext(
+  candidateId: string,
+  options: { readKeyFileText?: KeyFileTextReader } = {},
+): Promise<string> {
   let candidateContext = "";
   try {
-    candidateContext = await getCandidateContext(candidateId);
+    candidateContext = await getCandidateContext(candidateId, {
+      mode: "evaluation",
+      readKeyFileText: options.readKeyFileText,
+    });
     // Strip bookmark sections (we send job postings separately)
     // T-163: 評価一覧（RATINGS_SECTION_MARKER）はチャット用のため、評価する側の
     // analyze-batch には見せない（自分の過去評価による判定の自己調整を防ぐ）。
@@ -612,14 +630,15 @@ export async function buildAnalyzeCandidateContext(candidateId: string): Promise
   }
 
   // Truncate context to prevent oversized payloads
-  if (candidateContext.length > MAX_CONTEXT_CHARS) {
-    candidateContext = candidateContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
+  // （主要書類は getCandidateContext 側で予算内に収めてあるため、ここは最後の安全弁）
+  if (candidateContext.length > EVAL_CONTEXT_MAX_CHARS) {
+    candidateContext = candidateContext.substring(0, EVAL_CONTEXT_MAX_CHARS) + "\n\n...（コンテキストが長いため一部省略）";
   }
 
   return candidateContext;
 }
 
-/** user 側の求人票セクション組み立て（DB保存済み extractedText を各3,000字で切り出し）。 */
+/** user 側の求人票セクション組み立て（DB保存済み extractedText を各 JOB_TEXT_MAX_CHARS 字で切り出し）。 */
 export function buildAnalyzeJobsSection(
   batchFiles: { fileName: string; extractedText: string | null }[],
   start: number,
@@ -629,7 +648,7 @@ export function buildAnalyzeJobsSection(
     .map((f, i) => {
       const globalIndex = start + i + 1;
       const fullText = f.extractedText || "";
-      const text = fullText.substring(0, 3000);
+      const text = fullText.substring(0, JOB_TEXT_MAX_CHARS);
       console.log(`[AnalyzeBatch] Using extracted text: ${f.fileName} (${fullText.length} chars, sent ${text.length})`);
       return `### 求人${globalIndex}: ${f.fileName}\n${text}`;
     })
