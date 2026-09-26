@@ -146,6 +146,17 @@ T-051 で整理した面談入力フォームのドロップダウン定義位�
 - API: `src/app/api/interviews/[id]/attachments` 配下（単一ファイル POST、複数対応はフロント側ループで実現）
 - T-041 修正: master commit cde6530、staging merge 済み
 
+#### 2026-09-26: 受け付けを1つに統合（.txt は自動で面談ログ）
+
+- 下段「この面談の面談ログ（.txt）」（T-152 の専用欄・「ログをアップロード」ボタン）を削除し、上段のドロップ領域／「ファイルを選択」に一本化。
+- `handleUploadMultiple` が拡張子で呼び分ける（D&D・選択とも同じ経路、1件ずつ逐次 POST）:
+  - `.txt`（大文字小文字不問）→ `handleUploadInterviewLog`（`/api/candidates/{id}/files/upload` に `category=MEETING` + `interviewId` 付き＝この面談のログとして記録）
+  - それ以外 → `handleUpload`（同 API・`interviewId` なし＝通常の添付）
+  - 面談が未保存 or この面談のログが記録済みのときの `.txt` は `handleUpload`（旧専用欄もこの2状態ではログを受け付けなかった）。同じ回の `.txt` 複数はログにするのは1件目だけ。
+- 一覧で `interviewId` 一致の txt 行に「面談ログ」バッジ（`isInterviewLogOf`）。
+- 文言: ドロップ領域「面談ログ（.txt）／録音／履歴書PDF等をドラッグ＆ドロップ」、一覧上「.txt は自動でこの面談の面談ログとして記録され、解析に使われます」。
+- API・DB・解析ボタン・書類タブ（`DocumentsTab.tsx`）・自動保存は変更なし。
+
 ### 面談基本情報グリッド（line ~1053）
 
 6列グリッド（`repeat(6, minmax(0, 1fr))`）。各行は col-span-2 セルで構成。
@@ -1573,3 +1584,12 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   東日本4地域が揃えば「東日本」、西日本6地域が揃えば「西日本」、全地域なら「全国」。一部だけの地域は県名を「/」で並べ、地域同士は「・」で結ぶ
   （例: 東北全選択＋神奈川のみ→「東北・神奈川」）。`areaMode` が NATIONWIDE/EAST/WEST の行はそのラベルを出す（`areaLabel()`）。
 - 都道府県指定は**空にしない**（何もチェックしないとマイナビ側で海外が含まれるため）。API も PREFECTURE で0件は 400。
+
+
+## LINE WORKS 担当CA宛て通知の宛先（2026-09-26）
+
+- 求職者起点の担当CA宛て通知3本は `src/lib/lineworks-ca-mention.ts` の `resolveCaMentionTarget(candidate.employeeId)` → `sendBotMessageWithCaMention` で送る。宛先は **Employee → User.lineworksId のみ**（Employee・User とも active）。
+  - マイページまとめ送信通知（`candidate-site-notifications.ts` `notifySubmissionViaLineWorks`・マイページBot）: 旧 `LINEWORKS_ADVISOR_MAP`（CA名→ID の対応表）を廃止。Railway の環境変数は戻せるよう残置。
+  - 求職者サイトの応募通知（`candidate-site/apply-notification.ts`）・質問通知（`candidate-site/question-notification.ts`）: 旧 `Employee.lineUserId`（LINE のID・全員未登録＝実質メンションゼロ）を廃止。
+- 届かないとき（担当CA未設定／社員なし／lineworksId 未登録／無効）は大野 将幸（社員番号 `1000001`）へメンションし、本文末尾に「※担当CA（{氏名 or 未設定}）に届いていません（LINE WORKS未登録）」。大野も引けなければメンションなし＋注記＋エラーログ。メンション付き送信が失敗したら宛先を1段落として1回だけ再送。
+- タスク通知（`resolveAssigneeNotifyTargets`）とマイページ回答タスク通知（`mypage-response-sync.ts`）はこの関数を使っていない（挙動据え置き）。
