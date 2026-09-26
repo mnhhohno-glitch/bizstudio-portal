@@ -88,3 +88,57 @@
 
 ### テストの費用
 旧 $2.172 + 新 $2.096 = **$4.27 ≈ ¥672**（count_tokens は無料）
+
+## 3. 本番反映（第2部）
+
+### 変更（377eab8）
+| ファイル | 内容 |
+|--|--|
+| `src/lib/analyze-bookmarks.ts` | `EVAL_RULES` の「## 出力フォーマット」節を第1部の新（`NEW_OUTPUT_FORMAT` と byte 一致を確認）に差し替え。手動評価と自動配信で共通。`EVAL_LOGIC_VERSION = 1`・`evalLogicKey()`（版番号 + SKILL 本文の SHA-256）を追加 |
+| `src/lib/eval-history.ts` | 変更なしスキップを `fixed_hash`・`instruction_template_hash` ではなく **`logic_key`** で比較。記録3経路（SAVED/REUSED/PENDING）で `logic_key` を保存。`logic_key` が null の既存行は `LEGACY_LOGIC_KEY_BY_FIXED_HASH`（旧固定部 `cc3032…` + 旧テンプレ `70b1ce…` → `2ce84e…`）で読み替え |
+| `prisma/schema.prisma` ・ `prisma/migrations/20260926100000_t_xxx_job_eval_logic_key` | `job_eval_records.logic_key TEXT NULL` を追加（nullable 追加のみ・既存行は触らない） |
+| `.claude/12-pitfalls.md` | #52「評価の指示文を変えるときは `EVAL_LOGIC_VERSION` を上げるか決める」 |
+
+- `job_eval_parts` には実際に送った指示文をこれまでどおり保存（新しい固定部 = `3c99e4…`）
+- 旧の読み替えキー `2ce84e…` は、本番の `job_eval_parts` に保存された固定部から SKILL 本文を取り出して計算し、ローカルの SKILL（改行を LF に揃えたもの）とも一致を確認した。本番で新コードが計算した `logic_key` も `2ce84e…` で一致（下表）
+
+### 確認（大野テスト 5999999 のみ）
+事前（本番・旧の書き方）: 追加分析で最新3件を評価済みにした（1件 AI・2件は当日朝の評価を再利用）。¥22.5
+
+| # | 確認 | staging（95d2374） | 本番（377eab8） |
+|--|--|--|--|
+| 1 | 書き方の変更だけでは評価し直さない | 旧の書き方で評価済みの3件は **REUSED**（AI 呼び出しなし・`logic_key` null → 読み替えで一致） | 1バッチ目5件（旧の書き方3件＋staging の新2件）が **全件 REUSED・0秒・費用0** |
+| 2 | 新しい書き方で評価 | 2件 SAVED（固定部 `3c99e4`・`logic_key` `2ce84e`）。コメント 427・488字（同じ求職者の旧の書き方は 623〜1,094字） | 1件 SAVED・571字 |
+| 3 | ランク・3軸マーカー・CA 項目 | 3軸マーカー ✓・項目行 6〜7（▲3〜4）・総合評価表どおり | 同じ（項目7・▲4 ×1） |
+| 4 | 完了カード | 「5件を評価しました（変更がないため3件は前回の結果を使用）」 | 「6件を評価しました（変更がないため5件は前回の結果を使用）」 |
+| 5 | 出力トークン | 2件+総合まとめで 2,957 | 1件+総合まとめで **1,491**（事前の旧の書き方 1件+総合まとめ 2,009 → −26%） |
+| 6 | エラー | なし | なし（Railway ログに eval-history / AnalyzeBatch の警告なし） |
+
+- **求職者向けサイトの表示**: 大野テストの紹介済み求人（42件）は古いブックマークで、新しい書き方で評価し直すと費用上限を超えるため実物では確認していない。代わりに、サイトが使う `extractRecommendationForDisplay`（`candidate-site-favorite-dto.ts` 経由）と kyuujinPDF 送信用の `extractCandidateFacingComment` を、新しい書き方の実コメント3件に適用して確認した。本人向け本文（93〜112字・2文）だけが切り出され、CA 向けの内容は含まれない。見出しの形は変えていないため、表示の仕組みはそのまま動く
+- 本番の固定部 1h キャッシュは staging が書いたものを読込（cache_read 21,261）
+
+### 確認の費用
+| 内訳 | 金額 |
+|--|--|
+| 比較テスト（旧・新 Batch） | ¥672 |
+| 事前（本番・旧の書き方1件） | ¥22.5 |
+| staging（新2件・新固定部の 1h キャッシュ書込を含む） | ¥52.9 |
+| 本番（新1件） | ¥20.8 |
+| **合計** | **¥768**（上限 ¥800） |
+
+## 4. 戻し方
+- **書き方を戻す**: 377eab8 の `src/lib/analyze-bookmarks.ts` のうち「## 出力フォーマット」節だけを元に戻す（`git show 377eab8^:src/lib/analyze-bookmarks.ts` の同節）。スキップの仕組み（`logic_key`）は残してよい。戻しても版を上げなければ評価し直しは起きない（短い書き方で保存済みのコメントはそのまま使われる）。短い書き方のコメントを入れ替えたい場合だけ `EVAL_LOGIC_VERSION` を 2 に上げる（全件が評価し直しになる）
+- **スキップごと止める**: Railway 環境変数 `EVAL_SKIP_UNCHANGED=0`（step5 から）
+- `logic_key` 列は nullable で、古いコードは読まないため残してよい
+
+## 5. 月額の見込み
+出力費用 −¥0.92/件 × 手動評価 約2,700件/月 ≈ **月 −¥2,500**（自動配信の再開時はその分さらに減る）
+
+## 6. 残る注意
+- 比較テストで新の書き方は**やや厳しめ**に出た（ランクが違った19件のうち下がる14・上がる5。有意ではない）。見張りは `npx tsx --env-file=.env scripts/eval-rank-watch-t-xxx.ts --from 2026-09-26 --to …` で、総合ランク分布（特に B+ の比率が下がっていないか）を2週間後に確認する
+- 総合 A の評価は比較対象に無かった（保存済みの Opus 5.5 評価に A が0件）
+
+## 7. ファイル
+- コミット: 第1部 `8b1d5be`（比較スクリプト・本書）/ 第2部 `377eab8`（実装）/ 本書の追記（このコミット）
+- 比較スクリプト: `scripts/compare-comment-compact-t-xxx.ts`
+- 明細・比較 HTML（コミットしない）: `scripts/output/t-xxx-comment-compact/detail-new.csv`・`compare-new.html`・`report-new.md`・`plan.json`・`results-{old,new}.json`

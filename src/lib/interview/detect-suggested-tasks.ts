@@ -20,7 +20,7 @@
 // ★プロンプトキャッシュ（罠#39）: 面談ログは毎回異なる非決定的テキストなので
 //  cache_control は付けない。付けると毎回 cache write（1.25倍）で純損になる。
 
-import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { normalizeSuggestedTasks, type SuggestedTask } from "@/lib/advisor/suggested-tasks";
 
@@ -139,6 +139,8 @@ export async function detectSuggestedTasksFromInterviewLog(params: {
 
   const body = log.length > MAX_LOG_CHARS ? log.slice(0, MAX_LOG_CHARS) : log;
 
+  // T-XXX step9: モデル（CHAT_MODEL・既定 Sonnet 5）と送り方は chatRequestParams。
+  const chatParams = chatRequestParams({ maxTokens: MAX_OUTPUT_TOKENS, temperature: 0 });
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DETECT_TIMEOUT_MS);
 
@@ -151,9 +153,7 @@ export async function detectSuggestedTasksFromInterviewLog(params: {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        temperature: 0,
+        ...chatParams,
         // ★cache_control は付けない（面談ログは毎回異なる＝罠#39）。
         system: INTERVIEW_TASK_DETECTION_PROMPT,
         messages: [
@@ -173,7 +173,7 @@ export async function detectSuggestedTasksFromInterviewLog(params: {
       console.error("[interview-task-detect] Anthropic API error:", response.status, errText.slice(0, 300));
       await recordAdvisorUsage({
         endpoint: "interview-task-detect",
-        model: CLAUDE_MODEL_DEFAULT,
+        model: chatParams.model,
         usage: null,
         candidateId,
         note: `error-${response.status}`,
@@ -184,13 +184,13 @@ export async function detectSuggestedTasksFromInterviewLog(params: {
     const data = await response.json();
     await recordAdvisorUsage({
       endpoint: "interview-task-detect",
-      model: CLAUDE_MODEL_DEFAULT,
+      model: chatParams.model,
       usage: data.usage ?? null,
       candidateId,
       note: `log-chars-${body.length}`,
     });
 
-    const text: string = data.content?.[0]?.text ?? "";
+    const text: string = chatResponseText(data.content);
     const suggestedTasks = parseDetectionOutput(text);
 
     console.log(

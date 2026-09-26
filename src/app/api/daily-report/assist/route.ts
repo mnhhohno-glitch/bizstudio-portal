@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { anthropic, getChatModel, chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { getDailyReportSkill } from "@/lib/load-daily-report-skill";
 import { getJobMatchingSkillFull } from "@/lib/load-job-matching-skill";
@@ -106,14 +106,13 @@ export async function POST(req: Request) {
   let assistantText = "";
   try {
     const res = await anthropic.messages.create({
-      model: CLAUDE_MODEL_DEFAULT,
-      max_tokens: 4096,
+      ...chatRequestParams({ maxTokens: 4096 }),
       system: systemBlocks,
       messages,
     });
-    assistantText = res.content[0]?.type === "text" ? res.content[0].text : "";
+    assistantText = chatResponseText(res.content);
     // T-126: usage を永続化。
-    await recordAdvisorUsage({ endpoint: "daily-report-assist", model: CLAUDE_MODEL_DEFAULT, usage: res.usage });
+    await recordAdvisorUsage({ endpoint: "daily-report-assist", model: getChatModel(), usage: res.usage });
   } catch (e) {
     console.error("[daily-report/assist] Claude error:", e);
     return NextResponse.json({ error: "AI の応答取得に失敗しました" }, { status: 500 });
@@ -123,8 +122,7 @@ export async function POST(req: Request) {
   if (!parsed) {
     try {
       const retry = await anthropic.messages.create({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: 4096,
+        ...chatRequestParams({ maxTokens: 4096 }),
         system: systemBlocks,
         messages: [
           ...messages,
@@ -133,8 +131,8 @@ export async function POST(req: Request) {
         ],
       });
       // T-126: JSON 整形リトライも記録（isRetry=true）。
-      await recordAdvisorUsage({ endpoint: "daily-report-assist", model: CLAUDE_MODEL_DEFAULT, usage: retry.usage, isRetry: true, note: "json-retry" });
-      parsed = tryParse(retry.content[0]?.type === "text" ? retry.content[0].text : "");
+      await recordAdvisorUsage({ endpoint: "daily-report-assist", model: getChatModel(), usage: retry.usage, isRetry: true, note: "json-retry" });
+      parsed = tryParse(chatResponseText(retry.content));
     } catch (e) { console.error("[daily-report/assist] retry failed:", e); }
   }
   if (!parsed) {

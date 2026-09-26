@@ -42,6 +42,7 @@ export const AI_MODEL_PRICING: Record<string, AiModelPricing> = {
   "claude-opus-4-6": { input: 5, output: 25, cachedInput: 0.5 },
   "claude-opus-5-5": { input: 4, output: 20, cachedInput: 0.2 },
   "claude-sonnet-4-6": { input: 3, output: 15, cachedInput: 0.3 },
+  "claude-sonnet-5": { input: 2, output: 10, cachedInput: 0.2 }, // T-XXX step9: チャット等（CHAT_MODEL 既定）
   "claude-haiku-4-5": { input: 1, output: 5, cachedInput: 0.1 },
 };
 

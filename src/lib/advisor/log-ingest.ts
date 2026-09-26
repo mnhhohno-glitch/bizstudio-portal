@@ -11,7 +11,7 @@
 //    AI呼び出しが失敗したら一切書き込まない（未読のまま残り、次回押下で再試行できる）。
 //  - ★contextCache 破棄は必須要件。破棄しないと既存セッションは最大30分
 //    （messages route の CACHE_TTL）古いコンテキストのまま会話が続く。
-//  - AI は Anthropic（CLAUDE_MODEL_DEFAULT 定数参照）。Gemini は使わない。
+//  - AI は Anthropic（モデルは chatRequestParams＝CHAT_MODEL 参照）。Gemini は使わない。
 //    txt の生読みなので OCR も発生しない。
 //  - cache_control は付けない（ログ本文もダイジェストも非決定的テキスト＝罠#39）。
 //
@@ -22,7 +22,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { downloadFileFromDrive } from "@/lib/google-drive";
-import { CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 
 /** Anthropic 呼び出しのタイムアウト。 */
@@ -321,6 +321,8 @@ export async function ingestUnreadLogs(params: {
 
   const userContent = buildDigestUserContent(collected.bundle);
   // ---- Anthropic 呼び出し（fail-closed: 失敗したら一切書き込まない） ----
+  // T-XXX step9: モデル（CHAT_MODEL・既定 Sonnet 5）と送り方は chatRequestParams。
+  const chatParams = chatRequestParams({ maxTokens: MAX_OUTPUT_TOKENS, temperature: 0 });
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), INGEST_TIMEOUT_MS);
   let digest: string;
@@ -333,9 +335,7 @@ export async function ingestUnreadLogs(params: {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        temperature: 0,
+        ...chatParams,
         system: DIGEST_SYSTEM_PROMPT,
         messages: [{ role: "user", content: userContent }],
       }),
@@ -348,7 +348,7 @@ export async function ingestUnreadLogs(params: {
       console.error("[advisor-log-ingest] Anthropic API error:", response.status, errText.slice(0, 300));
       await recordAdvisorUsage({
         endpoint: "advisor-log-ingest",
-        model: CLAUDE_MODEL_DEFAULT,
+        model: chatParams.model,
         usage: null,
         candidateId,
         note: `error-${response.status}`,
@@ -359,12 +359,12 @@ export async function ingestUnreadLogs(params: {
     const data = await response.json();
     await recordAdvisorUsage({
       endpoint: "advisor-log-ingest",
-      model: CLAUDE_MODEL_DEFAULT,
+      model: chatParams.model,
       usage: data.usage ?? null,
       candidateId,
       note: `files-${logs.length};chars-${total}`,
     });
-    digest = (data.content?.[0]?.text ?? "").trim();
+    digest = chatResponseText(data.content).trim();
     if (!digest) {
       return { ok: false, error: "ダイジェストの生成結果が空でした。再度お試しください。", status: 502 };
     }

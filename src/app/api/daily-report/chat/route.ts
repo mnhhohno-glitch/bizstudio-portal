@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { anthropic, CLAUDE_MODEL_DEFAULT } from "@/lib/claude";
+import { anthropic, getChatModel, chatRequestParams, chatResponseText } from "@/lib/claude";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { buildDailyReportSystemPrompt } from "@/lib/dailyReport/prompt";
 import { computeCaMetrics } from "@/lib/dailyReport/metrics";
@@ -96,14 +96,13 @@ export async function POST(req: Request) {
   let assistantText = "";
   try {
     const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL_DEFAULT,
-      max_tokens: 4096,
+      ...chatRequestParams({ maxTokens: 4096 }),
       system: systemPrompt,
       messages,
     });
-    assistantText = response.content[0]?.type === "text" ? response.content[0].text : "";
+    assistantText = chatResponseText(response.content);
     // T-126: usage を永続化。
-    await recordAdvisorUsage({ endpoint: "daily-report-chat", model: CLAUDE_MODEL_DEFAULT, usage: response.usage });
+    await recordAdvisorUsage({ endpoint: "daily-report-chat", model: getChatModel(), usage: response.usage });
   } catch (e) {
     console.error("[daily-report/chat] Claude API error:", e);
     return NextResponse.json({ error: "AI の応答取得に失敗しました" }, { status: 500 });
@@ -128,8 +127,7 @@ export async function POST(req: Request) {
   if (!parsed) {
     try {
       const retry = await anthropic.messages.create({
-        model: CLAUDE_MODEL_DEFAULT,
-        max_tokens: 4096,
+        ...chatRequestParams({ maxTokens: 4096 }),
         system: systemPrompt,
         messages: [
           ...messages,
@@ -142,8 +140,8 @@ export async function POST(req: Request) {
         ],
       });
       // T-126: JSON 整形リトライも記録（isRetry=true）。
-      await recordAdvisorUsage({ endpoint: "daily-report-chat", model: CLAUDE_MODEL_DEFAULT, usage: retry.usage, isRetry: true, note: "json-retry" });
-      const retryText = retry.content[0]?.type === "text" ? retry.content[0].text : "";
+      await recordAdvisorUsage({ endpoint: "daily-report-chat", model: getChatModel(), usage: retry.usage, isRetry: true, note: "json-retry" });
+      const retryText = chatResponseText(retry.content);
       parsed = tryParse(retryText);
     } catch (e) {
       console.error("[daily-report/chat] retry failed:", e);
