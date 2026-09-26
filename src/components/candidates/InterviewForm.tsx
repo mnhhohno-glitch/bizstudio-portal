@@ -28,8 +28,9 @@ import InterviewSupportLogTab from "@/components/interview-support/InterviewSupp
 const LOG_UPLOAD_NOTICE_MS = 5000;
 
 const MENDAN_FUSANKA_CATEGORY_ID = "cmmqtqf330000rg4f6c7rw162";
-// 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025) / 大野 望(1000004)
-const INTERVIEW_DECLINE_ASSIGNEES = "1000027,1000025,1000004";
+// 面談不参加共有タスクの固定あて先（社員番号）: 見ル野 未来(1000027) / 佐藤 葵(1000025) / 道西 未来(1000029) / 大野 望(1000004)
+// 2026-09-26: 道西 未来(1000029) を追加。
+const INTERVIEW_DECLINE_ASSIGNEES = "1000027,1000025,1000029,1000004";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
