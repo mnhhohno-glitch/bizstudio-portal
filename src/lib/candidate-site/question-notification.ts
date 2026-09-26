@@ -1,17 +1,16 @@
-import { sendBotMessage } from "@/lib/lineworks";
+import { sendBotMessageWithCaMention, type CaMentionTarget } from "@/lib/lineworks-ca-mention";
 
 // T-128 batch4: 求職者サイトからの「担当CAへの質問」を担当CAへ LINE WORKS 通知する。
 // 応募通知（src/lib/candidate-site/apply-notification.ts）で現に稼働している経路をそのまま流用:
 // - 送信先: LINEWORKS_TASK_BOT_ID / LINEWORKS_TASK_CHANNEL_ID（既存CA通知チャンネル）。
-// - メンション宛先: 応募通知が実際に使っているのと同じ Employee.lineUserId（apply/route.ts が
-//   ca.employee.lineUserId を caLineworksId として渡し、apply-notification が <m userId> に使う）。
-//   無ければ担当CA名プレフィックスでフォールバック。
+// - 2026-09-26: 宛先を Employee.lineUserId（LINE のIDで LINE WORKS には効かない）から
+//   User.lineworksId に変更（lineworks-ca-mention.ts・応募通知と同一）。届かないときは代表へメンション＋本文末尾に注記。
+//   代表も引けないときはメンションなし（担当CA名プレフィックス）＋注記。
 
 type QuestionNotificationParams = {
   candidateName: string;
   candidateNumber: string;
-  caName: string | null;
-  caLineUserId: string | null; // Employee.lineUserId（応募通知と同一の宛先）
+  target: CaMentionTarget;
   taskId: string;
   question: string;
   summary: string;
@@ -35,6 +34,8 @@ export async function notifyCandidateQuestion(
     console.warn("[candidate-site/questions] LINE WORKS 環境変数が未設定のため通知をスキップ");
     return false;
   }
+
+  const caName = params.target.caName;
 
   // T-133 FU-11: 対象求人（求人紐付き質問のみ）。求職者ブロックの直後に1ブロック挿入。
   // 求人番号が無くても会社名・求人タイトルが来ていれば出す（タスク件名・メモ側と同一の判定）。
@@ -62,7 +63,7 @@ export async function notifyCandidateQuestion(
     params.summary,
     "",
     "■ 担当CA",
-    params.caName ?? "未設定",
+    caName ?? "未設定",
   ];
   if (baseUrl) {
     baseLines.push("", "🔗 タスク詳細", `${baseUrl}/tasks/${params.taskId}`);
@@ -70,25 +71,21 @@ export async function notifyCandidateQuestion(
 
   const header = "求職者サイトから質問が届きました";
 
-  // メンション（lineUserId があれば）。
-  if (params.caLineUserId) {
-    const mentioned = [
-      `<m userId="${params.caLineUserId}">`,
-      ` ${header}`,
-      "",
-      ...baseLines.slice(2), // 見出し行＋空行をスキップ
-    ];
-    try {
-      await sendBotMessage(botId, channelId, mentioned.join("\n"));
-      return true;
-    } catch (e) {
-      console.warn("[candidate-site/questions] メンション通知に失敗、メンションなしで再送します:", e);
-    }
-  }
-
-  // メンションなし（lineUserId 未登録 or メンション送信失敗時 or 担当CA未設定）。
-  const prefix = params.caName ? `${params.caName}さん ` : "";
-  const fallback = [`${prefix}${header}`, "", ...baseLines.slice(2)];
-  await sendBotMessage(botId, channelId, fallback.join("\n"));
+  await sendBotMessageWithCaMention(
+    botId,
+    channelId,
+    params.target,
+    (mentionId, note) => {
+      const tail = note ? [note] : [];
+      if (mentionId) {
+        // 見出し行＋空行をスキップ
+        return [`<m userId="${mentionId}">`, ` ${header}`, "", ...baseLines.slice(2), ...tail].join("\n");
+      }
+      // メンションなし。担当CA名を先頭に付ける。
+      const prefix = caName ? `${caName}さん ` : "";
+      return [`${prefix}${header}`, "", ...baseLines.slice(2), ...tail].join("\n");
+    },
+    "candidate-site/questions",
+  );
   return true;
 }

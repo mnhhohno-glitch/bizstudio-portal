@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { notifyCandidateQuestion } from "@/lib/candidate-site/question-notification";
+import { resolveCaMentionTarget } from "@/lib/lineworks-ca-mention";
 import { todayJST } from "@/lib/attendance/timezone";
 
 // T-128 batch4: 求職者サイト「担当CAに質問する」の確定送信。
@@ -13,8 +14,8 @@ import { todayJST } from "@/lib/attendance/timezone";
 // - 上限ガード: 同一候補者の質問タスク作成が当日（JST）10件で 429。
 // - Task作成: 既存 Task モデルをスキーマ変更なしで使用（新規関数・dedup流用なし）。assignee=担当CA。
 //   タイトルに候補者名、本文に AI要約＋原文の両方を含める。担当CA未設定なら assignee なしで作成。
-// - LINE WORKS通知: 応募通知（apply）で稼働中の sendBotMessage 経路を流用（宛先= Employee.lineUserId）。
-//   担当CA未設定時はチャンネル宛のみ（メンションなし）。
+// - LINE WORKS通知: 応募通知（apply）で稼働中の sendBotMessage 経路を流用（宛先= User.lineworksId・lineworks-ca-mention.ts）。
+//   担当CA未設定・未登録時は代表へメンション＋本文末尾に注記。
 
 const DAILY_LIMIT = 10;
 const MAX_QUESTION_LEN = 1000;
@@ -144,7 +145,7 @@ export async function POST(request: Request) {
   const withCa = await prisma.candidate.findUnique({
     where: { id: candidate.id },
     select: {
-      employee: { select: { id: true, name: true, lineUserId: true, userId: true } },
+      employee: { select: { id: true, name: true, userId: true } },
     },
   });
   const employee = withCa?.employee ?? null;
@@ -219,8 +220,7 @@ export async function POST(request: Request) {
     notified = await notifyCandidateQuestion({
       candidateName: candidate.name,
       candidateNumber: candidate.candidateNumber,
-      caName: employee?.name ?? null,
-      caLineUserId: employee?.lineUserId ?? null,
+      target: await resolveCaMentionTarget(employee?.id),
       taskId: task.id,
       question: questionBody,
       summary,

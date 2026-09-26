@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCandidateSiteKey, resolveScopedCandidate } from "@/lib/candidate-site-auth";
 import { notifyCandidateApplication } from "@/lib/candidate-site/apply-notification";
+import { resolveCaMentionTarget } from "@/lib/lineworks-ca-mention";
 
 // T-128 T2: 求職者サイトからの応募受付＋担当CAへ LINE WORKS 通知。
 // POST /api/external/candidate-site/apply
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
   // 担当CA情報を取得（通知先）。
   const ca = await prisma.candidate.findUnique({
     where: { id: candidate.id },
-    select: { employee: { select: { name: true, lineUserId: true } } },
+    select: { employeeId: true },
   });
 
   const jobTitle = str(body.jobTitle);
@@ -81,8 +82,7 @@ export async function POST(request: Request) {
       candidateId: candidate.id,
       candidateName: candidate.name,
       candidateNumber: candidate.candidateNumber,
-      caName: ca?.employee?.name ?? null,
-      caLineworksId: ca?.employee?.lineUserId ?? null,
+      target: await resolveCaMentionTarget(ca?.employeeId),
       jobTitle,
       companyName,
       externalJobRef,
