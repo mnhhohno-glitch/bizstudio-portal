@@ -19,6 +19,7 @@ import {
   buildAnalyzeCandidateContext,
   buildAnalyzeJobsSection,
   applyAnalysisResults,
+  JOB_TEXT_MAX_CHARS,
 } from "@/lib/analyze-bookmarks";
 import { recordAdvisorUsage, type AnthropicUsage } from "@/lib/advisor-usage";
 // T-XXX: 評価の入力（部品）と結果の保存。投入時に PENDING 行を作り、回収時に埋める。
@@ -247,7 +248,7 @@ export async function runAnalyzeSubmit(opts: {
 
   // 4. 費用試算（dry_run 表示のみに使用。課金には一切影響しない）。
   const jobChars = capped.reduce(
-    (sum, f) => sum + Math.min((f.extractedText ?? "").length, 3000),
+    (sum, f) => sum + Math.min((f.extractedText ?? "").length, JOB_TEXT_MAX_CHARS),
     0,
   );
   const estInputTokens = Math.round(

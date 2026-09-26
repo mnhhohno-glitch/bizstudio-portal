@@ -7,6 +7,9 @@ import { extractAxis, RANK_ORDER, RANK_UNRANKED, RATING_VALUE } from "@/lib/ai-r
 import { extractCompanyNameCandidates, stripFileMetadata } from "@/lib/normalize-filename";
 
 const MEETING_TEXT_MAX_CHARS = 8000;
+// T-XXX step7: 求人評価（mode="evaluation"＝buildAnalyzeCandidateContext）だけの全体上限。
+//   チャット・挨拶文は messages route の 20,000字のまま（評価一覧・求人票を押し出さないため）。
+export const EVAL_CONTEXT_MAX_CHARS = 50000;
 // T-163: 評価一覧セクションの上限。コメント本文を含めない1行1件形式でもここで打ち切る。
 const RATINGS_SECTION_MAX_CHARS = 2000;
 
@@ -61,12 +64,191 @@ export async function computeContextFingerprint(candidateId: string): Promise<st
   return createHash("sha256").update(material).digest("hex");
 }
 
+const KEY_FILE_SELECT = {
+  id: true,
+  driveFileId: true,
+  fileName: true,
+  category: true,
+  mimeType: true,
+  parsedText: true, // T-164: 解析済みならDriveダウンロードもAI解析もスキップ
+  createdAt: true,
+  advisorIngestedAt: true,
+} as const;
+
+export type KeyFile = {
+  id: string;
+  driveFileId: string | null;
+  fileName: string;
+  category: string;
+  mimeType: string;
+  parsedText: string | null;
+  createdAt: Date;
+  advisorIngestedAt: Date | null;
+};
+
+/** 主要書類1件の本文（未加工の全文）を返す。失敗時は throw する。 */
+export type KeyFileTextReader = (file: KeyFile, candidateId: string) => Promise<string>;
+
+export type CandidateContextOptions = {
+  /**
+   * "chat"（既定）: AIアドバイザーのチャット・挨拶文と同じ組み立て。
+   * "evaluation": 求人評価用（T-XXX step7）。主要書類の選び方と上限だけが違う（buildEvaluationKeyDocs 参照）。
+   */
+  mode?: "chat" | "evaluation";
+  /** 本文の読み方の差し替え（確認スクリプトで Drive・OCR・書き込みを避けるため）。既定は readKeyFileText。 */
+  readKeyFileText?: KeyFileTextReader;
+};
+
+/**
+ * 主要書類1件の本文を読む。T-164: アップロード済みファイルの中身は変わらないため、一度解析したら永続再利用する
+ * （従来はセッション30分キャッシュ失効のたびに Drive ダウンロード + Gemini 解析が走り、
+ *  context 再ビルドに実測 15,507ms かかっていた＝「最初の1通が遅い」の主因）。
+ * parsedText には未加工の全文を保存し、切り詰めは使用時に行う。
+ */
+export async function readKeyFileText(file: KeyFile, candidateId: string): Promise<string> {
+  let raw = file.parsedText;
+  if (!raw || raw.trim() === "") {
+    const { base64 } = await downloadFileFromDrive(file.driveFileId!);
+    if (file.mimeType === "text/plain") {
+      raw = parseTextFile(base64);
+    } else {
+      // T-135: この OCR は費用の帰属先を追えるよう candidateId と呼び出し元を記録する。
+      // parsePdfWithAI 自体は変更しない（呼ぶかどうかの判断だけを T-164 で変更）。
+      raw = await parsePdfWithAI(base64, {
+        candidateId,
+        caller: "advisor-context",
+        category: file.category,
+      });
+    }
+    // parsePdfWithAI / parseTextFile は失敗時に throw せず定型文を返すため、
+    // 定型文を parsedText に保存しない（失敗の永久キャッシュ防止・次回再試行）。
+    const isFailureText =
+      raw.trim() === "" ||
+      raw === "（ファイルの読み取りに失敗しました）" ||
+      raw === "（画像の読み取りに失敗しました）" ||
+      raw === "（テキストファイルの読み取りに失敗しました）";
+    try {
+      await prisma.candidateFile.update({
+        where: { id: file.id },
+        data: isFailureText
+          ? { parseFailedAt: new Date() }
+          : { parsedText: raw, parsedAt: new Date(), parseFailedAt: null },
+      });
+    } catch (persistErr) {
+      // 永続化の失敗は context ビルドを落とさない（次回再解析されるだけ）
+      console.error(`[advisor-context] parsedText persist failed: ${file.fileName}`, persistErr);
+    }
+  }
+  return raw;
+}
+
+/**
+ * 主要書類1件を「### ファイル名（区分）\n本文\n\n」の形にする。
+ * maxChars を指定すると txt（面談の文字起こし）だけその字数で切る。Drive 実体の無い行は null。
+ */
+async function renderKeyFile(
+  file: KeyFile,
+  candidateId: string,
+  readText: KeyFileTextReader,
+  maxChars: number | null,
+): Promise<string | null> {
+  if (!file.driveFileId) return null; // PDF実体が無い行はスキップ（BOOKMARK除外済だが型安全のため）
+  try {
+    const raw = await readText(file, candidateId);
+    const parsedText =
+      maxChars !== null && file.mimeType === "text/plain" && raw.length > maxChars
+        ? raw.substring(0, maxChars) + "\n...(以下省略)"
+        : raw;
+    return `### ${file.fileName}（${getCategoryLabel(file.category)}）\n${parsedText}\n\n`;
+  } catch (error) {
+    console.error(`File parse error: ${file.fileName}`, error);
+    // Drive ダウンロード等の例外も失敗として記録（次回再試行の対象。同一リクエスト内では再試行しない）
+    try {
+      await prisma.candidateFile.update({
+        where: { id: file.id },
+        data: { parseFailedAt: new Date() },
+      });
+    } catch { /* 記録失敗は無視 */ }
+    return `### ${file.fileName}（${getCategoryLabel(file.category)}）\n（読み取りに失敗しました）\n\n`;
+  }
+}
+
+/** 残りの字数がこれ未満なら、それ以降の書類は読まずに省略する。 */
+const EVAL_MIN_PARTIAL_CHARS = 200;
+
+/**
+ * T-XXX step7: 求人評価用の「主要書類の内容」。チャット用（最新4件・面談 txt は各8,000字）との違いは次の3点。
+ *   ① 最新の面談の文字起こし（面談 txt のうち最も新しいもの）は全文を、4件の枠とは別に先頭へ必ず入れる
+ *   ② 要約（advisorLogDigest）がある人でも、要約に入っていない面談 txt は本文を入れる。
+ *      「要約に入っているか」は面談 txt の advisorIngestedAt（要約の保存と同じトランザクションで立つ取り込み日時）で決める。
+ *      null＝未取り込み＝要約に入っていない。要約が無い人は全部の面談 txt が対象（従来どおり）。
+ *      最新の面談が取り込み済みなら①は行わない（要約で代替）。
+ *   ③ 全体の上限（budget＝EVAL_CONTEXT_MAX_CHARS から前後のセクションを引いた残り）を超える分は、
+ *      新しい順に並べた残りの書類の古い方から削る。最新の面談は削らない。
+ * 最新の面談以外の書類は従来どおり新しい順に最大4件・面談 txt は各8,000字。
+ */
+async function buildEvaluationKeyDocs(
+  candidateId: string,
+  hasLogDigest: boolean,
+  budget: number,
+  readText: KeyFileTextReader,
+): Promise<string> {
+  const rows: KeyFile[] = await prisma.candidateFile.findMany({
+    where: {
+      candidateId,
+      category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
+      mimeType: { in: ["application/pdf", "text/plain"] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: KEY_FILE_SELECT,
+  });
+  const isMeetingTxt = (f: KeyFile) => f.category === "MEETING" && f.mimeType === "text/plain";
+  const notInDigest = (f: KeyFile) => !hasLogDigest || f.advisorIngestedAt === null;
+
+  const newestMeeting = rows.find((f) => isMeetingTxt(f) && f.driveFileId);
+  const latest = newestMeeting && notInDigest(newestMeeting) ? newestMeeting : null;
+  const others = rows
+    .filter((f) => f !== latest && (!isMeetingTxt(f) || notInDigest(f)))
+    .slice(0, 4);
+  if (!latest && others.length === 0) return "";
+
+  let section = `## 主要書類の内容\n\n`;
+  if (latest) section += (await renderKeyFile(latest, candidateId, readText, null)) ?? "";
+  let remaining = budget - section.length;
+  let omitted = 0;
+  for (const file of others) {
+    if (!file.driveFileId) continue;
+    if (omitted > 0 || remaining < EVAL_MIN_PARTIAL_CHARS) {
+      omitted++;
+      continue;
+    }
+    const block = await renderKeyFile(file, candidateId, readText, MEETING_TEXT_MAX_CHARS);
+    if (!block) continue;
+    if (block.length <= remaining) {
+      section += block;
+      remaining -= block.length;
+    } else {
+      const tail = "\n...(以下省略)\n\n";
+      section += block.substring(0, Math.max(0, remaining - tail.length)) + tail;
+      remaining = 0;
+    }
+  }
+  if (omitted > 0) section += `（ほか${omitted}件の書類は字数の上限のため省略）\n\n`;
+  return section;
+}
+
 /**
  * Build candidate context string for AI advisor.
  * Includes: basic info, worksheet, PREP, AI report, resume, notes, file list,
  * key document contents (PDF parsed), and latest 5 bookmark texts.
+ * T-XXX step7: options.mode="evaluation" は求人評価用（主要書類の組み立てだけが違う）。既定の "chat" の出力は従来と同一。
  */
-export async function getCandidateContext(candidateId: string): Promise<string> {
+export async function getCandidateContext(
+  candidateId: string,
+  options: CandidateContextOptions = {},
+): Promise<string> {
+  const mode = options.mode ?? "chat";
+  const readText = options.readKeyFileText ?? readKeyFileText;
   const [candidate, guideEntry, notes, files] = await Promise.all([
     prisma.candidate.findUnique({
       where: { id: candidateId },
@@ -177,96 +359,7 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     context += "\n";
   }
 
-  // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDF/テキストのみ、最大4件）
-  // T-155: ダイジェストがある場合、MEETING の txt は本文読み込みを止める（ダイジェストと二重に
-  //   入れる意味がなく、最新4件の枠と 8,000字/20,000字の予算を圧迫するだけのため）。
-  //   ダイジェストが無い求職者では従来どおり本文を読む（既存の挙動を壊さない）。
-  //   ORIGINAL / BS_DOCUMENT（履歴書PDF等）と MEETING の PDF は従来どおり読む。
-  const keyFiles = await prisma.candidateFile.findMany({
-    where: {
-      candidateId,
-      category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
-      mimeType: { in: ["application/pdf", "text/plain"] },
-      ...(hasLogDigest
-        ? { NOT: { category: "MEETING", mimeType: "text/plain" } }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take: 4,
-    select: {
-      id: true,
-      driveFileId: true,
-      fileName: true,
-      category: true,
-      mimeType: true,
-      parsedText: true, // T-164: 解析済みならDriveダウンロードもAI解析もスキップ
-    },
-  });
-
-  if (keyFiles.length > 0) {
-    context += `## 主要書類の内容\n\n`;
-    for (const file of keyFiles) {
-      if (!file.driveFileId) continue; // PDF実体が無い行はスキップ（BOOKMARK除外済だが型安全のため）
-      try {
-        // T-164: アップロード済みファイルの中身は変わらないため、一度解析したら永続再利用する
-        //   （従来はセッション30分キャッシュ失効のたびに Drive ダウンロード + Gemini 解析が走り、
-        //    context 再ビルドに実測 15,507ms かかっていた＝「最初の1通が遅い」の主因）。
-        //   parsedText には未加工の全文を保存し、切り詰めは従来どおり使用時に行う。
-        let raw = file.parsedText;
-        if (!raw || raw.trim() === "") {
-          const { base64 } = await downloadFileFromDrive(file.driveFileId);
-          if (file.mimeType === "text/plain") {
-            raw = parseTextFile(base64);
-          } else {
-            // T-135: この OCR は費用の帰属先を追えるよう candidateId と呼び出し元を記録する。
-            // parsePdfWithAI 自体は変更しない（呼ぶかどうかの判断だけを T-164 で変更）。
-            raw = await parsePdfWithAI(base64, {
-              candidateId,
-              caller: "advisor-context",
-              category: file.category,
-            });
-          }
-          // parsePdfWithAI / parseTextFile は失敗時に throw せず定型文を返すため、
-          // 定型文を parsedText に保存しない（失敗の永久キャッシュ防止・次回再試行）。
-          const isFailureText =
-            raw.trim() === "" ||
-            raw === "（ファイルの読み取りに失敗しました）" ||
-            raw === "（画像の読み取りに失敗しました）" ||
-            raw === "（テキストファイルの読み取りに失敗しました）";
-          try {
-            await prisma.candidateFile.update({
-              where: { id: file.id },
-              data: isFailureText
-                ? { parseFailedAt: new Date() }
-                : { parsedText: raw, parsedAt: new Date(), parseFailedAt: null },
-            });
-          } catch (persistErr) {
-            // 永続化の失敗は context ビルドを落とさない（次回再解析されるだけ）
-            console.error(`[advisor-context] parsedText persist failed: ${file.fileName}`, persistErr);
-          }
-        }
-        const parsedText =
-          file.mimeType === "text/plain" && raw.length > MEETING_TEXT_MAX_CHARS
-            ? raw.substring(0, MEETING_TEXT_MAX_CHARS) + "\n...(以下省略)"
-            : raw;
-        context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
-        context += `${parsedText}\n\n`;
-      } catch (error) {
-        console.error(`File parse error: ${file.fileName}`, error);
-        // Drive ダウンロード等の例外も失敗として記録（次回再試行の対象。同一リクエスト内では再試行しない）
-        try {
-          await prisma.candidateFile.update({
-            where: { id: file.id },
-            data: { parseFailedAt: new Date() },
-          });
-        } catch { /* 記録失敗は無視 */ }
-        context += `### ${file.fileName}（${getCategoryLabel(file.category)}）\n`;
-        context += `（読み取りに失敗しました）\n\n`;
-      }
-    }
-  }
-
-  // 応募履歴
+  // 応募履歴（T-XXX step7: 評価では主要書類の字数の予算に応募履歴の長さが要るため、先に組み立てて後で足す）
   const jobEntries = await prisma.jobEntry.findMany({
     where: { candidateId },
     orderBy: { createdAt: "desc" },
@@ -288,23 +381,58 @@ export async function getCandidateContext(candidateId: string): Promise<string> 
     },
   });
 
+  let entriesSection = "";
   if (jobEntries.length > 0) {
-    context += `## 応募履歴（直近${jobEntries.length}件）\n`;
+    entriesSection += `## 応募履歴（直近${jobEntries.length}件）\n`;
     for (const entry of jobEntries) {
       const flag = entry.entryFlag || "不明";
       const detail = entry.entryFlagDetail || "";
-      context += `- ${entry.companyName || "不明"} / ${entry.jobTitle || "不明"} — ${flag}${detail ? `（${detail}）` : ""}`;
-      if (entry.documentSubmitDate) context += ` / 書類提出: ${entry.documentSubmitDate.toISOString().slice(0, 10)}`;
-      if (entry.documentPassDate) context += ` / 書類通過: ${entry.documentPassDate.toISOString().slice(0, 10)}`;
-      if (entry.firstInterviewDate) context += ` / 一次面接: ${entry.firstInterviewDate.toISOString().slice(0, 10)}`;
-      if (entry.finalInterviewDate) context += ` / 最終面接: ${entry.finalInterviewDate.toISOString().slice(0, 10)}`;
-      if (entry.offerDate) context += ` / 内定: ${entry.offerDate.toISOString().slice(0, 10)}`;
-      if (entry.acceptanceDate) context += ` / 承諾: ${entry.acceptanceDate.toISOString().slice(0, 10)}`;
-      if (entry.joinDate) context += ` / 入社: ${entry.joinDate.toISOString().slice(0, 10)}`;
-      context += "\n";
+      entriesSection += `- ${entry.companyName || "不明"} / ${entry.jobTitle || "不明"} — ${flag}${detail ? `（${detail}）` : ""}`;
+      if (entry.documentSubmitDate) entriesSection += ` / 書類提出: ${entry.documentSubmitDate.toISOString().slice(0, 10)}`;
+      if (entry.documentPassDate) entriesSection += ` / 書類通過: ${entry.documentPassDate.toISOString().slice(0, 10)}`;
+      if (entry.firstInterviewDate) entriesSection += ` / 一次面接: ${entry.firstInterviewDate.toISOString().slice(0, 10)}`;
+      if (entry.finalInterviewDate) entriesSection += ` / 最終面接: ${entry.finalInterviewDate.toISOString().slice(0, 10)}`;
+      if (entry.offerDate) entriesSection += ` / 内定: ${entry.offerDate.toISOString().slice(0, 10)}`;
+      if (entry.acceptanceDate) entriesSection += ` / 承諾: ${entry.acceptanceDate.toISOString().slice(0, 10)}`;
+      if (entry.joinDate) entriesSection += ` / 入社: ${entry.joinDate.toISOString().slice(0, 10)}`;
+      entriesSection += "\n";
     }
-    context += "\n";
+    entriesSection += "\n";
   }
+
+  if (mode === "evaluation") {
+    // T-XXX step7: 求人評価用。最新の面談は全文・4件枠の外・先頭。要約に入っていない面談も入れる。
+    const budget = EVAL_CONTEXT_MAX_CHARS - context.length - entriesSection.length;
+    context += await buildEvaluationKeyDocs(candidateId, hasLogDigest, budget, readText);
+  } else {
+    // 主要書類の内容を読み込み（ORIGINAL, BS_DOCUMENT, MEETING のPDF/テキストのみ、最大4件）
+    // T-155: ダイジェストがある場合、MEETING の txt は本文読み込みを止める（ダイジェストと二重に
+    //   入れる意味がなく、最新4件の枠と 8,000字/20,000字の予算を圧迫するだけのため）。
+    //   ダイジェストが無い求職者では従来どおり本文を読む（既存の挙動を壊さない）。
+    //   ORIGINAL / BS_DOCUMENT（履歴書PDF等）と MEETING の PDF は従来どおり読む。
+    const keyFiles = await prisma.candidateFile.findMany({
+      where: {
+        candidateId,
+        category: { in: ["ORIGINAL", "BS_DOCUMENT", "MEETING"] },
+        mimeType: { in: ["application/pdf", "text/plain"] },
+        ...(hasLogDigest
+          ? { NOT: { category: "MEETING", mimeType: "text/plain" } }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 4,
+      select: KEY_FILE_SELECT,
+    });
+
+    if (keyFiles.length > 0) {
+      context += `## 主要書類の内容\n\n`;
+      for (const file of keyFiles) {
+        context += (await renderKeyFile(file, candidateId, readText, MEETING_TEXT_MAX_CHARS)) ?? "";
+      }
+    }
+  }
+
+  context += entriesSection;
 
   // T-163: ブックマーク求人の評価一覧（1行1件・コメント本文は絶対に含めない＝肥大化防止）。
   // チャットの送信窓から分析長文を除外した代わりに、AIが評価を踏まえて答えられる最小情報をここで渡す。

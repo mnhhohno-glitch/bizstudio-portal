@@ -688,3 +688,11 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 
 - 呼ぶ側: 1回あたりの件数を絞り、少数の並列で回す（100件×3本が実績値）。
 - 作る側: 大量更新APIを新設するときは、1回あたりの上限件数を決めて超過は 400 で返す、または一括更新（`updateMany`／まとめたSQL）にする。
+
+## 51. 評価に送る求職者情報はチャットと別の組み立て（`buildAnalyzeCandidateContext`）
+
+**罠**: 求人評価（手動・自動配信）に送る求職者情報は `src/lib/analyze-bookmarks.ts` の `buildAnalyzeCandidateContext` で組み立てる（中で `getCandidateContext(candidateId, { mode: "evaluation" })` を呼ぶ）。チャット・挨拶文の `getCandidateContext`（既定 `mode: "chat"`）とは主要書類の選び方と上限が違う（T-XXX step7）。
+
+- 評価では**最新の面談の文字起こしは全文**を、主要書類4件の枠の外で**必ず先頭に**入れる。要約（`advisorLogDigest`）がある人でも、要約に入っていない面談 txt（`advisorIngestedAt IS NULL`）は本文を入れる（最新以外は従来どおり各8,000字）。
+- 全体上限は**評価のみ 50,000字**（`EVAL_CONTEXT_MAX_CHARS`）。超える分は古い書類から削り、最新の面談は削らない。チャットは messages route の **20,000字のまま**（伸ばすと末尾の評価一覧・求人票が押し出される）。求人本文は評価のみ 12,000字（`JOB_TEXT_MAX_CHARS`）。
+- **組み立てを変えると変更なしスキップが外れる**（`job_eval_parts` の context_core / job ハッシュが変わる）。該当する求職者は次の全件分析で全件評価し直しになる。組み立てを触るときは、変わる人数・求人数と一時費用を先に出す（`scripts/verify-eval-context-t-xxx-step7.ts` が雛形）。

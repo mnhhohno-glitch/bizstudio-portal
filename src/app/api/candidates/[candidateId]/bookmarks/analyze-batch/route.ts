@@ -234,7 +234,7 @@ export async function POST(
   // 3. Get candidate context.
   //    T-126 Phase2: run内は sessionId 単位でキャッシュし、全バッチで byte-identical にする
   //    （第2キャッシュブロックを read 化＋主要書類の再OCRを1回に削減）。
-  //    context の組み立て（評価一覧の除去・20,000字切り詰め）は lib（buildAnalyzeCandidateContext）へ
+  //    context の組み立て（評価一覧の除去・50,000字切り詰め）は lib（buildAnalyzeCandidateContext）へ
   //    切り出し済み。runContextCache は CA 画面 run 制御のため route に残す。
   //    T-XXX: run の先頭（batchIndex=0）では必ず組み立て直す。同じチャットセッションで30分以内に
   //    押し直した run が前の run の候補者情報を使い回すと、書類・面談記録の更新が評価に反映されず、

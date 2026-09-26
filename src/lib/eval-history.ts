@@ -19,7 +19,7 @@ import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getCategoryLabel } from "@/lib/constants/candidate-file-categories";
 import { extractAxis } from "@/lib/ai-rating";
-import { buildBatchInstruction, hasValidThreeAxisMarkers } from "@/lib/analyze-bookmarks";
+import { buildBatchInstruction, hasValidThreeAxisMarkers, JOB_TEXT_MAX_CHARS } from "@/lib/analyze-bookmarks";
 
 export type EvalRoute = "full" | "incremental" | "invalid-only" | "auto";
 export type EvalRecordStatus = "PENDING" | "SAVED" | "SKIPPED" | "FAILED" | "REUSED";
@@ -38,11 +38,11 @@ export function sha256(text: string): string {
 }
 
 /**
- * 求人本文（位置番号を含まない）。buildAnalyzeJobsSection が送る「### 求人N: ファイル名\n本文(3,000字)」の
+ * 求人本文（位置番号を含まない）。buildAnalyzeJobsSection が送る「### 求人N: ファイル名\n本文(JOB_TEXT_MAX_CHARS 字)」の
  * うち N を除いた部分。N はバッチ内の並び順で変わるだけなので、ハッシュには含めない。
  */
 export function jobBodyForHash(file: { fileName: string; extractedText: string | null }): string {
-  return `${file.fileName}\n${(file.extractedText || "").substring(0, 3000)}`;
+  return `${file.fileName}\n${(file.extractedText || "").substring(0, JOB_TEXT_MAX_CHARS)}`;
 }
 
 /** 求職者情報を「ブックマーク一覧の行」と「それ以外」に分ける（送る内容は変えない。ハッシュ用）。 */
