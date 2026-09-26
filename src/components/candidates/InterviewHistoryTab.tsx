@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast, Toaster } from "sonner";
 import InterviewForm from "@/components/candidates/InterviewForm";
+// T-205: 面談準備チャット（右から開くパネル）。このタブは開閉の state だけを持つ。
+import InterviewPrepPanel from "@/components/candidates/InterviewPrepPanel";
 
 type InterviewRecord = {
   id: string;
@@ -55,6 +57,8 @@ export default function InterviewHistoryTab({
   const [creating, setCreating] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null);
+  // T-205: 面談準備パネルの開閉（面談記録が無くても開ける）
+  const [prepOpen, setPrepOpen] = useState(false);
 
   const fetchInterviews = useCallback(async () => {
     try {
@@ -220,6 +224,15 @@ export default function InterviewHistoryTab({
             {creating ? "作成中..." : "+ 新規面談"}
           </button>
 
+          {/* T-205: 面談準備チャット（マイナビレジュメの整理＋会話） */}
+          <button
+            type="button"
+            onClick={() => setPrepOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-[12px] font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+          >
+            面談準備
+          </button>
+
           {selectedInterview && (
             <div className="ml-auto flex items-center gap-1 text-[11px] text-gray-400">
               <span>{selectedInterview.interviewType || ""}</span>
@@ -252,9 +265,19 @@ export default function InterviewHistoryTab({
             >
               {creating ? "作成中..." : "+ 新規面談を作成"}
             </button>
+            {/* T-205: 面談記録を作らなくても面談準備は開ける */}
+            <button
+              type="button"
+              onClick={() => setPrepOpen(true)}
+              className="ml-2 inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              面談準備
+            </button>
           </div>
         </div>
       )}
+
+      <InterviewPrepPanel candidateId={candidateId} open={prepOpen} onClose={() => setPrepOpen(false)} />
     </div>
   );
 }

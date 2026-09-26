@@ -34,7 +34,9 @@ export type AdvisorEndpoint =
   | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
   | "interview-support-auto-scan" // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
   | "interview-support-prior-keyterms" // T-183 Phase 6: 事前情報からの固有名詞抽出（Deepgram Keyterm 用・画面起動時1回）
-  | "recommend-analyze"; // T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・無人実行）
+  | "recommend-analyze" // T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・無人実行）
+  | "interview-prep-summary" // T-205: 面談準備チャットの最初の整理（Sonnet 5・ストリーミング）
+  | "interview-prep-chat"; // T-205: 面談準備チャットの質問1往復（Sonnet 5・ストリーミング）
 
 type TokenBreakdown = {
   inputTokens: number;

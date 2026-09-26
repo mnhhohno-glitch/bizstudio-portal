@@ -1293,3 +1293,46 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - 列順: `☑ | DB名 | DBNO | 会社名 | エリア(100px) | 職種(150px) | 希望 | 通過 | 総合 | 本人回答 | 担当 | 紹介日 | 操作`
 - 職種セルのホバーは `jobCategoryPath ?? jobCategory`。長い値は `truncate`。
 - **並び替え・絞り込みは対象外**（表示のみ）。紹介保留タブ（ArchivedBookmarkSection）にも出していない。
+
+## 面談準備チャット（T-205, master, 2026-09-27）
+
+新人CAの面談準備が外部の ChatGPT に流れていたため、ポータル内に「マイナビレジュメから整理を出し、そのまま会話を続けて求職者ごとに貯める」チャットを新設。既存の AIアドバイザー（`AdvisorFloatingPanel`・`advisor_chat_*`）とは**別テーブル・別API・別コンポーネント**で、既存機能には触れていない。面談記録は作らない（仮の面談記録が実績集計の「初回面談の予定」に数えられるため）。
+
+### 保存先（追加のみ・migration `20260927100000_t205_interview_prep_chat`）
+
+| テーブル（モデル） | 主な列 |
+|--|--|
+| `interview_prep_rooms`（`InterviewPrepRoom`） | candidateId / createdByUserId / **archivedAt**（null=有効な部屋。求職者ごとに1つ。「作り直す」で立てて残す＝物理削除しない）/ resumeFileId（CandidateFile・SetNull）/ **resumeText**（pdf-parse で取り出した文字）/ resumeImportedAt（CandidateFile.createdAt の写し）/ resumeExtractedAt / **careerType**（一社継続型・同職種転職型・職種転換型・取れなければ null）/ summaryMessageId |
+| `interview_prep_messages`（`InterviewPrepMessage`） | roomId（Cascade）/ role（user / assistant）/ **userId**（role=user の CA・SetNull）/ content / **kind**（`SUMMARY`=最初の整理。会話欄には出さず固定欄に表示）/ createdAt |
+
+- レジュメの文字は**部屋ごと**に持つ。初回だけ Drive から取得して `extractTextFromPdf`（pdf-parse→短ければ pdfjs）で取り出し、`normalizeResumeText`（改行LF・空白連続を1つ・空行連続を1つ。決定的処理のみ）で整形して保存。2回目以降は保存済みを使い Drive も pdf-parse も呼ばない。既存の `CandidateFile.parsedText`（Gemini 読み取り）は使わず、書き込みもしない。
+- 対象レジュメ: `CandidateFile` の category=MEETING かつ memo=`マイナビRPA自動取り込み` かつ PDF、複数あれば最新1件（`src/lib/interview-prep/resume.ts` `findLatestMynaviResume`）。無い／200字未満は AI を呼ばず 422（部屋も作らない）。
+- 経歴の型は最初の整理の本文から `経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型)` で取り出して `careerType` に保存（`extractCareerType`）。後日、面談後のタイプ診断と並べるため。
+
+### API（認証は既存 AIアドバイザーのチャットAPIと同じ `getSessionUser()`・未ログイン 403）
+
+| メソッド | パス | 内容 |
+|--|--|--|
+| GET | `/api/candidates/[candidateId]/interview-prep` | 有効な部屋＋整理＋会話＋レジュメの有無（文字は取り出さない） |
+| POST | `/api/candidates/[candidateId]/interview-prep/summary` | 最初の整理（SSE）。body `{ rebuild?: boolean }`。部屋が無ければ文字を取り出して作る。整理済みなら 409。`rebuild=true` は文字を取り直してから古い部屋を `archivedAt` にして新しい部屋を作る（取り直し失敗時は古い部屋を残す） |
+| POST | `/api/candidates/[candidateId]/interview-prep/messages` | 質問1往復（SSE）。body `{ content }`。整理が無ければ 409 |
+
+- SSE 形式は `interview-support/explain` と同じ（`data: {text}` / `{done,...}` / `{error}`。`src/lib/interview-prep/sse.ts`）。
+- **保存は表示が終わってから**。summary は assistant（kind=SUMMARY）＋ careerType、messages は CA の発言（createdAt=送信時刻・userId）と AI の発言を1トランザクションで保存。途中で失敗したら何も保存しない（画面はエラー＋「再送」で同じ質問を送り直す＝二重保存にならない）。
+
+### 送る中身（`src/lib/interview-prep/chat.ts`・検証スクリプトと共有）
+
+| 置き場所 | 内容 | キャッシュ指定 |
+|--|--|--|
+| system ブロック1 | `src/skills/interview-prep/SKILL.md` の指示本文（`getInterviewPrepSkill`・起動時1回読み込み・CRLF→LF 正規化） | ephemeral |
+| system ブロック2 | `# マイナビレジュメの文字` ＋ resumeText | ephemeral |
+| messages 先頭 | user 固定文「面談準備の整理を作ってください」→ assistant 最初の整理（10往復の数え方の外・常に送る） | なし |
+| messages 中 | 直近10往復（user/assistant 交互・1件4,000字でクランプ・kind=SUMMARY は除く） | なし |
+| messages 末尾 | 今回の質問 | ephemeral（次の往復で system＋履歴の全体が読み出しになる） |
+
+- job-matching-advisor の SKILL は送らない。モデルは `claude-sonnet-5` 固定（`INTERVIEW_PREP_MODEL`。CHAT_MODEL では切り替わらない）。`thinking: disabled`・temperature なし。max_tokens は整理 4,000／質問 2,000（1.3倍はしない）。
+- 使用量ログ: `AdvisorUsageLog` に endpoint `interview-prep-summary`（整理・note `rebuild` で作り直し）／`interview-prep-chat`（質問）。失敗は usage null・note `error-<status>`。Sonnet 5 の単価は `MODEL_PRICING_PER_MTOK` に登録済み。
+
+### 動作確認スクリプト
+
+`scripts/verify/interview-prep-dryrun.ts`（DB 書き込みなし・数値と有無だけ出力・AI 呼び出し最大3回）。本番コンテナで `railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts"`。

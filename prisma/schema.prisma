@@ -148,6 +148,8 @@ model User {
   candidateFiles           CandidateFile[]           @relation("UserCandidateFiles")
   archivedCandidateFiles   CandidateFile[]           @relation("CandidateFileArchivedBy")
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
+  interviewPrepRooms       InterviewPrepRoom[]       @relation("UserInterviewPrepRooms") // T-205
+  interviewPrepMessages    InterviewPrepMessage[]    @relation("UserInterviewPrepMessages") // T-205
   dailySchedules           DailySchedule[]
   googleCalendarConnection GoogleCalendarConnection?
   // T-066
@@ -561,6 +563,7 @@ model Candidate {
   // T-159 Phase 3: 「oneDriveFolderUrl を自動処理が設定した」ことの台帳（手貼りを守るため）
   oneDriveFolderUrlLedger OneDriveFolderUrlLedger?
   advisorSessions        AdvisorChatSession[]
+  interviewPrepRooms     InterviewPrepRoom[] // T-205
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
   candidateJobResponses  CandidateJobResponse[]
@@ -1503,6 +1506,7 @@ model CandidateFile {
   //   タイムスタンプが既読フラグを兼ねる。対象は MEETING の txt のみ（interview_id の有無は不問）。
   //   fail-closed: ダイジェスト生成・保存が成功した後にのみ立てる（失敗時は未読のまま再試行可能）。
   advisorIngestedAt DateTime?             @map("advisor_ingested_at")
+  interviewPrepRooms InterviewPrepRoom[]  @relation("InterviewPrepRoomResume") // T-205: 面談準備の材料に使った部屋
   category          CandidateFileCategory
   fileName          String                @map("file_name")
   fileSize          Int                   @map("file_size")
@@ -1716,6 +1720,50 @@ model AdvisorChatMessage {
   kind String?
 
   @@map("advisor_chat_messages")
+}
+
+// T-205: 面談準備チャットの部屋（求職者ごと・既存 AIアドバイザーの会話 advisor_chat_* とは完全に別テーブル）。
+//   材料はマイナビレジュメ（CandidateFile category=MEETING / memo=マイナビRPA自動取り込み）の文字だけ。
+//   有効な部屋は求職者ごとに1つ（archivedAt IS NULL）。「作り直す」で archivedAt を立てて残し、新しい部屋を作る。
+//   レジュメの文字は部屋ごとに持つ（作り直しで取り直す仕様に合わせる。AI を使わず pdf-parse で1回だけ取り出す）。
+model InterviewPrepRoom {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id])
+  createdByUserId String    @map("created_by_user_id")
+  createdBy       User      @relation("UserInterviewPrepRooms", fields: [createdByUserId], references: [id])
+  archivedAt      DateTime? @map("archived_at") // null=有効な部屋。作り直しで立てる（物理削除しない）
+  // 材料にしたレジュメ。ファイルが消えても部屋は残す（SetNull）
+  resumeFileId      String?        @map("resume_file_id")
+  resumeFile        CandidateFile? @relation("InterviewPrepRoomResume", fields: [resumeFileId], references: [id], onDelete: SetNull)
+  resumeText        String?        @db.Text @map("resume_text") // pdf-parse で取り出した文字（整形は決定的処理のみ・AI不使用）
+  resumeImportedAt  DateTime?      @map("resume_imported_at") // レジュメの取り込み日（CandidateFile.createdAt の写し）
+  resumeExtractedAt DateTime?      @map("resume_extracted_at")
+  // 最初の整理から取り出した経歴の型（一社継続型 / 同職種転職型 / 職種転換型）。取れなければ null
+  careerType       String?   @map("career_type")
+  summaryMessageId String?   @map("summary_message_id") // 最初の整理（assistant・kind=SUMMARY）のメッセージID
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  messages         InterviewPrepMessage[]
+
+  @@index([candidateId, archivedAt])
+  @@map("interview_prep_rooms")
+}
+
+// T-205: 面談準備チャットの発言。発言者は user（CA=userId）または assistant（AI=userId null）。
+model InterviewPrepMessage {
+  id        String            @id @default(cuid())
+  roomId    String            @map("room_id")
+  room      InterviewPrepRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  role      String // "user" | "assistant"
+  userId    String?           @map("user_id") // role=user のとき発言した CA の User.id
+  user      User?             @relation("UserInterviewPrepMessages", fields: [userId], references: [id], onDelete: SetNull)
+  content   String            @db.Text
+  kind      String? // "SUMMARY"=最初の整理（会話欄には出さず固定欄に表示）。null=通常の会話
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  @@index([roomId, createdAt])
+  @@map("interview_prep_messages")
 }
 
 // T-126: AIアドバイザー系 Anthropic API の usage/コストを1コール1行で永続化する。

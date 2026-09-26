@@ -1593,3 +1593,35 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   - 求職者サイトの応募通知（`candidate-site/apply-notification.ts`）・質問通知（`candidate-site/question-notification.ts`）: 旧 `Employee.lineUserId`（LINE のID・全員未登録＝実質メンションゼロ）を廃止。
 - 届かないとき（担当CA未設定／社員なし／lineworksId 未登録／無効）は大野 将幸（社員番号 `1000001`）へメンションし、本文末尾に「※担当CA（{氏名 or 未設定}）に届いていません（LINE WORKS未登録）」。大野も引けなければメンションなし＋注記＋エラーログ。メンション付き送信が失敗したら宛先を1段落として1回だけ再送。
 - タスク通知（`resolveAssigneeNotifyTargets`）とマイページ回答タスク通知（`mypage-response-sync.ts`）はこの関数を使っていない（挙動据え置き）。
+
+## 面談準備チャット `InterviewPrepPanel`（T-205, 2026-09-27）
+
+- パス: `src/components/candidates/InterviewPrepPanel.tsx`（新規・`AdvisorFloatingPanel` とは別）。`createPortal(document.body)` で描画。
+- 親: `InterviewHistoryTab`（開閉の `prepOpen` state だけを持つ）。Props: `candidateId` / `open` / `onClose`。
+
+### 入口ボタン（`InterviewHistoryTab.tsx`）
+
+- 面談一覧バー（「面談:」の並び）の「+ 新規面談」の右に「面談準備」（青系の小ボタン）。
+- 面談記録が0件の空状態（「+ 新規面談を作成」の右）にも同じ「面談準備」。面談記録を作らなくても開ける。
+
+### パネルの構造
+
+```
+InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしない）
+  幅: 標準 clamp(720px, 60vw, calc(100vw - 48px)) / 広げる 95vw（localStorage "interviewPrep.wide" に記憶）
+  ├─ ヘッダー: 「面談準備｜{氏名} さん」＋小さく「材料: マイナビレジュメ（{取り込み日} 取り込み）」
+  │     右: 「広げる／元の幅」「作り直す」（window.confirm・整理がある時だけ）「×」（Esc でも閉じる）
+  ├─ 整理の固定欄（整理がある時・作成中のみ）
+  │     畳: 「整理（作成日）」＋経歴の型バッジ＋右端「整理を開く」
+  │     開: 全文を Markdown（max-h-[50vh] で欄内スクロール）。作った直後は開・次に開いたときは畳
+  ├─ 会話欄（flex-1・overflow-y-auto・中央の列 max-w-[760px]。広げても列幅は変えない）
+  │     CA=右寄せ吹き出し（bg-gray-100 rounded-2xl）/ AI=列いっぱいの Markdown（PrepMarkdown）
+  │     書いている最中は文末に点滅カーソル（BlinkCursor）。自動スクロールは stickToBottomRef（下端から40px以内のときだけ）
+  │     状態: 整理前=「面談の準備を始めましょう」＋「面談準備を作る」/ レジュメなし=「マイナビレジュメが見つかりません」（AI は呼ばない）
+  │           エラー=赤枠＋「再送」（summary/chat を kind で区別して同じ内容を送り直す）
+  └─ 入力欄（整理がある時のみ）: 角丸の大枠に textarea（3行→最大10行・超えたら枠内スクロール）＋右下の丸い送信ボタン
+        Enter=改行 / Ctrl+Enter（Cmd+Enter）=送信（isComposing 中は無視）。左下に「Enterで改行・Ctrl+Enterで送信」。送信中は入力・送信を止める
+```
+
+- ストリーミング受信は `readSse()`（`data:` 行を `\n\n` 区切りで読む）。`{done}` が来る前に切れたらエラー扱い（保存されていない）。
+- 422 `no_resume` は「レジュメなし」状態へ、`resume_unreadable` は読み取れた字数付きのエラー。409 は状態を取り直す。

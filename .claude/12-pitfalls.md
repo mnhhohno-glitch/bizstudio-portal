@@ -707,3 +707,16 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - **書き方だけの変更**（出力フォーマットの長さ・言い回し・バッチ指示・総合まとめの形）は上げない。
 - SKILL.md の本文はキーに含まれるので、SKILL の更新では上げなくてよい（自動で評価し直しになる）。
 - `logic_key` が null の行（step8 より前）は `LEGACY_LOGIC_KEY_BY_FIXED_HASH` で読み替える。`job_eval_parts` には実際に送った指示文がこれまでどおり保存される。
+
+---
+
+## 53. `npm run build` には本番DBへの `prisma migrate deploy` が含まれる（確認用ビルドは `npx prisma generate && npx next build`）
+
+**罠**: `package.json` の `build` は `prisma generate && prisma migrate deploy && next build`。master worktree の `.env` は本番 proxy 直結なので、**「型を確かめるだけ」のつもりで `npm run build` を叩くと、未適用の migration がその場で本番DBに入る**（T-159 Phase 3・2026-08-18 で実際に発生）。
+
+**対処**:
+- 確認用のビルドは **`npx prisma generate && npx next build`**（migrate deploy を含めない）。本番への適用は push 後の Railway ビルドに任せる。
+- ローカルの dev サーバーが動いている間はビルドしない（罠: dev が全リクエスト 500 になる）。
+- push 前の待機は `node scripts/wait_railway_idle.mjs`（この開発機に Python は無い）。
+
+**関連**: T-205（2026-09-27）で手順化。`07-deploy-rules.md`・`11-cursor-prompt-templates.md` にも追記。

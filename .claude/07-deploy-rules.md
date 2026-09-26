@@ -45,3 +45,8 @@ python3 scripts/wait_railway_idle.py && git push origin master
 
 - 1 PR / 1 コミット = 1 機能
 - 万一の事故時、git revert で5分以内に戻せる粒度を保つ
+
+### 追記（2026-09-27, T-205）: 待機スクリプトは Node 版・確認用ビルドは migrate deploy を含めない
+
+- push 前の待機は **`node scripts/wait_railway_idle.mjs && git push origin master`**（開発機に Python が無いため。`.py` は他環境向けに残置・判定は同じ）。
+- 確認用のビルドは **`npx prisma generate && npx next build`**。`npm run build` は `prisma migrate deploy` を含み、ローカルの `.env`（本番 proxy 直結）経由で未適用 migration が本番DBに入る（罠#53）。本番への適用は push 後の Railway ビルドに任せる。
