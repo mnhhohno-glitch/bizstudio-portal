@@ -848,6 +848,15 @@ EntryBoard (1083 行)
   - 単数経路（候補者1名）: `assignees: "1000025,1000027"` を URL に積み `/tasks/new?...&step=5` を新規タブで開く（実作成はウィザード側）。
   - 複数経路（候補者2名以上）: `["1000025","1000027"]` を `Employee.id` 解決し、候補者ごとに `POST /api/tasks` を直接ループ。
 - 関連社員番号: 見ル野 未来=`1000027` / 佐藤 葵=`1000025` / 大野 望=`1000004`（`InterviewForm.tsx` の `INTERVIEW_DECLINE_ASSIGNEES` も同パターンで利用）。
+- **2026-09-26: 道西 未来(`1000029`) を追加。** 佐藤 葵＋見ル野 未来の2名セットで初期担当になる箇所はすべて3名（道西 未来の lineworksId=`miku_michinishi@bizstudio` 登録済・`/api/employees` は status=active のみで絞り込みなし＝返る）。
+  - コード（既に入っていた分を含む全箇所）:
+    - エントリー管理「タスク作成」: `EntryBoard.tsx` `ENTRY_TASK_DEFAULT_ASSIGNEES = ["1000025","1000027","1000029"]`（T-171 で追加済み。単数経路の URL は `assignees=1000025,1000027,1000029`）。completionType=any。
+    - タスク作成ウィザード「Googleフォーム作成依頼」カテゴリ既定担当: `src/constants/google-form-request.ts` `CATEGORY_DEFAULT_ASSIGNEE_NUMBERS`（T-171 で追加済み）。completionType=ウィザード既定 any。
+    - 面談不参加共有: `InterviewForm.tsx` `INTERVIEW_DECLINE_ASSIGNEES = "1000027,1000025,1000029,1000004"`（**今回追加**。既存の並びは変えず2名の直後に挿入）。completionType=ウィザード既定 any。
+    - スカウト条件「予約切れ」: `src/lib/scout-conditions/queue-empty.ts` `QUEUE_EMPTY_ASSIGNEE_NAMES`（T-195 時点で5名に道西含む。名前一致解決）。completionType=any。
+  - DB: 日程調整タスク（`create-schedule-task` の mynavi_new／CA不明フォールバック、`schedule-agent/post-reserve.ts` の翌朝トリアージ）は `User.isMynaviAssignee=true` の全員が担当。道西 未来は既に true（佐藤・見ル野・大野 望と同じ）→ 変更なし。
+  - 環境変数: 変更なし（`LINEWORKS_ADVISOR_MAP` は CA名→LW ID の辞書で佐藤 葵のみ・2名セットではない）。
+- 関連社員番号（追記）: 道西 未来=`1000029`。
 
 ### EntryTable「タスク依頼中」バッジ（T-120）
 
