@@ -6,10 +6,10 @@
  *   ローカルから本番DBを読む場合: npx tsx --env-file=.env scripts/verify/interview-prep-dryrun.ts
  *   （Drive の認証情報と ANTHROPIC_API_KEY が環境に必要）
  *
- * やること:
+ * やること（T-205 step3 で書き方の確認に更新。質問の往復は行わない）:
  *   1. 直近でマイナビレジュメが取り込まれた求職者1名（テスト除外）を選び、文字を取り出す（保存しない）
- *   2. 最初の整理を1回生成し、続けて質問を1回送る（保存しない）
- *   3. 2回目でキャッシュ読みが出ていなければ、同じ質問をもう1回だけ送って確認する（AI 呼び出しは最大3回）
+ *   2. 最初の整理を1回だけ生成する（保存しない。AI 呼び出しは1回）
+ *   3. 見出し7つ・「→」で意味を添えた行数・斜線（／ または /）を2つ以上含む行数・経歴の型の取り出しを出す
  * 出力は数値と有無だけ（本文・氏名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
@@ -17,17 +17,14 @@ import { MYNAVI_RESUME_MEMO, extractResumeText } from "@/lib/interview-prep/resu
 import {
   INTERVIEW_PREP_MODEL,
   SUMMARY_MAX_TOKENS,
-  CHAT_MAX_TOKENS,
   buildPrepSystem,
   buildSummaryMessages,
-  buildChatMessages,
   createPrepStream,
   extractCareerType,
-  hasSummaryHeadings,
+  missingSummaryHeadings,
 } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
 
-const QUESTION = "この人の職種で、新人CAが知っておくべき用語を教えて";
 const USD_JPY = 150;
 
 type CallResult = {
@@ -40,7 +37,7 @@ type CallResult = {
   ms: number;
 };
 
-async function callPrep(system: ReturnType<typeof buildPrepSystem>, messages: ReturnType<typeof buildChatMessages>, maxTokens: number): Promise<CallResult> {
+async function callPrep(system: ReturnType<typeof buildPrepSystem>, messages: ReturnType<typeof buildSummaryMessages>, maxTokens: number): Promise<CallResult> {
   const t0 = Date.now();
   const stream = createPrepStream({ system, messages, maxTokens });
   let text = "";
@@ -98,31 +95,23 @@ async function main() {
   console.log(`resume_text: ok chars=${extracted.chars}`);
 
   const system = buildPrepSystem(extracted.text);
-  let calls = 0;
 
-  // 1. 最初の整理
-  calls++;
+  // 最初の整理（1回だけ）
   const summary = await callPrep(system, buildSummaryMessages(), SUMMARY_MAX_TOKENS);
   printCall("call1 summary", summary);
-  console.log(`summary_headings_3: ${hasSummaryHeadings(summary.text) ? "yes" : "no"}`);
-  console.log(`summary_has_kisai_nashi: ${summary.text.includes("記載なし") ? "yes" : "no"}`);
+
+  const missing = missingSummaryHeadings(summary.text);
+  console.log(`summary_headings_7: ${missing.length === 0 ? "yes" : `no (missing: ${missing.join(", ")})`}`);
+
+  const lines = summary.text.split(/\r?\n/);
+  const arrowLines = lines.filter((l) => /^\s*[-*]/.test(l) && l.includes("→")).length;
+  console.log(`arrow_meaning_lines: ${arrowLines}`);
+  const slashLines = lines.filter((l) => (l.match(/[／/]/g) ?? []).length >= 2).length;
+  console.log(`lines_with_2plus_slashes: ${slashLines}`);
+
   const careerType = extractCareerType(summary.text);
   console.log(`career_type_extracted: ${careerType ? `yes (${careerType})` : "no"}`);
-
-  // 2. 質問1往復
-  calls++;
-  const chat = await callPrep(system, buildChatMessages(summary.text, [], QUESTION), CHAT_MAX_TOKENS);
-  printCall("call2 chat", chat);
-  console.log(`call2_cache_read: ${chat.cacheRead > 0 ? "yes" : "no"}`);
-
-  // 3. 2回目でキャッシュ読みが無ければ、同じ内容をもう1回だけ送って確認（最大3回）
-  if (chat.cacheRead === 0 && calls < 3) {
-    calls++;
-    const retry = await callPrep(system, buildChatMessages(summary.text, [], QUESTION), CHAT_MAX_TOKENS);
-    printCall("call3 chat(retry)", retry);
-    console.log(`call3_cache_read: ${retry.cacheRead > 0 ? "yes" : "no"}`);
-  }
-  console.log(`ai_calls: ${calls}`);
+  console.log("ai_calls: 1");
 }
 
 main()

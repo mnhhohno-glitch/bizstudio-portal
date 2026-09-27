@@ -1336,3 +1336,16 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 ### 動作確認スクリプト
 
 `scripts/verify/interview-prep-dryrun.ts`（DB 書き込みなし・数値と有無だけ出力・AI 呼び出し最大3回）。本番コンテナで `railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts"`。
+
+### T-205 step3（2026-09-27）: 整理の書き方の差し替え・ワンクリック作り直し・古い書き方の案内
+
+- **整理の構成（SKILL.md 全文差し替え）**: 見出し7つをこの順で出す。「ひとことで」「やっている仕事と、その意味」「基本情報」「強み」「経歴の型」「面談で確かめたいこと」「知っておきたい言葉」。
+  - 「やっている仕事と、その意味」は会社ごとに「会社名（業界・在籍期間・雇用形態）」→ 作業を1行1つで「レジュメの言葉 → 一般的な意味」。本人のやり方と一般的な意味を分ける。
+  - 1行1項目（斜線・読点で詰め込まない）・表は使わない・「記載なし」は大事な項目だけ・食い違いは「面談で確かめたいこと」へ。
+  - 経歴の型の行は「- 経歴の型: 〇〇型（根拠: …）」のまま。取り出し正規表現（`extractCareerType`）は変更なし。
+  - 見出しの一覧は `SUMMARY_HEADINGS`、欠けの判定は `missingSummaryHeadings()`（`src/lib/interview-prep/chat.ts`・検証スクリプト用。旧 `hasSummaryHeadings` は削除）。
+- **「作り直す」はワンクリックで生成まで**: 確認ダイアログ1回 → summary API（`rebuild: true`）が「文字を取り直す → 古い部屋を非表示 → 新しい部屋 → 整理をストリーミング」を1リクエストで行う（API は step1 のまま）。
+  - レジュメ無し／200字未満は 422 で古い部屋を残す（AI は呼ばない）。
+  - SSE の `started` 以降に失敗したら新しい部屋は空のまま残る。画面はその時点で再送を `rebuild: false` に切り替えるので、「面談準備を作る」／再送で古い部屋に戻さず新しい部屋に作る。
+- **古い書き方の案内**: `src/lib/interview-prep/format.ts` の `INTERVIEW_PREP_FORMAT_UPDATED_AT`（JST・step3 のコミット時刻）より前に作られた整理には「書き方が新しくなりました。「作り直す」を押すと新しい書き方で作り直せます。」を出す（`isOldPrepFormat`）。書き方をまた変えたらこの定数を更新する。画面から読むため Anthropic SDK を含む chat.ts とは別ファイル。
+- 検証スクリプト `scripts/verify/interview-prep-dryrun.ts` は step3 で「最初の整理1回だけ」に変更（見出し7つ・「→」行数・斜線2つ以上の行数・経歴の型の取り出し・トークン/費用/所要時間）。

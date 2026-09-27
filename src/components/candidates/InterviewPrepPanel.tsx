@@ -1,12 +1,14 @@
 "use client";
 
 // T-205: 面談準備チャット（右から開く幅広のパネル。見た目は ChatGPT / Claude の会話画面）。
-// - 材料はマイナビレジュメの文字だけ。最初の整理はヘッダー直下の固定欄、以降の会話は中央の列に並べる。
+// - 材料はマイナビレジュメの文字だけ。会話が0件のあいだは最初の整理をパネル全体に表示し、
+//   最初の質問を送った時点でヘッダー直下の固定欄（畳んだ状態）へ移す。以降の会話は中央の列に並べる。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
 // - 応答はストリーミング（SSE）で書きながら表示し、表示が終わってから保存される（保存はサーバー側）。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import { isOldPrepFormat } from "@/lib/interview-prep/format";
 
 type PrepMessage = {
   id: string;
@@ -80,18 +82,29 @@ async function readSse(
   }
 }
 
+// 文字の読みやすさ（T-205 step3）: 本文 15px・行間 1.9 / 見出し 16px 太字・上 20px / 箇条書きの間 6px
+const HEADING_CLASS = "font-bold text-[16px] mt-5 first:mt-0 mb-2";
+
+function OldFormatNotice() {
+  return (
+    <p className="text-[12px] text-amber-700">
+      書き方が新しくなりました。「作り直す」を押すと新しい書き方で作り直せます。
+    </p>
+  );
+}
+
 function PrepMarkdown({ text }: { text: string }) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-        h1: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
-        h2: ({ children }) => <p className="font-bold text-base mt-4 mb-2">{children}</p>,
-        h3: ({ children }) => <p className="font-bold text-[15px] mt-4 mb-2">{children}</p>,
-        h4: ({ children }) => <p className="font-bold mt-3 mb-1">{children}</p>,
-        ul: ({ children }) => <ul className="ml-5 mb-3 space-y-1 list-disc">{children}</ul>,
-        ol: ({ children }) => <ol className="ml-5 mb-3 space-y-1 list-decimal">{children}</ol>,
-        li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+        p: ({ children }) => <p className="mb-3 last:mb-0 text-[15px] leading-[1.9]">{children}</p>,
+        h1: ({ children }) => <p className={HEADING_CLASS}>{children}</p>,
+        h2: ({ children }) => <p className={HEADING_CLASS}>{children}</p>,
+        h3: ({ children }) => <p className={HEADING_CLASS}>{children}</p>,
+        h4: ({ children }) => <p className={HEADING_CLASS}>{children}</p>,
+        ul: ({ children }) => <ul className="ml-5 mb-3 space-y-1.5 list-disc [&_ul]:mt-1.5 [&_ul]:mb-0">{children}</ul>,
+        ol: ({ children }) => <ol className="ml-5 mb-3 space-y-1.5 list-decimal [&_ul]:mt-1.5 [&_ul]:mb-0">{children}</ol>,
+        li: ({ children }) => <li className="text-[15px] leading-[1.9]">{children}</li>,
         strong: ({ children }) => <strong className="font-bold">{children}</strong>,
         code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs">{children}</code>,
         hr: () => <hr className="my-3 border-gray-200" />,
@@ -267,11 +280,16 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           return;
         }
         let finished = false;
+        // started を受け取った時点で新しい部屋はできている（作り直しなら古い部屋は非表示済み）。
+        // 以降の失敗は新しい部屋を空のまま残し、「面談準備を作る」／再送は作り直しではなく通常の作成にする。
+        let retryAsRebuild = rebuild;
         await readSse(
           res,
           (t) => setStreamSummary((prev) => prev + t),
           (payload) => {
-            if (payload.done) {
+            if (payload.started) {
+              retryAsRebuild = false;
+            } else if (payload.done) {
               finished = true;
               const s = payload.summary as { content: string; createdAt: string };
               setSummary({ content: s.content, createdAt: s.createdAt, careerType: (payload.careerType as string | null) ?? null });
@@ -292,12 +310,14 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                   : prev,
               );
             } else if (typeof payload.error === "string") {
-              setError({ kind: "summary", rebuild, message: payload.error });
+              setError({ kind: "summary", rebuild: retryAsRebuild, message: payload.error });
             }
           },
         );
         if (!finished) {
-          setError((e) => e ?? { kind: "summary", rebuild, message: "整理の作成が途中で止まりました。再送してください。" });
+          setError(
+            (e) => e ?? { kind: "summary", rebuild: retryAsRebuild, message: "整理の作成が途中で止まりました。再送してください。" },
+          );
         }
       } catch (e) {
         setError({ kind: "summary", rebuild, message: e instanceof Error ? e.message : "整理の作成に失敗しました。" });
@@ -317,6 +337,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
       setSending(true);
       setPendingQuestion(q);
       setStreamAnswer("");
+      setSummaryOpen(false); // 最初の質問を送った時点で、整理は固定欄に畳む
       stickToBottomRef.current = true;
       try {
         const res = await fetch(`/api/candidates/${candidateId}/interview-prep/messages`, {
@@ -380,9 +401,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
 
   const handleRebuild = () => {
     if (summarizing || sending) return;
-    const ok = window.confirm(
-      "面談準備を作り直しますか？\n今の整理と会話は非表示になり、マイナビレジュメの文字を取り直して整理から始めます。",
-    );
+    const ok = window.confirm("今の整理と会話を片付けて、新しく作り直します。よろしいですか？");
     if (!ok) return;
     void runSummary(true);
   };
@@ -401,6 +420,17 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const hasRoom = !!summary;
   const noResume = !state?.room && !state?.resume;
   const busy = summarizing || sending;
+  // 会話が1件でもある（送信中を含む）ときだけ、整理を上部の固定欄に畳む。0件のときはパネル全体に表示する。
+  const hasConversation = messages.length > 0 || !!pendingQuestion;
+  const showSummaryBar = (hasRoom || summarizing) && hasConversation;
+  const oldFormat = !summarizing && isOldPrepFormat(summary?.createdAt);
+  const summaryLabel = `整理${summary && !summarizing ? `（${formatDate(summary.createdAt)}）` : summarizing ? "（作成中）" : ""}`;
+  const careerBadge =
+    summary?.careerType && !summarizing ? (
+      <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+        {summary.careerType}
+      </span>
+    ) : null;
   const width = wide ? "95vw" : "clamp(720px, 60vw, calc(100vw - 48px))";
 
   const panel = (
@@ -449,39 +479,31 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         </div>
       </div>
 
-      {/* 整理の固定欄 */}
-      {(hasRoom || summarizing) && (
+      {/* 整理の固定欄（会話があるときだけ。畳んだ状態で始める） */}
+      {showSummaryBar && (
         <div className="border-b border-gray-200 bg-gray-50/60 shrink-0">
           <div className="flex items-center gap-2 px-5 py-2">
-            <span className="text-[13px] font-medium text-gray-700">
-              整理{summary ? `（${formatDate(summary.createdAt)}）` : summarizing ? "（作成中）" : ""}
-            </span>
-            {summary?.careerType && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                {summary.careerType}
+            <span className="text-[13px] font-medium text-gray-700 shrink-0">{summaryLabel}</span>
+            {careerBadge}
+            {oldFormat && (
+              <span className="min-w-0">
+                <OldFormatNotice />
               </span>
             )}
             {!summarizing && (
               <button
                 type="button"
                 onClick={() => setSummaryOpen((v) => !v)}
-                className="ml-auto text-[12px] text-blue-600 hover:underline"
+                className="ml-auto shrink-0 text-[12px] text-blue-600 hover:underline"
               >
                 {summaryOpen ? "整理を閉じる" : "整理を開く"}
               </button>
             )}
           </div>
-          {(summaryOpen || summarizing) && (
+          {summaryOpen && !summarizing && (
             <div className="max-h-[50vh] overflow-y-auto px-5 pb-4">
-              <div className="max-w-[760px] mx-auto text-sm text-gray-800">
-                {summarizing ? (
-                  <>
-                    <PrepMarkdown text={streamSummary} />
-                    <BlinkCursor />
-                  </>
-                ) : (
-                  <PrepMarkdown text={summary?.content ?? ""} />
-                )}
+              <div className="max-w-[760px] mx-auto text-gray-800">
+                <PrepMarkdown text={summary?.content ?? ""} />
               </div>
             </div>
           )}
@@ -517,7 +539,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               <div className="text-center py-16">
                 <p className="text-lg font-medium text-gray-800 mb-2">面談の準備を始めましょう</p>
                 <p className="text-sm text-gray-500 mb-6">
-                  マイナビレジュメの記載だけを使い、本人の事実・職種の解説・面談で聞く質問を整理します。
+                  マイナビレジュメの記載だけを使い、どんな会社でどんな仕事をしてきた人かと、面談で確かめたいことを整理します。
                 </p>
                 <button
                   type="button"
@@ -541,13 +563,38 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
             )
           ) : (
             <div className="space-y-6">
-              {summarizing && messages.length === 0 && (
-                <p className="text-center text-sm text-gray-400 py-8">整理を作成しています…</p>
-              )}
-              {!summarizing && messages.length === 0 && !pendingQuestion && (
-                <p className="text-center text-sm text-gray-400 py-8">
-                  整理を読んで、気になることを下の入力欄から質問してください。
-                </p>
+              {!hasConversation && (
+                // 会話0件: 整理をパネル全体（会話欄と同じ背景・高さの上限なし）に表示する
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-[13px] font-medium text-gray-500">{summaryLabel}</span>
+                    {careerBadge}
+                  </div>
+                  {oldFormat && (
+                    <div className="mb-4">
+                      <OldFormatNotice />
+                    </div>
+                  )}
+                  <div className="text-gray-800">
+                    {summarizing ? (
+                      <>
+                        {streamSummary ? (
+                          <PrepMarkdown text={streamSummary} />
+                        ) : (
+                          <p className="text-sm text-gray-400 py-4">整理を作成しています…</p>
+                        )}
+                        <BlinkCursor />
+                      </>
+                    ) : (
+                      <PrepMarkdown text={summary?.content ?? ""} />
+                    )}
+                  </div>
+                  {!summarizing && (
+                    <p className="mt-8 text-[12px] text-gray-400">
+                      整理を読んで、気になることを下の入力欄から質問してください。
+                    </p>
+                  )}
+                </div>
               )}
               {messages.map((m) =>
                 m.role === "user" ? (
@@ -557,7 +604,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                     </div>
                   </div>
                 ) : (
-                  <div key={m.id} className="text-sm text-gray-800">
+                  <div key={m.id} className="text-gray-800">
                     <PrepMarkdown text={m.content} />
                   </div>
                 ),
@@ -570,7 +617,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                 </div>
               )}
               {sending && (
-                <div className="text-sm text-gray-800">
+                <div className="text-gray-800">
                   {streamAnswer ? <PrepMarkdown text={streamAnswer} /> : null}
                   <BlinkCursor />
                 </div>

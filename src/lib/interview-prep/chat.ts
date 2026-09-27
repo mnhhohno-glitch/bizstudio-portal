@@ -87,7 +87,19 @@ export function createPrepStream(params: { system: TextBlock[]; messages: ApiMes
   });
 }
 
-/** 整理の3見出しがそろっているか（検証スクリプト用）。 */
-export function hasSummaryHeadings(text: string): boolean {
-  return /1\.\s*本人の事実/.test(text) && /2\.\s*職種の解説/.test(text) && /3\.\s*面談で聞く質問/.test(text);
+/** 最初の整理の見出し（T-205 step3 の書き方・この順番）。 */
+export const SUMMARY_HEADINGS = [
+  "ひとことで",
+  "やっている仕事と、その意味",
+  "基本情報",
+  "強み",
+  "経歴の型",
+  "面談で確かめたいこと",
+  "知っておきたい言葉",
+] as const;
+
+/** 整理に無い見出しを返す（検証スクリプト用）。空ならそろっている。 */
+export function missingSummaryHeadings(text: string): string[] {
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/^#+\s*/, "").trim());
+  return SUMMARY_HEADINGS.filter((h) => !lines.includes(h));
 }
