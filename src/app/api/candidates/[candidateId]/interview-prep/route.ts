@@ -61,7 +61,7 @@ export async function GET(
           id: room.id,
           createdAt: room.createdAt,
           careerType: room.careerType,
-          // T-205 step4: 下調べの結果（出典リンク・学校のレベルのバッジ用）。下調べなしは null
+          // T-205 step4: 下調べの結果（出典リンク用。step7 で学校のバッジは廃止）。下調べなしは null
           research: normalizeResearch(room.researchJson),
           resumeImportedAt: room.resumeImportedAt,
           resumeChars: room.resumeText?.length ?? 0,

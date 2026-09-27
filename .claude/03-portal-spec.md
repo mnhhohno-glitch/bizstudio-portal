@@ -1381,3 +1381,15 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - **部分ごとの使い回し**（`reusableResearchParts`）: 使い回し元（作り直し＝前の部屋、途中失敗の再送＝今の部屋自身）のレジュメの文字が同じ・版が同じ・その部分の状態が ok なら、その部分は調べない（会社は使い回し、学校だけ調べ直す、もあり得る）。両方使い回せるときは下調べを呼ばない。
 - **使用量ログ**: endpoint は `interview-prep-research` のまま、部分ごとに1行。note に `part=company` / `part=school`。
 - 確認: `scripts/verify/interview-prep-research-format-check.ts`（AI・DB なし）で書式3通りと使い回し判定。`interview-prep-dryrun.ts` は下調べ2並列＋整理1（再試行込み最大4回）。
+
+### T-205 step7（2026-09-28）: 下調べを会社だけにして軽く・整理の中身の修正
+
+- **きっかけ**: step6 の検証で会社の下調べが 117 秒・検索4回・約9.7万トークン読み込み・約37円。原因は「最低2回は検索する」指示と、ページ全体を取り込んで絞り込む動的フィルタリング付きの検索方式。
+- **学校の下調べは廃止**（学校は名前を見ればCAが判断できるため）。`RESEARCH_SCHOOL.md` を削除し、下調べは会社用の1回だけ（`runResearch(resumeText)`・並列なし）。`research_json` は `version` / `companiesStatus` / `companies` のみ（`school`・`schoolStatus` 無し）。step6 以前の保存分の `school` / `schoolStatus` は `normalizeResearch` で読み捨てる。［調べた情報］ブロックは「■ 会社」だけ。
+- **検索方式**: `web_search_20260209`（動的フィルタリング）→ 検索結果だけを返す基本版 `web_search_20250305`（`RESEARCH_WEB_SEARCH_TOOL`）。`web_fetch` は付けない。`max_uses` 4→3。コンテナ指定は不要になったので外した。
+- **`RESEARCH_COMPANY.md`**: 「最低2回は検索」を削除。1社ずつ「会社名 株式会社」→見つかればその会社は終わり、見つからない会社だけ「会社名 都道府県」→それでも無ければ「特定できなかった」（3回目はしない）。念のための検索はしない。`source_urls` は「判断に使った検索結果のページ」（ページを開かないため）。
+- **使い回し**: `reusableResearch(prev, resumeText)`（`ResearchResult | null`）。同じ文字・同じ版・会社 ok なら使い回す。`RESEARCH_VERSION`＝4（step6 以前の保存分は必ず調べ直す）。
+- **SSE**: `researchProgress: { company }` だけ。使用量ログは1行（note に `part=company` は残す）。
+- **SKILL.md**: 学校のレベル・偏差値の記述を全削除（「どんなレベルの学校で」→「どんな学校で」）。「学校と学んだこと」はレジュメの学校名・学部学科・卒業年＋学部学科の一般的な学習内容だけ、学科が無ければ「学科はレジュメからは分からない」。「調べた情報」は会社についての情報だけ。基本情報＝職歴に「現在」→「在職中（職歴に「現在」の記載）」。強み＝業務内容を根拠にしたものを先に・自己PRだけが根拠なら「（本人の自己PRより）」。質問アドバイス＝3〜8個・食い違いは必ず1つ目・当てはまらない質問で数を埋めない。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を更新（それより前の整理には「作り直す」の案内）。
+- 確認: `interview-prep-research-format-check.ts`（会社だけ・旧版の学校つき保存分も）。`interview-prep-dryrun.ts` は下調べ1＋整理1＋再試行1（最大3回）で、偏差値/学校のレベルの語・今の状況・質問の個数・自己PRの明記も出す。

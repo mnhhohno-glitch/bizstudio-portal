@@ -1,7 +1,7 @@
 "use client";
 
 // T-205: 面談準備チャット（右から開く幅広のパネル。見た目は ChatGPT / Claude の会話画面）。
-// - 材料はマイナビレジュメの文字と、会社・学校の下調べ（ネット検索。T-205 step4）。会話が0件のあいだは最初の整理をパネル全体に表示し、
+// - 材料はマイナビレジュメの文字と、会社の下調べ（ネット検索。T-205 step4・step7 で学校の下調べはやめた）。会話が0件のあいだは最初の整理をパネル全体に表示し、
 //   最初の質問を送った時点でヘッダー直下の固定欄（畳んだ状態）へ移す。以降の会話は中央の列に並べる。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
 // - 応答はストリーミング（SSE）で書きながら表示し、表示が終わってから保存される（保存はサーバー側）。
@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { isOldPrepFormat } from "@/lib/interview-prep/format";
-import { researchSources, schoolLevelBadge, type ResearchResult } from "@/lib/interview-prep/research-format";
+import { researchSources, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 type PrepMessage = {
   id: string;
@@ -125,41 +125,23 @@ function PrepMarkdown({ text }: { text: string }) {
 }
 
 /** 整理の末尾に出す「調べた情報の出典」（URL はアプリ側で表示し、AI の本文には書かせない）。 */
-/** 下調べの部分ごとの進み具合（SSE の researchProgress）。 */
+/** 下調べの進み具合（SSE の researchProgress）。step7 で会社だけになった。 */
 type ResearchPartProgress = "running" | "ok" | "timeout" | "error";
-type ResearchProgress = { company: ResearchPartProgress; school: ResearchPartProgress };
+type ResearchProgress = { company: ResearchPartProgress };
 
-const RESEARCH_PART_LABELS = { company: "会社", school: "学校" } as const;
-
-/** 整理の本文が流れ始めるまでの表示。下調べ中は会社・学校の2行、終わったら「整理を作成しています…」。 */
+/** 整理の本文が流れ始めるまでの表示。下調べ中は会社の1行、終わったら「整理を作成しています…」。 */
 function ResearchProgressLines({ researching, progress }: { researching: boolean; progress: ResearchProgress | null }) {
   if (!researching) return <p className="text-sm text-gray-400 py-4">整理を作成しています…</p>;
-  if (!progress) return <p className="text-sm text-gray-400 py-4">会社と学校を調べています…</p>;
+  const st = progress?.company ?? "running";
   return (
     <div className="text-sm py-4 space-y-1">
-      {(["company", "school"] as const).map((part) => {
-        const label = RESEARCH_PART_LABELS[part];
-        const st = progress[part];
-        if (st === "running") {
-          return (
-            <p key={part} className="text-gray-400">
-              {label}を調べています…
-            </p>
-          );
-        }
-        if (st === "ok") {
-          return (
-            <p key={part} className="text-gray-600">
-              ✓ {label}を調べました
-            </p>
-          );
-        }
-        return (
-          <p key={part} className="text-amber-700">
-            {label}は今回調べられませんでした
-          </p>
-        );
-      })}
+      {st === "running" ? (
+        <p className="text-gray-400">会社を調べています…</p>
+      ) : st === "ok" ? (
+        <p className="text-gray-600">✓ 会社を調べました</p>
+      ) : (
+        <p className="text-amber-700">会社は今回調べられませんでした</p>
+      )}
     </div>
   );
 }
@@ -208,7 +190,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [streamSummary, setStreamSummary] = useState("");
-  // 整理の前の下調べ（会社と学校のネット検索）の最中か。step6: 会社と学校を同時に調べ、部分ごとの進み具合を持つ
+  // 整理の前の下調べ（会社のネット検索）の最中か。進み具合も持つ
   const [researching, setResearching] = useState(false);
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null);
 
@@ -526,12 +508,6 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         {summary.careerType}
       </span>
     ) : null;
-  const schoolLevel = !summarizing ? schoolLevelBadge(summary?.research) : null;
-  const schoolBadge = schoolLevel ? (
-    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-      学校: {schoolLevel}
-    </span>
-  ) : null;
   const width = wide ? "95vw" : "clamp(720px, 60vw, calc(100vw - 48px))";
 
   const panel = (
@@ -586,7 +562,6 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           <div className="flex items-center gap-2 px-5 py-2">
             <span className="text-[13px] font-medium text-gray-700 shrink-0">{summaryLabel}</span>
             {careerBadge}
-            {schoolBadge}
             {oldFormat && (
               <span className="min-w-0">
                 <OldFormatNotice />
@@ -642,7 +617,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               <div className="text-center py-16">
                 <p className="text-lg font-medium text-gray-800 mb-2">面談の準備を始めましょう</p>
                 <p className="text-sm text-gray-500 mb-6">
-                  マイナビレジュメと、会社・学校のネット検索を使い、どんな学校でどんな会社に就職し何をしてきた人かと、面談での質問のしかたを整理します。
+                  マイナビレジュメと、勤めた会社のネット検索を使い、どんな学校でどんな会社に就職し何をしてきた人かと、面談での質問のしかたを整理します。
                 </p>
                 <button
                   type="button"
@@ -672,7 +647,6 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-[13px] font-medium text-gray-500">{summaryLabel}</span>
                     {careerBadge}
-                    {schoolBadge}
                   </div>
                   {oldFormat && (
                     <div className="mb-4">

@@ -19,6 +19,9 @@
  *        AI 呼び出しは再試行を含め最大3回（下調べか整理が失敗したら1回だけやり直す）。
  * step6: 下調べは会社用と学校用の2つを同時に呼ぶ。下調べ全体の待ち時間と、部分ごとの所要時間・検索回数・費用・状態を出す。
  *        AI 呼び出しは最大4回（下調べ2＋整理1＋再試行1。失敗した部分か整理のどちらかを1回だけやり直す）。
+ * step7: 学校の下調べをやめ、会社用の1回だけ（検索結果だけを返す基本版の検索）。AI 呼び出しは最大3回（下調べ1＋整理1＋再試行1）。
+ *        整理に「偏差値」「学校のレベル」の語が無いか、今の状況が「記載なし」でないか、質問アドバイスの個数、
+ *        強みに「（本人の自己PRより）」があるかも出す。
  * 出力は数値と有無だけ（本文・氏名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
@@ -33,12 +36,12 @@ import {
   missingSummaryHeadings,
 } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
-import { runResearch, RESEARCH_MODEL, type ResearchPartOutcome } from "@/lib/interview-prep/research";
-import { normalizeResearch, researchSources, type ResearchReuse } from "@/lib/interview-prep/research-format";
+import { runResearch, RESEARCH_MODEL, RESEARCH_WEB_SEARCH_TOOL, type ResearchOutcome } from "@/lib/interview-prep/research";
+import { normalizeResearch, researchSources } from "@/lib/interview-prep/research-format";
 import { WEB_SEARCH_USD_PER_REQUEST } from "@/lib/claude";
 
 const USD_JPY = 150;
-const MAX_AI_CALLS = 4;
+const MAX_AI_CALLS = 3;
 let aiCalls = 0;
 
 type CallResult = {
@@ -131,54 +134,41 @@ async function main() {
   }
   console.log(`resume_text: ok chars=${extracted.chars}`);
 
-  // 下調べ（2並列・保存しない・使用量ログも書かない）。失敗した部分があれば1つだけやり直す（ok の部分は使い回す）
-  let outcome = await runResearch(extracted.text);
-  aiCalls += 2;
-  const partCost = (o: ResearchPartOutcome) =>
+  // 下調べ（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す
+  const researchCost = (o: ResearchOutcome) =>
     computeCostUsd(RESEARCH_MODEL, extractTokens(o.usage)).costUsd + o.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST;
-  const printPart = (label: string, o: ResearchPartOutcome) => {
+  const printResearch = (label: string, o: ResearchOutcome) => {
     const t = extractTokens(o.usage);
-    const c = partCost(o);
+    const c = researchCost(o);
     console.log(
-      `${label}: status=${o.status}${o.errorStatus ? ` http=${o.errorStatus}` : ""} searches=${o.webSearchRequests} ` +
-        `input=${t.inputTokens} output=${t.outputTokens} cost=$${c.toFixed(4)} (¥${(c * USD_JPY).toFixed(1)}) latency=${(o.latencyMs / 1000).toFixed(1)}s`,
+      `${label}: tool=${RESEARCH_WEB_SEARCH_TOOL} status=${o.status}${o.errorStatus ? ` http=${o.errorStatus}` : ""} searches=${o.webSearchRequests} ` +
+        `input=${t.inputTokens} output=${t.outputTokens} cache_read=${t.cacheReadTokens} cost=${c.toFixed(4)} (¥${(c * USD_JPY).toFixed(1)}) latency=${(o.latencyMs / 1000).toFixed(1)}s`,
     );
     if (o.status !== "ok" && o.errorMessage) console.log(`${label}_error: ${o.errorMessage}`);
   };
-  let researchUsd = 0;
+  let outcome = await runResearch(extracted.text);
+  aiCalls++;
+  printResearch("research", outcome);
+  let researchUsd = researchCost(outcome);
   let researchWaitMs = outcome.latencyMs;
-  for (const o of [outcome.parts.company, outcome.parts.school]) {
-    if (!o) continue;
-    printPart(`research_${o.part}`, o);
-    researchUsd += partCost(o);
-  }
-  console.log(`research_wait: ${(outcome.latencyMs / 1000).toFixed(1)}s (parallel)`);
-  const failed = (["company", "school"] as const).filter((p) => outcome.parts[p]?.status !== "ok");
-  if (failed.length > 0 && aiCalls < MAX_AI_CALLS) {
-    const part = failed[0];
-    console.log(`research_retry: part=${part}`);
-    const reuse: ResearchReuse = { companies: part !== "company", school: part !== "school", research: outcome.research };
-    const retried = await runResearch(extracted.text, { reuse });
+  if (outcome.status !== "ok" && aiCalls < MAX_AI_CALLS) {
+    console.log("research_retry: yes");
+    outcome = await runResearch(extracted.text);
     aiCalls++;
-    const o = retried.parts[part]!;
-    printPart(`research_${part}_retry`, o);
-    researchUsd += partCost(o);
-    researchWaitMs += retried.latencyMs;
-    outcome = { ...retried, parts: { ...outcome.parts, [part]: o } };
+    printResearch("research_retry", outcome);
+    researchUsd += researchCost(outcome);
+    researchWaitMs += outcome.latencyMs;
   }
   const rCost = researchUsd;
-  console.log(`research_total: cost=$${rCost.toFixed(4)} (¥${(rCost * USD_JPY).toFixed(1)})`);
+  console.log(`research_total: cost=${rCost.toFixed(4)} (¥${(rCost * USD_JPY).toFixed(1)}) wait=${(researchWaitMs / 1000).toFixed(1)}s`);
   const research = outcome.research;
   if (research) {
     const found = research.companies.filter((c) => c.found).length;
     console.log(
-      `research_companies: ${research.companies.length} (found=${found}) identified=${found > 0 ? "yes" : "no"} version=${research.version ?? "none"} companiesStatus=${research.companiesStatus} schoolStatus=${research.schoolStatus}`,
+      `research_companies: ${research.companies.length} (found=${found}) identified=${found > 0 ? "yes" : "no"} version=${research.version ?? "none"} companiesStatus=${research.companiesStatus}`,
     );
     research.companies.forEach((c, i) =>
       console.log(`research_company[${i}]: found=${c.found} urls=${c.source_urls.length} candidates=${c.candidates.length}`),
-    );
-    console.log(
-      `research_school: ${research.school ? `yes level=${research.school.level} level_obtained=${research.school.level !== "不明" ? "yes" : "no"} hensachi=${research.school.hensachi ? "yes" : "no"}` : "null"}`,
     );
     const sources = researchSources(research);
     console.log(`research_source_urls: ${sources.reduce((n, s) => n + s.urls.length, 0)} (labels=${sources.length})`);
@@ -202,7 +192,7 @@ async function main() {
     console.log(`summary: failed ai_calls=${aiCalls}`);
     return;
   }
-  printCall("call2 summary", summary);
+  printCall("summary", summary);
 
   const missing = missingSummaryHeadings(summary.text);
   console.log(`summary_headings_9: ${missing.length === 0 ? "yes" : `no (missing: ${missing.join(", ")})`}`);
@@ -223,6 +213,17 @@ async function main() {
   console.log(`arrow_meaning_lines: ${arrowLines}`);
   const slashLines = lines.filter((l) => (l.match(/[／/]/g) ?? []).length >= 2).length;
   console.log(`lines_with_2plus_slashes: ${slashLines}`);
+
+  // step7: 学校のレベル・偏差値の語／今の状況／質問アドバイスの個数／自己PRの明記
+  console.log(`summary_has_hensachi_or_school_level: ${/偏差値|学校のレベル/.test(summary.text) ? "yes" : "no"}`);
+  const statusLine = lines.find((l) => /今の状況/.test(l)) ?? lines.find((l) => /在職中|離職中/.test(l));
+  console.log(
+    `current_status: ${statusLine ? (statusLine.includes("記載なし") ? "記載なし" : /在職中/.test(statusLine) ? "在職中" : /離職中/.test(statusLine) ? "離職中" : "other") : "none"}`,
+  );
+  const sIdx = lines.findIndex((l) => l.replace(/^#+s*/, "").trim() === "強み");
+  const sEnd = sIdx < 0 ? -1 : lines.findIndex((l, i) => i > sIdx && /^#+s/.test(l));
+  const strengths = sIdx < 0 ? [] : lines.slice(sIdx + 1, sEnd < 0 ? undefined : sEnd).filter((l) => /^s*[-*]/.test(l));
+  console.log(`strengths: ${strengths.length} self_pr_marked=${strengths.filter((l) => l.includes("（本人の自己PRより）")).length}`);
 
   const careerType = extractCareerType(summary.text);
   console.log(`career_type_extracted: ${careerType ? `yes (${careerType})` : "no"}`);
