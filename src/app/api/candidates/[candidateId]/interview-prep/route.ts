@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { findLatestMynaviResume } from "@/lib/interview-prep/resume";
 import { normalizeResearch } from "@/lib/interview-prep/research-format";
+import { normalizeAskedQuestions, normalizePrepSummary } from "@/lib/interview-prep/summary-format";
 
 export async function GET(
   _req: Request,
@@ -66,6 +67,9 @@ export async function GET(
           resumeImportedAt: room.resumeImportedAt,
           resumeChars: room.resumeText?.length ?? 0,
           summary: summary ? { id: summary.id, content: summary.content, createdAt: summary.createdAt } : null,
+          // T-205 step8: 決まった項目の整理（カード表示用）。step7 以前の部屋は null（文章表示のまま）
+          summaryJson: normalizePrepSummary(room.summaryJson),
+          askedQuestions: normalizeAskedQuestions(room.askedQuestions),
           messages,
         }
       : null,

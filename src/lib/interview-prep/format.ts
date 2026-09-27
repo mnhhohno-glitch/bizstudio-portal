@@ -1,6 +1,7 @@
-// T-205 step3〜step7: 最初の整理の書き方を変えた日時（JST・最後に変えたコミットの時刻）。これより前に作られた整理には「作り直す」の案内を出す。
+// T-205 step3〜step8: 最初の整理の書き方を変えた日時（JST・最後に変えたコミットの時刻）。これより前に作られた整理には「作り直す」の案内を出す。
+// step8 以降は summary_json の有無でも判定する（無い部屋は文章表示のまま・作り直すとカード表示）。
 // 画面（クライアント）からも読むため、Anthropic SDK を読み込む chat.ts とは分けている。
-export const INTERVIEW_PREP_FORMAT_UPDATED_AT = "2026-09-28T00:51:00+09:00";
+export const INTERVIEW_PREP_FORMAT_UPDATED_AT = "2026-09-28T01:50:00+09:00";
 
 export function isOldPrepFormat(createdAt: string | null | undefined): boolean {
   if (!createdAt) return false;

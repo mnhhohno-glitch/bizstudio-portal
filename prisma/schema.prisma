@@ -1745,6 +1745,10 @@ model InterviewPrepRoom {
   // T-205 step4: 会社と学校の下調べ（ウェブ検索）の結果。検証・正規化済みの JSON。下調べなし／失敗は null
   researchJson     Json?     @map("research_json")
   researchedAt     DateTime? @map("researched_at")
+  // T-205 step8: 最初の整理を決まった項目で保存（summary-format.ts の PrepSummary）。step7 以前の部屋は null（文章表示のまま）
+  summaryJson      Json?     @map("summary_json")
+  // T-205 step8: 面談で「聞いた」質問。questions の添字ごとに { askedAt, userId }
+  askedQuestions   Json?     @map("asked_questions")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   messages         InterviewPrepMessage[]

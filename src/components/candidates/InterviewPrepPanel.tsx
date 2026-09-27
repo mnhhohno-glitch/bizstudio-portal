@@ -5,11 +5,16 @@
 //   最初の質問を送った時点でヘッダー直下の固定欄（畳んだ状態）へ移す。以降の会話は中央の列に並べる。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
 // - 応答はストリーミング（SSE）で書きながら表示し、表示が終わってから保存される（保存はサーバー側）。
+// - step8: 最初の整理は決まった項目（summary_json）で受け取り、カード（InterviewPrepSummaryCards）に組み立てて一度に表示する。
+//   質問には「聞いた」ボタン（asked_questions に保存）。summary_json が無い古い部屋は今までの文章表示のまま。
+//   CA の質問への回答は今までどおり文章のストリーミング。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { isOldPrepFormat } from "@/lib/interview-prep/format";
 import { researchSources, type ResearchResult } from "@/lib/interview-prep/research-format";
+import type { AskedQuestions, PrepSummary } from "@/lib/interview-prep/summary-format";
+import InterviewPrepSummaryCards from "./InterviewPrepSummaryCards";
 
 type PrepMessage = {
   id: string;
@@ -29,9 +34,21 @@ type PrepState = {
     resumeImportedAt: string | null;
     resumeChars: number;
     summary: { id: string; content: string; createdAt: string } | null;
+    summaryJson: PrepSummary | null;
+    askedQuestions: AskedQuestions;
     messages: PrepMessage[];
   } | null;
   resume: { fileId: string; importedAt: string } | null;
+};
+
+/** 画面で持つ整理（固定欄・全体表示の両方で使う）。json が null の部屋は文章表示（step7 以前）。 */
+type SummaryView = {
+  content: string;
+  createdAt: string;
+  careerType: string | null;
+  research: ResearchResult | null;
+  json: PrepSummary | null;
+  asked: AskedQuestions;
 };
 
 type Props = {
@@ -90,7 +107,7 @@ const HEADING_CLASS = "font-bold text-[16px] mt-5 first:mt-0 mb-2";
 function OldFormatNotice() {
   return (
     <p className="text-[12px] text-amber-700">
-      書き方が新しくなりました。「作り直す」を押すと新しい書き方で作り直せます。
+      表示が新しくなりました。「作り直す」を押すとカード表示になります。
     </p>
   );
 }
@@ -124,28 +141,41 @@ function PrepMarkdown({ text }: { text: string }) {
   );
 }
 
-/** 整理の末尾に出す「調べた情報の出典」（URL はアプリ側で表示し、AI の本文には書かせない）。 */
 /** 下調べの進み具合（SSE の researchProgress）。step7 で会社だけになった。 */
 type ResearchPartProgress = "running" | "ok" | "timeout" | "error";
 type ResearchProgress = { company: ResearchPartProgress };
 
-/** 整理の本文が流れ始めるまでの表示。下調べ中は会社の1行、終わったら「整理を作成しています…」。 */
-function ResearchProgressLines({ researching, progress }: { researching: boolean; progress: ResearchProgress | null }) {
-  if (!researching) return <p className="text-sm text-gray-400 py-4">整理を作成しています…</p>;
-  const st = progress?.company ?? "running";
+/**
+ * 整理ができるまでの表示（step8: カードは一度に出すので、途中は進み具合だけ）。
+ * 「会社を調べています…」→「✓ 会社を調べました」＋「整理を作っています…」。
+ */
+function ProgressLines({
+  researching,
+  progress,
+  summarizing,
+}: {
+  researching: boolean;
+  progress: ResearchProgress | null;
+  summarizing: boolean;
+}) {
+  const st = researching ? (progress?.company ?? "running") : progress?.company ?? null;
   return (
-    <div className="text-sm py-4 space-y-1">
-      {st === "running" ? (
+    <div className="text-sm py-4 space-y-1.5">
+      {st === "running" || (researching && !st) ? (
         <p className="text-gray-400">会社を調べています…</p>
       ) : st === "ok" ? (
         <p className="text-gray-600">✓ 会社を調べました</p>
-      ) : (
+      ) : st === "timeout" || st === "error" ? (
         <p className="text-amber-700">会社は今回調べられませんでした</p>
+      ) : null}
+      {!researching && (
+        <p className="text-gray-400">{summarizing ? "整理を作っています…" : "準備しています…"}</p>
       )}
     </div>
   );
 }
 
+/** 整理の末尾に出す「調べた情報の出典」（文章表示の古い部屋用。カード表示は InterviewPrepSummaryCards 内で出す）。 */
 function ResearchSources({ research }: { research: ResearchResult | null }) {
   const sources = researchSources(research);
   if (sources.length === 0) return null;
@@ -181,18 +211,14 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // 整理（固定欄）
-  const [summary, setSummary] = useState<{
-    content: string;
-    createdAt: string;
-    careerType: string | null;
-    research: ResearchResult | null;
-  } | null>(null);
+  const [summary, setSummary] = useState<SummaryView | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
-  const [streamSummary, setStreamSummary] = useState("");
   // 整理の前の下調べ（会社のネット検索）の最中か。進み具合も持つ
   const [researching, setResearching] = useState(false);
   const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null);
+  // 下調べが終わり、整理（ツール呼び出し）が動いている最中か（SSE の summarizing）
+  const [summaryGenerating, setSummaryGenerating] = useState(false);
 
   // 会話
   const [messages, setMessages] = useState<PrepMessage[]>([]);
@@ -230,6 +256,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
             createdAt: data.room.summary.createdAt,
             careerType: data.room.careerType,
             research: data.room.research ?? null,
+            json: data.room.summaryJson ?? null,
+            asked: data.room.askedQuestions ?? {},
           }
         : null,
     );
@@ -301,7 +329,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
       if (summarizing || sending) return;
       setError(null);
       setSummarizing(true);
-      setStreamSummary("");
+      setSummaryGenerating(false);
+      setResearchProgress(null);
       setSummaryOpen(true);
       if (rebuild) {
         setSummary(null);
@@ -347,7 +376,9 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         let retryAsRebuild = rebuild;
         await readSse(
           res,
-          (t) => setStreamSummary((prev) => prev + t),
+          () => {
+            /* step8: 整理は文章で流れてこない（done で一度に受け取る） */
+          },
           (payload) => {
             if (payload.started) {
               retryAsRebuild = false;
@@ -355,18 +386,19 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               setResearching(true);
               if (payload.researchProgress) setResearchProgress(payload.researchProgress as ResearchProgress);
             } else if (payload.researched) {
+              // 下調べの結果（✓ 会社を調べました）は残したまま、整理の段階へ
               setResearching(false);
-              setResearchProgress(null);
+            } else if (payload.summarizing) {
+              setResearching(false);
+              setSummaryGenerating(true);
             } else if (payload.done) {
               finished = true;
               const s = payload.summary as { content: string; createdAt: string };
               const research = (payload.research as ResearchResult | null | undefined) ?? null;
-              setSummary({
-                content: s.content,
-                createdAt: s.createdAt,
-                careerType: (payload.careerType as string | null) ?? null,
-                research,
-              });
+              const json = (payload.summaryJson as PrepSummary | null | undefined) ?? null;
+              const asked = (payload.askedQuestions as AskedQuestions | undefined) ?? {};
+              const careerType = (payload.careerType as string | null) ?? null;
+              setSummary({ content: s.content, createdAt: s.createdAt, careerType, research, json, asked });
               setState((prev) =>
                 prev
                   ? {
@@ -374,11 +406,13 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                       room: {
                         id: String(payload.roomId),
                         createdAt: s.createdAt,
-                        careerType: (payload.careerType as string | null) ?? null,
+                        careerType,
                         research,
                         resumeImportedAt: prev.room?.resumeImportedAt ?? prev.resume?.importedAt ?? null,
                         resumeChars: prev.room?.resumeChars ?? 0,
                         summary: { id: "", content: s.content, createdAt: s.createdAt },
+                        summaryJson: json,
+                        askedQuestions: asked,
                         messages: [],
                       },
                     }
@@ -400,10 +434,34 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         setSummarizing(false);
         setResearching(false);
         setResearchProgress(null);
-        setStreamSummary("");
+        setSummaryGenerating(false);
       }
     },
     [candidateId, summarizing, sending, fetchState],
+  );
+
+  // 「聞いた」を付ける／外す。画面を先に変え、保存に失敗したら戻す
+  const toggleAsked = useCallback(
+    async (index: number, asked: boolean) => {
+      const prevAsked = summary?.asked ?? {};
+      const optimistic: AskedQuestions = { ...prevAsked };
+      if (asked) optimistic[String(index)] = { askedAt: new Date().toISOString(), userId: "" };
+      else delete optimistic[String(index)];
+      setSummary((s) => (s ? { ...s, asked: optimistic } : s));
+      try {
+        const res = await fetch(`/api/candidates/${candidateId}/interview-prep/asked`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index, asked }),
+        });
+        if (!res.ok) throw new Error("save failed");
+        const data = (await res.json()) as { askedQuestions: AskedQuestions };
+        setSummary((s) => (s ? { ...s, asked: data.askedQuestions } : s));
+      } catch {
+        setSummary((s) => (s ? { ...s, asked: prevAsked } : s));
+      }
+    },
+    [candidateId, summary?.asked],
   );
 
   const runChat = useCallback(
@@ -500,7 +558,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   // 会話が1件でもある（送信中を含む）ときだけ、整理を上部の固定欄に畳む。0件のときはパネル全体に表示する。
   const hasConversation = messages.length > 0 || !!pendingQuestion;
   const showSummaryBar = (hasRoom || summarizing) && hasConversation;
-  const oldFormat = !summarizing && isOldPrepFormat(summary?.createdAt);
+  // step8: summary_json が無い部屋は文章表示のまま（作り直すとカード表示）。日時の判定も残す
+  const oldFormat = !summarizing && !!summary && (!summary.json || isOldPrepFormat(summary.createdAt));
   const summaryLabel = `整理${summary && !summarizing ? `（${formatDate(summary.createdAt)}）` : summarizing ? "（作成中）" : ""}`;
   const careerBadge =
     summary?.careerType && !summarizing ? (
@@ -577,11 +636,23 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               </button>
             )}
           </div>
-          {summaryOpen && !summarizing && (
+          {summaryOpen && !summarizing && summary && (
             <div className="max-h-[50vh] overflow-y-auto px-5 pb-4">
               <div className="max-w-[760px] mx-auto text-gray-800">
-                <PrepMarkdown text={summary?.content ?? ""} />
-                <ResearchSources research={summary?.research ?? null} />
+                {summary.json ? (
+                  <InterviewPrepSummaryCards
+                    summary={summary.json}
+                    research={summary.research}
+                    asked={summary.asked}
+                    onToggleAsked={(i, a) => void toggleAsked(i, a)}
+                    disabled={busy}
+                  />
+                ) : (
+                  <>
+                    <PrepMarkdown text={summary.content} />
+                    <ResearchSources research={summary.research} />
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -656,13 +727,17 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                   <div className="text-gray-800">
                     {summarizing ? (
                       <>
-                        {streamSummary ? (
-                          <PrepMarkdown text={streamSummary} />
-                        ) : (
-                          <ResearchProgressLines researching={researching} progress={researchProgress} />
-                        )}
+                        <ProgressLines researching={researching} progress={researchProgress} summarizing={summaryGenerating} />
                         <BlinkCursor />
                       </>
+                    ) : summary?.json ? (
+                      <InterviewPrepSummaryCards
+                        summary={summary.json}
+                        research={summary.research}
+                        asked={summary.asked}
+                        onToggleAsked={(i, a) => void toggleAsked(i, a)}
+                        disabled={busy}
+                      />
                     ) : (
                       <>
                         <PrepMarkdown text={summary?.content ?? ""} />

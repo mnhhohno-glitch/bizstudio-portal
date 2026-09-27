@@ -7,81 +7,29 @@
  *   ローカルから本番DBを読む場合: npx tsx --env-file=.env scripts/verify/interview-prep-dryrun.ts
  *   （Drive の認証情報と ANTHROPIC_API_KEY が環境に必要）
  *
- * やること（T-205 step4 で下調べを追加。質問の往復は行わない）:
- *   1. 直近でマイナビレジュメが取り込まれた求職者1名（テスト除外）を選び、文字を取り出す（保存しない）
- *   2. 下調べ（会社と学校のウェブ検索）を1回行う（保存しない・使用量ログも書かない）
- *   3. 最初の整理を1回だけ生成する（保存しない）。AI 呼び出しは合計2回
- *   4. 下調べ: 状態・検索回数・会社数/特定できた数・学校のレベルの有無・出典URL数・トークン/費用/所要時間
- *      整理: 見出し9つ・（調べた情報）の付いた行数・本文中のURL数・「希望」を含む行数・「聞き方:」の数・
- *            「→」で意味を添えた行数・斜線を2つ以上含む行数・経歴の型の取り出し
- * step5: 会社ごとの特定可否・出典URL数・候補数、「就職した会社」に（調べた情報）があるか、経歴の型の値（判定できない含む）、
- *        求職者番号指定時は今の部屋に保存済みの research_json の中身（版・特定可否・候補数・business の有無）も出す。
- *        AI 呼び出しは再試行を含め最大3回（下調べか整理が失敗したら1回だけやり直す）。
- * step6: 下調べは会社用と学校用の2つを同時に呼ぶ。下調べ全体の待ち時間と、部分ごとの所要時間・検索回数・費用・状態を出す。
- *        AI 呼び出しは最大4回（下調べ2＋整理1＋再試行1。失敗した部分か整理のどちらかを1回だけやり直す）。
- * step7: 学校の下調べをやめ、会社用の1回だけ（検索結果だけを返す基本版の検索）。AI 呼び出しは最大3回（下調べ1＋整理1＋再試行1）。
- *        整理に「偏差値」「学校のレベル」の語が無いか、今の状況が「記載なし」でないか、質問アドバイスの個数、
- *        強みに「（本人の自己PRより）」があるかも出す。
- * 出力は数値と有無だけ（本文・氏名・ファイル名などの個人情報は出さない）。
+ * やること（質問の往復は行わない）:
+ *   1. 求職者の最新のマイナビレジュメの文字を取り出す（保存しない）
+ *   2. 下調べ（会社のウェブ検索）を1回行う（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す
+ *   3. 最初の整理を1回生成する（保存しない）。step8: ツール save_prep_summary の入力で受け取り、検証に通らなければ1回だけ作り直す
+ *   4. 出力: 下調べの状態・検索回数・会社数/特定できた数・出典URL数・トークン/費用/所要時間
+ *      整理: 検証に通ったか（1回目／作り直し）、timeline・works・questions・strengths・glossary の件数、
+ *            questions の1件目が mismatch か、fromSelfPr が true の強みの数、fromResearch が true の行の数、
+ *            employmentStatus・careerType、文章化した文字数と2回実行で同じか、所要時間・費用
+ *   AI 呼び出しは最大3回（下調べ1＋整理1＋作り直し1）。
+ * 出力は数値と有無だけ（本文・氏名・会社名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
 import { MYNAVI_RESUME_MEMO, extractResumeText, findLatestMynaviResume } from "@/lib/interview-prep/resume";
-import {
-  INTERVIEW_PREP_MODEL,
-  SUMMARY_MAX_TOKENS,
-  buildPrepSystem,
-  buildSummaryMessages,
-  createPrepStream,
-  extractCareerType,
-  missingSummaryHeadings,
-} from "@/lib/interview-prep/chat";
+import { INTERVIEW_PREP_MODEL, buildPrepSystem, buildSummaryMessages, callSummaryTool } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
 import { runResearch, RESEARCH_MODEL, RESEARCH_WEB_SEARCH_TOOL, type ResearchOutcome } from "@/lib/interview-prep/research";
 import { normalizeResearch, researchSources } from "@/lib/interview-prep/research-format";
+import { careerTypeForRoom, formatPrepSummaryText, normalizePrepSummary, type PrepSummary } from "@/lib/interview-prep/summary-format";
 import { WEB_SEARCH_USD_PER_REQUEST } from "@/lib/claude";
 
 const USD_JPY = 150;
 const MAX_AI_CALLS = 3;
 let aiCalls = 0;
-
-type CallResult = {
-  text: string;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  costUsd: number;
-  ms: number;
-};
-
-async function callPrep(system: ReturnType<typeof buildPrepSystem>, messages: ReturnType<typeof buildSummaryMessages>, maxTokens: number): Promise<CallResult> {
-  const t0 = Date.now();
-  const stream = createPrepStream({ system, messages, maxTokens });
-  let text = "";
-  for await (const event of stream) {
-    if (event.type === "content_block_delta" && event.delta.type === "text_delta") text += event.delta.text;
-  }
-  const final = await stream.finalMessage();
-  const ms = Date.now() - t0;
-  const tokens = extractTokens(final.usage);
-  const { costUsd } = computeCostUsd(INTERVIEW_PREP_MODEL, tokens);
-  return {
-    text,
-    input: tokens.inputTokens,
-    output: tokens.outputTokens,
-    cacheRead: tokens.cacheReadTokens,
-    cacheWrite: tokens.cacheCreationTokens,
-    costUsd,
-    ms,
-  };
-}
-
-function printCall(label: string, r: CallResult) {
-  console.log(
-    `${label}: input=${r.input} output=${r.output} cache_read=${r.cacheRead} cache_write=${r.cacheWrite} ` +
-      `cost=$${r.costUsd.toFixed(4)} (¥${(r.costUsd * USD_JPY).toFixed(1)}) latency=${(r.ms / 1000).toFixed(1)}s chars=${r.text.length}`,
-  );
-}
 
 async function main() {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY が未設定です");
@@ -94,14 +42,16 @@ async function main() {
       console.log("candidate: not found");
       return;
     }
-    // 今の部屋に保存済みの下調べ（前回の結果）
     const room = await prisma.interviewPrepRoom.findFirst({
       where: { candidateId: cand.id, archivedAt: null },
       orderBy: { createdAt: "desc" },
-      select: { researchJson: true, researchedAt: true, careerType: true },
+      select: { researchJson: true, researchedAt: true, careerType: true, summaryJson: true, askedQuestions: true },
     });
     const saved = room ? normalizeResearch(room.researchJson) : null;
-    console.log(`saved_room: ${room ? "yes" : "no"} researched=${room?.researchedAt ? "yes" : "no"} career_type=${room?.careerType ?? "null"}`);
+    const savedSummary = room ? normalizePrepSummary(room.summaryJson) : null;
+    console.log(
+      `saved_room: ${room ? "yes" : "no"} researched=${room?.researchedAt ? "yes" : "no"} career_type=${room?.careerType ?? "null"} summary_json=${room?.summaryJson ? (savedSummary ? "valid" : "invalid") : "none"} asked_questions=${room?.askedQuestions ? "yes" : "none"}`,
+    );
     if (saved) {
       console.log(`saved_research: version=${saved.version ?? "none"}`);
       saved.companies.forEach((c, i) =>
@@ -109,18 +59,19 @@ async function main() {
       );
     }
     file = await findLatestMynaviResume(cand.id);
-  } else file = await prisma.candidateFile.findFirst({
-    where: {
-      category: "MEETING",
-      memo: MYNAVI_RESUME_MEMO,
-      mimeType: "application/pdf",
-      archivedAt: null,
-      driveFileId: { not: null },
-      candidate: { name: { not: { contains: "テスト" } } },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, driveFileId: true, createdAt: true },
-  });
+  } else
+    file = await prisma.candidateFile.findFirst({
+      where: {
+        category: "MEETING",
+        memo: MYNAVI_RESUME_MEMO,
+        mimeType: "application/pdf",
+        archivedAt: null,
+        driveFileId: { not: null },
+        candidate: { name: { not: { contains: "テスト" } } },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, driveFileId: true, createdAt: true },
+    });
   if (!file) {
     console.log("resume_file: none");
     return;
@@ -151,7 +102,7 @@ async function main() {
   printResearch("research", outcome);
   let researchUsd = researchCost(outcome);
   let researchWaitMs = outcome.latencyMs;
-  if (outcome.status !== "ok" && aiCalls < MAX_AI_CALLS) {
+  if (outcome.status !== "ok" && aiCalls < MAX_AI_CALLS - 1) {
     console.log("research_retry: yes");
     outcome = await runResearch(extracted.text);
     aiCalls++;
@@ -159,8 +110,7 @@ async function main() {
     researchUsd += researchCost(outcome);
     researchWaitMs += outcome.latencyMs;
   }
-  const rCost = researchUsd;
-  console.log(`research_total: cost=${rCost.toFixed(4)} (¥${(rCost * USD_JPY).toFixed(1)}) wait=${(researchWaitMs / 1000).toFixed(1)}s`);
+  console.log(`research_total: cost=${researchUsd.toFixed(4)} (¥${(researchUsd * USD_JPY).toFixed(1)}) wait=${(researchWaitMs / 1000).toFixed(1)}s`);
   const research = outcome.research;
   if (research) {
     const found = research.companies.filter((c) => c.found).length;
@@ -175,61 +125,61 @@ async function main() {
   }
 
   const system = buildPrepSystem(extracted.text, research);
+  const messages = buildSummaryMessages();
 
-  // 最初の整理（失敗・空なら残り回数の範囲で1回だけやり直す）
-  let summary: CallResult | null = null;
+  // 最初の整理（ツール呼び出し）。検証に通らなければ残り回数の範囲で1回だけ作り直す
+  let summary: PrepSummary | null = null;
+  let summaryUsd = 0;
+  let summaryMs = 0;
+  let attempts = 0;
+  let validOn: "first" | "retry" | "never" = "never";
   while (!summary && aiCalls < MAX_AI_CALLS) {
     aiCalls++;
+    attempts++;
+    const t0 = Date.now();
     try {
-      const r = await callPrep(system, buildSummaryMessages(), SUMMARY_MAX_TOKENS);
-      if (r.text.trim()) summary = r;
-      else console.log("summary_retry: empty");
+      const r = await callSummaryTool({ system, messages });
+      const ms = Date.now() - t0;
+      summaryMs += ms;
+      const tokens = extractTokens(r.usage);
+      const { costUsd } = computeCostUsd(INTERVIEW_PREP_MODEL, tokens);
+      summaryUsd += costUsd;
+      console.log(
+        `summary_call[${attempts}]: valid=${r.summary ? "yes" : `no(${r.invalidReason})`} stop=${r.stopReason} input=${tokens.inputTokens} output=${tokens.outputTokens} ` +
+          `cache_read=${tokens.cacheReadTokens} cache_write=${tokens.cacheCreationTokens} cost=$${costUsd.toFixed(4)} (¥${(costUsd * USD_JPY).toFixed(1)}) latency=${(ms / 1000).toFixed(1)}s`,
+      );
+      if (r.summary) {
+        summary = r.summary;
+        validOn = attempts === 1 ? "first" : "retry";
+      }
     } catch (e) {
-      console.log(`summary_retry: ${(e as { status?: number })?.status ?? "error"}`);
+      summaryMs += Date.now() - t0;
+      console.log(`summary_call[${attempts}]: error ${(e as { status?: number })?.status ?? ""} ${e instanceof Error ? e.message.slice(0, 200) : ""}`);
     }
   }
+  console.log(`summary_valid: ${validOn === "first" ? "通った" : validOn === "retry" ? "作り直しで通った" : "通らない"}`);
   if (!summary) {
     console.log(`summary: failed ai_calls=${aiCalls}`);
     return;
   }
-  printCall("summary", summary);
 
-  const missing = missingSummaryHeadings(summary.text);
-  console.log(`summary_headings_9: ${missing.length === 0 ? "yes" : `no (missing: ${missing.join(", ")})`}`);
-
-  const lines = summary.text.split(/\r?\n/);
-  console.log(`research_tagged_lines: ${lines.filter((l) => l.includes("（調べた情報）")).length}`);
-  // 「就職した会社」の節（次の見出しまで）に（調べた情報）の文があるか
-  const hIdx = lines.findIndex((l) => l.replace(/^#+\s*/, "").trim() === "就職した会社");
-  const nIdx = hIdx < 0 ? -1 : lines.findIndex((l, i) => i > hIdx && /^#+\s/.test(l));
-  const companySection = hIdx < 0 ? [] : lines.slice(hIdx + 1, nIdx < 0 ? undefined : nIdx);
-  console.log(`company_section_research_tagged: ${companySection.some((l) => l.includes("（調べた情報）")) ? "yes" : "no"}`);
-  const rawType = summary.text.match(/経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型|判定できない)/);
-  console.log(`career_type_raw: ${rawType ? rawType[1] : "none"}`);
-  console.log(`urls_in_body: ${(summary.text.match(/https?:\/\//g) ?? []).length}`);
-  console.log(`lines_with_kibou: ${lines.filter((l) => l.includes("希望")).length}`);
-  console.log(`question_advice_count: ${lines.filter((l) => /聞き方[:：]/.test(l)).length}`);
-  const arrowLines = lines.filter((l) => /^\s*[-*]/.test(l) && l.includes("→")).length;
-  console.log(`arrow_meaning_lines: ${arrowLines}`);
-  const slashLines = lines.filter((l) => (l.match(/[／/]/g) ?? []).length >= 2).length;
-  console.log(`lines_with_2plus_slashes: ${slashLines}`);
-
-  // step7: 学校のレベル・偏差値の語／今の状況／質問アドバイスの個数／自己PRの明記
-  console.log(`summary_has_hensachi_or_school_level: ${/偏差値|学校のレベル/.test(summary.text) ? "yes" : "no"}`);
-  const statusLine = lines.find((l) => /今の状況/.test(l)) ?? lines.find((l) => /在職中|離職中/.test(l));
   console.log(
-    `current_status: ${statusLine ? (statusLine.includes("記載なし") ? "記載なし" : /在職中/.test(statusLine) ? "在職中" : /離職中/.test(statusLine) ? "離職中" : "other") : "none"}`,
+    `summary_counts: timeline=${summary.timeline.length} works=${summary.works.length} work_items=${summary.works.reduce((n, w) => n + w.items.length, 0)} questions=${summary.questions.length} strengths=${summary.strengths.length} glossary=${summary.glossary.length} qualifications=${summary.qualifications.length}`,
   );
-  const sIdx = lines.findIndex((l) => l.replace(/^#+\s*/, "").trim() === "強み");
-  const sEnd = sIdx < 0 ? -1 : lines.findIndex((l, i) => i > sIdx && /^#+\s/.test(l));
-  const strengths = sIdx < 0 ? [] : lines.slice(sIdx + 1, sEnd < 0 ? undefined : sEnd).filter((l) => /^\s*[-*]/.test(l));
-  console.log(`strengths: ${strengths.length} self_pr_marked=${strengths.filter((l) => l.includes("（本人の自己PRより）")).length}`);
+  console.log(`first_question_mismatch: ${summary.questions[0]?.mismatch ? "yes" : "no"} (mismatch_total=${summary.questions.filter((q) => q.mismatch).length})`);
+  console.log(`strengths_from_self_pr: ${summary.strengths.filter((s) => s.fromSelfPr).length}`);
+  console.log(`timeline_from_research: ${summary.timeline.filter((t) => t.fromResearch).length}`);
+  console.log(`employment_status: ${summary.employmentStatus} age=${summary.age ? "yes" : "no"} income=${summary.currentIncome ? "yes" : "no"}`);
+  console.log(`career_type: ${summary.careerType} (room=${careerTypeForRoom(summary) ?? "null"}) reason=${summary.careerTypeReason ? "yes" : "no"}`);
+  console.log(`summary_has_kibou: ${/希望/.test(JSON.stringify(summary)) ? "yes" : "no"}`);
+  console.log(`summary_has_url: ${/https?:\/\//.test(JSON.stringify(summary)) ? "yes" : "no"}`);
+  const text1 = formatPrepSummaryText(summary);
+  const text2 = formatPrepSummaryText(summary);
+  console.log(`formatted_text: chars=${text1.length} deterministic=${text1 === text2 ? "yes" : "no"}`);
 
-  const careerType = extractCareerType(summary.text);
-  console.log(`career_type_extracted: ${careerType ? `yes (${careerType})` : "no"}`);
-  const totalUsd = rCost + summary.costUsd;
+  const totalUsd = researchUsd + summaryUsd;
   console.log(
-    `total: cost=${totalUsd.toFixed(4)} (¥${(totalUsd * USD_JPY).toFixed(1)}) latency=${((researchWaitMs + summary.ms) / 1000).toFixed(1)}s`,
+    `total: cost=${totalUsd.toFixed(4)} (¥${(totalUsd * USD_JPY).toFixed(1)}) latency=${((researchWaitMs + summaryMs) / 1000).toFixed(1)}s (research ${(researchWaitMs / 1000).toFixed(1)}s + summary ${(summaryMs / 1000).toFixed(1)}s)`,
   );
   console.log(`ai_calls: ${aiCalls}`);
 }

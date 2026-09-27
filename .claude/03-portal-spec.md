@@ -1393,3 +1393,16 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - **SKILL.md**: 学校のレベル・偏差値の記述を全削除（「どんなレベルの学校で」→「どんな学校で」）。「学校と学んだこと」はレジュメの学校名・学部学科・卒業年＋学部学科の一般的な学習内容だけ、学科が無ければ「学科はレジュメからは分からない」。「調べた情報」は会社についての情報だけ。基本情報＝職歴に「現在」→「在職中（職歴に「現在」の記載）」。強み＝業務内容を根拠にしたものを先に・自己PRだけが根拠なら「（本人の自己PRより）」。質問アドバイス＝3〜8個・食い違いは必ず1つ目・当てはまらない質問で数を埋めない。
 - `INTERVIEW_PREP_FORMAT_UPDATED_AT` を更新（それより前の整理には「作り直す」の案内）。
 - 確認: `interview-prep-research-format-check.ts`（会社だけ・旧版の学校つき保存分も）。`interview-prep-dryrun.ts` は下調べ1＋整理1＋再試行1（最大3回）で、偏差値/学校のレベルの語・今の状況・質問の個数・自己PRの明記も出す。
+
+### T-205 step8（2026-09-28）: 整理を決まった項目で受け取り、画面でカードに組み立てる
+
+- **きっかけ**: 整理の Markdown 表示は見慣れないCAに読みにくい。AI には文章ではなく決まった項目で返させ、画面側でカードにする。質問に「聞いた」を付けて後日の突き合わせに使う。
+- **AI の返し方**: 最初の整理はツール `save_prep_summary`（`SUMMARY_TOOL`・入力の形は `src/lib/interview-prep/summary-format.ts` の `SUMMARY_TOOL_INPUT_SCHEMA`）を `tool_choice: { type: "tool" }` で必ず呼ばせる（`callSummaryTool`・ストリーミングで受けて `finalMessage()` の tool_use 入力を読む）。返ってきた入力は `normalizePrepSummary` で検証・正規化（必須: summary が空でない／employmentStatus・careerType が選択肢のどれか／questions 1つ以上。文字は1,000字・配列は30件・questions 8・strengths 3 で切る）。通らなければ **1回だけ作り直し**（note `retry; invalid-<理由>`）、それでも駄目なら SSE `{error}`（画面は「再送」）。max_tokens は整理 6,000（ツール入力は文章より長くなる）。質問への回答は今までどおり文章のストリーミング（`createPrepStream`）。
+- **項目の形（`PrepSummary`）**: summary / employmentStatus（在職中｜離職中｜不明）/ age / currentIncome / qualifications[] / careerType（一社継続型｜同職種転職型｜職種転換型｜判定できない）/ careerTypeReason / timeline[{period,title,detail,fromResearch}] / works[{company,items[{term,meaning}]}] / questions[{question,why,reveals,mismatch}] / strengths[{strength,basis,fromSelfPr}] / glossary[{term,meaning}]。
+- **保存列（migration `20260928100000_t205_interview_prep_summary_json`・nullable 追加のみ）**: `interview_prep_rooms.summary_json`（JSONB・検証済みの PrepSummary）／`asked_questions`（JSONB・`{ "<questions の添字>": { askedAt, userId } }`）。`career_type` は `careerType` から直接入れる（「判定できない」は null・`careerTypeForRoom`）。`extractCareerType`（本文からの正規表現）は廃止。assistant の発言（kind=SUMMARY）の content には `formatPrepSummaryText` の文章を入れる（古い画面経路・ログ用）。
+- **会話履歴に入れる整理**: `messages` API は `summary_json` があれば毎回 `formatPrepSummaryText` で文章にしたもの（決定的処理のみ・見出し8つ・URL なし。罠#39）を整理の AI 発言として先頭に入れる。無い古い部屋は保存済みの文章。
+- **API 追加**: `PATCH /api/candidates/[candidateId]/interview-prep/asked` body `{ index, asked }` → `asked_questions` を `toggleAskedQuestion`（純粋関数）で更新して返す。summary_json が無い部屋は 409 `not_card_format`、範囲外は 400。
+- **GET** は `room.summaryJson`（正規化済み・無ければ null）と `room.askedQuestions` を返す。**summary SSE** は文章の `{text}` を流さず、下調べ後に `{summarizing:true}` を3秒おきに送り、`{done, summary, summaryJson, askedQuestions, careerType, research}` で一度に渡す。
+- **SKILL.md**: 「## 最初の整理」を項目ごとの書き方に差し替え（文章では返さずツールを1回呼ぶ・記号で飾らない）。書き方のルールから「見出しは###、中身は箇条書き」の行を削除。「## 最重要ルール」「## CAの質問に答えるとき」は据え置き。
+- **古い部屋**: summary_json が無い部屋は文章表示のまま（`OldFormatNotice`＝「作り直すとカード表示になります」）。`INTERVIEW_PREP_FORMAT_UPDATED_AT` も更新。
+- **確認**: AI なしは `scripts/verify/interview-prep-summary-format-check.ts`（見本 JSON の検証・形違いの拒否・文章化の決定性・「聞いた」の保存と取り消し）。本番は `interview-prep-dryrun.ts`（下調べ1＋整理1＋作り直し1・検証に通ったか・各項目の件数・1件目が mismatch か・fromSelfPr / fromResearch の数・文章化の決定性・費用と時間）。

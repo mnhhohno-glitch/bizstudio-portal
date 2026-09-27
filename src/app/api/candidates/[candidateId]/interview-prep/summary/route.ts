@@ -1,4 +1,4 @@
-// T-205: 面談準備チャットの「最初の整理」を作る（SSE ストリーミング）。
+// T-205: 面談準備チャットの「最初の整理」を作る（SSE）。
 //
 // 流れ:
 //   1. 有効な部屋が無ければ、マイナビレジュメを Drive から取得して pdf-parse で文字を取り出し、部屋を作る。
@@ -12,13 +12,13 @@
 //      「作り直す」は新しい部屋なので原則下調べからやり直す。ただし取り直したレジュメの文字が前の部屋と完全に同じで、
 //      前の部屋の research_json の版が今の版（RESEARCH_VERSION）と同じなら、検索せずにその結果を新しい部屋にコピーする（step5）。
 //      途中失敗の再送は、下調べ済みならその結果を使う（検索し直さない）。
-//      step6: 会社と学校を別々の呼び出しで同時に調べる（research.ts）。使い回しは部分ごと（reusableResearchParts）で、
-//      前の部屋（再送なら今の部屋自身）の該当部分が ok・文字も版も同じならその部分は調べない。
-//      下調べ中は数秒おきに researchProgress を送り続ける（無通信が長いと途中の中継で接続が切られるため）。
-//      step7: 学校の下調べをやめ、会社だけにした。使い回しは会社の部分で判断する（reusableResearch）。
-//      researchProgress は { company } だけを送る。
-//   5. 応答を流し終えてから assistant の発言（kind=SUMMARY）を保存し、経歴の型を部屋に保存する。
-//      途中で失敗したら何も保存しない（画面はエラーと「再送」を出す）。
+//      step7: 学校の下調べはやめ、会社だけ。researchProgress は { company } だけを送る。
+//      下調べ中・整理中は数秒おきに進み具合を送り続ける（無通信が長いと途中の中継で接続が切られるため）。
+//   5. step8: 整理は文章のストリーミングではなく、ツール save_prep_summary の入力（決まった項目）で受け取る。
+//      検証に通らなければ1回だけ作り直し、それでも駄目ならエラー（画面は「再送」を出す）。
+//      通ったら assistant の発言（kind=SUMMARY・本文は formatPrepSummaryText の文章）と、部屋の summary_json・career_type を保存し、
+//      done で summary_json を画面に渡す（画面はカードに組み立てて一度に表示する）。
+//      途中で失敗したら何も保存しない。
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -27,18 +27,19 @@ import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import { findLatestMynaviResume, extractResumeText } from "@/lib/interview-prep/resume";
 import {
   INTERVIEW_PREP_MODEL,
-  SUMMARY_MAX_TOKENS,
   buildPrepSystem,
   buildSummaryMessages,
-  createPrepStream,
-  extractCareerType,
+  callSummaryTool,
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
 import { runResearch, recordResearchUsage, toPartStatus } from "@/lib/interview-prep/research";
 import { reusableResearch, type ResearchPartStatus, type ResearchResult } from "@/lib/interview-prep/research-format";
+import { careerTypeForRoom, formatPrepSummaryText, type PrepSummary } from "@/lib/interview-prep/summary-format";
 
-/** 下調べ中に進み具合を送る間隔（ms）。 */
-const RESEARCH_PROGRESS_INTERVAL_MS = 3_000;
+/** 下調べ中・整理中に進み具合を送る間隔（ms）。 */
+const PROGRESS_INTERVAL_MS = 3_000;
+/** 整理の検証に通らなかったときの作り直し回数。 */
+const SUMMARY_RETRIES = 1;
 
 export async function POST(
   req: Request,
@@ -108,7 +109,7 @@ export async function POST(
     } else {
       const progress: { company: "running" | ResearchPartStatus } = { company: "running" };
       send({ researching: true, researchProgress: { ...progress } });
-      const timer = setInterval(() => send({ researchProgress: { ...progress } }), RESEARCH_PROGRESS_INTERVAL_MS);
+      const timer = setInterval(() => send({ researchProgress: { ...progress } }), PROGRESS_INTERVAL_MS);
       let outcome: Awaited<ReturnType<typeof runResearch>>;
       try {
         outcome = await runResearch(resumeText);
@@ -139,36 +140,39 @@ export async function POST(
     }
     send({ researched: true, research });
 
+    // 整理（ツール呼び出し）。進み具合は数秒おきに送る
     const system = buildPrepSystem(resumeText, research);
+    send({ summarizing: true });
+    const summarizingTimer = setInterval(() => send({ summarizing: true }), PROGRESS_INTERVAL_MS);
     const startedAt = Date.now();
-    let text = "";
     try {
-      const stream = createPrepStream({ system, messages, maxTokens: SUMMARY_MAX_TOKENS });
-      for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          text += event.delta.text;
-          send({ text: event.delta.text });
-        }
+      let summary: PrepSummary | null = null;
+      for (let attempt = 0; attempt <= SUMMARY_RETRIES && !summary; attempt++) {
+        const callStartedAt = Date.now();
+        const result = await callSummaryTool({ system, messages });
+        const latencyMs = Date.now() - callStartedAt;
+        const noteParts = [rebuild ? "rebuild" : null, attempt > 0 ? "retry" : null, result.invalidReason ? `invalid-${result.invalidReason}` : null];
+        await recordAdvisorUsage({
+          endpoint: "interview-prep-summary",
+          model: INTERVIEW_PREP_MODEL,
+          usage: result.usage,
+          candidateId,
+          latencyMs,
+          note: noteParts.filter(Boolean).join("; ") || null,
+        });
+        const u = result.usage;
+        console.log(
+          `[interview-prep summary] attempt=${attempt} valid=${result.summary ? "yes" : `no(${result.invalidReason})`} stop=${result.stopReason} input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs}`,
+        );
+        summary = result.summary;
       }
-      const final = await stream.finalMessage();
-      const latencyMs = Date.now() - startedAt;
-      await recordAdvisorUsage({
-        endpoint: "interview-prep-summary",
-        model: INTERVIEW_PREP_MODEL,
-        usage: final.usage,
-        candidateId,
-        latencyMs,
-        note: rebuild ? "rebuild" : null,
-      });
-      const u = final.usage;
-      console.log(
-        `[interview-prep summary] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs}`,
-      );
-      if (!text.trim()) {
-        send({ error: "応答が空でした。もう一度お試しください。" });
+      clearInterval(summarizingTimer);
+      if (!summary) {
+        send({ error: "整理の形が読めませんでした。再送してください。" });
         return;
       }
-      const careerType = extractCareerType(text);
+      const text = formatPrepSummaryText(summary);
+      const careerType = careerTypeForRoom(summary);
       const saved = await prisma.$transaction(async (tx) => {
         const msg = await tx.interviewPrepMessage.create({
           data: { roomId, role: "assistant", content: text, kind: "SUMMARY" },
@@ -176,12 +180,18 @@ export async function POST(
         });
         await tx.interviewPrepRoom.update({
           where: { id: roomId },
-          data: { summaryMessageId: msg.id, careerType },
+          data: {
+            summaryMessageId: msg.id,
+            careerType,
+            summaryJson: summary as unknown as Prisma.InputJsonValue,
+            askedQuestions: Prisma.DbNull,
+          },
         });
         return msg;
       });
-      send({ done: true, roomId, summary: saved, careerType, research });
+      send({ done: true, roomId, summary: saved, summaryJson: summary, askedQuestions: {}, careerType, research });
     } catch (e) {
+      clearInterval(summarizingTimer);
       console.error("[interview-prep summary] failed:", e);
       const status = (e as { status?: number })?.status;
       await recordAdvisorUsage({

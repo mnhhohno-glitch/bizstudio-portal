@@ -1651,3 +1651,18 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 - 学校の下調べをやめたので、学校に関する表示を外した: 進み具合の「学校を調べています…」の行、固定欄・全体表示の「学校: 高／中／低」バッジ（`schoolLevelBadge()` は削除）、出典リンクの学校分（`researchSources()` は会社だけ）。
 - 進み具合は1行（`ResearchProgressLines`）: 「会社を調べています…」→「✓ 会社を調べました」／「会社は今回調べられませんでした」。SSE の `researchProgress` は `{ company }` だけ。
 - 最初の案内文は「マイナビレジュメと、勤めた会社のネット検索を使い…」。
+
+### T-205 step8（2026-09-28）: 整理のカード表示と「聞いた」ボタン
+
+- 新コンポーネント `src/components/candidates/InterviewPrepSummaryCards.tsx`（Props: `summary: PrepSummary` / `research` / `asked: AskedQuestions` / `onToggleAsked(index, asked)` / `disabled`）。`InterviewPrepPanel` は `summary.json` があればこれを、無ければ従来の `PrepMarkdown`＋`ResearchSources`（文章表示）を出す。全体表示・固定欄の「整理を開く」の両方で同じカード。
+- カードの順（中央の列 max-w-[760px]・白カード rounded-xl border shadow-sm・見出しは 12px gray-500）:
+  1. **ひとことで**: summary 17px。下に丸バッジ（在職中=emerald／離職中=amber／不明=gray、年齢=gray、経歴の型=blue〔判定できないは出さず理由を1行〕、年収=gray）。資格は 12px 1行（truncate）。
+  2. **経歴の流れ**: 縦線（gray-200）と点（#2563EB）の時系列。period 12px gray → title 15px 太字 → detail 14px。fromResearch の行に「🌐 調べた情報」。
+  3. **やってきた仕事**: 会社ごとに term（太字）｜meaning の2列 grid（2fr:3fr）。フッター「右側は一般的な意味です。本人のやり方は面談で確認します。」
+  4. **面談で聞くこと（N/M 聞いた）**: 1問1カード。Q番号＋mismatch なら amber の「食い違い」札、question 16px、下に 12px「なぜ: 」「分かること: 」。右上「聞いた」→押すと「✓ 聞いた」（emerald）でカードは opacity-60。最初は3件、残りは「ほかN件を開く」。
+  5. **強み**: strength 15px＋「根拠: basis」。fromSelfPr は「根拠: 本人の自己PRより」。
+  6. **知っておきたい言葉**: 最初は「N語を開く」で畳む。開くと term｜meaning の2列。
+  7. 最下部に 11px「🌐 調べた情報の出典」（会社の URL を番号リンク・新しいタブ）。学校は出さない。
+- 「聞いた」は `InterviewPrepPanel.toggleAsked`: 画面を先に変えて PATCH `/interview-prep/asked`、失敗したら戻す。`summary.asked`（`AskedQuestions`）1か所で持つ。
+- 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。最初の質問で固定欄に畳む動き（step3・`hasConversation`）はそのまま。
+- 古い部屋（summary_json なし）は文章表示のまま。`OldFormatNotice` は「表示が新しくなりました。「作り直す」を押すとカード表示になります。」（summary_json が無い、または作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前）。

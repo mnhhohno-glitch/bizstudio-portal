@@ -2,6 +2,7 @@
 //
 // - 有効な部屋に最初の整理が無ければ 409（先に summary を作る）。
 // - 送る中身は system＝指示本文＋レジュメ＋調べた情報（保存済みの research_json。質問のたびに検索はしない）、messages＝［固定文→整理］＋直近10往復＋今回の質問（chat.ts）。
+//   step8: 整理は summary_json を formatPrepSummaryText で文章にしたもの（古い部屋は保存済みの文章）。
 // - 応答を流し終えてから CA の発言と AI の発言をまとめて保存する。途中で失敗したら両方とも保存しない
 //   （画面はエラーと「再送」を出し、再送で同じ質問を送り直す＝二重保存にならない）。
 import { NextResponse } from "next/server";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
 import { normalizeResearch } from "@/lib/interview-prep/research-format";
+import { formatPrepSummaryText, normalizePrepSummary } from "@/lib/interview-prep/summary-format";
 
 const MAX_QUESTION_CHARS = 8000;
 
@@ -52,7 +54,10 @@ export async function POST(
   if (!room || !room.summaryMessageId || !room.resumeText) {
     return NextResponse.json({ error: "not_ready" }, { status: 409 });
   }
-  const summary = room.messages.find((m) => m.kind === "SUMMARY")?.content;
+  // step8: summary_json がある部屋は毎回同じ書式で文章にしたものを整理の発言にする（決定的処理・罠#39）。
+  // 無い古い部屋は保存済みの文章（kind=SUMMARY）をそのまま使う。
+  const summaryJson = normalizePrepSummary(room.summaryJson);
+  const summary = summaryJson ? formatPrepSummaryText(summaryJson) : room.messages.find((m) => m.kind === "SUMMARY")?.content;
   if (!summary) return NextResponse.json({ error: "not_ready" }, { status: 409 });
 
   const history: PrepHistoryMessage[] = room.messages
