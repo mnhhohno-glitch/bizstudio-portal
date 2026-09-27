@@ -220,9 +220,9 @@ async function main() {
   console.log(
     `current_status: ${statusLine ? (statusLine.includes("記載なし") ? "記載なし" : /在職中/.test(statusLine) ? "在職中" : /離職中/.test(statusLine) ? "離職中" : "other") : "none"}`,
   );
-  const sIdx = lines.findIndex((l) => l.replace(/^#+s*/, "").trim() === "強み");
-  const sEnd = sIdx < 0 ? -1 : lines.findIndex((l, i) => i > sIdx && /^#+s/.test(l));
-  const strengths = sIdx < 0 ? [] : lines.slice(sIdx + 1, sEnd < 0 ? undefined : sEnd).filter((l) => /^s*[-*]/.test(l));
+  const sIdx = lines.findIndex((l) => l.replace(/^#+\s*/, "").trim() === "強み");
+  const sEnd = sIdx < 0 ? -1 : lines.findIndex((l, i) => i > sIdx && /^#+\s/.test(l));
+  const strengths = sIdx < 0 ? [] : lines.slice(sIdx + 1, sEnd < 0 ? undefined : sEnd).filter((l) => /^\s*[-*]/.test(l));
   console.log(`strengths: ${strengths.length} self_pr_marked=${strengths.filter((l) => l.includes("（本人の自己PRより）")).length}`);
 
   const careerType = extractCareerType(summary.text);
