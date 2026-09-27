@@ -1659,9 +1659,9 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
   1. **ひとことで**: summary 17px。下に丸バッジ（在職中=emerald／離職中=amber／不明=gray、年齢=gray、経歴の型=blue〔判定できないは出さず理由を1行〕、年収=gray）。資格は 12px 1行（truncate）。
   2. **経歴の流れ**: 縦線（gray-200）と点（#2563EB）の時系列。period 12px gray → title 15px 太字 → detail 14px。fromResearch の行に「🌐 調べた情報」。
   3. **やってきた仕事**: 会社ごとに term（太字）｜meaning の2列 grid（2fr:3fr）。フッター「右側は一般的な意味です。本人のやり方は面談で確認します。」
-  4. **面談で聞くこと（N/M 聞いた）**: 1問1カード。Q番号＋mismatch なら amber の「食い違い」札、question 16px、下に 12px「なぜ: 」「分かること: 」。右上「聞いた」→押すと「✓ 聞いた」（emerald）でカードは opacity-60。最初は3件、残りは「ほかN件を開く」。
+  4. **面談で聞くこと（N/M 聞いた）**: 1問1カード。Q番号＋mismatch なら amber の「食い違い」札、question 16px、下に 12px「なぜ: 」「分かること: 」。右上「聞いた」→押すと「✓ 聞いた」（emerald）でカードは opacity-60。件数に関係なく全件表示（T-205 step9 で「ほかN件を開く」の開閉を廃止）。
   5. **強み**: strength 15px＋「根拠: basis」。fromSelfPr は「根拠: 本人の自己PRより」。
-  6. **知っておきたい言葉**: 最初は「N語を開く」で畳む。開くと term｜meaning の2列。
+  6. **知っておきたい言葉**: 最初から全語を term｜meaning の2列で表示（T-205 step9 で「N語を開く」の開閉を廃止）。
   7. 最下部に 11px「🌐 調べた情報の出典」（会社の URL を番号リンク・新しいタブ）。学校は出さない。
 - 「聞いた」は `InterviewPrepPanel.toggleAsked`: 画面を先に変えて PATCH `/interview-prep/asked`、失敗したら戻す。`summary.asked`（`AskedQuestions`）1か所で持つ。
 - 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。最初の質問で固定欄に畳む動き（step3・`hasConversation`）はそのまま。

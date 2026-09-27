@@ -3,12 +3,8 @@
 // T-205 step8: 面談準備の「最初の整理」をカードで表示する（summary_json をそのまま組み立てる。文章の解釈はしない）。
 // 並び: ひとことで → 経歴の流れ → やってきた仕事 → 面談で聞くこと（「聞いた」ボタン） → 強み → 知っておきたい言葉 → 調べた情報の出典。
 // 見た目は InterviewPrepPanel の色（#2563EB・gray・amber）に合わせる。新しいライブラリは使わない。
-import { useState } from "react";
 import { researchSources, type ResearchResult } from "@/lib/interview-prep/research-format";
 import type { AskedQuestions, PrepSummary } from "@/lib/interview-prep/summary-format";
-
-/** 「面談で聞くこと」で最初から出す件数。残りは「ほかN件」で開く。 */
-const QUESTIONS_INITIAL = 3;
 
 type Props = {
   summary: PrepSummary;
@@ -46,11 +42,6 @@ function ResearchMark() {
 }
 
 export default function InterviewPrepSummaryCards({ summary, research, asked, onToggleAsked, disabled }: Props) {
-  const [questionsOpen, setQuestionsOpen] = useState(false);
-  const [glossaryOpen, setGlossaryOpen] = useState(false);
-
-  const questions = questionsOpen ? summary.questions : summary.questions.slice(0, QUESTIONS_INITIAL);
-  const hiddenQuestions = summary.questions.length - QUESTIONS_INITIAL;
   const sources = researchSources(research);
   const askedCount = summary.questions.filter((_, i) => !!asked[String(i)]).length;
 
@@ -137,10 +128,10 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
         )}
       </Card>
 
-      {/* 4. 面談で聞くこと */}
+      {/* 4. 面談で聞くこと（T-205 step9: 件数に関係なく全件を出す） */}
       <Card title={`面談で聞くこと（${askedCount}/${summary.questions.length} 聞いた）`}>
         <div className="space-y-3">
-          {questions.map((q, i) => {
+          {summary.questions.map((q, i) => {
             const isAsked = !!asked[String(i)];
             return (
               <div
@@ -191,15 +182,6 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
             );
           })}
         </div>
-        {hiddenQuestions > 0 && (
-          <button
-            type="button"
-            onClick={() => setQuestionsOpen((v) => !v)}
-            className="mt-3 text-[13px] text-blue-600 hover:underline"
-          >
-            {questionsOpen ? "最初の3件だけにする" : `ほか${hiddenQuestions}件を開く`}
-          </button>
-        )}
       </Card>
 
       {/* 5. 強み */}
@@ -220,28 +202,19 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
         )}
       </Card>
 
-      {/* 6. 知っておきたい言葉（最初は畳む） */}
+      {/* 6. 知っておきたい言葉（T-205 step9: 畳まずに全語を出す） */}
       <Card title="知っておきたい言葉">
         {summary.glossary.length === 0 ? (
           <p className="text-[14px] text-gray-500">なし</p>
-        ) : !glossaryOpen ? (
-          <button type="button" onClick={() => setGlossaryOpen(true)} className="text-[13px] text-blue-600 hover:underline">
-            {summary.glossary.length}語を開く
-          </button>
         ) : (
-          <>
-            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 gap-y-2">
-              {summary.glossary.map((g, i) => (
-                <div key={i} className="contents">
-                  <div className="text-[14px] font-bold text-gray-900 leading-[1.7]">{g.term}</div>
-                  <div className="text-[14px] text-gray-700 leading-[1.7]">{g.meaning}</div>
-                </div>
-              ))}
-            </div>
-            <button type="button" onClick={() => setGlossaryOpen(false)} className="mt-3 text-[13px] text-blue-600 hover:underline">
-              閉じる
-            </button>
-          </>
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 gap-y-2">
+            {summary.glossary.map((g, i) => (
+              <div key={i} className="contents">
+                <div className="text-[14px] font-bold text-gray-900 leading-[1.7]">{g.term}</div>
+                <div className="text-[14px] text-gray-700 leading-[1.7]">{g.meaning}</div>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
 
