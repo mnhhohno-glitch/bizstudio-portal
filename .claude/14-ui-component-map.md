@@ -47,7 +47,7 @@
 CandidateDetailPage (100% width, no max-width)
   └─ InterviewHistoryTab (100% width)
        └─ InterviewForm (100% width)
-            ├─ ヘッダー（保存・キャンセル・PDF表示等のボタン）
+            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・面談準備〔T-205 step2〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示）
             └─ div.grid.grid-cols-2 (line 1045 周辺)
                  ├─ LEFT COLUMN (50%)
                  │    ├─ 面談基本情報（面談日、時刻、求職者ID、氏名、フリガナ、生年月日 等）
@@ -62,6 +62,8 @@ CandidateDetailPage (100% width, no max-width)
                            ├─ "action": アクション
                            ├─ "attachments": 添付（ファイル数バッジあり）
                            └─ "support": 面談サポート（T-183 Phase 2。求職者単位のセッション一覧・閲覧・削除・新規作成。中身は InterviewSupportLogTab.tsx）
+                                ※ T-205 step2（2026-09-27）で一時的に非表示。`InterviewForm.tsx` 冒頭の定数 `SHOW_INTERVIEW_SUPPORT = false`（RIGHT_TABS の直上）がヘッダーの「面談サポート」ボタンとこのタブの両方を隠す。
+                                  タブは `VISIBLE_RIGHT_TABS` で絞り、選択状態が "support" のときは派生値で "initial"（初期条件）に戻す。true に戻せば元どおり。処理・API・保存データは据え置き。
 ```
 
 ### メモセクション（line ~1290-1333）
@@ -1599,10 +1601,12 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - パス: `src/components/candidates/InterviewPrepPanel.tsx`（新規・`AdvisorFloatingPanel` とは別）。`createPortal(document.body)` で描画。
 - 親: `InterviewHistoryTab`（開閉の `prepOpen` state だけを持つ）。Props: `candidateId` / `open` / `onClose`。
 
-### 入口ボタン（`InterviewHistoryTab.tsx`）
+### 入口ボタン（T-205 step2 で配置変更・2026-09-27）
 
-- 面談一覧バー（「面談:」の並び）の「+ 新規面談」の右に「面談準備」（青系の小ボタン）。
-- 面談記録が0件の空状態（「+ 新規面談を作成」の右）にも同じ「面談準備」。面談記録を作らなくても開ける。
+- `InterviewForm` ヘッダーの操作ボタン列（「PDF表示」の右・「保存」の左）に「面談準備」（PDF表示と同種の見た目＋吹き出しアイコン）。`InterviewHistoryTab` から `onOpenInterviewPrep` props で開く関数を渡す（開閉の `prepOpen` state は `InterviewHistoryTab` のまま）。
+- 面談記録が0件の空状態（`InterviewHistoryTab.tsx`・「+ 新規面談を作成」の右）にも同じ「面談準備」。面談記録を作らなくても開ける。
+- 面談一覧バー（「面談:」の並び）のボタンは step2 で撤去。
+- 同じ位置にあった「面談サポート」（T-183）は `SHOW_INTERVIEW_SUPPORT = false` で一時的に非表示（上の InterviewForm セクション参照）。
 
 ### パネルの構造
 

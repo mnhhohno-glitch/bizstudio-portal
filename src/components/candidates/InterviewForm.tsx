@@ -112,6 +112,8 @@ interface InterviewFormProps {
   interviewSeq?: number;
   onSaved?: () => void;
   onDeleted?: () => void;
+  /** T-205 step2: ヘッダーの「面談準備」ボタンで面談準備パネルを開く（開閉 state は InterviewHistoryTab が持つ） */
+  onOpenInterviewPrep?: () => void;
 }
 
 function formatCandidateFlagBadge(
@@ -129,6 +131,11 @@ function formatCandidateFlagBadge(
 /*  Constants                                                          */
 /* ================================================================== */
 
+// T-205 step2: 面談サポート（T-183）はテスト段階のため入口を一時的に隠す。
+// true に戻すとヘッダーの「面談サポート」ボタンと右カラムの「面談サポート」タブが元どおり出る。
+// 処理・API・保存データには触れていない（表示の切替のみ）。
+const SHOW_INTERVIEW_SUPPORT = false;
+
 const RIGHT_TABS = [
   { id: "initial", label: "初期条件" },
   { id: "desired", label: "希望条件" },
@@ -138,6 +145,9 @@ const RIGHT_TABS = [
   // T-183 Phase 2: 面談サポート（文字起こし+AI解説）の記録一覧・閲覧・削除
   { id: "support", label: "面談サポート" },
 ] as const;
+
+/** 実際に表示するタブ（SHOW_INTERVIEW_SUPPORT=false のときは "support" を除く） */
+const VISIBLE_RIGHT_TABS = RIGHT_TABS.filter((tab) => SHOW_INTERVIEW_SUPPORT || tab.id !== "support");
 
 const AUTOSAVE_DEBOUNCE = 3_000;
 
@@ -459,7 +469,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 /* ================================================================== */
 
 export default function InterviewForm({
-  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted,
+  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted, onOpenInterviewPrep,
 }: InterviewFormProps) {
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
@@ -470,7 +480,9 @@ export default function InterviewForm({
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [autosaveToken, setAutosaveToken] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [rightTab, setRightTab] = useState<string>("initial");
+  const [rightTabState, setRightTab] = useState<string>("initial");
+  // T-205 step2: 隠しているタブ（面談サポート）が選択状態になっていたら「初期条件」に戻す（effect を使わず派生値で判定）
+  const rightTab = VISIBLE_RIGHT_TABS.some((tab) => tab.id === rightTabState) ? rightTabState : "initial";
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -1355,15 +1367,28 @@ export default function InterviewForm({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasPdf ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
-          {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled */}
-          <button
-            type="button" onClick={() => window.open(`/interview-support/${interviewId}`, "_blank")} disabled={!interviewId}
-            className="inline-flex items-center justify-center gap-1"
-            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: interviewId ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: interviewId ? 1 : 0.5, cursor: interviewId ? "pointer" : "not-allowed" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={interviewId ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            面談サポート
-          </button>
+          {/* T-205 step2: 面談準備チャット（マイナビレジュメの整理＋会話）を右からのパネルで開く。見た目は「PDF表示」と同種 */}
+          {onOpenInterviewPrep && (
+            <button
+              type="button" onClick={onOpenInterviewPrep}
+              className="inline-flex items-center justify-center gap-1 cursor-pointer"
+              style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              面談準備
+            </button>
+          )}
+          {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） */}
+          {SHOW_INTERVIEW_SUPPORT && (
+            <button
+              type="button" onClick={() => window.open(`/interview-support/${interviewId}`, "_blank")} disabled={!interviewId}
+              className="inline-flex items-center justify-center gap-1"
+              style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: interviewId ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: interviewId ? 1 : 0.5, cursor: interviewId ? "pointer" : "not-allowed" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={interviewId ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              面談サポート
+            </button>
+          )}
           <button
             type="button" onClick={handleSave} disabled={saving}
             className="cursor-pointer"
@@ -1578,7 +1603,7 @@ export default function InterviewForm({
 
           {/* Tabs */}
           <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
-            {RIGHT_TABS.map((tab) => (
+            {VISIBLE_RIGHT_TABS.map((tab) => (
               <button
                 key={tab.id} type="button" onClick={() => setRightTab(tab.id)}
                 className="cursor-pointer whitespace-nowrap"
@@ -1948,8 +1973,8 @@ export default function InterviewForm({
               </div>
             )}
 
-            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる ===== */}
-            {rightTab === "support" && (
+            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） ===== */}
+            {SHOW_INTERVIEW_SUPPORT && rightTab === "support" && (
               <InterviewSupportLogTab candidateId={candidateId} interviewId={interviewId} />
             )}
 

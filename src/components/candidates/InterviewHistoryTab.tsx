@@ -224,14 +224,7 @@ export default function InterviewHistoryTab({
             {creating ? "作成中..." : "+ 新規面談"}
           </button>
 
-          {/* T-205: 面談準備チャット（マイナビレジュメの整理＋会話） */}
-          <button
-            type="button"
-            onClick={() => setPrepOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-[12px] font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-          >
-            面談準備
-          </button>
+          {/* T-205 step2: 「面談準備」ボタンは InterviewForm ヘッダー（PDF表示の右）へ移動。空状態のボタンは残す */}
 
           {selectedInterview && (
             <div className="ml-auto flex items-center gap-1 text-[11px] text-gray-400">
@@ -252,6 +245,7 @@ export default function InterviewHistoryTab({
           interviewSeq={interviews.findIndex((i) => i.id === selectedInterview.id) + 1}
           onSaved={() => fetchInterviews()}
           onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
+          onOpenInterviewPrep={() => setPrepOpen(true)}
         />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
