@@ -2,7 +2,8 @@
  * T-205 面談準備チャットの動作確認（本番環境で実行・DB への書き込みなし）。
  *
  * 実行（railway run は使わない。コンテナに入って実行する）:
- *   railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts"
+ *   railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts [求職者番号]"
+ *   求職者番号（candidateNumber）を渡すと、その求職者の最新のマイナビレジュメを使う（step5）。省略時は直近の1名。
  *   ローカルから本番DBを読む場合: npx tsx --env-file=.env scripts/verify/interview-prep-dryrun.ts
  *   （Drive の認証情報と ANTHROPIC_API_KEY が環境に必要）
  *
@@ -13,10 +14,13 @@
  *   4. 下調べ: 状態・検索回数・会社数/特定できた数・学校のレベルの有無・出典URL数・トークン/費用/所要時間
  *      整理: 見出し9つ・（調べた情報）の付いた行数・本文中のURL数・「希望」を含む行数・「聞き方:」の数・
  *            「→」で意味を添えた行数・斜線を2つ以上含む行数・経歴の型の取り出し
+ * step5: 会社ごとの特定可否・出典URL数・候補数、「就職した会社」に（調べた情報）があるか、経歴の型の値（判定できない含む）、
+ *        求職者番号指定時は今の部屋に保存済みの research_json の中身（版・特定可否・候補数・business の有無）も出す。
+ *        AI 呼び出しは再試行を含め最大3回（下調べか整理が失敗したら1回だけやり直す）。
  * 出力は数値と有無だけ（本文・氏名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
-import { MYNAVI_RESUME_MEMO, extractResumeText } from "@/lib/interview-prep/resume";
+import { MYNAVI_RESUME_MEMO, extractResumeText, findLatestMynaviResume } from "@/lib/interview-prep/resume";
 import {
   INTERVIEW_PREP_MODEL,
   SUMMARY_MAX_TOKENS,
@@ -28,10 +32,12 @@ import {
 } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
 import { runResearch, RESEARCH_MODEL } from "@/lib/interview-prep/research";
-import { researchSources } from "@/lib/interview-prep/research-format";
+import { normalizeResearch, researchSources } from "@/lib/interview-prep/research-format";
 import { WEB_SEARCH_USD_PER_REQUEST } from "@/lib/claude";
 
 const USD_JPY = 150;
+const MAX_AI_CALLS = 3;
+let aiCalls = 0;
 
 type CallResult = {
   text: string;
@@ -75,7 +81,30 @@ function printCall(label: string, r: CallResult) {
 async function main() {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY が未設定です");
 
-  const file = await prisma.candidateFile.findFirst({
+  const candidateNumber = process.argv[2];
+  let file: Awaited<ReturnType<typeof findLatestMynaviResume>> = null;
+  if (candidateNumber) {
+    const cand = await prisma.candidate.findUnique({ where: { candidateNumber }, select: { id: true } });
+    if (!cand) {
+      console.log("candidate: not found");
+      return;
+    }
+    // 今の部屋に保存済みの下調べ（前回の結果）
+    const room = await prisma.interviewPrepRoom.findFirst({
+      where: { candidateId: cand.id, archivedAt: null },
+      orderBy: { createdAt: "desc" },
+      select: { researchJson: true, researchedAt: true, careerType: true },
+    });
+    const saved = room ? normalizeResearch(room.researchJson) : null;
+    console.log(`saved_room: ${room ? "yes" : "no"} researched=${room?.researchedAt ? "yes" : "no"} career_type=${room?.careerType ?? "null"}`);
+    if (saved) {
+      console.log(`saved_research: version=${saved.version ?? "none"}`);
+      saved.companies.forEach((c, i) =>
+        console.log(`saved_company[${i}]: found=${c.found} business=${c.business ? "yes" : "no"} urls=${c.source_urls.length} candidates=${c.candidates.length}`),
+      );
+    }
+    file = await findLatestMynaviResume(cand.id);
+  } else file = await prisma.candidateFile.findFirst({
     where: {
       category: "MEETING",
       memo: MYNAVI_RESUME_MEMO,
@@ -100,8 +129,14 @@ async function main() {
   }
   console.log(`resume_text: ok chars=${extracted.chars}`);
 
-  // 下調べ（1回だけ・保存しない・使用量ログも書かない）
-  const outcome = await runResearch(extracted.text);
+  // 下調べ（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す
+  let outcome = await runResearch(extracted.text);
+  aiCalls++;
+  if (outcome.status !== "ok" && aiCalls < MAX_AI_CALLS) {
+    console.log(`research_retry: previous status=${outcome.status}`);
+    outcome = await runResearch(extracted.text);
+    aiCalls++;
+  }
   const rTokens = extractTokens(outcome.usage);
   const rCost =
     computeCostUsd(RESEARCH_MODEL, rTokens).costUsd + outcome.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST;
@@ -114,7 +149,10 @@ async function main() {
   const research = outcome.research;
   if (research) {
     const found = research.companies.filter((c) => c.found).length;
-    console.log(`research_companies: ${research.companies.length} (found=${found})`);
+    console.log(`research_companies: ${research.companies.length} (found=${found}) version=${research.version ?? "none"}`);
+    research.companies.forEach((c, i) =>
+      console.log(`research_company[${i}]: found=${c.found} urls=${c.source_urls.length} candidates=${c.candidates.length}`),
+    );
     console.log(
       `research_school: ${research.school ? `yes level=${research.school.level} hensachi=${research.school.hensachi ? "yes" : "no"}` : "null"}`,
     );
@@ -124,8 +162,22 @@ async function main() {
 
   const system = buildPrepSystem(extracted.text, research);
 
-  // 最初の整理（1回だけ）
-  const summary = await callPrep(system, buildSummaryMessages(), SUMMARY_MAX_TOKENS);
+  // 最初の整理（失敗・空なら残り回数の範囲で1回だけやり直す）
+  let summary: CallResult | null = null;
+  while (!summary && aiCalls < MAX_AI_CALLS) {
+    aiCalls++;
+    try {
+      const r = await callPrep(system, buildSummaryMessages(), SUMMARY_MAX_TOKENS);
+      if (r.text.trim()) summary = r;
+      else console.log("summary_retry: empty");
+    } catch (e) {
+      console.log(`summary_retry: ${(e as { status?: number })?.status ?? "error"}`);
+    }
+  }
+  if (!summary) {
+    console.log(`summary: failed ai_calls=${aiCalls}`);
+    return;
+  }
   printCall("call2 summary", summary);
 
   const missing = missingSummaryHeadings(summary.text);
@@ -133,6 +185,13 @@ async function main() {
 
   const lines = summary.text.split(/\r?\n/);
   console.log(`research_tagged_lines: ${lines.filter((l) => l.includes("（調べた情報）")).length}`);
+  // 「就職した会社」の節（次の見出しまで）に（調べた情報）の文があるか
+  const hIdx = lines.findIndex((l) => l.replace(/^#+\s*/, "").trim() === "就職した会社");
+  const nIdx = hIdx < 0 ? -1 : lines.findIndex((l, i) => i > hIdx && /^#+\s/.test(l));
+  const companySection = hIdx < 0 ? [] : lines.slice(hIdx + 1, nIdx < 0 ? undefined : nIdx);
+  console.log(`company_section_research_tagged: ${companySection.some((l) => l.includes("（調べた情報）")) ? "yes" : "no"}`);
+  const rawType = summary.text.match(/経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型|判定できない)/);
+  console.log(`career_type_raw: ${rawType ? rawType[1] : "none"}`);
   console.log(`urls_in_body: ${(summary.text.match(/https?:\/\//g) ?? []).length}`);
   console.log(`lines_with_kibou: ${lines.filter((l) => l.includes("希望")).length}`);
   console.log(`question_advice_count: ${lines.filter((l) => /聞き方[:：]/.test(l)).length}`);
@@ -143,7 +202,11 @@ async function main() {
 
   const careerType = extractCareerType(summary.text);
   console.log(`career_type_extracted: ${careerType ? `yes (${careerType})` : "no"}`);
-  console.log("ai_calls: 2");
+  const totalUsd = rCost + summary.costUsd;
+  console.log(
+    `total: cost=${totalUsd.toFixed(4)} (¥${(totalUsd * USD_JPY).toFixed(1)}) latency=${((outcome.latencyMs + summary.ms) / 1000).toFixed(1)}s`,
+  );
+  console.log(`ai_calls: ${aiCalls}`);
 }
 
 main()

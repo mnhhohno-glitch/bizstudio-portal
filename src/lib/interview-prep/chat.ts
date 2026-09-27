@@ -31,10 +31,11 @@ export type PrepHistoryMessage = { role: "user" | "assistant"; content: string }
 type TextBlock = { type: "text"; text: string; cache_control?: { type: "ephemeral" } };
 type ApiMessage = { role: "user" | "assistant"; content: string | TextBlock[] };
 
-/** 最初の整理から経歴の型を取り出す。取れなければ null。 */
+/** 最初の整理から経歴の型を取り出す。取れない・「判定できない」（step5）は null（バッジを出さない）。 */
 export function extractCareerType(summary: string): CareerType | null {
-  const m = summary.match(/経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型)/);
-  return m ? (m[1] as CareerType) : null;
+  const m = summary.match(/経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型|判定できない)/);
+  if (!m || m[1] === "判定できない") return null;
+  return m[1] as CareerType;
 }
 
 function clamp(text: string): string {

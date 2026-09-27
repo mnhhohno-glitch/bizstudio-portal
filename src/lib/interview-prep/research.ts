@@ -10,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { anthropic, CLAUDE_MODEL_SONNET_5 } from "@/lib/claude";
 import { getInterviewPrepResearchSkill } from "@/lib/load-interview-prep-skill";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
-import { parseResearchJson, type ResearchResult } from "@/lib/interview-prep/research-format";
+import { parseResearchJson, RESEARCH_VERSION, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 export const RESEARCH_MODEL = CLAUDE_MODEL_SONNET_5;
 export const RESEARCH_MAX_TOKENS = 4000;
@@ -110,7 +110,9 @@ export async function runResearch(resumeText: string): Promise<ResearchOutcome> 
       messages.push({ role: "assistant", content: response.content });
     }
     const latencyMs = Date.now() - startedAt;
-    const research = response ? parseResearchJson(finalText(response.content)) : null;
+    const parsed = response ? parseResearchJson(finalText(response.content)) : null;
+    // step5: 版番号を付けて返す（作り直し時の使い回し判定に使う）
+    const research: ResearchResult | null = parsed ? { ...parsed, version: RESEARCH_VERSION } : null;
     return {
       status: research ? "ok" : "invalid_json",
       research,

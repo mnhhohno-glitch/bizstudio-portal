@@ -1,6 +1,6 @@
-// T-205 step3/step4: 最初の整理の書き方を変えた日時（JST・最後に変えたコミットの時刻）。これより前に作られた整理には「作り直す」の案内を出す。
+// T-205 step3〜step5: 最初の整理の書き方を変えた日時（JST・最後に変えたコミットの時刻）。これより前に作られた整理には「作り直す」の案内を出す。
 // 画面（クライアント）からも読むため、Anthropic SDK を読み込む chat.ts とは分けている。
-export const INTERVIEW_PREP_FORMAT_UPDATED_AT = "2026-09-27T10:08:00+09:00";
+export const INTERVIEW_PREP_FORMAT_UPDATED_AT = "2026-09-27T10:58:00+09:00";
 
 export function isOldPrepFormat(createdAt: string | null | undefined): boolean {
   if (!createdAt) return false;

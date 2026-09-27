@@ -9,7 +9,9 @@
 //      取り直しに失敗したときは古い部屋を残す。
 //   4. 整理を作る直前に「会社と学校の下調べ」（ウェブ検索・research.ts）を1回行い、結果を部屋の research_json に保存する。
 //      失敗（ウェブ検索が使えない・時間切れ・JSON が読めない）でも止めず、下調べなしで整理を作る。
-//      「作り直す」は新しい部屋なので下調べからやり直す。途中失敗の再送は、下調べ済みならその結果を使う（検索し直さない）。
+//      「作り直す」は新しい部屋なので原則下調べからやり直す。ただし取り直したレジュメの文字が前の部屋と完全に同じで、
+//      前の部屋の research_json の版が今の版（RESEARCH_VERSION）と同じなら、検索せずにその結果を新しい部屋にコピーする（step5）。
+//      途中失敗の再送は、下調べ済みならその結果を使う（検索し直さない）。
 //   5. 応答を流し終えてから assistant の発言（kind=SUMMARY）を保存し、経歴の型を部屋に保存する。
 //      途中で失敗したら何も保存しない（画面はエラーと「再送」を出す）。
 import { NextResponse } from "next/server";
@@ -28,7 +30,7 @@ import {
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
 import { runResearch, recordResearchUsage } from "@/lib/interview-prep/research";
-import { normalizeResearch, type ResearchResult } from "@/lib/interview-prep/research-format";
+import { normalizeResearch, reusableResearch, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 export async function POST(
   req: Request,
@@ -80,6 +82,20 @@ export async function POST(
     if (!created.ok) return created.response;
     roomId = created.roomId;
     resumeText = created.resumeText;
+    // step5: 作り直しで文字も版も同じなら、前の部屋の下調べを新しい部屋にコピーして使い回す
+    const reused = rebuild ? reusableResearch(active, resumeText) : null;
+    if (reused) {
+      try {
+        await prisma.interviewPrepRoom.update({
+          where: { id: roomId },
+          data: { researchJson: reused as unknown as Prisma.InputJsonValue, researchedAt: new Date() },
+        });
+        savedResearch = reused;
+        console.log("[interview-prep research] reused from previous room (same resume text and version)");
+      } catch (e) {
+        console.error("[interview-prep research] copy failed, will research again:", e);
+      }
+    }
   }
 
   const messages = buildSummaryMessages();

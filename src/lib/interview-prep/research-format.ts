@@ -5,6 +5,11 @@
 // - formatResearchBlock: 保存済みの research_json から、整理・質問のときに system に入れる文字を組み立てる。
 //   決定的な処理だけで組み立てる（同じ JSON なら毎回同じ byte になる＝プロンプトキャッシュが効く・罠#39）。
 //   出典 URL はこのブロックに入れない（本文に URL を書かせないため。出典は画面側で表示する）。
+// - step5: research_json に版番号（RESEARCH_VERSION）を入れる。「作り直す」でレジュメの文字が前の部屋と同じ・版も同じなら
+//   下調べを使い回す（reusableResearch）。下調べの指示や JSON の形を変えたら版を上げる（次の作り直しで必ず調べ直す）。
+
+/** 下調べの版。指示（RESEARCH.md）や JSON の形を変えたら上げる。 */
+export const RESEARCH_VERSION = 2;
 
 export const SCHOOL_LEVELS = ["高", "中", "低", "なし", "不明"] as const;
 export type SchoolLevel = (typeof SCHOOL_LEVELS)[number];
@@ -14,12 +19,16 @@ export const MAX_RESEARCH_COMPANIES = 3;
 /** 1件あたりの出典 URL の上限（画面の出典表示用）。 */
 const MAX_SOURCE_URLS = 5;
 const MAX_TEXT_CHARS = 400;
+/** 特定できなかったときの候補の上限。 */
+const MAX_CANDIDATES = 5;
 
 export type ResearchCompany = {
   name: string;
   found: boolean;
   business: string;
   source_urls: string[];
+  /** 特定できなかったときの候補（「候補の会社名（都道府県・業種）」）。特定できたときは空。 */
+  candidates: string[];
 };
 
 export type ResearchSchool = {
@@ -31,6 +40,8 @@ export type ResearchSchool = {
 };
 
 export type ResearchResult = {
+  /** 版番号（step5〜）。step4 以前の保存分には無い。 */
+  version?: number;
   companies: ResearchCompany[];
   school: ResearchSchool | null;
 };
@@ -61,6 +72,18 @@ function urls(v: unknown): string[] | null {
   return out;
 }
 
+/** 文字列の配列（候補）。配列でなければ空。 */
+function strList(v: unknown, max: number): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const x of v) {
+    const t = str(x);
+    if (t && !out.includes(t)) out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 /** 形を検証して正規化する。形が違えば null。 */
 export function normalizeResearch(raw: unknown): ResearchResult | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -75,7 +98,14 @@ export function normalizeResearch(raw: unknown): ResearchResult | null {
     const sourceUrls = urls(r.source_urls);
     if (!name || typeof r.found !== "boolean" || sourceUrls === null) return null;
     const business = r.found ? str(r.business) ?? "" : "";
-    companies.push({ name, found: r.found && business.length > 0, business, source_urls: sourceUrls });
+    const found = r.found && business.length > 0;
+    companies.push({
+      name,
+      found,
+      business,
+      source_urls: sourceUrls,
+      candidates: found ? [] : strList(r.candidates, MAX_CANDIDATES),
+    });
   }
 
   let school: ResearchSchool | null = null;
@@ -95,7 +125,12 @@ export function normalizeResearch(raw: unknown): ResearchResult | null {
     };
   }
 
-  return { companies: companies.slice(0, MAX_RESEARCH_COMPANIES), school };
+  const version = typeof obj.version === "number" && Number.isInteger(obj.version) ? obj.version : undefined;
+  return {
+    ...(version !== undefined ? { version } : {}),
+    companies: companies.slice(0, MAX_RESEARCH_COMPANIES),
+    school,
+  };
 }
 
 /** AI の応答文字から JSON を取り出して検証する。読めない・形が違う場合は null。 */
@@ -119,7 +154,12 @@ export function formatResearchBlock(research: ResearchResult | null): string {
   } else {
     for (const c of research.companies) {
       lines.push(`- 会社名: ${c.name}`);
-      lines.push(c.found ? `  - どんな会社か: ${c.business}` : "  - どんな会社か: 特定できなかった");
+      if (c.found) {
+        lines.push(`  - どんな会社か: ${c.business}`);
+      } else {
+        lines.push("  - どんな会社か: 特定できなかった");
+        if (c.candidates.length > 0) lines.push(`  - 候補: ${c.candidates.join("／")}`);
+      }
     }
   }
   lines.push("", "■ 学校");
@@ -133,6 +173,19 @@ export function formatResearchBlock(research: ResearchResult | null): string {
     lines.push(`- 偏差値の目安: ${s.hensachi || "なし"}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * 「作り直す」で前の部屋の下調べを使い回せるか。使い回せるときはその結果を返し、調べ直すときは null。
+ * 条件: 前の部屋が下調べ済み（researchedAt あり）・レジュメの文字が完全に同じ・research_json の版が RESEARCH_VERSION と同じ。
+ */
+export function reusableResearch(
+  prev: { resumeText: string | null; researchJson: unknown; researchedAt: Date | null } | null | undefined,
+  resumeText: string,
+): ResearchResult | null {
+  if (!prev || !prev.researchedAt || prev.resumeText !== resumeText) return null;
+  const research = normalizeResearch(prev.researchJson);
+  return research && research.version === RESEARCH_VERSION ? research : null;
 }
 
 /** 画面の「調べた情報の出典」。URL が無いものは出さない。 */
