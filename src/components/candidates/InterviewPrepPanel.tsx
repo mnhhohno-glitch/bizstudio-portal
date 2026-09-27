@@ -125,6 +125,45 @@ function PrepMarkdown({ text }: { text: string }) {
 }
 
 /** 整理の末尾に出す「調べた情報の出典」（URL はアプリ側で表示し、AI の本文には書かせない）。 */
+/** 下調べの部分ごとの進み具合（SSE の researchProgress）。 */
+type ResearchPartProgress = "running" | "ok" | "timeout" | "error";
+type ResearchProgress = { company: ResearchPartProgress; school: ResearchPartProgress };
+
+const RESEARCH_PART_LABELS = { company: "会社", school: "学校" } as const;
+
+/** 整理の本文が流れ始めるまでの表示。下調べ中は会社・学校の2行、終わったら「整理を作成しています…」。 */
+function ResearchProgressLines({ researching, progress }: { researching: boolean; progress: ResearchProgress | null }) {
+  if (!researching) return <p className="text-sm text-gray-400 py-4">整理を作成しています…</p>;
+  if (!progress) return <p className="text-sm text-gray-400 py-4">会社と学校を調べています…</p>;
+  return (
+    <div className="text-sm py-4 space-y-1">
+      {(["company", "school"] as const).map((part) => {
+        const label = RESEARCH_PART_LABELS[part];
+        const st = progress[part];
+        if (st === "running") {
+          return (
+            <p key={part} className="text-gray-400">
+              {label}を調べています…
+            </p>
+          );
+        }
+        if (st === "ok") {
+          return (
+            <p key={part} className="text-gray-600">
+              ✓ {label}を調べました
+            </p>
+          );
+        }
+        return (
+          <p key={part} className="text-amber-700">
+            {label}は今回調べられませんでした
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResearchSources({ research }: { research: ResearchResult | null }) {
   const sources = researchSources(research);
   if (sources.length === 0) return null;
@@ -169,8 +208,9 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [streamSummary, setStreamSummary] = useState("");
-  // 整理の前の下調べ（会社と学校のネット検索）の最中か
+  // 整理の前の下調べ（会社と学校のネット検索）の最中か。step6: 会社と学校を同時に調べ、部分ごとの進み具合を持つ
   const [researching, setResearching] = useState(false);
+  const [researchProgress, setResearchProgress] = useState<ResearchProgress | null>(null);
 
   // 会話
   const [messages, setMessages] = useState<PrepMessage[]>([]);
@@ -329,10 +369,12 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           (payload) => {
             if (payload.started) {
               retryAsRebuild = false;
-            } else if (payload.researching) {
+            } else if (payload.researching || payload.researchProgress) {
               setResearching(true);
+              if (payload.researchProgress) setResearchProgress(payload.researchProgress as ResearchProgress);
             } else if (payload.researched) {
               setResearching(false);
+              setResearchProgress(null);
             } else if (payload.done) {
               finished = true;
               const s = payload.summary as { content: string; createdAt: string };
@@ -375,6 +417,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
       } finally {
         setSummarizing(false);
         setResearching(false);
+        setResearchProgress(null);
         setStreamSummary("");
       }
     },
@@ -642,9 +685,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                         {streamSummary ? (
                           <PrepMarkdown text={streamSummary} />
                         ) : (
-                          <p className="text-sm text-gray-400 py-4">
-                            {researching ? "会社と学校を調べています…" : "整理を作成しています…"}
-                          </p>
+                          <ResearchProgressLines researching={researching} progress={researchProgress} />
                         )}
                         <BlinkCursor />
                       </>

@@ -12,6 +12,9 @@
 //      「作り直す」は新しい部屋なので原則下調べからやり直す。ただし取り直したレジュメの文字が前の部屋と完全に同じで、
 //      前の部屋の research_json の版が今の版（RESEARCH_VERSION）と同じなら、検索せずにその結果を新しい部屋にコピーする（step5）。
 //      途中失敗の再送は、下調べ済みならその結果を使う（検索し直さない）。
+//      step6: 会社と学校を別々の呼び出しで同時に調べる（research.ts）。使い回しは部分ごと（reusableResearchParts）で、
+//      前の部屋（再送なら今の部屋自身）の該当部分が ok・文字も版も同じならその部分は調べない。
+//      下調べ中は数秒おきに researchProgress を送り続ける（無通信が長いと途中の中継で接続が切られるため）。
 //   5. 応答を流し終えてから assistant の発言（kind=SUMMARY）を保存し、経歴の型を部屋に保存する。
 //      途中で失敗したら何も保存しない（画面はエラーと「再送」を出す）。
 import { NextResponse } from "next/server";
@@ -29,8 +32,15 @@ import {
   extractCareerType,
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
-import { runResearch, recordResearchUsage } from "@/lib/interview-prep/research";
-import { normalizeResearch, reusableResearch, type ResearchResult } from "@/lib/interview-prep/research-format";
+import { runResearch, recordResearchUsage, type ResearchPart } from "@/lib/interview-prep/research";
+import {
+  reusableResearchParts,
+  type ResearchPartStatus,
+  type ResearchResult,
+} from "@/lib/interview-prep/research-format";
+
+/** 下調べ中に進み具合を送る間隔（ms）。 */
+const RESEARCH_PROGRESS_INTERVAL_MS = 3_000;
 
 export async function POST(
   req: Request,
@@ -52,13 +62,13 @@ export async function POST(
   const active = await prisma.interviewPrepRoom.findFirst({
     where: { candidateId, archivedAt: null },
     orderBy: { createdAt: "desc" },
-    select: { id: true, resumeText: true, summaryMessageId: true, researchJson: true, researchedAt: true },
+    select: { id: true, resumeText: true, summaryMessageId: true, researchJson: true },
   });
 
   let roomId: string;
   let resumeText: string;
-  // 下調べ済みの結果（途中失敗の再送だけ使う）。undefined＝これから下調べする
-  let savedResearch: ResearchResult | null | undefined = undefined;
+  // 下調べの使い回し元（再送は今の部屋・作り直しは前の部屋）。部分ごとに使えるかは reusableResearchParts で決める
+  let reuseSource: { resumeText: string | null; researchJson: unknown } | null = null;
 
   if (active && !rebuild) {
     if (active.summaryMessageId) {
@@ -68,7 +78,7 @@ export async function POST(
       // 途中失敗の再送: 保存済みの文字で作り直す
       roomId = active.id;
       resumeText = active.resumeText;
-      if (active.researchedAt) savedResearch = normalizeResearch(active.researchJson);
+      reuseSource = active;
     } else {
       // 文字が無い部屋（想定外）は非表示にして作り直す
       await prisma.interviewPrepRoom.update({ where: { id: active.id }, data: { archivedAt: new Date() } });
@@ -82,20 +92,8 @@ export async function POST(
     if (!created.ok) return created.response;
     roomId = created.roomId;
     resumeText = created.resumeText;
-    // step5: 作り直しで文字も版も同じなら、前の部屋の下調べを新しい部屋にコピーして使い回す
-    const reused = rebuild ? reusableResearch(active, resumeText) : null;
-    if (reused) {
-      try {
-        await prisma.interviewPrepRoom.update({
-          where: { id: roomId },
-          data: { researchJson: reused as unknown as Prisma.InputJsonValue, researchedAt: new Date() },
-        });
-        savedResearch = reused;
-        console.log("[interview-prep research] reused from previous room (same resume text and version)");
-      } catch (e) {
-        console.error("[interview-prep research] copy failed, will research again:", e);
-      }
-    }
+    // step5/6: 作り直しで文字も版も同じなら、前の部屋の下調べを（部分ごとに）使い回す
+    if (rebuild) reuseSource = active;
   }
 
   const messages = buildSummaryMessages();
@@ -104,34 +102,56 @@ export async function POST(
     send({ started: true, roomId });
 
     // 下調べ（失敗しても止めない）
-    let research: ResearchResult | null;
-    if (savedResearch !== undefined) {
-      research = savedResearch;
+    const reuse = reusableResearchParts(reuseSource, resumeText);
+    let research: ResearchResult;
+    if (reuse.companies && reuse.school && reuse.research) {
+      research = reuse.research;
+      console.log("[interview-prep research] reused from previous room (same resume text and version)");
     } else {
-      send({ researching: true });
-      const outcome = await runResearch(resumeText);
-      research = outcome.research;
-      await recordResearchUsage(outcome, candidateId, rebuild);
-      console.log(
-        `[interview-prep research] status=${outcome.status} searches=${outcome.webSearchRequests} input=${outcome.usage?.input_tokens ?? 0} output=${outcome.usage?.output_tokens ?? 0} latency_ms=${outcome.latencyMs}`,
-      );
-      if (outcome.status === "web_search_disabled") {
-        console.warn(`[interview-prep research] web search is disabled for this organization: ${outcome.errorMessage}`);
-      } else if (outcome.status !== "ok") {
-        console.warn(`[interview-prep research] failed: ${outcome.status} ${outcome.errorStatus ?? ""} ${outcome.errorMessage ?? ""}`);
+      const progress: Record<ResearchPart, "running" | ResearchPartStatus> = {
+        company: reuse.companies ? "ok" : "running",
+        school: reuse.school ? "ok" : "running",
+      };
+      if (reuse.companies || reuse.school) {
+        console.log(`[interview-prep research] partial reuse company=${reuse.companies} school=${reuse.school}`);
       }
+      send({ researching: true, researchProgress: { ...progress } });
+      const timer = setInterval(() => send({ researchProgress: { ...progress } }), RESEARCH_PROGRESS_INTERVAL_MS);
+      let outcome: Awaited<ReturnType<typeof runResearch>>;
       try {
-        await prisma.interviewPrepRoom.update({
-          where: { id: roomId },
-          data: {
-            researchJson: research ? (research as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-            // 成功したときだけ下調べ済みにする（失敗なら再送でもう一度調べる）
-            researchedAt: research ? new Date() : null,
+        outcome = await runResearch(resumeText, {
+          reuse,
+          onPartDone: (part, status) => {
+            progress[part] = status;
+            send({ researchProgress: { ...progress } });
           },
         });
-      } catch (e) {
-        console.error("[interview-prep research] save failed:", e);
+      } finally {
+        clearInterval(timer);
       }
+      research = outcome.research;
+      const parts = [outcome.parts.company, outcome.parts.school].filter((o) => o !== null);
+      await Promise.all(parts.map((o) => recordResearchUsage(o, candidateId, rebuild)));
+      for (const o of parts) {
+        console.log(
+          `[interview-prep research] part=${o.part} status=${o.status} searches=${o.webSearchRequests} input=${o.usage?.input_tokens ?? 0} output=${o.usage?.output_tokens ?? 0} latency_ms=${o.latencyMs}`,
+        );
+        if (o.status === "web_search_disabled") {
+          console.warn(`[interview-prep research] web search is disabled for this organization: ${o.errorMessage}`);
+        } else if (o.status !== "ok") {
+          console.warn(`[interview-prep research] part=${o.part} failed: ${o.status} ${o.errorStatus ?? ""} ${o.errorMessage ?? ""}`);
+        }
+      }
+      console.log(`[interview-prep research] total latency_ms=${outcome.latencyMs}`);
+    }
+    try {
+      // 失敗した部分も状態付きで保存する（再送・作り直しでは ok の部分だけ使い回し、失敗した部分は調べ直す）
+      await prisma.interviewPrepRoom.update({
+        where: { id: roomId },
+        data: { researchJson: research as unknown as Prisma.InputJsonValue, researchedAt: new Date() },
+      });
+    } catch (e) {
+      console.error("[interview-prep research] save failed:", e);
     }
     send({ researched: true, research });
 

@@ -1370,3 +1370,14 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - **経歴の型**: SKILL.md に「会社の数と職種だけで決める」「読み取れないときは『判定できない（根拠: 職歴の記載が読み取れない）』」を追加。`extractCareerType` は `判定できない` も拾い、その場合 `career_type` は null（バッジなし）。
 - 検証スクリプト `scripts/verify/interview-prep-dryrun.ts` は求職者番号を引数に取れる（今の部屋の保存済み下調べの概要も出す）・AI 呼び出しは再試行込み最大3回。
 - `INTERVIEW_PREP_FORMAT_UPDATED_AT` を step5 のコミット時刻に更新。
+### T-205 step6（2026-09-27）: 下調べの2並列化・時間切れ延長・失敗時の正直な書き方
+
+- **きっかけ**: step5 の検証で、下調べ1回（会社→学校を順番に検索）が111秒かかり時間切れ150秒に近かった。前回の外れは時間切れで下調べなしになったのが原因で、しかも整理は調べていないのに「調べても特定できなかった」と書いていた。
+- **2並列**: `RESEARCH.md` を削除し、会社用 `RESEARCH_COMPANY.md`（返す JSON は `{"companies": [...]}`）と学校用 `RESEARCH_SCHOOL.md`（`{"school": {...} | null}`）に分けた（指示は対象に絞っただけで検索ルールの文言は同じ）。`runResearch` が2つを `Promise.all` で同時に呼ぶ（`runResearchPart` は例外を投げず status で返すので片方の失敗でもう片方は止まらない）。どちらも Sonnet 5、`max_uses` は会社 4・学校 2。
+- **時間切れ**: 部分ごとに 240 秒（`RESEARCH_TIMEOUT_MS`・`pause_turn` の続きも含めた合計。残り時間を次の呼び出しの timeout にする）。
+- **状態の持ち方**: `research_json` に `companiesStatus` / `schoolStatus`（`ok` | `timeout` | `error`。`invalid_json`・`web_search_disabled` は `error`）。ok 以外の部分は companies=[] / school=null。`RESEARCH_VERSION`＝3。失敗した部分があっても状態付きで保存し `researched_at` を入れる。状態が無い保存分（step5 以前）は ok 扱いで読む。
+- **失敗時の書き方**: ［調べた情報］ブロックは、状態が timeout/error の部分を「- 会社: 今回は調べられなかった（時間切れ）」「- 学校: 今回は調べられなかった（エラー）」と書く。「特定できなかった」「不明」は ok で見つからなかったときだけ。SKILL.md 最重要ルール4に「『今回は調べられなかった』とある項目は、本文でも『今回は調べられなかった。作り直すと再度調べます』と書く。『特定できなかった』とは書かない。」を追加。
+- **進み具合の送信**: SSE `researchProgress: { company, school }`（`running` | `ok` | `timeout` | `error`）を開始時・部分が終わるたび・3秒おきに送る（無通信が長いと途中の中継で接続が切られる恐れがあるため）。画面は「会社を調べています…」「学校を調べています…」の2行→「✓ 会社を調べました」／「会社は今回調べられませんでした」。
+- **部分ごとの使い回し**（`reusableResearchParts`）: 使い回し元（作り直し＝前の部屋、途中失敗の再送＝今の部屋自身）のレジュメの文字が同じ・版が同じ・その部分の状態が ok なら、その部分は調べない（会社は使い回し、学校だけ調べ直す、もあり得る）。両方使い回せるときは下調べを呼ばない。
+- **使用量ログ**: endpoint は `interview-prep-research` のまま、部分ごとに1行。note に `part=company` / `part=school`。
+- 確認: `scripts/verify/interview-prep-research-format-check.ts`（AI・DB なし）で書式3通りと使い回し判定。`interview-prep-dryrun.ts` は下調べ2並列＋整理1（再試行込み最大4回）。
