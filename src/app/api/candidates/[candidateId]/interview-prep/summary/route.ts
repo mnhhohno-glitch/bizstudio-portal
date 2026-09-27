@@ -7,9 +7,13 @@
 //      保存済みの文字で作り直す（Drive も pdf-parse も呼ばない）。
 //   3. body.rebuild=true は「作り直す」。文字を取り直してから古い部屋を非表示（archivedAt）にし、新しい部屋を作る。
 //      取り直しに失敗したときは古い部屋を残す。
-//   4. 応答を流し終えてから assistant の発言（kind=SUMMARY）を保存し、経歴の型を部屋に保存する。
+//   4. 整理を作る直前に「会社と学校の下調べ」（ウェブ検索・research.ts）を1回行い、結果を部屋の research_json に保存する。
+//      失敗（ウェブ検索が使えない・時間切れ・JSON が読めない）でも止めず、下調べなしで整理を作る。
+//      「作り直す」は新しい部屋なので下調べからやり直す。途中失敗の再送は、下調べ済みならその結果を使う（検索し直さない）。
+//   5. 応答を流し終えてから assistant の発言（kind=SUMMARY）を保存し、経歴の型を部屋に保存する。
 //      途中で失敗したら何も保存しない（画面はエラーと「再送」を出す）。
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
@@ -23,6 +27,8 @@ import {
   extractCareerType,
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
+import { runResearch, recordResearchUsage } from "@/lib/interview-prep/research";
+import { normalizeResearch, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 export async function POST(
   req: Request,
@@ -44,11 +50,13 @@ export async function POST(
   const active = await prisma.interviewPrepRoom.findFirst({
     where: { candidateId, archivedAt: null },
     orderBy: { createdAt: "desc" },
-    select: { id: true, resumeText: true, summaryMessageId: true },
+    select: { id: true, resumeText: true, summaryMessageId: true, researchJson: true, researchedAt: true },
   });
 
   let roomId: string;
   let resumeText: string;
+  // 下調べ済みの結果（途中失敗の再送だけ使う）。undefined＝これから下調べする
+  let savedResearch: ResearchResult | null | undefined = undefined;
 
   if (active && !rebuild) {
     if (active.summaryMessageId) {
@@ -58,6 +66,7 @@ export async function POST(
       // 途中失敗の再送: 保存済みの文字で作り直す
       roomId = active.id;
       resumeText = active.resumeText;
+      if (active.researchedAt) savedResearch = normalizeResearch(active.researchJson);
     } else {
       // 文字が無い部屋（想定外）は非表示にして作り直す
       await prisma.interviewPrepRoom.update({ where: { id: active.id }, data: { archivedAt: new Date() } });
@@ -73,12 +82,45 @@ export async function POST(
     resumeText = created.resumeText;
   }
 
-  const system = buildPrepSystem(resumeText);
   const messages = buildSummaryMessages();
-  const startedAt = Date.now();
 
   return sseResponse(async (send) => {
     send({ started: true, roomId });
+
+    // 下調べ（失敗しても止めない）
+    let research: ResearchResult | null;
+    if (savedResearch !== undefined) {
+      research = savedResearch;
+    } else {
+      send({ researching: true });
+      const outcome = await runResearch(resumeText);
+      research = outcome.research;
+      await recordResearchUsage(outcome, candidateId, rebuild);
+      console.log(
+        `[interview-prep research] status=${outcome.status} searches=${outcome.webSearchRequests} input=${outcome.usage?.input_tokens ?? 0} output=${outcome.usage?.output_tokens ?? 0} latency_ms=${outcome.latencyMs}`,
+      );
+      if (outcome.status === "web_search_disabled") {
+        console.warn(`[interview-prep research] web search is disabled for this organization: ${outcome.errorMessage}`);
+      } else if (outcome.status !== "ok") {
+        console.warn(`[interview-prep research] failed: ${outcome.status} ${outcome.errorStatus ?? ""} ${outcome.errorMessage ?? ""}`);
+      }
+      try {
+        await prisma.interviewPrepRoom.update({
+          where: { id: roomId },
+          data: {
+            researchJson: research ? (research as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+            // 成功したときだけ下調べ済みにする（失敗なら再送でもう一度調べる）
+            researchedAt: research ? new Date() : null,
+          },
+        });
+      } catch (e) {
+        console.error("[interview-prep research] save failed:", e);
+      }
+    }
+    send({ researched: true, research });
+
+    const system = buildPrepSystem(resumeText, research);
+    const startedAt = Date.now();
     let text = "";
     try {
       const stream = createPrepStream({ system, messages, maxTokens: SUMMARY_MAX_TOKENS });
@@ -118,7 +160,7 @@ export async function POST(
         });
         return msg;
       });
-      send({ done: true, roomId, summary: saved, careerType });
+      send({ done: true, roomId, summary: saved, careerType, research });
     } catch (e) {
       console.error("[interview-prep summary] failed:", e);
       const status = (e as { status?: number })?.status;

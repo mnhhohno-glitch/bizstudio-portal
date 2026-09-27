@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { findLatestMynaviResume } from "@/lib/interview-prep/resume";
+import { normalizeResearch } from "@/lib/interview-prep/research-format";
 
 export async function GET(
   _req: Request,
@@ -60,6 +61,8 @@ export async function GET(
           id: room.id,
           createdAt: room.createdAt,
           careerType: room.careerType,
+          // T-205 step4: 下調べの結果（出典リンク・学校のレベルのバッジ用）。下調べなしは null
+          research: normalizeResearch(room.researchJson),
           resumeImportedAt: room.resumeImportedAt,
           resumeChars: room.resumeText?.length ?? 0,
           summary: summary ? { id: summary.id, content: summary.content, createdAt: summary.createdAt } : null,

@@ -1742,6 +1742,9 @@ model InterviewPrepRoom {
   // 最初の整理から取り出した経歴の型（一社継続型 / 同職種転職型 / 職種転換型）。取れなければ null
   careerType       String?   @map("career_type")
   summaryMessageId String?   @map("summary_message_id") // 最初の整理（assistant・kind=SUMMARY）のメッセージID
+  // T-205 step4: 会社と学校の下調べ（ウェブ検索）の結果。検証・正規化済みの JSON。下調べなし／失敗は null
+  researchJson     Json?     @map("research_json")
+  researchedAt     DateTime? @map("researched_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   messages         InterviewPrepMessage[]

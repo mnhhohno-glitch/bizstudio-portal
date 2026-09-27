@@ -6,10 +6,13 @@
  *   ローカルから本番DBを読む場合: npx tsx --env-file=.env scripts/verify/interview-prep-dryrun.ts
  *   （Drive の認証情報と ANTHROPIC_API_KEY が環境に必要）
  *
- * やること（T-205 step3 で書き方の確認に更新。質問の往復は行わない）:
+ * やること（T-205 step4 で下調べを追加。質問の往復は行わない）:
  *   1. 直近でマイナビレジュメが取り込まれた求職者1名（テスト除外）を選び、文字を取り出す（保存しない）
- *   2. 最初の整理を1回だけ生成する（保存しない。AI 呼び出しは1回）
- *   3. 見出し7つ・「→」で意味を添えた行数・斜線（／ または /）を2つ以上含む行数・経歴の型の取り出しを出す
+ *   2. 下調べ（会社と学校のウェブ検索）を1回行う（保存しない・使用量ログも書かない）
+ *   3. 最初の整理を1回だけ生成する（保存しない）。AI 呼び出しは合計2回
+ *   4. 下調べ: 状態・検索回数・会社数/特定できた数・学校のレベルの有無・出典URL数・トークン/費用/所要時間
+ *      整理: 見出し9つ・（調べた情報）の付いた行数・本文中のURL数・「希望」を含む行数・「聞き方:」の数・
+ *            「→」で意味を添えた行数・斜線を2つ以上含む行数・経歴の型の取り出し
  * 出力は数値と有無だけ（本文・氏名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
@@ -24,6 +27,9 @@ import {
   missingSummaryHeadings,
 } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
+import { runResearch, RESEARCH_MODEL } from "@/lib/interview-prep/research";
+import { researchSources } from "@/lib/interview-prep/research-format";
+import { WEB_SEARCH_USD_PER_REQUEST } from "@/lib/claude";
 
 const USD_JPY = 150;
 
@@ -94,16 +100,42 @@ async function main() {
   }
   console.log(`resume_text: ok chars=${extracted.chars}`);
 
-  const system = buildPrepSystem(extracted.text);
+  // 下調べ（1回だけ・保存しない・使用量ログも書かない）
+  const outcome = await runResearch(extracted.text);
+  const rTokens = extractTokens(outcome.usage);
+  const rCost =
+    computeCostUsd(RESEARCH_MODEL, rTokens).costUsd + outcome.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST;
+  console.log(
+    `call1 research: status=${outcome.status}${outcome.errorStatus ? ` http=${outcome.errorStatus}` : ""} searches=${outcome.webSearchRequests} ` +
+      `input=${rTokens.inputTokens} output=${rTokens.outputTokens} cache_read=${rTokens.cacheReadTokens} cache_write=${rTokens.cacheCreationTokens} ` +
+      `cost=$${rCost.toFixed(4)} (¥${(rCost * USD_JPY).toFixed(1)}) latency=${(outcome.latencyMs / 1000).toFixed(1)}s`,
+  );
+  if (outcome.status !== "ok" && outcome.errorMessage) console.log(`research_error: ${outcome.errorMessage}`);
+  const research = outcome.research;
+  if (research) {
+    const found = research.companies.filter((c) => c.found).length;
+    console.log(`research_companies: ${research.companies.length} (found=${found})`);
+    console.log(
+      `research_school: ${research.school ? `yes level=${research.school.level} hensachi=${research.school.hensachi ? "yes" : "no"}` : "null"}`,
+    );
+    const sources = researchSources(research);
+    console.log(`research_source_urls: ${sources.reduce((n, s) => n + s.urls.length, 0)} (labels=${sources.length})`);
+  }
+
+  const system = buildPrepSystem(extracted.text, research);
 
   // 最初の整理（1回だけ）
   const summary = await callPrep(system, buildSummaryMessages(), SUMMARY_MAX_TOKENS);
-  printCall("call1 summary", summary);
+  printCall("call2 summary", summary);
 
   const missing = missingSummaryHeadings(summary.text);
-  console.log(`summary_headings_7: ${missing.length === 0 ? "yes" : `no (missing: ${missing.join(", ")})`}`);
+  console.log(`summary_headings_9: ${missing.length === 0 ? "yes" : `no (missing: ${missing.join(", ")})`}`);
 
   const lines = summary.text.split(/\r?\n/);
+  console.log(`research_tagged_lines: ${lines.filter((l) => l.includes("（調べた情報）")).length}`);
+  console.log(`urls_in_body: ${(summary.text.match(/https?:\/\//g) ?? []).length}`);
+  console.log(`lines_with_kibou: ${lines.filter((l) => l.includes("希望")).length}`);
+  console.log(`question_advice_count: ${lines.filter((l) => /聞き方[:：]/.test(l)).length}`);
   const arrowLines = lines.filter((l) => /^\s*[-*]/.test(l) && l.includes("→")).length;
   console.log(`arrow_meaning_lines: ${arrowLines}`);
   const slashLines = lines.filter((l) => (l.match(/[／/]/g) ?? []).length >= 2).length;
@@ -111,7 +143,7 @@ async function main() {
 
   const careerType = extractCareerType(summary.text);
   console.log(`career_type_extracted: ${careerType ? `yes (${careerType})` : "no"}`);
-  console.log("ai_calls: 1");
+  console.log("ai_calls: 2");
 }
 
 main()

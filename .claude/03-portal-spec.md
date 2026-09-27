@@ -1349,3 +1349,14 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
   - SSE の `started` 以降に失敗したら新しい部屋は空のまま残る。画面はその時点で再送を `rebuild: false` に切り替えるので、「面談準備を作る」／再送で古い部屋に戻さず新しい部屋に作る。
 - **古い書き方の案内**: `src/lib/interview-prep/format.ts` の `INTERVIEW_PREP_FORMAT_UPDATED_AT`（JST・step3 のコミット時刻）より前に作られた整理には「書き方が新しくなりました。「作り直す」を押すと新しい書き方で作り直せます。」を出す（`isOldPrepFormat`）。書き方をまた変えたらこの定数を更新する。画面から読むため Anthropic SDK を含む chat.ts とは別ファイル。
 - 検証スクリプト `scripts/verify/interview-prep-dryrun.ts` は step3 で「最初の整理1回だけ」に変更（見出し7つ・「→」行数・斜線2つ以上の行数・経歴の型の取り出し・トークン/費用/所要時間）。
+
+### T-205 step4（2026-09-27）: 会社と学校の下調べ（ウェブ検索）＋整理の作り直し
+
+- **下調べ**（`src/lib/interview-prep/research.ts` `runResearch`）: 整理を作る直前に1回。Sonnet 5・`thinking: disabled`・サーバー側ウェブ検索 `web_search_20260209`（動的フィルタリング）`max_uses=5`・SDK 自動リトライなし・150秒で時間切れ・`pause_turn` は応答を送り返して最大2回続ける。system＝`src/skills/interview-prep/RESEARCH.md`（`getInterviewPrepResearchSkill`）、user＝レジュメの文字。
+  - 返った JSON は `research-format.ts` の `parseResearchJson`→`normalizeResearch` で検証・正規化（会社は最大3社・URL は http(s) のみ・level は 高/中/低/なし/不明）。読めない・形が違う・失敗（検索無効・時間切れ・エラー）は**下調べなしで整理を作る**（止めない）。
+  - 保存先: `interview_prep_rooms.research_json`（JSONB）/ `researched_at`（migration `20260927200000_t205_interview_prep_research`・nullable 追加のみ）。成功時だけ `researched_at` を入れる。途中失敗の再送は下調べ済みなら再利用、「作り直す」は新しい部屋なので下調べから。
+  - 使用量: `AdvisorUsageLog` endpoint `interview-prep-research`。検索1回 $0.01（`WEB_SEARCH_USD_PER_REQUEST`・`src/lib/claude.ts` に出典URL）を costUsd に加算し、回数は note `web_search=N`。失敗は note `research-<status>[-http]`。組織設定で検索が無効なときは status `web_search_disabled`（400 のメッセージで判定）でログに warn。
+- **送る中身**: system が3ブロック ［SKILL.md］＋［# マイナビレジュメの文字］＋［調べた情報］（すべて ephemeral。messages 末尾と合わせてキャッシュ指定は4つ）。［調べた情報］は `formatResearchBlock` が research_json から決定的に組み立てる（見出し「【調べた情報（レジュメ外・ネット検索）】」・出典URLは入れない・下調べなしは「【調べた情報】なし（調べられなかった）」1行）。質問の往復でも同じ3ブロック（検索はしない）。
+- **SSE**: `started` → `researching`（下調べ開始）→ `researched`（`research` 付き）→ 本文 `text` → `done`（`research` 付き）。GET の `room.research` も同じ正規化済み JSON。
+- **整理の構成（SKILL.md 全文差し替え）**: 見出し9つ「ひとことで」「学校と学んだこと」「就職した会社」「やってきた仕事と、その意味」「強み」「経歴の型」「面談での質問アドバイス」「知っておきたい言葉」「基本情報」。希望条件は一切書かない・調べた情報を使う文には「（調べた情報）」・URL は書かない。`SUMMARY_HEADINGS` 更新。経歴の型の取り出しは変更なし。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を step4 のコミット時刻に更新。検証スクリプトは「下調べ1回＋整理1回」（保存なし）。

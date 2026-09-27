@@ -1,7 +1,7 @@
 // T-205: 面談準備チャットの質問1往復（SSE ストリーミング）。
 //
 // - 有効な部屋に最初の整理が無ければ 409（先に summary を作る）。
-// - 送る中身は system＝指示本文＋レジュメ、messages＝［固定文→整理］＋直近10往復＋今回の質問（chat.ts）。
+// - 送る中身は system＝指示本文＋レジュメ＋調べた情報（保存済みの research_json。質問のたびに検索はしない）、messages＝［固定文→整理］＋直近10往復＋今回の質問（chat.ts）。
 // - 応答を流し終えてから CA の発言と AI の発言をまとめて保存する。途中で失敗したら両方とも保存しない
 //   （画面はエラーと「再送」を出し、再送で同じ質問を送り直す＝二重保存にならない）。
 import { NextResponse } from "next/server";
@@ -17,6 +17,7 @@ import {
   type PrepHistoryMessage,
 } from "@/lib/interview-prep/chat";
 import { sseResponse } from "@/lib/interview-prep/sse";
+import { normalizeResearch } from "@/lib/interview-prep/research-format";
 
 const MAX_QUESTION_CHARS = 8000;
 
@@ -58,7 +59,7 @@ export async function POST(
     .filter((m) => m.kind !== "SUMMARY" && (m.role === "user" || m.role === "assistant"))
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-  const system = buildPrepSystem(room.resumeText);
+  const system = buildPrepSystem(room.resumeText, normalizeResearch(room.researchJson));
   const messages = buildChatMessages(summary, history, question);
   const roomId = room.id;
   const askedAt = new Date();

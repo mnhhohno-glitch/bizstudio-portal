@@ -1,7 +1,7 @@
 "use client";
 
 // T-205: 面談準備チャット（右から開く幅広のパネル。見た目は ChatGPT / Claude の会話画面）。
-// - 材料はマイナビレジュメの文字だけ。会話が0件のあいだは最初の整理をパネル全体に表示し、
+// - 材料はマイナビレジュメの文字と、会社・学校の下調べ（ネット検索。T-205 step4）。会話が0件のあいだは最初の整理をパネル全体に表示し、
 //   最初の質問を送った時点でヘッダー直下の固定欄（畳んだ状態）へ移す。以降の会話は中央の列に並べる。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
 // - 応答はストリーミング（SSE）で書きながら表示し、表示が終わってから保存される（保存はサーバー側）。
@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { isOldPrepFormat } from "@/lib/interview-prep/format";
+import { researchSources, schoolLevelBadge, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 type PrepMessage = {
   id: string;
@@ -24,6 +25,7 @@ type PrepState = {
     id: string;
     createdAt: string;
     careerType: string | null;
+    research: ResearchResult | null;
     resumeImportedAt: string | null;
     resumeChars: number;
     summary: { id: string; content: string; createdAt: string } | null;
@@ -122,6 +124,32 @@ function PrepMarkdown({ text }: { text: string }) {
   );
 }
 
+/** 整理の末尾に出す「調べた情報の出典」（URL はアプリ側で表示し、AI の本文には書かせない）。 */
+function ResearchSources({ research }: { research: ResearchResult | null }) {
+  const sources = researchSources(research);
+  if (sources.length === 0) return null;
+  return (
+    <div className="mt-6 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+      <div className="font-medium mb-1">調べた情報の出典</div>
+      <ul className="space-y-0.5">
+        {sources.map((src) => (
+          <li key={src.label} className="break-all">
+            <span className="text-gray-600">{src.label}:</span>{" "}
+            {src.urls.map((u, i) => (
+              <span key={u}>
+                {i > 0 && "、"}
+                <a href={u} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                  {i + 1}
+                </a>
+              </span>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function BlinkCursor() {
   return <span className="inline-block w-[2px] h-[1em] align-text-bottom bg-gray-700 animate-pulse ml-0.5" />;
 }
@@ -132,10 +160,17 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // 整理（固定欄）
-  const [summary, setSummary] = useState<{ content: string; createdAt: string; careerType: string | null } | null>(null);
+  const [summary, setSummary] = useState<{
+    content: string;
+    createdAt: string;
+    careerType: string | null;
+    research: ResearchResult | null;
+  } | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [streamSummary, setStreamSummary] = useState("");
+  // 整理の前の下調べ（会社と学校のネット検索）の最中か
+  const [researching, setResearching] = useState(false);
 
   // 会話
   const [messages, setMessages] = useState<PrepMessage[]>([]);
@@ -168,7 +203,12 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
     setMessages(data.room?.messages ?? []);
     setSummary(
       data.room?.summary
-        ? { content: data.room.summary.content, createdAt: data.room.summary.createdAt, careerType: data.room.careerType }
+        ? {
+            content: data.room.summary.content,
+            createdAt: data.room.summary.createdAt,
+            careerType: data.room.careerType,
+            research: data.room.research ?? null,
+          }
         : null,
     );
   }, []);
@@ -289,10 +329,20 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           (payload) => {
             if (payload.started) {
               retryAsRebuild = false;
+            } else if (payload.researching) {
+              setResearching(true);
+            } else if (payload.researched) {
+              setResearching(false);
             } else if (payload.done) {
               finished = true;
               const s = payload.summary as { content: string; createdAt: string };
-              setSummary({ content: s.content, createdAt: s.createdAt, careerType: (payload.careerType as string | null) ?? null });
+              const research = (payload.research as ResearchResult | null | undefined) ?? null;
+              setSummary({
+                content: s.content,
+                createdAt: s.createdAt,
+                careerType: (payload.careerType as string | null) ?? null,
+                research,
+              });
               setState((prev) =>
                 prev
                   ? {
@@ -301,6 +351,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                         id: String(payload.roomId),
                         createdAt: s.createdAt,
                         careerType: (payload.careerType as string | null) ?? null,
+                        research,
                         resumeImportedAt: prev.room?.resumeImportedAt ?? prev.resume?.importedAt ?? null,
                         resumeChars: prev.room?.resumeChars ?? 0,
                         summary: { id: "", content: s.content, createdAt: s.createdAt },
@@ -323,6 +374,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         setError({ kind: "summary", rebuild, message: e instanceof Error ? e.message : "整理の作成に失敗しました。" });
       } finally {
         setSummarizing(false);
+        setResearching(false);
         setStreamSummary("");
       }
     },
@@ -431,6 +483,12 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         {summary.careerType}
       </span>
     ) : null;
+  const schoolLevel = !summarizing ? schoolLevelBadge(summary?.research) : null;
+  const schoolBadge = schoolLevel ? (
+    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+      学校: {schoolLevel}
+    </span>
+  ) : null;
   const width = wide ? "95vw" : "clamp(720px, 60vw, calc(100vw - 48px))";
 
   const panel = (
@@ -485,6 +543,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           <div className="flex items-center gap-2 px-5 py-2">
             <span className="text-[13px] font-medium text-gray-700 shrink-0">{summaryLabel}</span>
             {careerBadge}
+            {schoolBadge}
             {oldFormat && (
               <span className="min-w-0">
                 <OldFormatNotice />
@@ -504,6 +563,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
             <div className="max-h-[50vh] overflow-y-auto px-5 pb-4">
               <div className="max-w-[760px] mx-auto text-gray-800">
                 <PrepMarkdown text={summary?.content ?? ""} />
+                <ResearchSources research={summary?.research ?? null} />
               </div>
             </div>
           )}
@@ -539,7 +599,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               <div className="text-center py-16">
                 <p className="text-lg font-medium text-gray-800 mb-2">面談の準備を始めましょう</p>
                 <p className="text-sm text-gray-500 mb-6">
-                  マイナビレジュメの記載だけを使い、どんな会社でどんな仕事をしてきた人かと、面談で確かめたいことを整理します。
+                  マイナビレジュメと、会社・学校のネット検索を使い、どんな学校でどんな会社に就職し何をしてきた人かと、面談での質問のしかたを整理します。
                 </p>
                 <button
                   type="button"
@@ -569,6 +629,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-[13px] font-medium text-gray-500">{summaryLabel}</span>
                     {careerBadge}
+                    {schoolBadge}
                   </div>
                   {oldFormat && (
                     <div className="mb-4">
@@ -581,12 +642,17 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                         {streamSummary ? (
                           <PrepMarkdown text={streamSummary} />
                         ) : (
-                          <p className="text-sm text-gray-400 py-4">整理を作成しています…</p>
+                          <p className="text-sm text-gray-400 py-4">
+                            {researching ? "会社と学校を調べています…" : "整理を作成しています…"}
+                          </p>
                         )}
                         <BlinkCursor />
                       </>
                     ) : (
-                      <PrepMarkdown text={summary?.content ?? ""} />
+                      <>
+                        <PrepMarkdown text={summary?.content ?? ""} />
+                        <ResearchSources research={summary?.research ?? null} />
+                      </>
                     )}
                   </div>
                   {!summarizing && (

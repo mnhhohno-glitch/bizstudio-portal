@@ -1,13 +1,15 @@
 // T-205: 面談準備チャットの Anthropic 送信内容の組み立て（API route と検証スクリプトで共有）。
 //
 // 送る中身:
-//   system   = ［指示本文（SKILL.md）］＋［レジュメの文字］ … それぞれ cache_control 付き
+//   system   = ［指示本文（SKILL.md）］＋［レジュメの文字］＋［調べた情報（research_json から組み立て）］
+//              … それぞれ cache_control 付き（messages 末尾と合わせてキャッシュ指定は4つまで）
 //   messages = ［固定文→最初の整理］＋［直近10往復の履歴］＋［今回の質問（cache_control 付き）］
 // - 最初の整理は 10往復の数え方の外に置き、常に送る。
 // - 今回の質問に cache_control を付けると、次の往復で「system＋履歴」の全体が読み出し扱いになる。
 // - 履歴の本文はクランプ以外の加工をしない（byte が揺れるとキャッシュが効かない・罠#39）。
 import { anthropic, CLAUDE_MODEL_SONNET_5 } from "@/lib/claude";
 import { getInterviewPrepSkill } from "@/lib/load-interview-prep-skill";
+import { formatResearchBlock, type ResearchResult } from "@/lib/interview-prep/research-format";
 
 export const INTERVIEW_PREP_MODEL = CLAUDE_MODEL_SONNET_5;
 export const SUMMARY_MAX_TOKENS = 4000;
@@ -39,11 +41,15 @@ function clamp(text: string): string {
   return text.length > MAX_MESSAGE_CHARS ? text.slice(0, MAX_MESSAGE_CHARS) + "\n…（長いため省略）" : text;
 }
 
-/** system ブロック（指示本文＋レジュメ）。どちらも byte 固定のため cache_control を付ける。 */
-export function buildPrepSystem(resumeText: string): TextBlock[] {
+/**
+ * system ブロック（指示本文＋レジュメ＋調べた情報）。いずれも byte 固定のため cache_control を付ける。
+ * 調べた情報は保存済みの research_json から決定的に組み立てる（下調べなしは「なし」の1行）。
+ */
+export function buildPrepSystem(resumeText: string, research: ResearchResult | null): TextBlock[] {
   return [
     { type: "text", text: getInterviewPrepSkill(), cache_control: { type: "ephemeral" } },
     { type: "text", text: RESUME_HEADER + resumeText, cache_control: { type: "ephemeral" } },
+    { type: "text", text: formatResearchBlock(research), cache_control: { type: "ephemeral" } },
   ];
 }
 
@@ -87,15 +93,17 @@ export function createPrepStream(params: { system: TextBlock[]; messages: ApiMes
   });
 }
 
-/** 最初の整理の見出し（T-205 step3 の書き方・この順番）。 */
+/** 最初の整理の見出し（T-205 step4 の書き方・この順番）。 */
 export const SUMMARY_HEADINGS = [
   "ひとことで",
-  "やっている仕事と、その意味",
-  "基本情報",
+  "学校と学んだこと",
+  "就職した会社",
+  "やってきた仕事と、その意味",
   "強み",
   "経歴の型",
-  "面談で確かめたいこと",
+  "面談での質問アドバイス",
   "知っておきたい言葉",
+  "基本情報",
 ] as const;
 
 /** 整理に無い見出しを返す（検証スクリプト用）。空ならそろっている。 */

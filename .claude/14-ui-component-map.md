@@ -1638,3 +1638,10 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 - **文字**（整理・AI の回答の両方。`PrepMarkdown`）: 本文 15px・行間 1.9／見出し（h1〜h4）16px 太字・上 20px（先頭は 0）／箇条書きの項目の間 6px（`space-y-1.5`）。中央の列幅 `max-w-[760px]` は不変。
 - **古い書き方の案内**: 整理の作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前なら、全体表示では整理の上、固定欄ではバーの中に小さく（amber）案内を出す（`OldFormatNotice`）。
 - 「作り直す」の確認文は「今の整理と会話を片付けて、新しく作り直します。よろしいですか？」。OK 後は押し直し不要で整理の生成まで進む。
+
+### T-205 step4（2026-09-27）: 下調べの表示
+
+- 整理の作成中、本文が流れ始めるまでの表示は SSE `researching` 〜 `researched` の間だけ「会社と学校を調べています…」、その後は従来の「整理を作成しています…」（`researching` state）。
+- 整理の末尾の下に小さく「調べた情報の出典」（`ResearchSources`・`researchSources()`）: 会社名・学校名ごとに URL を番号リンクで新しいタブ（`rel=noopener noreferrer`）。URL が無いものは出さない。全体表示と固定欄の「整理を開く」の両方。
+- 経歴の型バッジの隣に学校のレベルのバッジ「学校: 高／中／低」（emerald・`schoolLevelBadge()`）。「なし」「不明」・下調べなしは出さない。
+- 最初の案内文は「マイナビレジュメと、会社・学校のネット検索を使い…」に変更。
