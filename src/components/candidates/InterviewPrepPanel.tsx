@@ -1,8 +1,9 @@
 "use client";
 
 // T-205: 面談準備チャット（右から開く幅広のパネル。見た目は ChatGPT / Claude の会話画面）。
-// - 材料はマイナビレジュメの文字と、会社の下調べ（ネット検索。T-205 step4・step7 で学校の下調べはやめた）。会話が0件のあいだは最初の整理をパネル全体に表示し、
-//   最初の質問を送った時点でヘッダー直下の固定欄（畳んだ状態）へ移す。以降の会話は中央の列に並べる。
+// - 材料はマイナビレジュメの文字と、会社の下調べ（ネット検索。T-205 step4・step7 で学校の下調べはやめた）。
+// - step11: 整理は会話の先頭のメッセージとして置き、その下に CA の質問と AI の回答を時系列で並べる。
+//   スクロールするのはヘッダーと入力欄の間の1つだけ（上部のバーの「整理へ移動」で先頭へ戻る）。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
 // - 応答はストリーミング（SSE）で書きながら表示し、表示が終わってから保存される（保存はサーバー側）。
 // - step8: 最初の整理は決まった項目（summary_json）で受け取り、カード（InterviewPrepSummaryCards）に組み立てて一度に表示する。
@@ -41,7 +42,7 @@ type PrepState = {
   resume: { fileId: string; importedAt: string } | null;
 };
 
-/** 画面で持つ整理（固定欄・全体表示の両方で使う）。json が null の部屋は文章表示（step7 以前）。 */
+/** 画面で持つ整理（会話の先頭に表示する）。json が null の部屋は文章表示（step7 以前）。 */
 type SummaryView = {
   content: string;
   createdAt: string;
@@ -210,9 +211,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const [state, setState] = useState<PrepState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // 整理（固定欄）
+  // 整理（会話の先頭）
   const [summary, setSummary] = useState<SummaryView | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   // 整理の前の下調べ（会社のネット検索）の最中か。進み具合も持つ
   const [researching, setResearching] = useState(false);
@@ -235,6 +235,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  // 開いた直後の取り込みが済んだら、会話あり=一番下・会話なし=一番上に合わせる（一度だけ）
+  const initialScrollRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -263,13 +265,14 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
     );
   }, []);
 
-  const fetchState = useCallback(async () => {
+  const fetchState = useCallback(async (initial = false) => {
     setLoading(true);
     setLoadError(null);
     try {
       const res = await fetch(`/api/candidates/${candidateId}/interview-prep`);
       if (!res.ok) throw new Error("状態の取得に失敗しました");
       const data = (await res.json()) as PrepState;
+      if (initial) initialScrollRef.current = true;
       applyState(data);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "状態の取得に失敗しました");
@@ -278,15 +281,14 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
     }
   }, [candidateId, applyState]);
 
-  // 開いたときに状態を取り直し、整理は畳んだ状態で始める
+  // 開いたときに状態を取り直す（表示位置は取り込み後に決める）
   useEffect(() => {
     if (!open) return;
-    setSummaryOpen(false);
     setError(null);
     setPendingQuestion(null);
     setStreamAnswer("");
-    stickToBottomRef.current = true;
-    void fetchState();
+    stickToBottomRef.current = false;
+    void fetchState(true);
   }, [open, fetchState]);
 
   // Esc で閉じる
@@ -300,16 +302,34 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   }, [open, onClose]);
 
   // 新しい文字が出るたびに下へ（CA が上へスクロールして読み返しているときは止める）
+  // 開いた直後だけは、会話があれば一番下（最新）、無ければ一番上（整理の先頭）から表示する
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickToBottomRef.current) return;
+    if (!el) return;
+    if (initialScrollRef.current) {
+      if (loading) return;
+      initialScrollRef.current = false;
+      const hasMessages = messages.length > 0;
+      el.scrollTop = hasMessages ? el.scrollHeight : 0;
+      stickToBottomRef.current = hasMessages;
+      return;
+    }
+    if (!stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamAnswer, pendingQuestion, sending]);
+  }, [messages, streamAnswer, pendingQuestion, sending, loading]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
+
+  // 上部バーの「整理へ移動」: 1本のスクロールの一番上（整理の先頭）へ戻る
+  const scrollToSummary = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = false;
+    el.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const toggleWide = () => {
@@ -331,7 +351,9 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
       setSummarizing(true);
       setSummaryGenerating(false);
       setResearchProgress(null);
-      setSummaryOpen(true);
+      // 整理は先頭に出るので、作成中は一番上を見せる
+      stickToBottomRef.current = false;
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
       if (rebuild) {
         setSummary(null);
         setMessages([]);
@@ -472,8 +494,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
       setSending(true);
       setPendingQuestion(q);
       setStreamAnswer("");
-      setSummaryOpen(false); // 最初の質問を送った時点で、整理は固定欄に畳む
-      stickToBottomRef.current = true;
+      stickToBottomRef.current = true; // 送った瞬間は一番下へ
       try {
         const res = await fetch(`/api/candidates/${candidateId}/interview-prep/messages`, {
           method: "POST",
@@ -555,9 +576,9 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
   const hasRoom = !!summary;
   const noResume = !state?.room && !state?.resume;
   const busy = summarizing || sending;
-  // 会話が1件でもある（送信中を含む）ときだけ、整理を上部の固定欄に畳む。0件のときはパネル全体に表示する。
   const hasConversation = messages.length > 0 || !!pendingQuestion;
-  const showSummaryBar = (hasRoom || summarizing) && hasConversation;
+  // 上部のバー（整理＋経歴の型＋「整理へ移動」）は、整理がある・作成中のとき常に出す（step11）
+  const showSummaryBar = hasRoom || summarizing;
   // step8: summary_json が無い部屋は文章表示のまま（作り直すとカード表示）。日時の判定も残す
   const oldFormat = !summarizing && !!summary && (!summary.json || isOldPrepFormat(summary.createdAt));
   const summaryLabel = `整理${summary && !summarizing ? `（${formatDate(summary.createdAt)}）` : summarizing ? "（作成中）" : ""}`;
@@ -615,7 +636,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
         </div>
       </div>
 
-      {/* 整理の固定欄（会話があるときだけ。畳んだ状態で始める） */}
+      {/* 上部のバー（スクロールしない。「整理へ移動」で下の1本のスクロールを先頭へ戻す） */}
       {showSummaryBar && (
         <div className="border-b border-gray-200 bg-gray-50/60 shrink-0">
           <div className="flex items-center gap-2 px-5 py-2">
@@ -626,40 +647,18 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
                 <OldFormatNotice />
               </span>
             )}
-            {!summarizing && (
-              <button
-                type="button"
-                onClick={() => setSummaryOpen((v) => !v)}
-                className="ml-auto shrink-0 text-[12px] text-blue-600 hover:underline"
-              >
-                {summaryOpen ? "整理を閉じる" : "整理を開く"}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={scrollToSummary}
+              className="ml-auto shrink-0 text-[12px] text-blue-600 hover:underline"
+            >
+              整理へ移動
+            </button>
           </div>
-          {summaryOpen && !summarizing && summary && (
-            <div className="max-h-[50vh] overflow-y-auto px-5 pb-4">
-              <div className="max-w-[760px] mx-auto text-gray-800">
-                {summary.json ? (
-                  <InterviewPrepSummaryCards
-                    summary={summary.json}
-                    research={summary.research}
-                    asked={summary.asked}
-                    onToggleAsked={(i, a) => void toggleAsked(i, a)}
-                    disabled={busy}
-                  />
-                ) : (
-                  <>
-                    <PrepMarkdown text={summary.content} />
-                    <ResearchSources research={summary.research} />
-                  </>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* 会話欄 */}
+      {/* 1本のスクロール（整理＝先頭のメッセージ → 会話） */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-5 py-4">
         <div className="max-w-[760px] mx-auto">
           {loading && !state ? (
@@ -712,46 +711,35 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
             )
           ) : (
             <div className="space-y-6">
-              {!hasConversation && (
-                // 会話0件: 整理をパネル全体（会話欄と同じ背景・高さの上限なし）に表示する
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-[13px] font-medium text-gray-500">{summaryLabel}</span>
-                    {careerBadge}
-                  </div>
-                  {oldFormat && (
-                    <div className="mb-4">
-                      <OldFormatNotice />
-                    </div>
-                  )}
-                  <div className="text-gray-800">
-                    {summarizing ? (
-                      <>
-                        <ProgressLines researching={researching} progress={researchProgress} summarizing={summaryGenerating} />
-                        <BlinkCursor />
-                      </>
-                    ) : summary?.json ? (
-                      <InterviewPrepSummaryCards
-                        summary={summary.json}
-                        research={summary.research}
-                        asked={summary.asked}
-                        onToggleAsked={(i, a) => void toggleAsked(i, a)}
-                        disabled={busy}
-                      />
-                    ) : (
-                      <>
-                        <PrepMarkdown text={summary?.content ?? ""} />
-                        <ResearchSources research={summary?.research ?? null} />
-                      </>
-                    )}
-                  </div>
-                  {!summarizing && (
-                    <p className="mt-8 text-[12px] text-gray-400">
-                      整理を読んで、気になることを下の入力欄から質問してください。
-                    </p>
+              {/* 整理は会話の先頭のメッセージ（会話の有無に関係なく常にここ。高さの上限なし） */}
+              <div className={hasConversation ? "pb-6 border-b border-gray-100" : undefined}>
+                <div className="text-gray-800">
+                  {summarizing ? (
+                    <>
+                      <ProgressLines researching={researching} progress={researchProgress} summarizing={summaryGenerating} />
+                      <BlinkCursor />
+                    </>
+                  ) : summary?.json ? (
+                    <InterviewPrepSummaryCards
+                      summary={summary.json}
+                      research={summary.research}
+                      asked={summary.asked}
+                      onToggleAsked={(i, a) => void toggleAsked(i, a)}
+                      disabled={busy}
+                    />
+                  ) : (
+                    <>
+                      <PrepMarkdown text={summary?.content ?? ""} />
+                      <ResearchSources research={summary?.research ?? null} />
+                    </>
                   )}
                 </div>
-              )}
+                {!summarizing && !hasConversation && (
+                  <p className="mt-8 text-[12px] text-gray-400">
+                    整理を読んで、気になることを下の入力欄から質問してください。
+                  </p>
+                )}
+              </div>
               {messages.map((m) =>
                 m.role === "user" ? (
                   <div key={m.id} className="flex justify-end">

@@ -1615,10 +1615,11 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
   幅: 標準 clamp(720px, 60vw, calc(100vw - 48px)) / 広げる 95vw（localStorage "interviewPrep.wide" に記憶）
   ├─ ヘッダー: 「面談準備｜{氏名} さん」＋小さく「材料: マイナビレジュメ（{取り込み日} 取り込み）」
   │     右: 「広げる／元の幅」「作り直す」（window.confirm・整理がある時だけ）「×」（Esc でも閉じる）
-  ├─ 整理の固定欄（整理がある時・作成中のみ）
-  │     畳: 「整理（作成日）」＋経歴の型バッジ＋右端「整理を開く」
-  │     開: 全文を Markdown（max-h-[50vh] で欄内スクロール）。作った直後は開・次に開いたときは畳
-  ├─ 会話欄（flex-1・overflow-y-auto・中央の列 max-w-[760px]。広げても列幅は変えない）
+  ├─ 上部のバー（整理がある時・作成中。スクロールしない）: 「整理（作成日）」＋経歴の型バッジ＋右端「整理へ移動」（step11）
+  │     「整理へ移動」= 下の1本のスクロールを一番上（整理の先頭）へ smooth で戻す。開閉の仕組みは無い
+  ├─ 1本のスクロール（flex-1・overflow-y-auto・中央の列 max-w-[760px]。広げても列幅は変えない）
+  │     パネル内でスクロールするのはここだけ（ヘッダー・上部バー・入力欄は固定）
+  │     先頭=整理（カード／古い部屋は文章）→ その下に CA の質問と AI の回答を時系列（会話があるとき整理の下に区切り線）
   │     CA=右寄せ吹き出し（bg-gray-100 rounded-2xl）/ AI=列いっぱいの Markdown（PrepMarkdown）
   │     書いている最中は文末に点滅カーソル（BlinkCursor）。自動スクロールは stickToBottomRef（下端から40px以内のときだけ）
   │     状態: 整理前=「面談の準備を始めましょう」＋「面談準備を作る」/ レジュメなし=「マイナビレジュメが見つかりません」（AI は呼ばない）
@@ -1630,13 +1631,22 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 - ストリーミング受信は `readSse()`（`data:` 行を `\n\n` 区切りで読む）。`{done}` が来る前に切れたらエラー扱い（保存されていない）。
 - 422 `no_resume` は「レジュメなし」状態へ、`resume_unreadable` は読み取れた字数付きのエラー。409 は状態を取り直す。
 
+### T-205 step11（2026-09-28）: 1本のスクロール・整理は先頭・上部バーは「整理へ移動」（step3 の固定欄を置き換え）
+
+- 整理は会話の有無に関係なく**1本のスクロールの先頭のメッセージ**。その下に CA の質問と AI の回答を時系列で並べる。ChatGPT / Claude と同じく、スクロールで整理まで遡れる。
+- step3 の「最初の質問を送ったら整理を固定欄に畳む」動きと、固定欄の中だけのスクロール（`max-h-[50vh]`・`summaryOpen` state）は削除。
+- 上部のバー（「整理（作成日）」＋経歴の型バッジ＋`OldFormatNotice`）は整理がある・作成中のとき常に表示。右端は「整理へ移動」（`scrollToSummary`: `scrollTo({ top: 0, behavior: "smooth" })`）。
+- スクロールの位置:
+  - 開いたとき: 取り込み後に一度だけ（`initialScrollRef`・`fetchState(true)`）、会話があれば一番下（最新）、無ければ一番上（整理の先頭）。
+  - AI が書いている最中は下へ自動スクロール。CA が上へスクロールしているときは止める（`stickToBottomRef`・下端から40px以内のときだけ追う）。
+  - 質問を送った瞬間は一番下へ（`runChat` で `stickToBottomRef = true`）。整理の作成・作り直しの開始時は一番上へ。
+- 「整理を読んで、気になることを下の入力欄から質問してください。」は会話0件のときだけ整理の下に出す（`hasConversation = messages.length > 0 || !!pendingQuestion`）。
+
 ### T-205 step3（2026-09-27）: 整理の表示配分と文字
 
-- **会話0件**（`messages` も送信中の質問も無い）: 固定欄は出さず、整理を**会話欄（ヘッダー下〜入力欄の上）全体**に表示する。高さの上限なし・パネル全体でスクロール・背景は会話欄と同じ白。先頭に小さく「整理（作成日）＋経歴の型バッジ」、末尾の下に小さく「整理を読んで、気になることを下の入力欄から質問してください。」。作成中はここにストリーミング表示。
-- **最初の質問を送った時点**（`pendingQuestion` が立った時点）で固定欄（畳んだバー「整理（作成日）＋バッジ＋整理を開く」）に切り替える。会話がある状態で開いたときも畳んだ状態で始まる。「整理を開く」は従来どおり `max-h-[50vh]` で欄内スクロール。
-  - 判定は `hasConversation = messages.length > 0 || !!pendingQuestion` の1か所。
+- ~~会話0件は整理を全体表示、最初の質問で固定欄に畳む~~ → step11 で廃止（上記）。
 - **文字**（整理・AI の回答の両方。`PrepMarkdown`）: 本文 15px・行間 1.9／見出し（h1〜h4）16px 太字・上 20px（先頭は 0）／箇条書きの項目の間 6px（`space-y-1.5`）。中央の列幅 `max-w-[760px]` は不変。
-- **古い書き方の案内**: 整理の作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前なら、全体表示では整理の上、固定欄ではバーの中に小さく（amber）案内を出す（`OldFormatNotice`）。
+- **古い書き方の案内**: 整理の作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前なら、上部のバーの中に小さく（amber）案内を出す（`OldFormatNotice`。step11 で整理の上の表示はやめバーだけに）。
 - 「作り直す」の確認文は「今の整理と会話を片付けて、新しく作り直します。よろしいですか？」。OK 後は押し直し不要で整理の生成まで進む。
 
 ### T-205 step4（2026-09-27）: 下調べの表示
@@ -1654,7 +1664,7 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 
 ### T-205 step8（2026-09-28）: 整理のカード表示と「聞いた」ボタン
 
-- 新コンポーネント `src/components/candidates/InterviewPrepSummaryCards.tsx`（Props: `summary: PrepSummary` / `research` / `asked: AskedQuestions` / `onToggleAsked(index, asked)` / `disabled`）。`InterviewPrepPanel` は `summary.json` があればこれを、無ければ従来の `PrepMarkdown`＋`ResearchSources`（文章表示）を出す。全体表示・固定欄の「整理を開く」の両方で同じカード。
+- 新コンポーネント `src/components/candidates/InterviewPrepSummaryCards.tsx`（Props: `summary: PrepSummary` / `research` / `asked: AskedQuestions` / `onToggleAsked(index, asked)` / `disabled`）。`InterviewPrepPanel` は `summary.json` があればこれを、無ければ従来の `PrepMarkdown`＋`ResearchSources`（文章表示）を出す。表示場所は1本のスクロールの先頭の1か所（step11）。
 - カードの順（中央の列 max-w-[760px]・白カード rounded-xl border shadow-sm・見出しは 12px gray-500）:
   1. **ひとことで**: summary 17px。下に丸バッジ（在職中=emerald／離職中=amber／不明=gray、年齢=gray、経歴の型=blue〔判定できないは出さず理由を1行〕、年収=gray）。資格は 12px 1行（truncate）。
   2. **経歴の流れ**: 縦線（gray-200）と点（#2563EB）の時系列。period 12px gray → title 15px 太字 → detail 14px。fromResearch の行に「🌐 調べた情報」。
@@ -1664,7 +1674,7 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
   6. **知っておきたい言葉**: 最初から全語を term｜meaning の2列で表示（T-205 step9 で「N語を開く」の開閉を廃止）。
   7. 最下部に 11px「🌐 調べた情報の出典」（会社の URL を番号リンク・新しいタブ）。学校は出さない。
 - 「聞いた」は `InterviewPrepPanel.toggleAsked`: 画面を先に変えて PATCH `/interview-prep/asked`、失敗したら戻す。`summary.asked`（`AskedQuestions`）1か所で持つ。
-- 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。最初の質問で固定欄に畳む動き（step3・`hasConversation`）はそのまま。
+- 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。（固定欄に畳む動きは step11 で廃止し、整理は常に会話の先頭。）
 - 古い部屋（summary_json なし）は文章表示のまま。`OldFormatNotice` は「表示が新しくなりました。「作り直す」を押すとカード表示になります。」（summary_json が無い、または作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前）。
 
 ### T-205 step10（2026-09-28）: 会社の公式サイトのリンク
