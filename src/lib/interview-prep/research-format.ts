@@ -13,9 +13,13 @@
 //   見つからなかったときだけ）。使い回しも部分ごと（reusableResearchParts）。
 // - step7: 学校の下調べをやめ、会社だけにした（research_json は version / companiesStatus / companies のみ）。
 //   step6 以前に保存された school / schoolStatus は読むときに無視する（版が違うので使い回しもされない）。
+// - step10: 会社ごとに公式サイトの URL（officialUrl）を持つ。AI が作った URL を出さないため、その呼び出しの
+//   検索結果に実際に出てきた URL と一致するものだけを採用する（parseCompanyResearchJson の searchResultUrls）。
+//   officialUrl が無い保存分（step9 以前）は空文字として読む（画面にリンクを出さないだけ）。
+//   officialUrl は［調べた情報］ブロックには入れない（本文に URL を書かせない・既存の byte を変えない）。
 
 /** 下調べの版。指示（RESEARCH_COMPANY.md）・検索方式・JSON の形を変えたら上げる。 */
-export const RESEARCH_VERSION = 4;
+export const RESEARCH_VERSION = 5;
 
 /** 下調べの結果の状態（step6）。 */
 export const RESEARCH_PART_STATUSES = ["ok", "timeout", "error"] as const;
@@ -36,6 +40,8 @@ export type ResearchCompany = {
   source_urls: string[];
   /** 特定できなかったときの候補（「候補の会社名（都道府県・業種）」）。特定できたときは空。 */
   candidates: string[];
+  /** 公式サイトの URL（step10）。無い・特定できなかった・検索結果と一致しなかったときは空文字。 */
+  officialUrl: string;
 };
 
 export type ResearchResult = {
@@ -56,6 +62,29 @@ const FAILURE_LABEL: Record<Exclude<ResearchPartStatus, "ok">, string> = {
 
 function str(v: unknown): string | null {
   return typeof v === "string" ? v.trim().slice(0, MAX_TEXT_CHARS) : null;
+}
+
+/** http(s) の URL なら前後の空白を除いて返す。それ以外は null。 */
+function httpUrl(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  try {
+    const parsed = new URL(t);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 検索結果の URL と見比べるための形（末尾の「/」と「#」以降の違いは同じとみなす）。 */
+export function urlMatchKey(u: string): string {
+  try {
+    const parsed = new URL(u.trim());
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return u.trim();
+  }
 }
 
 /** http(s) の URL だけを残す（画面でリンクにするため javascript: などは落とす）。 */
@@ -113,6 +142,7 @@ function normalizeCompanies(raw: unknown): ResearchCompany[] | null {
       business,
       source_urls: sourceUrls,
       candidates: found ? [] : strList(r.candidates, MAX_CANDIDATES),
+      officialUrl: found ? httpUrl(r.officialUrl) ?? "" : "",
     });
   }
   return companies.slice(0, MAX_RESEARCH_COMPANIES);
@@ -147,10 +177,25 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
   }
 }
 
-/** 会社用の応答（{"companies": [...]}）を読む。読めない・形が違う場合は null。 */
+/**
+ * 会社用の応答（{"companies": [...]}）を読む。読めない・形が違う場合は null。
+ * officialUrl はまだ AI の言ったままなので、保存・表示の前に必ず keepSearchedOfficialUrls を通す。
+ */
 export function parseCompanyResearchJson(text: string): ResearchCompany[] | null {
   const obj = extractJsonObject(text);
   return obj ? normalizeCompanies(obj.companies) : null;
+}
+
+/**
+ * step10: officialUrl は、その呼び出しの検索結果に実際に出てきた URL（searchResultUrls）と一致するものだけ残し、
+ * 一致しなければ空にする（AI が作った URL を出さないため）。
+ */
+export function keepSearchedOfficialUrls(
+  companies: ResearchCompany[],
+  searchResultUrls: readonly string[],
+): ResearchCompany[] {
+  const seen = new Set(searchResultUrls.map(urlMatchKey));
+  return companies.map((c) => (c.officialUrl && !seen.has(urlMatchKey(c.officialUrl)) ? { ...c, officialUrl: "" } : c));
 }
 
 /** system に入れる［調べた情報］の文字。下調べなしは1行。 */
@@ -189,6 +234,35 @@ export function reusableResearch(
   const research = normalizeResearch(prev.researchJson);
   if (!research || research.version !== RESEARCH_VERSION) return null;
   return (research.companiesStatus ?? "ok") === "ok" ? research : null;
+}
+
+/** 画面の「会社のホームページ」（step10）。officialUrl がある会社だけ。 */
+export function officialSites(research: ResearchResult | null | undefined): { name: string; url: string }[] {
+  if (!research) return [];
+  return research.companies.filter((c) => c.officialUrl).map((c) => ({ name: c.name, url: c.officialUrl }));
+}
+
+/** 会社名の見比べ用（株式会社などの法人の種類・空白・全角半角の違いを除く）。 */
+function companyKey(s: string): string {
+  return s
+    .normalize("NFKC")
+    .replace(/株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|\(有\)/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+/**
+ * 経歴の流れの行（title 例「〇〇 正社員」）に当たる会社の公式サイト（step10）。
+ * title に会社名が含まれる会社のうち、名前が一番長いものを採る。無ければ null。
+ */
+export function officialUrlForTitle(research: ResearchResult | null | undefined, title: string): string | null {
+  const t = companyKey(title);
+  let best: { len: number; url: string } | null = null;
+  for (const s of officialSites(research)) {
+    const k = companyKey(s.name);
+    if (k && t.includes(k) && (!best || k.length > best.len)) best = { len: k.length, url: s.url };
+  }
+  return best?.url ?? null;
 }
 
 /** 画面の「調べた情報の出典」。URL が無いものは出さない。 */

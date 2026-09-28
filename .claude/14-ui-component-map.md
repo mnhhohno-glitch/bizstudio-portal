@@ -1666,3 +1666,10 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 - 「聞いた」は `InterviewPrepPanel.toggleAsked`: 画面を先に変えて PATCH `/interview-prep/asked`、失敗したら戻す。`summary.asked`（`AskedQuestions`）1か所で持つ。
 - 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。最初の質問で固定欄に畳む動き（step3・`hasConversation`）はそのまま。
 - 古い部屋（summary_json なし）は文章表示のまま。`OldFormatNotice` は「表示が新しくなりました。「作り直す」を押すとカード表示になります。」（summary_json が無い、または作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前）。
+
+### T-205 step10（2026-09-28）: 会社の公式サイトのリンク
+
+- `InterviewPrepSummaryCards` に research の `officialUrl` からリンクを出す（新しいタブ・`rel="noopener noreferrer"`・末尾「↗」）。
+  - **ひとことで**: バッジの下・資格の行の上に 12px gray「会社のホームページ:」＋会社名ごとのリンク（例「三春工業 ↗」）。`officialSites(research)` が空なら行ごと出さない。
+  - **経歴の流れ**: title の横に 11px「公式サイト ↗」。行と会社の対応は `officialUrlForTitle(research, title)`（株式会社・（株）・空白・全角半角の違いを除いた会社名が title に含まれる会社のうち、名前が一番長いもの）。学校の行や当たらない行には出さない。
+- 「🌐 調べた情報の出典」はそのまま。officialUrl の無い古い部屋ではどちらのリンクも出さない。

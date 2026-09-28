@@ -2,8 +2,14 @@
 
 // T-205 step8: 面談準備の「最初の整理」をカードで表示する（summary_json をそのまま組み立てる。文章の解釈はしない）。
 // 並び: ひとことで → 経歴の流れ → やってきた仕事 → 面談で聞くこと（「聞いた」ボタン） → 強み → 知っておきたい言葉 → 調べた情報の出典。
+// step10: 「ひとことで」に会社のホームページ、「経歴の流れ」の会社の行に公式サイトのリンク（research の officialUrl があるときだけ）。
 // 見た目は InterviewPrepPanel の色（#2563EB・gray・amber）に合わせる。新しいライブラリは使わない。
-import { researchSources, type ResearchResult } from "@/lib/interview-prep/research-format";
+import {
+  officialSites,
+  officialUrlForTitle,
+  researchSources,
+  type ResearchResult,
+} from "@/lib/interview-prep/research-format";
 import type { AskedQuestions, PrepSummary } from "@/lib/interview-prep/summary-format";
 
 type Props = {
@@ -37,12 +43,21 @@ function employmentBadgeClass(status: PrepSummary["employmentStatus"]): string {
   return BADGE_GRAY;
 }
 
+function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline whitespace-nowrap">
+      {children} ↗
+    </a>
+  );
+}
+
 function ResearchMark() {
   return <span className="text-[11px] text-gray-400 whitespace-nowrap">🌐 調べた情報</span>;
 }
 
 export default function InterviewPrepSummaryCards({ summary, research, asked, onToggleAsked, disabled }: Props) {
   const sources = researchSources(research);
+  const sites = officialSites(research);
   const askedCount = summary.questions.filter((_, i) => !!asked[String(i)]).length;
 
   return (
@@ -63,6 +78,16 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
         {summary.careerType === "判定できない" && summary.careerTypeReason && (
           <p className="mt-2 text-[12px] text-gray-500">経歴の型は判定できない（{summary.careerTypeReason}）</p>
         )}
+        {sites.length > 0 && (
+          <p className="mt-2 text-[12px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span>会社のホームページ:</span>
+            {sites.map((s) => (
+              <ExternalLink key={s.name} href={s.url}>
+                {s.name}
+              </ExternalLink>
+            ))}
+          </p>
+        )}
         {summary.qualifications.length > 0 && (
           <p className="mt-2 text-[12px] text-gray-500 truncate" title={summary.qualifications.join("、")}>
             資格: {summary.qualifications.join("、")}
@@ -78,6 +103,7 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
           <ol className="relative">
             {summary.timeline.map((t, i) => {
               const last = i === summary.timeline.length - 1;
+              const siteUrl = officialUrlForTitle(research, t.title);
               return (
                 <li key={i} className={`relative pl-6 ${last ? "" : "pb-4"}`}>
                   {!last && <span aria-hidden className="absolute left-[7px] top-3 bottom-0 w-px bg-gray-200" />}
@@ -89,7 +115,14 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
                     {t.period && <span className="text-[12px] text-gray-500">{t.period}</span>}
                     {t.fromResearch && <ResearchMark />}
                   </div>
-                  <div className="text-[15px] font-bold text-gray-900 leading-[1.7]">{t.title}</div>
+                  <div className="text-[15px] font-bold text-gray-900 leading-[1.7]">
+                    {t.title}
+                    {siteUrl && (
+                      <span className="ml-2 text-[11px] font-normal">
+                        <ExternalLink href={siteUrl}>公式サイト</ExternalLink>
+                      </span>
+                    )}
+                  </div>
                   {t.detail && <p className="text-[14px] text-gray-700 leading-[1.8] mt-0.5">{t.detail}</p>}
                 </li>
               );

@@ -121,7 +121,7 @@ export async function POST(
       research = outcome.research;
       await recordResearchUsage(outcome, candidateId, rebuild);
       console.log(
-        `[interview-prep research] status=${outcome.status} searches=${outcome.webSearchRequests} input=${outcome.usage?.input_tokens ?? 0} output=${outcome.usage?.output_tokens ?? 0} latency_ms=${outcome.latencyMs}`,
+        `[interview-prep research] status=${outcome.status} searches=${outcome.webSearchRequests} input=${outcome.usage?.input_tokens ?? 0} output=${outcome.usage?.output_tokens ?? 0} official_urls=${outcome.officialUrlKept}/${outcome.officialUrlProposed} latency_ms=${outcome.latencyMs}`,
       );
       if (outcome.status === "web_search_disabled") {
         console.warn(`[interview-prep research] web search is disabled for this organization: ${outcome.errorMessage}`);

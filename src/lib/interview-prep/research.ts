@@ -12,11 +12,13 @@
 // - 失敗（ウェブ検索が使えない・時間切れ・エラー）でも例外は投げず status で返す。呼び出し側は止めずに整理を作る。
 // - 長い検索は API が pause_turn で一度返すことがあるため、応答をそのまま送り返して続けさせる（最大 MAX_CONTINUATIONS 回）。
 //   240 秒は続きの呼び出しも含めた合計（残り時間を次の呼び出しの timeout にする）。
+// - step10: 公式サイトの URL（officialUrl）は、この呼び出し（続きを含む）の検索結果に出てきた URL と一致するものだけ残す。
 import Anthropic from "@anthropic-ai/sdk";
 import { anthropic, CLAUDE_MODEL_SONNET_5 } from "@/lib/claude";
 import { getInterviewPrepResearchSkill } from "@/lib/load-interview-prep-skill";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
 import {
+  keepSearchedOfficialUrls,
   parseCompanyResearchJson,
   RESEARCH_VERSION,
   type ResearchCompany,
@@ -56,6 +58,11 @@ export type ResearchOutcome = {
   companies?: ResearchCompany[];
   usage: ResearchUsage | null;
   webSearchRequests: number;
+  /** 検索結果に出てきた URL の数（step10・確認用）。 */
+  searchResultUrlCount: number;
+  /** AI が返した officialUrl の数と、検索結果と一致して残した数（step10・確認用）。 */
+  officialUrlProposed: number;
+  officialUrlKept: number;
   latencyMs: number;
   /** 失敗時の HTTP ステータスとメッセージ（完了報告・ログ用。本文は含めない）。 */
   errorStatus?: number;
@@ -79,6 +86,16 @@ function finalText(content: Anthropic.ContentBlock[]): string {
   const all = content.filter((b): b is Anthropic.TextBlock => b.type === "text");
   const pick = tail.length > 0 ? tail : all;
   return pick.map((b) => b.text).join("");
+}
+
+/** 応答の中の検索結果の URL（web_search_tool_result の各 web_search_result.url）。 */
+function collectSearchResultUrls(content: Anthropic.ContentBlock[], into: string[]): void {
+  for (const b of content) {
+    if (b.type !== "web_search_tool_result" || !Array.isArray(b.content)) continue;
+    for (const r of b.content) {
+      if (r.type === "web_search_result" && typeof r.url === "string") into.push(r.url);
+    }
+  }
 }
 
 function isWebSearchDisabled(e: unknown): boolean {
@@ -110,6 +127,7 @@ export async function runResearch(resumeText: string): Promise<ResearchOutcome> 
   };
   let webSearchRequests = 0;
   let called = false;
+  const searchResultUrls: string[] = [];
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: resumeText }];
   try {
@@ -132,13 +150,22 @@ export async function runResearch(resumeText: string): Promise<ResearchOutcome> 
       called = true;
       addUsage(usage, response.usage);
       webSearchRequests += response.usage.server_tool_use?.web_search_requests ?? 0;
+      collectSearchResultUrls(response.content, searchResultUrls);
       if (response.stop_reason !== "pause_turn") break;
       // pause_turn: 応答をそのまま送り返して続けさせる
       messages.push({ role: "assistant", content: response.content });
     }
     const latencyMs = Date.now() - startedAt;
-    const companies = parseCompanyResearchJson(response ? finalText(response.content) : "");
-    const base = { usage, webSearchRequests, latencyMs };
+    const parsed = parseCompanyResearchJson(response ? finalText(response.content) : "");
+    const companies = parsed ? keepSearchedOfficialUrls(parsed, searchResultUrls) : null;
+    const base = {
+      usage,
+      webSearchRequests,
+      latencyMs,
+      searchResultUrlCount: searchResultUrls.length,
+      officialUrlProposed: parsed ? parsed.filter((c) => c.officialUrl).length : 0,
+      officialUrlKept: companies ? companies.filter((c) => c.officialUrl).length : 0,
+    };
     return companies
       ? { ...base, status: "ok", companies, research: toResearch("ok", companies) }
       : { ...base, status: "invalid_json", research: toResearch("invalid_json", []) };
@@ -154,6 +181,9 @@ export async function runResearch(resumeText: string): Promise<ResearchOutcome> 
       research: toResearch(status, []),
       usage: called ? usage : null,
       webSearchRequests,
+      searchResultUrlCount: searchResultUrls.length,
+      officialUrlProposed: 0,
+      officialUrlKept: 0,
       latencyMs,
       errorStatus: (e as { status?: number })?.status,
       errorMessage: e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300),

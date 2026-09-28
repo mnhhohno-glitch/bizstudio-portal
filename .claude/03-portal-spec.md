@@ -1406,3 +1406,11 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - **SKILL.md**: 「## 最初の整理」を項目ごとの書き方に差し替え（文章では返さずツールを1回呼ぶ・記号で飾らない）。書き方のルールから「見出しは###、中身は箇条書き」の行を削除。「## 最重要ルール」「## CAの質問に答えるとき」は据え置き。
 - **古い部屋**: summary_json が無い部屋は文章表示のまま（`OldFormatNotice`＝「作り直すとカード表示になります」）。`INTERVIEW_PREP_FORMAT_UPDATED_AT` も更新。
 - **確認**: AI なしは `scripts/verify/interview-prep-summary-format-check.ts`（見本 JSON の検証・形違いの拒否・文章化の決定性・「聞いた」の保存と取り消し）。本番は `interview-prep-dryrun.ts`（下調べ1＋整理1＋作り直し1・検証に通ったか・各項目の件数・1件目が mismatch か・fromSelfPr / fromResearch の数・文章化の決定性・費用と時間）。
+
+### T-205 step10（2026-09-28）: 下調べで会社の公式サイトの URL を取る
+
+- **research_json**: companies の各要素に `officialUrl`（公式サイトの URL・無ければ空文字）を追加。`RESEARCH_VERSION` を **5** に上げた（次の作り直しで必ず調べ直し、公式サイトを取り直す）。officialUrl の無い保存分（版4以前）は空文字として読む（リンクを出さないだけ・エラーにしない）。特定できなかった会社（found=false）は常に空。
+- **指示本文** `src/skills/interview-prep/RESEARCH_COMPANY.md`: 返す JSON 例に `"officialUrl"` を追加し、「officialUrl には、その会社自身が運営する公式サイトのURLだけを入れる。求人サイト・口コミサイト・企業情報のまとめサイトは公式サイトとしない。」を追記。
+- **検証（AI が作った URL を出さない）**: `runResearch` がその呼び出し（pause_turn の続きを含む）の応答の `web_search_tool_result` から検索結果の URL を集め、`keepSearchedOfficialUrls`（research-format.ts）で一致するものだけ残す（一致しなければ空）。見比べは `urlMatchKey`（`#` 以降と末尾の `/` の違いは同じとみなす）。`parseCompanyResearchJson` は AI の言ったままを返すので、保存・表示の前に必ずこれを通す。outcome に `searchResultUrlCount` / `officialUrlProposed` / `officialUrlKept` を持ち、summary のログに `official_urls=残した数/AIが返した数` を出す。
+- **［調べた情報］ブロックには officialUrl を入れない**（本文に URL を書かせない・既存の byte を変えない。罠#39）。
+- **確認**: AI なしは `scripts/verify/interview-prep-research-format-check.ts`（検索結果に無い URL が空になる・古い部屋の表示処理）。本番は `scripts/verify/interview-prep-official-url-check.ts <求職者番号>`（下調べのみ・最大2回・保存しない・出力は有無と数値だけ）。
