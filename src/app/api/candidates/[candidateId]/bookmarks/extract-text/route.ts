@@ -138,8 +138,9 @@ export async function POST(
           // 対象は PDF由来（sourceType=NULL）かつ未紐付け（externalJobRef 未設定）のみ。
           // 失敗しても [t131-ingest] ログのみで既存フロー（kyuujinPDF出力・AI評価）は不変。
           // 二重投入対策: externalJobRef 設定済みはスキップ＋ job-platform 側の内容ハッシュ重複回避（二重防御）。
+          // T-XXX: 抽出済み本文も渡す（返却に sourceMedia が無いときの予備判定＝本文の「求人ID：hl-ap-」）。
           if (file.sourceType === null && !file.externalJobRef) {
-            void ingestAndLink({ fileId: file.id, fileName: file.fileName, pdfBuffer }).catch((e) => {
+            void ingestAndLink({ fileId: file.id, fileName: file.fileName, pdfBuffer, extractedText: text }).catch((e) => {
               console.error(`[t131-ingest] 予期せぬエラー fileId=${file.id}:`, e);
             });
           }

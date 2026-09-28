@@ -41,7 +41,14 @@ T-028 Phase 1 調査（2026/5/15）で portal の `JobEntry.jobDb` に上記マ�
 | 媒体 | パターン | 例 |
 |--|--|--|
 | HITO-Link | `{会社名}:{求人ID}.pdf` | 株式会社ヤマシタ:141163.pdf |
+| HITO-Link（現在のダウンロード名） | `求人票_{会社名}_{17桁の日時}.pdf`（CAが入れ直すと `求人票_{会社名}.pdf` になることもある） | 求人票_KDDI Biz Edge株式会社_20260703220709583.pdf |
 | Bee | `{会社名}：{求人ID}.pdf` | 進和テック株式会社：141427.pdf |
 | マイナビ | `{番号}_{会社名}.pdf` | 28847_株式会社マイナビ.pdf |
 | Circus | `{会社名}_No{数字}.pdf` | トラコム株式会社_No28760.pdf |
 | DODA | `{会社名}_No{数字}.pdf` | 株式会社フジタ医科器械_No346057.pdf |
+
+### PDF直登録ブックマークの媒体は求人プラットフォームが本文で決める（T-XXX・2026-09-28）
+
+- CAがブックマークにPDFを直接入れたときの求人プラットフォーム登録（T-131経路 `ingest-pdf`）では、**媒体と番号は求人プラットフォームがPDF本文から決める**（本文の `求人ID：hl-ap-\d+` を最優先）。返却の `sourceMedia` / `sourceJobId` / `jobArea` / `jobCategory` / `jobCategoryPath` をポータルが正として保存する（`buildLinkData`）。
+- ファイル名での媒体判定（`detectMediaFromFilename`）は送信時の `media` パラメータと、返却に `sourceMedia` が無いときの予備（`resolveFallbackMedia`: 本文の求人ID → ファイル名17桁 → 従来ルール）にだけ使う。
+- HITO-Link の `求人票_{会社名}_{17桁}.pdf` は本番実データ 3,124 件中 3,101 件が本文に `hl-ap` を持つ。circus（`No\d{5,7}`）・マイナビ（`^\d{4,6}_`）との誤マッチは 0 件。
