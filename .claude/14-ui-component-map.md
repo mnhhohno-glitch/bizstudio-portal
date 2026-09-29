@@ -1683,3 +1683,26 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
   - **ひとことで**: バッジの下・資格の行の上に 12px gray「会社のホームページ:」＋会社名ごとのリンク（例「三春工業 ↗」）。`officialSites(research)` が空なら行ごと出さない。
   - **経歴の流れ**: title の横に 11px「公式サイト ↗」。行と会社の対応は `officialUrlForTitle(research, title)`（株式会社・（株）・空白・全角半角の違いを除いた会社名が title に含まれる会社のうち、名前が一番長いもの）。学校の行や当たらない行には出さない。
 - 「🌐 調べた情報の出典」はそのまま。officialUrl の無い古い部屋ではどちらのリンクも出さない。
+
+## 案内メール `CandidateContactMailButton`（T-207, 2026-09-30）
+
+面談記録画面から「LINE登録案内」「あいさつメール」を確認付きで送るボタン。`InterviewForm.tsx` が肥大化しているため、ボタン・メニュー・確認画面は新しいコンポーネント `src/components/candidates/CandidateContactMailButton.tsx` にまとめた（props は `candidateId` と `appearance`）。
+
+### ボタンの位置
+- `InterviewForm` ヘッダーの操作ボタン列で「面談準備」のすぐ右（`appearance="header"`・PDF表示/面談準備と同種の見た目＋封筒アイコン・文言「案内メール」）。
+- 面談記録が0件の空状態（`InterviewHistoryTab.tsx`・「面談準備」の右）にも同じボタン（`appearance="empty"`・面談準備と同じ青いボタン）。面談記録を作らなくても送れる。
+
+### メニュー（ボタンを押すと直下に 300px の小さなメニュー）
+- 項目は［LINE登録案内］［あいさつメール］の2つ。開くたびに `GET /api/candidates/[id]/contact-mail` で最新の送信状況を取り直す。
+- 送信済みなら右に emerald の「送信済み（M/D HH:MM）」（JST）。
+- 送れないとき（求職者のメールアドレス無し／CA の LINE WORKS URL 無し／差出人が bizstudio.co.jp でない）は項目を押せなくして、下に amber で理由（例「社員管理でLINE WORKSのURLを登録してください」）。
+- 外側クリックで閉じる。
+
+### 確認画面（`createPortal` で body 直下・z-100・幅 640px・`useOverlayClose`）
+- 見出し「{種類} を送る」。宛先（氏名 様 <メール>）・差出人（`株式会社ビズスタジオ 〔CA姓〕 <ca@bizstudio.co.jp>`）・件名・本文（テキスト本文を pre-wrap で表示。LINE登録案内は 〔QR〕 の位置に QR 画像 160px を表示）。下に「控えとして差出人のアドレスにも同じメールが届きます（BCC）」。
+- ボタンは［キャンセル］［送信］。送信後は toast「送信しました」で閉じる。
+- 送信済みの種類をもう一度選んだときは上部に amber の「すでに送信済みです（M/D HH:MM）。もう一度送りますか？」を出し、ボタンを［再送］にする（POST に `resend: true` を付ける）。
+- 送信中は閉じられない（`sending` 中はオーバーレイ・×・キャンセルとも無効）。
+
+### 社員管理側
+- `/admin/users/[id]` 基本情報タブ（`BasicInfoTab.tsx`）末尾に「LINE WORKS」ブロック＝「LINE WORKS のURL（友だち追加用）」入力欄（2列幅・onBlur 自動保存）。`https://works.do/` で始まらないと amber の注意文（保存は止めない）。

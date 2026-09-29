@@ -1414,3 +1414,44 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - **検証（AI が作った URL を出さない）**: `runResearch` がその呼び出し（pause_turn の続きを含む）の応答の `web_search_tool_result` から検索結果の URL を集め、`keepSearchedOfficialUrls`（research-format.ts）で一致するものだけ残す（一致しなければ空）。見比べは `urlMatchKey`（`#` 以降と末尾の `/` の違いは同じとみなす）。`parseCompanyResearchJson` は AI の言ったままを返すので、保存・表示の前に必ずこれを通す。outcome に `searchResultUrlCount` / `officialUrlProposed` / `officialUrlKept` を持ち、summary のログに `official_urls=残した数/AIが返した数` を出す。
 - **［調べた情報］ブロックには officialUrl を入れない**（本文に URL を書かせない・既存の byte を変えない。罠#39）。
 - **確認**: AI なしは `scripts/verify/interview-prep-research-format-check.ts`（検索結果に無い URL が空になる・古い部屋の表示処理）。本番は `scripts/verify/interview-prep-official-url-check.ts <求職者番号>`（下調べのみ・最大2回・保存しない・出力は有無と数値だけ）。
+
+## 求職者向け案内メール「LINE登録案内」「あいさつメール」（T-207, master, 2026-09-30）
+
+初回面談で CA が OneNote の文面をコピーして手で送っていた LINE 登録案内メールを、面談記録画面のボタン1つ（確認付き）で送れるようにした。追加のみの改修。あとで作る初回面談の台本のボタンからも `src/lib/candidate-mail/send.ts` の同じ関数を通す前提。
+
+### 送り方（Resend・差出人は CA 本人）
+- 送信は既存の Resend（`sendResendEmail`・`RESEND_API_KEY`）。`bizstudio.co.jp` は Resend 側でドメイン認証済み（`GET /domains` で status=verified・region=ap-northeast-1 を確認）なので、ログイン中 CA のアドレスをそのまま From にできる（T-147 の `buildSenderFrom` を流用）。
+- From = `株式会社ビズスタジオ 〔CA姓〕 <ca@bizstudio.co.jp>`、Reply-To = 同じアドレス、**BCC = CA 本人**（受信箱に控えを残す）。差出人が `@bizstudio.co.jp` でないアカウントは「送れない」扱い（noreply へのフォールバックはしない）。
+- `sendResendEmail` に `html` と `attachments`（`filename/content(base64)/contentType/contentId`）を任意項目で追加。未指定なら従来どおり text のみ＝既存の呼び出し元の挙動は変わらない。
+- 参考: CA ごとの Google 連携（`src/lib/googleCalendar.ts`）のスコープは `calendar.events` と `tasks` のみで、Gmail 送信（`gmail.send`）の許可は無い。今回は使わない。
+
+### 文面と差し込み（`src/lib/candidate-mail/templates.ts`・固定・DB に持たない）
+- 種類は `line`（LINE登録案内）と `greeting`（あいさつメール）。件名・本文はこのファイルに一字一句固定。
+- 差し込み: 〔氏名〕=求職者の氏名 / 〔CA姓〕=送信 CA の姓（`caFamilyNameOf`: 社員名を空白（半角・全角）で分けた先頭。空白が無ければ氏名全体。Employee.name があればそれ、無ければ User.name）/ 〔URL〕=送信 CA の `Employee.lineWorksUrl` / 〔QR〕=その URL から作った QR コード画像。
+- `buildContactMail` が件名・テキスト本文・HTML 本文を同時に作る。確認画面（GET）と実送信（POST）が同じ関数を通るので、見たものと送るものは同じ。
+- **QR コードの入れ方**: `qrcode` パッケージで PNG を作り、Resend の `attachments` に `content_id` 付きで添付、HTML 本文は `<img src="cid:line-works-qr">` で本文中に表示（Gmail で表示される方法）。`data:` URL の直接埋め込みは Gmail で表示されないので使わない。テキスト本文では 〔QR〕 の位置に「（QRコードは HTML 表示でご覧いただけます）」を置く。確認画面のプレビューだけはブラウザ表示なので data: URL を返す（`buildQrDataUrl`）。
+
+### 社員管理の追加列
+- `Employee.lineWorksUrl`（`employees.line_works_url`・nullable TEXT・migration `20260930100000_t207_candidate_contact_mail`・`IF NOT EXISTS`）。
+- 社員詳細（管理者用 `/admin/users/[id]` 基本情報タブ）の末尾に「LINE WORKS」ブロック＝入力欄「LINE WORKS のURL（友だち追加用）」。`https://works.do/` で始まらないときは保存はできるが注意文（amber）を出す（判定は `src/lib/candidate-mail/line-works-url.ts` の `isLineWorksUrl`）。QR は URL から自動で作るので画像の登録欄は無い。保存は既存の自動保存（`PATCH /api/admin/employees/[employeeId]` section=basic・`BASIC_FIELDS` に `lineWorksUrl` を追加）。
+
+### 送信記録の表（`candidate_contact_mail_logs` / Prisma `CandidateContactMailLog`・追加のみ）
+| 列 | 内容 |
+|--|--|
+| candidate_id | 求職者 |
+| type | enum `CandidateContactMailType`（`LINE_GUIDE` / `GREETING`。API の `line` / `greeting` と `CONTACT_MAIL_DB_TYPE` で対応） |
+| sent_by_user_id | 送信者（User.id） |
+| to_email / from_email | 送った時点の宛先・差出人アドレス |
+| subject | 送った件名 |
+| message_id | Resend が返した id（本文が読めなかったときは null） |
+| sent_at | 送信日時 |
+- 1通につき1行。物理削除しない。index は `(candidate_id, type, sent_at)`。
+
+### API（`/api/candidates/[candidateId]/contact-mail`・認証は既存の求職者 API と同じ `getSessionUser()`・未ログイン 403）
+- `GET`（type 無し）: メニュー用。`items.{line,greeting}` に `canSend / reason / lastSentAt` と、`candidate`（name/email）・`sender`（email/name/familyName/from）。
+- `GET ?type=line|greeting`: 上に加えて `preview`（差し込み済みの `subject / text / html / qrDataUrl`）。確認画面用。
+- `POST { type, resend? }`: 送信。順に (1) 送れない理由（求職者のメールアドレス無し／差出人が bizstudio.co.jp でない／`line` で CA の lineWorksUrl 無し）→ 400 `cannot_send` (2) **二重送信の防止**: 同じ求職者×同じ種類の記録があり `resend !== true` → 409 `already_sent`（`lastSentAt` 付き） (3) Resend 送信 → 失敗は 502 `send_failed`（記録は作らない） (4) 成功で記録を1行作り `{ ok, logId, messageId, sentAt }`。
+- 判定・組み立て・送信はすべて `src/lib/candidate-mail/send.ts`（`checkCanSend` / `findLastSentAt` / `buildContactMailPreview` / `sendContactMail`）。
+
+### 動作確認（2026-09-30）
+- 送ってよいのはテスト用求職者「大野 テスト」（5999999）だけ。送信者は大野さんのアカウントで `lineWorksUrl=https://works.do/R/ti/p/masayuki_oono@bizstudio` を設定して 2 通送り、記録 2 行と 2 回目の 409 を確認する（結果は完了報告に記載）。

@@ -19,6 +19,7 @@ import {
 } from "./detail-ui";
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
+import { isLineWorksUrl } from "@/lib/candidate-mail/line-works-url";
 
 // AI読み取りの未保存バーに出す項目ラベル（BASIC_AI_KEYS と対応）。
 const BASIC_AI_LABELS: Record<string, string> = {
@@ -77,6 +78,7 @@ export default function BasicInfoTab({
     emergencyContactName: employee.emergencyContactName ?? "",
     emergencyContactRelation: employee.emergencyContactRelation ?? "",
     emergencyContactPhone: employee.emergencyContactPhone ?? "",
+    lineWorksUrl: employee.lineWorksUrl ?? "", // T-207
   };
   const [form, setForm] = useState(initial);
   // 「住所表示」ボタン結果の候補（複数件時の選択肢）。ボタンでしか設定されないため onFocus/onChange 上書きは起きない。
@@ -264,6 +266,22 @@ export default function BasicInfoTab({
           <FormField label="電話番号">
             <TextInput value={form.emergencyContactPhone} onChange={set("emergencyContactPhone")} onBlur={blurSave("emergencyContactPhone")} />
           </FormField>
+        </div>
+      </div>
+
+      {/* T-207: 求職者向け「LINE登録案内」メールに差し込む LINE WORKS の友だち追加URL。QRコードはこのURLから自動で作るので画像の登録欄は無い。 */}
+      <div className="mt-5">
+        <BlockTitle>LINE WORKS</BlockTitle>
+        <div className="grid grid-cols-4 gap-x-6 gap-y-3">
+          <div className="col-span-2">
+            <FormField label="LINE WORKS のURL（友だち追加用）">
+              <TextInput value={form.lineWorksUrl} onChange={set("lineWorksUrl")} onBlur={blurSave("lineWorksUrl")} placeholder="例: https://works.do/R/ti/p/xxxx@bizstudio" />
+            </FormField>
+            {form.lineWorksUrl.trim() && !isLineWorksUrl(form.lineWorksUrl) && (
+              <p className="mt-1 text-[11px] text-amber-600">https://works.do/ で始まるURLではありません。保存はできますが、求職者に送るLINE登録案内に使われるので確認してください。</p>
+            )}
+            <p className="mt-1 text-[10px] text-gray-400">求職者への「LINE登録案内」メールにURLとQRコードとして差し込まれます。</p>
+          </div>
         </div>
       </div>
     </div>

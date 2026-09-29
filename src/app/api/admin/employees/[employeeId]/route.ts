@@ -65,6 +65,7 @@ export async function GET(
       emergencyContactName: e.emergencyContactName,
       emergencyContactRelation: e.emergencyContactRelation,
       emergencyContactPhone: e.emergencyContactPhone,
+      lineWorksUrl: e.lineWorksUrl,
     },
     bankAccount: bankAccount
       ? {

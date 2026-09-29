@@ -22,6 +22,8 @@ import SuggestedTaskCard, {
 } from "@/components/common/SuggestedTaskCard";
 // T-183 Phase 2: 面談サポートタブ（記録一覧・閲覧・削除）。
 import InterviewSupportLogTab from "@/components/interview-support/InterviewSupportLogTab";
+// T-207: 求職者向け案内メール（LINE登録案内・あいさつメール）のボタン＋メニュー＋確認画面
+import CandidateContactMailButton from "@/components/candidates/CandidateContactMailButton";
 
 // 専用欄アップロード成功の中央通知の表示時間。既存トースト（約3秒）より長め＝
 // 「解析ボタンを押す」という次の操作に気づける時間を確保する。
@@ -1378,6 +1380,8 @@ export default function InterviewForm({
               面談準備
             </button>
           )}
+          {/* T-207: 案内メール（LINE登録案内・あいさつメール）。「面談準備」の隣。ボタン・メニュー・確認画面は CandidateContactMailButton 内 */}
+          <CandidateContactMailButton candidateId={candidateId} appearance="header" />
           {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） */}
           {SHOW_INTERVIEW_SUPPORT && (
             <button

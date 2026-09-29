@@ -149,6 +149,7 @@ model User {
   archivedCandidateFiles   CandidateFile[]           @relation("CandidateFileArchivedBy")
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
   interviewPrepRooms       InterviewPrepRoom[]       @relation("UserInterviewPrepRooms") // T-205
+  contactMailLogs          CandidateContactMailLog[] @relation("UserContactMailLogs") // T-207
   interviewPrepMessages    InterviewPrepMessage[]    @relation("UserInterviewPrepMessages") // T-205
   dailySchedules           DailySchedule[]
   googleCalendarConnection GoogleCalendarConnection?
@@ -230,6 +231,8 @@ model Employee {
   // T-066: 日報フォーマット分岐用。nullable で全既存社員に NULL を入れ非破壊追加。
   jobCategory            EmployeeJobCategory? @map("job_category")
   lineUserId             String?              @map("line_user_id") // LINE ユーザーID
+  // T-207: LINE WORKS の友だち追加URL（https://works.do/...）。求職者向け「LINE登録案内」メールの差し込みとQRコードの元。nullable で非破壊追加。
+  lineWorksUrl           String?              @map("line_works_url")
 
   // T-096: FileMaker 相当の社員詳細（基本情報）。全カラム nullable で非破壊追加。
   furigana                 String?
@@ -564,6 +567,7 @@ model Candidate {
   oneDriveFolderUrlLedger OneDriveFolderUrlLedger?
   advisorSessions        AdvisorChatSession[]
   interviewPrepRooms     InterviewPrepRoom[] // T-205
+  contactMailLogs        CandidateContactMailLog[] // T-207
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
   candidateJobResponses  CandidateJobResponse[]
@@ -3766,4 +3770,32 @@ model JobEvalRecord {
   @@index([status])
   @@index([ledgerId])
   @@map("job_eval_records")
+}
+
+// ========================================
+// T-207: 求職者向け案内メール（LINE登録案内・あいさつメール）の送信記録
+// ========================================
+// 面談記録画面の「案内メール」ボタンから Resend で送った1通につき1行。
+// 二重送信の防止（同じ求職者×同じ種類は resend=true でないと送らない）と「送信済み（日時）」表示の元。
+// 物理削除しない（追加のみ）。文面は src/lib/candidate-mail/templates.ts に固定で持ち DB には持たない。
+enum CandidateContactMailType {
+  LINE_GUIDE // LINE登録案内
+  GREETING   // あいさつメール
+}
+
+model CandidateContactMailLog {
+  id           String                   @id @default(cuid())
+  candidateId  String                   @map("candidate_id")
+  candidate    Candidate                @relation(fields: [candidateId], references: [id])
+  type         CandidateContactMailType
+  sentByUserId String                   @map("sent_by_user_id")
+  sentBy       User                     @relation("UserContactMailLogs", fields: [sentByUserId], references: [id])
+  toEmail      String                   @map("to_email") // 送った時点の求職者アドレス
+  fromEmail    String                   @map("from_email") // 送った時点の差出人アドレス（CA本人）
+  subject      String
+  messageId    String?                  @map("message_id") // Resend が返した id（本文が読めなかったときは null）
+  sentAt       DateTime                 @default(now()) @map("sent_at")
+
+  @@index([candidateId, type, sentAt])
+  @@map("candidate_contact_mail_logs")
 }

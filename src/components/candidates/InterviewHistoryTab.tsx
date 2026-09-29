@@ -5,6 +5,8 @@ import { toast, Toaster } from "sonner";
 import InterviewForm from "@/components/candidates/InterviewForm";
 // T-205: 面談準備チャット（右から開くパネル）。このタブは開閉の state だけを持つ。
 import InterviewPrepPanel from "@/components/candidates/InterviewPrepPanel";
+// T-207: 空状態にも「面談準備」の隣に「案内メール」を出す
+import CandidateContactMailButton from "@/components/candidates/CandidateContactMailButton";
 
 type InterviewRecord = {
   id: string;
@@ -267,6 +269,8 @@ export default function InterviewHistoryTab({
             >
               面談準備
             </button>
+            {/* T-207: 面談記録が無くても案内メールは送れる */}
+            <CandidateContactMailButton candidateId={candidateId} appearance="empty" />
           </div>
         </div>
       )}
