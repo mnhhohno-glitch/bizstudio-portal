@@ -5,6 +5,7 @@
 
 import QRCode from "qrcode";
 
+// 画像は 240px（表示は templates.ts の QR_DISPLAY_PX=120px）。高精細画面でもぼやけないよう2倍で作る。margin（余白）は読み取りのため削らない
 const QR_WIDTH_PX = 240;
 
 export async function buildQrPngBuffer(url: string): Promise<Buffer> {

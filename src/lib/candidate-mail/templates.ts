@@ -22,6 +22,9 @@ export const CONTACT_MAIL_LABELS: Record<ContactMailType, string> = {
 /** HTML の <img src="cid:..."> と Resend の attachments[].content_id で一致させる値。 */
 export const LINE_QR_CID = "line-works-qr";
 
+/** QRコードの表示幅（px）。画像は高精細画面向けに2倍（qr.ts の 240px）で作り、表示はこの大きさ。 */
+export const QR_DISPLAY_PX = 120;
+
 /** テキスト本文で 〔QR〕 の位置に置く注記（テキストのみのメーラー向け）。 */
 export const QR_TEXT_FALLBACK = "（QRコードは HTML 表示でご覧いただけます）";
 
@@ -132,7 +135,7 @@ export function buildContactMail(type: ContactMailType, vars: ContactMailVars): 
   const hasQr = t.body.includes("〔QR〕");
   const htmlLines = t.body.split("\n").map((line) => {
     if (line === "〔QR〕") {
-      return `<img src="cid:${LINE_QR_CID}" alt="LINE登録用QRコード" width="200" height="200" style="display:block;width:200px;height:200px;">`;
+      return `<img src="cid:${LINE_QR_CID}" alt="LINE登録用QRコード" width="${QR_DISPLAY_PX}" height="${QR_DISPLAY_PX}" style="display:block;width:${QR_DISPLAY_PX}px;height:${QR_DISPLAY_PX}px;">`;
     }
     if (line === "〔URL〕") {
       const e = escapeHtml(url);

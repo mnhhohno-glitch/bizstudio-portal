@@ -14,6 +14,7 @@ import { useOverlayClose } from "@/hooks/useOverlayClose";
 import {
   CONTACT_MAIL_LABELS,
   CONTACT_MAIL_TYPES,
+  QR_DISPLAY_PX,
   QR_TEXT_FALLBACK,
   type ContactMailType,
 } from "@/lib/candidate-mail/templates";
@@ -252,7 +253,7 @@ export default function CandidateContactMailButton({
               {preview.preview.text.split("\n").map((line, i) =>
                 line === QR_TEXT_FALLBACK && preview.preview.qrDataUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={i} src={preview.preview.qrDataUrl} alt="LINE登録用QRコード" width={160} height={160} className="block my-1" />
+                  <img key={i} src={preview.preview.qrDataUrl} alt="LINE登録用QRコード" width={QR_DISPLAY_PX} height={QR_DISPLAY_PX} className="block my-1" />
                 ) : (
                   <span key={i}>
                     {line}
