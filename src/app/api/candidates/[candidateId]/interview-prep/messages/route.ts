@@ -5,6 +5,10 @@
 //   step8: 整理は summary_json を formatPrepSummaryText で文章にしたもの（古い部屋は保存済みの文章）。
 // - 応答を流し終えてから CA の発言と AI の発言をまとめて保存する。途中で失敗したら両方とも保存しない
 //   （画面はエラーと「再送」を出し、再送で同じ質問を送り直す＝二重保存にならない）。
+// - T-208 step3（付録G）: body.interviewId（開いている面談記録）に台本の答え（interview_script_answers）があれば、
+//   答えのある項目だけを「【台本で分かったこと】」（1行「場面名: 値」・facts.ts）にして今回の質問の先頭にだけ付けて AI に送る。
+//   system と過去の履歴には入れない（キャッシュを壊さない）。保存する CA の発言は画面に打った文だけ（添えた部分は保存しない）。
+//   面談記録がこの求職者のものでない・答えが無いときは何も付けない。
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
@@ -20,8 +24,28 @@ import {
 import { sseResponse } from "@/lib/interview-prep/sse";
 import { normalizeResearch } from "@/lib/interview-prep/research-format";
 import { formatPrepSummaryText, normalizePrepSummary } from "@/lib/interview-prep/summary-format";
+import { formatScriptFacts, withScriptFacts } from "@/lib/interview-script/facts";
+import type { AnswerMap } from "@/lib/interview-script/types";
 
 const MAX_QUESTION_CHARS = 8000;
+
+/**
+ * 開いている面談記録の台本の答えから「【台本で分かったこと】」を作る。面談記録がこの求職者のものでない・答えが無ければ ""。
+ * 会社名は面談記録の職歴の行（order 順）から取る（台本の会社番号と同じ並び）。
+ */
+async function loadScriptFacts(candidateId: string, interviewId: string | null): Promise<string> {
+  if (!interviewId) return "";
+  const record = await prisma.interviewRecord.findFirst({
+    where: { id: interviewId, candidateId },
+    select: {
+      scriptAnswers: { select: { answers: true } },
+      workHistories: { orderBy: { order: "asc" }, select: { companyName: true } },
+    },
+  });
+  const answers = record?.scriptAnswers?.answers;
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) return "";
+  return formatScriptFacts(answers as AnswerMap, record!.workHistories.map((w) => w.companyName ?? ""));
+}
 
 export async function POST(
   req: Request,
@@ -34,8 +58,9 @@ export async function POST(
   }
 
   const { candidateId } = await params;
-  const body = (await req.json().catch(() => ({}))) as { content?: string };
+  const body = (await req.json().catch(() => ({}))) as { content?: string; interviewId?: string | null };
   const question = (body.content ?? "").trim();
+  const interviewId = typeof body.interviewId === "string" && body.interviewId ? body.interviewId : null;
   if (!question) return NextResponse.json({ error: "メッセージが空です" }, { status: 400 });
   if (question.length > MAX_QUESTION_CHARS) {
     return NextResponse.json({ error: "メッセージが長すぎます" }, { status: 400 });
@@ -65,7 +90,9 @@ export async function POST(
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
   const system = buildPrepSystem(room.resumeText, normalizeResearch(room.researchJson));
-  const messages = buildChatMessages(summary, history, question);
+  // T-208 step3: 台本の答えは今回の質問の先頭にだけ付ける（保存は question のまま）
+  const scriptFacts = await loadScriptFacts(candidateId, interviewId);
+  const messages = buildChatMessages(summary, history, withScriptFacts(question, scriptFacts));
   const roomId = room.id;
   const askedAt = new Date();
   const startedAt = Date.now();
@@ -92,7 +119,7 @@ export async function POST(
       });
       const u = final.usage;
       console.log(
-        `[interview-prep chat] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs}`,
+        `[interview-prep chat] input=${u.input_tokens} output=${u.output_tokens} cache_create=${u.cache_creation_input_tokens} cache_read=${u.cache_read_input_tokens} latency_ms=${latencyMs} script_facts=${scriptFacts ? "yes" : "no"}`,
       );
       if (!text.trim()) {
         send({ error: "応答が空でした。もう一度お試しください。" });

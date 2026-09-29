@@ -16,6 +16,7 @@ import {
   expandScenes,
   firstIndexOfPart,
   isLastOfPart,
+  prepQuestionsForScene,
   readMeta,
   renderScene,
   resolveNextKey,
@@ -36,6 +37,8 @@ export type ScriptProposal = { value: string };
 
 type Props = {
   candidateId: string;
+  /** T-208 step3: 開いている面談記録（右のチャットが台本の答えを添えるために API へ渡す） */
+  interviewId: string;
   candidate: { name: string; email: string | null } | null;
   form: AnyRecord;
   detail: AnyRecord;
@@ -97,6 +100,7 @@ function Paragraphs({ text }: { text: string }) {
 
 export default function InterviewScriptMode({
   candidateId,
+  interviewId,
   candidate,
   form,
   detail,
@@ -262,6 +266,8 @@ export default function InterviewScriptMode({
   }
 
   const company = rs?.companyIndex != null ? ctx.companies[rs.companyIndex] : undefined;
+  // T-208 step3: この場面に出す面談準備の質問（会社ごと／全体の振り分けは runtime の prepQuestionsForScene 1か所）
+  const scenePrepQuestions = rs ? prepQuestionsForScene(ctx, rs) : [];
   const allPlaceholder = ctx.companies.length > 0 && ctx.companies.every((c) => c.placeholder);
   const prepCompanyNames = ctx.companies.filter((c) => c.placeholder && c.name).map((c) => c.name);
 
@@ -416,13 +422,19 @@ export default function InterviewScriptMode({
                   <p style={{ fontSize: 13, color: "var(--im-fg2)", marginBottom: 8 }}>{say}</p>
                   {ctx.prepQuestions.length === 0 ? (
                     <p style={{ fontSize: 12, color: "var(--im-fg3)" }}>面談準備の整理がまだありません（右の面談準備で「面談準備を作る」）。</p>
+                  ) : scenePrepQuestions.length === 0 ? (
+                    <p style={{ fontSize: 12, color: "var(--im-fg3)" }}>この場面に出す質問はありません（会社ごとの場面で出しました）。</p>
                   ) : (
                     <ol className="space-y-2" style={{ paddingLeft: 0, listStyle: "none" }}>
-                      {ctx.prepQuestions.map((q, i) => (
-                        <li key={i} className="rounded-md px-3 py-2" style={{ border: "0.5px solid var(--im-bdr)", opacity: q.asked ? 0.55 : 1, background: "var(--im-bg)" }}>
+                      {/* T-208 step3: Q番号は整理の番号（右の面談準備と同じ）。会社ごとの場面は食い違いを先に */}
+                      {scenePrepQuestions.map((q) => (
+                        <li key={q.index} className="rounded-md px-3 py-2" style={{ border: "0.5px solid var(--im-bdr)", opacity: q.asked ? 0.55 : 1, background: "var(--im-bg)" }}>
                           <div className="flex items-start gap-2">
-                            <span style={{ fontSize: 11, color: "var(--im-fg3)", marginTop: 3 }}>Q{i + 1}</span>
+                            <span style={{ fontSize: 11, color: "var(--im-fg3)", marginTop: 3 }}>Q{q.index + 1}</span>
                             {q.mismatch && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#fef3c7", color: "#92400e", marginTop: 3 }}>食い違い</span>}
+                            {rs.companyIndex == null && q.company !== "全体" && (
+                              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "var(--im-bg2)", color: "var(--im-fg2)", marginTop: 3 }}>{q.company}</span>
+                            )}
                             <span className="flex-1" style={{ fontSize: 14, lineHeight: 1.7 }}>{q.question}</span>
                             {q.asked && <span style={{ fontSize: 11, color: "var(--im-fg-ok)" }}>✓ 聞いた</span>}
                           </div>
@@ -613,7 +625,7 @@ export default function InterviewScriptMode({
             ))}
           </div>
           <div className="flex-1 min-h-0" style={{ display: rightTab === "prep" ? "block" : "none" }}>
-            <InterviewPrepPanel candidateId={candidateId} open onClose={() => {}} embedded />
+            <InterviewPrepPanel candidateId={candidateId} interviewId={interviewId} open onClose={() => {}} embedded />
           </div>
           {rightTab === "inputs" && <div className="flex-1 min-h-0 overflow-hidden">{inputsTab}</div>}
         </div>

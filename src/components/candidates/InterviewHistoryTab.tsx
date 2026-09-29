@@ -275,7 +275,8 @@ export default function InterviewHistoryTab({
         </div>
       )}
 
-      <InterviewPrepPanel candidateId={candidateId} open={prepOpen} onClose={() => setPrepOpen(false)} />
+      {/* T-208 step3: 開いている面談記録の台本の答えをチャットに添えるため、選択中の面談記録IDを渡す */}
+      <InterviewPrepPanel candidateId={candidateId} interviewId={selectedId} open={prepOpen} onClose={() => setPrepOpen(false)} />
     </div>
   );
 }

@@ -1703,6 +1703,7 @@ export default function InterviewForm({
       {scriptMode ? (
         <InterviewScriptMode
           candidateId={candidateId}
+          interviewId={interviewId}
           candidate={candidate ? { name: candidate.name, email: candidate.email } : null}
           form={form}
           detail={detail}

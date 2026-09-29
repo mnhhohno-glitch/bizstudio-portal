@@ -4,6 +4,7 @@
 // - deriveValues / deriveFlags: 答えから決まる差し込み（〔内容〕〔時期の目安〕…）と条件（line / mail / hurry …）
 // - sceneWrites: 1つの場面の答えから「どの欄に何を入れるか」を作る（メモ欄は場面ごとに1つの文にまとめる）
 
+import { PREP_QUESTION_ALL, questionsForCompany, questionsUnassigned } from "@/lib/interview-prep/summary-format";
 import { fieldPath } from "./apply";
 import {
   calcSalary,
@@ -58,7 +59,8 @@ export type WorkHistoryLike = {
 export type PrepSummaryLike = {
   timeline?: Array<{ period: string; title: string; detail: string }>;
   works?: Array<{ company: string }>;
-  questions?: Array<{ question: string; why: string; mismatch: boolean }>;
+  /** company は T-208 step3 で足した項目。無い古い整理は「全体」扱い */
+  questions?: Array<{ question: string; why: string; mismatch: boolean; company?: string }>;
 } | null;
 
 export type BuildContextInput = {
@@ -126,10 +128,13 @@ export function buildContext(input: BuildContextInput): ScriptContext {
 
   const asked = input.askedQuestions ?? {};
   const prepQuestions: PrepQuestionView[] = (input.prepSummary?.questions ?? []).map((q, i) => ({
+    index: i,
     question: q.question,
     why: q.why,
     mismatch: q.mismatch,
     asked: !!asked[String(i)],
+    // T-208 step3: company が無い古い整理は「全体」
+    company: (q.company ?? "").trim() || PREP_QUESTION_ALL,
   }));
 
   const email = (input.candidateEmail ?? "").trim();
@@ -151,6 +156,26 @@ export function buildContext(input: BuildContextInput): ScriptContext {
   };
 }
 
+/**
+ * T-208 step3（付録H）: 「面談準備の質問」の場面に出す質問。
+ * - 会社ごとの場面（companyIndex あり）: その会社に関わる質問（食い違いを先に）。会社名の突き合わせは normalizeCompanyKey と同じそろえ方
+ * - 全体の場面: どの会社にも当たらない質問と「全体」の質問（元の順のまま＝今までどおり）
+ */
+export function prepQuestionsForScene(ctx: ScriptContext, rs: RuntimeScene): PrepQuestionView[] {
+  if (rs.scene.kind !== "prep-questions") return [];
+  if (rs.companyIndex != null) {
+    const name = ctx.companies[rs.companyIndex]?.name ?? "";
+    return questionsForCompany(ctx.prepQuestions, name).map((h) => h.question);
+  }
+  return questionsUnassigned(ctx.prepQuestions, ctx.companies.map((c) => c.name)).map((h) => h.question);
+}
+
+/** 会社ごとの「面談準備の質問」の場面を出すか（その会社に関わる質問が1つ以上あるとき） */
+export function hasPrepQuestionsForCompany(ctx: ScriptContext, companyIndex: number): boolean {
+  const name = ctx.companies[companyIndex]?.name ?? "";
+  return questionsForCompany(ctx.prepQuestions, name).length > 0;
+}
+
 /* ---------- 場面の展開 ---------- */
 
 export function sceneKeyOf(scene: ScriptScene, companyIndex?: number): string {
@@ -162,7 +187,10 @@ export function expandScenes(ctx: ScriptContext, answers: AnswerMap): RuntimeSce
   for (const scene of SCRIPT_SCENES) {
     if (scene.when && !scene.when(ctx, answers)) continue;
     if (scene.repeat === "company") {
-      ctx.companies.forEach((c) => out.push({ key: sceneKeyOf(scene, c.index), scene, companyIndex: c.index }));
+      ctx.companies.forEach((c) => {
+        if (scene.whenCompany && !scene.whenCompany(ctx, c.index, answers)) return;
+        out.push({ key: sceneKeyOf(scene, c.index), scene, companyIndex: c.index });
+      });
     } else {
       out.push({ key: scene.id, scene });
     }

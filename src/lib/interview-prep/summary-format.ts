@@ -7,6 +7,9 @@
 //   決定的な処理だけで組み立てる（同じ JSON なら毎回同じ byte になる＝プロンプトキャッシュが効く・罠#39）。
 // - asked_questions（聞いた質問）: 質問の番号（questions の添字）ごとに聞いた日時と userId を持つ。
 //   toggleAskedQuestion は純粋関数（API とAIなしの確認スクリプトで共有）。
+// - T-208 step3（付録H）: questions の各要素に company（関わる会社の名前・works の company と同じ書き方・無ければ「全体」）。
+//   会社名のそろえ方は normalizeCompanyKey 1か所（整理の検証と、台本の会社ごとの差し込みの両方で使う）。
+//   company が無い古い整理は normalizePrepSummary ですべて「全体」になる。
 
 export const EMPLOYMENT_STATUSES = ["在職中", "離職中", "不明"] as const;
 export type EmploymentStatus = (typeof EMPLOYMENT_STATUSES)[number];
@@ -18,7 +21,8 @@ export type CareerTypeChoice = (typeof CAREER_TYPE_CHOICES)[number];
 export type PrepTimelineItem = { period: string; title: string; detail: string; fromResearch: boolean };
 export type PrepWorkItem = { term: string; meaning: string };
 export type PrepWork = { company: string; items: PrepWorkItem[] };
-export type PrepQuestion = { question: string; why: string; reveals: string; mismatch: boolean };
+/** T-208 step3: company は works の company と同じ書き方の会社名。特定の会社に関わらなければ「全体」（PREP_QUESTION_ALL） */
+export type PrepQuestion = { question: string; why: string; reveals: string; mismatch: boolean; company: string };
 export type PrepStrength = { strength: string; basis: string; fromSelfPr: boolean };
 export type PrepGlossaryItem = { term: string; meaning: string };
 
@@ -41,6 +45,72 @@ export type PrepSummary = {
 export type AskedQuestions = Record<string, { askedAt: string; userId: string }>;
 
 export const SUMMARY_TOOL_NAME = "save_prep_summary";
+
+/** 特定の会社に関わらない質問の company の値（T-208 step3・付録H）。company が無い古い整理もこれになる。 */
+export const PREP_QUESTION_ALL = "全体";
+
+/**
+ * 会社名を突き合わせ用にそろえる（付録H）: 全角半角（NFKC）・空白・「株式会社」「（株）」「(株)」「㈱」を取り、小文字にする。
+ * 整理の検証・台本の会社ごとの差し込みの両方でこの1つを使う。
+ */
+export function normalizeCompanyKey(name: string): string {
+  return name
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/株式会社|\(株\)|（株）|㈱/g, "")
+    .toLowerCase();
+}
+
+/** 2つの会社名が同じ会社を指すか（そろえた上で比べる。どちらかが空なら false） */
+export function companyMatches(a: string, b: string): boolean {
+  const ka = normalizeCompanyKey(a);
+  const kb = normalizeCompanyKey(b);
+  return ka !== "" && ka === kb;
+}
+
+/**
+ * questions の company を works の会社名にそろえる。どの会社にも一致しなければ「全体」。
+ * 一致した場合は works 側の書き方に置き換える（表記ゆれを吸収）。
+ */
+export function resolveQuestionCompany(company: string | null | undefined, works: ReadonlyArray<{ company: string }>): string {
+  const raw = (company ?? "").trim();
+  if (!raw || raw === PREP_QUESTION_ALL) return PREP_QUESTION_ALL;
+  const hit = works.find((w) => companyMatches(w.company, raw));
+  return hit ? hit.company : PREP_QUESTION_ALL;
+}
+
+/** 質問に元の添字（asked_questions のキー・Q番号）を付けたもの */
+export type IndexedPrepQuestion<Q = PrepQuestion> = { index: number; question: Q };
+
+/**
+ * ある会社に関わる質問（食い違い＝mismatch を先に、あとは元の順）。台本の経歴確認の会社ごとの場面に出す（付録H）。
+ * 純粋関数。company が無い古い整理は「全体」扱いなので、どの会社にも当たらない。
+ */
+export function questionsForCompany<Q extends { mismatch: boolean; company?: string }>(
+  questions: ReadonlyArray<Q>,
+  companyName: string,
+): IndexedPrepQuestion<Q>[] {
+  const hits = questions
+    .map((question, index) => ({ index, question }))
+    .filter(({ question }) => companyMatches(question.company ?? "", companyName));
+  return [...hits.filter((h) => h.question.mismatch), ...hits.filter((h) => !h.question.mismatch)];
+}
+
+/**
+ * どの会社にも当たらない質問と「全体」の質問（元の順のまま）。経歴確認の最後にまとめて出す（今までどおり）。
+ */
+export function questionsUnassigned<Q extends { company?: string }>(
+  questions: ReadonlyArray<Q>,
+  companyNames: ReadonlyArray<string>,
+): IndexedPrepQuestion<Q>[] {
+  return questions
+    .map((question, index) => ({ index, question }))
+    .filter(({ question }) => {
+      const c = (question.company ?? "").trim();
+      if (!c || c === PREP_QUESTION_ALL) return true;
+      return !companyNames.some((name) => companyMatches(name, c));
+    });
+}
 
 const MAX_TEXT = 1000;
 const MAX_LIST = 30;
@@ -98,8 +168,9 @@ export const SUMMARY_TOOL_INPUT_SCHEMA = {
           why: { type: "string" },
           reveals: { type: "string" },
           mismatch: { type: "boolean" },
+          company: { type: "string", description: "関わる会社の名前（works の company と同じ書き方）。特定の会社に関わらなければ「全体」" },
         },
-        required: ["question", "why", "reveals", "mismatch"],
+        required: ["question", "why", "reveals", "mismatch", "company"],
       },
     },
     strengths: {
@@ -232,7 +303,9 @@ export function normalizePrepSummary(raw: unknown): PrepSummary | null {
       const reveals = text(q.reveals, true);
       const mismatch = bool(q.mismatch ?? false);
       if (!question || why === null || reveals === null || mismatch === null) return null;
-      return { question, why, reveals, mismatch };
+      // T-208 step3: company は works の会社名にそろえる。無い（古い整理）・一致しない → 「全体」
+      const company = resolveQuestionCompany(typeof q.company === "string" ? q.company : "", works);
+      return { question, why, reveals, mismatch, company };
     },
     MAX_QUESTIONS,
   );
@@ -325,7 +398,9 @@ export function formatPrepSummaryText(s: PrepSummary): string {
 
   lines.push("### 面談での質問アドバイス");
   s.questions.forEach((q, i) => {
-    lines.push(`${i + 1}. ${q.question}${q.mismatch ? "（レジュメの食い違い）" : ""}`);
+    // T-208 step3: 会社に関わる質問だけ会社名を添える（「全体」は付けない＝古い整理の文章は byte が変わらない）
+    const company = q.company && q.company !== PREP_QUESTION_ALL ? `［${q.company}］` : "";
+    lines.push(`${i + 1}. ${q.question}${q.mismatch ? "（レジュメの食い違い）" : ""}${company}`);
     lines.push(`   - なぜ聞くか: ${q.why}`);
     lines.push(`   - 答えで分かること: ${q.reveals}`);
   });

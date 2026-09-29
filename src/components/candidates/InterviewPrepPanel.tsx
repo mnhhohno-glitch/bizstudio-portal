@@ -9,12 +9,15 @@
 // - step8: 最初の整理は決まった項目（summary_json）で受け取り、カード（InterviewPrepSummaryCards）に組み立てて一度に表示する。
 //   質問には「聞いた」ボタン（asked_questions に保存）。summary_json が無い古い部屋は今までの文章表示のまま。
 //   CA の質問への回答は今までどおり文章のストリーミング。
+// - T-208 step3（付録G）: 入力欄の上に「よく使う質問」5つ（quick-questions.ts）。fill は入力欄に文を入れて〔　〕を選んだ状態にし、send はすぐ送る。
+//   props.interviewId（開いている面談記録）を質問と一緒に API へ渡す（台本の答えがあれば API が先頭に添える。保存は打った文だけ）。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { isOldPrepFormat } from "@/lib/interview-prep/format";
 import { researchSources, type ResearchResult } from "@/lib/interview-prep/research-format";
 import type { AskedQuestions, PrepSummary } from "@/lib/interview-prep/summary-format";
+import { QUICK_QUESTIONS, blankRangeOf, type QuickQuestion } from "@/lib/interview-prep/quick-questions";
 import InterviewPrepSummaryCards from "./InterviewPrepSummaryCards";
 
 type PrepMessage = {
@@ -56,6 +59,8 @@ type SummaryView = {
 
 type Props = {
   candidateId: string;
+  /** T-208 step3: 開いている面談記録。台本の答えがあれば API がチャットの質問に「【台本で分かったこと】」を添える（無ければ何も付けない） */
+  interviewId?: string | null;
   open: boolean;
   onClose: () => void;
   /** T-208: 台本モードの右側に埋め込む（portal・固定配置・×・広げる・Esc を使わず、親の枠いっぱいに出す）。中身は同じ */
@@ -109,10 +114,13 @@ async function readSse(
 // 文字の読みやすさ（T-205 step3）: 本文 15px・行間 1.9 / 見出し 16px 太字・上 20px / 箇条書きの間 6px
 const HEADING_CLASS = "font-bold text-[16px] mt-5 first:mt-0 mb-2";
 
-function OldFormatNotice() {
+/** 古い整理の案内。カード表示の部屋（summary_json あり）は T-208 step3 の会社ごとの振り分けの案内、文章表示の部屋はカード表示の案内 */
+function OldFormatNotice({ hasCards }: { hasCards: boolean }) {
   return (
     <p className="text-[12px] text-amber-700">
-      表示が新しくなりました。「作り直す」を押すとカード表示になります。
+      {hasCards
+        ? "「作り直す」と、面談で聞くことが会社ごとに振り分けられます。"
+        : "表示が新しくなりました。「作り直す」を押すとカード表示になります。"}
     </p>
   );
 }
@@ -210,7 +218,7 @@ function BlinkCursor() {
   return <span className="inline-block w-[2px] h-[1em] align-text-bottom bg-gray-700 animate-pulse ml-0.5" />;
 }
 
-export default function InterviewPrepPanel({ candidateId, open, onClose, embedded = false }: Props) {
+export default function InterviewPrepPanel({ candidateId, interviewId = null, open, onClose, embedded = false }: Props) {
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState<PrepState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -504,7 +512,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
         const res = await fetch(`/api/candidates/${candidateId}/interview-prep/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: q }),
+          // T-208 step3: 開いている面談記録を渡す（台本の答えがあれば API が質問の先頭に添える。保存は打った文だけ）
+          body: JSON.stringify({ content: q, interviewId }),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -542,7 +551,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
         setStreamAnswer("");
       }
     },
-    [candidateId, sending, summarizing, fetchState],
+    [candidateId, interviewId, sending, summarizing, fetchState],
   );
 
   const handleSend = () => {
@@ -572,6 +581,27 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(Math.max(el.scrollHeight, TEXTAREA_MIN_PX), TEXTAREA_MAX_PX)}px`;
+  };
+
+  // T-208 step3（付録G）: 「よく使う質問」のボタン。fill は入力欄に文を入れて〔　〕を選んだ状態にする（値が描画されてから選択する）。send はすぐ送る
+  const pendingSelectRef = useRef<{ start: number; end: number } | null>(null);
+  useEffect(() => {
+    const range = pendingSelectRef.current;
+    const el = textareaRef.current;
+    if (!range || !el) return;
+    pendingSelectRef.current = null;
+    resizeTextarea();
+    el.focus();
+    el.setSelectionRange(range.start, range.end);
+  }, [input]);
+  const handleQuickQuestion = (q: QuickQuestion) => {
+    if (summarizing || sending) return;
+    if (q.kind === "send") {
+      void runChat(q.text);
+      return;
+    }
+    pendingSelectRef.current = blankRangeOf(q.text);
+    setInput(q.text);
   };
 
   if (!open || !mounted) return null;
@@ -659,7 +689,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
             {careerBadge}
             {oldFormat && (
               <span className="min-w-0">
-                <OldFormatNotice />
+                <OldFormatNotice hasCards={!!summary?.json} />
               </span>
             )}
             <button
@@ -800,6 +830,21 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
       {hasRoom && (
         <div className="border-t border-gray-200 px-5 py-4 shrink-0 bg-white">
           <div className="max-w-[760px] mx-auto">
+            {/* T-208 step3（付録G）: よく使う質問（横のパネルでも台本モードの右側でも同じ。送信中・整理中は押せない） */}
+            <div className="flex flex-wrap gap-1.5 mb-2" aria-label="よく使う質問">
+              {QUICK_QUESTIONS.map((q) => (
+                <button
+                  key={q.key}
+                  type="button"
+                  onClick={() => handleQuickQuestion(q)}
+                  disabled={busy}
+                  title={q.kind === "send" ? "押すとすぐ送ります" : "入力欄に入れます（〔　〕を打ち替えてから送る）"}
+                  className="px-2.5 py-1 rounded-full text-[12px] border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
             <div className="rounded-2xl border border-gray-300 shadow-sm focus-within:border-blue-400 px-4 pt-3 pb-2">
               <textarea
                 ref={textareaRef}

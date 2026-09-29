@@ -1,10 +1,12 @@
 // T-208 step2: 初回面談の台本 v1（docs/interview-script/initial-interview-script.md を元に、付録A〜F を反映）。
 // - ボタンの保存する値は入力画面の選択肢そのもの（field-options.ts）。表示名の（ ）は説明で、値には含めない。
 // - 拾う一言は台本の文をそのまま使う。付録A の割り当てで複数のボタンが同じ文を使うことがある。
-// - 付録G（チャットのボタン）と付録H（質問の会社ごとの振り分け）は作らない。面談準備の質問は経歴確認の最後に「全体」で出す。
+// - 付録H（質問の会社ごとの振り分け）は T-208 step3 で反映: 会社ごとの場面「s5-wh-prep-questions」（その会社の質問があるときだけ）
+//   ＋ 経歴確認の最後の「面談準備の質問（全体）」（どの会社にも当たらない質問と「全体」）。付録G（チャットのボタン）は InterviewPrepPanel 側。
 // - 台本に書いてあるが作らないもの: 職種の「提案候補」（職種提案パターン集は T-206 の後に作り直す決まり）。
 
 import { getSmallOptions } from "@/constants/resign-reason-hierarchy";
+import { questionsForCompany } from "@/lib/interview-prep/summary-format";
 import {
   calcSalary,
   formatHours,
@@ -543,6 +545,16 @@ export const SCRIPT_SCENES: ScriptScene[] = [
     targetsHint: "職務経歴（職種の下のテキスト欄。見出し付き）",
   },
   {
+    // T-208 step3（付録H）: その会社に関わる面談準備の質問（company が一致するもの・食い違いを先に）。質問が無い会社では出さない
+    id: "s5-wh-prep-questions",
+    part: "p5",
+    title: "職歴：面談準備の質問（この会社）",
+    repeat: "company",
+    kind: "prep-questions",
+    say: "面談準備の「面談で聞くこと」のうち、この会社に関わるものをここで聞く（食い違いを先に）。聞いた質問は右の面談準備で「聞いた」を付ける。",
+    whenCompany: (ctx, companyIndex) => questionsForCompany(ctx.prepQuestions, ctx.companies[companyIndex]?.name ?? "").length > 0,
+  },
+  {
     id: "s5-wh-reason",
     part: "p5",
     title: "職歴：退職理由",
@@ -582,7 +594,8 @@ export const SCRIPT_SCENES: ScriptScene[] = [
     part: "p5",
     title: "面談準備の質問（全体）",
     kind: "prep-questions",
-    say: "面談準備の「面談で聞くこと」を、ここでまとめて聞く（食い違いを先に）。聞いた質問は右の面談準備で「聞いた」を付ける。",
+    // T-208 step3: 会社ごとの場面に出した質問は除き、どの会社にも当たらない質問と「全体」の質問をここにまとめる
+    say: "面談準備の「面談で聞くこと」のうち、どの会社にも当たらない質問と「全体」の質問を、ここでまとめて聞く。聞いた質問は右の面談準備で「聞いた」を付ける。",
   },
 
   /* ===== 6. 希望条件 ===== */

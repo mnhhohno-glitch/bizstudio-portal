@@ -1459,12 +1459,12 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 
 ## 初回面談の台本モード（T-208 step2, master, 2026-09-30）
 
-初回面談で CA が台本を読みながら相手の答えのボタンを押すと、拾う一言が出て、面談記録の欄に自動で入る。台本の中身は `docs/interview-script/initial-interview-script.md`（付録 A〜F を本文より優先。付録 G（チャットのボタン）・H（質問の会社ごとの振り分け）は未実装）、欄との対応は `docs/survey_T-208_script-form-mapping.md`。AI の指示・送る中身は変えていない（面談準備チャットは右側に埋め込むだけ）。追加のみの改修。
+初回面談で CA が台本を読みながら相手の答えのボタンを押すと、拾う一言が出て、面談記録の欄に自動で入る。台本の中身は `docs/interview-script/initial-interview-script.md`（付録 A〜F を本文より優先。付録 G（チャットのボタン）・H（質問の会社ごとの振り分け）は step3 で反映）、欄との対応は `docs/survey_T-208_script-form-mapping.md`。AI の指示・送る中身は変えていない（面談準備チャットは右側に埋め込むだけ）。追加のみの改修。
 
 ### 台本の定義の場所（`src/lib/interview-script/`・すべて純粋関数・AI と DB を使わない）
 | ファイル | 中身 |
 |--|--|
-| `script-v1.ts` | 台本 v1（`SCRIPT_VERSION="v1"`）。7パート `SCRIPT_PARTS`・40場面 `SCRIPT_SCENES`（うち3場面は会社ごとにくり返し）・ボタン149・入力46。拾う一言・分岐（`when` / ボタンの `next`）・入れ先（`FieldTarget`）・自動で決まる書き込み `derivedWrites`（残業の数字→選択肢、日時→「設定済」）。退職理由の大・中と小分類の候補は `RESIGN_REASON_BUTTONS`（付録E・文字列は `resign-reason-hierarchy.ts` の実際の値）。Word/PowerPoint は `WORD_PPT_BUTTONS`、転勤は `TRANSFER_BUTTONS`（付録B） |
+| `script-v1.ts` | 台本 v1（`SCRIPT_VERSION="v1"`）。7パート `SCRIPT_PARTS`・41場面 `SCRIPT_SCENES`（うち4場面は会社ごとにくり返し。step3 で `s5-wh-prep-questions` を追加）・ボタン149・入力46。拾う一言・分岐（`when` / ボタンの `next`）・入れ先（`FieldTarget`）・自動で決まる書き込み `derivedWrites`（残業の数字→選択肢、日時→「設定済」）。退職理由の大・中と小分類の候補は `RESIGN_REASON_BUTTONS`（付録E・文字列は `resign-reason-hierarchy.ts` の実際の値）。Word/PowerPoint は `WORD_PPT_BUTTONS`、転勤は `TRANSFER_BUTTONS`（付録B） |
 | `field-options.ts` | 入力画面の選択肢（`InterviewForm.tsx` の `<select>` もここを import）。付録C で足した「取得(AT限定)」「45時間超も可」を含む。`DETAIL_SELECT_OPTIONS` は欄→選択肢の表（確認スクリプトが値の実在を確かめる） |
 | `calc.ts` | 自動計算: 月給＝（賞与込み年収−賞与年額）÷12・手取り＝×0.8／残業 1日↔月 ×20 ÷20／`overtimeOptionFor`（0→絶対不可…46以上→45時間超も可）／`nextInterviewGuide`（急ぎ＝すぐにでも・3カ月以内・半年以内。時期の目安は付録A の置き直し）／`scheduleOutlook`（内定＝次回面談+1〜2ヶ月、入社＝内定+退職までの月数〔不明 1〜2、離職中 1〕） |
 | `render.ts` | 差し込み〔氏名〕〔CA名〕〔CA姓〕〔時刻〕〔直近の会社〕〔学校名〕〔学部学科〕〔卒業年〕〔会社名〕〔入社年月〕〔仕事内容〕〔頭の文字〕と、`{{if:条件}}…{{else}}…{{/if}}`（入れ子可）。値が無いときは台本の代わりの言い方（例: 会社名が無い→「現在は、お仕事をされていますか？」、時刻が無い→「本日〇時から」を省く） |
@@ -1495,3 +1495,32 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - 働き方のチェックは「無ければ付ける」。外すのは台本が付けたもの（applied="1"）だけ。
 - 反映は画面の state（`setDetailState` / `setWorkHistories`）に対して行い、既存の自動保存（3秒・`buildAutosaveBody`）で保存する。数値の欄（社数・年収）は Number、日付の欄（退職日・次回面談日）は `normalizeDate`（月入力 "YYYY-MM" は 1 日に寄せる）。
 - 確認: `npx tsx scripts/verify/interview-script-check.ts`（値の実在・自動計算・入れ方の決まり・場面→書き込み・差し込み。AI/DB なし）。
+
+### T-208 step3（2026-09-30）: 面談準備の質問を会社ごとに振り分け（付録H）・チャットの「よく使う質問」（付録G）・台本の答えをチャットに添える
+
+AI の指示（SKILL.md）と AI に送る中身を変えたので staging で確かめてから master に反映した。
+
+**整理の questions に company（付録H）**
+- `PrepQuestion` に `company: string`（関わる会社の名前・`works` の company と同じ書き方・特定の会社に関わらなければ「全体」＝`PREP_QUESTION_ALL`）。ツール `save_prep_summary` の入力の形（`SUMMARY_TOOL_INPUT_SCHEMA`・required）と SKILL.md の「questions:」の説明に追加。
+- 検証（`normalizePrepSummary`）: company が `works` のどの会社名とも一致しなければ「全体」に直す。一致すれば `works` 側の書き方に置き換える（表記ゆれ吸収）。**company が無い古い整理はすべて「全体」**（GET も `normalizePrepSummary` を通すので画面・台本とも古い部屋は「全体」）。
+- 会社名のそろえ方は `summary-format.ts` の `normalizeCompanyKey` **1か所**（NFKC で全角半角・空白を取る・「株式会社」「（株）」「(株)」「㈱」を取る・小文字）。`companyMatches` / `resolveQuestionCompany` / `questionsForCompany`（食い違い＝mismatch を先に・元の添字つき）/ `questionsUnassigned`（どの会社にも当たらない＋「全体」・元の順）も同じファイル（純粋関数・画面と台本と確認スクリプトで共有）。
+- 会話履歴の整理の文章（`formatPrepSummaryText`）は、会社ありの質問だけ末尾に「［会社名］」を添える。「全体」には何も付けない＝**古い整理の文章は byte が変わらない**（キャッシュを壊さない）。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を `2026-09-30T08:50:00+09:00` に更新。それより前のカード表示の部屋には上部バーに「「作り直す」と、面談で聞くことが会社ごとに振り分けられます。」（文章表示の古い部屋は従来の「カード表示になります」）。
+- カード「面談で聞くこと」の各質問に会社名の小さな札（「全体」は出さない）。
+
+**台本の経歴確認に会社ごとに差し込む（`script-v1.ts`・`runtime.ts`）**
+- 新しい場面 `s5-wh-prep-questions`（part p5・`repeat: "company"`・`kind: "prep-questions"`・題「職歴：面談準備の質問（この会社）」）を「仕事の中身・立場と数字」の後・「退職理由」の前に置いた（台本の 5.）。**その会社に関わる質問が無い会社では出さない**（`ScriptScene.whenCompany`＝会社ごとにくり返す場面の会社単位の出し分け。`expandScenes` で判定）。
+- 経歴確認の最後の「面談準備の質問（全体）」は残し、どの会社にも当たらない質問と「全体」の質問だけをまとめて出す（今までどおり元の順）。
+- どの質問をどの場面に出すかは `runtime.ts` の `prepQuestionsForScene(ctx, rs)` **1か所**（会社ごと＝`questionsForCompany(ctx.prepQuestions, 会社名)`・全体＝`questionsUnassigned`）。会社の突き合わせは職歴の行の `companyName`（無ければ整理から作った仮の会社名）と質問の company を `normalizeCompanyKey` で比べる。
+- `PrepQuestionView` に `index`（整理の添字＝Q番号・「聞いた」のキー）と `company`。画面の Q 番号は整理の番号のまま（右の面談準備と同じ番号）。
+- 場面数は 41（会社ごとにくり返す場面は 4）。`interview-script-check.ts` は変更なしで ALL OK。
+
+**チャットの「よく使う質問」（付録G・`src/lib/interview-prep/quick-questions.ts`）**
+- 5つ: ［職種を説明］［業界を説明］［言葉の意味］（kind=fill: 入力欄に文を入れ、〔　〕を選んだ状態にする）／［別の職種を提案］［次に聞くこと］（kind=send: すぐ送る）。文は `QUICK_QUESTIONS` 1か所（確認スクリプトも同じ定数を見る）。送信中・整理中は押せない。
+
+**台本の答えをチャットに添える（`src/lib/interview-script/facts.ts`・`messages/route.ts`）**
+- 画面は `POST /interview-prep/messages` に `interviewId`（開いている面談記録。`InterviewForm` → `InterviewScriptMode` → `InterviewPrepPanel` props、横のパネルは `InterviewHistoryTab` の `selectedId`）を渡す。
+- API は `interview_script_answers.answers`（面談記録がこの求職者のもののときだけ）を `formatScriptFacts` で「【台本で分かったこと】」＋1行「場面名: 値」（会社ごとの場面は「場面名（会社名）」・会社名は面談記録の職歴の行・無ければ「N社目」）にし、`withScriptFacts` で**今回の質問の先頭にだけ**付けて AI に送る。system と過去の履歴には入れない（キャッシュを壊さない）。答えのある項目だけ（今の答えで見えないグループ・入力＝showIf は入れない）。台本の答えが無ければ何も付けない。
+- **保存する CA の発言は画面に打った文だけ**（`question`）。添えた部分は保存しない。ログに `script_facts=yes/no`。
+- SKILL.md「CAの質問に答えるとき」に3行追加（【台本で分かったこと】は使ってよい・レジュメの希望条件は使わない／別の職種・業種の提案は必ず別の職種か別の業種／次に聞くことは【台本で分かったこと】とレジュメを踏まえる）。
+- 確認: `npx tsx scripts/verify/interview-prep-step3-dryrun.ts --no-ai`（AI/DB なし・37項目）。staging: `railway ssh --service bizstudio-portal-staging "cd /app && npx tsx scripts/verify/interview-prep-step3-dryrun.ts 5008627"`（AI 最大4回・保存なし）。

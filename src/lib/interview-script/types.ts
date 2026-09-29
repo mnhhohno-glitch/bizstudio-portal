@@ -76,7 +76,8 @@ export type ScriptCompany = {
   placeholder?: boolean;
 };
 
-export type PrepQuestionView = { question: string; why: string; mismatch: boolean; asked: boolean };
+/** 面談準備の質問（台本用）。index は整理の questions の添字（Q番号・「聞いた」のキー）。company は関わる会社名か「全体」（T-208 step3） */
+export type PrepQuestionView = { index: number; question: string; why: string; mismatch: boolean; asked: boolean; company: string };
 
 /** 差し込み・条件分岐に使う、この面談の実行時の情報 */
 export type ScriptContext = {
@@ -117,6 +118,8 @@ export type ScriptScene = {
   repeat?: "company";
   /** false のときはこの場面を飛ばす */
   when?: (ctx: ScriptContext, answers: AnswerMap) => boolean;
+  /** 会社ごとにくり返す場面で、false の会社はその場面を出さない（T-208 step3: その会社の質問が無ければ出さない） */
+  whenCompany?: (ctx: ScriptContext, companyIndex: number, answers: AnswerMap) => boolean;
   /** 新人向けの用語メモなど */
   notes?: string[];
   /** 自動計算の結果（行ごと） */

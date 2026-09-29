@@ -10,7 +10,7 @@ import {
   researchSources,
   type ResearchResult,
 } from "@/lib/interview-prep/research-format";
-import type { AskedQuestions, PrepSummary } from "@/lib/interview-prep/summary-format";
+import { PREP_QUESTION_ALL, type AskedQuestions, type PrepSummary } from "@/lib/interview-prep/summary-format";
 
 type Props = {
   summary: PrepSummary;
@@ -178,6 +178,10 @@ export default function InterviewPrepSummaryCards({ summary, research, asked, on
                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
                       <span className="text-[11px] text-gray-400">Q{i + 1}</span>
                       {q.mismatch && <span className={BADGE_AMBER}>食い違い</span>}
+                      {/* T-208 step3: 関わる会社（「全体」は出さない） */}
+                      {q.company && q.company !== PREP_QUESTION_ALL && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{q.company}</span>
+                      )}
                     </div>
                     <p className="text-[16px] font-medium text-gray-900 leading-[1.7]">{q.question}</p>
                   </div>
