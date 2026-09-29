@@ -3,12 +3,12 @@
  *
  * 実行（railway run は使わない。コンテナに入って実行する）:
  *   railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts [求職者番号]"
- *   求職者番号（candidateNumber）を渡すと、その求職者の最新のマイナビレジュメを使う（step5）。省略時は直近の1名。
+ *   求職者番号（candidateNumber）を渡すと、その求職者の「面談」フォルダの最新 PDFを使う（step5）。省略時は直近の1名。
  *   ローカルから本番DBを読む場合: npx tsx --env-file=.env scripts/verify/interview-prep-dryrun.ts
  *   （Drive の認証情報と ANTHROPIC_API_KEY が環境に必要）
  *
  * やること（質問の往復は行わない）:
- *   1. 求職者の最新のマイナビレジュメの文字を取り出す（保存しない）
+ *   1. 求職者の「面談」フォルダの最新 PDFの文字を取り出す（保存しない）
  *   2. 下調べ（会社のウェブ検索）を1回行う（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す
  *   3. 最初の整理を1回生成する（保存しない）。step8: ツール save_prep_summary の入力で受け取り、検証に通らなければ1回だけ作り直す
  *   4. 出力: 下調べの状態・検索回数・会社数/特定できた数・出典URL数・トークン/費用/所要時間
@@ -19,7 +19,7 @@
  * 出力は数値と有無だけ（本文・氏名・会社名・ファイル名などの個人情報は出さない）。
  */
 import { prisma } from "@/lib/prisma";
-import { MYNAVI_RESUME_MEMO, extractResumeText, findLatestMynaviResume } from "@/lib/interview-prep/resume";
+import { extractResumeText, findLatestMeetingPdf, meetingPdfWhere } from "@/lib/interview-prep/resume";
 import { INTERVIEW_PREP_MODEL, buildPrepSystem, buildSummaryMessages, callSummaryTool } from "@/lib/interview-prep/chat";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
 import { runResearch, RESEARCH_MODEL, RESEARCH_WEB_SEARCH_TOOL, type ResearchOutcome } from "@/lib/interview-prep/research";
@@ -35,7 +35,7 @@ async function main() {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY が未設定です");
 
   const candidateNumber = process.argv[2];
-  let file: Awaited<ReturnType<typeof findLatestMynaviResume>> = null;
+  let file: Awaited<ReturnType<typeof findLatestMeetingPdf>> = null;
   if (candidateNumber) {
     const cand = await prisma.candidate.findUnique({ where: { candidateNumber }, select: { id: true } });
     if (!cand) {
@@ -58,19 +58,16 @@ async function main() {
         console.log(`saved_company[${i}]: found=${c.found} business=${c.business ? "yes" : "no"} urls=${c.source_urls.length} candidates=${c.candidates.length}`),
       );
     }
-    file = await findLatestMynaviResume(cand.id);
+    file = await findLatestMeetingPdf(cand.id);
   } else
     file = await prisma.candidateFile.findFirst({
       where: {
-        category: "MEETING",
-        memo: MYNAVI_RESUME_MEMO,
-        mimeType: "application/pdf",
-        archivedAt: null,
+        ...meetingPdfWhere(),
         driveFileId: { not: null },
         candidate: { name: { not: { contains: "テスト" } } },
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, driveFileId: true, createdAt: true },
+      select: { id: true, driveFileId: true, createdAt: true, fileName: true },
     });
   if (!file) {
     console.log("resume_file: none");

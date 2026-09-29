@@ -9,7 +9,7 @@
  *   2. 自動計算（月給・手取り・残業の月↔日・希望残業の選択肢・次回面談とスケジュールの目安）が決まりどおり
  *   3. 入れ方の決まり（空欄だけ入れる／値があれば替えない＝提案／押し直しで台本が入れた値だけ差し替える／メモの追記と重複防止）
  *   4. 場面の答え → 欄への書き込み（Word・PowerPoint の2欄、退職理由の大中小、残業の自動選択、転勤のメモ、働き方のチェック）
- *   5. 差し込み（時刻が無いときは「本日〇時から」を省く・会社名が無いときの言い換え）
+ *   5. 差し込み（時刻が無いときは「本日〇時から」を省く・会社名が無いときの言い換え・〔CA名〕は名字だけ＝T-207 の〔CA姓〕と同じ取り方）
  * 出力は OK / NG と数値だけ。
  */
 import {
@@ -29,6 +29,7 @@ import {
 import { DESIRED_OVERTIME_OPTIONS, DETAIL_SELECT_OPTIONS, WORK_STYLE_OPTIONS } from "@/lib/interview-script/field-options";
 import { allButtons, buildContext, expandScenes, renderScene, sceneWrites, sceneWritesWithClears, scriptStats } from "@/lib/interview-script/runtime";
 import { DERIVED_TARGETS, RESIGN_REASON_BUTTONS, SCRIPT_SCENES, SCRIPT_VERSION } from "@/lib/interview-script/script-v1";
+import { caFamilyNameOf } from "@/lib/candidate-mail/templates";
 import type { FieldTarget, RuntimeScene } from "@/lib/interview-script/types";
 
 let failed = 0;
@@ -234,7 +235,32 @@ check("salary memo composed in one chunk", sal["d.currentSalary"] === "400" && s
 
 /* ---------- 5. 差し込み ---------- */
 const say1 = renderScene(find("s1-greeting"), ctx, {});
-check("greeting (phone) inserts CA name / candidate / time", say1.includes("ビズスタジオの大野 望と申します") && say1.includes("架空 太郎様のお電話") && say1.includes("本日10:00から"));
+check("greeting (phone) inserts CA surname / candidate / time", say1.includes("ビズスタジオの大野と申します") && !say1.includes("大野 望") && say1.includes("架空 太郎様のお電話") && say1.includes("本日10:00から"));
+// T-208 fix: 〔CA名〕は名字だけ（resolveSender と同じ caFamilyNameOf の取り方）。「大野 将幸」→「大野」、空白なしは全体
+const ctxFullName = buildContext({
+  candidateName: "架空 太郎",
+  candidateEmail: null,
+  caName: "大野 将幸",
+  caFamilyName: caFamilyNameOf("大野 将幸"),
+  startTime: "",
+  tool: "電話",
+  detail: {},
+  workHistories: [],
+  prepSummary: null,
+  askedQuestions: {},
+  today: base,
+});
+const sayFull = renderScene(find("s1-greeting"), ctxFullName, {});
+const sayFullOnline = renderScene(find("s1-greeting"), { ...ctxFullName, tool: "オンライン" }, {});
+check(
+  "greeting uses CA surname only (大野 将幸 → 大野) in every 〔CA名〕",
+  sayFull.includes("ビズスタジオの大野と申します") &&
+    sayFull.includes("担当させていただきます大野です") &&
+    !sayFull.includes("大野 将幸") &&
+    sayFullOnline.includes("ビズスタジオの大野です") &&
+    !sayFullOnline.includes("大野 将幸") &&
+    caFamilyNameOf("大野将幸") === "大野将幸",
+);
 const ctxNoTime = { ...ctx, startTime: "", tool: "オンライン" };
 const say2 = renderScene(find("s1-greeting"), ctxNoTime, {});
 check("greeting (online) variant, no time", say2.includes("音声は聞こえておりますでしょうか") && !say2.includes("本日10:00") && !say2.includes("お電話でお間違い") && !say2.includes("〔"));

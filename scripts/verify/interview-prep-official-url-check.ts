@@ -4,11 +4,11 @@
  * 実行（railway run は使わない。コンテナに入って実行する）:
  *   railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-official-url-check.ts 求職者番号"
  *
- * やること: 求職者の最新のマイナビレジュメで下調べを1回行う（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す。
+ * やること: 求職者の「面談」フォルダの最新 PDFで下調べを1回行う（保存しない・使用量ログも書かない）。失敗したら1回だけやり直す。
  * AI 呼び出しは最大2回。出力は有無と数値だけ（URL・会社名・本文は出さない）。
  */
 import { prisma } from "@/lib/prisma";
-import { extractResumeText, findLatestMynaviResume } from "@/lib/interview-prep/resume";
+import { extractResumeText, findLatestMeetingPdf } from "@/lib/interview-prep/resume";
 import { computeCostUsd, extractTokens } from "@/lib/advisor-usage";
 import { runResearch, RESEARCH_MODEL, type ResearchOutcome } from "@/lib/interview-prep/research";
 import { RESEARCH_VERSION } from "@/lib/interview-prep/research-format";
@@ -27,7 +27,7 @@ async function main() {
     console.log("candidate: not found");
     return;
   }
-  const file = await findLatestMynaviResume(cand.id);
+  const file = await findLatestMeetingPdf(cand.id);
   if (!file) {
     console.log("resume_file: none");
     return;

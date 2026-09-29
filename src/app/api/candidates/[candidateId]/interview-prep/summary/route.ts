@@ -1,7 +1,7 @@
 // T-205: 面談準備チャットの「最初の整理」を作る（SSE）。
 //
 // 流れ:
-//   1. 有効な部屋が無ければ、マイナビレジュメを Drive から取得して pdf-parse で文字を取り出し、部屋を作る。
+//   1. 有効な部屋が無ければ、「面談」フォルダの最新 PDF（マイナビレジュメなど）を Drive から取得して pdf-parse で文字を取り出し、部屋を作る。
 //      レジュメが無い／200字未満なら AI を呼ばず 422 を返す（部屋も作らない）。
 //   2. 有効な部屋があり整理も済んでいれば 409（画面は状態取得で復元する）。整理が未保存（途中失敗）なら
 //      保存済みの文字で作り直す（Drive も pdf-parse も呼ばない）。
@@ -24,7 +24,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recordAdvisorUsage } from "@/lib/advisor-usage";
-import { findLatestMynaviResume, extractResumeText } from "@/lib/interview-prep/resume";
+import { findLatestMeetingPdf, extractResumeText } from "@/lib/interview-prep/resume";
 import {
   INTERVIEW_PREP_MODEL,
   buildPrepSystem,
@@ -222,7 +222,7 @@ async function createRoomWithResume(
   userId: string,
   archivePreviousId: string | null = null,
 ): Promise<CreateResult> {
-  const file = await findLatestMynaviResume(candidateId);
+  const file = await findLatestMeetingPdf(candidateId);
   if (!file) {
     return { ok: false, response: NextResponse.json({ error: "no_resume" }, { status: 422 }) };
   }

@@ -1,10 +1,10 @@
 // T-205: 面談準備チャットの状態取得。
-// 有効な部屋（archivedAt IS NULL）と、その最初の整理・会話、マイナビレジュメの有無を返す。
+// 有効な部屋（archivedAt IS NULL）と、その最初の整理・会話、材料（「面談」フォルダの最新 PDF）の有無を返す。
 // レジュメの文字はここでは取り出さない（取り出しは summary の初回だけ）。
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { findLatestMynaviResume } from "@/lib/interview-prep/resume";
+import { findLatestMeetingPdf } from "@/lib/interview-prep/resume";
 import { normalizeResearch } from "@/lib/interview-prep/research-format";
 import { normalizeAskedQuestions, normalizePrepSummary } from "@/lib/interview-prep/summary-format";
 
@@ -28,6 +28,8 @@ export async function GET(
       where: { candidateId, archivedAt: null },
       orderBy: { createdAt: "desc" },
       include: {
+        // T-205 step12: 「材料:」にファイル名を出す（部屋を作ったときに使った PDF）
+        resumeFile: { select: { fileName: true } },
         messages: {
           orderBy: { createdAt: "asc" },
           select: {
@@ -41,7 +43,7 @@ export async function GET(
         },
       },
     }),
-    findLatestMynaviResume(candidateId),
+    findLatestMeetingPdf(candidateId),
   ]);
 
   const summary = room?.messages.find((m) => m.kind === "SUMMARY") ?? null;
@@ -65,6 +67,7 @@ export async function GET(
           // T-205 step4: 下調べの結果（出典リンク用。step7 で学校のバッジは廃止）。下調べなしは null
           research: normalizeResearch(room.researchJson),
           resumeImportedAt: room.resumeImportedAt,
+          resumeFileName: room.resumeFile?.fileName ?? null,
           resumeChars: room.resumeText?.length ?? 0,
           summary: summary ? { id: summary.id, content: summary.content, createdAt: summary.createdAt } : null,
           // T-205 step8: 決まった項目の整理（カード表示用）。step7 以前の部屋は null（文章表示のまま）
@@ -73,6 +76,6 @@ export async function GET(
           messages,
         }
       : null,
-    resume: resume ? { fileId: resume.id, importedAt: resume.createdAt } : null,
+    resume: resume ? { fileId: resume.id, importedAt: resume.createdAt, fileName: resume.fileName } : null,
   });
 }

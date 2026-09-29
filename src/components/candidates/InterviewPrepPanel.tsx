@@ -1,7 +1,7 @@
 "use client";
 
 // T-205: 面談準備チャット（右から開く幅広のパネル。見た目は ChatGPT / Claude の会話画面）。
-// - 材料はマイナビレジュメの文字と、会社の下調べ（ネット検索。T-205 step4・step7 で学校の下調べはやめた）。
+// - 材料は書類の「面談」フォルダの最新 PDF（マイナビレジュメなど。step12 で取り込み経路は不問）の文字と、会社の下調べ（ネット検索。T-205 step4・step7 で学校の下調べはやめた）。
 // - step11: 整理は会話の先頭のメッセージとして置き、その下に CA の質問と AI の回答を時系列で並べる。
 //   スクロールするのはヘッダーと入力欄の間の1つだけ（上部のバーの「整理へ移動」で先頭へ戻る）。
 // - 既存の AIアドバイザー（AdvisorFloatingPanel）とは別コンポーネント・別API・別テーブル。
@@ -33,13 +33,15 @@ type PrepState = {
     careerType: string | null;
     research: ResearchResult | null;
     resumeImportedAt: string | null;
+    /** T-205 step12: 材料に使った PDF のファイル名（「材料:」の表示用） */
+    resumeFileName: string | null;
     resumeChars: number;
     summary: { id: string; content: string; createdAt: string } | null;
     summaryJson: PrepSummary | null;
     askedQuestions: AskedQuestions;
     messages: PrepMessage[];
   } | null;
-  resume: { fileId: string; importedAt: string } | null;
+  resume: { fileId: string; importedAt: string; fileName: string } | null;
 };
 
 /** 画面で持つ整理（会話の先頭に表示する）。json が null の部屋は文章表示（step7 以前）。 */
@@ -373,7 +375,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
           if (res.status === 422 && body.error === "no_resume") {
             setState((s) => (s ? { ...s, resume: null, room: rebuild ? s.room : null } : s));
             if (rebuild) {
-              setError({ kind: "summary", message: "マイナビレジュメが見つからないため、作り直しはできません。今の整理をそのまま使えます。" });
+              setError({ kind: "summary", message: "材料のPDF（書類タブの「面談」）が見つからないため、作り直しはできません。今の整理をそのまま使えます。" });
               await fetchState();
             }
             return;
@@ -382,7 +384,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
             setError({
               kind: "summary",
               rebuild,
-              message: `マイナビレジュメの文字を読み取れません（読み取れたのは ${body.chars ?? 0} 字。200字以上が必要です）。`,
+              message: `材料のPDFの文字を読み取れません（読み取れたのは ${body.chars ?? 0} 字。200字以上が必要です）。`,
             });
             if (rebuild) await fetchState();
             return;
@@ -433,6 +435,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
                         careerType,
                         research,
                         resumeImportedAt: prev.room?.resumeImportedAt ?? prev.resume?.importedAt ?? null,
+                        resumeFileName: prev.room?.resumeFileName ?? prev.resume?.fileName ?? null,
                         resumeChars: prev.room?.resumeChars ?? 0,
                         summary: { id: "", content: s.content, createdAt: s.createdAt },
                         summaryJson: json,
@@ -575,6 +578,8 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
 
   const candidateName = state?.candidate.name ?? "";
   const importedAt = state?.room?.resumeImportedAt ?? state?.resume?.importedAt ?? null;
+  // T-205 step12: 材料は「面談」フォルダの最新 PDF。部屋があればその部屋で使ったファイル、無ければ今見つかるファイル
+  const materialName = state?.room?.resumeFileName ?? state?.resume?.fileName ?? null;
   const hasRoom = !!summary;
   const noResume = !state?.room && !state?.resume;
   const busy = summarizing || sending;
@@ -610,7 +615,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
             面談準備｜{candidateName ? `${candidateName} さん` : ""}
           </div>
           <div className="text-[11px] text-gray-500 mt-0.5">
-            材料: マイナビレジュメ{importedAt ? `（${formatDate(importedAt)} 取り込み）` : "（未取り込み）"}
+            材料: {materialName ? `${materialName}${importedAt ? `（${formatDate(importedAt)}）` : ""}` : "なし"}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -687,9 +692,9 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
           ) : !hasRoom && !summarizing ? (
             noResume ? (
               <div className="text-center py-16">
-                <p className="text-base font-medium text-gray-700 mb-2">マイナビレジュメが見つかりません</p>
+                <p className="text-base font-medium text-gray-700 mb-2">材料のPDFが見つかりません</p>
                 <p className="text-sm text-gray-500">
-                  書類タブの「面談」にマイナビレジュメ（RPA 自動取り込みの PDF）が入ると使えるようになります。
+                  書類タブの「面談」にPDF（マイナビレジュメなど）が入ると使えるようになります。
                 </p>
                 {error && <p className="text-sm text-red-600 mt-4">{error.message}</p>}
               </div>
@@ -697,7 +702,7 @@ export default function InterviewPrepPanel({ candidateId, open, onClose, embedde
               <div className="text-center py-16">
                 <p className="text-lg font-medium text-gray-800 mb-2">面談の準備を始めましょう</p>
                 <p className="text-sm text-gray-500 mb-6">
-                  マイナビレジュメと、勤めた会社のネット検索を使い、どんな学校でどんな会社に就職し何をしてきた人かと、面談での質問のしかたを整理します。
+                  「面談」フォルダのPDF（マイナビレジュメなど）と、勤めた会社のネット検索を使い、どんな学校でどんな会社に就職し何をしてきた人かと、面談での質問のしかたを整理します。
                 </p>
                 <button
                   type="button"

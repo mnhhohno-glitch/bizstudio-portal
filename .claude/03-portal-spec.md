@@ -1306,7 +1306,8 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 | `interview_prep_messages`（`InterviewPrepMessage`） | roomId（Cascade）/ role（user / assistant）/ **userId**（role=user の CA・SetNull）/ content / **kind**（`SUMMARY`=最初の整理。会話欄には出さず固定欄に表示）/ createdAt |
 
 - レジュメの文字は**部屋ごと**に持つ。初回だけ Drive から取得して `extractTextFromPdf`（pdf-parse→短ければ pdfjs）で取り出し、`normalizeResumeText`（改行LF・空白連続を1つ・空行連続を1つ。決定的処理のみ）で整形して保存。2回目以降は保存済みを使い Drive も pdf-parse も呼ばない。既存の `CandidateFile.parsedText`（Gemini 読み取り）は使わず、書き込みもしない。
-- 対象レジュメ: `CandidateFile` の category=MEETING かつ memo=`マイナビRPA自動取り込み` かつ PDF、複数あれば最新1件（`src/lib/interview-prep/resume.ts` `findLatestMynaviResume`）。無い／200字未満は AI を呼ばず 422（部屋も作らない）。
+- 材料（対象ファイル）: `CandidateFile` の category=MEETING（書類タブの「面談」）かつ PDF、複数あれば最新1件（`src/lib/interview-prep/resume.ts` `findLatestMeetingPdf`・条件は `meetingPdfWhere` の1か所）。**step12（2026-09-30）で memo=`マイナビRPA自動取り込み` の条件を外した**＝手でアップロードした PDF も材料になる。PDF かどうかは mimeType=`application/pdf` または拡張子 `.pdf`（大文字小文字不問）で判断し、面談ログ txt は対象外。作るとき・作り直すときの両方でこの探し方（部屋の保存済み resumeText はそのまま使う）。無い／200字未満は AI を呼ばず 422（部屋も作らない）。
+- パネル上部の「材料:」は使ったファイル名＋日付（例 `材料: 5008587_宮嶋 大成.pdf（2026/9/14）`。部屋があれば `resumeFile.fileName`、無ければ今見つかるファイル）。材料が無いときの案内文は「書類タブの『面談』にPDF（マイナビレジュメなど）が入ると使えるようになります」。確認は `scripts/verify/interview-prep-source-check.ts 求職者番号`（AI なし・書き込みなし）。
 - 経歴の型は最初の整理の本文から `経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型)` で取り出して `careerType` に保存（`extractCareerType`）。後日、面談後のタイプ診断と並べるため。
 
 ### API（認証は既存 AIアドバイザーのチャットAPIと同じ `getSessionUser()`・未ログイン 403）
@@ -1467,7 +1468,7 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 | `field-options.ts` | 入力画面の選択肢（`InterviewForm.tsx` の `<select>` もここを import）。付録C で足した「取得(AT限定)」「45時間超も可」を含む。`DETAIL_SELECT_OPTIONS` は欄→選択肢の表（確認スクリプトが値の実在を確かめる） |
 | `calc.ts` | 自動計算: 月給＝（賞与込み年収−賞与年額）÷12・手取り＝×0.8／残業 1日↔月 ×20 ÷20／`overtimeOptionFor`（0→絶対不可…46以上→45時間超も可）／`nextInterviewGuide`（急ぎ＝すぐにでも・3カ月以内・半年以内。時期の目安は付録A の置き直し）／`scheduleOutlook`（内定＝次回面談+1〜2ヶ月、入社＝内定+退職までの月数〔不明 1〜2、離職中 1〕） |
 | `render.ts` | 差し込み〔氏名〕〔CA名〕〔CA姓〕〔時刻〕〔直近の会社〕〔学校名〕〔学部学科〕〔卒業年〕〔会社名〕〔入社年月〕〔仕事内容〕〔頭の文字〕と、`{{if:条件}}…{{else}}…{{/if}}`（入れ子可）。値が無いときは台本の代わりの言い方（例: 会社名が無い→「現在は、お仕事をされていますか？」、時刻が無い→「本日〇時から」を省く） |
-| `runtime.ts` | `buildContext`（面談記録・求職者・面談準備の整理 summary_json・案内メール API の sender から差し込み情報を組む。〔CA名〕〔CA姓〕は T-207 の `resolveSender` と同じ取り方＝`GET /contact-mail` の `sender`）／`expandScenes`（会社ごとに展開・`when` で飛ばす）／`deriveValues` `deriveFlags`（答えから決まる〔内容〕〔時期の目安〕〔内定の目安〕〔入社の目安〕〔転職時期〕〔LINE／メール〕〔電話／オンライン〕〔日時〕〔月給〕〔手取り〕…）／`sceneWrites`（場面の答え→欄への書き込み。**メモ欄はその場面の入力・ボタンを「／」でつないだ1つの文**、applied のキーは `欄のパス@場面キー`）／`sceneWritesWithClears`（答えが無くなった欄は value="" で「消す」書き込み） |
+| `runtime.ts` | `buildContext`（面談記録・求職者・面談準備の整理 summary_json・案内メール API の sender から差し込み情報を組む。〔CA名〕〔CA姓〕は T-207 の `resolveSender` と同じ取り方＝`GET /contact-mail` の `sender`。**〔CA名〕も名字だけ**（`sender.familyName`＝`caFamilyNameOf`: 空白で分けた先頭・空白が無ければ社員名全体。2026-09-30 fix: 「大野 将幸と申します」→「大野と申します」。差し込みは `render.ts` `baseValues` の1か所で、フルネームは使わない））／`expandScenes`（会社ごとに展開・`when` で飛ばす）／`deriveValues` `deriveFlags`（答えから決まる〔内容〕〔時期の目安〕〔内定の目安〕〔入社の目安〕〔転職時期〕〔LINE／メール〕〔電話／オンライン〕〔日時〕〔月給〕〔手取り〕…）／`sceneWrites`（場面の答え→欄への書き込み。**メモ欄はその場面の入力・ボタンを「／」でつないだ1つの文**、applied のキーは `欄のパス@場面キー`）／`sceneWritesWithClears`（答えが無くなった欄は value="" で「消す」書き込み） |
 | `apply.ts` | 入れ方の決まり（下記）。`decideApply` が 1欄ごとに set / append / replace / skip / propose を返す |
 | `field-labels.ts` | 欄のパス→画面の名前（「入力内容」タブ・提案の表示） |
 | `types.ts` | 形。答えは `answers[場面キー] = { choices: {グループ: 押したボタンの表示名}, inputs: {key: 文字}, at }`。進み具合は `answers.__meta = { currentKey, doneParts }` |

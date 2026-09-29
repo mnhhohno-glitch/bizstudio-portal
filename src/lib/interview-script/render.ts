@@ -31,7 +31,9 @@ export function baseValues(ctx: ScriptContext): DerivedValues {
   const company = ctx.companyIndex != null ? ctx.companies[ctx.companyIndex] : undefined;
   return {
     "氏名": ctx.candidateName,
-    "CA名": ctx.caName,
+    // T-208 fix: 挨拶の〔CA名〕は電話で自然な名字だけ（T-207 の〔CA姓〕と同じ取り方＝resolveSender の familyName）。
+    //   社員名に空白が無いときは名前全体（caFamilyNameOf の決まり）。フルネームは差し込みに使わない。
+    "CA名": ctx.caFamilyName || ctx.caName,
     "CA姓": ctx.caFamilyName || ctx.caName,
     "時刻": ctx.startTime,
     "直近の会社": ctx.latestCompany,
