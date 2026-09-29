@@ -56,6 +56,8 @@ type Props = {
   candidateId: string;
   open: boolean;
   onClose: () => void;
+  /** T-208: 台本モードの右側に埋め込む（portal・固定配置・×・広げる・Esc を使わず、親の枠いっぱいに出す）。中身は同じ */
+  embedded?: boolean;
 };
 
 const WIDTH_STORAGE_KEY = "interviewPrep.wide";
@@ -206,7 +208,7 @@ function BlinkCursor() {
   return <span className="inline-block w-[2px] h-[1em] align-text-bottom bg-gray-700 animate-pulse ml-0.5" />;
 }
 
-export default function InterviewPrepPanel({ candidateId, open, onClose }: Props) {
+export default function InterviewPrepPanel({ candidateId, open, onClose, embedded = false }: Props) {
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState<PrepState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -291,15 +293,15 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
     void fetchState(true);
   }, [open, fetchState]);
 
-  // Esc で閉じる
+  // Esc で閉じる（埋め込み表示では閉じる操作が無い）
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   // 新しい文字が出るたびに下へ（CA が上へスクロールして読み返しているときは止める）
   // 開いた直後だけは、会話があれば一番下（最新）、無ければ一番上（整理の先頭）から表示する
@@ -592,10 +594,14 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
 
   const panel = (
     <div
-      role="dialog"
+      role={embedded ? undefined : "dialog"}
       aria-label="面談準備"
-      className="fixed top-0 right-0 h-screen bg-white border-l border-gray-200 shadow-2xl z-[70] flex flex-col"
-      style={{ width, maxWidth: "calc(100vw - 48px)" }}
+      className={
+        embedded
+          ? "relative w-full h-full min-h-0 bg-white flex flex-col"
+          : "fixed top-0 right-0 h-screen bg-white border-l border-gray-200 shadow-2xl z-[70] flex flex-col"
+      }
+      style={embedded ? undefined : { width, maxWidth: "calc(100vw - 48px)" }}
     >
       {/* ヘッダー */}
       <div className="flex items-start gap-3 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -608,13 +614,15 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={toggleWide}
-            className="px-2.5 py-1 rounded-md text-[12px] border border-gray-200 text-gray-600 hover:bg-gray-50"
-          >
-            {wide ? "元の幅" : "広げる"}
-          </button>
+          {!embedded && (
+            <button
+              type="button"
+              onClick={toggleWide}
+              className="px-2.5 py-1 rounded-md text-[12px] border border-gray-200 text-gray-600 hover:bg-gray-50"
+            >
+              {wide ? "元の幅" : "広げる"}
+            </button>
+          )}
           {hasRoom && (
             <button
               type="button"
@@ -625,14 +633,16 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
               作り直す
             </button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="閉じる"
-            className="w-8 h-8 rounded-md text-gray-500 hover:bg-gray-100 text-lg leading-none"
-          >
-            ×
-          </button>
+          {!embedded && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="閉じる"
+              className="w-8 h-8 rounded-md text-gray-500 hover:bg-gray-100 text-lg leading-none"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -827,5 +837,6 @@ export default function InterviewPrepPanel({ candidateId, open, onClose }: Props
     </div>
   );
 
+  if (embedded) return panel;
   return createPortal(panel, document.body);
 }

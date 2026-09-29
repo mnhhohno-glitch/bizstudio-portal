@@ -150,6 +150,7 @@ model User {
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
   interviewPrepRooms       InterviewPrepRoom[]       @relation("UserInterviewPrepRooms") // T-205
   contactMailLogs          CandidateContactMailLog[] @relation("UserContactMailLogs") // T-207
+  interviewScriptAnswers   InterviewScriptAnswer[]   @relation("UserInterviewScriptAnswers") // T-208
   interviewPrepMessages    InterviewPrepMessage[]    @relation("UserInterviewPrepMessages") // T-205
   dailySchedules           DailySchedule[]
   googleCalendarConnection GoogleCalendarConnection?
@@ -2357,6 +2358,7 @@ model InterviewRecord {
   workHistories WorkHistory[]
   // T-152: この面談に紐づく面談ログ等（CandidateFile.interviewId 経由）
   meetingFiles  CandidateFile[]       @relation("InterviewMeetingFiles")
+  scriptAnswers InterviewScriptAnswer? // T-208: 初回面談の台本モードの答え（面談1件に1行）
   // T-183 Phase 2: 面談サポート（文字起こし+AI解説）のセッション
   supportSessions InterviewSupportSession[]
   createdAt     DateTime              @default(now()) @map("created_at")
@@ -3798,4 +3800,23 @@ model CandidateContactMailLog {
 
   @@index([candidateId, type, sentAt])
   @@map("candidate_contact_mail_logs")
+}
+
+// T-208: 初回面談の台本モードで CA が押したボタン・入力した値（面談1件に1行）。
+// - answers: 場面ごとの答え（押したボタンの値・入力した文字）。台本の定義は src/lib/interview-script/。
+// - applied: 台本が入力画面のどの欄に何を入れたか（欄のパス → 入れた値）。押し直しのとき「台本が入れた値のままか」の判定に使う。
+// - interview_details とは別の表なので、面談の自動保存（detail 丸ごと送信）や前回からの写し（copyFromPreviousInterview）の対象にならない。
+model InterviewScriptAnswer {
+  id                String          @id @default(cuid())
+  interviewRecordId String          @unique @map("interview_record_id")
+  interviewRecord   InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
+  answers           Json
+  applied           Json
+  scriptVersion     String          @map("script_version")
+  updatedByUserId   String?         @map("updated_by_user_id")
+  updatedBy         User?           @relation("UserInterviewScriptAnswers", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@map("interview_script_answers")
 }

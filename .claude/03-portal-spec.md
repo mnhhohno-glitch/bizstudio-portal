@@ -1455,3 +1455,42 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 
 ### 動作確認（2026-09-30）
 - 送ってよいのはテスト用求職者「大野 テスト」（5999999）だけ。送信者は大野さんのアカウントで `lineWorksUrl=https://works.do/R/ti/p/masayuki_oono@bizstudio` を設定して 2 通送り、記録 2 行と 2 回目の 409 を確認する（結果は完了報告に記載）。
+
+## 初回面談の台本モード（T-208 step2, master, 2026-09-30）
+
+初回面談で CA が台本を読みながら相手の答えのボタンを押すと、拾う一言が出て、面談記録の欄に自動で入る。台本の中身は `docs/interview-script/initial-interview-script.md`（付録 A〜F を本文より優先。付録 G（チャットのボタン）・H（質問の会社ごとの振り分け）は未実装）、欄との対応は `docs/survey_T-208_script-form-mapping.md`。AI の指示・送る中身は変えていない（面談準備チャットは右側に埋め込むだけ）。追加のみの改修。
+
+### 台本の定義の場所（`src/lib/interview-script/`・すべて純粋関数・AI と DB を使わない）
+| ファイル | 中身 |
+|--|--|
+| `script-v1.ts` | 台本 v1（`SCRIPT_VERSION="v1"`）。7パート `SCRIPT_PARTS`・40場面 `SCRIPT_SCENES`（うち3場面は会社ごとにくり返し）・ボタン149・入力46。拾う一言・分岐（`when` / ボタンの `next`）・入れ先（`FieldTarget`）・自動で決まる書き込み `derivedWrites`（残業の数字→選択肢、日時→「設定済」）。退職理由の大・中と小分類の候補は `RESIGN_REASON_BUTTONS`（付録E・文字列は `resign-reason-hierarchy.ts` の実際の値）。Word/PowerPoint は `WORD_PPT_BUTTONS`、転勤は `TRANSFER_BUTTONS`（付録B） |
+| `field-options.ts` | 入力画面の選択肢（`InterviewForm.tsx` の `<select>` もここを import）。付録C で足した「取得(AT限定)」「45時間超も可」を含む。`DETAIL_SELECT_OPTIONS` は欄→選択肢の表（確認スクリプトが値の実在を確かめる） |
+| `calc.ts` | 自動計算: 月給＝（賞与込み年収−賞与年額）÷12・手取り＝×0.8／残業 1日↔月 ×20 ÷20／`overtimeOptionFor`（0→絶対不可…46以上→45時間超も可）／`nextInterviewGuide`（急ぎ＝すぐにでも・3カ月以内・半年以内。時期の目安は付録A の置き直し）／`scheduleOutlook`（内定＝次回面談+1〜2ヶ月、入社＝内定+退職までの月数〔不明 1〜2、離職中 1〕） |
+| `render.ts` | 差し込み〔氏名〕〔CA名〕〔CA姓〕〔時刻〕〔直近の会社〕〔学校名〕〔学部学科〕〔卒業年〕〔会社名〕〔入社年月〕〔仕事内容〕〔頭の文字〕と、`{{if:条件}}…{{else}}…{{/if}}`（入れ子可）。値が無いときは台本の代わりの言い方（例: 会社名が無い→「現在は、お仕事をされていますか？」、時刻が無い→「本日〇時から」を省く） |
+| `runtime.ts` | `buildContext`（面談記録・求職者・面談準備の整理 summary_json・案内メール API の sender から差し込み情報を組む。〔CA名〕〔CA姓〕は T-207 の `resolveSender` と同じ取り方＝`GET /contact-mail` の `sender`）／`expandScenes`（会社ごとに展開・`when` で飛ばす）／`deriveValues` `deriveFlags`（答えから決まる〔内容〕〔時期の目安〕〔内定の目安〕〔入社の目安〕〔転職時期〕〔LINE／メール〕〔電話／オンライン〕〔日時〕〔月給〕〔手取り〕…）／`sceneWrites`（場面の答え→欄への書き込み。**メモ欄はその場面の入力・ボタンを「／」でつないだ1つの文**、applied のキーは `欄のパス@場面キー`）／`sceneWritesWithClears`（答えが無くなった欄は value="" で「消す」書き込み） |
+| `apply.ts` | 入れ方の決まり（下記）。`decideApply` が 1欄ごとに set / append / replace / skip / propose を返す |
+| `field-labels.ts` | 欄のパス→画面の名前（「入力内容」タブ・提案の表示） |
+| `types.ts` | 形。答えは `answers[場面キー] = { choices: {グループ: 押したボタンの表示名}, inputs: {key: 文字}, at }`。進み具合は `answers.__meta = { currentKey, doneParts }` |
+
+- 場面のキーは `場面id` または `場面id#会社番号`（0始まり）。会社は職歴の行（`work_histories` order 順）、無ければ面談準備の整理の経歴の流れから仮の会社を作る（欄には入れられない。画面の「登録情報の職歴を取り込む」で企業名だけの職歴の行を作れる）。
+- 職種の「提案候補」（〔経験〕〔職種〕〔理由〕）は台本の決まりで T-206 の後に作り直すため v1 では出ない（CA が口頭で補う）。
+
+### 保存（表 `interview_script_answers` / Prisma `InterviewScriptAnswer`・migration `20260930200000_t208_interview_script_answers`・追加のみ・`IF NOT EXISTS`）
+| 列 | 内容 |
+|--|--|
+| interview_record_id | 面談1件に1行（unique・面談削除で Cascade） |
+| answers | JSONB。場面ごとの答え（押したボタンの表示名・入力した文字）＋ `__meta`（今の場面・終わったパート） |
+| applied | JSONB。台本が入れた欄（`d.<列>` / `wh.<会社番号>.<列>` / `ws.<項目>`、メモは `…@場面キー`）→ 入れた値。押し直しの判定用 |
+| script_version | 台本の版（"v1"） |
+| updated_by_user_id | 最後に保存した CA（User.id・SetNull） |
+- `interview_details` とは別表なので、自動保存（detail 丸ごと送信）や面談作成時の前回からの写し（`copyFromPreviousInterview`）の対象にならない＝2回目の面談に持ち越さない。
+- API `GET/PUT /api/interviews/[id]/script-answers`（認証は既存の面談 API と同じ `getSessionUser()`・未ログイン 403・面談なし 404）。PUT は `{ answers, applied, scriptVersion }` を upsert。**サーバーで面談記録（detail / work_histories）は書かない。**
+- 画面は答えが変わるたび 1.5 秒デバウンスで PUT（`InterviewForm.saveScriptAnswers`）。面談を切り替えると台本の状態は捨てて読み直す。
+
+### 入力画面への入れ方（付録F・`apply.ts`）
+- 欄が空（null / "" / []）のときだけ入れる。すでに値があれば勝手に変えず **propose**＝欄の横（いつもの入力画面）と「入力内容」タブに「台本: 〇〇［替える］［×］」を出し、CA が押したときだけ替える。
+- メモ欄は、空なら入れ（接頭辞なし）、入っていれば末尾に改行＋「【台本】…」を書き足す。同じ文がすでにあれば足さない。
+- 押し直したとき、欄が前に台本が入れた値のまま（`applied` と一致）なら差し替え／答えが無くなれば消す。CA が手で直していたら触らない（メモは台本の文だけ差し替え、CA の文は残す）。
+- 働き方のチェックは「無ければ付ける」。外すのは台本が付けたもの（applied="1"）だけ。
+- 反映は画面の state（`setDetailState` / `setWorkHistories`）に対して行い、既存の自動保存（3秒・`buildAutosaveBody`）で保存する。数値の欄（社数・年収）は Number、日付の欄（退職日・次回面談日）は `normalizeDate`（月入力 "YYYY-MM" は 1 日に寄せる）。
+- 確認: `npx tsx scripts/verify/interview-script-check.ts`（値の実在・自動計算・入れ方の決まり・場面→書き込み・差し込み。AI/DB なし）。

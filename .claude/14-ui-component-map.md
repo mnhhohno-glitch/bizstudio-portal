@@ -1706,3 +1706,43 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 
 ### 社員管理側
 - `/admin/users/[id]` 基本情報タブ（`BasicInfoTab.tsx`）末尾に「LINE WORKS」ブロック＝「LINE WORKS のURL（友だち追加用）」入力欄（2列幅・onBlur 自動保存）。`https://works.do/` で始まらないと amber の注意文（保存は止めない）。
+
+## 初回面談の台本モード `InterviewScriptMode`（T-208 step2, 2026-09-30）
+
+`src/components/candidates/InterviewScriptMode.tsx`。面談記録画面の本体（左右2カラムの grid）を**置き換えて**出す（重ねて開かない）。台本の定義・実行・入れ方の決まりは `src/lib/interview-script/`（03-portal-spec 参照）。答えの保持と欄への反映は `InterviewForm.tsx` 側（`scriptMode` / `scriptAnswers` / `scriptApplied` / `scriptProposals`・`applyScriptWrites`・`acceptScriptProposalFor`・`importScriptCompanies`）。
+
+### 入口ボタン
+- `InterviewForm` ヘッダーの操作ボタン列、「案内メール」のすぐ右に「台本」（本のアイコン）。押すと本体が台本モードに替わり、ボタンは「入力画面へ」（青）になる。もう一度押すといつもの入力画面に戻る。面談を切り替えると台本モードは閉じる。
+
+### 配置
+```
+InterviewForm（ヘッダーはそのまま）
+  └─ scriptMode ? InterviewScriptMode : div.grid.grid-cols-2（いつもの本体）
+       ├─ 上: 7つのパート「1. 本人確認・挨拶」…「7. 今後の流れ・クロージング」（押すとそのパートの最初の場面へ。今のパートは青、終わったパートは緑＋✓）。右端「▸ 新人向けの注意」（畳んだ状態・押すと5項目を開く）
+       └─ grid 2列
+            ├─ 左: 今の場面のカード
+            │    ├─ 「N. パート名　場面 i / n」・場面の見出し（会社ごとの場面は「k社目：会社名」）
+            │    ├─ 読むセリフ（差し込み済み・青の左線。「（…）」で始まる段落は小さくグレー＝CA向けの補足）
+            │    ├─ 入力欄（文字・数値・年月・日付・時刻。**blur / Enter で欄に反映**）
+            │    ├─ ボタン（大きめ 14px・押すと青で「● 表示名」。単一選択はもう一度押すと解除、複数選択はトグル。「特になし」は他を外す）
+            │    ├─ 連絡方法の場面だけ: 「LINE登録案内／あいさつメールの確認画面を開く」（T-207 の `ContactMailConfirmDialog` をそのまま開く＝二重送信の防止 409 も同じ）。送信済みなら「送信済み（M/D HH:MM）」、送れなければ理由
+            │    ├─ 拾う一言（緑の枠・押したボタンの文＋場面の動的な文〔退職までの月数など〕）
+            │    ├─ 自動計算（青の枠・月給/手取り・残業の月↔日と選択肢・次回面談の内容と時期の目安・内定/入社の目安）
+            │    ├─ 用語メモ（箇条書き）・「入れ先: …」（小さくグレー）
+            │    └─ ［← 前へ］［飛ばす（任意の場面だけ）］［次へ →］（次へは押したボタンの `next` があればそこへ。パートの最後を越えると ✓）
+            └─ 右（sticky・高さ calc(100vh-120px)）: タブ「面談準備」「入力内容」
+                 ├─ 面談準備: `InterviewPrepPanel` を `embedded` で埋め込み（portal・固定配置・×・広げる・Esc なし。中身・API・保存は同じ）。タブを切り替えても display:none で残す（会話の状態を保つ）
+                 └─ 入力内容: 上に「すでに値がある欄（台本の答えに替えますか？）」＝提案の一覧（いま→台本の答え・［替える］［そのまま］）、下に「台本で入った欄（N件）」の表（CA が直した行は「（CAが変更）」）。欄が更新されたらタブに「更新」、提案があれば「確認N」のバッジ
+```
+- 職歴の行が無いとき、会社ごとの場面に amber の注意「職務経歴の行がまだ無いので、答えを欄に入れられません」＋「登録情報の職歴を取り込む（N社）」（面談準備の整理の経歴の流れから企業名だけの `work_histories` を POST で作る）。
+- 面談準備の質問は「5. 経歴確認」の最後の場面「面談準備の質問（全体）」に一覧で出す（Q番号・食い違い札・「聞いた」済みは薄く）。「聞いた」を付けるのは右の面談準備側。
+
+### いつもの入力画面に足した欄・選択肢（付録C）
+- 転職活動状況: 「在職状況」（在職中／離職中）＋「退職日」（date）を他AG状況の下に追加。
+- 希望条件タブ「希望休日」の行の右に「年間休日」（文字・幅64）。
+- 希望条件タブの最後に「大事にしたい条件」（1つ目〜3つ目・文字）。
+- 自動車免許の選択肢に「取得(AT限定)」、希望残業に「45時間超も可」。選択肢の配列は `src/lib/interview-script/field-options.ts` に移した（台本と同じ配列）。
+- 台本の答えと違う値がある欄には、欄の横に小さな amber の「台本: 〇〇［替える］［×］」（`scriptProposalBadge`）。
+
+### 案内メールの切り出し（T-207 の変更）
+- `CandidateContactMailButton.tsx` の確認画面を `ContactMailConfirmDialog`（props: candidateId / type / onClose / onSent）として export。ボタン側のメニューはこれを開くだけになり、中身・送信・409 の扱いは同じ。`formatSentAt` と `ContactMailStatusResponse` も export。
