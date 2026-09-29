@@ -9,18 +9,46 @@
  * 動作:
  *   - 既定は DRY-RUN（対象一覧と件数を出力・DB/HTTPとも触らない）
  *   - --execute で再投入（1回の実行上限 50件・各件の成否をログ）
+ *   - T-XXX: 対象期間は既定「作成から3日以内」（env T131_RESUBMIT_WINDOW_DAYS）。
+ *       --days=N       作成から N 日以内に広げる（古い分を送るとき。AI費用が出るので件数を DRY-RUN で先に確認）
+ *       --days=all     期間無制限（cutoff 以降すべて）
+ *       --candidate=<candidateId>[,<candidateId>...]  特定の求職者だけ
+ *       --file=<fileId>[,<fileId>...]                 特定の行だけ
+ *       --batch=N      1回の上限（既定50）
+ *       --concurrency=N 並列度（既定3）
  *
  * 実行（本番コンテナ上・要 INTERNAL_INGEST_API_KEY / GOOGLE_SERVICE_ACCOUNT_KEY / DATABASE_URL）:
  *   railway ssh → npx tsx scripts/t131-resubmit-stale.ts             # DRY-RUN
  *                 npx tsx scripts/t131-resubmit-stale.ts --execute   # 本実行（上限50件）
+ *   ローカルから本番DBを叩くときは npx tsx --env-file=.env scripts/t131-resubmit-stale.ts ...
  */
 import "dotenv/config";
 import { runResubmitStale } from "@/lib/t131-resubmit-stale";
 
-const EXECUTE = process.argv.includes("--execute");
+const argv = process.argv.slice(2);
+const EXECUTE = argv.includes("--execute");
+const argValue = (name: string): string | undefined => {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+};
+const daysRaw = argValue("days");
+const windowDays = daysRaw === "all" ? null : daysRaw ? Number(daysRaw) : undefined;
+const list = (v: string | undefined) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+const batchRaw = argValue("batch");
+const concurrencyRaw = argValue("concurrency");
 
 async function main() {
-  await runResubmitStale({ execute: EXECUTE, log: (m) => console.log(m) });
+  await runResubmitStale({
+    execute: EXECUTE,
+    windowDays,
+    candidateIds: list(argValue("candidate")),
+    fileIds: list(argValue("file")),
+    batchCap: batchRaw ? Number(batchRaw) : undefined,
+    concurrency: concurrencyRaw ? Number(concurrencyRaw) : undefined,
+    // 手動実行はプロキシ上限が無いので時間の上限を広めに取る（1件120秒×上限50件でも十分）
+    timeBudgetMs: 30 * 60 * 1000,
+    log: (m) => console.log(m),
+  });
 }
 
 main()

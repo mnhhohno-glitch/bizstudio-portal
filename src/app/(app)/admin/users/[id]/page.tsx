@@ -107,6 +107,7 @@ export default async function AdminUserDetailPage({
         emergencyContactName: emp.emergencyContactName,
         emergencyContactRelation: emp.emergencyContactRelation,
         emergencyContactPhone: emp.emergencyContactPhone,
+        lineWorksUrl: emp.lineWorksUrl,
       },
       bankAccount: emp.bankAccount
         ? {

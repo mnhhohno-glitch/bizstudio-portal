@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { MODEL_PRICING_PER_MTOK } from "@/lib/claude";
+import { MODEL_PRICING_PER_MTOK, WEB_SEARCH_USD_PER_REQUEST } from "@/lib/claude";
 
 // T-126: AIアドバイザー系 Anthropic API の usage を AdvisorUsageLog に永続化するヘルパ。
 //
@@ -34,7 +34,10 @@ export type AdvisorEndpoint =
   | "interview-support-explain" // T-183: 面談サポートのリアルタイム解説（Anthropic Haiku・ストリーミング）
   | "interview-support-auto-scan" // T-183 Phase 3: 面談サポートの自動検知（用語/業務内容/転職理由・非ストリーミング）
   | "interview-support-prior-keyterms" // T-183 Phase 6: 事前情報からの固有名詞抽出（Deepgram Keyterm 用・画面起動時1回）
-  | "recommend-analyze"; // T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・無人実行）
+  | "recommend-analyze" // T-189 Phase 2a: 自動引き当てブックマークのAI評価（Message Batches API・無人実行）
+  | "interview-prep-summary" // T-205: 面談準備チャットの最初の整理（Sonnet 5・ストリーミング）
+  | "interview-prep-chat" // T-205: 面談準備チャットの質問1往復（Sonnet 5・ストリーミング）
+  | "interview-prep-research"; // T-205 step4: 面談準備の下調べ（会社と学校のウェブ検索・Sonnet 5）
 
 type TokenBreakdown = {
   inputTokens: number;
@@ -107,6 +110,9 @@ export type RecordAdvisorUsageParams = {
   // T-189 Phase 2a: Message Batches API 経由のコール。単価が全トークン種別（入力・出力・キャッシュ）
   //   一律 50% になるため costUsd を ×0.5 する。既存の同期経路（未指定）は従来どおり満額計上。
   batchApi?: boolean;
+  // T-205 step4: サーバー側ウェブ検索の回数（usage.server_tool_use.web_search_requests）。
+  //   1回ごとの単価（WEB_SEARCH_USD_PER_REQUEST）を costUsd に足し、回数は note に "web_search=N" で残す（専用列は持たない）。
+  webSearchRequests?: number | null;
 };
 
 /**
@@ -121,10 +127,15 @@ export async function recordAdvisorUsage(
     const tokens = extractTokens(params.usage);
     const { costUsd: fullCostUsd, unknownPricing } = computeCostUsd(params.model, tokens);
     // バッチAPI（50%割引）は全トークン種別が半額のため、算出後の合計に ×0.5 を掛ける。
-    const costUsd = params.batchApi ? fullCostUsd * 0.5 : fullCostUsd;
-    const note = unknownPricing
-      ? [params.note, "unknown-model-pricing"].filter(Boolean).join("; ")
-      : params.note ?? null;
+    const searches = params.webSearchRequests ?? 0;
+    const tokenCostUsd = params.batchApi ? fullCostUsd * 0.5 : fullCostUsd;
+    const costUsd = tokenCostUsd + searches * WEB_SEARCH_USD_PER_REQUEST;
+    const noteParts = [
+      params.note,
+      params.webSearchRequests != null ? `web_search=${searches}` : null,
+      unknownPricing ? "unknown-model-pricing" : null,
+    ].filter(Boolean);
+    const note = noteParts.length > 0 ? noteParts.join("; ") : null;
 
     const row = await prisma.advisorUsageLog.create({
       select: { id: true },

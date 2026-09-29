@@ -56,6 +56,14 @@ export type SendMailResult =
   | { ok: true; messageId?: string | null }
   | { ok: false; error: string; rejected?: boolean };
 
+// T-207: 添付ファイル。content は base64 文字列。
+export type ResendAttachment = {
+  filename: string;
+  content: string; // base64
+  contentType?: string; // 例: "image/png"（未指定なら filename から推定される）
+  contentId?: string; // 本文中に表示するときの cid
+};
+
 export async function sendResendEmail(params: {
   to: string | string[]; // 複数指定するとその全員が TO に並ぶ1通になる
   cc?: string[]; // CC。空配列・未指定なら cc ヘッダ自体を付けない
@@ -66,6 +74,10 @@ export async function sendResendEmail(params: {
   replyTo?: string; // 受信者が返信したとき届くアドレス（例: 送信者本人の User.email）
   // 差出人。未指定なら既定の noreply。bizstudio.co.jp 以外を渡してはいけない（buildSenderFrom で作る）
   from?: string;
+  // T-207: HTML 本文（text と両方渡すとマルチパートで送られる）。未指定なら text のみ＝既存の呼び出し元の挙動は変わらない。
+  html?: string;
+  // T-207: 添付。contentId を付けると html 内の <img src="cid:contentId"> で本文中に表示できる（QRコード用）。
+  attachments?: ResendAttachment[];
 }): Promise<SendMailResult> {
   const resendApiKey = process.env.RESEND_API_KEY;
   if (!resendApiKey) {
@@ -92,6 +104,17 @@ export async function sendResendEmail(params: {
         ...(params.bcc && params.bcc.length > 0 ? { bcc: params.bcc } : {}),
         subject,
         text: params.text,
+        ...(params.html ? { html: params.html } : {}),
+        ...(params.attachments && params.attachments.length > 0
+          ? {
+              attachments: params.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { content_type: a.contentType } : {}),
+                ...(a.contentId ? { content_id: a.contentId } : {}),
+              })),
+            }
+          : {}),
         ...(params.replyTo ? { reply_to: params.replyTo } : {}),
       }),
       signal: controller.signal,

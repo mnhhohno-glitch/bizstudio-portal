@@ -5,8 +5,9 @@
 //            ＋ services/lineworks_service.py（get_lineworks_id_by_name / send_message_with_mention）
 //    発火条件: LINEWORKS_CLIENT_ID・LINEWORKS_MYPAGE_BOT_ID・LINEWORKS_MYPAGE_CHANNEL_ID が全て設定済み
 //              （差分submit成立時は 気になる/応募したい が0件でもヘッダのみ送る＝箱B実装と同一）
-//    メンション: LINEWORKS_ADVISOR_MAP（JSON: CA名→LINE WORKS userId）で担当CAを解決。
-//                解決不可(未設定/parse失敗/名前なし)はメンションなし。メンション送信失敗時はプレーン再送。
+//    メンション: 担当CA（candidate.employeeId）→ User.lineworksId で解決（lineworks-ca-mention.ts）。
+//                2026-09-26 に LINEWORKS_ADVISOR_MAP（CA名→userId の対応表）の参照を廃止（env 自体は残置）。
+//                届かないときは代表（大野 将幸）へメンション＋本文末尾に注記。メンション失敗時は1回だけ宛先を切り替えて再送。
 //    下回り: portal 既存 src/lib/lineworks.ts の sendBotMessage を流用（認証系 env はタスクBotと共通、
 //            Bot/チャンネルは LINEWORKS_MYPAGE_* で分離）。
 //
@@ -23,8 +24,8 @@
 //
 // 通知失敗はまとめ送信本体を失敗させない（本ファイル内で完全に捕捉しログのみ）。
 import { prisma } from "@/lib/prisma";
-import { sendBotMessage } from "@/lib/lineworks";
 import { stripFileMetadata } from "@/lib/normalize-filename";
+import { resolveCaMentionTarget, sendBotMessageWithCaMention } from "@/lib/lineworks-ca-mention";
 
 export type SubmissionJobSummary = {
   fileName: string;
@@ -80,19 +81,6 @@ async function resolveJobDisplays(
   return map;
 }
 
-// 箱B get_lineworks_id_by_name と同一: LINEWORKS_ADVISOR_MAP(JSON) から CA名→LW userId。失敗は null。
-function getLineworksIdByName(advisorName: string | null | undefined): string | null {
-  const mapJson = process.env.LINEWORKS_ADVISOR_MAP;
-  if (!mapJson || !advisorName) return null;
-  try {
-    const map = JSON.parse(mapJson) as Record<string, string>;
-    return map[advisorName] ?? null;
-  } catch {
-    console.error("[LINE WORKS] Failed to parse LINEWORKS_ADVISOR_MAP");
-    return null;
-  }
-}
-
 /** ① LINE WORKS マイページBot 通知（箱B submit_feedback の LINE WORKS ブロックと同一挙動）。 */
 export async function notifySubmissionViaLineWorks(
   payload: SubmissionNotificationPayload,
@@ -102,12 +90,13 @@ export async function notifySubmissionViaLineWorks(
     const channelId = process.env.LINEWORKS_MYPAGE_CHANNEL_ID;
     if (!process.env.LINEWORKS_CLIENT_ID || !botId || !channelId) return; // 箱Bと同一のゲート
 
-    // 担当CA名（箱B: project.career_advisor 相当 → portal: candidate.employee.name）
+    // 担当CA（箱B: project.career_advisor 相当 → portal: candidate.employeeId）
     const cand = await prisma.candidate.findUnique({
       where: { id: payload.candidateId },
-      select: { employee: { select: { name: true } } },
+      select: { employeeId: true },
     });
-    const careerAdvisor = cand?.employee?.name ?? null;
+    const target = await resolveCaMentionTarget(cand?.employeeId);
+    const careerAdvisor = target.caName;
 
     const displays = await resolveJobDisplays(payload.candidateNumber, payload.jobs);
     const interested = payload.jobs.filter((j) => j.responseStatus === "INTERESTED");
@@ -137,17 +126,17 @@ export async function notifySubmissionViaLineWorks(
     }
     const message = lines.join("\n");
 
-    // メンション付き送信 → 失敗時プレーン再送（箱B send_message_with_mention と同一）
-    const lineworksId = careerAdvisor ? getLineworksIdByName(careerAdvisor) : null;
-    if (lineworksId) {
-      try {
-        await sendBotMessage(botId, channelId, `<m userId="${lineworksId}"> ${message}`);
-        return;
-      } catch (e) {
-        console.warn("[LINE WORKS] Mention message failed, falling back:", e);
-      }
-    }
-    await sendBotMessage(botId, channelId, message);
+    // メンション付き送信（担当CA → 代表 → メンションなし の順・メンション失敗は1回だけ宛先を切り替えて再送）
+    await sendBotMessageWithCaMention(
+      botId,
+      channelId,
+      target,
+      (mentionId, note) => {
+        const body = note ? `${message}\n${note}` : message;
+        return mentionId ? `<m userId="${mentionId}"> ${body}` : body;
+      },
+      "LINE WORKS",
+    );
   } catch (e) {
     // 通知失敗はまとめ送信本体を失敗させない
     console.error("[LINE WORKS] Notification failed:", e);

@@ -43,6 +43,11 @@ export const MODEL_PRICING_PER_MTOK: Record<string, ModelPricing> = {
   "gemini-3-flash-preview": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0 },
 };
 
+// T-205 step4: サーバー側ウェブ検索ツールの単価（トークン代とは別に1回ごとに課金。失敗した検索は課金されない）。
+// 出典: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool （Usage and pricing: $10 per 1,000 searches）
+// web_search_20260209 の動的フィルタリングで内部的に使われるコード実行は、トークン代以外の追加料金なし（同ページ Dynamic filtering）。
+export const WEB_SEARCH_USD_PER_REQUEST = 10 / 1000;
+
 // T-XXX step9: 従来 Sonnet 4.6（CLAUDE_MODEL_DEFAULT）を使っていた全機能のモデルと送り方の単一ソース。
 // AIアドバイザーのチャット・挨拶文・未読ログ取込・日報（アシスト/チャット）・日程チャット/レビュー・
 // RPAエラーチャット・面談ログのタスク検出。

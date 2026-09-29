@@ -20,6 +20,7 @@ export type EmployeeBasic = {
   emergencyContactName: string | null;
   emergencyContactRelation: string | null;
   emergencyContactPhone: string | null;
+  lineWorksUrl: string | null; // T-207
 };
 
 export type BankAccountData = {

@@ -64,6 +64,7 @@ export const BASIC_FIELDS: Record<string, FieldKind> = {
   emergencyContactName: "string",
   emergencyContactRelation: "string",
   emergencyContactPhone: "string",
+  lineWorksUrl: "string", // T-207: LINE WORKS の友だち追加URL
 };
 
 export const BANK_FIELDS: Record<string, FieldKind> = {

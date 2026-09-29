@@ -22,6 +22,33 @@ import SuggestedTaskCard, {
 } from "@/components/common/SuggestedTaskCard";
 // T-183 Phase 2: 面談サポートタブ（記録一覧・閲覧・削除）。
 import InterviewSupportLogTab from "@/components/interview-support/InterviewSupportLogTab";
+// T-207: 求職者向け案内メール（LINE登録案内・あいさつメール）のボタン＋メニュー＋確認画面
+import CandidateContactMailButton from "@/components/candidates/CandidateContactMailButton";
+// T-208 step2: 初回面談の台本モード（本体の左右2カラムを置き換える）。台本の定義・入れ方の決まりは src/lib/interview-script/
+import InterviewScriptMode, { type ScriptProposal } from "@/components/candidates/InterviewScriptMode";
+import { acceptProposal as acceptScriptProposal, decideApply, nextApplied } from "@/lib/interview-script/apply";
+import { SCRIPT_VERSION } from "@/lib/interview-script/script-v1";
+import type { SceneWrite } from "@/lib/interview-script/runtime";
+import type { AnswerMap, AppliedMap } from "@/lib/interview-script/types";
+import {
+  ACTIVITY_PERIOD_OPTIONS,
+  AGENT_USAGE_OPTIONS,
+  APPLICATION_TYPE_OPTIONS,
+  CONTACT_METHOD_OPTIONS,
+  DESIRED_DAY_OFF_OPTIONS,
+  DESIRED_OVERTIME_OPTIONS,
+  DESIRED_TRANSFER_OPTIONS,
+  DOCUMENT_STATUS_OPTIONS,
+  DRIVER_LICENSE_OPTIONS,
+  EMPLOYMENT_STATUS_OPTIONS,
+  JAPANESE_SKILL_OPTIONS,
+  JOB_CHANGE_TIMELINE_OPTIONS,
+  LANGUAGE_SKILL_OPTIONS,
+  NEXT_INTERVIEW_FLAG_OPTIONS,
+  PC_SKILL_OPTIONS,
+  TYPING_OPTIONS,
+  WORK_STYLE_OPTIONS,
+} from "@/lib/interview-script/field-options";
 
 // 専用欄アップロード成功の中央通知の表示時間。既存トースト（約3秒）より長め＝
 // 「解析ボタンを押す」という次の操作に気づける時間を確保する。
@@ -57,6 +84,12 @@ type AttachmentRecord = {
   // T-152: この面談ログが「どの面談のものか」。面談画面の専用アップロード欄経由のみ値が入る。
   interviewId?: string | null;
 };
+
+// 2026-09-26: 添付タブの振り分け（.txt → 面談ログ）と「面談ログ」バッジの判定。大文字小文字は問わない。
+const isTxtFileName = (fileName: string) => fileName.toLowerCase().endsWith(".txt");
+/** この面談のログとして記録されたファイルか（T-152 の interviewId 紐付き・txt）。 */
+const isInterviewLogOf = (a: AttachmentRecord, interviewId: string) =>
+  a.interviewId === interviewId && (a.mimeType.startsWith("text/") || isTxtFileName(a.fileName));
 
 type MemoRecord = {
   id: string;
@@ -106,6 +139,8 @@ interface InterviewFormProps {
   interviewSeq?: number;
   onSaved?: () => void;
   onDeleted?: () => void;
+  /** T-205 step2: ヘッダーの「面談準備」ボタンで面談準備パネルを開く（開閉 state は InterviewHistoryTab が持つ） */
+  onOpenInterviewPrep?: () => void;
 }
 
 function formatCandidateFlagBadge(
@@ -123,6 +158,11 @@ function formatCandidateFlagBadge(
 /*  Constants                                                          */
 /* ================================================================== */
 
+// T-205 step2: 面談サポート（T-183）はテスト段階のため入口を一時的に隠す。
+// true に戻すとヘッダーの「面談サポート」ボタンと右カラムの「面談サポート」タブが元どおり出る。
+// 処理・API・保存データには触れていない（表示の切替のみ）。
+const SHOW_INTERVIEW_SUPPORT = false;
+
 const RIGHT_TABS = [
   { id: "initial", label: "初期条件" },
   { id: "desired", label: "希望条件" },
@@ -133,15 +173,20 @@ const RIGHT_TABS = [
   { id: "support", label: "面談サポート" },
 ] as const;
 
+/** 実際に表示するタブ（SHOW_INTERVIEW_SUPPORT=false のときは "support" を除く） */
+const VISIBLE_RIGHT_TABS = RIGHT_TABS.filter((tab) => SHOW_INTERVIEW_SUPPORT || tab.id !== "support");
+
 const AUTOSAVE_DEBOUNCE = 3_000;
 
 const MEMO_FLAGS = ["初回面談", "既存面談", "面接対策", "内定面談", "その他"];
 
-const WORK_STYLE_OPTIONS = [
-  "フルリモート", "上場企業", "退職金制度", "海外勤務・出張あり",
-  "ハイブリッド", "スタートアップ", "固定残業NG", "海外常駐希望",
-  "フレックス勤務", "住宅手当", "賞与必須", "英語を使う仕事",
-];
+// T-208 step2: 選択肢は src/lib/interview-script/field-options.ts に移した（台本のボタンの値と同じ配列を見る）。
+// WORK_STYLE_OPTIONS も同ファイルから import。
+
+/** T-208: 台本の答えの保存（PUT /script-answers）の間隔 */
+const SCRIPT_SAVE_DEBOUNCE = 1_500;
+/** T-208: detail の数値の欄（台本から入れるとき Number にする） */
+const DETAIL_NUMBER_KEYS = new Set(["currentApplicationCount", "currentSalary", "desiredSalaryMin", "desiredSalaryMax"]);
 
 const DESIRED_SUBTABS = [
   { id: "st-job", label: "職種" },
@@ -453,7 +498,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 /* ================================================================== */
 
 export default function InterviewForm({
-  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted,
+  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted, onOpenInterviewPrep,
 }: InterviewFormProps) {
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
@@ -464,18 +509,17 @@ export default function InterviewForm({
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [autosaveToken, setAutosaveToken] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [rightTab, setRightTab] = useState<string>("initial");
+  const [rightTabState, setRightTab] = useState<string>("initial");
+  // T-205 step2: 隠しているタブ（面談サポート）が選択状態になっていたら「初期条件」に戻す（effect を使わず派生値で判定）
+  const rightTab = VISIBLE_RIGHT_TABS.some((tab) => tab.id === rightTabState) ? rightTabState : "initial";
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [, setTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // T-152: 「この面談の面談ログ」専用アップロード欄の input と通信中フラグ
-  const logInputRef = useRef<HTMLInputElement>(null);
+  // T-152: 「この面談の面談ログ」として記録する通信中フラグ（2026-09-26 に受け付けを上段1つへ統合）
   const [logUploading, setLogUploading] = useState(false);
-  // 専用欄のドラッグ&ドロップ受け入れ表示
-  const [logDragActive, setLogDragActive] = useState(false);
-  // 専用欄アップロード成功の中央通知（解析ボタンの押し忘れ防止）
+  // 面談ログとして記録できたときの中央通知（解析ボタンの押し忘れ防止）
   const [logUploadNotice, setLogUploadNotice] = useState<string | null>(null);
   const logNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevIdRef = useRef<string | null>(null);
@@ -499,6 +543,19 @@ export default function InterviewForm({
   const [taskCardError, setTaskCardError] = useState<Record<string, string>>({});
   // 候補1件ごとの処理済み状態。候補が複数あるとき1件の操作で全体を閉じないために持つ。
   const [taskCardDone, setTaskCardDone] = useState<Record<string, SuggestedTaskDone>>({});
+
+  // T-208 step2: 台本モード。答え（answers）・台本が入れた欄（applied）は interview_script_answers に保存し、
+  // 欄への反映は画面の state（detail / workHistories）に行って既存の自動保存に乗せる。
+  const [scriptMode, setScriptMode] = useState(false);
+  const [scriptAnswers, setScriptAnswers] = useState<AnswerMap>({});
+  const [scriptApplied, setScriptApplied] = useState<AppliedMap>({});
+  // すでに値がある欄への提案「台本の答え（〇〇）に替えますか？」（欄のパス → 値）
+  const [scriptProposals, setScriptProposals] = useState<Record<string, ScriptProposal>>({});
+  const [scriptLoadedFor, setScriptLoadedFor] = useState<string | null>(null);
+  const scriptDirtyRef = useRef(false);
+  const scriptSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scriptAnswersRef = useRef<AnswerMap>({});
+  const scriptAppliedRef = useRef<AppliedMap>({});
 
   /* ---- Fetch interview data (existing logic) ---- */
   const fetchData = useCallback(async () => {
@@ -648,7 +705,255 @@ export default function InterviewForm({
     autosaveTokenRef.current = autosaveToken;
     interviewIdRef.current = interviewId;
     currentUserIdRef.current = currentUser?.id;
+    scriptAnswersRef.current = scriptAnswers;
+    scriptAppliedRef.current = scriptApplied;
   });
+
+  /* ---- T-208 step2: 台本モード ---- */
+
+  // 面談を切り替えたら台本の状態を捨て、台本モードも閉じる（前回の面談の答えは持ち越さない）
+  useEffect(() => {
+    setScriptMode(false);
+    setScriptAnswers({});
+    setScriptApplied({});
+    setScriptProposals({});
+    setScriptLoadedFor(null);
+    scriptDirtyRef.current = false;
+  }, [interviewId]);
+
+  // 台本モードを開いたら、この面談の答えを読み込む（1回だけ）
+  useEffect(() => {
+    if (!scriptMode || !interviewId || scriptLoadedFor === interviewId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/interviews/${interviewId}/script-answers`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { answers?: AnswerMap; applied?: AppliedMap };
+        setScriptAnswers(data.answers ?? {});
+        setScriptApplied(data.applied ?? {});
+      } catch {
+        /* silent */
+      } finally {
+        if (!cancelled) setScriptLoadedFor(interviewId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scriptMode, interviewId, scriptLoadedFor]);
+
+  const saveScriptAnswers = useCallback(async () => {
+    const id = interviewIdRef.current;
+    if (!id || !scriptDirtyRef.current) return;
+    scriptDirtyRef.current = false;
+    try {
+      await fetch(`/api/interviews/${id}/script-answers`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: scriptAnswersRef.current, applied: scriptAppliedRef.current, scriptVersion: SCRIPT_VERSION }),
+      });
+    } catch {
+      scriptDirtyRef.current = true;
+    }
+  }, []);
+
+  const scheduleScriptSave = useCallback(() => {
+    scriptDirtyRef.current = true;
+    if (scriptSaveTimerRef.current) clearTimeout(scriptSaveTimerRef.current);
+    scriptSaveTimerRef.current = setTimeout(() => {
+      void saveScriptAnswers();
+    }, SCRIPT_SAVE_DEBOUNCE);
+  }, [saveScriptAnswers]);
+
+  useEffect(() => {
+    return () => {
+      if (scriptSaveTimerRef.current) clearTimeout(scriptSaveTimerRef.current);
+      void saveScriptAnswers();
+    };
+  }, [saveScriptAnswers]);
+
+  const handleScriptAnswersChange = (next: AnswerMap) => {
+    setScriptAnswers(next);
+    scriptAnswersRef.current = next;
+    scheduleScriptSave();
+  };
+
+  /** 働き方のチェック（JSON 文字列）を配列で */
+  const workStyleListOf = (d: AnyRecord): string[] => {
+    try {
+      const v = d.workStylePreferences ? JSON.parse(d.workStylePreferences) : [];
+      return Array.isArray(v) ? (v as string[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  /** detail の欄に入れる値の型を合わせる（数値・日付） */
+  const coerceDetailValue = (field: string, value: string): unknown => {
+    if (DETAIL_NUMBER_KEYS.has(field)) return value === "" ? null : Number(value);
+    if (DETAIL_DATETIME_KEYS.includes(field)) {
+      if (value === "") return null;
+      const v = /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
+      return normalizeDate(v);
+    }
+    return value === "" ? null : value;
+  };
+
+  /** いまの欄の値を文字で（「入力内容」タブ・提案の表示用） */
+  const scriptCurrentValueOf = (path: string): string => {
+    const p = path.split("@")[0];
+    if (p.startsWith("d.")) {
+      const v = detail[p.slice(2)];
+      if (v == null) return "";
+      if (DETAIL_DATETIME_KEYS.includes(p.slice(2)) && typeof v === "string") return v.slice(0, 10);
+      return String(v);
+    }
+    if (p.startsWith("wh.")) {
+      const [, idx, field] = p.split(".");
+      const v = workHistories[Number(idx)]?.[field as keyof WorkHistoryRecord];
+      return v == null ? "" : String(v);
+    }
+    if (p.startsWith("ws.")) return workStyleListOf(detail).includes(p.slice(3)) ? "1" : "";
+    return "";
+  };
+
+  /**
+   * 台本の答えから決まった書き込みを欄に反映する（付録F の決まりは apply.ts の decideApply）。
+   * 反映は画面の state に対して行い、既存の自動保存で保存する。
+   */
+  const applyScriptWrites = (writes: SceneWrite[]) => {
+    const detailPatch: Record<string, unknown> = {};
+    const whPatch: Record<number, Record<string, unknown>> = {};
+    let wsList: string[] | null = null;
+    let applied = { ...scriptAppliedRef.current };
+    const proposals = { ...scriptProposals };
+    let whTouched = false;
+
+    for (const w of writes) {
+      const prevApplied = applied[w.appliedKey];
+      let companyIndex: number | undefined;
+      let current: unknown;
+      if (w.target.kind === "detail") {
+        current = w.target.field in detailPatch ? detailPatch[w.target.field] : detailRef.current[w.target.field];
+      } else if (w.target.kind === "wh") {
+        companyIndex = Number(w.path.split(".")[1]);
+        const row = workHistoriesRef.current[companyIndex];
+        if (!row) continue; // 職歴の行が無い（仮の会社）ときは入れない
+        current = whPatch[companyIndex] && w.target.field in whPatch[companyIndex] ? whPatch[companyIndex][w.target.field] : row[w.target.field as keyof WorkHistoryRecord];
+      } else {
+        if (wsList === null) wsList = workStyleListOf(detailRef.current);
+        current = wsList;
+      }
+      const dec = decideApply(w.target, companyIndex, current, prevApplied, w.value);
+      if (dec.action === "propose") {
+        proposals[w.path] = { value: dec.nextValue };
+        continue;
+      }
+      if (dec.action === "skip") {
+        if (!w.value) delete proposals[w.path];
+        continue;
+      }
+      delete proposals[w.path];
+      applied = nextApplied(applied, { ...dec, path: w.appliedKey });
+      if (w.target.kind === "detail") {
+        detailPatch[w.target.field] = coerceDetailValue(w.target.field, dec.nextValue);
+      } else if (w.target.kind === "wh") {
+        whPatch[companyIndex!] = { ...(whPatch[companyIndex!] ?? {}), [w.target.field]: dec.nextValue === "" ? null : dec.nextValue };
+        whTouched = true;
+      } else {
+        const item = w.target.item;
+        wsList = dec.nextValue === "1" ? [...(wsList ?? []), item] : (wsList ?? []).filter((x) => x !== item);
+      }
+    }
+    if (wsList !== null) detailPatch.workStylePreferences = JSON.stringify(wsList);
+
+    if (Object.keys(detailPatch).length > 0) {
+      setDetailState((prev) => ({ ...prev, ...detailPatch }));
+      setIsDirty(true);
+    }
+    if (whTouched) {
+      setWorkHistories((prev) => prev.map((row, i) => (whPatch[i] ? { ...row, ...whPatch[i] } : row)));
+      whDirtyRef.current = true;
+      setIsDirty(true);
+    }
+    setScriptApplied(applied);
+    scriptAppliedRef.current = applied;
+    setScriptProposals(proposals);
+    scheduleScriptSave();
+  };
+
+  /** 「台本の答え（〇〇）に替える」を押した */
+  const acceptScriptProposalFor = (path: string) => {
+    const p = scriptProposals[path];
+    if (!p) return;
+    if (path.startsWith("d.")) {
+      const field = path.slice(2);
+      setDetailState((prev) => ({ ...prev, [field]: coerceDetailValue(field, p.value) }));
+      setIsDirty(true);
+    } else if (path.startsWith("wh.")) {
+      const [, idx, field] = path.split(".");
+      setWorkHistories((prev) => prev.map((row, i) => (i === Number(idx) ? { ...row, [field]: p.value || null } : row)));
+      whDirtyRef.current = true;
+      setIsDirty(true);
+    }
+    const applied = acceptScriptProposal(scriptAppliedRef.current, path, p.value);
+    setScriptApplied(applied);
+    scriptAppliedRef.current = applied;
+    setScriptProposals((prev) => {
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    scheduleScriptSave();
+  };
+
+  const dismissScriptProposal = (path: string) => {
+    setScriptProposals((prev) => {
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+  };
+
+  /** 職歴の行が無いとき、登録情報（面談準備の整理）の会社名で職歴を作る（欄が空のときだけ入れる決まりの範囲） */
+  const importScriptCompanies = async (names: string[]) => {
+    if (!interviewId || workHistoriesRef.current.length > 0) return;
+    const rows: WorkHistoryRecord[] = names.map((name, i) => ({
+      order: i + 1, companyName: name || null, businessContent: null,
+      tenureYear: null, tenureMonth: null, jobTypeFlag: null, jobTypeMemo: null,
+      resignReasonLarge: null, resignReasonMedium: null, resignReasonSmall: null,
+      jobChangeReasonMemo: null,
+    }));
+    const saved: WorkHistoryRecord[] = [];
+    for (const row of rows) {
+      try {
+        const res = await fetch(`/api/interviews/${interviewId}/work-histories`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(row),
+        });
+        saved.push(res.ok ? ((await res.json()) as WorkHistoryRecord) : row);
+      } catch {
+        saved.push(row);
+      }
+    }
+    setWorkHistories(saved);
+    toast.success(`職歴を${saved.length}社分作りました（企業名のみ）`);
+  };
+
+  /** 欄の横に出す提案（いつもの入力画面用） */
+  const scriptProposalBadge = (path: string) => {
+    const p = scriptProposals[path];
+    if (!p) return null;
+    return (
+      <span className="inline-flex items-center gap-1 shrink-0" style={{ fontSize: 10, color: "var(--im-fg-warn)", background: "var(--im-bg-warn)", borderRadius: 4, padding: "1px 4px", whiteSpace: "nowrap" }} title="台本の答えに替えますか？">
+        台本: {p.value}
+        <button type="button" onClick={() => acceptScriptProposalFor(path)} style={{ fontSize: 10, border: "0.5px solid #f0d9b5", borderRadius: 3, background: "var(--im-bg)", padding: "0 4px", cursor: "pointer", fontFamily: "inherit", color: "var(--im-fg-warn)" }}>替える</button>
+        <button type="button" onClick={() => dismissScriptProposal(path)} style={{ fontSize: 10, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", color: "var(--im-fg3)" }} aria-label="そのまま">×</button>
+      </span>
+    );
+  };
 
   const doAutoSave = useCallback(async (overrides: Partial<AnyRecord> = {}) => {
     if (!interviewId || savingRef.current) return;
@@ -835,21 +1140,26 @@ export default function InterviewForm({
     }
   };
 
+  // 2026-09-26: 受け付けを1つに統合。ドラッグ＆ドロップ・「ファイルを選択」の両方がここを通り、
+  // 拡張子で振り分ける（.txt → この面談の面談ログ／それ以外 → 通常の添付）。1件ずつ逐次 POST（罠#31）。
+  // ログにできない .txt（面談が未保存・この面談のログが記録済み）は、従来どおり通常の添付として上げる
+  // （旧「ログをアップロード」もこの2状態ではログを受け付けていなかった）。
   const handleUploadMultiple = async (files: File[]) => {
+    // 同じ回に .txt が複数あっても、この面談のログにするのは1件目だけ（旧専用欄と同じく1面談1ログ）
+    let logRecorded = !!interviewId && attachments.some((a) => isInterviewLogOf(a, interviewId));
     for (const file of files) {
-      await handleUpload(file);
+      if (isTxtFileName(file.name) && interviewId && !logRecorded) {
+        logRecorded = await handleUploadInterviewLog(file);
+      } else {
+        await handleUpload(file);
+      }
     }
   };
 
-  // T-152: 「この面談の面談ログ」専用アップロード。interviewId 付きで送り、
-  // どの面談のログかを記録する（解析はこの紐付きログを最優先で使う）。
-  const handleUploadInterviewLog = async (file: File) => {
-    if (!interviewId) return;
-    // クリック選択・ドラッグ&ドロップのどちらもここを通す（同じAPI・同じパラメータ）。
-    if (!file.name.toLowerCase().endsWith(".txt")) {
-      toast.error("面談ログ（.txt）のみアップロードできます");
-      return;
-    }
+  // T-152: 「この面談の面談ログ」として記録する。interviewId 付きで送り、
+  // どの面談のログかを記録する（解析はこの紐付きログを最優先で使う）。成功で true。
+  const handleUploadInterviewLog = async (file: File): Promise<boolean> => {
+    if (!interviewId) return false;
     setLogUploading(true);
     try {
       const fd = new FormData();
@@ -866,8 +1176,10 @@ export default function InterviewForm({
       if (att) setAttachments((prev) => [att, ...prev]); // hasInterviewLog が即座に更新され解析ボタンが活性化する
       // 画面下の小さいトーストだと解析ボタンの押し忘れが起きるため、中央に出す。
       showLogUploadNotice(file.name);
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "アップロードに失敗しました");
+      return false;
     } finally {
       setLogUploading(false);
     }
@@ -886,16 +1198,6 @@ export default function InterviewForm({
       if (logNoticeTimerRef.current) clearTimeout(logNoticeTimerRef.current);
     };
   }, []);
-
-  /** 専用欄へのドロップ。1件目だけを対象にし、判定・送信はクリック選択と同じ経路に流す。 */
-  const handleDropInterviewLog = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setLogDragActive(false);
-    if (!interviewId || logUploading) return;
-    const file = Array.from(e.dataTransfer.files)[0];
-    if (file) handleUploadInterviewLog(file);
-  };
 
   const handleDeleteAttachment = async (attachmentId: string) => {
     if (!confirm("この添付ファイルを削除しますか？")) return;
@@ -1203,13 +1505,8 @@ export default function InterviewForm({
   const hasInterviewLog = attachments.some(
     (a) => a.mimeType.startsWith("text/") || a.fileName.toLowerCase().endsWith(".txt"),
   );
-  // T-152: この面談に紐づくログ（専用アップロード欄経由）。attachments は createdAt desc なので先頭が最新。
-  const linkedLog = attachments.find(
-    (a) =>
-      a.interviewId === interviewId &&
-      !!interviewId &&
-      (a.mimeType.startsWith("text/") || a.fileName.toLowerCase().endsWith(".txt")),
-  );
+  // T-152: この面談に紐づくログか。2026-09-26 に専用欄を廃止し、一覧の「面談ログ」バッジの判定に使う。
+  const isLinkedLog = (a: AttachmentRecord) => !!interviewId && isInterviewLogOf(a, interviewId);
   const d = detail;
   const r = rating;
 
@@ -1360,15 +1657,40 @@ export default function InterviewForm({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasPdf ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
-          {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled */}
+          {/* T-205 step2: 面談準備チャット（マイナビレジュメの整理＋会話）を右からのパネルで開く。見た目は「PDF表示」と同種 */}
+          {onOpenInterviewPrep && (
+            <button
+              type="button" onClick={onOpenInterviewPrep}
+              className="inline-flex items-center justify-center gap-1 cursor-pointer"
+              style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              面談準備
+            </button>
+          )}
+          {/* T-207: 案内メール（LINE登録案内・あいさつメール）。「面談準備」の隣。ボタン・メニュー・確認画面は CandidateContactMailButton 内 */}
+          <CandidateContactMailButton candidateId={candidateId} appearance="header" />
+          {/* T-208 step2: 台本モードの切替（面談準備・案内メールの隣）。押すと本体が台本モードに替わり、もう一度押すと戻る */}
           <button
-            type="button" onClick={() => window.open(`/interview-support/${interviewId}`, "_blank")} disabled={!interviewId}
-            className="inline-flex items-center justify-center gap-1"
-            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: interviewId ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: interviewId ? 1 : 0.5, cursor: interviewId ? "pointer" : "not-allowed" }}
+            type="button" onClick={() => setScriptMode((v) => !v)}
+            className="inline-flex items-center justify-center gap-1 cursor-pointer"
+            style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: scriptMode ? "0.5px solid var(--im-bdr-info)" : "0.5px solid var(--im-bdr)", background: scriptMode ? "var(--im-bg-info)" : "transparent", color: scriptMode ? "var(--im-fg-info)" : "var(--im-fg)", fontFamily: "inherit", fontWeight: scriptMode ? 500 : undefined }}
+            title={scriptMode ? "いつもの入力画面に戻る" : "初回面談の台本モードを開く"}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={interviewId ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            面談サポート
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            {scriptMode ? "入力画面へ" : "台本"}
           </button>
+          {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） */}
+          {SHOW_INTERVIEW_SUPPORT && (
+            <button
+              type="button" onClick={() => window.open(`/interview-support/${interviewId}`, "_blank")} disabled={!interviewId}
+              className="inline-flex items-center justify-center gap-1"
+              style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: interviewId ? "var(--im-fg)" : "var(--im-fg3)", fontFamily: "inherit", opacity: interviewId ? 1 : 0.5, cursor: interviewId ? "pointer" : "not-allowed" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={interviewId ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              面談サポート
+            </button>
+          )}
           <button
             type="button" onClick={handleSave} disabled={saving}
             className="cursor-pointer"
@@ -1377,7 +1699,26 @@ export default function InterviewForm({
         </div>
       </div>
 
-      {/* ============ GRID: LEFT + RIGHT ============ */}
+      {/* ============ T-208: 台本モード（本体を置き換える。重ねて開かない） ============ */}
+      {scriptMode ? (
+        <InterviewScriptMode
+          candidateId={candidateId}
+          interviewId={interviewId}
+          candidate={candidate ? { name: candidate.name, email: candidate.email } : null}
+          form={form}
+          detail={detail}
+          workHistories={workHistories}
+          answers={scriptAnswers}
+          applied={scriptApplied}
+          proposals={scriptProposals}
+          onAnswersChange={handleScriptAnswersChange}
+          onApplyWrites={applyScriptWrites}
+          onAcceptProposal={acceptScriptProposalFor}
+          onDismissProposal={dismissScriptProposal}
+          onImportCompanies={(names) => void importScriptCompanies(names)}
+          currentValueOf={scriptCurrentValueOf}
+        />
+      ) : (
       <div className="grid grid-cols-2">
 
         {/* ======== LEFT COLUMN ======== */}
@@ -1508,22 +1849,33 @@ export default function InterviewForm({
           {/* --- 転職活動状況 --- */}
           <div className="mb-4" style={isTerminated ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
             <SectionHd title="転職活動状況" />
-            <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={["初めて利用", "他社利用中", "利用経験あり"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.agentUsageFlag")} /><Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
-            <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={["すぐにでも", "3カ月以内", "半年以内", "1年以内", "未定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.jobChangeTimeline")} /><Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
-            <Row label="活動期間"><Fld value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)} type="select" options={["1週間以内", "1カ月以内", "3カ月以内", "半年以内", "半年以上"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.activityPeriod")} /><Fld value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} /></Row>
+            <Row label="他AG状況"><Fld value={d.agentUsageFlag} onChange={(v) => setDetail("agentUsageFlag", v)} type="select" options={AGENT_USAGE_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.agentUsageFlag")} />{scriptProposalBadge("d.agentUsageFlag")}<Fld value={d.agentUsageMemo} onChange={(v) => setDetail("agentUsageMemo", v)} /></Row>
+            {/* T-208 step2（付録C）: 在職状況・退職日（DB列は既存。画面に出す） */}
+            <Row label="在職状況">
+              <Fld value={d.employmentStatus} onChange={(v) => setDetail("employmentStatus", v)} type="select" options={EMPLOYMENT_STATUS_OPTIONS} style={{ width: 110, flex: "none" }} />
+              {scriptProposalBadge("d.employmentStatus")}
+              <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)" }}>退職日</span>
+              <Fld value={d.resignationDate ? new Date(d.resignationDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("resignationDate", v)} type="date" style={{ width: 130, flex: "none" }} />
+              {scriptProposalBadge("d.resignationDate")}
+            </Row>
+            <Row label="転職時期"><Fld value={d.jobChangeTimeline} onChange={(v) => setDetail("jobChangeTimeline", v)} type="select" options={JOB_CHANGE_TIMELINE_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.jobChangeTimeline")} />{scriptProposalBadge("d.jobChangeTimeline")}<Fld value={d.jobChangeTimelineMemo} onChange={(v) => setDetail("jobChangeTimelineMemo", v)} /></Row>
+            <Row label="活動期間"><Fld value={d.activityPeriod} onChange={(v) => setDetail("activityPeriod", v)} type="select" options={ACTIVITY_PERIOD_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.activityPeriod")} />{scriptProposalBadge("d.activityPeriod")}<Fld value={d.activityPeriodMemo} onChange={(v) => setDetail("activityPeriodMemo", v)} /></Row>
             <Row label="他社応募">
-              <Fld value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)} type="select" options={["検討中", "応募中", "選考中", "なし"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.applicationTypeFlag")} />
+              <Fld value={d.applicationTypeFlag} onChange={(v) => setDetail("applicationTypeFlag", v)} type="select" options={APPLICATION_TYPE_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.applicationTypeFlag")} />
+              {scriptProposalBadge("d.applicationTypeFlag")}
               <Fld value={d.applicationMemo} onChange={(v) => setDetail("applicationMemo", v)} />
               <div className="flex items-center gap-1 shrink-0" style={{ width: 80 }}>
                 <Fld value={d.currentApplicationCount} onChange={(v) => setDetail("currentApplicationCount", v ? Number(v) : null)} type="number" style={{ width: 48, textAlign: "center", flex: "none" }} isMissing={miss.has("d.currentApplicationCount")} />
                 <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>社</span>
               </div>
+              {scriptProposalBadge("d.currentApplicationCount")}
             </Row>
             <Row label="最終学歴">
               <Fld value={d.educationFlag} onChange={(v) => setDetail("educationFlag", v)} type="select" options={["大学卒", "大学院卒", "短大卒", "専門卒", "高卒"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.educationFlag")} />
               <Fld value={d.educationMemo} onChange={(v) => setDetail("educationMemo", v)} />
               <div className="flex items-center gap-1 shrink-0" style={{ width: 186 }}>
                 <Fld value={d.graduationDate} onChange={(v) => setDetail("graduationDate", v)} style={{ width: 92 }} placeholder="2016年3月" isMissing={miss.has("d.graduationDate")} />
+                {scriptProposalBadge("d.graduationDate")}
                 <Fld value={d.graduationStatus} onChange={(v) => setDetail("graduationStatus", v)} type="select" options={["卒業", "卒業予定", "在学中", "中退", "修了", "その他"]} style={{ flex: 1 }} isMissing={miss.has("d.graduationStatus")} />
               </div>
             </Row>
@@ -1556,6 +1908,7 @@ export default function InterviewForm({
                     </div>
                   </div>
                   <Row label="退社理由">
+                    {scriptProposalBadge(`wh.${idx}.resignReasonLarge`)}{scriptProposalBadge(`wh.${idx}.resignReasonMedium`)}{scriptProposalBadge(`wh.${idx}.resignReasonSmall`)}
                     <Fld value={wh.resignReasonLarge} onChange={(v) => { setWH(idx, "resignReasonLarge", v); setWH(idx, "resignReasonMedium", ""); setWH(idx, "resignReasonSmall", ""); }} type="select" options={[...RESIGN_REASON_LARGE_OPTIONS]} style={{ width: 90, flex: "none" }} />
                     <Fld value={wh.resignReasonMedium} onChange={(v) => { setWH(idx, "resignReasonMedium", v); setWH(idx, "resignReasonSmall", ""); }} type="select" options={(() => { const opts = getMediumOptions(wh.resignReasonLarge); return wh.resignReasonMedium && !opts.includes(wh.resignReasonMedium) ? [...opts, wh.resignReasonMedium] : opts; })()} readOnly={!wh.resignReasonLarge} style={{ width: 110, flex: "none" }} />
                     <Fld value={wh.resignReasonSmall} onChange={(v) => setWH(idx, "resignReasonSmall", v)} type="select" options={(() => { const opts = getSmallOptions(wh.resignReasonMedium); return wh.resignReasonSmall && !opts.includes(wh.resignReasonSmall) ? [...opts, wh.resignReasonSmall] : opts; })()} readOnly={!wh.resignReasonMedium} style={{ flex: 1 }} />
@@ -1583,7 +1936,7 @@ export default function InterviewForm({
 
           {/* Tabs */}
           <div className="flex overflow-x-auto" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
-            {RIGHT_TABS.map((tab) => (
+            {VISIBLE_RIGHT_TABS.map((tab) => (
               <button
                 key={tab.id} type="button" onClick={() => setRightTab(tab.id)}
                 className="cursor-pointer whitespace-nowrap"
@@ -1794,23 +2147,31 @@ export default function InterviewForm({
 
                 <div className="mb-4">
                   <SectionHd title="年収・勤務条件" />
-                  <Row label="現年収"><Fld value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.currentSalary")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} /></Row>
-                  <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMin")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
-                  <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMax")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span><Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
-                  <Row label="希望休日"><Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={["土日祝休み", "完全週休2日", "シフト制", "曜日問わず"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredDayOff")} /><Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} /></Row>
-                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={["絶対不可", "10時間以内", "20時間以内", "30時間以内", "45時間以内"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredOvertimeMax")} /><Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
-                  <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={["なし", "可", "要相談"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredTransfer")} /><Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
+                  <Row label="現年収"><Fld value={d.currentSalary} onChange={(v) => setDetail("currentSalary", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.currentSalary")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span>{scriptProposalBadge("d.currentSalary")}<Fld value={d.currentSalaryMemo} onChange={(v) => setDetail("currentSalaryMemo", v)} /></Row>
+                  <Row label="希望下限"><Fld value={d.desiredSalaryMin} onChange={(v) => setDetail("desiredSalaryMin", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMin")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span>{scriptProposalBadge("d.desiredSalaryMin")}<Fld value={d.desiredSalaryMinMemo} onChange={(v) => setDetail("desiredSalaryMinMemo", v)} /></Row>
+                  <Row label="希望年収"><Fld value={d.desiredSalaryMax} onChange={(v) => setDetail("desiredSalaryMax", v ? Number(v) : null)} type="number" style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredSalaryMax")} /><span style={{ fontSize: 11, color: "var(--im-fg3)" }}>万円</span>{scriptProposalBadge("d.desiredSalaryMax")}<Fld value={d.desiredSalaryMaxMemo} onChange={(v) => setDetail("desiredSalaryMaxMemo", v)} /></Row>
+                  {/* T-208 step2（付録C）: 年間休日を希望休日の隣に出す（DB列は既存） */}
+                  <Row label="希望休日">
+                    <Fld value={d.desiredDayOff} onChange={(v) => setDetail("desiredDayOff", v)} type="select" options={DESIRED_DAY_OFF_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredDayOff")} />
+                    {scriptProposalBadge("d.desiredDayOff")}
+                    <Fld value={d.desiredDayOffMemo} onChange={(v) => setDetail("desiredDayOffMemo", v)} />
+                    <span className="shrink-0" style={{ fontSize: 11, color: "var(--im-fg2)" }}>年間休日</span>
+                    <Fld value={d.desiredHolidayCount} onChange={(v) => setDetail("desiredHolidayCount", v)} style={{ width: 64, flex: "none" }} placeholder="120日" />
+                    {scriptProposalBadge("d.desiredHolidayCount")}
+                  </Row>
+                  <Row label="希望残業"><Fld value={d.desiredOvertimeMax} onChange={(v) => setDetail("desiredOvertimeMax", v)} type="select" options={DESIRED_OVERTIME_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredOvertimeMax")} />{scriptProposalBadge("d.desiredOvertimeMax")}<Fld value={d.desiredOvertimeMemo} onChange={(v) => setDetail("desiredOvertimeMemo", v)} /></Row>
+                  <Row label="転勤有無"><Fld value={d.desiredTransfer} onChange={(v) => setDetail("desiredTransfer", v)} type="select" options={DESIRED_TRANSFER_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.desiredTransfer")} />{scriptProposalBadge("d.desiredTransfer")}<Fld value={d.desiredTransferMemo} onChange={(v) => setDetail("desiredTransferMemo", v)} /></Row>
                 </div>
 
                 <div className="mb-4">
                   <SectionHd title="スキル" />
-                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={["取得", "未取得", "取得予定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.driverLicenseFlag")} /><Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
-                  <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={["不可", "日常会話", "ビジネス", "ネイティブ"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.languageSkillFlag")} /><Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
-                  <Row label="日本語"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={["ネイティブ", "ビジネス", "日常会話"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.japaneseSkillFlag")} /><Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
-                  <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={["ブラインドタッチ可", "中級", "初級"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.typingFlag")} /><Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
-                  <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.excelFlag")} /><Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
-                  <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.wordFlag")} /><Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
-                  <Row label="PPT"><Fld value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} type="select" options={["中級", "上級", "初級", "不可"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.pptFlag")} /><Fld value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} /></Row>
+                  <Row label="自動車免許"><Fld value={d.driverLicenseFlag} onChange={(v) => setDetail("driverLicenseFlag", v)} type="select" options={DRIVER_LICENSE_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.driverLicenseFlag")} />{scriptProposalBadge("d.driverLicenseFlag")}<Fld value={d.driverLicenseMemo} onChange={(v) => setDetail("driverLicenseMemo", v)} /></Row>
+                  <Row label="語学"><Fld value={d.languageSkillFlag} onChange={(v) => setDetail("languageSkillFlag", v)} type="select" options={LANGUAGE_SKILL_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.languageSkillFlag")} />{scriptProposalBadge("d.languageSkillFlag")}<Fld value={d.languageSkillMemo} onChange={(v) => setDetail("languageSkillMemo", v)} /></Row>
+                  <Row label="日本語"><Fld value={d.japaneseSkillFlag} onChange={(v) => setDetail("japaneseSkillFlag", v)} type="select" options={JAPANESE_SKILL_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.japaneseSkillFlag")} />{scriptProposalBadge("d.japaneseSkillFlag")}<Fld value={d.japaneseSkillMemo} onChange={(v) => setDetail("japaneseSkillMemo", v)} /></Row>
+                  <Row label="Typing"><Fld value={d.typingFlag} onChange={(v) => setDetail("typingFlag", v)} type="select" options={TYPING_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.typingFlag")} />{scriptProposalBadge("d.typingFlag")}<Fld value={d.typingMemo} onChange={(v) => setDetail("typingMemo", v)} /></Row>
+                  <Row label="Excel"><Fld value={d.excelFlag} onChange={(v) => setDetail("excelFlag", v)} type="select" options={PC_SKILL_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.excelFlag")} />{scriptProposalBadge("d.excelFlag")}<Fld value={d.excelMemo} onChange={(v) => setDetail("excelMemo", v)} /></Row>
+                  <Row label="Word"><Fld value={d.wordFlag} onChange={(v) => setDetail("wordFlag", v)} type="select" options={PC_SKILL_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.wordFlag")} />{scriptProposalBadge("d.wordFlag")}<Fld value={d.wordMemo} onChange={(v) => setDetail("wordMemo", v)} /></Row>
+                  <Row label="PPT"><Fld value={d.pptFlag} onChange={(v) => setDetail("pptFlag", v)} type="select" options={PC_SKILL_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.pptFlag")} />{scriptProposalBadge("d.pptFlag")}<Fld value={d.pptMemo} onChange={(v) => setDetail("pptMemo", v)} /></Row>
                 </div>
 
                 <div className="mb-4">
@@ -1823,6 +2184,17 @@ export default function InterviewForm({
                       </label>
                     ))}
                   </div>
+                </div>
+
+                {/* T-208 step2（付録C）: 大事にしたい条件1〜3（DB列は既存。希望条件タブの最後） */}
+                <div className="mb-4">
+                  <SectionHd title="大事にしたい条件" />
+                  {(["priorityCondition1", "priorityCondition2", "priorityCondition3"] as const).map((key, i) => (
+                    <Row key={key} label={`${i + 1}つ目`}>
+                      <Fld value={d[key]} onChange={(v) => setDetail(key, v)} placeholder="例: 土日祝休み" />
+                      {scriptProposalBadge(`d.${key}`)}
+                    </Row>
+                  ))}
                 </div>
               </div>
             )}
@@ -1923,12 +2295,12 @@ export default function InterviewForm({
               <div className="flex flex-col flex-1">
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>応募書類状況</div>
-                  <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={["未着手", "本人作成中", "書類サポート中", "完成"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.documentStatusFlag")} /><Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
+                  <Row label="書類状況"><Fld value={d.documentStatusFlag} onChange={(v) => setDetail("documentStatusFlag", v)} type="select" options={DOCUMENT_STATUS_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.documentStatusFlag")} />{scriptProposalBadge("d.documentStatusFlag")}<Fld value={d.documentStatusMemo} onChange={(v) => setDetail("documentStatusMemo", v)} /></Row>
                   <Row label="サポート"><Fld value={d.documentSupportFlag} onChange={(v) => setDetail("documentSupportFlag", v)} type="select" options={["マイナビWEB履歴書から作成", "本人作成書類から作成", "ヤギッシュ作成依頼", "テンプレ送付のみ"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.documentSupportFlag")} /><Fld value={d.documentSupportMemo} onChange={(v) => setDetail("documentSupportMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>連絡方法</div>
-                  <Row label="連絡手段"><Fld value={d.contactMethod} onChange={(v) => setDetail("contactMethod", v)} type="select" options={["LINE", "メール", "電話"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.contactMethod")} /><Fld value={d.contactMemo} onChange={(v) => setDetail("contactMemo", v)} /></Row>
+                  <Row label="連絡手段"><Fld value={d.contactMethod} onChange={(v) => setDetail("contactMethod", v)} type="select" options={CONTACT_METHOD_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.contactMethod")} />{scriptProposalBadge("d.contactMethod")}<Fld value={d.contactMemo} onChange={(v) => setDetail("contactMemo", v)} /></Row>
                 </div>
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>求人送付／送付期限</div>
@@ -1937,7 +2309,8 @@ export default function InterviewForm({
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-1.5 pb-1" style={{ fontSize: 12, fontWeight: 500, borderBottom: "0.5px solid var(--im-bdr)" }}>次回面談予定</div>
                   <Row label="日時">
-                    <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={["設定済", "調整中", "未設定"]} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.nextInterviewFlag")} />
+                    <Fld value={d.nextInterviewFlag} onChange={(v) => setDetail("nextInterviewFlag", v)} type="select" options={NEXT_INTERVIEW_FLAG_OPTIONS} style={{ width: 110, flex: "none" }} isMissing={miss.has("d.nextInterviewFlag")} />
+                    {scriptProposalBadge("d.nextInterviewFlag")}{scriptProposalBadge("d.nextInterviewDate")}{scriptProposalBadge("d.nextInterviewTime")}
                     <Fld value={d.nextInterviewDate ? new Date(d.nextInterviewDate).toISOString().slice(0, 10) : ""} onChange={(v) => setDetail("nextInterviewDate", v)} type="date" style={{ width: 116, flex: "none" }} isMissing={miss.has("d.nextInterviewDate")} />
                     <Fld value={d.nextInterviewTime} onChange={(v) => setDetail("nextInterviewTime", v)} type="time" style={{ width: 78, flex: "none" }} isMissing={miss.has("d.nextInterviewTime")} />
                     <Fld value={d.nextInterviewMemo} onChange={(v) => setDetail("nextInterviewMemo", v)} placeholder="次回面談メモ" isMissing={miss.has("d.nextInterviewMemo")} />
@@ -1953,8 +2326,8 @@ export default function InterviewForm({
               </div>
             )}
 
-            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる ===== */}
-            {rightTab === "support" && (
+            {/* ===== 面談サポートタブ（T-183 Phase 2）: 中身は InterviewSupportLogTab に閉じる。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） ===== */}
+            {SHOW_INTERVIEW_SUPPORT && rightTab === "support" && (
               <InterviewSupportLogTab candidateId={candidateId} interviewId={interviewId} />
             )}
 
@@ -1975,12 +2348,12 @@ export default function InterviewForm({
                       accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.docx,.xlsx,.csv,.txt,.mp3,.m4a"
                       onChange={(e) => { const files = Array.from(e.target.files ?? []); if (files.length > 0) handleUploadMultiple(files); e.target.value = ""; }}
                     />
-                    {uploading ? (
+                    {uploading || logUploading ? (
                       <p style={{ fontSize: 13, color: "var(--im-fg2)" }}>アップロード中...</p>
                     ) : (
                       <>
                         <div style={{ fontSize: 22, marginBottom: 4 }}>📎</div>
-                        <div style={{ fontSize: 13, color: "var(--im-fg2)", marginBottom: 6 }}>Nottaログ / 録音 / 履歴書PDF等をドラッグ＆ドロップ または</div>
+                        <div style={{ fontSize: 13, color: "var(--im-fg2)", marginBottom: 6 }}>面談ログ（.txt）／録音／履歴書PDF等をドラッグ＆ドロップ または</div>
                         <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 6, fontSize: 12, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}>ファイルを選択</span>
                         <div style={{ fontSize: 11, color: "var(--im-fg3)", marginTop: 6 }}>対応形式: .txt / .pdf / .docx / .xlsx / .mp3 / .m4a / .png / .jpg （最大 20MB）</div>
                       </>
@@ -1998,73 +2371,11 @@ export default function InterviewForm({
                       履歴書PDFだけで解析しても中途半端な面談詳細になるため、押させない仕様。 */}
                   {!hasInterviewLog && (
                     <p style={{ fontSize: 11, color: "var(--im-fg3)", margin: "0 0 6px" }}>
-                      面談ログ（.txt）を添付すると解析できます
-                      {hasPdf ? "（履歴書PDFだけでは解析できません）" : ""}
+                      .txt は自動でこの面談の面談ログとして記録され、解析に使われます
                     </p>
                   )}
 
-                  {/* T-152: この面談専用のログアップロード欄。ここから上げたログには interviewId が記録され、
-                      解析はこのログを最優先で使う（無ければ従来どおり最新txtへフォールバック）。 */}
-                  <div
-                    className="rounded-lg p-2.5 mb-2"
-                    style={{
-                      border: logDragActive ? "1px dashed #2563EB" : "0.5px solid var(--im-bdr)",
-                      background: logDragActive ? "#EFF6FF" : "var(--im-bg2)",
-                    }}
-                    onDragOver={(e) => {
-                      // アップロード可能なときだけ受け入れ表示にする（差し替え済み・未保存では反応させない）。
-                      if (!interviewId || linkedLog) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setLogDragActive(true);
-                    }}
-                    onDragLeave={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setLogDragActive(false);
-                    }}
-                    onDrop={(e) => {
-                      if (!interviewId || linkedLog) return;
-                      handleDropInterviewLog(e);
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--im-fg)", marginBottom: 4 }}>
-                      この面談の面談ログ（.txt）
-                    </div>
-                    {!interviewId ? (
-                      <p style={{ fontSize: 11, color: "var(--im-fg3)", margin: 0 }}>
-                        面談を保存するとログを添付できます
-                      </p>
-                    ) : linkedLog ? (
-                      <div className="flex items-center gap-1.5" style={{ fontSize: 12, color: "var(--im-fg)" }}>
-                        <span>📄</span>
-                        <span className="flex-1 min-w-0 truncate">{linkedLog.fileName}</span>
-                        <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>
-                          {new Date(linkedLog.createdAt).toLocaleString("ja-JP", {
-                            timeZone: "Asia/Tokyo",
-                            year: "numeric", month: "2-digit", day: "2-digit",
-                            hour: "2-digit", minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          ref={logInputRef} type="file" className="hidden" accept=".txt"
-                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadInterviewLog(f); e.target.value = ""; }}
-                        />
-                        <BtnMini onClick={() => logInputRef.current?.click()} disabled={logUploading}>
-                          {logUploading ? "アップロード中..." : "📎 ログをアップロード"}
-                        </BtnMini>
-                        <span style={{ fontSize: 11, color: "var(--im-fg3)" }}>
-                          {logDragActive
-                            ? "ここにドロップするとこの面談のログとして記録されます"
-                            : "ドラッグ＆ドロップ、またはボタンから選択すると、この面談のログとして記録されます"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
+                  {/* T-152 の専用ログ欄は 2026-09-26 に廃止（上段の受け付けで .txt を自動でこの面談のログとして記録）。 */}
                   {/* T-151: タスク候補の確認カード。解析ボタンの直下に出す。
                       破棄済み（suggestedTasksDismissedAt あり）と候補なしでは描画しない。 */}
                   {!suggestedTasksDismissedAt && suggestedTasks.length > 0 && (
@@ -2088,6 +2399,9 @@ export default function InterviewForm({
                           <BtnMini variant="danger" onClick={() => handleDeleteAttachment(att.id)}>🗑 削除</BtnMini>
                           <span style={{ fontSize: 18, flexShrink: 0 }}>{att.mimeType?.startsWith("audio") ? "🎙️" : "📄"}</span>
                           <span className="flex-1 min-w-0 truncate" style={{ fontSize: 12, color: "var(--im-fg)" }}>{att.fileName}</span>
+                          {isLinkedLog(att) && (
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#EFF6FF", color: "#2563EB", border: "0.5px solid #BFDBFE", whiteSpace: "nowrap", flexShrink: 0 }}>面談ログ</span>
+                          )}
                           <BtnMini onClick={() => handleDownloadAttachment(att)} disabled={downloadingAttId === att.id}>{downloadingAttId === att.id ? "..." : "⬇ DL"}</BtnMini>
                           <span style={{ fontSize: 11, color: "var(--im-fg3)", whiteSpace: "nowrap" }}>{(att.fileSize / 1024).toFixed(0)} KB</span>
                         </div>
@@ -2101,6 +2415,7 @@ export default function InterviewForm({
           </div>
         </div>
       </div>
+      )}
 
       {expandedMemoId && (() => {
         const targetMemo = memos.find(m => m.id === expandedMemoId);

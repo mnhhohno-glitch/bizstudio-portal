@@ -1293,3 +1293,234 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 - 列順: `☑ | DB名 | DBNO | 会社名 | エリア(100px) | 職種(150px) | 希望 | 通過 | 総合 | 本人回答 | 担当 | 紹介日 | 操作`
 - 職種セルのホバーは `jobCategoryPath ?? jobCategory`。長い値は `truncate`。
 - **並び替え・絞り込みは対象外**（表示のみ）。紹介保留タブ（ArchivedBookmarkSection）にも出していない。
+
+## 面談準備チャット（T-205, master, 2026-09-27）
+
+新人CAの面談準備が外部の ChatGPT に流れていたため、ポータル内に「マイナビレジュメから整理を出し、そのまま会話を続けて求職者ごとに貯める」チャットを新設。既存の AIアドバイザー（`AdvisorFloatingPanel`・`advisor_chat_*`）とは**別テーブル・別API・別コンポーネント**で、既存機能には触れていない。面談記録は作らない（仮の面談記録が実績集計の「初回面談の予定」に数えられるため）。
+
+### 保存先（追加のみ・migration `20260927100000_t205_interview_prep_chat`）
+
+| テーブル（モデル） | 主な列 |
+|--|--|
+| `interview_prep_rooms`（`InterviewPrepRoom`） | candidateId / createdByUserId / **archivedAt**（null=有効な部屋。求職者ごとに1つ。「作り直す」で立てて残す＝物理削除しない）/ resumeFileId（CandidateFile・SetNull）/ **resumeText**（pdf-parse で取り出した文字）/ resumeImportedAt（CandidateFile.createdAt の写し）/ resumeExtractedAt / **careerType**（一社継続型・同職種転職型・職種転換型・取れなければ null）/ summaryMessageId |
+| `interview_prep_messages`（`InterviewPrepMessage`） | roomId（Cascade）/ role（user / assistant）/ **userId**（role=user の CA・SetNull）/ content / **kind**（`SUMMARY`=最初の整理。会話欄には出さず固定欄に表示）/ createdAt |
+
+- レジュメの文字は**部屋ごと**に持つ。初回だけ Drive から取得して `extractTextFromPdf`（pdf-parse→短ければ pdfjs）で取り出し、`normalizeResumeText`（改行LF・空白連続を1つ・空行連続を1つ。決定的処理のみ）で整形して保存。2回目以降は保存済みを使い Drive も pdf-parse も呼ばない。既存の `CandidateFile.parsedText`（Gemini 読み取り）は使わず、書き込みもしない。
+- 材料（対象ファイル）: `CandidateFile` の category=MEETING（書類タブの「面談」）かつ PDF、複数あれば最新1件（`src/lib/interview-prep/resume.ts` `findLatestMeetingPdf`・条件は `meetingPdfWhere` の1か所）。**step12（2026-09-30）で memo=`マイナビRPA自動取り込み` の条件を外した**＝手でアップロードした PDF も材料になる。PDF かどうかは mimeType=`application/pdf` または拡張子 `.pdf`（大文字小文字不問）で判断し、面談ログ txt は対象外。作るとき・作り直すときの両方でこの探し方（部屋の保存済み resumeText はそのまま使う）。無い／200字未満は AI を呼ばず 422（部屋も作らない）。
+- パネル上部の「材料:」は使ったファイル名＋日付（例 `材料: 5008587_宮嶋 大成.pdf（2026/9/14）`。部屋があれば `resumeFile.fileName`、無ければ今見つかるファイル）。材料が無いときの案内文は「書類タブの『面談』にPDF（マイナビレジュメなど）が入ると使えるようになります」。確認は `scripts/verify/interview-prep-source-check.ts 求職者番号`（AI なし・書き込みなし）。
+- 経歴の型は最初の整理の本文から `経歴の型[:：]\s*(一社継続型|同職種転職型|職種転換型)` で取り出して `careerType` に保存（`extractCareerType`）。後日、面談後のタイプ診断と並べるため。
+
+### API（認証は既存 AIアドバイザーのチャットAPIと同じ `getSessionUser()`・未ログイン 403）
+
+| メソッド | パス | 内容 |
+|--|--|--|
+| GET | `/api/candidates/[candidateId]/interview-prep` | 有効な部屋＋整理＋会話＋レジュメの有無（文字は取り出さない） |
+| POST | `/api/candidates/[candidateId]/interview-prep/summary` | 最初の整理（SSE）。body `{ rebuild?: boolean }`。部屋が無ければ文字を取り出して作る。整理済みなら 409。`rebuild=true` は文字を取り直してから古い部屋を `archivedAt` にして新しい部屋を作る（取り直し失敗時は古い部屋を残す） |
+| POST | `/api/candidates/[candidateId]/interview-prep/messages` | 質問1往復（SSE）。body `{ content }`。整理が無ければ 409 |
+
+- SSE 形式は `interview-support/explain` と同じ（`data: {text}` / `{done,...}` / `{error}`。`src/lib/interview-prep/sse.ts`）。
+- **保存は表示が終わってから**。summary は assistant（kind=SUMMARY）＋ careerType、messages は CA の発言（createdAt=送信時刻・userId）と AI の発言を1トランザクションで保存。途中で失敗したら何も保存しない（画面はエラー＋「再送」で同じ質問を送り直す＝二重保存にならない）。
+
+### 送る中身（`src/lib/interview-prep/chat.ts`・検証スクリプトと共有）
+
+| 置き場所 | 内容 | キャッシュ指定 |
+|--|--|--|
+| system ブロック1 | `src/skills/interview-prep/SKILL.md` の指示本文（`getInterviewPrepSkill`・起動時1回読み込み・CRLF→LF 正規化） | ephemeral |
+| system ブロック2 | `# マイナビレジュメの文字` ＋ resumeText | ephemeral |
+| messages 先頭 | user 固定文「面談準備の整理を作ってください」→ assistant 最初の整理（10往復の数え方の外・常に送る） | なし |
+| messages 中 | 直近10往復（user/assistant 交互・1件4,000字でクランプ・kind=SUMMARY は除く） | なし |
+| messages 末尾 | 今回の質問 | ephemeral（次の往復で system＋履歴の全体が読み出しになる） |
+
+- job-matching-advisor の SKILL は送らない。モデルは `claude-sonnet-5` 固定（`INTERVIEW_PREP_MODEL`。CHAT_MODEL では切り替わらない）。`thinking: disabled`・temperature なし。max_tokens は整理 4,000／質問 2,000（1.3倍はしない）。
+- 使用量ログ: `AdvisorUsageLog` に endpoint `interview-prep-summary`（整理・note `rebuild` で作り直し）／`interview-prep-chat`（質問）。失敗は usage null・note `error-<status>`。Sonnet 5 の単価は `MODEL_PRICING_PER_MTOK` に登録済み。
+
+### 動作確認スクリプト
+
+`scripts/verify/interview-prep-dryrun.ts`（DB 書き込みなし・数値と有無だけ出力・AI 呼び出し最大3回）。本番コンテナで `railway ssh --service bizstudio-portal "cd /app && npx tsx scripts/verify/interview-prep-dryrun.ts"`。
+
+### T-205 step3（2026-09-27）: 整理の書き方の差し替え・ワンクリック作り直し・古い書き方の案内
+
+- **整理の構成（SKILL.md 全文差し替え）**: 見出し7つをこの順で出す。「ひとことで」「やっている仕事と、その意味」「基本情報」「強み」「経歴の型」「面談で確かめたいこと」「知っておきたい言葉」。
+  - 「やっている仕事と、その意味」は会社ごとに「会社名（業界・在籍期間・雇用形態）」→ 作業を1行1つで「レジュメの言葉 → 一般的な意味」。本人のやり方と一般的な意味を分ける。
+  - 1行1項目（斜線・読点で詰め込まない）・表は使わない・「記載なし」は大事な項目だけ・食い違いは「面談で確かめたいこと」へ。
+  - 経歴の型の行は「- 経歴の型: 〇〇型（根拠: …）」のまま。取り出し正規表現（`extractCareerType`）は変更なし。
+  - 見出しの一覧は `SUMMARY_HEADINGS`、欠けの判定は `missingSummaryHeadings()`（`src/lib/interview-prep/chat.ts`・検証スクリプト用。旧 `hasSummaryHeadings` は削除）。
+- **「作り直す」はワンクリックで生成まで**: 確認ダイアログ1回 → summary API（`rebuild: true`）が「文字を取り直す → 古い部屋を非表示 → 新しい部屋 → 整理をストリーミング」を1リクエストで行う（API は step1 のまま）。
+  - レジュメ無し／200字未満は 422 で古い部屋を残す（AI は呼ばない）。
+  - SSE の `started` 以降に失敗したら新しい部屋は空のまま残る。画面はその時点で再送を `rebuild: false` に切り替えるので、「面談準備を作る」／再送で古い部屋に戻さず新しい部屋に作る。
+- **古い書き方の案内**: `src/lib/interview-prep/format.ts` の `INTERVIEW_PREP_FORMAT_UPDATED_AT`（JST・step3 のコミット時刻）より前に作られた整理には「書き方が新しくなりました。「作り直す」を押すと新しい書き方で作り直せます。」を出す（`isOldPrepFormat`）。書き方をまた変えたらこの定数を更新する。画面から読むため Anthropic SDK を含む chat.ts とは別ファイル。
+- 検証スクリプト `scripts/verify/interview-prep-dryrun.ts` は step3 で「最初の整理1回だけ」に変更（見出し7つ・「→」行数・斜線2つ以上の行数・経歴の型の取り出し・トークン/費用/所要時間）。
+
+### T-205 step4（2026-09-27）: 会社と学校の下調べ（ウェブ検索）＋整理の作り直し
+
+- **下調べ**（`src/lib/interview-prep/research.ts` `runResearch`）: 整理を作る直前に1回。Sonnet 5・`thinking: disabled`・サーバー側ウェブ検索 `web_search_20260209`（動的フィルタリング）`max_uses=5`・SDK 自動リトライなし・150秒で時間切れ・`pause_turn` は応答を送り返して最大2回続ける。system＝`src/skills/interview-prep/RESEARCH.md`（`getInterviewPrepResearchSkill`）、user＝レジュメの文字。
+  - 返った JSON は `research-format.ts` の `parseResearchJson`→`normalizeResearch` で検証・正規化（会社は最大3社・URL は http(s) のみ・level は 高/中/低/なし/不明）。読めない・形が違う・失敗（検索無効・時間切れ・エラー）は**下調べなしで整理を作る**（止めない）。
+  - 保存先: `interview_prep_rooms.research_json`（JSONB）/ `researched_at`（migration `20260927200000_t205_interview_prep_research`・nullable 追加のみ）。成功時だけ `researched_at` を入れる。途中失敗の再送は下調べ済みなら再利用、「作り直す」は新しい部屋なので下調べから。
+  - 使用量: `AdvisorUsageLog` endpoint `interview-prep-research`。検索1回 $0.01（`WEB_SEARCH_USD_PER_REQUEST`・`src/lib/claude.ts` に出典URL）を costUsd に加算し、回数は note `web_search=N`。失敗は note `research-<status>[-http]`。組織設定で検索が無効なときは status `web_search_disabled`（400 のメッセージで判定）でログに warn。
+- **送る中身**: system が3ブロック ［SKILL.md］＋［# マイナビレジュメの文字］＋［調べた情報］（すべて ephemeral。messages 末尾と合わせてキャッシュ指定は4つ）。［調べた情報］は `formatResearchBlock` が research_json から決定的に組み立てる（見出し「【調べた情報（レジュメ外・ネット検索）】」・出典URLは入れない・下調べなしは「【調べた情報】なし（調べられなかった）」1行）。質問の往復でも同じ3ブロック（検索はしない）。
+- **SSE**: `started` → `researching`（下調べ開始）→ `researched`（`research` 付き）→ 本文 `text` → `done`（`research` 付き）。GET の `room.research` も同じ正規化済み JSON。
+- **整理の構成（SKILL.md 全文差し替え）**: 見出し9つ「ひとことで」「学校と学んだこと」「就職した会社」「やってきた仕事と、その意味」「強み」「経歴の型」「面談での質問アドバイス」「知っておきたい言葉」「基本情報」。希望条件は一切書かない・調べた情報を使う文には「（調べた情報）」・URL は書かない。`SUMMARY_HEADINGS` 更新。経歴の型の取り出しは変更なし。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を step4 のコミット時刻に更新。検証スクリプトは「下調べ1回＋整理1回」（保存なし）。
+
+### T-205 step5（2026-09-27）: 下調べの指示の緩和・作り直し時の使い回し・経歴の型「判定できない」
+
+- **きっかけ**: step4 の下調べが、公式サイトのある会社を「特定できなかった」と返した。原因は「業種・所在地と合わなければ捨てる」が厳しすぎたこと（レジュメの業種の言い方と会社の説明が違う言い換え）。
+- **検索の順番（RESEARCH.md「検索のルール」差し替え）**: 最低2回検索してから判断。①「会社名 株式会社」で公式サイト優先 → ②「会社名 都道府県」（会社の所在地が無ければ求職者の住所の都道府県）→ ③「会社名 業種」。検索語は会社名・学校名・学部名・業種・都道府県（会社の所在地なら市区町村まで）のみ。
+- **候補の扱い**: 候補が1社ならそれを採用（同じ分野の言い換えは同じ会社とみなす）。同名が複数で絞り切れないときだけ「特定できなかった」とし、`companies[].candidates`（任意・「会社名（都道府県・業種）」・最大5件）に並べる。`normalizeResearch` は found=true のとき candidates を空にする。［調べた情報］ブロックは特定できなかった会社に「- 候補: A／B」を1行足す。business には親会社・グループを一言添える。
+- **版番号と使い回し**: `research_json.version`（`RESEARCH_VERSION`＝2・`research-format.ts`）。`runResearch` が成功時に付ける。「作り直す」で、前の部屋が下調べ済み・取り直したレジュメの文字が完全一致・前の版が今の版と同じ、の3つを満たすときだけ検索せずに前の結果を新しい部屋へコピー（`reusableResearch`）。どれか違えば調べ直す。step4 以前の保存分は版なし＝初回の作り直しは必ず調べ直し。**RESEARCH.md や JSON の形を変えたら版を上げる**。
+- **経歴の型**: SKILL.md に「会社の数と職種だけで決める」「読み取れないときは『判定できない（根拠: 職歴の記載が読み取れない）』」を追加。`extractCareerType` は `判定できない` も拾い、その場合 `career_type` は null（バッジなし）。
+- 検証スクリプト `scripts/verify/interview-prep-dryrun.ts` は求職者番号を引数に取れる（今の部屋の保存済み下調べの概要も出す）・AI 呼び出しは再試行込み最大3回。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を step5 のコミット時刻に更新。
+### T-205 step6（2026-09-27）: 下調べの2並列化・時間切れ延長・失敗時の正直な書き方
+
+- **きっかけ**: step5 の検証で、下調べ1回（会社→学校を順番に検索）が111秒かかり時間切れ150秒に近かった。前回の外れは時間切れで下調べなしになったのが原因で、しかも整理は調べていないのに「調べても特定できなかった」と書いていた。
+- **2並列**: `RESEARCH.md` を削除し、会社用 `RESEARCH_COMPANY.md`（返す JSON は `{"companies": [...]}`）と学校用 `RESEARCH_SCHOOL.md`（`{"school": {...} | null}`）に分けた（指示は対象に絞っただけで検索ルールの文言は同じ）。`runResearch` が2つを `Promise.all` で同時に呼ぶ（`runResearchPart` は例外を投げず status で返すので片方の失敗でもう片方は止まらない）。どちらも Sonnet 5、`max_uses` は会社 4・学校 2。
+- **時間切れ**: 部分ごとに 240 秒（`RESEARCH_TIMEOUT_MS`・`pause_turn` の続きも含めた合計。残り時間を次の呼び出しの timeout にする）。
+- **状態の持ち方**: `research_json` に `companiesStatus` / `schoolStatus`（`ok` | `timeout` | `error`。`invalid_json`・`web_search_disabled` は `error`）。ok 以外の部分は companies=[] / school=null。`RESEARCH_VERSION`＝3。失敗した部分があっても状態付きで保存し `researched_at` を入れる。状態が無い保存分（step5 以前）は ok 扱いで読む。
+- **失敗時の書き方**: ［調べた情報］ブロックは、状態が timeout/error の部分を「- 会社: 今回は調べられなかった（時間切れ）」「- 学校: 今回は調べられなかった（エラー）」と書く。「特定できなかった」「不明」は ok で見つからなかったときだけ。SKILL.md 最重要ルール4に「『今回は調べられなかった』とある項目は、本文でも『今回は調べられなかった。作り直すと再度調べます』と書く。『特定できなかった』とは書かない。」を追加。
+- **進み具合の送信**: SSE `researchProgress: { company, school }`（`running` | `ok` | `timeout` | `error`）を開始時・部分が終わるたび・3秒おきに送る（無通信が長いと途中の中継で接続が切られる恐れがあるため）。画面は「会社を調べています…」「学校を調べています…」の2行→「✓ 会社を調べました」／「会社は今回調べられませんでした」。
+- **部分ごとの使い回し**（`reusableResearchParts`）: 使い回し元（作り直し＝前の部屋、途中失敗の再送＝今の部屋自身）のレジュメの文字が同じ・版が同じ・その部分の状態が ok なら、その部分は調べない（会社は使い回し、学校だけ調べ直す、もあり得る）。両方使い回せるときは下調べを呼ばない。
+- **使用量ログ**: endpoint は `interview-prep-research` のまま、部分ごとに1行。note に `part=company` / `part=school`。
+- 確認: `scripts/verify/interview-prep-research-format-check.ts`（AI・DB なし）で書式3通りと使い回し判定。`interview-prep-dryrun.ts` は下調べ2並列＋整理1（再試行込み最大4回）。
+
+### T-205 step7（2026-09-28）: 下調べを会社だけにして軽く・整理の中身の修正
+
+- **きっかけ**: step6 の検証で会社の下調べが 117 秒・検索4回・約9.7万トークン読み込み・約37円。原因は「最低2回は検索する」指示と、ページ全体を取り込んで絞り込む動的フィルタリング付きの検索方式。
+- **学校の下調べは廃止**（学校は名前を見ればCAが判断できるため）。`RESEARCH_SCHOOL.md` を削除し、下調べは会社用の1回だけ（`runResearch(resumeText)`・並列なし）。`research_json` は `version` / `companiesStatus` / `companies` のみ（`school`・`schoolStatus` 無し）。step6 以前の保存分の `school` / `schoolStatus` は `normalizeResearch` で読み捨てる。［調べた情報］ブロックは「■ 会社」だけ。
+- **検索方式**: `web_search_20260209`（動的フィルタリング）→ 検索結果だけを返す基本版 `web_search_20250305`（`RESEARCH_WEB_SEARCH_TOOL`）。`web_fetch` は付けない。`max_uses` 4→3。コンテナ指定は不要になったので外した。
+- **`RESEARCH_COMPANY.md`**: 「最低2回は検索」を削除。1社ずつ「会社名 株式会社」→見つかればその会社は終わり、見つからない会社だけ「会社名 都道府県」→それでも無ければ「特定できなかった」（3回目はしない）。念のための検索はしない。`source_urls` は「判断に使った検索結果のページ」（ページを開かないため）。
+- **使い回し**: `reusableResearch(prev, resumeText)`（`ResearchResult | null`）。同じ文字・同じ版・会社 ok なら使い回す。`RESEARCH_VERSION`＝4（step6 以前の保存分は必ず調べ直す）。
+- **SSE**: `researchProgress: { company }` だけ。使用量ログは1行（note に `part=company` は残す）。
+- **SKILL.md**: 学校のレベル・偏差値の記述を全削除（「どんなレベルの学校で」→「どんな学校で」）。「学校と学んだこと」はレジュメの学校名・学部学科・卒業年＋学部学科の一般的な学習内容だけ、学科が無ければ「学科はレジュメからは分からない」。「調べた情報」は会社についての情報だけ。基本情報＝職歴に「現在」→「在職中（職歴に「現在」の記載）」。強み＝業務内容を根拠にしたものを先に・自己PRだけが根拠なら「（本人の自己PRより）」。質問アドバイス＝3〜8個・食い違いは必ず1つ目・当てはまらない質問で数を埋めない。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を更新（それより前の整理には「作り直す」の案内）。
+- 確認: `interview-prep-research-format-check.ts`（会社だけ・旧版の学校つき保存分も）。`interview-prep-dryrun.ts` は下調べ1＋整理1＋再試行1（最大3回）で、偏差値/学校のレベルの語・今の状況・質問の個数・自己PRの明記も出す。
+
+### T-205 step8（2026-09-28）: 整理を決まった項目で受け取り、画面でカードに組み立てる
+
+- **きっかけ**: 整理の Markdown 表示は見慣れないCAに読みにくい。AI には文章ではなく決まった項目で返させ、画面側でカードにする。質問に「聞いた」を付けて後日の突き合わせに使う。
+- **AI の返し方**: 最初の整理はツール `save_prep_summary`（`SUMMARY_TOOL`・入力の形は `src/lib/interview-prep/summary-format.ts` の `SUMMARY_TOOL_INPUT_SCHEMA`）を `tool_choice: { type: "tool" }` で必ず呼ばせる（`callSummaryTool`・ストリーミングで受けて `finalMessage()` の tool_use 入力を読む）。返ってきた入力は `normalizePrepSummary` で検証・正規化（必須: summary が空でない／employmentStatus・careerType が選択肢のどれか／questions 1つ以上。文字は1,000字・配列は30件・questions 8・strengths 3 で切る）。通らなければ **1回だけ作り直し**（note `retry; invalid-<理由>`）、それでも駄目なら SSE `{error}`（画面は「再送」）。max_tokens は整理 6,000（ツール入力は文章より長くなる）。質問への回答は今までどおり文章のストリーミング（`createPrepStream`）。
+- **項目の形（`PrepSummary`）**: summary / employmentStatus（在職中｜離職中｜不明）/ age / currentIncome / qualifications[] / careerType（一社継続型｜同職種転職型｜職種転換型｜判定できない）/ careerTypeReason / timeline[{period,title,detail,fromResearch}] / works[{company,items[{term,meaning}]}] / questions[{question,why,reveals,mismatch}] / strengths[{strength,basis,fromSelfPr}] / glossary[{term,meaning}]。
+- **保存列（migration `20260928100000_t205_interview_prep_summary_json`・nullable 追加のみ）**: `interview_prep_rooms.summary_json`（JSONB・検証済みの PrepSummary）／`asked_questions`（JSONB・`{ "<questions の添字>": { askedAt, userId } }`）。`career_type` は `careerType` から直接入れる（「判定できない」は null・`careerTypeForRoom`）。`extractCareerType`（本文からの正規表現）は廃止。assistant の発言（kind=SUMMARY）の content には `formatPrepSummaryText` の文章を入れる（古い画面経路・ログ用）。
+- **会話履歴に入れる整理**: `messages` API は `summary_json` があれば毎回 `formatPrepSummaryText` で文章にしたもの（決定的処理のみ・見出し8つ・URL なし。罠#39）を整理の AI 発言として先頭に入れる。無い古い部屋は保存済みの文章。
+- **API 追加**: `PATCH /api/candidates/[candidateId]/interview-prep/asked` body `{ index, asked }` → `asked_questions` を `toggleAskedQuestion`（純粋関数）で更新して返す。summary_json が無い部屋は 409 `not_card_format`、範囲外は 400。
+- **GET** は `room.summaryJson`（正規化済み・無ければ null）と `room.askedQuestions` を返す。**summary SSE** は文章の `{text}` を流さず、下調べ後に `{summarizing:true}` を3秒おきに送り、`{done, summary, summaryJson, askedQuestions, careerType, research}` で一度に渡す。
+- **SKILL.md**: 「## 最初の整理」を項目ごとの書き方に差し替え（文章では返さずツールを1回呼ぶ・記号で飾らない）。書き方のルールから「見出しは###、中身は箇条書き」の行を削除。「## 最重要ルール」「## CAの質問に答えるとき」は据え置き。
+- **古い部屋**: summary_json が無い部屋は文章表示のまま（`OldFormatNotice`＝「作り直すとカード表示になります」）。`INTERVIEW_PREP_FORMAT_UPDATED_AT` も更新。
+- **確認**: AI なしは `scripts/verify/interview-prep-summary-format-check.ts`（見本 JSON の検証・形違いの拒否・文章化の決定性・「聞いた」の保存と取り消し）。本番は `interview-prep-dryrun.ts`（下調べ1＋整理1＋作り直し1・検証に通ったか・各項目の件数・1件目が mismatch か・fromSelfPr / fromResearch の数・文章化の決定性・費用と時間）。
+
+### T-205 step10（2026-09-28）: 下調べで会社の公式サイトの URL を取る
+
+- **research_json**: companies の各要素に `officialUrl`（公式サイトの URL・無ければ空文字）を追加。`RESEARCH_VERSION` を **5** に上げた（次の作り直しで必ず調べ直し、公式サイトを取り直す）。officialUrl の無い保存分（版4以前）は空文字として読む（リンクを出さないだけ・エラーにしない）。特定できなかった会社（found=false）は常に空。
+- **指示本文** `src/skills/interview-prep/RESEARCH_COMPANY.md`: 返す JSON 例に `"officialUrl"` を追加し、「officialUrl には、その会社自身が運営する公式サイトのURLだけを入れる。求人サイト・口コミサイト・企業情報のまとめサイトは公式サイトとしない。」を追記。
+- **検証（AI が作った URL を出さない）**: `runResearch` がその呼び出し（pause_turn の続きを含む）の応答の `web_search_tool_result` から検索結果の URL を集め、`keepSearchedOfficialUrls`（research-format.ts）で一致するものだけ残す（一致しなければ空）。見比べは `urlMatchKey`（`#` 以降と末尾の `/` の違いは同じとみなす）。`parseCompanyResearchJson` は AI の言ったままを返すので、保存・表示の前に必ずこれを通す。outcome に `searchResultUrlCount` / `officialUrlProposed` / `officialUrlKept` を持ち、summary のログに `official_urls=残した数/AIが返した数` を出す。
+- **［調べた情報］ブロックには officialUrl を入れない**（本文に URL を書かせない・既存の byte を変えない。罠#39）。
+- **確認**: AI なしは `scripts/verify/interview-prep-research-format-check.ts`（検索結果に無い URL が空になる・古い部屋の表示処理）。本番は `scripts/verify/interview-prep-official-url-check.ts <求職者番号>`（下調べのみ・最大2回・保存しない・出力は有無と数値だけ）。
+
+## 求職者向け案内メール「LINE登録案内」「あいさつメール」（T-207, master, 2026-09-30）
+
+初回面談で CA が OneNote の文面をコピーして手で送っていた LINE 登録案内メールを、面談記録画面のボタン1つ（確認付き）で送れるようにした。追加のみの改修。あとで作る初回面談の台本のボタンからも `src/lib/candidate-mail/send.ts` の同じ関数を通す前提。
+
+### 送り方（Resend・差出人は CA 本人）
+- 送信は既存の Resend（`sendResendEmail`・`RESEND_API_KEY`）。`bizstudio.co.jp` は Resend 側でドメイン認証済み（`GET /domains` で status=verified・region=ap-northeast-1 を確認）なので、ログイン中 CA のアドレスをそのまま From にできる（T-147 の `buildSenderFrom` を流用）。
+- From = `株式会社ビズスタジオ 〔CA姓〕 <ca@bizstudio.co.jp>`、Reply-To = 同じアドレス、**BCC = CA 本人**（受信箱に控えを残す）。差出人が `@bizstudio.co.jp` でないアカウントは「送れない」扱い（noreply へのフォールバックはしない）。
+- `sendResendEmail` に `html` と `attachments`（`filename/content(base64)/contentType/contentId`）を任意項目で追加。未指定なら従来どおり text のみ＝既存の呼び出し元の挙動は変わらない。
+- 参考: CA ごとの Google 連携（`src/lib/googleCalendar.ts`）のスコープは `calendar.events` と `tasks` のみで、Gmail 送信（`gmail.send`）の許可は無い。今回は使わない。
+
+### 文面と差し込み（`src/lib/candidate-mail/templates.ts`・固定・DB に持たない）
+- 種類は `line`（LINE登録案内）と `greeting`（あいさつメール）。件名・本文はこのファイルに一字一句固定。
+- 差し込み: 〔氏名〕=求職者の氏名 / 〔CA姓〕=送信 CA の姓（`caFamilyNameOf`: 社員名を空白（半角・全角）で分けた先頭。空白が無ければ氏名全体。Employee.name があればそれ、無ければ User.name）/ 〔URL〕=送信 CA の `Employee.lineWorksUrl` / 〔QR〕=その URL から作った QR コード画像。
+- `buildContactMail` が件名・テキスト本文・HTML 本文を同時に作る。確認画面（GET）と実送信（POST）が同じ関数を通るので、見たものと送るものは同じ。
+- **QR コードの入れ方**: `qrcode` パッケージで PNG を作り、Resend の `attachments` に `content_id` 付きで添付、HTML 本文は `<img src="cid:line-works-qr">` で本文中に表示（Gmail で表示される方法）。`data:` URL の直接埋め込みは Gmail で表示されないので使わない。テキスト本文では 〔QR〕 の位置に「（QRコードは HTML 表示でご覧いただけます）」を置く。確認画面のプレビューだけはブラウザ表示なので data: URL を返す（`buildQrDataUrl`）。
+
+### 社員管理の追加列
+- `Employee.lineWorksUrl`（`employees.line_works_url`・nullable TEXT・migration `20260930100000_t207_candidate_contact_mail`・`IF NOT EXISTS`）。
+- 社員詳細（管理者用 `/admin/users/[id]` 基本情報タブ）の末尾に「LINE WORKS」ブロック＝入力欄「LINE WORKS のURL（友だち追加用）」。`https://works.do/` で始まらないときは保存はできるが注意文（amber）を出す（判定は `src/lib/candidate-mail/line-works-url.ts` の `isLineWorksUrl`）。QR は URL から自動で作るので画像の登録欄は無い。保存は既存の自動保存（`PATCH /api/admin/employees/[employeeId]` section=basic・`BASIC_FIELDS` に `lineWorksUrl` を追加）。
+
+### 送信記録の表（`candidate_contact_mail_logs` / Prisma `CandidateContactMailLog`・追加のみ）
+| 列 | 内容 |
+|--|--|
+| candidate_id | 求職者 |
+| type | enum `CandidateContactMailType`（`LINE_GUIDE` / `GREETING`。API の `line` / `greeting` と `CONTACT_MAIL_DB_TYPE` で対応） |
+| sent_by_user_id | 送信者（User.id） |
+| to_email / from_email | 送った時点の宛先・差出人アドレス |
+| subject | 送った件名 |
+| message_id | Resend が返した id（本文が読めなかったときは null） |
+| sent_at | 送信日時 |
+- 1通につき1行。物理削除しない。index は `(candidate_id, type, sent_at)`。
+
+### API（`/api/candidates/[candidateId]/contact-mail`・認証は既存の求職者 API と同じ `getSessionUser()`・未ログイン 403）
+- `GET`（type 無し）: メニュー用。`items.{line,greeting}` に `canSend / reason / lastSentAt` と、`candidate`（name/email）・`sender`（email/name/familyName/from）。
+- `GET ?type=line|greeting`: 上に加えて `preview`（差し込み済みの `subject / text / html / qrDataUrl`）。確認画面用。
+- `POST { type, resend? }`: 送信。順に (1) 送れない理由（求職者のメールアドレス無し／差出人が bizstudio.co.jp でない／`line` で CA の lineWorksUrl 無し）→ 400 `cannot_send` (2) **二重送信の防止**: 同じ求職者×同じ種類の記録があり `resend !== true` → 409 `already_sent`（`lastSentAt` 付き） (3) Resend 送信 → 失敗は 502 `send_failed`（記録は作らない） (4) 成功で記録を1行作り `{ ok, logId, messageId, sentAt }`。
+- 判定・組み立て・送信はすべて `src/lib/candidate-mail/send.ts`（`checkCanSend` / `findLastSentAt` / `buildContactMailPreview` / `sendContactMail`）。
+
+### 動作確認（2026-09-30）
+- 送ってよいのはテスト用求職者「大野 テスト」（5999999）だけ。送信者は大野さんのアカウントで `lineWorksUrl=https://works.do/R/ti/p/masayuki_oono@bizstudio` を設定して 2 通送り、記録 2 行と 2 回目の 409 を確認する（結果は完了報告に記載）。
+
+## 初回面談の台本モード（T-208 step2, master, 2026-09-30）
+
+初回面談で CA が台本を読みながら相手の答えのボタンを押すと、拾う一言が出て、面談記録の欄に自動で入る。台本の中身は `docs/interview-script/initial-interview-script.md`（付録 A〜F を本文より優先。付録 G（チャットのボタン）・H（質問の会社ごとの振り分け）は step3 で反映）、欄との対応は `docs/survey_T-208_script-form-mapping.md`。AI の指示・送る中身は変えていない（面談準備チャットは右側に埋め込むだけ）。追加のみの改修。
+
+### 台本の定義の場所（`src/lib/interview-script/`・すべて純粋関数・AI と DB を使わない）
+| ファイル | 中身 |
+|--|--|
+| `script-v1.ts` | 台本 v1（`SCRIPT_VERSION="v1"`）。7パート `SCRIPT_PARTS`・41場面 `SCRIPT_SCENES`（うち4場面は会社ごとにくり返し。step3 で `s5-wh-prep-questions` を追加）・ボタン149・入力46。拾う一言・分岐（`when` / ボタンの `next`）・入れ先（`FieldTarget`）・自動で決まる書き込み `derivedWrites`（残業の数字→選択肢、日時→「設定済」）。退職理由の大・中と小分類の候補は `RESIGN_REASON_BUTTONS`（付録E・文字列は `resign-reason-hierarchy.ts` の実際の値）。Word/PowerPoint は `WORD_PPT_BUTTONS`、転勤は `TRANSFER_BUTTONS`（付録B） |
+| `field-options.ts` | 入力画面の選択肢（`InterviewForm.tsx` の `<select>` もここを import）。付録C で足した「取得(AT限定)」「45時間超も可」を含む。`DETAIL_SELECT_OPTIONS` は欄→選択肢の表（確認スクリプトが値の実在を確かめる） |
+| `calc.ts` | 自動計算: 月給＝（賞与込み年収−賞与年額）÷12・手取り＝×0.8／残業 1日↔月 ×20 ÷20／`overtimeOptionFor`（0→絶対不可…46以上→45時間超も可）／`nextInterviewGuide`（急ぎ＝すぐにでも・3カ月以内・半年以内。時期の目安は付録A の置き直し）／`scheduleOutlook`（内定＝次回面談+1〜2ヶ月、入社＝内定+退職までの月数〔不明 1〜2、離職中 1〕） |
+| `render.ts` | 差し込み〔氏名〕〔CA名〕〔CA姓〕〔時刻〕〔直近の会社〕〔学校名〕〔学部学科〕〔卒業年〕〔会社名〕〔入社年月〕〔仕事内容〕〔頭の文字〕と、`{{if:条件}}…{{else}}…{{/if}}`（入れ子可）。値が無いときは台本の代わりの言い方（例: 会社名が無い→「現在は、お仕事をされていますか？」、時刻が無い→「本日〇時から」を省く） |
+| `runtime.ts` | `buildContext`（面談記録・求職者・面談準備の整理 summary_json・案内メール API の sender から差し込み情報を組む。〔CA名〕〔CA姓〕は T-207 の `resolveSender` と同じ取り方＝`GET /contact-mail` の `sender`。**〔CA名〕も名字だけ**（`sender.familyName`＝`caFamilyNameOf`: 空白で分けた先頭・空白が無ければ社員名全体。2026-09-30 fix: 「大野 将幸と申します」→「大野と申します」。差し込みは `render.ts` `baseValues` の1か所で、フルネームは使わない））／`expandScenes`（会社ごとに展開・`when` で飛ばす）／`deriveValues` `deriveFlags`（答えから決まる〔内容〕〔時期の目安〕〔内定の目安〕〔入社の目安〕〔転職時期〕〔LINE／メール〕〔電話／オンライン〕〔日時〕〔月給〕〔手取り〕…）／`sceneWrites`（場面の答え→欄への書き込み。**メモ欄はその場面の入力・ボタンを「／」でつないだ1つの文**、applied のキーは `欄のパス@場面キー`）／`sceneWritesWithClears`（答えが無くなった欄は value="" で「消す」書き込み） |
+| `apply.ts` | 入れ方の決まり（下記）。`decideApply` が 1欄ごとに set / append / replace / skip / propose を返す |
+| `field-labels.ts` | 欄のパス→画面の名前（「入力内容」タブ・提案の表示） |
+| `types.ts` | 形。答えは `answers[場面キー] = { choices: {グループ: 押したボタンの表示名}, inputs: {key: 文字}, at }`。進み具合は `answers.__meta = { currentKey, doneParts }` |
+
+- 場面のキーは `場面id` または `場面id#会社番号`（0始まり）。会社は職歴の行（`work_histories` order 順）、無ければ面談準備の整理の経歴の流れから仮の会社を作る（欄には入れられない。画面の「登録情報の職歴を取り込む」で企業名だけの職歴の行を作れる）。
+- 職種の「提案候補」（〔経験〕〔職種〕〔理由〕）は台本の決まりで T-206 の後に作り直すため v1 では出ない（CA が口頭で補う）。
+
+### 保存（表 `interview_script_answers` / Prisma `InterviewScriptAnswer`・migration `20260930200000_t208_interview_script_answers`・追加のみ・`IF NOT EXISTS`）
+| 列 | 内容 |
+|--|--|
+| interview_record_id | 面談1件に1行（unique・面談削除で Cascade） |
+| answers | JSONB。場面ごとの答え（押したボタンの表示名・入力した文字）＋ `__meta`（今の場面・終わったパート） |
+| applied | JSONB。台本が入れた欄（`d.<列>` / `wh.<会社番号>.<列>` / `ws.<項目>`、メモは `…@場面キー`）→ 入れた値。押し直しの判定用 |
+| script_version | 台本の版（"v1"） |
+| updated_by_user_id | 最後に保存した CA（User.id・SetNull） |
+- `interview_details` とは別表なので、自動保存（detail 丸ごと送信）や面談作成時の前回からの写し（`copyFromPreviousInterview`）の対象にならない＝2回目の面談に持ち越さない。
+- API `GET/PUT /api/interviews/[id]/script-answers`（認証は既存の面談 API と同じ `getSessionUser()`・未ログイン 403・面談なし 404）。PUT は `{ answers, applied, scriptVersion }` を upsert。**サーバーで面談記録（detail / work_histories）は書かない。**
+- 画面は答えが変わるたび 1.5 秒デバウンスで PUT（`InterviewForm.saveScriptAnswers`）。面談を切り替えると台本の状態は捨てて読み直す。
+
+### 入力画面への入れ方（付録F・`apply.ts`）
+- 欄が空（null / "" / []）のときだけ入れる。すでに値があれば勝手に変えず **propose**＝欄の横（いつもの入力画面）と「入力内容」タブに「台本: 〇〇［替える］［×］」を出し、CA が押したときだけ替える。
+- メモ欄は、空なら入れ（接頭辞なし）、入っていれば末尾に改行＋「【台本】…」を書き足す。同じ文がすでにあれば足さない。
+- 押し直したとき、欄が前に台本が入れた値のまま（`applied` と一致）なら差し替え／答えが無くなれば消す。CA が手で直していたら触らない（メモは台本の文だけ差し替え、CA の文は残す）。
+- 働き方のチェックは「無ければ付ける」。外すのは台本が付けたもの（applied="1"）だけ。
+- 反映は画面の state（`setDetailState` / `setWorkHistories`）に対して行い、既存の自動保存（3秒・`buildAutosaveBody`）で保存する。数値の欄（社数・年収）は Number、日付の欄（退職日・次回面談日）は `normalizeDate`（月入力 "YYYY-MM" は 1 日に寄せる）。
+- 確認: `npx tsx scripts/verify/interview-script-check.ts`（値の実在・自動計算・入れ方の決まり・場面→書き込み・差し込み。AI/DB なし）。
+
+### T-208 step3（2026-09-30）: 面談準備の質問を会社ごとに振り分け（付録H）・チャットの「よく使う質問」（付録G）・台本の答えをチャットに添える
+
+AI の指示（SKILL.md）と AI に送る中身を変えたので staging で確かめてから master に反映した。
+
+**整理の questions に company（付録H）**
+- `PrepQuestion` に `company: string`（関わる会社の名前・`works` の company と同じ書き方・特定の会社に関わらなければ「全体」＝`PREP_QUESTION_ALL`）。ツール `save_prep_summary` の入力の形（`SUMMARY_TOOL_INPUT_SCHEMA`・required）と SKILL.md の「questions:」の説明に追加。
+- 検証（`normalizePrepSummary`）: company が `works` のどの会社名とも一致しなければ「全体」に直す。一致すれば `works` 側の書き方に置き換える（表記ゆれ吸収）。**company が無い古い整理はすべて「全体」**（GET も `normalizePrepSummary` を通すので画面・台本とも古い部屋は「全体」）。
+- 会社名のそろえ方は `summary-format.ts` の `normalizeCompanyKey` **1か所**（NFKC で全角半角・空白を取る・「株式会社」「（株）」「(株)」「㈱」を取る・小文字）。`companyMatches` / `resolveQuestionCompany` / `questionsForCompany`（食い違い＝mismatch を先に・元の添字つき）/ `questionsUnassigned`（どの会社にも当たらない＋「全体」・元の順）も同じファイル（純粋関数・画面と台本と確認スクリプトで共有）。
+- 会話履歴の整理の文章（`formatPrepSummaryText`）は、会社ありの質問だけ末尾に「［会社名］」を添える。「全体」には何も付けない＝**古い整理の文章は byte が変わらない**（キャッシュを壊さない）。
+- `INTERVIEW_PREP_FORMAT_UPDATED_AT` を `2026-09-30T08:50:00+09:00` に更新。それより前のカード表示の部屋には上部バーに「「作り直す」と、面談で聞くことが会社ごとに振り分けられます。」（文章表示の古い部屋は従来の「カード表示になります」）。
+- カード「面談で聞くこと」の各質問に会社名の小さな札（「全体」は出さない）。
+
+**台本の経歴確認に会社ごとに差し込む（`script-v1.ts`・`runtime.ts`）**
+- 新しい場面 `s5-wh-prep-questions`（part p5・`repeat: "company"`・`kind: "prep-questions"`・題「職歴：面談準備の質問（この会社）」）を「仕事の中身・立場と数字」の後・「退職理由」の前に置いた（台本の 5.）。**その会社に関わる質問が無い会社では出さない**（`ScriptScene.whenCompany`＝会社ごとにくり返す場面の会社単位の出し分け。`expandScenes` で判定）。
+- 経歴確認の最後の「面談準備の質問（全体）」は残し、どの会社にも当たらない質問と「全体」の質問だけをまとめて出す（今までどおり元の順）。
+- どの質問をどの場面に出すかは `runtime.ts` の `prepQuestionsForScene(ctx, rs)` **1か所**（会社ごと＝`questionsForCompany(ctx.prepQuestions, 会社名)`・全体＝`questionsUnassigned`）。会社の突き合わせは職歴の行の `companyName`（無ければ整理から作った仮の会社名）と質問の company を `normalizeCompanyKey` で比べる。
+- `PrepQuestionView` に `index`（整理の添字＝Q番号・「聞いた」のキー）と `company`。画面の Q 番号は整理の番号のまま（右の面談準備と同じ番号）。
+- 場面数は 41（会社ごとにくり返す場面は 4）。`interview-script-check.ts` は変更なしで ALL OK。
+
+**チャットの「よく使う質問」（付録G・`src/lib/interview-prep/quick-questions.ts`）**
+- 5つ: ［職種を説明］［業界を説明］［言葉の意味］（kind=fill: 入力欄に文を入れ、〔　〕を選んだ状態にする）／［別の職種を提案］［次に聞くこと］（kind=send: すぐ送る）。文は `QUICK_QUESTIONS` 1か所（確認スクリプトも同じ定数を見る）。送信中・整理中は押せない。
+
+**台本の答えをチャットに添える（`src/lib/interview-script/facts.ts`・`messages/route.ts`）**
+- 画面は `POST /interview-prep/messages` に `interviewId`（開いている面談記録。`InterviewForm` → `InterviewScriptMode` → `InterviewPrepPanel` props、横のパネルは `InterviewHistoryTab` の `selectedId`）を渡す。
+- API は `interview_script_answers.answers`（面談記録がこの求職者のもののときだけ）を `formatScriptFacts` で「【台本で分かったこと】」＋1行「場面名: 値」（会社ごとの場面は「場面名（会社名）」・会社名は面談記録の職歴の行・無ければ「N社目」）にし、`withScriptFacts` で**今回の質問の先頭にだけ**付けて AI に送る。system と過去の履歴には入れない（キャッシュを壊さない）。答えのある項目だけ（今の答えで見えないグループ・入力＝showIf は入れない）。台本の答えが無ければ何も付けない。
+- **保存する CA の発言は画面に打った文だけ**（`question`）。添えた部分は保存しない。ログに `script_facts=yes/no`。
+- SKILL.md「CAの質問に答えるとき」に3行追加（【台本で分かったこと】は使ってよい・レジュメの希望条件は使わない／別の職種・業種の提案は必ず別の職種か別の業種／次に聞くことは【台本で分かったこと】とレジュメを踏まえる）。
+- 確認: `npx tsx scripts/verify/interview-prep-step3-dryrun.ts --no-ai`（AI/DB なし・37項目）。staging: `railway ssh --service bizstudio-portal-staging "cd /app && npx tsx scripts/verify/interview-prep-step3-dryrun.ts 5008627"`（AI 最大4回・保存なし）。

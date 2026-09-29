@@ -8,6 +8,14 @@
 //   - body(multipart): file / media / ref
 //   - 200 { sourceJobId, status, deduped, confidence, durationMs } / 422 { error, status:'error' }
 //   - 処理時間 実測 約41秒/件（Gemini構造化が律速）
+//
+// T-XXX（2026-09-28・両側の取り決め）: 返却に次の任意項目が追加される。ポータルはこれを正として保存する。
+//   - sourceMedia: job-platform の媒体コード（source_media の値そのまま。例 "hito_link"）
+//   - sourceJobId: job-platform の番号（DBNO。本文の「求人ID：hl-ap-…」を最優先で job-platform が決める）
+//   - jobArea / jobCategory / jobCategoryPath: T-200 と同じ形。職種が取れないときは3つとも付かない
+//   返却に sourceMedia が無い（相手側が未反映）ときは、本文の求人ID → ファイル名の順で予備判定する
+//   （resolveFallbackMedia）。送信時の media はこれまでどおりファイル名判定（旧受け口に "hito_link" を
+//   送ると hito_link-xxxxxx の番号で日次取り込み用の媒体に混入するため変えない）。
 import { prisma } from "@/lib/prisma";
 
 // job-platform（Vercel）の安定本番URL。env で上書き可能。
@@ -30,10 +38,84 @@ export function detectMediaFromFilename(fileName: string): "circus" | "mynavi_jo
   return "own";
 }
 
+// HITO-Link 求人票PDFの本文にある求人ID行（例「求人ID：hl-ap-207786」）。全角/半角コロン・空白許容。
+const HITO_LINK_TEXT_JOB_ID_RE = /求人ID[：:]\s*(hl-ap-\d+)/;
+// HITO-Link の現在のダウンロード名: 求人票_{会社名}_{17桁の日時}.pdf（本番実データ 3,124件中 3,101件が本文に hl-ap を持つ。
+// circus の No\d{5,7} / マイナビの ^\d{4,6}_ との誤マッチは実データ照合で 0 件）。
+const HITO_LINK_FILENAME_RE = /^求人票_.+_\d{17}\.pdf$/i;
+
+/**
+ * T-XXX: 返却に sourceMedia が無いときの予備判定（保存用）。
+ *   1. 抽出済み本文に「求人ID：hl-ap-\d+」があれば hito_link
+ *   2. ファイル名が HITO-Link の現在のダウンロード名（求人票_{会社名}_{17桁}.pdf）なら hito_link
+ *   3. それ以外は従来の detectMediaFromFilename（circus / mynavi_jobshare / own）
+ * ※送信時の media には使わない（上記ヘッダ参照）。
+ */
+export function resolveFallbackMedia(args: {
+  fileName: string;
+  extractedText?: string | null;
+}): "hito_link" | "circus" | "mynavi_jobshare" | "own" {
+  if (args.extractedText && HITO_LINK_TEXT_JOB_ID_RE.test(args.extractedText)) return "hito_link";
+  if (HITO_LINK_FILENAME_RE.test(args.fileName ?? "")) return "hito_link";
+  return detectMediaFromFilename(args.fileName);
+}
+
+/** 抽出済み本文から HITO-Link の求人ID（hl-ap-…）を取り出す。無ければ null。 */
+export function extractHitoLinkJobIdFromText(extractedText: string | null | undefined): string | null {
+  if (!extractedText) return null;
+  const m = extractedText.match(HITO_LINK_TEXT_JOB_ID_RE);
+  return m ? m[1] : null;
+}
+
 export type IngestResult =
-  | { ok: true; sourceJobId: string; status: string; deduped: boolean }
+  | {
+      ok: true;
+      sourceJobId: string;
+      status: string;
+      deduped: boolean;
+      /** T-XXX: job-platform が本文から確定した媒体コード（未反映の相手側からは undefined） */
+      sourceMedia?: string;
+      /** T-XXX: T-200 と同じ形。3つ揃ったときだけ保存する（揃わなければ既存値を消さない） */
+      jobArea?: string;
+      jobCategory?: string;
+      jobCategoryPath?: string;
+    }
   // skipped=true: 送信前クレームに敗れた（他プロセスが既にクレーム済み＝二重発火の排他）。エラーではない。
   | { ok: false; error: string; skipped?: boolean };
+
+/** 返却 JSON の任意文字列項目。空文字・非文字列は undefined（保存しない）。長すぎる値は切る（DB列は無制限だが表示用）。 */
+function optStr(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  if (!t) return undefined;
+  return t.length > 500 ? t.slice(0, 500) : t;
+}
+
+/**
+ * T-XXX: 投入成功時に CandidateFile へ書き戻すデータを組み立てる（ingestAndLink と resubmit-stale で共用）。
+ *   - externalJobRef = 返却の sourceJobId（DBNO）
+ *   - sourceMedia   = 返却の sourceMedia を正とし、無ければ予備判定（本文の求人ID → ファイル名）
+ *   - jobArea / jobCategory / jobCategoryPath = 3つ揃ったときだけ保存（T-200 ルール。揃わなければ既存値を消さない）
+ *   媒体が hito_link なら DB名列は SOURCE_MEDIA_TO_JOBDB で「HITO-Link」になる（エントリー化の jobDb も同じ関数）。
+ */
+export function buildLinkData(
+  result: Extract<IngestResult, { ok: true }>,
+  file: { fileName: string; extractedText?: string | null },
+): {
+  externalJobRef: string;
+  platformSubmittedAt: Date;
+  sourceMedia: string;
+  jobArea?: string;
+  jobCategory?: string;
+  jobCategoryPath?: string;
+} {
+  const sourceMedia = result.sourceMedia ?? resolveFallbackMedia(file);
+  const attrs =
+    result.jobArea && result.jobCategory && result.jobCategoryPath
+      ? { jobArea: result.jobArea, jobCategory: result.jobCategory, jobCategoryPath: result.jobCategoryPath }
+      : {};
+  return { externalJobRef: result.sourceJobId, platformSubmittedAt: new Date(), sourceMedia, ...attrs };
+}
 
 /**
  * PDFを job-platform の内部投入APIへ送る（HTTPのみ・DB書込なし）。
@@ -72,6 +154,10 @@ export async function submitPdfToJobPlatform(args: {
       status?: string;
       deduped?: boolean;
       error?: string;
+      sourceMedia?: unknown;
+      jobArea?: unknown;
+      jobCategory?: unknown;
+      jobCategoryPath?: unknown;
     };
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}: ${json.error ?? JSON.stringify(json)}` };
@@ -84,6 +170,10 @@ export async function submitPdfToJobPlatform(args: {
       sourceJobId: json.sourceJobId,
       status: json.status ?? "unknown",
       deduped: !!json.deduped,
+      sourceMedia: optStr(json.sourceMedia),
+      jobArea: optStr(json.jobArea),
+      jobCategory: optStr(json.jobCategory),
+      jobCategoryPath: optStr(json.jobCategoryPath),
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -111,6 +201,8 @@ export async function ingestAndLink(args: {
   fileId: string;
   fileName: string;
   pdfBuffer: Buffer;
+  /** T-XXX: 予備の媒体判定用（返却に sourceMedia が無いとき本文の求人IDを見る）。無くても動く。 */
+  extractedText?: string | null;
 }): Promise<IngestResult> {
   // --- 投入前クレーム（送信前に platformSubmittedAt を打つ） ---
   const claimedAt = new Date();
@@ -143,12 +235,10 @@ export async function ingestAndLink(args: {
 
   try {
     if (result.ok) {
-      await prisma.candidateFile.update({
-        where: { id: args.fileId },
-        data: { externalJobRef: result.sourceJobId, platformSubmittedAt: new Date() },
-      });
+      const data = buildLinkData(result, { fileName: args.fileName, extractedText: args.extractedText });
+      await prisma.candidateFile.update({ where: { id: args.fileId }, data });
       console.log(
-        `[t131-ingest] 投入成功 fileId=${args.fileId} file=${args.fileName} → ${result.sourceJobId} (status=${result.status} deduped=${result.deduped})`,
+        `[t131-ingest] 投入成功 fileId=${args.fileId} file=${args.fileName} → ${result.sourceJobId} (status=${result.status} deduped=${result.deduped} media=${data.sourceMedia}${data.jobArea ? ` area=${data.jobArea} category=${data.jobCategory}` : ""})`,
       );
     } else {
       // 失敗: platformSubmittedAt はクレームで既に now。追加更新は不要（30分ゲートはクレーム時刻基準）。

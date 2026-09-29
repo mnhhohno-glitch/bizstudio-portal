@@ -1,16 +1,17 @@
-import { sendBotMessage } from "@/lib/lineworks";
+import { sendBotMessageWithCaMention, type CaMentionTarget } from "@/lib/lineworks-ca-mention";
 
 // T-128 T2: 求職者サイトからの応募を担当CAへ LINE WORKS 通知する。
 // 既存のタスク通知（src/lib/task-notification.ts）と同じ Bot/トークルーム・メンション方式に従う。
 // - 送信先: LINEWORKS_TASK_BOT_ID / LINEWORKS_TASK_CHANNEL_ID（既存CA通知チャンネル）。
-// - 担当CAに lineUserId があれば <m userId="..."> でメンション。無ければ名前プレフィックスでフォールバック。
+// - 2026-09-26: 宛先を Employee.lineUserId（LINE のIDで LINE WORKS には効かない）から
+//   User.lineworksId に変更（lineworks-ca-mention.ts）。届かないときは代表へメンション＋本文末尾に注記。
+//   代表も引けないときはメンションなし（担当CA名プレフィックス）＋注記。
 
 type ApplyNotificationParams = {
   candidateId: string;
   candidateName: string;
   candidateNumber: string;
-  caName: string | null;
-  caLineworksId: string | null;
+  target: CaMentionTarget;
   jobTitle: string | null;
   companyName: string | null;
   externalJobRef: string;
@@ -33,6 +34,7 @@ export async function notifyCandidateApplication(
     return false;
   }
 
+  const caName = params.target.caName;
   const jobLine = [params.companyName, params.jobTitle].filter(Boolean).join(" / ") || "(求人情報なし)";
 
   const baseLines = [
@@ -48,7 +50,7 @@ export async function notifyCandidateApplication(
     params.externalJobRef,
     "",
     "■ 担当CA",
-    params.caName ?? "未設定",
+    caName ?? "未設定",
   ];
   if (baseUrl) {
     baseLines.push("", "🔗 求職者ページ", `${baseUrl}/candidates/${params.candidateId}`);
@@ -56,25 +58,21 @@ export async function notifyCandidateApplication(
 
   const header = "求職者サイトから応募がありました";
 
-  // メンション（lineUserId があれば）。
-  if (params.caLineworksId) {
-    const mentioned = [
-      `<m userId="${params.caLineworksId}">`,
-      ` ${header}`,
-      "",
-      ...baseLines.slice(2), // 見出し行＋空行をスキップ
-    ];
-    try {
-      await sendBotMessage(botId, channelId, mentioned.join("\n"));
-      return true;
-    } catch (e) {
-      console.warn("[candidate-site/apply] メンション通知に失敗、メンションなしで再送します:", e);
-    }
-  }
-
-  // メンションなし（lineUserId 未登録 or メンション送信失敗時）。担当CA名を先頭に付ける。
-  const prefix = params.caName ? `${params.caName}さん ` : "";
-  const fallback = [`${prefix}${header}`, "", ...baseLines.slice(2)];
-  await sendBotMessage(botId, channelId, fallback.join("\n"));
+  await sendBotMessageWithCaMention(
+    botId,
+    channelId,
+    params.target,
+    (mentionId, note) => {
+      const tail = note ? [note] : [];
+      if (mentionId) {
+        // 見出し行＋空行をスキップ
+        return [`<m userId="${mentionId}">`, ` ${header}`, "", ...baseLines.slice(2), ...tail].join("\n");
+      }
+      // メンションなし。担当CA名を先頭に付ける。
+      const prefix = caName ? `${caName}さん ` : "";
+      return [`${prefix}${header}`, "", ...baseLines.slice(2), ...tail].join("\n");
+    },
+    "candidate-site/apply",
+  );
   return true;
 }

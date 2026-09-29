@@ -33,3 +33,10 @@ dry-run と execute の両モード必須、idempotent 必須。
 - 影響範囲を書かない
 - デプロイ判断を丸投げ
 - 動作確認手順なし
+
+## 実装プロンプトに含める定型（2026-09-27 追記, T-205）
+
+- 確認用ビルド: `npx prisma generate && npx next build`（ローカルの dev サーバー停止中に実行）。**`npm run build` は本番DBへの `prisma migrate deploy` を含むため使わない**（罠#53）。
+- push: `node scripts/wait_railway_idle.mjs && git push origin master`（開発機に Python が無い）。
+- マイグレーション: `prisma migrate dev` は使わず、`prisma migrate diff --from-schema <旧> --to-schema prisma/schema.prisma --script` → 手書き SQL（`IF NOT EXISTS` で冪等）。ローカルから `migrate deploy` は実行しない（本番反映時のビルドで適用）。
+- 完了確認（2026-09-27 追記, T-205 step3）: 画面を変える改修は、本番デプロイが SUCCESS になり、**本番に出ているコミットが今回のコミットと一致する**ことを確かめてから完了報告する（Railway の webhook 不発で古いコミットのまま SUCCESS に見えることがある）。

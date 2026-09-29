@@ -159,3 +159,14 @@ T-067 以降、面談ログ・添付ファイルを含む全ての求職者関�
 **実績集計の扱い（R1）**: 本人応募（origin='candidate' AND drive_file_id IS NULL）は CA の紹介実績に数えない。
 集計述語は「非サイト行 かつ COALESCE(last_exported_at, introduced_at) 非NULL」で統一
 （jobSearch.ts / metrics.ts / weeklyMatrix.ts / performance/detail / support-sub-status / dashboard）。
+
+## PDF直登録ブックマークの求人プラットフォーム登録（T-131 / T-XXX・2026-09-28）
+
+| データ | source of truth | 備考 |
+|--|--|--|
+| 番号（DBNO・`CandidateFile.externalJobRef`） | **求人プラットフォーム `ingest-pdf` の返却 `sourceJobId`** | 本文の `求人ID：hl-ap-\d+` を最優先で求人プラットフォームが決める。既存求人があればその番号（重複を作らない） |
+| 媒体（DB名・`sourceMedia`） | **返却 `sourceMedia`** | 無ければ `resolveFallbackMedia`（本文の求人ID → ファイル名17桁 → 従来のファイル名判定）で予備判定 |
+| エリア・職種（`jobArea` / `jobCategory` / `jobCategoryPath`） | **返却の3項目（T-200 と同じ形）** | 3つ揃ったときだけ保存。揃わなければ既存値を消さない |
+
+- 経路: `extract-text` → `ingestAndLink`（投入前クレーム → 送信 → `buildLinkData` で書き戻し）。取りこぼしは `/api/internal/bookmarks/resubmit-stale`（GitHub Actions 2時間毎）が拾う。
+- 送り直しの自動対象は **作成から3日以内**（`T131_RESUBMIT_WINDOW_DAYS`）。それより古い滞留は `outsideWindow` に件数だけ出す（送るのは手動 `scripts/t131-resubmit-stale.ts --days=N --execute`）。

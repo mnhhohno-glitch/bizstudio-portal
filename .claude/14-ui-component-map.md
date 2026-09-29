@@ -47,7 +47,7 @@
 CandidateDetailPage (100% width, no max-width)
   └─ InterviewHistoryTab (100% width)
        └─ InterviewForm (100% width)
-            ├─ ヘッダー（保存・キャンセル・PDF表示等のボタン）
+            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・面談準備〔T-205 step2〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示）
             └─ div.grid.grid-cols-2 (line 1045 周辺)
                  ├─ LEFT COLUMN (50%)
                  │    ├─ 面談基本情報（面談日、時刻、求職者ID、氏名、フリガナ、生年月日 等）
@@ -62,6 +62,8 @@ CandidateDetailPage (100% width, no max-width)
                            ├─ "action": アクション
                            ├─ "attachments": 添付（ファイル数バッジあり）
                            └─ "support": 面談サポート（T-183 Phase 2。求職者単位のセッション一覧・閲覧・削除・新規作成。中身は InterviewSupportLogTab.tsx）
+                                ※ T-205 step2（2026-09-27）で一時的に非表示。`InterviewForm.tsx` 冒頭の定数 `SHOW_INTERVIEW_SUPPORT = false`（RIGHT_TABS の直上）がヘッダーの「面談サポート」ボタンとこのタブの両方を隠す。
+                                  タブは `VISIBLE_RIGHT_TABS` で絞り、選択状態が "support" のときは派生値で "initial"（初期条件）に戻す。true に戻せば元どおり。処理・API・保存データは据え置き。
 ```
 
 ### メモセクション（line ~1290-1333）
@@ -145,6 +147,17 @@ T-051 で整理した面談入力フォームのドロップダウン定義位�
 
 - API: `src/app/api/interviews/[id]/attachments` 配下（単一ファイル POST、複数対応はフロント側ループで実現）
 - T-041 修正: master commit cde6530、staging merge 済み
+
+#### 2026-09-26: 受け付けを1つに統合（.txt は自動で面談ログ）
+
+- 下段「この面談の面談ログ（.txt）」（T-152 の専用欄・「ログをアップロード」ボタン）を削除し、上段のドロップ領域／「ファイルを選択」に一本化。
+- `handleUploadMultiple` が拡張子で呼び分ける（D&D・選択とも同じ経路、1件ずつ逐次 POST）:
+  - `.txt`（大文字小文字不問）→ `handleUploadInterviewLog`（`/api/candidates/{id}/files/upload` に `category=MEETING` + `interviewId` 付き＝この面談のログとして記録）
+  - それ以外 → `handleUpload`（同 API・`interviewId` なし＝通常の添付）
+  - 面談が未保存 or この面談のログが記録済みのときの `.txt` は `handleUpload`（旧専用欄もこの2状態ではログを受け付けなかった）。同じ回の `.txt` 複数はログにするのは1件目だけ。
+- 一覧で `interviewId` 一致の txt 行に「面談ログ」バッジ（`isInterviewLogOf`）。
+- 文言: ドロップ領域「面談ログ（.txt）／録音／履歴書PDF等をドラッグ＆ドロップ」、一覧上「.txt は自動でこの面談の面談ログとして記録され、解析に使われます」。
+- API・DB・解析ボタン・書類タブ（`DocumentsTab.tsx`）・自動保存は変更なし。
 
 ### 面談基本情報グリッド（line ~1053）
 
@@ -1573,3 +1586,171 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
   東日本4地域が揃えば「東日本」、西日本6地域が揃えば「西日本」、全地域なら「全国」。一部だけの地域は県名を「/」で並べ、地域同士は「・」で結ぶ
   （例: 東北全選択＋神奈川のみ→「東北・神奈川」）。`areaMode` が NATIONWIDE/EAST/WEST の行はそのラベルを出す（`areaLabel()`）。
 - 都道府県指定は**空にしない**（何もチェックしないとマイナビ側で海外が含まれるため）。API も PREFECTURE で0件は 400。
+
+
+## LINE WORKS 担当CA宛て通知の宛先（2026-09-26）
+
+- 求職者起点の担当CA宛て通知3本は `src/lib/lineworks-ca-mention.ts` の `resolveCaMentionTarget(candidate.employeeId)` → `sendBotMessageWithCaMention` で送る。宛先は **Employee → User.lineworksId のみ**（Employee・User とも active）。
+  - マイページまとめ送信通知（`candidate-site-notifications.ts` `notifySubmissionViaLineWorks`・マイページBot）: 旧 `LINEWORKS_ADVISOR_MAP`（CA名→ID の対応表）を廃止。Railway の環境変数は戻せるよう残置。
+  - 求職者サイトの応募通知（`candidate-site/apply-notification.ts`）・質問通知（`candidate-site/question-notification.ts`）: 旧 `Employee.lineUserId`（LINE のID・全員未登録＝実質メンションゼロ）を廃止。
+- 届かないとき（担当CA未設定／社員なし／lineworksId 未登録／無効）は大野 将幸（社員番号 `1000001`）へメンションし、本文末尾に「※担当CA（{氏名 or 未設定}）に届いていません（LINE WORKS未登録）」。大野も引けなければメンションなし＋注記＋エラーログ。メンション付き送信が失敗したら宛先を1段落として1回だけ再送。
+- タスク通知（`resolveAssigneeNotifyTargets`）とマイページ回答タスク通知（`mypage-response-sync.ts`）はこの関数を使っていない（挙動据え置き）。
+
+## 面談準備チャット `InterviewPrepPanel`（T-205, 2026-09-27）
+
+- パス: `src/components/candidates/InterviewPrepPanel.tsx`（新規・`AdvisorFloatingPanel` とは別）。`createPortal(document.body)` で描画。
+- 親: `InterviewHistoryTab`（開閉の `prepOpen` state だけを持つ）。Props: `candidateId` / `open` / `onClose`。
+
+### 入口ボタン（T-205 step2 で配置変更・2026-09-27）
+
+- `InterviewForm` ヘッダーの操作ボタン列（「PDF表示」の右・「保存」の左）に「面談準備」（PDF表示と同種の見た目＋吹き出しアイコン）。`InterviewHistoryTab` から `onOpenInterviewPrep` props で開く関数を渡す（開閉の `prepOpen` state は `InterviewHistoryTab` のまま）。
+- 面談記録が0件の空状態（`InterviewHistoryTab.tsx`・「+ 新規面談を作成」の右）にも同じ「面談準備」。面談記録を作らなくても開ける。
+- 面談一覧バー（「面談:」の並び）のボタンは step2 で撤去。
+- 同じ位置にあった「面談サポート」（T-183）は `SHOW_INTERVIEW_SUPPORT = false` で一時的に非表示（上の InterviewForm セクション参照）。
+
+### パネルの構造
+
+```
+InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしない）
+  幅: 標準 clamp(720px, 60vw, calc(100vw - 48px)) / 広げる 95vw（localStorage "interviewPrep.wide" に記憶）
+  ├─ ヘッダー: 「面談準備｜{氏名} さん」＋小さく「材料: マイナビレジュメ（{取り込み日} 取り込み）」
+  │     右: 「広げる／元の幅」「作り直す」（window.confirm・整理がある時だけ）「×」（Esc でも閉じる）
+  ├─ 上部のバー（整理がある時・作成中。スクロールしない）: 「整理（作成日）」＋経歴の型バッジ＋右端「整理へ移動」（step11）
+  │     「整理へ移動」= 下の1本のスクロールを一番上（整理の先頭）へ smooth で戻す。開閉の仕組みは無い
+  ├─ 1本のスクロール（flex-1・overflow-y-auto・中央の列 max-w-[760px]。広げても列幅は変えない）
+  │     パネル内でスクロールするのはここだけ（ヘッダー・上部バー・入力欄は固定）
+  │     先頭=整理（カード／古い部屋は文章）→ その下に CA の質問と AI の回答を時系列（会話があるとき整理の下に区切り線）
+  │     CA=右寄せ吹き出し（bg-gray-100 rounded-2xl）/ AI=列いっぱいの Markdown（PrepMarkdown）
+  │     書いている最中は文末に点滅カーソル（BlinkCursor）。自動スクロールは stickToBottomRef（下端から40px以内のときだけ）
+  │     状態: 整理前=「面談の準備を始めましょう」＋「面談準備を作る」/ レジュメなし=「マイナビレジュメが見つかりません」（AI は呼ばない）
+  │           エラー=赤枠＋「再送」（summary/chat を kind で区別して同じ内容を送り直す）
+  └─ 入力欄（整理がある時のみ）:
+        ├─ 「よく使う質問」の丸いボタン5つ（T-208 step3・付録G。角丸の大枠の上・横並び・折り返し）: ［職種を説明］［業界を説明］［言葉の意味］＝入力欄に文を入れて〔　〕を選択 ／ ［別の職種を提案］［次に聞くこと］＝すぐ送る。送信中・整理中は disabled
+        └─ 角丸の大枠に textarea（3行→最大10行・超えたら枠内スクロール）＋右下の丸い送信ボタン
+              Enter=改行 / Ctrl+Enter（Cmd+Enter）=送信（isComposing 中は無視）。左下に「Enterで改行・Ctrl+Enterで送信」。送信中は入力・送信を止める
+```
+
+- ストリーミング受信は `readSse()`（`data:` 行を `\n\n` 区切りで読む）。`{done}` が来る前に切れたらエラー扱い（保存されていない）。
+- 422 `no_resume` は「レジュメなし」状態へ、`resume_unreadable` は読み取れた字数付きのエラー。409 は状態を取り直す。
+
+### T-205 step11（2026-09-28）: 1本のスクロール・整理は先頭・上部バーは「整理へ移動」（step3 の固定欄を置き換え）
+
+- 整理は会話の有無に関係なく**1本のスクロールの先頭のメッセージ**。その下に CA の質問と AI の回答を時系列で並べる。ChatGPT / Claude と同じく、スクロールで整理まで遡れる。
+- step3 の「最初の質問を送ったら整理を固定欄に畳む」動きと、固定欄の中だけのスクロール（`max-h-[50vh]`・`summaryOpen` state）は削除。
+- 上部のバー（「整理（作成日）」＋経歴の型バッジ＋`OldFormatNotice`）は整理がある・作成中のとき常に表示。右端は「整理へ移動」（`scrollToSummary`: `scrollTo({ top: 0, behavior: "smooth" })`）。
+- スクロールの位置:
+  - 開いたとき: 取り込み後に一度だけ（`initialScrollRef`・`fetchState(true)`）、会話があれば一番下（最新）、無ければ一番上（整理の先頭）。
+  - AI が書いている最中は下へ自動スクロール。CA が上へスクロールしているときは止める（`stickToBottomRef`・下端から40px以内のときだけ追う）。
+  - 質問を送った瞬間は一番下へ（`runChat` で `stickToBottomRef = true`）。整理の作成・作り直しの開始時は一番上へ。
+- 「整理を読んで、気になることを下の入力欄から質問してください。」は会話0件のときだけ整理の下に出す（`hasConversation = messages.length > 0 || !!pendingQuestion`）。
+
+### T-205 step3（2026-09-27）: 整理の表示配分と文字
+
+- ~~会話0件は整理を全体表示、最初の質問で固定欄に畳む~~ → step11 で廃止（上記）。
+- **文字**（整理・AI の回答の両方。`PrepMarkdown`）: 本文 15px・行間 1.9／見出し（h1〜h4）16px 太字・上 20px（先頭は 0）／箇条書きの項目の間 6px（`space-y-1.5`）。中央の列幅 `max-w-[760px]` は不変。
+- **古い書き方の案内**: 整理の作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前なら、上部のバーの中に小さく（amber）案内を出す（`OldFormatNotice`。step11 で整理の上の表示はやめバーだけに）。
+- 「作り直す」の確認文は「今の整理と会話を片付けて、新しく作り直します。よろしいですか？」。OK 後は押し直し不要で整理の生成まで進む。
+
+### T-205 step4（2026-09-27）: 下調べの表示
+
+- 整理の作成中、本文が流れ始めるまでの表示は SSE `researching` 〜 `researched` の間だけ「会社と学校を調べています…」、その後は従来の「整理を作成しています…」（`researching` state）。
+- 整理の末尾の下に小さく「調べた情報の出典」（`ResearchSources`・`researchSources()`）: 会社名・学校名ごとに URL を番号リンクで新しいタブ（`rel=noopener noreferrer`）。URL が無いものは出さない。全体表示と固定欄の「整理を開く」の両方。
+- 経歴の型バッジの隣に学校のレベルのバッジ「学校: 高／中／低」（emerald・`schoolLevelBadge()`）。「なし」「不明」・下調べなしは出さない。
+- 最初の案内文は「マイナビレジュメと、会社・学校のネット検索を使い…」に変更。
+
+### T-205 step7（2026-09-28）: 学校の下調べの廃止に伴う表示の整理
+
+- 学校の下調べをやめたので、学校に関する表示を外した: 進み具合の「学校を調べています…」の行、固定欄・全体表示の「学校: 高／中／低」バッジ（`schoolLevelBadge()` は削除）、出典リンクの学校分（`researchSources()` は会社だけ）。
+- 進み具合は1行（`ResearchProgressLines`）: 「会社を調べています…」→「✓ 会社を調べました」／「会社は今回調べられませんでした」。SSE の `researchProgress` は `{ company }` だけ。
+- 最初の案内文は「マイナビレジュメと、勤めた会社のネット検索を使い…」。
+
+### T-205 step8（2026-09-28）: 整理のカード表示と「聞いた」ボタン
+
+- 新コンポーネント `src/components/candidates/InterviewPrepSummaryCards.tsx`（Props: `summary: PrepSummary` / `research` / `asked: AskedQuestions` / `onToggleAsked(index, asked)` / `disabled`）。`InterviewPrepPanel` は `summary.json` があればこれを、無ければ従来の `PrepMarkdown`＋`ResearchSources`（文章表示）を出す。表示場所は1本のスクロールの先頭の1か所（step11）。
+- カードの順（中央の列 max-w-[760px]・白カード rounded-xl border shadow-sm・見出しは 12px gray-500）:
+  1. **ひとことで**: summary 17px。下に丸バッジ（在職中=emerald／離職中=amber／不明=gray、年齢=gray、経歴の型=blue〔判定できないは出さず理由を1行〕、年収=gray）。資格は 12px 1行（truncate）。
+  2. **経歴の流れ**: 縦線（gray-200）と点（#2563EB）の時系列。period 12px gray → title 15px 太字 → detail 14px。fromResearch の行に「🌐 調べた情報」。
+  3. **やってきた仕事**: 会社ごとに term（太字）｜meaning の2列 grid（2fr:3fr）。フッター「右側は一般的な意味です。本人のやり方は面談で確認します。」
+  4. **面談で聞くこと（N/M 聞いた）**: 1問1カード。Q番号＋mismatch なら amber の「食い違い」札、question 16px、下に 12px「なぜ: 」「分かること: 」。右上「聞いた」→押すと「✓ 聞いた」（emerald）でカードは opacity-60。件数に関係なく全件表示（T-205 step9 で「ほかN件を開く」の開閉を廃止）。
+  5. **強み**: strength 15px＋「根拠: basis」。fromSelfPr は「根拠: 本人の自己PRより」。
+  6. **知っておきたい言葉**: 最初から全語を term｜meaning の2列で表示（T-205 step9 で「N語を開く」の開閉を廃止）。
+  7. 最下部に 11px「🌐 調べた情報の出典」（会社の URL を番号リンク・新しいタブ）。学校は出さない。
+- 「聞いた」は `InterviewPrepPanel.toggleAsked`: 画面を先に変えて PATCH `/interview-prep/asked`、失敗したら戻す。`summary.asked`（`AskedQuestions`）1か所で持つ。
+- 作成中の表示は `ProgressLines`: 「会社を調べています…」→「✓ 会社を調べました」（残す）＋「整理を作っています…」（SSE `summarizing`）。文章は流れてこず、`done` でカードを一度に表示。（固定欄に畳む動きは step11 で廃止し、整理は常に会話の先頭。）
+- 古い部屋（summary_json なし）は文章表示のまま。`OldFormatNotice` は「表示が新しくなりました。「作り直す」を押すとカード表示になります。」（summary_json が無い、または作成日時が `INTERVIEW_PREP_FORMAT_UPDATED_AT` より前）。
+
+### T-205 step10（2026-09-28）: 会社の公式サイトのリンク
+
+- `InterviewPrepSummaryCards` に research の `officialUrl` からリンクを出す（新しいタブ・`rel="noopener noreferrer"`・末尾「↗」）。
+  - **ひとことで**: バッジの下・資格の行の上に 12px gray「会社のホームページ:」＋会社名ごとのリンク（例「三春工業 ↗」）。`officialSites(research)` が空なら行ごと出さない。
+  - **経歴の流れ**: title の横に 11px「公式サイト ↗」。行と会社の対応は `officialUrlForTitle(research, title)`（株式会社・（株）・空白・全角半角の違いを除いた会社名が title に含まれる会社のうち、名前が一番長いもの）。学校の行や当たらない行には出さない。
+- 「🌐 調べた情報の出典」はそのまま。officialUrl の無い古い部屋ではどちらのリンクも出さない。
+
+## 案内メール `CandidateContactMailButton`（T-207, 2026-09-30）
+
+面談記録画面から「LINE登録案内」「あいさつメール」を確認付きで送るボタン。`InterviewForm.tsx` が肥大化しているため、ボタン・メニュー・確認画面は新しいコンポーネント `src/components/candidates/CandidateContactMailButton.tsx` にまとめた（props は `candidateId` と `appearance`）。
+
+### ボタンの位置
+- `InterviewForm` ヘッダーの操作ボタン列で「面談準備」のすぐ右（`appearance="header"`・PDF表示/面談準備と同種の見た目＋封筒アイコン・文言「案内メール」）。
+- 面談記録が0件の空状態（`InterviewHistoryTab.tsx`・「面談準備」の右）にも同じボタン（`appearance="empty"`・面談準備と同じ青いボタン）。面談記録を作らなくても送れる。
+
+### メニュー（ボタンを押すと直下に 300px の小さなメニュー）
+- 項目は［LINE登録案内］［あいさつメール］の2つ。開くたびに `GET /api/candidates/[id]/contact-mail` で最新の送信状況を取り直す。
+- 送信済みなら右に emerald の「送信済み（M/D HH:MM）」（JST）。
+- 送れないとき（求職者のメールアドレス無し／CA の LINE WORKS URL 無し／差出人が bizstudio.co.jp でない）は項目を押せなくして、下に amber で理由（例「社員管理でLINE WORKSのURLを登録してください」）。
+- 外側クリックで閉じる。
+
+### 確認画面（`createPortal` で body 直下・z-100・幅 640px・`useOverlayClose`）
+- 見出し「{種類} を送る」。宛先（氏名 様 <メール>）・差出人（`株式会社ビズスタジオ 〔CA姓〕 <ca@bizstudio.co.jp>`）・件名・本文（テキスト本文を pre-wrap で表示。LINE登録案内は 〔QR〕 の位置に QR 画像 160px を表示）。下に「控えとして差出人のアドレスにも同じメールが届きます（BCC）」。
+- ボタンは［キャンセル］［送信］。送信後は toast「送信しました」で閉じる。
+- 送信済みの種類をもう一度選んだときは上部に amber の「すでに送信済みです（M/D HH:MM）。もう一度送りますか？」を出し、ボタンを［再送］にする（POST に `resend: true` を付ける）。
+- 送信中は閉じられない（`sending` 中はオーバーレイ・×・キャンセルとも無効）。
+
+### 社員管理側
+- `/admin/users/[id]` 基本情報タブ（`BasicInfoTab.tsx`）末尾に「LINE WORKS」ブロック＝「LINE WORKS のURL（友だち追加用）」入力欄（2列幅・onBlur 自動保存）。`https://works.do/` で始まらないと amber の注意文（保存は止めない）。
+
+## 初回面談の台本モード `InterviewScriptMode`（T-208 step2, 2026-09-30）
+
+`src/components/candidates/InterviewScriptMode.tsx`。面談記録画面の本体（左右2カラムの grid）を**置き換えて**出す（重ねて開かない）。台本の定義・実行・入れ方の決まりは `src/lib/interview-script/`（03-portal-spec 参照）。答えの保持と欄への反映は `InterviewForm.tsx` 側（`scriptMode` / `scriptAnswers` / `scriptApplied` / `scriptProposals`・`applyScriptWrites`・`acceptScriptProposalFor`・`importScriptCompanies`）。
+
+### 入口ボタン
+- `InterviewForm` ヘッダーの操作ボタン列、「案内メール」のすぐ右に「台本」（本のアイコン）。押すと本体が台本モードに替わり、ボタンは「入力画面へ」（青）になる。もう一度押すといつもの入力画面に戻る。面談を切り替えると台本モードは閉じる。
+
+### 配置
+```
+InterviewForm（ヘッダーはそのまま）
+  └─ scriptMode ? InterviewScriptMode : div.grid.grid-cols-2（いつもの本体）
+       ├─ 上: 7つのパート「1. 本人確認・挨拶」…「7. 今後の流れ・クロージング」（押すとそのパートの最初の場面へ。今のパートは青、終わったパートは緑＋✓）。右端「▸ 新人向けの注意」（畳んだ状態・押すと5項目を開く）
+       └─ grid 2列
+            ├─ 左: 今の場面のカード
+            │    ├─ 「N. パート名　場面 i / n」・場面の見出し（会社ごとの場面は「k社目：会社名」）
+            │    ├─ 読むセリフ（差し込み済み・青の左線。「（…）」で始まる段落は小さくグレー＝CA向けの補足）
+            │    ├─ 入力欄（文字・数値・年月・日付・時刻。**blur / Enter で欄に反映**）
+            │    ├─ ボタン（大きめ 14px・押すと青で「● 表示名」。単一選択はもう一度押すと解除、複数選択はトグル。「特になし」は他を外す）
+            │    ├─ 連絡方法の場面だけ: 「LINE登録案内／あいさつメールの確認画面を開く」（T-207 の `ContactMailConfirmDialog` をそのまま開く＝二重送信の防止 409 も同じ）。送信済みなら「送信済み（M/D HH:MM）」、送れなければ理由
+            │    ├─ 拾う一言（緑の枠・押したボタンの文＋場面の動的な文〔退職までの月数など〕）
+            │    ├─ 自動計算（青の枠・月給/手取り・残業の月↔日と選択肢・次回面談の内容と時期の目安・内定/入社の目安）
+            │    ├─ 用語メモ（箇条書き）・「入れ先: …」（小さくグレー）
+            │    └─ ［← 前へ］［飛ばす（任意の場面だけ）］［次へ →］（次へは押したボタンの `next` があればそこへ。パートの最後を越えると ✓）
+            └─ 右（sticky・高さ calc(100vh-120px)）: タブ「面談準備」「入力内容」
+                 ├─ 面談準備: `InterviewPrepPanel` を `embedded` で埋め込み（portal・固定配置・×・広げる・Esc なし。中身・API・保存は同じ）。タブを切り替えても display:none で残す（会話の状態を保つ）
+                 └─ 入力内容: 上に「すでに値がある欄（台本の答えに替えますか？）」＝提案の一覧（いま→台本の答え・［替える］［そのまま］）、下に「台本で入った欄（N件）」の表（CA が直した行は「（CAが変更）」）。欄が更新されたらタブに「更新」、提案があれば「確認N」のバッジ
+```
+- 職歴の行が無いとき、会社ごとの場面に amber の注意「職務経歴の行がまだ無いので、答えを欄に入れられません」＋「登録情報の職歴を取り込む（N社）」（面談準備の整理の経歴の流れから企業名だけの `work_histories` を POST で作る）。
+- 面談準備の質問は「5. 経歴確認」の最後の場面「面談準備の質問（全体）」に一覧で出す（Q番号・食い違い札・「聞いた」済みは薄く）。「聞いた」を付けるのは右の面談準備側。T-208 step3 で、その会社に関わる質問は会社ごとの場面「職歴：面談準備の質問（この会社）」（仕事の中身の後・退職理由の前・質問がある会社だけ）に出し、最後の「（全体）」には残り（どの会社にも当たらない＋「全体」）だけを出す。
+
+### いつもの入力画面に足した欄・選択肢（付録C）
+- 転職活動状況: 「在職状況」（在職中／離職中）＋「退職日」（date）を他AG状況の下に追加。
+- 希望条件タブ「希望休日」の行の右に「年間休日」（文字・幅64）。
+- 希望条件タブの最後に「大事にしたい条件」（1つ目〜3つ目・文字）。
+- 自動車免許の選択肢に「取得(AT限定)」、希望残業に「45時間超も可」。選択肢の配列は `src/lib/interview-script/field-options.ts` に移した（台本と同じ配列）。
+- 台本の答えと違う値がある欄には、欄の横に小さな amber の「台本: 〇〇［替える］［×］」（`scriptProposalBadge`）。
+
+### 案内メールの切り出し（T-207 の変更）
+- `CandidateContactMailButton.tsx` の確認画面を `ContactMailConfirmDialog`（props: candidateId / type / onClose / onSent）として export。ボタン側のメニューはこれを開くだけになり、中身・送信・409 の扱いは同じ。`formatSentAt` と `ContactMailStatusResponse` も export。
+
+### T-208 step3（2026-09-30）: 会社ごとの質問の場面・チャットの「よく使う質問」ボタン・台本の答えの受け渡し
+- 左の場面カード: 会社ごとの場面「職歴：面談準備の質問（この会社）」（`s5-wh-prep-questions#N`・見出しに「N社目：会社名」）。中身は `prepQuestionsForScene`（runtime）で決めた質問の一覧（Q番号は整理の番号・食い違い札・「聞いた」済みは薄く）。最後の「面談準備の質問（全体）」には残りだけ（会社名の小さな札つき）。質問が1つも無いときは「この場面に出す質問はありません（会社ごとの場面で出しました）」。
+- 右の面談準備（`InterviewPrepPanel embedded`）: 入力欄の上に「よく使う質問」5つ（横のパネルと同じ・`quick-questions.ts`）。fill のボタンは `pendingSelectRef` で値の描画後に textarea を focus して〔　〕を `setSelectionRange`。
+- `InterviewPrepPanel` に props `interviewId`（省略可）。`InterviewForm` → `InterviewScriptMode`（props `interviewId`）→ パネル、横のパネルは `InterviewHistoryTab` の `selectedId`。チャット送信の body は `{ content, interviewId }`（台本の答えの添付はサーバー側・画面の吹き出しと保存は打った文だけ）。
+- カード「面談で聞くこと」（`InterviewPrepSummaryCards`）の各質問に会社名の灰色の札（「全体」は出さない）。上部バーの `OldFormatNotice` は、カード表示の古い部屋（step3 より前）では「「作り直す」と、面談で聞くことが会社ごとに振り分けられます。」。
