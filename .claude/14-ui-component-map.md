@@ -47,7 +47,7 @@
 CandidateDetailPage (100% width, no max-width)
   └─ InterviewHistoryTab (100% width)
        └─ InterviewForm (100% width)
-            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・面談準備〔T-205 step2〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示）
+            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・案内メール〔T-207〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示。T-205 の「面談準備」と T-208 step2 の「台本」は step4 で外した＝入口は「面談スクリプト」タブ）
             └─ div.grid.grid-cols-2 (line 1045 周辺)
                  ├─ LEFT COLUMN (50%)
                  │    ├─ 面談基本情報（面談日、時刻、求職者ID、氏名、フリガナ、生年月日 等）
@@ -900,7 +900,7 @@ EntryBoard (1083 行)
 
 ```
 CandidateDetailPage
-  ├─ TOP_VIEWS: [{key:"basic", label:"基本"}, {key:"interview", label:"面談履歴"}]
+  ├─ TOP_VIEWS: [{key:"basic", label:"基本"}, {key:"interview", label:"面談履歴"}, {key:"script", label:"面談スクリプト"}（T-208 step4）, {key:"settings-history"}, {key:"dashboard"}]
   ├─ activeView === "interview"
   │   └─ <InterviewHistoryTab candidateId currentUser />
   └─ activeView === "basic"
@@ -1601,12 +1601,10 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 - パス: `src/components/candidates/InterviewPrepPanel.tsx`（新規・`AdvisorFloatingPanel` とは別）。`createPortal(document.body)` で描画。
 - 親: `InterviewHistoryTab`（開閉の `prepOpen` state だけを持つ）。Props: `candidateId` / `open` / `onClose`。
 
-### 入口ボタン（T-205 step2 で配置変更・2026-09-27）
+### 入口ボタン（T-205 step2 で配置変更・2026-09-27 → T-208 step4 で撤去・2026-09-30）
 
-- `InterviewForm` ヘッダーの操作ボタン列（「PDF表示」の右・「保存」の左）に「面談準備」（PDF表示と同種の見た目＋吹き出しアイコン）。`InterviewHistoryTab` から `onOpenInterviewPrep` props で開く関数を渡す（開閉の `prepOpen` state は `InterviewHistoryTab` のまま）。
-- 面談記録が0件の空状態（`InterviewHistoryTab.tsx`・「+ 新規面談を作成」の右）にも同じ「面談準備」。面談記録を作らなくても開ける。
+- ~~`InterviewForm` ヘッダーの「面談準備」・空状態の「面談準備」~~ → **T-208 step4 で両方外した**。面談準備は求職者詳細の「面談スクリプト」タブ（`?view=script`）の右側に常に埋め込む（`InterviewPrepPanel embedded`）。右から開く横のパネル（`InterviewHistoryTab` の `prepOpen` / `onOpenInterviewPrep`）も使わなくなった。パネル本体・API・保存は同じ。
 - 面談一覧バー（「面談:」の並び）のボタンは step2 で撤去。
-- 同じ位置にあった「面談サポート」（T-183）は `SHOW_INTERVIEW_SUPPORT = false` で一時的に非表示（上の InterviewForm セクション参照）。
 
 ### パネルの構造
 
@@ -1709,9 +1707,38 @@ InterviewPrepPanel（fixed right-0 / h-screen / z-[70] / 後ろは暗くしな�
 ### 社員管理側
 - `/admin/users/[id]` 基本情報タブ（`BasicInfoTab.tsx`）末尾に「LINE WORKS」ブロック＝「LINE WORKS のURL（友だち追加用）」入力欄（2列幅・onBlur 自動保存）。`https://works.do/` で始まらないと amber の注意文（保存は止めない）。
 
-## 初回面談の台本モード `InterviewScriptMode`（T-208 step2, 2026-09-30）
+## 「面談スクリプト」タブ `InterviewScriptTab`（T-208 step4, 2026-09-30）
 
-`src/components/candidates/InterviewScriptMode.tsx`。面談記録画面の本体（左右2カラムの grid）を**置き換えて**出す（重ねて開かない）。台本の定義・実行・入れ方の決まりは `src/lib/interview-script/`（03-portal-spec 参照）。答えの保持と欄への反映は `InterviewForm.tsx` 側（`scriptMode` / `scriptAnswers` / `scriptApplied` / `scriptProposals`・`applyScriptWrites`・`acceptScriptProposalFor`・`importScriptCompanies`）。
+求職者詳細の上部タブ（基本／面談履歴／**面談スクリプト**／設定履歴／ダッシュボード）。`?view=script`。面談記録画面の中で切り替える台本モード（step2）を、独立したタブに作り直した。答えの保存と欄への反映はサーバー（`POST /api/interviews/[id]/script-answers/apply`・03-portal-spec）。
+
+```
+CandidateDetailPage（activeView === "script"）
+  ├─ CandidateCompactHeader（src/components/candidates/CandidateCompactHeader.tsx）
+  │    1行の小さな表示: 氏名・フリガナ・求職者ID・年齢/性別・支援状況・経路・担当CA。編集ボタンは無し（CandidateHeader は basic / dashboard だけ）
+  └─ InterviewScriptTab（src/components/candidates/InterviewScriptTab.tsx・配色は interview-form-vars.ts の INTERVIEW_FORM_ROOT_STYLE）
+       ├─ ① 面談の選択バー: 「1回目 9/11」の並び（状態の丸つき・既定は isLatest か最後）・電話／オンライン・時刻・種別・担当を小さく。右端に「案内メール」（CandidateContactMailButton appearance="header"）
+       └─ ② InterviewScriptMode（src/components/candidates/InterviewScriptMode.tsx）
+            ├─ 上: 7つのパートの進み具合（今＝青・終わった＝緑✓）。右端「▸ 新人向けの注意」
+            └─ 左右2列 grid（55fr / 45fr）。高さ＝画面の残り（useRemainingHeight: 要素の top から window.innerHeight − 24px・最小 420px・resize と body の ResizeObserver で追従）。**左右は別々に overflow-y-auto**
+                 ├─ 左: 今の場面のカード（step2 と同じ: セリフ・入力・ボタン・拾う一言・自動計算・用語メモ・入れ先・前へ／飛ばす／次へ）。面談記録が無いときは上に「面談記録を作ると、答えを保存できます」＋［+ 新規面談を作成］（noRecordSlot）
+                 │    職歴の行が無いとき「登録情報の職歴を取り込む（N社）」（InterviewScriptTab.handleImportCompanies＝work-histories POST → 記録を読み直す）
+                 └─ 右: タブ「面談準備」（InterviewPrepPanel embedded・interviewId＝選んでいる記録・display:none で残す）／「入力内容」
+                      入力内容: 上「すでに値がある欄（スクリプトの答えに替えますか？）」＝提案（いま→スクリプトの答え・［替える］［そのまま］）、
+                                下「面談スクリプトで入った欄（N件）」の表（CA が直した行は「（CAが変更）」）＋右上「面談履歴で確かめる →」（面談履歴タブのその記録へ）
+```
+
+- 面談記録が1件も無いとき: 右の面談準備は使える。左のスクリプトは読めてボタンも押せるが、答えは画面の中だけ（保存しない）。［+ 新規面談を作成］は面談履歴タブと同じ処理（`interview-create.ts` の `createInterviewRecord` / `useCurrentEmployeeId`）。作成後はこのタブのまま、作った記録を選ぶ。
+- 面談を切り替えると答え・applied・提案を捨てて読み直す（GET script-answers ＋ GET /api/interviews/[id]）。
+- 面談履歴タブとの行き来（17-tab-navigation-rules）: 面談履歴タブを離れる前に未保存分を保存（`InterviewForm.onRegisterFlush` → `CandidateDetailPage.handleViewChange` が await）。戻ったら読み直し。
+
+### 外したもの（T-208 step4）
+- `InterviewForm`: 台本モード（`scriptMode` と `InterviewScriptMode` の埋め込み）、ヘッダーの「台本」「面談準備」ボタン、欄の横の提案バッジ `scriptProposalBadge`（31か所）、`setDetailState` / `setWorkHistories` へ直接入れていた `applyScriptWrites` / `acceptScriptProposalFor` / `dismissScriptProposal` / `importScriptCompanies`、PUT script-answers のデバウンス保存。配色 `CSS_VARS` は `interview-form-vars.ts` に移して共有。
+- `InterviewHistoryTab`: 空状態の「面談準備」ボタン、横の `InterviewPrepPanel`（`prepOpen`）、`onOpenInterviewPrep`。新規作成と一覧取得は `interview-create.ts` に寄せた。props に `initialSelectedId`（`?interview=`）と `onRegisterFlush` を追加。
+- 面談準備の入口は「面談スクリプト」タブに一本化。
+
+## 初回面談の台本モード `InterviewScriptMode`（T-208 step2, 2026-09-30 → step4 で「面談スクリプト」タブの部品に）
+
+`src/components/candidates/InterviewScriptMode.tsx`。~~面談記録画面の本体を置き換えて出す~~ → **T-208 step4 から「面談スクリプト」タブ（上の `InterviewScriptTab`）の中に出す**。答えの保存と欄への反映も step4 から `InterviewScriptTab` → サーバー（apply API）。以下の step2/step3 の記述のうち、入口ボタン・InterviewForm 内の配置・右カラムの sticky・`InterviewForm.tsx` 側の state（`scriptMode` 等）は step4 で無効（上の節が今の形）。場面カードの中身・パート一覧・面談準備の埋め込み・入力内容タブの構成は同じ。台本の定義・実行・入れ方の決まりは `src/lib/interview-script/`（03-portal-spec 参照）。答えの保持と欄への反映は `InterviewForm.tsx` 側（`scriptMode` / `scriptAnswers` / `scriptApplied` / `scriptProposals`・`applyScriptWrites`・`acceptScriptProposalFor`・`importScriptCompanies`）。
 
 ### 入口ボタン
 - `InterviewForm` ヘッダーの操作ボタン列、「案内メール」のすぐ右に「台本」（本のアイコン）。押すと本体が台本モードに替わり、ボタンは「入力画面へ」（青）になる。もう一度押すといつもの入力画面に戻る。面談を切り替えると台本モードは閉じる。

@@ -3,26 +3,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast, Toaster } from "sonner";
 import InterviewForm from "@/components/candidates/InterviewForm";
-// T-205: 面談準備チャット（右から開くパネル）。このタブは開閉の state だけを持つ。
-import InterviewPrepPanel from "@/components/candidates/InterviewPrepPanel";
-// T-207: 空状態にも「面談準備」の隣に「案内メール」を出す
+// T-207: 空状態にも「案内メール」を出す（T-208 step4 で「面談準備」ボタンは外した。入口は「面談スクリプト」タブ）
 import CandidateContactMailButton from "@/components/candidates/CandidateContactMailButton";
-
-type InterviewRecord = {
-  id: string;
-  interviewDate: string;
-  interviewCount: number;
-  status: string;
-  isLatest: boolean;
-  lastSavedAt: string | null;
-  startTime: string | null;
-  endTime: string | null;
-  interviewTool: string | null;
-  interviewType: string | null;
-  interviewer: { name: string } | null;
-  rating: { overallRank: string | null; grandTotal: number | null } | null;
-  _count: { memos: number; attachments: number };
-};
+// T-208 step4: 新規面談の作成は面談スクリプトタブと同じ処理（interview-create.ts）
+import {
+  createInterviewRecord,
+  defaultSelectedInterview,
+  fetchInterviewList,
+  formatShortDate,
+  InterviewCreateError,
+  useCurrentEmployeeId,
+  type InterviewListRecord,
+} from "@/components/candidates/interview-create";
 
 type SessionUser = {
   id: string;
@@ -30,11 +22,6 @@ type SessionUser = {
   email: string;
   role: string;
 };
-
-function formatShortDate(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 function StatusDot({ status, lastSavedAt }: { status: string; lastSavedAt: string | null }) {
   if (status === "complete") {
@@ -49,93 +36,51 @@ function StatusDot({ status, lastSavedAt }: { status: string; lastSavedAt: strin
 export default function InterviewHistoryTab({
   candidateId,
   currentUser,
+  initialSelectedId,
+  onRegisterFlush,
 }: {
   candidateId: string;
   currentUser: SessionUser | null;
+  /** T-208 step4: 面談スクリプトタブの「面談履歴で確かめる」から来たとき、最初に選ぶ面談記録（?interview=） */
+  initialSelectedId?: string | null;
+  /** T-208 step4: タブを離れる前に未保存の入力を保存する関数を親（CandidateDetailPage）に登録する */
+  onRegisterFlush?: (fn: (() => Promise<void>) | null) => void;
 }) {
-  const [interviews, setInterviews] = useState<InterviewRecord[]>([]);
+  const [interviews, setInterviews] = useState<InterviewListRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null);
   const [creating, setCreating] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null);
-  // T-205: 面談準備パネルの開閉（面談記録が無くても開ける）
-  const [prepOpen, setPrepOpen] = useState(false);
+  const currentEmployeeId = useCurrentEmployeeId(currentUser);
 
   const fetchInterviews = useCallback(async () => {
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/interviews`);
-      if (res.ok) {
-        const data = await res.json();
-        const records = (data.records || []) as InterviewRecord[];
-        records.sort((a, b) => new Date(a.interviewDate).getTime() - new Date(b.interviewDate).getTime() || a.id.localeCompare(b.id));
-        setInterviews(records);
-        if (!selectedId && records.length > 0) {
-          const latest = records.find((r) => r.isLatest) || records[records.length - 1];
-          setSelectedId(latest.id);
-        }
+      const records = await fetchInterviewList(candidateId);
+      setInterviews(records);
+      if (records.length > 0) {
+        setSelectedId((prev) => (prev && records.some((r) => r.id === prev) ? prev : defaultSelectedInterview(records)?.id ?? null));
       }
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [candidateId, selectedId]);
+  }, [candidateId]);
 
   useEffect(() => {
     fetchInterviews();
   }, [fetchInterviews]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    fetch("/api/employees")
-      .then((r) => r.json())
-      .then((data: { id: string; userId: string | null }[]) => {
-        if (!Array.isArray(data)) return;
-        const match = data.find((e) => e.userId === currentUser.id);
-        if (match) setCurrentEmployeeId(match.id);
-      })
-      .catch(() => {});
-  }, [currentUser]);
-
   const handleCreateInterview = async () => {
     if (creating) return;
-    if (!currentUser) {
-      toast.error("ログインセッションが取得できません。再ログインしてください。");
-      return;
-    }
-    if (!currentEmployeeId) {
-      toast.error("社員情報がアカウントに紐づいていません。管理者にお問い合わせください。");
-      return;
-    }
     setCreating(true);
     try {
-      const now = new Date();
-      const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      const res = await fetch("/api/interviews", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidateId,
-          interviewDate: now.toLocaleDateString("sv-SE"),
-          startTime: timeStr,
-          endTime: timeStr,
-          interviewTool: "電話",
-          interviewerUserId: currentEmployeeId,
-          interviewType: interviews.length === 0 ? "初回面談" : "フォロー面談",
-          status: "draft",
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "作成に失敗しました");
-      }
-      const data = await res.json();
+      const newId = await createInterviewRecord({ candidateId, currentUser, currentEmployeeId, existingCount: interviews.length });
       toast.success("新規面談を作成しました");
-      setSelectedId(data.record.id);
+      setSelectedId(newId);
       await fetchInterviews();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "新規面談の作成に失敗しました");
+      toast.error(e instanceof InterviewCreateError ? e.message : "新規面談の作成に失敗しました");
     } finally {
       setCreating(false);
     }
@@ -226,8 +171,6 @@ export default function InterviewHistoryTab({
             {creating ? "作成中..." : "+ 新規面談"}
           </button>
 
-          {/* T-205 step2: 「面談準備」ボタンは InterviewForm ヘッダー（PDF表示の右）へ移動。空状態のボタンは残す */}
-
           {selectedInterview && (
             <div className="ml-auto flex items-center gap-1 text-[11px] text-gray-400">
               <span>{selectedInterview.interviewType || ""}</span>
@@ -247,7 +190,7 @@ export default function InterviewHistoryTab({
           interviewSeq={interviews.findIndex((i) => i.id === selectedInterview.id) + 1}
           onSaved={() => fetchInterviews()}
           onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
-          onOpenInterviewPrep={() => setPrepOpen(true)}
+          onRegisterFlush={onRegisterFlush}
         />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
@@ -261,22 +204,11 @@ export default function InterviewHistoryTab({
             >
               {creating ? "作成中..." : "+ 新規面談を作成"}
             </button>
-            {/* T-205: 面談記録を作らなくても面談準備は開ける */}
-            <button
-              type="button"
-              onClick={() => setPrepOpen(true)}
-              className="ml-2 inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-            >
-              面談準備
-            </button>
-            {/* T-207: 面談記録が無くても案内メールは送れる */}
+            {/* T-207: 面談記録が無くても案内メールは送れる（面談準備は「面談スクリプト」タブから） */}
             <CandidateContactMailButton candidateId={candidateId} appearance="empty" />
           </div>
         </div>
       )}
-
-      {/* T-208 step3: 開いている面談記録の台本の答えをチャットに添えるため、選択中の面談記録IDを渡す */}
-      <InterviewPrepPanel candidateId={candidateId} interviewId={selectedId} open={prepOpen} onClose={() => setPrepOpen(false)} />
     </div>
   );
 }

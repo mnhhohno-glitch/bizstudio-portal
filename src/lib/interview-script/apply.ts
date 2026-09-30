@@ -1,15 +1,18 @@
-// T-208 step2: 台本の答えを入力画面の欄に入れるときの決まり（付録F）。純粋関数。
+// T-208 step2: 面談スクリプトの答えを面談記録の欄に入れるときの決まり（付録F）。純粋関数。
+// T-208 step4: 入れるのはサーバー側（apply-plan.ts → script-answers/apply API）。ここは1欄ごとの判定だけ。
 //
-// - 欄が空のときだけ入れる。すでに値があれば勝手に変えず「台本の答え（〇〇）に替えますか？」（propose）。
-// - メモ欄は、空なら入れ、入っていれば末尾に「【台本】」を付けて書き足す（同じ文がすでにあれば足さない）。
-// - ボタンを押し直したとき、欄が前に台本が入れた値のままなら差し替え、CA が手で直していたら触らない（applied で判断）。
+// - 欄が空のときだけ入れる。すでに値があれば勝手に変えず「スクリプトの答え（〇〇）に替えますか？」（propose）。
+// - メモ欄は、空なら入れ、入っていれば末尾に「【スクリプト】」を付けて書き足す（同じ文がすでにあれば足さない）。
+// - ボタンを押し直したとき、欄が前にスクリプトが入れた値のままなら差し替え、CA が手で直していたら触らない（applied で判断）。
 // - 働き方のチェックは、無ければ付ける（外さない）。
 //
 // 欄のパス: "d.<列>"（interview_details）/ "wh.<会社番号>.<列>"（work_histories）/ "ws.<項目>"（働き方）
 
 import type { AppliedMap, FieldTarget } from "./types";
 
-export const SCRIPT_MEMO_PREFIX = "【台本】";
+export const SCRIPT_MEMO_PREFIX = "【スクリプト】";
+/** step2〜3 で保存されたメモの印（すでに入っているメモの文字は書き換えない。押し直しの判定にだけ使う） */
+export const LEGACY_SCRIPT_MEMO_PREFIX = "【台本】";
 
 export type ApplyAction = "set" | "append" | "replace" | "skip" | "propose";
 
@@ -89,7 +92,7 @@ export function decideApply(
     }
     // 押し直し: 前に台本が入れた文がそのまま残っていれば差し替える
     if (prevApplied && cur.includes(prevApplied)) {
-      const keepPrefix = prevApplied.startsWith(SCRIPT_MEMO_PREFIX);
+      const keepPrefix = prevApplied.startsWith(SCRIPT_MEMO_PREFIX) || prevApplied.startsWith(LEGACY_SCRIPT_MEMO_PREFIX);
       const chunk = v ? (keepPrefix ? SCRIPT_MEMO_PREFIX + v : v) : "";
       if (chunk === prevApplied) return { ...base, action: "skip", nextValue: cur, appliedValue: prevApplied };
       let next = cur.replace(prevApplied, chunk);

@@ -1,13 +1,15 @@
 "use client";
 
-// T-208 step2: 初回面談の「台本モード」。面談記録画面の本体（左右2カラム）を置き換えて出す。
+// T-208 step2〜4: 初回面談の「面談スクリプト」の本体。求職者詳細の「面談スクリプト」タブ（InterviewScriptTab）の中に出す。
 // - 上: 7つのパートの進み具合（押すとそのパートへ。終わったパートに ✓）。「新人向けの注意」は畳んだ状態。
-// - 左: 今の場面のカード（読むセリフ・ボタン・拾う一言・入れ先・自動計算・前へ／次へ）。
-// - 右: 面談準備チャット（InterviewPrepPanel を embedded で埋め込み）と、タブ「入力内容」（台本で入った欄の一覧・提案）。
-// 台本の定義と実行は src/lib/interview-script/（ここは描画と答えの保持だけ）。
-// 欄への反映は親（InterviewForm）が行う（onApplyWrites → 画面の state → 既存の自動保存）。サーバーで面談記録は書かない。
+// - 下: 左右2列（左 約55%・右 約45%）。残りの高さいっぱいを使い、左右は別々にスクロールする。
+//   - 左: 今の場面のカード（読むセリフ・ボタン・拾う一言・入れ先・自動計算・前へ／次へ）
+//   - 右: タブ「面談準備」（InterviewPrepPanel を embedded で埋め込み）と「入力内容」（提案＝［替える］と、スクリプトで入った欄の一覧）
+// スクリプトの定義と実行は src/lib/interview-script/（ここは描画だけ）。
+// 答えの保存と面談記録の欄への反映は親（InterviewScriptTab）が POST …/script-answers/apply でサーバーに頼む
+// （step4: 画面の state に入れて自動保存に乗せる方式はやめた）。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InterviewPrepPanel from "./InterviewPrepPanel";
 import { ContactMailConfirmDialog, formatSentAt, type ContactMailStatusResponse } from "./CandidateContactMailButton";
 import { SCRIPT_NOTES_FOR_BEGINNERS, SCRIPT_PARTS } from "@/lib/interview-script/script-v1";
@@ -20,47 +22,52 @@ import {
   readMeta,
   renderScene,
   resolveNextKey,
-  sceneWritesWithClears,
   writeMeta,
   type PrepSummaryLike,
-  type SceneWrite,
   type WorkHistoryLike,
 } from "@/lib/interview-script/runtime";
 import { fieldLabelOf } from "@/lib/interview-script/field-labels";
+import type { ProposalMap } from "@/lib/interview-script/apply-plan";
 import type { AnswerMap, AppliedMap, PartId, RuntimeScene, SceneAnswer, ScriptButton, ScriptButtonGroup } from "@/lib/interview-script/types";
 import type { ContactMailType } from "@/lib/candidate-mail/templates";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
-export type ScriptProposal = { value: string };
-
 type Props = {
   candidateId: string;
-  /** T-208 step3: 開いている面談記録（右のチャットが台本の答えを添えるために API へ渡す） */
-  interviewId: string;
+  /** 選んでいる面談記録。null のときは面談記録が無い（スクリプトは読めるが答えは保存しない） */
+  interviewId: string | null;
   candidate: { name: string; email: string | null } | null;
   form: AnyRecord;
   detail: AnyRecord;
   workHistories: WorkHistoryLike[];
   answers: AnswerMap;
   applied: AppliedMap;
-  proposals: Record<string, ScriptProposal>;
-  /** 答えが変わった（保存は親が行う） */
-  onAnswersChange: (next: AnswerMap) => void;
-  /** 場面の答えから決まった書き込みを欄に反映する（入れ方の決まりは親が apply.ts で判定） */
-  onApplyWrites: (writes: SceneWrite[]) => void;
+  proposals: ProposalMap;
+  /** 進み具合（今の場面・終わったパート）だけが変わった */
+  onNavigate: (next: AnswerMap) => void;
+  /** 場面の答え（ボタン・入力）が変わった。親がサーバーに保存し、欄に入れる */
+  onSceneAnswer: (sceneKey: string, next: AnswerMap) => void;
   onAcceptProposal: (path: string) => void;
   onDismissProposal: (path: string) => void;
   /** 職歴の行が無いとき、登録情報の会社名で職歴を作る */
   onImportCompanies: (names: string[]) => void;
   /** 「入力内容」タブに出す、いまの欄の値（パス → 値） */
   currentValueOf: (path: string) => string;
+  /** 「面談履歴で確かめる」（面談履歴タブのこの記録へ） */
+  onOpenHistory?: () => void;
+  /** 面談記録が無いときに左の上に出すもの（「面談記録を作ると、答えを保存できます」＋［新規面談を作成］） */
+  noRecordSlot?: React.ReactNode;
 };
 
 type PrepStateLike = {
   room: { summaryJson: PrepSummaryLike; askedQuestions: Record<string, unknown> | null } | null;
 };
+
+const MIN_BODY_HEIGHT = 420;
+/** 下の余白（main の padding 相当） */
+const BOTTOM_GAP = 24;
 
 const BTN_BASE: React.CSSProperties = {
   padding: "10px 16px",
@@ -98,6 +105,29 @@ function Paragraphs({ text }: { text: string }) {
   );
 }
 
+/** 左右の本体の高さ＝画面の残り（上の要素の位置から計算。ウィンドウや上の高さが変わったら追従） */
+function useRemainingHeight(ref: React.RefObject<HTMLElement | null>): number {
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const h = Math.floor(window.innerHeight - (top - window.scrollY) - BOTTOM_GAP);
+      setHeight((prev) => (Math.abs(prev - h) >= 1 ? h : prev));
+    };
+    update();
+    window.addEventListener("resize", update);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    ro?.observe(document.body);
+    return () => {
+      window.removeEventListener("resize", update);
+      ro?.disconnect();
+    };
+  }, [ref]);
+  return Math.max(MIN_BODY_HEIGHT, height);
+}
+
 export default function InterviewScriptMode({
   candidateId,
   interviewId,
@@ -108,12 +138,14 @@ export default function InterviewScriptMode({
   answers,
   applied,
   proposals,
-  onAnswersChange,
-  onApplyWrites,
+  onNavigate,
+  onSceneAnswer,
   onAcceptProposal,
   onDismissProposal,
   onImportCompanies,
   currentValueOf,
+  onOpenHistory,
+  noRecordSlot,
 }: Props) {
   const [prep, setPrep] = useState<PrepStateLike | null>(null);
   const [mail, setMail] = useState<ContactMailStatusResponse | null>(null);
@@ -123,6 +155,8 @@ export default function InterviewScriptMode({
   const [notesOpen, setNotesOpen] = useState(false);
   // 入力欄の途中の文字（欄への反映は blur / Enter のとき）
   const [draftInputs, setDraftInputs] = useState<Record<string, string>>({});
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyHeight = useRemainingHeight(bodyRef);
 
   const fetchPrep = useCallback(async () => {
     try {
@@ -142,7 +176,7 @@ export default function InterviewScriptMode({
       /* silent */
     }
   }, [candidateId]);
-  // 開いたときの読み込み（setState は fetch の then の中＝React Compiler 系 lint の「effect 内で同期 setState」に当たらない形）
+  // 開いたときの読み込み（setState は fetch の then の中）
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/candidates/${candidateId}/interview-prep`)
@@ -186,7 +220,7 @@ export default function InterviewScriptMode({
   const doneParts = new Set<PartId>(meta.doneParts ?? []);
 
   const setMeta = (patch: { currentKey?: string; doneParts?: PartId[] }) => {
-    onAnswersChange(writeMeta(answers, { ...meta, ...patch }));
+    onNavigate(writeMeta(answers, { ...meta, ...patch }));
   };
 
   const goTo = (index: number) => {
@@ -203,12 +237,11 @@ export default function InterviewScriptMode({
 
   const sceneAnswer: SceneAnswer = (rs && answers[rs.key]) || {};
 
-  // 答えを更新して、欄への書き込みを親に渡す
+  // 答えを更新して親に渡す（親がサーバーに保存し、欄に入れる）
   const commitSceneAnswer = (nextSa: SceneAnswer) => {
     if (!rs) return;
     const nextAnswers: AnswerMap = { ...answers, [rs.key]: { ...nextSa, at: new Date().toISOString() } };
-    onAnswersChange(nextAnswers);
-    onApplyWrites(sceneWritesWithClears(rs, nextSa));
+    onSceneAnswer(rs.key, nextAnswers);
     if (rightTab !== "inputs") setInputsUpdated(true);
   };
 
@@ -273,21 +306,25 @@ export default function InterviewScriptMode({
 
   const appliedEntries = Object.entries(applied);
   const proposalEntries = Object.entries(proposals);
-  const inputsRef = useRef<HTMLDivElement>(null);
 
   // ---- 右: 入力内容タブ ----
   const inputsTab = (
-    <div ref={inputsRef} className="p-4 overflow-y-auto h-full" style={{ fontSize: 13 }}>
+    <div className="p-4 overflow-y-auto h-full" style={{ fontSize: 13 }}>
+      {!interviewId && (
+        <p className="mb-3 rounded-md px-3 py-2" style={{ fontSize: 12, background: "var(--im-bg-warn)", color: "var(--im-fg-warn)" }}>
+          面談記録が無いので、答えは保存されず、欄にも入りません。
+        </p>
+      )}
       {proposalEntries.length > 0 && (
         <div className="mb-4">
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--im-fg-warn)", marginBottom: 6 }}>すでに値がある欄（台本の答えに替えますか？）</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--im-fg-warn)", marginBottom: 6 }}>すでに値がある欄（スクリプトの答えに替えますか？）</div>
           <div className="space-y-1.5">
             {proposalEntries.map(([path, p]) => (
               <div key={path} className="rounded-md px-3 py-2 flex items-center gap-2" style={{ background: "var(--im-bg-warn)", border: "0.5px solid #f0d9b5" }}>
                 <div className="flex-1 min-w-0">
                   <div style={{ fontSize: 12, color: "var(--im-fg2)" }}>{fieldLabelOf(path)}</div>
                   <div className="truncate" style={{ fontSize: 12 }}>
-                    いま: {currentValueOf(path) || "-"} → 台本の答え: <b>{p.value}</b>
+                    いま: {currentValueOf(path) || "-"} → スクリプトの答え: <b>{p.value}</b>
                   </div>
                 </div>
                 <button type="button" onClick={() => onAcceptProposal(path)} style={{ ...BTN_BASE, padding: "4px 10px", fontSize: 12 }}>
@@ -301,7 +338,14 @@ export default function InterviewScriptMode({
           </div>
         </div>
       )}
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--im-fg2)", marginBottom: 6 }}>台本で入った欄（{appliedEntries.length}件）</div>
+      <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--im-fg2)" }}>面談スクリプトで入った欄（{appliedEntries.length}件）</div>
+        {interviewId && onOpenHistory && (
+          <button type="button" onClick={onOpenHistory} className="ml-auto" style={{ fontSize: 11, color: "var(--im-fg-info)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
+            面談履歴で確かめる →
+          </button>
+        )}
+      </div>
       {appliedEntries.length === 0 ? (
         <p style={{ fontSize: 12, color: "var(--im-fg3)" }}>まだありません。左のボタンや入力で欄に入ります。</p>
       ) : (
@@ -378,9 +422,11 @@ export default function InterviewScriptMode({
         </ul>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
+      {/* 左右2列。残りの高さいっぱい・左右は別々にスクロール */}
+      <div ref={bodyRef} className="grid" style={{ gridTemplateColumns: "minmax(0, 55fr) minmax(0, 45fr)", height: bodyHeight }}>
         {/* 左: 今の場面 */}
-        <div className="p-5" style={{ borderRight: "0.5px solid var(--im-bdr)", minHeight: 640 }}>
+        <div className="p-5 overflow-y-auto min-h-0" style={{ borderRight: "0.5px solid var(--im-bdr)" }}>
+          {noRecordSlot}
           {rs && (
             <>
               <div className="flex items-center gap-2 mb-3">
@@ -407,12 +453,14 @@ export default function InterviewScriptMode({
               {rs.scene.repeat === "company" && allPlaceholder && (
                 <div className="rounded-md px-3 py-2 mb-3" style={{ background: "var(--im-bg-warn)", fontSize: 12, color: "var(--im-fg-warn)" }}>
                   職務経歴の行がまだ無いので、答えを欄に入れられません。
-                  {prepCompanyNames.length > 0 ? (
+                  {!interviewId ? (
+                    <span className="ml-1">面談記録を作ると、登録情報から職歴を取り込めます。</span>
+                  ) : prepCompanyNames.length > 0 ? (
                     <button type="button" onClick={() => onImportCompanies(prepCompanyNames)} className="ml-2 underline" style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", color: "var(--im-fg-warn)", fontSize: 12 }}>
                       登録情報の職歴を取り込む（{prepCompanyNames.length}社）
                     </button>
                   ) : (
-                    <span className="ml-1">いつもの入力画面で「＋ 職歴を追加」を押してから戻ってください。</span>
+                    <span className="ml-1">面談履歴タブで「＋ 職歴を追加」を押してから戻ってください。</span>
                   )}
                 </div>
               )}
@@ -590,7 +638,7 @@ export default function InterviewScriptMode({
         </div>
 
         {/* 右: 面談準備／入力内容 */}
-        <div className="flex flex-col" style={{ position: "sticky", top: 0, alignSelf: "start", height: "calc(100vh - 120px)", minHeight: 480 }}>
+        <div className="flex flex-col min-h-0">
           <div className="flex shrink-0" style={{ borderBottom: "0.5px solid var(--im-bdr)" }}>
             {([
               { id: "prep", label: "面談準備" },
@@ -624,6 +672,7 @@ export default function InterviewScriptMode({
               </button>
             ))}
           </div>
+          {/* 面談準備はタブを切り替えても display:none で残す（会話の状態を保つ） */}
           <div className="flex-1 min-h-0" style={{ display: rightTab === "prep" ? "block" : "none" }}>
             <InterviewPrepPanel candidateId={candidateId} interviewId={interviewId} open onClose={() => {}} embedded />
           </div>

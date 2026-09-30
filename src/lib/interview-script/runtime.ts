@@ -182,6 +182,19 @@ export function sceneKeyOf(scene: ScriptScene, companyIndex?: number): string {
   return scene.repeat === "company" ? `${scene.id}#${companyIndex ?? 0}` : scene.id;
 }
 
+/** T-208 step4: "s5-wh-reason#1" のような場面キーから実行時の場面を戻す（サーバーの apply API が使う）。無ければ null */
+export function runtimeSceneOfKey(sceneKey: string): RuntimeScene | null {
+  const [id, idx] = sceneKey.split("#");
+  const scene = SCRIPT_SCENES.find((s) => s.id === id);
+  if (!scene) return null;
+  if (scene.repeat === "company") {
+    const companyIndex = Number(idx ?? "0");
+    if (!Number.isInteger(companyIndex) || companyIndex < 0) return null;
+    return { key: sceneKey, scene, companyIndex };
+  }
+  return { key: scene.id, scene };
+}
+
 export function expandScenes(ctx: ScriptContext, answers: AnswerMap): RuntimeScene[] {
   const out: RuntimeScene[] = [];
   for (const scene of SCRIPT_SCENES) {
