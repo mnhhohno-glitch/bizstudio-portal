@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast, Toaster } from "sonner";
 import InterviewForm from "@/components/candidates/InterviewForm";
-// T-207: 空状態にも「案内メール」を出す（T-208 step4 で「面談準備」ボタンは外した。入口は「面談スクリプト」タブ）
+// T-205: 面談準備チャット（右から開くパネル）。このタブは開閉の state だけを持つ。
+// T-208 fix: step4 で外したボタン2つ（面談記録の画面・空状態）を戻した。部品は「面談スクリプト」タブの埋め込みと同じ
+import InterviewPrepPanel from "@/components/candidates/InterviewPrepPanel";
+// T-207: 空状態にも「面談準備」の隣に「案内メール」を出す
 import CandidateContactMailButton from "@/components/candidates/CandidateContactMailButton";
 // T-208 step4: 新規面談の作成は面談スクリプトタブと同じ処理（interview-create.ts）
 import {
@@ -52,6 +55,8 @@ export default function InterviewHistoryTab({
   const [creating, setCreating] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const currentEmployeeId = useCurrentEmployeeId(currentUser);
+  // T-205: 面談準備パネルの開閉（面談記録が無くても開ける）
+  const [prepOpen, setPrepOpen] = useState(false);
 
   const fetchInterviews = useCallback(async () => {
     try {
@@ -191,6 +196,7 @@ export default function InterviewHistoryTab({
           onSaved={() => fetchInterviews()}
           onDeleted={() => { setSelectedId(null); fetchInterviews(); }}
           onRegisterFlush={onRegisterFlush}
+          onOpenInterviewPrep={() => setPrepOpen(true)}
         />
       ) : (
         <div className="bg-gray-50 rounded-lg border border-gray-200 p-12 flex items-center justify-center min-h-[300px]">
@@ -204,11 +210,22 @@ export default function InterviewHistoryTab({
             >
               {creating ? "作成中..." : "+ 新規面談を作成"}
             </button>
-            {/* T-207: 面談記録が無くても案内メールは送れる（面談準備は「面談スクリプト」タブから） */}
+            {/* T-205: 面談記録を作らなくても面談準備は開ける */}
+            <button
+              type="button"
+              onClick={() => setPrepOpen(true)}
+              className="ml-2 inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              面談準備
+            </button>
+            {/* T-207: 面談記録が無くても案内メールは送れる */}
             <CandidateContactMailButton candidateId={candidateId} appearance="empty" />
           </div>
         </div>
       )}
+
+      {/* T-208 step3: 開いている面談記録のスクリプトの答えをチャットに添えるため、表示中の面談記録IDを渡す（空の画面から開いたときは null） */}
+      <InterviewPrepPanel candidateId={candidateId} interviewId={selectedInterview?.id ?? null} open={prepOpen} onClose={() => setPrepOpen(false)} />
     </div>
   );
 }

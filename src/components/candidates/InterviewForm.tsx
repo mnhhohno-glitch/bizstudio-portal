@@ -138,6 +138,8 @@ interface InterviewFormProps {
   onDeleted?: () => void;
   /** T-208 step4: タブを離れる前に未保存の入力を保存する関数を親に登録する（CandidateDetailPage が面談履歴タブを離れる前に呼ぶ） */
   onRegisterFlush?: (fn: (() => Promise<void>) | null) => void;
+  /** T-205 step2 / T-208 fix: ヘッダーの「面談準備」ボタンで面談準備パネル（右から開く横パネル）を開く（開閉 state は InterviewHistoryTab が持つ） */
+  onOpenInterviewPrep?: () => void;
 }
 
 function formatCandidateFlagBadge(
@@ -474,7 +476,7 @@ function BtnMini({ children, onClick, variant, disabled }: { children: React.Rea
 /* ================================================================== */
 
 export default function InterviewForm({
-  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted, onRegisterFlush,
+  interviewId, candidateId, currentUser, interviewSeq, onSaved, onDeleted, onRegisterFlush, onOpenInterviewPrep,
 }: InterviewFormProps) {
   /* ---- State ---- */
   const [loading, setLoading] = useState(true);
@@ -1390,8 +1392,20 @@ export default function InterviewForm({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hasPdf ? "var(--im-fg)" : "var(--im-fg3)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
             {pdfLoading ? "PDF取得中..." : "PDF表示"}
           </button>
-          {/* T-207: 案内メール（LINE登録案内・あいさつメール）。「PDF表示」の隣。ボタン・メニュー・確認画面は CandidateContactMailButton 内。
-              T-205 の「面談準備」・T-208 step2 の「台本」ボタンは step4 で外した（入口は求職者詳細の「面談スクリプト」タブ） */}
+          {/* T-205 step2: 面談準備チャット（マイナビレジュメの整理＋会話）を右からのパネルで開く。見た目は「PDF表示」と同種。
+              T-208 fix: step4 で外したが、縦いっぱいの横パネルが見やすいため戻した（「面談スクリプト」タブの埋め込みと同じ部品） */}
+          {onOpenInterviewPrep && (
+            <button
+              type="button" onClick={onOpenInterviewPrep}
+              className="inline-flex items-center justify-center gap-1 cursor-pointer"
+              style={{ minWidth: 104, padding: "6px 14px", borderRadius: 6, fontSize: 13, border: "0.5px solid var(--im-bdr)", background: "transparent", color: "var(--im-fg)", fontFamily: "inherit" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--im-fg)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              面談準備
+            </button>
+          )}
+          {/* T-207: 案内メール（LINE登録案内・あいさつメール）。「面談準備」の隣。ボタン・メニュー・確認画面は CandidateContactMailButton 内。
+              T-208 step2 の「台本」ボタンは step4 で外した（入口は求職者詳細の「面談スクリプト」タブ） */}
           <CandidateContactMailButton candidateId={candidateId} appearance="header" />
           {/* T-183: 面談サポート（リアルタイム文字起こし+AI解説）を別タブで開く。面談レコードID未確定時は disabled。T-205 step2 で一時的に非表示（SHOW_INTERVIEW_SUPPORT） */}
           {SHOW_INTERVIEW_SUPPORT && (
