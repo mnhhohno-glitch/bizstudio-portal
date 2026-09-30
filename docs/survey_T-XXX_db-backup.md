@@ -198,3 +198,62 @@
 2. **本命:** Railway の外への日次ダンプ（暗号化して別クラウドに保存）。
 3. 開発機の `C:\bizstudio\backups\railway_prod_20260608_120043.dump`（暗号化なし・個人情報あり）の扱いを決める（本命の仕組みができたら安全な場所へ移すか削除する）。
 4. **同じく危ないもの:** kyuujin-pdf-tool の SQLite（一度もバックアップされていない）、bizstudio-finance の Postgres。
+
+---
+
+## step2 対処記録（2026-09-30）
+
+実施: 2026-09-30 18:33 JST（09:33 UTC）／ Railway GraphQL API（`volumeInstanceBackupCreate`・`volumeInstanceBackupScheduleUpdate`。名前は introspection で確認）  
+行った操作は「手動バックアップの作成」と「スケジュール設定」だけ。復元・wipe・バックアップ削除・再起動・再デプロイ・環境変数変更・DB 接続はしていない。期限切れの古いバックアップもそのまま残している。
+
+### 対象ボリュームの確定
+
+`projects(workspaceId)` → `volumes` → `volumeInstances` で列挙した結果は **11本で、項目4の表と一致**（差分なし）。
+
+### 結果（11本）
+
+手動バックアップ名はすべて `T-XXX step2 manual 2026-09-30`。スケジュールの cron は API の値そのまま（UTC）。
+
+| # | プロジェクト | 環境 | サービス | 手動バックアップ作成日時（UTC） | 状態 | 毎日 | 毎週 | 毎月 |
+|--|--|--|--|--|--|--|--|--|
+| 1 | **surprising-acceptance**（portal 本番） | production | Postgres | 2026-09-30 09:33:27 | 完了（参照 1,746MB） | `1 8 * * *` | `33 22 * * 6` | `22 21 1 * *` |
+| 2 | offerbox-scout-generator | production | Postgres | 2026-09-30 09:33:28 | 完了（参照 1,193MB） | `47 20 * * *` | `45 20 * * 6` | `51 2 1 * *` |
+| 3 | offerbox-scout-generator | production | Postgres-qNB4 | 2026-09-30 09:33:29 | 完了（参照 1,125MB） | `50 8 * * *` | `23 10 * * 6` | `5 2 1 * *` |
+| 4 | bizstudio-finance | production | Postgres | 2026-09-30 09:33:30 | 完了（参照 1,149MB） | `48 7 * * *` | `21 9 * * 6` | `55 5 1 * *` |
+| 5 | ai-resume-generator | production | Postgres | 2026-09-30 09:33:31 | 完了（参照 1,129MB） | `21 19 * * *` | `58 9 * * 6` | `24 15 1 * *` |
+| 6 | mensetutaisaku-application | production | Postgres | 2026-09-30 09:33:32 | 完了（参照 344MB） | `58 5 * * *` | `53 4 * * 6` | `8 0 1 * *` |
+| 7 | mensetutaisaku-application | staging | Postgres | 2026-09-30 09:33:34 | 完了（参照 1,392MB） | `34 1 * * *` | `52 7 * * 6` | `33 2 1 * *` |
+| 8 | candidate-intake | production | candidate-intake-staging | 2026-09-30 09:33:35 | 完了（参照 1,058MB） | `17 4 * * *` | `32 18 * * 6` | `9 14 1 * *` |
+| 9 | candidate-intake | production | candidate-intake | 2026-09-30 09:33:36 | 完了（参照 1,064MB） | `58 14 * * *` | `16 0 * * 6` | `36 19 1 * *` |
+| 10 | PDF Analysis Tool（kyuujin-pdf-tool） | production | PostgreSQL-staging | 2026-09-30 09:33:38 | 完了（参照 1,105MB） | `33 15 * * *` | `42 21 * * 6` | `21 21 1 * *` |
+| 11 | **PDF Analysis Tool**（kyuujin-pdf-tool） | production | web（SQLite `/data`） | 2026-09-30 09:33:39 | 完了（参照 1,081MB） | `58 7 * * *` | `49 14 * * 6` | `54 10 1 * *` |
+
+- 設定前のスケジュールは11本とも空（既存の種類は無し）。11本とも DAILY / WEEKLY / MONTHLY の3種類を設定し、API で読み直して3種類とも入っていることを確認した。
+- 「完了」の判定: API にはバックアップ単位の状態欄が無く、作成時に返る workflowId の状態照会（`workflowStatus`）はこのトークンでは `Not Authorized` になる。そのため、`volumeInstanceBackupList` に今日の手動バックアップが載り、`referencedMB` がボリューム使用量と一致していることをもって完了とした。
+- candidate-intake と kyuujin-pdf-tool の SQLite（#8・#9・#11）は、これが初めてのバックアップ。
+
+### 失敗したボリューム
+
+**無し**（11本中11本成功。再試行が必要になったものも無し）。
+
+### 保持期間
+
+| 種類 | 保持期間 | 根拠 |
+|--|--|--|
+| 毎日 | 6日 | API の `retentionSeconds`（518,400秒）・公式ドキュメント |
+| 毎週（土曜） | 27日 | API（2,332,800秒）・公式ドキュメント |
+| 毎月（1日） | 89日 | API（7,689,600秒）・公式ドキュメント |
+| 手動 | **期限無し**（API の `expiresAt` = null） | 公式ドキュメントに期限の記載は無い。手動バックアップの合計はボリューム容量の50%まで |
+
+→ 今日の手動バックアップは期限切れにならず、スケジュールの初回分が溜まるまでの復元点として残る。
+
+### 追加費用の見立て
+
+- 課金はボリュームと同じ単価（約 $0.15/GB・月）で、**各バックアップ固有の差分（Copy-on-Write）の容量分だけ**（公式ドキュメント）。作成直後の手動バックアップは差分 0MB（本番 DB の `usedMB` = 0）。
+- 11本の使用量合計は約 12.4GB。step1 で見た本番 DB の差分は、約1.5か月で 489MB だった。
+- 見立て: 保持中のバックアップ（毎日6・毎週4・毎月3・手動1）の差分合計は、全ボリュームで約 5〜20GB → **月 $1〜3 程度**。
+- 上限（全バックアップの中身が完全に入れ替わった場合。現実には起きない）: 14世代 × 12.4GB ≒ 174GB → 月 約 $26。
+
+### 限界
+
+Railway 標準バックアップはボリュームと一緒に消える（wipe でバックアップも全消去）ため、この対処では Railway 障害やボリューム消失には備えられない。Railway の外への退避は step3 で行う。
