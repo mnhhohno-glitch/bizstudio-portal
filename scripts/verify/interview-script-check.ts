@@ -1,5 +1,5 @@
 /**
- * T-208 step2: 初回面談の台本モードの AI を呼ばない確認。DB も使わない。
+ * T-208 step2〜4: 初回面談の面談スクリプトの AI を呼ばない確認。DB も使わない。
  *
  *   npx tsx scripts/verify/interview-script-check.ts
  *
@@ -10,14 +10,27 @@
  *   3. 入れ方の決まり（空欄だけ入れる／値があれば替えない＝提案／押し直しで台本が入れた値だけ差し替える／メモの追記と重複防止）
  *   4. 場面の答え → 欄への書き込み（Word・PowerPoint の2欄、退職理由の大中小、残業の自動選択、転勤のメモ、働き方のチェック）
  *   5. 差し込み（時刻が無いときは「本日〇時から」を省く・会社名が無いときの言い換え・〔CA名〕は名字だけ＝T-207 の〔CA姓〕と同じ取り方）
+ *   6. T-208 step4: 画面の文言に「台本」が残っていない／メモの印とチャットの見出しが新しい言葉／
+ *      サーバー側の入れ方（apply-plan: 空欄だけ入れる・違う値は提案・［替える］でその欄だけ・押し直しの差し替えと CA が直した欄・メモの追記と重複防止）
  * 出力は OK / NG と数値だけ。
  */
+import fs from "node:fs";
+import path from "node:path";
 import {
   RESIGN_REASON_LARGE_OPTIONS,
   getMediumOptions,
   getSmallOptions,
 } from "@/constants/resign-reason-hierarchy";
-import { acceptProposal, decideApply, nextApplied, SCRIPT_MEMO_PREFIX } from "@/lib/interview-script/apply";
+import { acceptProposal, decideApply, LEGACY_SCRIPT_MEMO_PREFIX, nextApplied, SCRIPT_MEMO_PREFIX } from "@/lib/interview-script/apply";
+import {
+  applyPlanToState,
+  currentValueAt,
+  planAcceptProposal,
+  planDismissProposal,
+  planSceneApply,
+  type ProposalMap,
+} from "@/lib/interview-script/apply-plan";
+import { SCRIPT_FACTS_HEADER } from "@/lib/interview-script/facts";
 import {
   calcSalary,
   nextInterviewGuide,
@@ -27,10 +40,10 @@ import {
   scheduleOutlook,
 } from "@/lib/interview-script/calc";
 import { DESIRED_OVERTIME_OPTIONS, DETAIL_SELECT_OPTIONS, WORK_STYLE_OPTIONS } from "@/lib/interview-script/field-options";
-import { allButtons, buildContext, expandScenes, renderScene, sceneWrites, sceneWritesWithClears, scriptStats } from "@/lib/interview-script/runtime";
+import { allButtons, buildContext, expandScenes, renderScene, runtimeSceneOfKey, sceneWrites, sceneWritesWithClears, scriptStats } from "@/lib/interview-script/runtime";
 import { DERIVED_TARGETS, RESIGN_REASON_BUTTONS, SCRIPT_SCENES, SCRIPT_VERSION } from "@/lib/interview-script/script-v1";
 import { caFamilyNameOf } from "@/lib/candidate-mail/templates";
-import type { FieldTarget, RuntimeScene } from "@/lib/interview-script/types";
+import type { AppliedMap, FieldTarget, RuntimeScene } from "@/lib/interview-script/types";
 
 let failed = 0;
 function check(label: string, ok: boolean, extra = "") {
@@ -277,6 +290,118 @@ const unresolved = SCRIPT_SCENES.filter((s) => {
   return /\{\{|\}\}/.test(renderScene(rs, ctx, {}));
 });
 check("no unresolved {{if}} blocks in any scene", unresolved.length === 0, unresolved.map((s) => s.id).join(","));
+
+/* ---------- 6. T-208 step4: 名前のそろえ（「台本」→「面談スクリプト」）とサーバー側の入れ方（apply-plan） ---------- */
+
+// 6-1. 画面に出る文言に「台本」が残っていない（コメントは除く。コードの名前＝interview_script_answers 等はそのまま）
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
+}
+const UI_FILES = [
+  "src/components/candidates/InterviewScriptMode.tsx",
+  "src/components/candidates/InterviewScriptTab.tsx",
+  "src/components/candidates/InterviewHistoryTab.tsx",
+  "src/components/candidates/InterviewForm.tsx",
+  "src/components/candidates/InterviewPrepPanel.tsx",
+  "src/components/candidates/InterviewPrepSummaryCards.tsx",
+  "src/components/candidates/CandidateDetailPage.tsx",
+  "src/components/candidates/CandidateCompactHeader.tsx",
+  "src/components/candidates/CandidateContactMailButton.tsx",
+  "src/lib/interview-script/script-v1.ts",
+  "src/lib/interview-script/field-labels.ts",
+  "src/lib/interview-script/field-options.ts",
+  "src/lib/interview-script/calc.ts",
+  "src/lib/interview-script/render.ts",
+  "src/lib/interview-script/apply.ts",
+  "src/lib/interview-script/facts.ts",
+  "src/lib/interview-prep/quick-questions.ts",
+  "src/lib/interview-prep/summary-format.ts",
+];
+const leftovers: string[] = [];
+for (const f of UI_FILES) {
+  const full = path.join(process.cwd(), f);
+  if (!fs.existsSync(full)) continue;
+  const body = stripComments(fs.readFileSync(full, "utf8"));
+  // LEGACY_SCRIPT_MEMO_PREFIX（押し直しの判定用に残す旧い印）だけは許す
+  const lines = body.split("\n").filter((l) => l.includes("台本") && !l.includes("LEGACY_SCRIPT_MEMO_PREFIX"));
+  if (lines.length > 0) leftovers.push(`${f}: ${lines.length}`);
+}
+check("no 「台本」 left in UI strings (comments excluded)", leftovers.length === 0, leftovers.join(" / "));
+check("memo prefix is 【スクリプト】", SCRIPT_MEMO_PREFIX === "【スクリプト】");
+check("chat facts header is 【面談スクリプトで分かったこと】", SCRIPT_FACTS_HEADER === "【面談スクリプトで分かったこと】");
+const skill = fs.readFileSync(path.join(process.cwd(), "src/skills/interview-prep/SKILL.md"), "utf8");
+check("SKILL.md uses the new header and has no 「台本」", skill.includes("【面談スクリプトで分かったこと】") && !skill.includes("台本"));
+// 旧い印で入っていたメモの押し直し: 新しい印で差し替わる（保存済みの文字は、押し直すまで書き換えない）
+const legacyMemo = `CAのメモ\n${LEGACY_SCRIPT_MEMO_PREFIX}退職予定: 12月末`;
+const lm = decideApply(memo, undefined, legacyMemo, `${LEGACY_SCRIPT_MEMO_PREFIX}退職予定: 12月末`, "退職予定: 1月末");
+check("legacy 【台本】 chunk re-press -> replaced with 【スクリプト】 chunk", lm.action === "replace" && lm.nextValue === `CAのメモ\n${SCRIPT_MEMO_PREFIX}退職予定: 1月末`);
+
+// 6-2. サーバー側の入れ方（apply-plan）をメモリ上のデータで通す（DB なし）
+const whRows = [
+  { id: "wh1", order: 1, companyName: "架空商事株式会社", jobTypeFlag: "営業", jobTypeMemo: null, resignReasonLarge: null, resignReasonMedium: null, resignReasonSmall: null, jobChangeReasonMemo: null },
+  { id: "wh2", order: 2, companyName: "架空システム株式会社", jobTypeFlag: null, jobTypeMemo: "社内SE", resignReasonLarge: null, resignReasonMedium: null, resignReasonSmall: null, jobChangeReasonMemo: null },
+];
+// (a) 欄が空 → 入る（applied に記録・提案なし）。数値は Number・日付は Date 化
+let st = { detail: { jobChangeTimelineMemo: "CAのメモ" } as Record<string, unknown>, workHistories: whRows as Array<Record<string, unknown> & { order: number }> };
+let appliedS: AppliedMap = {};
+let proposalsS: ProposalMap = {};
+const tlScene = find("s4-timeline");
+const pA = planSceneApply(sceneWritesWithClears(tlScene, { choices: { timeline: "3カ月以内" } }), st.detail, st.workHistories, appliedS, proposalsS);
+check("plan: empty select -> set, memo appended with prefix", pA.detailPatch.jobChangeTimeline === "3カ月以内" && pA.applied["d.jobChangeTimeline"] === "3カ月以内" && Object.keys(pA.proposals).length === 0);
+st = applyPlanToState(pA, st.detail, st.workHistories);
+appliedS = pA.applied;
+proposalsS = pA.proposals;
+check("plan: state after apply", currentValueAt("d.jobChangeTimeline", st.detail, st.workHistories) === "3カ月以内");
+
+const salScene = find("s6-salary-current");
+const pNum = planSceneApply(sceneWrites(salScene, { inputs: { annual: "400" } }), {}, whRows, {}, {});
+check("plan: number field coerced to Number", pNum.detailPatch.currentSalary === 400);
+const rsgScene = runtimeSceneOfKey("s4-retired-when")!; // 離職中のときだけ出る場面なので展開せずキーから作る
+const pDate = planSceneApply(sceneWrites(rsgScene, { inputs: { date: "2026-12" } }), {}, whRows, {}, {});
+check("plan: month input -> resignationDate ISO of the 1st", typeof pDate.detailPatch.resignationDate === "string" && String(pDate.detailPatch.resignationDate).startsWith("2026-12-01"));
+
+// (b) すでに違う値がある → 入れずに提案に回る（欄・applied は変わらない）
+const pB = planSceneApply(sceneWritesWithClears(tlScene, { choices: { timeline: "半年以内（3〜6ヶ月）" } }), { jobChangeTimeline: "1年以内" }, whRows, {}, {});
+check("plan: existing different value -> proposal only", Object.keys(pB.detailPatch).filter((k) => k !== "workStylePreferences").length === 0 && pB.proposals["d.jobChangeTimeline"]?.value === "半年以内" && !pB.applied["d.jobChangeTimeline"]);
+
+// (c) ［替える］→ その欄だけ入り、提案から消え、applied に記録
+const acc2 = planAcceptProposal("d.jobChangeTimeline", whRows, {}, pB.proposals);
+check("plan: accept proposal -> only that field, removed from proposals, recorded in applied", !!acc2 && acc2.detailPatch.jobChangeTimeline === "半年以内" && Object.keys(acc2.detailPatch).length === 1 && !acc2.proposals["d.jobChangeTimeline"] && acc2.applied["d.jobChangeTimeline"] === "半年以内");
+check("plan: accept unknown path -> null", planAcceptProposal("d.nothing", whRows, {}, pB.proposals) === null);
+check("plan: dismiss removes the proposal only", Object.keys(planDismissProposal("d.jobChangeTimeline", pB.proposals)).length === 0);
+
+// (d) 押し直し: 欄がスクリプトの値のままなら差し替え／CA が直していたら触らない（提案に回る）
+const pC = planSceneApply(sceneWritesWithClears(tlScene, { choices: { timeline: "半年以内（3〜6ヶ月）" } }), st.detail, st.workHistories, appliedS, proposalsS);
+check("plan: re-press while field still holds script value -> replaced", pC.detailPatch.jobChangeTimeline === "半年以内" && pC.applied["d.jobChangeTimeline"] === "半年以内");
+const edited = { ...st.detail, jobChangeTimeline: "1年以内" }; // CA が手で直した
+const pD = planSceneApply(sceneWritesWithClears(tlScene, { choices: { timeline: "未定（良いところがあれば）" } }), edited, st.workHistories, appliedS, proposalsS);
+check("plan: re-press after CA edited the field -> untouched, proposal", pD.detailPatch.jobChangeTimeline === undefined && pD.proposals["d.jobChangeTimeline"]?.value === "未定");
+
+// (e) メモ: 空なら入れ、入っていれば末尾に印つきで書き足し、同じ文があれば足さない（work_histories の行＝会社番号で）
+const reasonScene = find("s5-wh-reason", 1);
+const pM1 = planSceneApply(sceneWritesWithClears(reasonScene, { choices: { reason: "言いにくそう" } }), {}, whRows, {}, {});
+check("plan: wh memo empty -> set as-is on the 2nd company row", pM1.whPatches[1]?.jobChangeReasonMemo === "言いにくい" && !pM1.whPatches[0]);
+const whWithMemo = whRows.map((r, i) => (i === 1 ? { ...r, jobChangeReasonMemo: "CAが書いた理由" } : r));
+const pM2 = planSceneApply(sceneWritesWithClears(reasonScene, { choices: { reason: "言いにくそう" } }), {}, whWithMemo, {}, {});
+check("plan: wh memo has text -> appended with 【スクリプト】", pM2.whPatches[1]?.jobChangeReasonMemo === `CAが書いた理由\n${SCRIPT_MEMO_PREFIX}言いにくい`);
+const whDup = whRows.map((r, i) => (i === 1 ? { ...r, jobChangeReasonMemo: pM2.whPatches[1]!.jobChangeReasonMemo } : r));
+const pM3 = planSceneApply(sceneWritesWithClears(reasonScene, { choices: { reason: "言いにくそう" } }), {}, whDup, pM2.applied, {});
+check("plan: same memo sentence already there -> not appended again", !pM3.whPatches[1] || pM3.whPatches[1].jobChangeReasonMemo === undefined);
+const mirrored = applyPlanToState(pM1, {}, whRows);
+check("plan: 1st company row is mirrored into detail (autosave-compatible)", mirrored.detail.companyName === "架空商事株式会社" && String(mirrored.detail.careerSummary).includes("【2社目】架空システム株式会社"));
+// 職歴の行が無い会社番号には入れない
+const pNoRow = planSceneApply(sceneWritesWithClears(reasonScene, { choices: { reason: "言いにくそう" } }), {}, [whRows[0]], {}, {});
+check("plan: no work-history row for that company -> nothing written", Object.keys(pNoRow.whPatches).length === 0);
+
+// (f) 働き方: 無ければ付ける・付いていればそのまま
+const wsScene = find("s6-workstyle");
+const pW = planSceneApply(sceneWritesWithClears(wsScene, { choices: { ws: ["フルリモート"] } }), { workStylePreferences: JSON.stringify(["退職金制度"]) }, whRows, {}, {});
+check("plan: work style check added, existing CA check kept", pW.detailPatch.workStylePreferences === JSON.stringify(["退職金制度", "フルリモート"]) && pW.applied["ws.フルリモート"] === "1");
+
+// (g) 場面キー → 実行時の場面（サーバーの apply API が使う）
+check("runtimeSceneOfKey: plain / company / unknown", runtimeSceneOfKey("s4-timeline")?.scene.id === "s4-timeline" && runtimeSceneOfKey("s5-wh-reason#1")?.companyIndex === 1 && runtimeSceneOfKey("nope") === null && runtimeSceneOfKey("s5-wh-reason#x") === null);
 
 console.log(failed === 0 ? "ALL OK" : `FAILED: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

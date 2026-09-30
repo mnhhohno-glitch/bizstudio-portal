@@ -38,3 +38,14 @@
 - 求職者管理・タスク管理とも、URL クエリで絞り込みを受け取る導線は今は無い。URL で開く導線を足すときは、EntryBoard の `initialCandidateName` と同じく、URL 指定時は復元をスキップすること。
 - 求職者管理の検索 debounce は、マウント時にも走って 300ms 後にページを 1 に戻していた（復元したページが消える）。`appliedSearchRef` で「検索語が変わったときだけ」走るようにした。`InterviewListClient` の debounce にも同じ作りが残っていて、復元したページが 1 に戻る可能性がある（今回は触っていない）。
 - タスク一覧は `fetchTasks` 冒頭で `if (!restored) return;` して二重取得を防ぐ。一覧はクライアント側でマウント時に取り直すので、完了後に戻れば最新になる。
+
+## 2026-09-30 変更（T-208 step4）
+
+| 画面 | 導線 | 挙動 | ファイル |
+|--|--|--|--|
+| 求職者詳細 | 上部タブ「面談スクリプト」（`?view=script`・「面談履歴」の右） | 既存の上部タブと同じ作法（`handleViewChange` → `router.push`・**同一タブ**） | `src/components/candidates/CandidateDetailPage.tsx` |
+| 面談スクリプトタブ | 入力内容タブ「面談履歴で確かめる」→ 面談履歴タブのその記録 | 同一タブ。`?view=interview&interview=<面談記録ID>` で開き、`InterviewHistoryTab` が `initialSelectedId` としてその記録を選ぶ（一覧に無ければ既定＝最新） | `CandidateDetailPage.openInterviewHistory` / `InterviewHistoryTab.tsx` |
+
+- **面談履歴タブを離れるとき**（上部タブのどこへ行くときも）: `InterviewForm` が `onRegisterFlush` で登録した「未保存の入力を既存の自動保存で保存する」関数を `handleViewChange` が **await してから** `router.push` する（`CandidateDetailPage.interviewFlushRef`）。保存に失敗しても切り替えは止めない（従来の unmount flush＝keepalive PATCH が残る）。
+- 面談履歴タブに戻ったときは `InterviewHistoryTab` / `InterviewForm` がマウントし直されるので、面談記録はサーバーから読み直される（面談スクリプトタブでサーバー側が入れた値がそのまま出る）。
+- URL の `interview=` は面談履歴タブの初期選択にだけ使う（他のタブ・一覧からの導線には無い）。

@@ -1485,16 +1485,38 @@ T-214 の「重なり」は **7軸すべてが交わる**（範囲が少しで�
 | script_version | 台本の版（"v1"） |
 | updated_by_user_id | 最後に保存した CA（User.id・SetNull） |
 - `interview_details` とは別表なので、自動保存（detail 丸ごと送信）や面談作成時の前回からの写し（`copyFromPreviousInterview`）の対象にならない＝2回目の面談に持ち越さない。
-- API `GET/PUT /api/interviews/[id]/script-answers`（認証は既存の面談 API と同じ `getSessionUser()`・未ログイン 403・面談なし 404）。PUT は `{ answers, applied, scriptVersion }` を upsert。**サーバーで面談記録（detail / work_histories）は書かない。**
-- 画面は答えが変わるたび 1.5 秒デバウンスで PUT（`InterviewForm.saveScriptAnswers`）。面談を切り替えると台本の状態は捨てて読み直す。
+- ~~API `GET/PUT /api/interviews/[id]/script-answers`。PUT は `{ answers, applied, scriptVersion }` を upsert。サーバーで面談記録は書かない。~~ → **step4 で変更**（下の「T-208 step4」）。GET は `proposals` も返す。PUT は `{ answers, scriptVersion }` だけを書く（applied / proposals はサーバーの apply API が更新）。
 
 ### 入力画面への入れ方（付録F・`apply.ts`）
 - 欄が空（null / "" / []）のときだけ入れる。すでに値があれば勝手に変えず **propose**＝欄の横（いつもの入力画面）と「入力内容」タブに「台本: 〇〇［替える］［×］」を出し、CA が押したときだけ替える。
 - メモ欄は、空なら入れ（接頭辞なし）、入っていれば末尾に改行＋「【台本】…」を書き足す。同じ文がすでにあれば足さない。
 - 押し直したとき、欄が前に台本が入れた値のまま（`applied` と一致）なら差し替え／答えが無くなれば消す。CA が手で直していたら触らない（メモは台本の文だけ差し替え、CA の文は残す）。
 - 働き方のチェックは「無ければ付ける」。外すのは台本が付けたもの（applied="1"）だけ。
-- 反映は画面の state（`setDetailState` / `setWorkHistories`）に対して行い、既存の自動保存（3秒・`buildAutosaveBody`）で保存する。数値の欄（社数・年収）は Number、日付の欄（退職日・次回面談日）は `normalizeDate`（月入力 "YYYY-MM" は 1 日に寄せる）。
+- ~~反映は画面の state（`setDetailState` / `setWorkHistories`）に対して行い、既存の自動保存で保存する。~~ → **step4 で変更**: サーバー（apply API）が DB の今の値に対して判定し、そのまま書く。数値の欄（社数・年収）は Number、日付の欄（退職日・次回面談日）は `normalizeDate`（月入力 "YYYY-MM" は 1 日に寄せる）＝`apply-plan.ts` の `coerceDetailValue`。メモの印は「【スクリプト】」（step4 で「【台本】」から改名。保存済みのメモの文字は書き換えず、押し直しの判定では旧い印 `LEGACY_SCRIPT_MEMO_PREFIX` も同じ扱い＝差し替えると新しい印になる）。
 - 確認: `npx tsx scripts/verify/interview-script-check.ts`（値の実在・自動計算・入れ方の決まり・場面→書き込み・差し込み。AI/DB なし）。
+
+### T-208 step4（2026-09-30・staging → master）: 「面談スクリプト」タブ化と、答えの入れ方のサーバー側への移行
+
+**画面**: 求職者詳細の上部タブに「面談スクリプト」（`?view=script`・「面談履歴」の右）。中身は `src/components/candidates/InterviewScriptTab.tsx`（面談の選択・データ取得・API 呼び出し）＋ `InterviewScriptMode.tsx`（パートの進み具合・左右2列の描画）。面談記録画面（InterviewForm）の中の台本モード・ヘッダーの「台本」「面談準備」ボタン・空状態の「面談準備」ボタン・欄の横の提案バッジ（`scriptProposalBadge`）・`setDetailState` への直接書き込み（`applyScriptWrites` 等）はすべて外した。配置は 14-ui-component-map、タブの挙動は 17-tab-navigation-rules。
+
+**保存と入れ方（サーバー側）**
+- 列追加: `interview_script_answers.proposals` JSONB nullable（migration `20260930300000_t208_step4_script_proposals`・`ADD COLUMN IF NOT EXISTS`）。欄のパス → `{ value }`（すでに違う値があって入れなかった答え）。
+- API `POST /api/interviews/[id]/script-answers/apply`（認証は他の面談 API と同じ `getSessionUser()`・403/404）。body の `action`:
+
+  | action | body | 動き |
+  |--|--|--|
+  | `scene` | `answers`（全体・`__meta` 含む）, `sceneKey?`, `scriptVersion?` | answers を保存。`sceneKey`（"場面id" / "場面id#会社番号"）があれば `runtimeSceneOfKey` → `sceneWritesWithClears` → `planSceneApply` で欄に入れる。無ければ進み具合の保存だけ |
+  | `accept` | `path` | 提案［替える］: その欄だけ提案の値にし、applied に記録、提案から外す（提案が無ければ 409） |
+  | `dismiss` | `path` | 提案［そのまま］: 提案から外すだけ |
+
+  返り `{ ok, applied, proposals, detail, workHistories, lastSavedAt, autosaveToken, wrote }`（detail / workHistories は書いた後の値）。
+- 計画は `src/lib/interview-script/apply-plan.ts`（純粋関数・確認スクリプトがメモリ上のデータで通す）: `planSceneApply`（複数の書き込みを1つの計画に。職歴の行が無い会社番号は入れない・働き方は JSON 配列に足す）/ `planAcceptProposal` / `planDismissProposal` / `applyPlanToState` / `currentValueAt`（画面の「入力内容」タブもこれで今の値を出す）/ `detailMirrorOfWorkHistories`（職歴を書いたときは 1社目を detail に写す＝自動保存 `buildAutosaveBody` と同じ列）。
+- DB は 1 トランザクション: `work_histories` は order 順の行を id で update → `interview_details` upsert → `interview_records` の `lastSavedAt` / `autosaveToken`（新しい値）/ `lastEditedBy` → `interview_script_answers` upsert（answers / applied / proposals）。**autosaveToken を進める**ので、面談記録画面を別のセッションで開いたままなら既存の競合検知（409「他のセッションで変更されました」）で気づける。同じブラウザでは面談履歴タブは unmount されているので影響なし。
+- 画面の送り方（`InterviewScriptTab`）: ボタン・入力は押した順に1つずつ POST（promise のキュー）。前へ／次へ（進み具合だけ）は 1.5 秒デバウンス（タブを離れる・面談を切り替えるときは keepalive で即送る）。面談記録が無いときは画面の中だけで答えを持ち、送らない。
+- 面談履歴タブとの行き来: 上部タブを切り替える前に `InterviewForm` の未保存分を自動保存で保存してから遷移（`onRegisterFlush`）。戻ったときは読み直し（マウントし直し）。
+- 確認: `npx tsx scripts/verify/interview-script-check.ts` に 6. を追加（画面の文言に「台本」が残っていない／印と見出し／apply-plan の入れ方。74 項目 ALL OK）。staging ではテスト用求職者 5999999 の面談記録で apply API を1往復（保存→欄に入る→提案→［替える］）確かめ、値は元に戻した。
+
+**名前**: 画面の「台本」は「面談スクリプト」に統一。メモの印「【台本】」→「【スクリプト】」、チャットの見出し「【台本で分かったこと】」→「【面談スクリプトで分かったこと】」（`facts.ts` `SCRIPT_FACTS_HEADER`・SKILL.md も同じ言葉。AI の指示の変更なので staging で確認）。表・API・コードの名前（`interview_script_answers`・`src/lib/interview-script/`・`script-answers`）は変えない。
 
 ### T-208 step3（2026-09-30）: 面談準備の質問を会社ごとに振り分け（付録H）・チャットの「よく使う質問」（付録G）・台本の答えをチャットに添える
 

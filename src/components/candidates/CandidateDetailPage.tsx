@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CandidateQuickSearch from "@/components/candidates/CandidateQuickSearch";
@@ -11,6 +11,9 @@ import HistoryTab from "@/components/candidates/HistoryTab";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
+// T-208 step4: 「面談スクリプト」タブ（左: スクリプト／右: 面談準備）と、そのときの1行の上部表示
+import InterviewScriptTab from "@/components/candidates/InterviewScriptTab";
+import CandidateCompactHeader from "@/components/candidates/CandidateCompactHeader";
 import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import DashboardTab from "@/components/candidates/DashboardTab";
 import GoogleFormCreatorModal, { type GoogleFormMeetingFile } from "@/components/candidates/GoogleFormCreatorModal";
@@ -125,6 +128,8 @@ type SessionUser = {
 const TOP_VIEWS = [
   { key: "basic", label: "基本" },
   { key: "interview", label: "面談履歴" },
+  // T-208 step4: 面談スクリプト（?view=script）。面談履歴の右
+  { key: "script", label: "面談スクリプト" },
   { key: "settings-history", label: "設定履歴" },
   { key: "dashboard", label: "ダッシュボード" },
 ] as const;
@@ -1692,6 +1697,13 @@ function CandidateDetailPageBody() {
       ? (rawTab as SubTabKey)
       : "history";
   const fromInterviews = searchParams.get("from") === "interviews";
+  // T-208 step4: 面談スクリプトタブの「面談履歴で確かめる」から来たとき、面談履歴タブで最初に選ぶ記録
+  const initialInterviewId = searchParams.get("interview");
+  // T-208 step4: 面談履歴タブ（InterviewForm）が登録する「未保存の入力を保存する」関数。タブを離れる前に await する
+  const interviewFlushRef = useRef<(() => Promise<void>) | null>(null);
+  const registerInterviewFlush = useCallback((fn: (() => Promise<void>) | null) => {
+    interviewFlushRef.current = fn;
+  }, []);
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -1844,13 +1856,27 @@ function CandidateDetailPageBody() {
     ? `書類タブの面談サブタブに PDF と .txt を各1つ以上配置してください（現在 PDF: ${googleFormPdfCount} 件、テキスト: ${googleFormTxtCount} 件）`
     : undefined;
 
-  const handleViewChange = (view: TopViewKey) => {
+  const handleViewChange = async (view: TopViewKey) => {
+    if (view === activeView) return;
+    // T-208 step4: 面談履歴タブを離れる前に、未保存の入力があれば既存の自動保存で保存してから切り替える
+    if (activeView === "interview" && interviewFlushRef.current) {
+      try {
+        await interviewFlushRef.current();
+      } catch {
+        /* 保存に失敗しても切り替えは止めない（InterviewForm 側の unmount flush が残る） */
+      }
+    }
     const params = new URLSearchParams();
     if (view !== "basic") params.set("view", view);
     const qs = params.toString();
     router.push(`/candidates/${candidateId}${qs ? `?${qs}` : ""}`, {
       scroll: false,
     });
+  };
+
+  /** T-208 step4: 面談スクリプトタブの「面談履歴で確かめる」→ 面談履歴タブでその記録を選んだ状態にする */
+  const openInterviewHistory = (interviewId: string) => {
+    router.push(`/candidates/${candidateId}?view=interview&interview=${encodeURIComponent(interviewId)}`, { scroll: false });
   };
 
   const handleTabChange = (tab: SubTabKey) => {
@@ -1897,7 +1923,7 @@ function CandidateDetailPageBody() {
           {TOP_VIEWS.map((v) => (
             <button
               key={v.key}
-              onClick={() => handleViewChange(v.key as TopViewKey)}
+              onClick={() => void handleViewChange(v.key as TopViewKey)}
               className={`px-5 py-3 text-[15px] font-semibold border-b-2 transition-colors ${
                 activeView === v.key
                   ? "text-[#2563EB] border-[#2563EB]"
@@ -1927,7 +1953,10 @@ function CandidateDetailPageBody() {
         </div>
       </div>
 
-      {/* 候補者の基本情報ヘッダー: 基本・ダッシュボードタブのみ表示（面談履歴・設定履歴では非表示） */}
+      {/* T-208 step4: 面談スクリプトタブは上部を1行の小さな表示にまとめ、下を広く取る */}
+      {activeView === "script" && <CandidateCompactHeader candidate={candidate} />}
+
+      {/* 候補者の基本情報ヘッダー: 基本・ダッシュボードタブのみ表示（面談履歴・面談スクリプト・設定履歴では非表示） */}
       {(activeView === "basic" || activeView === "dashboard") && (
       <CandidateHeader
         candidate={candidate}
@@ -1994,6 +2023,15 @@ function CandidateDetailPageBody() {
         <InterviewHistoryTab
           candidateId={candidateId}
           currentUser={currentUser}
+          initialSelectedId={initialInterviewId}
+          onRegisterFlush={registerInterviewFlush}
+        />
+      ) : activeView === "script" ? (
+        <InterviewScriptTab
+          candidateId={candidateId}
+          currentUser={currentUser}
+          candidate={{ name: candidate.name, email: candidate.email }}
+          onOpenHistory={openInterviewHistory}
         />
       ) : activeView === "settings-history" ? (
         <SettingsHistoryTab candidateId={candidateId} />

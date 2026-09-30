@@ -3812,6 +3812,8 @@ model InterviewScriptAnswer {
   interviewRecord   InterviewRecord @relation(fields: [interviewRecordId], references: [id], onDelete: Cascade)
   answers           Json
   applied           Json
+  /// T-208 step4: すでに値がある欄への提案（欄のパス → 提案する値）。サーバー側で入れるようになったので applied とは別に持つ
+  proposals         Json?
   scriptVersion     String          @map("script_version")
   updatedByUserId   String?         @map("updated_by_user_id")
   updatedBy         User?           @relation("UserInterviewScriptAnswers", fields: [updatedByUserId], references: [id], onDelete: SetNull)
