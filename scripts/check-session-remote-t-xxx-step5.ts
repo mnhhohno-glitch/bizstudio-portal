@@ -89,3 +89,6 @@ main().catch((e) => {
   console.error("FATAL", e instanceof Error ? e.message : e);
   process.exit(1);
 });
+
+// このファイルをモジュールにする（罠: import の無い scripts/*.ts はグローバルになり next build の型検査で衝突する）
+export {};
