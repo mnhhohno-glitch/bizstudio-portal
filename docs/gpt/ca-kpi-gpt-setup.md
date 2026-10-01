@@ -83,3 +83,71 @@ ChatGPT のカスタムGPT（GPTs）から、ポータルの CA別実績 API（`
 - 数値の後ろに、該当する注意点（上のルール）を短く添える。注意点を省略して断定しない。
 - CA の個人評価（優劣の断定・人事的な判断）はしない。事実（数値と定義）と、確認が必要な点を分けて書く。
 ```
+
+---
+
+## 4. MCP アプリ＋スキル方式（推奨・T-XXX step3）
+
+カスタムGPT の Actions（§1〜§3）の代わりに、ChatGPT の「MCP アプリ」でポータルの MCP 入口（`/api/mcp/<秘密>`）に接続し、
+分析の手順は「スキル」として登録する方式。普段のチャット（GPT を切り替えずに）で使えるのが利点。§1〜§3 の方式も引き続き使える。
+
+- MCP 入口のコード: `src/app/api/mcp/[secret]/route.ts`（入口）、`src/lib/mcp/caKpiServer.ts`（ツール 4 本）
+- ツール: `get_metric_definitions`（定義・注意点）、`list_cas`（CA 一覧）、`get_ca_kpi`（CA別実績＝`/api/ai/ca-kpi` と同じ）、`get_company_kpi`（会社KPI＝`/api/ai/company-kpi` と同じ）。すべて読み取り専用
+- 認証: ChatGPT の MCP アプリは「OAuth」か「認証なし」しか選べないため、**認証なし＋推測できない長い秘密のURL**で接続する。
+  秘密は Railway の `bizstudio-portal` サービスの環境変数 `MCP_PATH_SECRET`。**URL・秘密の値はこの文書・リポジトリ・チャットに書かない**
+- 接続URL: `https://bizstudio-portal-production.up.railway.app/api/mcp/<MCP_PATH_SECRET の値>`（設定時にデスクトップの `portal-mcp-url.txt` に 1 行で書き出してある。ChatGPT に貼ったら削除する）
+
+### 4-1. MCP アプリを作る
+
+1. ChatGPT 左下の自分の名前 → 設定 → **プラグイン**（または「アプリ」）→ **追加** → **MCP アプリを作成**
+2. 名前: **ビズスタジオ CA実績**
+3. 接続タイプ: **サーバーURL** → デスクトップの `portal-mcp-url.txt` の 1 行（`https://…/api/mcp/…`）を貼る
+4. 認証: **認証なし**
+5. 「このアプリを信頼する」等の注意事項にチェック → **作成**
+6. 作成後、ツール一覧に `get_metric_definitions` / `list_cas` / `get_ca_kpi` / `get_company_kpi` の 4 つが出れば接続できている
+7. `portal-mcp-url.txt` を削除する
+
+### 4-2. スキルを登録する
+
+1. `docs/gpt/ca-kpi-skill/` を zip にする（PowerShell）:
+   ```powershell
+   Compress-Archive -Path "C:\bizstudio\bizstudio-portal\docs\gpt\ca-kpi-skill\*" -DestinationPath "$env:USERPROFILE\Desktop\ca-kpi-skill.zip" -Force
+   ```
+   zip はリポジトリにコミットしない
+2. ChatGPT → **スキル** → **作成** → **コンピュータからアップロード** → `ca-kpi-skill.zip` を選ぶ → 保存
+3. スキル名 `bizstudio-ca-kpi-analysis` が一覧に出る
+
+### 4-3. 動作確認
+
+新しいチャットで、MCP アプリ「ビズスタジオ CA実績」を有効にして:
+
+- 「2026年8月・全CAの面談数とエントリー数を表にして」
+  → `get_metric_definitions` → `get_ca_kpi(from=2026-08-01, to=2026-08-31)` が呼ばれ、全員行で **面談 185・初回 82・エントリー 48 人／229 件・書類通過 26 人・内定 10 人・承諾 9 人／10 件** が出る（step1 報告書 §7-3・step2 本番確認と同じ値）
+- 「CA の一覧を出して」→ `list_cas` が呼ばれ、社員番号と表示名（在籍 8 名が inDefaultAggregation=true）が出る
+- 「2026年の会社の決定人数と粗利は？」→ `get_company_kpi(year=2026)` が呼ばれる
+
+### 4-4. うまくいかないとき
+
+| 症状 | 原因と対処 |
+|--|--|
+| 接続できない・404 | URL が違う（末尾の秘密が欠けている／変わった）。Railway の `MCP_PATH_SECRET` と一致する URL を貼り直す。本番側に `MCP_PATH_SECRET` が無いときも 404 |
+| 429 | 1 分 60 回の回数制限。1 分待って再試行 |
+| ツールが「応答が大きすぎます」「期間が長すぎます」と返す | 期間を分ける、`caId` で 1 人に絞る、`granularity` を粗くする、`groups` を減らす（文に上限が書いてある） |
+| ツール一覧が出ない | 接続URLの先頭が `https://bizstudio-portal-production.up.railway.app/api/mcp/` になっているか確認。staging ではない |
+
+### 4-5. URL が漏れた疑いがあるときの止め方
+
+秘密のURLを知っている人は誰でも（認証なしで）この入口を呼べる。漏れた疑いがあれば **秘密を作り直す**だけで旧URLは即座に 404 になる:
+
+1. PowerShell で新しい秘密を作って Railway に設定する（値は画面に出さない）:
+   ```powershell
+   $s = -join ((1..48) | ForEach-Object { [char[]]"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" | Get-Random })
+   railway variables --set "MCP_PATH_SECRET=$s" --service bizstudio-portal | Out-Null
+   "https://bizstudio-portal-production.up.railway.app/api/mcp/$s" | Set-Content -Encoding ascii "$env:USERPROFILE\Desktop\portal-mcp-url.txt"
+   Remove-Variable s
+   ```
+   （設定で本番の再デプロイが走る。完了まで 3〜5 分）
+2. ChatGPT のプラグイン → 「ビズスタジオ CA実績」→ 接続URLを `portal-mcp-url.txt` の内容に差し替える → ファイルを削除
+3. 入口を一時的に完全に止めたいときは、Railway で `MCP_PATH_SECRET` を削除する（未設定＝常に 404）
+
+秘密は 48 文字以上の英数字にする（32 文字未満の値は入口側で無効扱い＝404 になる）。
