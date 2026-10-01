@@ -56,7 +56,8 @@ async function main() {
   const wrong = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "nobody@example.invalid", password: "x" }) });
   check("[3] 誤ったログインは 401", wrong.status, 401);
 
-  check("[4] Bearer なしの AI 読み取り API は 401", (await fetch(`${BASE}/api/ai/ca-kpi?from=2026-08-01&to=2026-08-31`)).status, 401);
+  const bearerless = (await fetch(`${BASE}/api/ai/ca-kpi?from=2026-08-01&to=2026-08-31`)).status;
+  checkTrue("[4] Bearer なしの AI 読み取り API は 401（鍵未設定の環境では 503・どちらも拒否）", bearerless === 401 || bearerless === 503, String(bearerless));
   check("[4] x-api-key なしの内部 API は 401", (await fetch(`${BASE}/api/internal/pipeline-snapshot?dry_run=true`, { method: "POST" })).status, 401);
   check("[4] MCP の誤った秘密は 404", (await fetch(`${BASE}/api/mcp/${"x".repeat(48)}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 404);
 
@@ -69,7 +70,7 @@ async function main() {
     const l = sc.toLowerCase();
     checkTrue("[5] HttpOnly / Secure / SameSite=Lax / Path=/ / Max-Age=604800", l.includes("httponly") && l.includes("secure") && l.includes("samesite=lax") && l.includes("path=/") && l.includes("max-age=604800"), mask(sc));
     check("[5] ログイン後の API は 200", await session(cookie), 200);
-    for (const path of ["/", "/entries", "/tasks", "/interviews/new"]) {
+    for (const path of ["/", "/entries", "/tasks", "/announcements"]) {
       const r = await page(path, cookie);
       check(`[5] 主要画面 ${path} が 200`, r.status, 200);
     }
