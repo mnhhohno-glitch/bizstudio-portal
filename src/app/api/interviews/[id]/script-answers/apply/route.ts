@@ -27,6 +27,8 @@ import {
   type ProposalMap,
 } from "@/lib/interview-script/apply-plan";
 import type { AnswerMap, AppliedMap } from "@/lib/interview-script/types";
+// T-XXX step5B: 台本モードから面談詳細へ反映した希望条件（選択式）を履歴に残す（同じトランザクション）
+import { PREFERENCE_ROUTES, loadInterviewDetailBaseline, recordInterviewDetailPreferenceChanges } from "@/lib/preference-history";
 
 export const runtime = "nodejs";
 
@@ -105,10 +107,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const detailPatch: Record<string, unknown> = { ...plan.detailPatch };
       if (Object.keys(plan.whPatches).length > 0) Object.assign(detailPatch, detailMirrorOfWorkHistories(touchedRows));
       if (Object.keys(detailPatch).length > 0) {
+        const baseline = await loadInterviewDetailBaseline(tx, { interviewRecordId: id, candidateId: record.candidateId });
         await tx.interviewDetail.upsert({
           where: { interviewRecordId: id },
           create: { interviewRecordId: id, ...(detailPatch as object) },
           update: detailPatch as object,
+        });
+        await recordInterviewDetailPreferenceChanges(tx, {
+          candidateId: record.candidateId,
+          interviewRecordId: id,
+          baseline,
+          patch: detailPatch,
+          changedByUserId: user.id,
+          route: PREFERENCE_ROUTES.scriptApply,
         });
       }
       await tx.interviewRecord.update({

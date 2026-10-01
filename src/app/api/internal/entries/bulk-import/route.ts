@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
 import { SELECTION_ENDED_DETAILS } from "@/lib/constants/entry-flag-rules";
+// T-XXX step5B: 取り込みによる作成・削除を選考ステータス履歴に残す（外部連携なので変更者は NULL）
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange, recordJobEntryStatusChanges } from "@/lib/entry-status-history";
 
 function parseDate(val: string | null | undefined): Date | null {
   if (!val) return null;
@@ -103,7 +105,9 @@ export async function POST(request: NextRequest) {
       const isActive = entry.status !== "終了" && !SELECTION_ENDED_DETAILS.includes(detail);
 
       // 5. Create entry
-      await prisma.jobEntry.create({
+      await prisma.$transaction(async (tx) => {
+      const createdRow = await tx.jobEntry.create({
+        select: ENTRY_STATUS_SELECT,
         data: {
           candidateId: candidate.id,
           externalJobId: 0,
@@ -152,6 +156,8 @@ export async function POST(request: NextRequest) {
           isActive,
         },
       });
+      await recordJobEntryStatusChange(tx, { event: "create", before: null, after: createdRow, changedByUserId: null, route: ENTRY_STATUS_ROUTES.bulkImport });
+      });
 
       created++;
     } catch (e: unknown) {
@@ -177,8 +183,15 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "fmEntryNos array is required" }, { status: 400 });
   }
 
-  const result = await prisma.jobEntry.deleteMany({
-    where: { fmEntryNo: { in: fmEntryNos } },
+  const result = await prisma.$transaction(async (tx) => {
+    const where = { fmEntryNo: { in: fmEntryNos } };
+    const before = await tx.jobEntry.findMany({ where, select: ENTRY_STATUS_SELECT });
+    const r = await tx.jobEntry.deleteMany({ where });
+    await recordJobEntryStatusChanges(
+      tx,
+      before.map((b) => ({ event: "delete" as const, before: b, after: null, changedByUserId: null, route: ENTRY_STATUS_ROUTES.bulkImportDelete })),
+    );
+    return r;
   });
 
   return NextResponse.json({ deleted: result.count });

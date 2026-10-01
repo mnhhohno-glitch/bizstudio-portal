@@ -585,6 +585,8 @@ model Candidate {
   responseSubmissions    CandidateResponseSubmission[] // T-133 P1: まとめ送信バッチ
   mynaviScoutHistories   MynaviScoutHistory[] // T-190 Step3-1: マイナビ スカウト履歴一覧の受け口
   caAssignmentHistories  CandidateCaAssignmentHistory[] // T-XXX step2: 担当CA変更の記録（追加のみ）
+  supportStatusHistories CandidateSupportStatusHistory[] // T-XXX step5B: 支援状況の変更記録（追加のみ）
+  preferenceHistories    CandidatePreferenceHistory[] // T-XXX step5B: 希望条件（選択式）の変更記録（追加のみ）
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -3868,4 +3870,118 @@ model UserSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("user_sessions")
+}
+
+// T-XXX step5B: 選考ステータス（job_entries の entry_flag / entry_flag_detail / company_flag / person_flag / is_active / archived_at）の変更記録。
+//   - 変わる保存のたびに 1 行追記（追加のみ）。変わらない保存では書かない。作成（event=create・from は NULL）と削除（event=delete・to は NULL）も残す。
+//   - job_entry_id に外部キーを張らない（エントリー削除後も「いつ消されたか」を残すため）。
+//   - 書き込みは src/lib/entry-status-history.ts に集約する。記録開始日は MIN(changed_at)（本番反映日）。
+model JobEntryStatusHistory {
+  id                  String   @id @default(cuid())
+  jobEntryId          String   @map("job_entry_id")
+  candidateId         String   @map("candidate_id")
+  event               String // create / update / delete
+  fromEntryFlag       String?  @map("from_entry_flag")
+  toEntryFlag         String?  @map("to_entry_flag")
+  fromEntryFlagDetail String?  @map("from_entry_flag_detail")
+  toEntryFlagDetail   String?  @map("to_entry_flag_detail")
+  fromCompanyFlag     String?  @map("from_company_flag")
+  toCompanyFlag       String?  @map("to_company_flag")
+  fromPersonFlag      String?  @map("from_person_flag")
+  toPersonFlag        String?  @map("to_person_flag")
+  fromIsActive        Boolean? @map("from_is_active")
+  toIsActive          Boolean? @map("to_is_active")
+  fromArchived        Boolean? @map("from_archived")
+  toArchived          Boolean? @map("to_archived")
+  changedFields       String[] @map("changed_fields") // 変わった項目名（entryFlag / entryFlagDetail / companyFlag / personFlag / isActive / archived）
+  changedAt           DateTime @default(now()) @map("changed_at")
+  changedByUserId     String?  @map("changed_by_user_id") // 変更した社員（User.id）。定期処理・外部連携は NULL
+  route               String // 変更経路（src/lib/entry-status-history.ts の ENTRY_STATUS_ROUTES）
+
+  @@index([jobEntryId, changedAt])
+  @@index([candidateId, changedAt])
+  @@index([changedAt])
+  @@map("job_entry_status_histories")
+}
+
+// T-XXX step5B: 支援状況（candidates の support_status / support_sub_status / support_end_reason / support_end_date）の変更記録。
+//   - 変わる保存のたびに 1 行追記（追加のみ）。自動再計算（中項目）も route=sub_status_auto で残す。
+//   - 書き込みは src/lib/support-status-history.ts に集約する。
+model CandidateSupportStatusHistory {
+  id                   String    @id @default(cuid())
+  candidateId          String    @map("candidate_id")
+  candidate            Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  fromSupportStatus    String?   @map("from_support_status")
+  toSupportStatus      String?   @map("to_support_status")
+  fromSupportSubStatus String?   @map("from_support_sub_status")
+  toSupportSubStatus   String?   @map("to_support_sub_status")
+  fromSupportEndReason String?   @map("from_support_end_reason")
+  toSupportEndReason   String?   @map("to_support_end_reason")
+  fromSupportEndDate   DateTime? @map("from_support_end_date")
+  toSupportEndDate     DateTime? @map("to_support_end_date")
+  changedFields        String[]  @map("changed_fields")
+  changedAt            DateTime  @default(now()) @map("changed_at")
+  changedByUserId      String?   @map("changed_by_user_id")
+  route                String // 変更経路（src/lib/support-status-history.ts の SUPPORT_STATUS_ROUTES）
+
+  @@index([candidateId, changedAt])
+  @@index([changedAt])
+  @@map("candidate_support_status_histories")
+}
+
+// T-XXX step5B: 希望条件（選択式の項目）の変更記録。文章欄（memo 類）は対象外。
+//   - source=interview_detail: 面談詳細（interview_details）の希望条件・年収・転職時期・学歴区分など。
+//     面談を新規作成したときは「その求職者の直前の面談の値」と比べる（前回の写しなら書かない）。
+//   - source=candidate: 求職者の行（candidates.desired_*）。
+//   - 1 項目 1 行（field / from_value / to_value）。JSON の項目は正規化した文字列で保存する。
+//   - 書き込みは src/lib/preference-history.ts に集約する。
+model CandidatePreferenceHistory {
+  id                String    @id @default(cuid())
+  candidateId       String    @map("candidate_id")
+  candidate         Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  source            String // interview_detail / candidate
+  interviewRecordId String?   @map("interview_record_id") // source=interview_detail のときの面談ID（外部キーなし）
+  field             String
+  fromValue         String?   @map("from_value") @db.Text
+  toValue           String?   @map("to_value") @db.Text
+  changedAt         DateTime  @default(now()) @map("changed_at")
+  changedByUserId   String?   @map("changed_by_user_id")
+  route             String // 変更経路（src/lib/preference-history.ts の PREFERENCE_ROUTES）
+
+  @@index([candidateId, changedAt])
+  @@index([field, changedAt])
+  @@index([changedAt])
+  @@map("candidate_preference_histories")
+}
+
+// T-XXX step5B: 進行中案件の日次スナップショット（CA別の集計値のみ・個人の行は保存しない）。
+//   - 毎日 1 回（GitHub Actions → POST /api/internal/pipeline-snapshot）。同じ日に 2 回動いたら上書き（snapshot_date × ca_key で一意）。
+//   - ca_key: Employee.id（担当CA）/ "ALL"（全体）/ "NONE"（担当なし）。
+//   - 数え方は src/lib/pipeline-snapshot.ts（get_pipeline_now と同じ定義）。
+model CaPipelineDailySnapshot {
+  id                        String   @id @default(cuid())
+  snapshotDate              DateTime @map("snapshot_date") @db.Date // JST の日付
+  caKey                     String   @map("ca_key")
+  employeeNumber            String?  @map("employee_number") // 保存時点の社員番号（ALL / NONE は NULL）
+  activeCandidates          Int      @map("active_candidates") // support_status が ACTIVE または WAITING の人数
+  activeStatusActive        Int      @map("active_status_active")
+  activeStatusWaiting       Int      @map("active_status_waiting")
+  entered                   Int // 以下は取得時点の選考段階ごとの件数（有効・未アーカイブのエントリー）
+  documentScreening         Int      @map("document_screening")
+  firstInterview            Int      @map("first_interview")
+  secondInterview           Int      @map("second_interview")
+  finalInterview            Int      @map("final_interview")
+  interviewOther            Int      @map("interview_other")
+  offered                   Int
+  inSelectionRecords        Int      @map("in_selection_records") // 書類選考〜内定（承諾前）の件数
+  inSelectionCandidates     Int      @map("in_selection_candidates") // 同・人数
+  acceptedNotJoined         Int      @map("accepted_not_joined") // 承諾済み未入社の件数
+  upcomingInterviewsFirst   Int      @map("upcoming_interviews_first") // 今後の面談予約（その求職者の初回）
+  upcomingInterviewsExisting Int     @map("upcoming_interviews_existing") // 今後の面談予約（2 回目以降）
+  runCount                  Int      @default(1) @map("run_count") // 同じ日に保存した回数
+  generatedAt               DateTime @default(now()) @map("generated_at")
+
+  @@unique([snapshotDate, caKey])
+  @@index([snapshotDate])
+  @@map("ca_pipeline_daily_snapshots")
 }

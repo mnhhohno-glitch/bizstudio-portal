@@ -1,0 +1,62 @@
+# T-XXX step5B: 進行中案件の日次スナップショット（CA別の集計値）を毎日 1 回保存する。
+# - 23:50 JST（14:50 UTC）に本番へ dry_run=false で 1 回叩く。
+# - workflow_dispatch で手動疎通も可能（dry_run=true で保存なし・今の集計値の確認）。
+# - INTERNAL_API_KEY は GitHub Secrets 経由（auto-expire / due-reminder と同一シークレット）。
+# - default branch (master) に置かないと schedule が動かない。
+# - 同じ日に 2 回動いても行は増えない（API 側で snapshot_date × ca_key の upsert）。
+
+name: T-XXX pipeline snapshot (daily)
+
+on:
+  schedule:
+    - cron: "50 14 * * *" # 23:50 JST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら保存せず今の集計値だけ返す（疎通確認用）。本番自動実行（schedule）は常に false。"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine dry_run flag
+        id: flag
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry=${{ github.event.inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call pipeline-snapshot API (production)
+        env:
+          API_KEY: ${{ secrets.INTERNAL_API_KEY }}
+        run: |
+          set -e
+          URL="https://bizstudio-portal-production.up.railway.app/api/internal/pipeline-snapshot?dry_run=${{ steps.flag.outputs.dry }}"
+          echo "Calling: $URL"
+
+          HTTP=$(curl -sS -X POST "$URL" \
+            -H "x-api-key: $API_KEY" \
+            --max-time 120 \
+            -o response.json \
+            -w "%{http_code}")
+
+          echo "=== HTTP $HTTP ==="
+          echo "=== Response (集計値のみ) ==="
+          cat response.json
+          echo ""
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::pipeline-snapshot returned HTTP $HTTP"
+            exit 1
+          fi

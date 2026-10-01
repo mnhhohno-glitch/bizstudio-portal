@@ -5,6 +5,8 @@ import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, applyEntryFlagAutoTransitions } 
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { jstDateStringToDbDate, todayJstDateString } from "@/lib/dailyReport/jstDate";
+// T-XXX step5B: 選考ステータスが変わる保存を同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 export async function PATCH(
   req: NextRequest,
@@ -92,28 +94,36 @@ export async function PATCH(
 
   const transformedData = applyEntryFlagAutoTransitions(data);
 
-  const entry = await prisma.jobEntry.update({
-    where: { id: entryId },
-    data: transformedData,
-    include: {
-      candidate: {
-        select: {
-          id: true,
-          name: true,
-          candidateNumber: true,
-          employeeId: true,
-          // T-161: 一覧(GET /api/entries)と同じく担当RCを返す。EntryBoard は本レスポンスで
-          // 行を丸ごと差し替えるため、ここに無い列は更新直後の画面から消える（リロードで復活）。
-          recruiterName: true,
-          employee: { select: { name: true } },
+  // T-XXX step5B: 更新と同じトランザクションで、選考ステータスが変わったときだけ履歴を 1 行追記する。
+  const entry = await prisma.$transaction(async (tx) => {
+    const before = await tx.jobEntry.findUnique({ where: { id: entryId }, select: ENTRY_STATUS_SELECT });
+    const row = await tx.jobEntry.update({
+      where: { id: entryId },
+      data: transformedData,
+      include: {
+        candidate: {
+          select: {
+            id: true,
+            name: true,
+            candidateNumber: true,
+            employeeId: true,
+            // T-161: 一覧(GET /api/entries)と同じく担当RCを返す。EntryBoard は本レスポンスで
+            // 行を丸ごと差し替えるため、ここに無い列は更新直後の画面から消える（リロードで復活）。
+            recruiterName: true,
+            employee: { select: { name: true } },
+          },
         },
       },
-    },
+    });
+    if (before) {
+      await recordJobEntryStatusChange(tx, { event: "update", before, after: row, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.entryFlags });
+    }
+    return row;
   });
 
   if ("entryFlag" in transformedData || "personFlag" in transformedData) {
     try {
-      await recalculateSubStatusIfAuto(entry.candidateId);
+      await recalculateSubStatusIfAuto(entry.candidateId, user.id);
     } catch (e) {
       console.error("[flags.PATCH] recalculateSubStatusIfAuto failed:", e);
     }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+// T-XXX step5B: 「求人紹介に戻す」＝エントリー行の削除を event=delete として同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChanges } from "@/lib/entry-status-history";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -21,7 +23,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const entries = await prisma.jobEntry.findMany({
     where: { id: { in: entryIds }, candidateId },
-    select: { id: true },
+    select: ENTRY_STATUS_SELECT,
   });
 
   if (entries.length === 0) {
@@ -29,10 +31,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const ids = entries.map((e) => e.id);
-  await prisma.jobEntry.deleteMany({ where: { id: { in: ids } } });
+  await prisma.$transaction(async (tx) => {
+    await tx.jobEntry.deleteMany({ where: { id: { in: ids } } });
+    await recordJobEntryStatusChanges(
+      tx,
+      entries.map((b) => ({ event: "delete" as const, before: b, after: null, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.revertBulk })),
+    );
+  });
 
   try {
-    await recalculateSubStatusIfAuto(candidateId);
+    await recalculateSubStatusIfAuto(candidateId, user.id);
   } catch (e) {
     console.error("[entries.revert-bulk] recalculateSubStatusIfAuto failed:", e);
   }

@@ -7,6 +7,9 @@ import { fetchCandidateConditions } from "@/lib/recommend/job-platform-condition
 import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 // T-XXX step2: 担当CAが変わったときだけ履歴を 1 行追記（同じトランザクション内）
 import { recordCaAssignmentChange, CA_ASSIGNMENT_ROUTES } from "@/lib/ca-assignment-history";
+// T-XXX step5B: 支援状況・希望条件（選択式）が変わる保存を同じトランザクションで記録する
+import { SUPPORT_STATUS_ROUTES, recordSupportStatusChange } from "@/lib/support-status-history";
+import { PREFERENCE_ROUTES, recordCandidatePreferenceChanges } from "@/lib/preference-history";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -223,6 +226,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         route: CA_ASSIGNMENT_ROUTES.candidateUpdate,
       });
     }
+    // T-XXX step5B: 支援状況（大項目・中項目・終了理由・終了日）と希望条件（選択式）は、変わったときだけ履歴に残す。
+    await recordSupportStatusChange(tx, {
+      candidateId,
+      before: existing,
+      after: row,
+      changedByUserId: user.id,
+      route: SUPPORT_STATUS_ROUTES.candidateUpdate,
+    });
+    await recordCandidatePreferenceChanges(tx, {
+      candidateId,
+      before: existing as unknown as Record<string, unknown>,
+      patch: updateData,
+      changedByUserId: user.id,
+      route: PREFERENCE_ROUTES.candidateUpdate,
+    });
     return row;
   });
 

@@ -8,6 +8,8 @@ import { randomUUID } from "crypto";
 import { checkInputMissing } from "@/lib/interview-input-missing";
 import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
 import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
+// T-XXX step5B: 面談の新規作成で保存した希望条件（選択式）を、直前の面談の値と比べて履歴に残す
+import { PREFERENCE_ROUTES, loadInterviewDetailBaseline, recordInterviewDetailPreferenceChanges } from "@/lib/preference-history";
 
 const TERMINATED_RESULTS = ["連絡なし辞退", "連絡あり辞退", "支援終了_当社判断", "支援終了_本人希望"];
 
@@ -330,36 +332,52 @@ export async function POST(req: Request) {
   const employee = await prisma.employee.findFirst({ where: { userId: user.id } });
   if (!employee) return NextResponse.json({ error: "従業員情報が見つかりません" }, { status: 400 });
 
-  const record = await prisma.interviewRecord.create({
-    data: {
-      candidateId,
-      interviewDate: new Date(interviewDate),
-      startTime,
-      endTime,
-      duration,
-      interviewTool,
-      interviewerUserId,
-      interviewType,
-      interviewCount,
-      resultFlag: resultFlag || (lastRecord?.resultFlag && !TERMINATED_RESULTS.includes(lastRecord.resultFlag) ? lastRecord.resultFlag : null),
-      interviewMemo: interviewMemo || null,
-      previousMemo: lastRecord?.interviewMemo || null,
-      rawTranscript: rawTranscript || null,
-      resumePdfFileId: resumePdfFileId || null,
-      summaryText: summaryText || null,
-      createdByUserId: employee.id,
-      status: body.status ?? "draft",
-      isLatest: true,
-      detail: detail ? { create: detail } : undefined,
-      rating: rating ? { create: rating } : undefined,
-    },
-    include: {
-      detail: true,
-      rating: true,
-      memos: true,
-      attachments: true,
-      candidate: { select: { id: true, name: true, candidateNumber: true } },
-    },
+  // T-XXX step5B: detail を同時保存するときは「直前の面談の値」と比べ、変わった項目だけ履歴に残す（同じトランザクション）。
+  const preferenceBaseline =
+    detail && typeof detail === "object" ? await loadInterviewDetailBaseline(prisma, { interviewRecordId: "", candidateId }) : null;
+  const record = await prisma.$transaction(async (tx) => {
+    const created = await tx.interviewRecord.create({
+      data: {
+        candidateId,
+        interviewDate: new Date(interviewDate),
+        startTime,
+        endTime,
+        duration,
+        interviewTool,
+        interviewerUserId,
+        interviewType,
+        interviewCount,
+        resultFlag: resultFlag || (lastRecord?.resultFlag && !TERMINATED_RESULTS.includes(lastRecord.resultFlag) ? lastRecord.resultFlag : null),
+        interviewMemo: interviewMemo || null,
+        previousMemo: lastRecord?.interviewMemo || null,
+        rawTranscript: rawTranscript || null,
+        resumePdfFileId: resumePdfFileId || null,
+        summaryText: summaryText || null,
+        createdByUserId: employee.id,
+        status: body.status ?? "draft",
+        isLatest: true,
+        detail: detail ? { create: detail } : undefined,
+        rating: rating ? { create: rating } : undefined,
+      },
+      include: {
+        detail: true,
+        rating: true,
+        memos: true,
+        attachments: true,
+        candidate: { select: { id: true, name: true, candidateNumber: true } },
+      },
+    });
+    if (detail && typeof detail === "object") {
+      await recordInterviewDetailPreferenceChanges(tx, {
+        candidateId,
+        interviewRecordId: created.id,
+        baseline: preferenceBaseline,
+        patch: detail as Record<string, unknown>,
+        changedByUserId: user.id,
+        route: PREFERENCE_ROUTES.interviewCreate,
+      });
+    }
+    return created;
   });
 
   await prisma.interviewRecord.updateMany({
@@ -378,7 +396,7 @@ export async function POST(req: Request) {
   }
 
   // T-080: 最新面談の resultFlag に応じて Candidate.supportStatus を自動更新
-  await applyLatestInterviewResultToSupportStatus(candidateId);
+  await applyLatestInterviewResultToSupportStatus(candidateId, user.id);
 
   const freshRecord = await prisma.interviewRecord.findUnique({
     where: { id: record.id },

@@ -4,6 +4,8 @@ import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
+// T-XXX step5B: 選考ステータスが変わる保存・削除を同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 export async function GET(
   _req: NextRequest,
@@ -125,7 +127,7 @@ export async function PATCH(
   // body に isActive が明示された場合は手動編集とみなし explicitIsActive で最優先尊重する。
   const existingFlags = await prisma.jobEntry.findUnique({
     where: { id: entryId },
-    select: { entryFlag: true, entryFlagDetail: true, companyFlag: true, personFlag: true },
+    select: ENTRY_STATUS_SELECT,
   });
   const mergedFlag = <K extends "entryFlag" | "entryFlagDetail" | "companyFlag" | "personFlag">(k: K) =>
     k in transformedData ? (transformedData[k] as string | null) : (existingFlags?.[k] ?? null);
@@ -137,29 +139,42 @@ export async function PATCH(
     explicitIsActive: "isActive" in body && typeof body.isActive === "boolean" ? body.isActive : undefined,
   });
 
-  const entry = await prisma.jobEntry.update({
-    where: { id: entryId },
-    data: transformedData,
-    include: {
-      candidate: {
-        select: {
-          id: true,
-          name: true,
-          candidateNumber: true,
-          employeeId: true,
-          // T-161: 一覧(GET /api/entries)と同じく担当RCを返す。EntryBoard は本レスポンスで
-          // 行を丸ごと差し替えるため、ここに無い列は更新直後の画面から消える（リロードで復活）。
-          recruiterName: true,
-          employee: { select: { name: true } },
+  // T-XXX step5B: 更新と同じトランザクションで、選考ステータスが変わったときだけ履歴を 1 行追記する。
+  const entry = await prisma.$transaction(async (tx) => {
+    const row = await tx.jobEntry.update({
+      where: { id: entryId },
+      data: transformedData,
+      include: {
+        candidate: {
+          select: {
+            id: true,
+            name: true,
+            candidateNumber: true,
+            employeeId: true,
+            // T-161: 一覧(GET /api/entries)と同じく担当RCを返す。EntryBoard は本レスポンスで
+            // 行を丸ごと差し替えるため、ここに無い列は更新直後の画面から消える（リロードで復活）。
+            recruiterName: true,
+            employee: { select: { name: true } },
+          },
         },
       },
-    },
+    });
+    if (existingFlags) {
+      await recordJobEntryStatusChange(tx, {
+        event: "update",
+        before: existingFlags,
+        after: row,
+        changedByUserId: user.id,
+        route: ENTRY_STATUS_ROUTES.entryUpdate,
+      });
+    }
+    return row;
   });
 
   // entryFlag / personFlag / hasJoined の変更は中項目の自動判定トリガー
   if ("entryFlag" in transformedData || "personFlag" in transformedData || "hasJoined" in transformedData) {
     try {
-      await recalculateSubStatusIfAuto(entry.candidateId);
+      await recalculateSubStatusIfAuto(entry.candidateId, user.id);
     } catch (e) {
       console.error("[entries.PATCH] recalculateSubStatusIfAuto failed:", e);
     }
@@ -179,6 +194,13 @@ export async function DELETE(
   }
 
   const { entryId } = await params;
-  await prisma.jobEntry.delete({ where: { id: entryId } });
+  // T-XXX step5B: 削除は event=delete として履歴に残す（同じトランザクション）。
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.jobEntry.findUnique({ where: { id: entryId }, select: ENTRY_STATUS_SELECT });
+    await tx.jobEntry.delete({ where: { id: entryId } });
+    if (before) {
+      await recordJobEntryStatusChange(tx, { event: "delete", before, after: null, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.entryDelete });
+    }
+  });
   return NextResponse.json({ ok: true });
 }

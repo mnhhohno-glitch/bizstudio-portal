@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { formatRecruiterName, normalizeRecruiterName } from "@/lib/recruiterDisplay";
+// T-XXX step5B: 作成を選考ステータス履歴（event=create）として同じトランザクションで記録する
+import { ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 // 選考終了系のフラグ詳細（タブ件数・人数の集計から除外する）。
 // 「もう前に進まない案件」をタブの数字から外すのが目的。一覧テーブル本体と右上「全 N 件」には効かせない。
@@ -189,27 +191,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "candidateId and companyName are required" }, { status: 400 });
   }
 
-  const entry = await prisma.jobEntry.create({
-    data: {
-      candidateId,
-      companyName,
-      jobTitle: jobTitle || "",
-      externalJobId: 0,
-      entryDate: entryDate ? new Date(entryDate) : new Date(),
-      introducedAt: new Date(),
-      // T-182: 既定を「エントリー」へ（「求人紹介」タブ非表示化とセット。旧既定だと作成行がどのタブにも出ない）
-      entryFlag: entryFlag || "エントリー",
-      entryFlagDetail: entryFlagDetail || "検討中",
-      externalJobNo: externalJobNo || null,
-      jobDb: jobDb || null,
-      jobType: jobType || null,
-      prefecture: prefecture || null,
-      careerAdvisorId: user.id,
-      createdBy: user.id,
-    },
-    include: {
-      candidate: { select: { id: true, name: true, candidateNumber: true } },
-    },
+  // T-XXX step5B: 作成を event=create として同じトランザクションで記録する（段階に入った日の起点）。
+  const entry = await prisma.$transaction(async (tx) => {
+    const row = await tx.jobEntry.create({
+      data: {
+        candidateId,
+        companyName,
+        jobTitle: jobTitle || "",
+        externalJobId: 0,
+        entryDate: entryDate ? new Date(entryDate) : new Date(),
+        introducedAt: new Date(),
+        // T-182: 既定を「エントリー」へ（「求人紹介」タブ非表示化とセット。旧既定だと作成行がどのタブにも出ない）
+        entryFlag: entryFlag || "エントリー",
+        entryFlagDetail: entryFlagDetail || "検討中",
+        externalJobNo: externalJobNo || null,
+        jobDb: jobDb || null,
+        jobType: jobType || null,
+        prefecture: prefecture || null,
+        careerAdvisorId: user.id,
+        createdBy: user.id,
+      },
+      include: {
+        candidate: { select: { id: true, name: true, candidateNumber: true } },
+      },
+    });
+    await recordJobEntryStatusChange(tx, { event: "create", before: null, after: row, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.entryCreate });
+    return row;
   });
 
   return NextResponse.json({ entry }, { status: 201 });

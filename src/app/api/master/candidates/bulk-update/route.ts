@@ -4,6 +4,8 @@ import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
 // T-XXX step2: 一括「担当CA変更」で担当が変わる行だけ履歴を追記（同じトランザクション内）
 import { recordCaAssignmentChanges, CA_ASSIGNMENT_ROUTES } from "@/lib/ca-assignment-history";
+// T-XXX step5B: 一括アーカイブ・一括支援状況変更で変わる行だけ履歴を追記（同じトランザクション内）
+import { SUPPORT_STATUS_SELECT, SUPPORT_STATUS_ROUTES, recordSupportStatusChange, recordSupportStatusChanges } from "@/lib/support-status-history";
 
 const VALID_STATUSES = ["BEFORE", "ACTIVE", "WAITING", "ENDED", "ARCHIVED"];
 
@@ -34,16 +36,30 @@ export async function POST(request: NextRequest) {
     let message = "";
 
     if (action === "archive") {
-      const result = await prisma.candidate.updateMany({
-        where: { id: { in: candidateIds } },
-        data: {
-          supportStatus: "ARCHIVED",
-          supportSubStatus: null,
-          supportSubStatusManual: false,
-          supportEndReason: null,
-          supportEndNote: null,
-          supportEndDate: null,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        const before = await tx.candidate.findMany({ where: { id: { in: candidateIds } }, select: SUPPORT_STATUS_SELECT });
+        const r = await tx.candidate.updateMany({
+          where: { id: { in: candidateIds } },
+          data: {
+            supportStatus: "ARCHIVED",
+            supportSubStatus: null,
+            supportSubStatusManual: false,
+            supportEndReason: null,
+            supportEndNote: null,
+            supportEndDate: null,
+          },
+        });
+        await recordSupportStatusChanges(
+          tx,
+          before.map((b) => ({
+            candidateId: b.id,
+            before: b,
+            after: { supportStatus: "ARCHIVED", supportSubStatus: null, supportEndReason: null, supportEndDate: null },
+            changedByUserId: user.id,
+            route: SUPPORT_STATUS_ROUTES.bulkArchive,
+          })),
+        );
+        return r;
       });
       updatedCount = result.count;
       message = `${updatedCount}件の求職者をアーカイブしました`;
@@ -133,10 +149,15 @@ export async function POST(request: NextRequest) {
           );
           updateData.supportSubStatus = nextSub || null;
 
-          await tx.candidate.update({
+          const before = await tx.candidate.findUnique({ where: { id: candidateId }, select: SUPPORT_STATUS_SELECT });
+          const after = await tx.candidate.update({
             where: { id: candidateId },
             data: updateData,
+            select: SUPPORT_STATUS_SELECT,
           });
+          if (before) {
+            await recordSupportStatusChange(tx, { candidateId, before, after, changedByUserId: user.id, route: SUPPORT_STATUS_ROUTES.bulkChangeStatus });
+          }
         }
       });
       updatedCount = candidateIds.length;

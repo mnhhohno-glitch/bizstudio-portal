@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+// T-XXX step5B: 削除を選考ステータス履歴（event=delete）として同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 type RouteContext = {
   params: Promise<{ candidateId: string; entryId: string }>;
@@ -61,10 +63,16 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     );
   }
 
-  await prisma.jobEntry.delete({ where: { id: entryId } });
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.jobEntry.findUnique({ where: { id: entryId }, select: ENTRY_STATUS_SELECT });
+    await tx.jobEntry.delete({ where: { id: entryId } });
+    if (before) {
+      await recordJobEntryStatusChange(tx, { event: "delete", before, after: null, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.entryDelete });
+    }
+  });
 
   try {
-    await recalculateSubStatusIfAuto(candidateId);
+    await recalculateSubStatusIfAuto(candidateId, user.id);
   } catch (e) {
     console.error("[entries.DELETE] recalculateSubStatusIfAuto failed:", e);
   }

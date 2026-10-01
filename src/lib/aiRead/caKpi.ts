@@ -337,12 +337,13 @@ async function querySelection(bCte: string, empPred: string) {
     GROUP BY GROUPING SETS ((b.key, ev.employee_id, ev.stage), (b.key, ev.stage));`);
 }
 
-async function queryCurrentStatus(empPred: string) {
-  return q<Row>(`
-    SELECT ${grpExpr("x.employee_id")}, x.stage, COUNT(*)::int AS n
-    FROM (
-      SELECT c.employee_id,
-        CASE
+/**
+ * 取得時点の選考段階（CURRENT_STATUS_STAGES のいずれか・該当なしは NULL）を返す CASE 式。別名 je の job_entries 行に対して使う。
+ * T-XXX step5: 日次スナップショット（src/lib/pipeline-snapshot.ts）と分析ツール（src/lib/aiRead/analytics/*）でも同じ定義を使うため export
+ * （文字列は queryCurrentStatus に埋め込まれていたものと同一）。
+ */
+export function entryStageCaseSql(): string {
+  return `CASE
           WHEN je.entry_flag_detail IN (${inList(DECLINED_DETAILS)}) THEN 'declined'
           WHEN je.entry_flag_detail IN (${inList(REJECTED_DETAILS)}) THEN 'rejected'
           WHEN je.entry_flag_detail IN (${inList(CLOSED_DETAILS)}) THEN 'closed'
@@ -357,7 +358,15 @@ async function queryCurrentStatus(empPred: string) {
           WHEN je.entry_flag = '面接' THEN 'interviewOther'
           WHEN je.entry_flag = '書類選考' THEN 'documentScreening'
           WHEN je.entry_flag IN ('応募','エントリー') THEN 'entered'
-        END AS stage
+        END`;
+}
+
+async function queryCurrentStatus(empPred: string) {
+  return q<Row>(`
+    SELECT ${grpExpr("x.employee_id")}, x.stage, COUNT(*)::int AS n
+    FROM (
+      SELECT c.employee_id,
+        ${entryStageCaseSql()} AS stage
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL
     ) x

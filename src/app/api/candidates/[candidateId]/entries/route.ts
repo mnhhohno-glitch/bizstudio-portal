@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+// T-XXX step5B: 一括作成を選考ステータス履歴（event=create）として同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChanges } from "@/lib/entry-status-history";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -74,7 +76,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   );
 
   if (newEntries.length > 0) {
-    await prisma.jobEntry.createMany({
+    await prisma.$transaction(async (tx) => {
+    const createdRows = await tx.jobEntry.createManyAndReturn({
+      select: ENTRY_STATUS_SELECT,
       data: newEntries.map(
         (e: {
           externalJobId: number;
@@ -114,13 +118,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       ),
     });
+    await recordJobEntryStatusChanges(
+      tx,
+      createdRows.map((r) => ({ event: "create" as const, before: null, after: r, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.candidateEntriesCreate })),
+    );
+    });
   }
 
   const skipped = entries.length - newEntries.length;
 
   if (newEntries.length > 0) {
     try {
-      await recalculateSubStatusIfAuto(candidateId);
+      await recalculateSubStatusIfAuto(candidateId, user.id);
     } catch (e) {
       console.error("[entries.POST] recalculateSubStatusIfAuto failed:", e);
     }
