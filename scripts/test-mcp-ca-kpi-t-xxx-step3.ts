@@ -14,7 +14,7 @@
  *
  * 確かめること:
  *   1. initialize → serverInfo.name が bizstudio-portal-ca-kpi
- *   2. tools/list → 4 ツール（list_cas / get_ca_kpi / get_company_kpi / get_metric_definitions）・全部 readOnlyHint=true
+ *   2. tools/list → 既存 4 ツール（list_cas / get_ca_kpi / get_company_kpi / get_metric_definitions）が残り・全ツール readOnlyHint=true（step5C で 9 本増えた）
  *   3. tools/call get_metric_definitions → definitions / caveats が入っている
  *   4. tools/call list_cas → cas 配列
  *   5. tools/call get_ca_kpi（2026-08-01〜08-31・month）→ rows が返り、全員行がある（--expect-2026-08 なら数字も一致）
@@ -117,12 +117,13 @@ async function main(): Promise<void> {
   // 2. tools/list
   const list = await rpc("tools/list", {});
   const tools = ((list.result?.tools ?? []) as Array<{ name: string; annotations?: { readOnlyHint?: boolean }; description?: string; inputSchema?: Json }>).slice();
+  // T-XXX step5C で分析ツール 9 本が増えた。既存 4 本が残っていること（名前・入力項目）を確かめる（増えた分は scripts/test-mcp-analytics-t-xxx-step5.ts）
   check(
-    "[2] tools/list 4 ツール",
-    tools.map((t) => t.name).sort(),
+    "[2] tools/list に既存 4 ツール",
+    tools.map((t) => t.name).filter((n) => ["get_ca_kpi", "get_company_kpi", "get_metric_definitions", "list_cas"].includes(n)).sort(),
     ["get_ca_kpi", "get_company_kpi", "get_metric_definitions", "list_cas"],
   );
-  checkTrue("[2] 全ツール readOnlyHint=true", tools.length === 4 && tools.every((t) => t.annotations?.readOnlyHint === true));
+  checkTrue("[2] 全ツール readOnlyHint=true", tools.length >= 4 && tools.every((t) => t.annotations?.readOnlyHint === true));
   checkTrue("[2] 全ツールに日本語の説明", tools.every((t) => (t.description ?? "").length > 20));
   const caKpiTool = tools.find((t) => t.name === "get_ca_kpi");
   const props = (caKpiTool?.inputSchema?.properties ?? {}) as Json;
