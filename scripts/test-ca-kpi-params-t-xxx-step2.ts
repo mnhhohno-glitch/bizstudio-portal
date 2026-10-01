@@ -11,7 +11,8 @@ import {
   isValidYmd,
   daysInclusive,
   lastDayOfMonthYmd,
-  checkCaKpiRowLimit,
+  checkCaKpiSizeLimit,
+  estimateCaKpiRowBytes,
   CA_KPI_DEFAULT_GROUPS,
 } from "@/lib/aiRead/caKpiParams";
 
@@ -119,11 +120,16 @@ test("parse: 期間の上限（day 92 日 / week・month 400 日）", () => {
   assert.equal(parseCaKpiQuery(sp("from=2026-07-01&to=2026-10-02&granularity=day"), TODAY).ok, false);
 });
 
-test("行数の上限（rows ≤ 100）", () => {
-  assert.equal(checkCaKpiRowLimit(11, 9), null); // 全CA 8 名 + 全員 × 11 か月 = 99
-  assert.match(checkCaKpiRowLimit(12, 9) ?? "", /108 行/); // 12 か月は超過
-  assert.equal(checkCaKpiRowLimit(92, 1), null); // caId 指定の day 92 日
-  assert.match(checkCaKpiRowLimit(31, 9) ?? "", /上限 100 行/);
+test("応答サイズの上限（rows の推定 ≤ 85KB）", () => {
+  const def = [...CA_KPI_DEFAULT_GROUPS];
+  assert.equal(estimateCaKpiRowBytes(def), 1070);
+  assert.equal(checkCaKpiSizeLimit(8, 9, def), null); // 全CA 8 名 + 全員 × 8 か月 = 72 行 ≈ 77KB
+  assert.match(checkCaKpiSizeLimit(9, 9, def) ?? "", /81 行/); // 9 か月は超過
+  assert.match(checkCaKpiSizeLimit(11, 9, def) ?? "", /区切りは 8 個まで/);
+  assert.equal(checkCaKpiSizeLimit(79, 1, def), null); // caId 指定の day 79 日 ≈ 84.5KB
+  assert.match(checkCaKpiSizeLimit(92, 1, def) ?? "", /groups/); // 既定グループの day 92 日は超過（groups を減らせば通る）
+  assert.equal(checkCaKpiSizeLimit(92, 1, ["interview", "entry", "selection"]), null); // 780B × 92 = 72KB
+  assert.equal(checkCaKpiSizeLimit(13, 9, ["interview"]), null); // 270B × 117 = 32KB
 });
 
 console.log(`\n${count} tests passed`);

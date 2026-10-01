@@ -17,21 +17,44 @@ export const CA_KPI_DEFAULT_GROUPS: readonly CaKpiGroup[] = ["interview", "propo
 export const CA_KPI_LIMITS = {
   dayMaxDays: 92,
   weekMonthMaxDays: 400,
-  /** rows（区切り × 行の数）の上限。1 行 ≈ 1KB なので ChatGPT Actions の応答サイズ（目安 100KB）に収める。 */
-  maxRows: 100,
+  /**
+   * rows 全体の推定バイト数の上限。ChatGPT Actions の応答は約 10 万文字までなので、定義文（約 6KB）を足しても収まる値にする。
+   * 本番実測（2026-10-01）: 既定グループで 1 行 ≈ 1.1KB（全CA × 11 か月 = 99 行で 114KB → 超過）。
+   */
+  maxRowsBytes: 85_000,
 } as const;
 
+/** グループごとの 1 行あたりの推定バイト数（本番の実測から。キー名 + 3〜4 桁の数値）。 */
+const GROUP_BYTES: Record<CaKpiGroup, number> = {
+  interview: 230,
+  proposal: 100,
+  rating: 190,
+  entry: 90,
+  selection: 420,
+  activity: 130,
+};
+const ROW_BASE_BYTES = 40; // {"ca":"1000001","bucket":"2026-08",…}
+
+/** 1 行あたりの推定バイト数。 */
+export function estimateCaKpiRowBytes(groups: readonly CaKpiGroup[]): number {
+  return ROW_BASE_BYTES + groups.reduce((s, g) => s + GROUP_BYTES[g], 0);
+}
+
 /**
- * 応答の行数（区切り × （全員 + CA 人数））が上限を超えないか。超えるときは 400 に載せる理由文を返す。
+ * 応答の rows（区切り × （全員 + CA 人数） × 1 行の推定サイズ）が上限を超えないか。超えるときは 400 に載せる理由文を返す。
  * @param bucketCount 区切りの数
  * @param rowsPerBucket 1 区切りあたりの行数（caId 指定時は 1、全CAなら CA 人数 + 1（全員行））
+ * @param groups 返すグループ（少ないほど 1 行が小さい）
  */
-export function checkCaKpiRowLimit(bucketCount: number, rowsPerBucket: number): string | null {
+export function checkCaKpiSizeLimit(bucketCount: number, rowsPerBucket: number, groups: readonly CaKpiGroup[]): string | null {
   const rows = bucketCount * rowsPerBucket;
-  if (rows <= CA_KPI_LIMITS.maxRows) return null;
+  const perRow = estimateCaKpiRowBytes(groups);
+  const bytes = rows * perRow;
+  if (bytes <= CA_KPI_LIMITS.maxRowsBytes) return null;
+  const maxBuckets = Math.max(1, Math.floor(CA_KPI_LIMITS.maxRowsBytes / (rowsPerBucket * perRow)));
   return (
-    `応答が大きすぎます（${bucketCount} 区切り × ${rowsPerBucket} 行 = ${rows} 行、上限 ${CA_KPI_LIMITS.maxRows} 行）。` +
-    `期間を短くする（全CAの月別なら最大 ${Math.floor(CA_KPI_LIMITS.maxRows / rowsPerBucket)} 区切り）か、caId で CA を 1 人に絞るか、granularity を粗くしてください`
+    `応答が大きすぎます（${bucketCount} 区切り × ${rowsPerBucket} 行 = ${rows} 行・推定 ${Math.round(bytes / 1000)}KB、上限 ${Math.round(CA_KPI_LIMITS.maxRowsBytes / 1000)}KB）。` +
+    `同じ条件なら区切りは ${maxBuckets} 個まで。期間を短くする、caId で CA を 1 人に絞る、granularity を粗くする、groups で返す項目を減らす（例 groups=interview,entry,selection）のいずれかで対応してください`
   );
 }
 

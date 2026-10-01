@@ -62,7 +62,7 @@ ChatGPT のカスタムGPT（GPTs）から、ポータルの CA別実績 API（`
 ## データの取り方
 - CA別・期間別の実績は getCaKpi を使う（from/to は JST の YYYY-MM-DD、granularity は month が既定。週別は week、日別は day）。
 - 会社全体の売上・粗利・目標・決定人数は getCompanyKpi を使う（year=YYYY、month=YYYY-MM）。
-- 全CAの月別は最大 11 か月まで一度に取れる。1 年分は 2 回に分けて取る。日別・週別で全CAを見るときは期間を短くするか、caId で 1 人に絞る。
+- 全CAの月別は既定の項目で最大 8 か月まで一度に取れる。1 年分は 2 回に分けて取る。日別・週別で全CAを見るときは期間を短くするか、caId で 1 人に絞るか、groups で項目を減らす（例 groups=interview,entry,selection）。
 - 400 が返ったら本文の error を読み、期間や粒度を変えて取り直す。
 - 当月は「今日まで」の値で、未来の面談予約や未入力の分だけ動く。確定値の比較は過去の月で行う。
 

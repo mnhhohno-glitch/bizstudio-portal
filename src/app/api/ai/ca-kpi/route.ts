@@ -13,7 +13,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { assertAiReadAuth } from "@/lib/aiRead/auth";
-import { parseCaKpiQuery, buildCaKpiBuckets, checkCaKpiRowLimit, CA_KPI_GROUPS, CA_KPI_LIMITS } from "@/lib/aiRead/caKpiParams";
+import { parseCaKpiQuery, buildCaKpiBuckets, checkCaKpiSizeLimit, CA_KPI_GROUPS, CA_KPI_LIMITS } from "@/lib/aiRead/caKpiParams";
 import {
   computeCaKpi,
   metricsFor,
@@ -171,8 +171,8 @@ export async function GET(req: Request) {
 
   const buckets = buildCaKpiBuckets(qp.from, qp.to, qp.granularity);
   const single = cas.length === 1 && qp.caId != null;
-  // 応答サイズの上限（rows ≈ 1KB/行）。全CA × day 粒度 × 92 日のような組み合わせはここで 400 にする。
-  const tooBig = checkCaKpiRowLimit(buckets.length, single ? 1 : cas.length + 1);
+  // 応答サイズの上限（rows の推定バイト数）。全CA × 12 か月や全CA × day 粒度のような組み合わせはここで 400 にする。
+  const tooBig = checkCaKpiSizeLimit(buckets.length, single ? 1 : cas.length + 1, qp.groups);
   if (tooBig) return bad(tooBig);
   const [result, meta] = await Promise.all([
     computeCaKpi({
@@ -221,7 +221,12 @@ export async function GET(req: Request) {
           : qp.granularity === "month"
             ? "month は暦月。最初と最後の月は from/to で切り詰めた端数（当月は今日まで）"
             : "day は JST の暦日",
-      limits: { dayMaxDays: CA_KPI_LIMITS.dayMaxDays, weekMonthMaxDays: CA_KPI_LIMITS.weekMonthMaxDays, maxRows: CA_KPI_LIMITS.maxRows },
+      limits: {
+        dayMaxDays: CA_KPI_LIMITS.dayMaxDays,
+        weekMonthMaxDays: CA_KPI_LIMITS.weekMonthMaxDays,
+        maxRowsBytes: CA_KPI_LIMITS.maxRowsBytes,
+        note: "全CA（8名+全員行）の月別・既定グループなら 8 か月まで。超えるときは期間を分ける・caId で絞る・groups を減らす",
+      },
       groups: qp.groups,
       availableGroups: CA_KPI_GROUPS,
       dataFreshness: {
