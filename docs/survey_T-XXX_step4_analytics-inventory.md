@@ -519,3 +519,131 @@ MCP の認可仕様（2025-06-18 版）と、ChatGPT のアプリ連携の一般
 今は CA 8名のうち入社日が入っているのは安藤さん・奥村さん・磯野さんの3名だけで、退職日は誰にも入っていません。また「橋田」さんが社員マスタに見当たらず、要件書に無い南條さん・岡田さんが「在籍中の CA」として集計に入っています。入社日・退職日を基準にすると、入社前の月や、CA でなくなった後の月を自動で外せます。
 
 - **推奨**: はい。大野さんが社員詳細で5名分の入社日（と、CA でなくなった人の退職日）を入れ、「橋田」さんが誰かを教えてもらう。CA 業務の開始日が入社日と違う人がいる場合だけ、その欄を追加します。
+
+---
+
+## step5 実装結果（2026-10-02・commit d6a49e0 / 5cdd094 / 1b2975f ＋ 392a1fc / 82af286 / 264432b → master・staging ea64f37）
+
+### A. ログイン情報（`bs_session`）の強化（commit d6a49e0）
+
+| 項目 | 内容 |
+|--|--|
+| 方式 | **サーバー側の新規テーブル `user_sessions` で管理する乱数トークン方式**（署名付きトークンにしなかった理由: 既存に `app_sessions`（連携アプリ向け・ハッシュ保存）があり同じ作りが自然、ログアウト・無効化で即時失効できる、鍵のローテーションが要らない） |
+| トークン | `bss_` + 32 バイト base64url（47 文字）。DB には SHA-256 だけ（`token_hash` UNIQUE）。`user_id`・`created_at`・`last_used_at`（10 分に 1 回更新）・`expires_at`（作成から 7 日・絶対）・`revoked_at`・`revoke_reason` |
+| Cookie | `HttpOnly`・`Secure`（本番）・`SameSite=Lax`・`Path=/`・`Max-Age=604800`（旧と同じ） |
+| 旧形式の拒否 | `src/lib/session-token.ts` `isSessionTokenFormat` で形式判定。`getSessionUser` は null、`middleware` は `/login` へ流して旧 Cookie を `Max-Age=0` で消す。**本番反映後は全員がログインし直し** |
+| 失効 | ログアウト（`clearSession` → `revoke_reason=logout`）、ユーザー無効化（`POST /api/admin/users/[id]/status` disabled → `revokeAllUserSessions` → `user_disabled`。監査ログに `revokedSessions` 件数） |
+
+**`bs_session` を読んでいた箇所の一覧（置き換え結果）**:
+
+| 箇所 | 以前 | 今 |
+|--|--|--|
+| `src/lib/auth.ts` `getSessionUser` | Cookie の値＝User.id で `users` を引く | 形式判定 → ハッシュで `user_sessions` を引く（失効・期限・`users.status`） |
+| `src/lib/auth.ts` `setSessionUserId` / `clearSession` | User.id を Cookie に書く / Cookie を消す | `loginAndSetSessionCookie`（別名で互換）/ セッション失効＋Cookie 消去 |
+| `src/middleware.ts` | Cookie が「有る」だけで通す | 新形式に一致するときだけ通す。旧形式は消して `/login` |
+| `src/app/api/auth/login/route.ts` | `setSessionUserId(user.id)` | `loginAndSetSessionCookie(user.id)` |
+| `src/app/api/admin/users/[id]/status/route.ts` | 無効化しても既存 Cookie は有効 | 無効化で全セッション失効 |
+| `getSessionUser` の呼び出し 334 か所（API・サーバーコンポーネント・`(app)/layout.tsx`・`auth/sso/page.tsx`） | — | **変更なし**（戻り値の形は同じ） |
+| `src/app/api/candidates/[candidateId]/saved-jobs/route.ts` 他のコメント中の `bs_session` | 説明文のみ | 変更なし |
+
+`grep -rn bs_session src` の結果はこの 3 ファイル（auth.ts・middleware.ts・コメント 2 件）だけで、Cookie を直接読む箇所は他に無い（`request.cookies.get` は `share_*` / `transfer` の別 Cookie のみ）。
+
+**影響を受けていないこと（テストで確認）**: Bearer `AI_READ_API_KEY`（`/api/ai/*`）、`x-api-key`（`/api/internal/*`）、`x-api-secret`（`/api/external/*`）、`x-rpa-secret`（`/api/rpa/mynavi/*`）、`/api/mcp/[secret]`、`AppSession` の Bearer（`/api/auth/me`）。いずれも `src/lib/auth.ts` を通らない。
+
+### B. 今日から記録を始めるもの（commit 5cdd094）
+
+記録の失敗で本体の更新を止めるか: **止める**（step2 の担当CA履歴と同じ「更新と同じトランザクション」。履歴が書けない＝本体も戻る。履歴の欠けを後から埋められないため）。変わらない保存では書かない。
+
+| 表 | 内容 | 経路（route 列） | 記録開始日 |
+|--|--|--|--|
+| `job_entry_status_histories` | `entry_flag` / `entry_flag_detail` / `company_flag` / `person_flag` / `is_active` / `archived` の変化（event=update）、作成（create・from NULL）、削除（delete・to NULL）。`job_entry_id` に FK 無し（削除後も残す） | entry_update（PATCH /api/entries/[id]）/ entry_flags（…/flags）/ bulk_flags / auto_progress / bulk_archive / entry_create（POST /api/entries）/ candidate_entries_create（POST /api/candidates/[id]/entries）/ bookmark_to_entry / auto_expire（定期・変更者 NULL）/ bulk_import（取り込み）/ entry_delete（2 つの DELETE）/ bulk_delete / revert_bulk / auto_purge（定期）/ bulk_import_delete | 2026-10-02 反映（最初の行の日時を `historySince.entryStatus` で返す。確認時点では 0 行） |
+| `candidate_support_status_histories` | `support_status` / `support_sub_status` / `support_end_reason` / `support_end_date` の変化 | candidate_update（PATCH /api/candidates/[id]/update）/ bulk_archive・bulk_change_status（POST /api/master/candidates/bulk-update）/ interview_result（面談結果からの自動反映 `applyLatestInterviewResultToSupportStatus`・3 経路から）/ sub_status_auto（中項目の自動再計算 `recalculateSubStatusIfAuto`・約 20 経路から） | 同上（`historySince.supportStatus`） |
+| `candidate_preference_histories` | 面談詳細（`interview_details`）の選択式・数値・JSON の 35 項目と、求職者行（`candidates.desired_*`）の 8 項目。1 項目 1 行（from/to）。文章欄は対象外。面談の新規作成は「直前の面談の値」と比べる（前回の写しなら書かない） | interview_create（POST /api/interviews）/ interview_update（PATCH /api/interviews/[id]）/ interview_autosave / script_apply（台本モード）/ candidate_update | 同上（`historySince.preference`） |
+| `ca_pipeline_daily_snapshots` | CA 別（＋ALL・NONE）の集計値: 活動中（ACTIVE/WAITING）、段階別の有効エントリー件数、選考中の件数・人数、承諾済み未入社、今後の面談予約（初回/継続）。個人の行は保存しない | `POST /api/internal/pipeline-snapshot`（`x-api-key`）。**GitHub Actions `t-xxx-pipeline-snapshot.yml` 23:50 JST**（既存の定期処理と同じ作法: auto-expire 等と同一シークレット・`workflow_dispatch` で dry_run 可）。同じ日に 2 回動いたら upsert（`run_count` +1） | **2026-10-02**（本番反映当日に手動実行で 1 回保存: 10 行＝ALL・NONE・CA 8 名、ALL の選考中 99 件・活動中 155 名） |
+
+対象外にした経路（ステータス以外の列だけを書く）: `entries/[id]/sync-task`（Google ToDo・カレンダー ID）、`tasks` POST（`task_requested_at`）、`candidates/[id]/entries/[entryId]` PATCH（エントリー日だけ）。求職者の新規登録（既定 BEFORE）と初期の希望条件は「変更」ではないので記録しない。
+
+### C. 分析ツール（commit 1b2975f）
+
+`src/lib/mcp/caKpiServer.ts` に 9 ツールを追加（全部 `readOnlyHint`・集計値のみ・zod 検証・85KB 上限・期間は最長 18 か月）。組み立ては `src/lib/aiRead/analytics/*`。既存 4 ツールの出力は変えていない（tools/list は 13 本）。
+
+| ツール | 本番の応答（2026-05〜09） |
+|--|--|
+| `get_ca_roster` | 6KB・0.4 秒。入社日未登録の警告: 1000001・1000007・1000009・1000028・1000030 |
+| `get_cohort_funnel` | 29KB・1.0 秒 |
+| `get_selection_conversion` | 37KB・1.6 秒 |
+| `get_pipeline_now` | 16KB・0.4 秒 |
+| `get_accept_revenue` | 29KB・0.4 秒 |
+| `get_forecast_inputs` | 23KB・0.6 秒 |
+| `get_segment_breakdown` | 26KB・0.4 秒 |
+| `get_snapshot_history` | 3KB・0.4 秒 |
+| `get_data_quality` | 10KB・0.3 秒 |
+
+**共通の定義**: 在籍CA＝`employees.job_category='CA'`（在籍＝status active かつ退職日なしか未来）。CA 別の月の行は入社月〜退職月だけ（入社日未登録は全月＋warnings）。初回面談＝辞退系・日程再調整を除く最も早い実施済み面談。粗利＝売上−求人DB費−仕入（税抜・円）。人数 1〜4 のグループは内訳を伏せる（`suppressed: true`）、分布は標本 5 未満で伏せる。2026-04 以前は `reference: true`。
+
+**2026-05〜09 の主要な結果（全体・集計値のみ・取得 2026-10-02 07:35 JST）**:
+
+| 初回面談月 | 人数 | 提案 | エントリー | 書類通過 | 企業面接 | 内定 | 承諾 | 入社 | 観測中 |
+|--|--|--|--|--|--|--|--|--|--|
+| 2026-05 | 83 | 47 | 32 | 24 | 22 | 9 | 6 | 4 | 6 |
+| 2026-06 | 65 | 55 | 26 | 12 | 11 | 6 | 6 | 1 | 11 |
+| 2026-07 | 84 | 72 | 29 | 21 | 16 | 6 | 5 | 1 | 21 |
+| 2026-08 | 82 | 60 | 28 | 13 | 12 | 2 | 1 | 0 | 26 |
+| 2026-09 | 88 | 64 | 22 | 10 | 7 | 0 | 0 | 0 | 65 |
+
+（step4 §3-7 の試算と提案〜承諾の人数が全月一致）
+
+| 応募月 | 件数 | 人数 | 承諾 | 承諾後辞退 | 辞退 | 見送り | クローズ | 選考中 | 不明 |
+|--|--|--|--|--|--|--|--|--|--|
+| 2026-05 | 186 | 34 | 3 | 0 | 41 | 136 | 6 | 0 | 0 |
+| 2026-06 | 289 | 45 | 5 | 0 | 55 | 221 | 8 | 0 | 0 |
+| 2026-07 | 279 | 45 | 7 | 1 | 70 | 169 | 30 | 0 | 2 |
+| 2026-08 | 229 | 48 | 5 | 1 | 23 | 138 | 53 | 8 | 1 |
+| 2026-09 | 313 | 50 | 1 | 0 | 37 | 98 | 80 | 94 | 3 |
+
+| 承諾月 | 件数 | 承諾売上（税抜・円） | 粗利 | うち承諾後辞退 |
+|--|--|--|--|--|
+| 2026-05 | 2 | 1,586,400 | 1,186,400 | 0 |
+| 2026-06 | 4 | 3,717,200 | 2,698,480 | 0 |
+| 2026-07 | 5 | 3,425,000 | 2,245,800 | 0 |
+| 2026-08 | 10 | 7,890,832 | 5,609,880 | 2 件・440,000 |
+| 2026-09 | 6 | 4,432,070 | 3,512,070 | 0 |
+
+- `get_accept_revenue` の ALL は `get_company_kpi` の `invoiceRevenue` / `grossProfit` / `decidedDealCount` と 2026-07・08 で一致。期間合計の CA 別合計＝全体合計（差 0）。既存ツールとの差は無く、承諾後辞退（8 月 2 件・440,000 円）は**内数として分けて返す**だけ
+- 今の進行中（ALL）: 選考中 99 件・34 名、承諾済み未入社 13 件、今後の面談予約 20 件（初回 14・継続 6）、活動中 155 名（支援中 129・待機 26）
+- `historySince`: caAssignment 2026-10-01、entryStatus / supportStatus / preference は確認時点で null（最初の変更から始まる）、pipelineSnapshot 2026-10-02
+
+**スキル**: `docs/gpt/ca-kpi-skill/SKILL.md` を更新（分析の順序・予測売上の手順・注意書き）。デスクトップに `ca-kpi-skill.zip` を作り直し済み（コミットしない）。
+
+### D. テスト
+
+| 区分 | 内容 | 結果 |
+|--|--|--|
+| A | `scripts/test-session-auth-t-xxx-step5.ts`（ローカル dev＋docker postgres・架空データ `scripts/seed-analytics-fixture-t-xxx-step5.ts`）: ログイン・Cookie 属性・主要画面・旧形式の拒否と消去・推測トークン・期限切れ・ログアウト・無効化で 2 セッション失効・無効ユーザーの拒否・Bearer / x-api-key / x-api-secret / x-rpa-secret / MCP の各経路 | **43/43** |
+| B | `scripts/test-histories-t-xxx-step5.ts`: 15 経路のうち 9 経路を実際に叩いて「変更時のみ 1 行・変わらない保存では増えない・削除も残る」、支援状況 5 経路のうち 4、希望条件 5 経路のうち 4（新規作成の「写しだけなら増えない」を含む）、スナップショット同日 2 回で重複なし・dry_run は保存しない | **56/56** |
+| C | `scripts/test-analytics-t-xxx-step5.ts`（架空データで設計したケース: 在籍CAのみ・入社前の月の行が無い・初回面談の再設定 2 名・複数応募・担当変更・承諾後辞退・月またぎ・選考中・少人数の伏せ・CA別合計＝全体・company-kpi と一致・個人情報なし） | **71/71** |
+| C | `scripts/test-mcp-analytics-t-xxx-step5.ts`（MCP 経由・13 ツール・共通項目・上限・入力誤り） | ローカル 64/64・**本番 70/70** |
+| 既存 | `scripts/verify-ca-kpi-t-xxx-step2.ts`（ローカル）PASS、`test-ca-kpi-params-t-xxx-step2.ts` 9 PASS、`test-mcp-secret-rate-limit-t-xxx-step3.ts` 15/15、`test-mcp-ca-kpi-t-xxx-step3.ts` ローカル 29/29・**本番 41/41（--expect-2026-08: 面談 185・初回 82・エントリー 48 人／229 件・書類通過 26・内定 10・承諾 9 人／10 件が不変）** | PASS |
+| 型・lint・ビルド | `tsc --noEmit` OK、`eslint`（変更ファイル）OK、`npx prisma generate && npx next build` OK | OK |
+
+### E. デプロイと本番確認
+
+1. **staging**（ea64f37・shared DB にマイグレーション 2 本を適用＝追加のみ）: `scripts/check-session-remote-t-xxx-step5.ts` で未認証→/login、旧形式 Cookie の拒否と消去、推測トークン 401、誤ログイン 401、ログイン（Cookie は新形式・HttpOnly・Secure・SameSite=Lax・7 日）→ `/`・`/entries`・`/tasks`・`/announcements` 200 → ログアウト 303 → 401 を **20/20**。確認用の一時ユーザー（`step5-check@system.local`）を作って使い、確認後に自分の行（監査ログ 6・セッション 3・ユーザー 1）だけ削除した
+2. **本番**: 1 回目の push（82af286）は **build 失敗**（import の無い `scripts/*.ts` 2 本がグローバルになり `failures` が衝突・罠「scripts の export {}」の再発）。本番は旧コミットのまま稼働していた。`export {}` を付けた 264432b で **SUCCESS**（Railway のデプロイ済みコミットが 264432b と一致）。確認: 同じスクリプトで 20/20、MCP 既存 41/41・新 70/70、x-api-key 経路（GitHub Actions からの snapshot 保存 HTTP 200）、x-api-secret / x-rpa-secret は未認証で拒否されること（本番に送る秘密を持っていないため、認証成功側は直近の受信ログで確認: マイナビ RPA の処理ログ 直近 24 時間 6 件・求職者サイトの行動ログ 805 件・いずれも反映直前まで受信）
+3. 本番 DB（読み取り専用）: `_prisma_migrations` に 2 本、5 表が存在、`user_sessions` にログイン分の行（確認後は全部失効）、各履歴 0 行（記録は最初の変更から）、スナップショット 2026-10-02 が 10 行
+
+### 実際に確認できたこと
+
+- 旧形式 Cookie が staging・本番で拒否され消されること、新形式でログイン〜主要画面〜ログアウトが動くこと、無効化で全セッションが失効すること（ローカル）
+- Cookie 以外の認証経路（Bearer・x-api-key・x-api-secret・x-rpa-secret・MCP 秘密URL）が従来どおり動くこと（ローカルで成功/拒否の両方、本番で拒否側と x-api-key の成功側）
+- 各履歴が「変更時のみ 1 行」で、変わらない保存では増えないこと（ローカル）。スナップショットが同日 2 回で重複しないこと（ローカル・本番は 1 回）
+- 2026-08 の既存の数字が不変であること（本番 MCP）。新ツールの ALL が company-kpi と一致すること（本番 2026-07・08）
+- 本番の 2026-05 コホートの人数が step4 の試算と一致すること
+
+### 確認できていないこと
+
+- 本番で x-api-secret / x-rpa-secret の**認証成功側**をこの作業では送っていない（秘密を持っていないため）。次の RPA 実行・外部連携の受信で `mynavi_rpa_processing_logs` 等に新しい行が付くかを翌営業日に見る
+- 本番の各履歴表はまだ 0 行（最初の変更が起きた時点から記録される）。`historySince` の日付は翌営業日以降に埋まる
+- 日次スナップショットの**定期実行（23:50 JST）**はまだ 1 回も動いていない（手動実行で 1 回保存済み）。10/2 23:50 の分が `run_count=2` で上書きされ、10/3 以降は毎日 1 行ずつ増える見込み
+- ChatGPT 画面からの新ツールの利用（スキル zip の再アップロードは大野さんの作業）
+- 入社日未登録の 5 名の在籍期間（入力されるまで全期間を在籍として扱う）
