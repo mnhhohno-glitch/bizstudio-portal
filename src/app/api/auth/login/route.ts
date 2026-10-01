@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { setSessionUserId } from "@/lib/auth";
+import { loginAndSetSessionCookie } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 
 export async function POST(req: Request) {
@@ -48,7 +48,8 @@ export async function POST(req: Request) {
     );
   }
 
-  await setSessionUserId(user.id);
+  // T-XXX step5A: 乱数トークンのセッションを作って Cookie に入れる（User.id は Cookie に入れない）
+  await loginAndSetSessionCookie(user.id);
 
   await writeAudit({
     actorUserId: user.id,

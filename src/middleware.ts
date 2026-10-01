@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME, isSessionTokenFormat } from "@/lib/session-token";
 
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -34,9 +35,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // セッションCookieチェック
-  const sessionCookie = request.cookies.get("bs_session");
-  if (sessionCookie?.value) {
+  // セッションCookieチェック（形式のみ。本当の検証は getSessionUser が DB で行う）
+  // T-XXX step5A: 旧形式（User.id そのまま）の Cookie は形式が違うので、ここで未認証として扱い Cookie を消す。
+  const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (isSessionTokenFormat(sessionCookie)) {
     return NextResponse.next();
   }
 
@@ -46,7 +48,12 @@ export function middleware(request: NextRequest) {
   const loginUrl = new URL("/login", appUrl);
   loginUrl.searchParams.set("redirect", redirectUrl);
 
-  return NextResponse.redirect(loginUrl);
+  const res = NextResponse.redirect(loginUrl);
+  if (sessionCookie) {
+    // 旧形式の Cookie が残っているとログイン画面に戻り続けて見えるので消す
+    res.cookies.set(SESSION_COOKIE_NAME, "", { httpOnly: true, path: "/", maxAge: 0, sameSite: "lax" });
+  }
+  return res;
 }
 
 export const config = {

@@ -125,6 +125,8 @@ model User {
   invitesMade     Invite[]         @relation("InvitesMade")
   appTokens       AppToken[]
   appSessions     AppSession[]
+  // T-XXX step5A: ポータルのログインセッション（bs_session Cookie の正本）
+  sessions        UserSession[]    @relation("UserSessions")
   announcements   Announcement[]
   announcementAttachments AnnouncementAttachment[] @relation("AnnouncementAttachmentsCreated")
   documents       Document[]       @relation("UserDocuments")
@@ -3845,4 +3847,25 @@ model CandidateCaAssignmentHistory {
   @@index([candidateId, changedAt])
   @@index([changedAt])
   @@map("candidate_ca_assignment_histories")
+}
+
+// T-XXX step5A: ポータルのログインセッション。
+//   - bs_session Cookie の中身は推測できない乱数トークン（bss_ + 32 バイト base64url）。DB にはその SHA-256 だけを保存する。
+//   - 旧形式（User.id そのまま）の Cookie は受け付けない（src/lib/session-token.ts の形式判定）。
+//   - ログアウトで revoked_at を立てる。ユーザー無効化（status=disabled）で全セッションを失効させる。
+//   - 読み書きは src/lib/auth.ts に集約する（他の場所から直接触らない）。
+model UserSession {
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  user         User      @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique @map("token_hash") // SHA-256（hex）。平文トークンは保存しない
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastUsedAt   DateTime  @default(now()) @map("last_used_at") // 10 分に 1 回だけ更新（毎リクエストは書かない）
+  expiresAt    DateTime  @map("expires_at") // 作成から 7 日（絶対期限・延長しない）
+  revokedAt    DateTime? @map("revoked_at")
+  revokeReason String?   @map("revoke_reason") // logout / user_disabled / replaced
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
