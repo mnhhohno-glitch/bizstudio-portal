@@ -4,6 +4,8 @@ import { getSessionUser } from "@/lib/auth";
 import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+// T-XXX step5B: 選考ステータスが変わる行だけ、同じトランザクションで履歴を追記する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 export async function PATCH(req: NextRequest) {
   const user = await getSessionUser();
@@ -39,7 +41,7 @@ export async function PATCH(req: NextRequest) {
   // 無効化要因を無視して誤って有効化してしまうため、per-entry の update に切り替える。
   const affectedEntries = await prisma.jobEntry.findMany({
     where: { id: { in: entryIds } },
-    select: { id: true, candidateId: true, entryFlag: true, entryFlagDetail: true, companyFlag: true, personFlag: true },
+    select: ENTRY_STATUS_SELECT,
   });
   const uniqueCandidateIds = [...new Set(affectedEntries.map((e) => e.candidateId))];
 
@@ -64,7 +66,8 @@ export async function PATCH(req: NextRequest) {
         companyFlag: merged.companyFlag,
         personFlag: merged.personFlag,
       });
-      await tx.jobEntry.update({ where: { id: e.id }, data: perData });
+      const after = await tx.jobEntry.update({ where: { id: e.id }, data: perData, select: ENTRY_STATUS_SELECT });
+      await recordJobEntryStatusChange(tx, { event: "update", before: e, after, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.bulkFlags });
       updatedCount++;
     }
   });
@@ -72,7 +75,7 @@ export async function PATCH(req: NextRequest) {
 
   for (const candidateId of uniqueCandidateIds) {
     try {
-      await recalculateSubStatusIfAuto(candidateId);
+      await recalculateSubStatusIfAuto(candidateId, user.id);
     } catch (e) {
       console.error("[bulk-flags.PATCH] recalculateSubStatusIfAuto failed:", e);
     }

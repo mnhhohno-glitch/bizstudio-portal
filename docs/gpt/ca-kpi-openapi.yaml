@@ -1,0 +1,374 @@
+openapi: 3.1.0
+info:
+  title: ビズスタジオ ポータル AI読み取りAPI（CA実績・会社KPI）
+  version: "1.0.0"
+  description: |
+    株式会社ビズスタジオの CA管理ポータル（bizstudio-portal）から、CA（キャリアアドバイザー）別の実績と会社KPIを
+    読み取り専用で取得する API。ChatGPT のカスタムGPT（Actions）から呼ぶことを想定している。
+
+    - すべて GET・読み取り専用。個人情報（求職者の氏名・連絡先・住所・生年月日・経歴・面談メモ）は返さない。
+    - CA は社員番号（employeeNumber）と表示名のみ。
+    - 認証: `Authorization: Bearer <AI_READ_API_KEY>`（未設定 503・不一致 401）。
+    - 数え方はポータルの実績表（ホーム画面）と同じ。CA別の数値は求職者の「現在の」担当CAで集計する。
+    - 日付・時刻はすべて JST（Asia/Tokyo）。
+servers:
+  - url: https://bizstudio-portal-production.up.railway.app
+    description: 本番
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    RecsUniq:
+      type: object
+      description: 件数（records）と人数（candidates＝求職者ユニーク）
+      properties:
+        records: { type: integer }
+        candidates: { type: integer }
+    CaKpiRow:
+      type: object
+      description: 1 区切り × 1 CA（または全員）の実績。groups で指定したグループだけが入る。
+      properties:
+        ca:
+          type: string
+          description: 社員番号。"ALL" は全求職者の合算（caId 未指定のときだけ）
+        bucket:
+          type: string
+          description: 区切りのキー（day="YYYY-MM-DD"、week=週初日 "YYYY-MM-DD"、month="YYYY-MM"）。期間は buckets 配列を参照
+        interview:
+          type: object
+          description: CAと求職者の面談（面談日基準）。total=実施（辞退除く）、first=初回、existing=2回目以降、interviewPrep=面接対策、booked=予約（辞退含む）、noShow=連絡なし辞退、cancelled=連絡あり辞退・辞退、rescheduled=日程再調整、minutesTotal/minutesKnown/minutesAvg=面談時間（分・予約枠の長さ）
+          properties:
+            total: { type: integer }
+            first: { type: integer }
+            existing: { type: integer }
+            interviewPrep: { type: integer }
+            booked: { type: integer }
+            noShow: { type: integer }
+            cancelled: { type: integer }
+            rescheduled: { type: integer }
+            minutesTotal: { type: integer }
+            minutesKnown: { type: integer }
+            minutesAvg: { type: [number, "null"] }
+        interviewRank:
+          type: object
+          description: 初回面談の面談評価ランク分布（合計＝interview.first）
+          properties:
+            S: { type: integer }
+            A+: { type: integer }
+            A: { type: integer }
+            B+: { type: integer }
+            B: { type: integer }
+            C: { type: integer }
+            D: { type: integer }
+            unrated: { type: integer }
+        proposal:
+          allOf: [{ $ref: "#/components/schemas/RecsUniq" }]
+          description: 求人紹介（提案）。実績表の「紹介」と同じ定義
+        bookmark:
+          type: object
+          description: ブックマーク。created=作成件数、createdAuto=うち自動引き当て、introduced=マイページへ紹介した件数
+          properties:
+            created: { type: integer }
+            createdAuto: { type: integer }
+            introduced: { type: integer }
+        bookmarkRatingCurrent:
+          type: object
+          description: 区切り内に作成したブックマークの、取得時点の総合評価（A/B+/B/C/D/unrated）。AI判定かCA修正かは区別できない
+          additionalProperties: { type: integer }
+        aiRatingHistory:
+          type: object
+          description: AI求人評価の履歴（2026-09-25〜）の総合評価件数（A/B+/B/C/D/other）
+          additionalProperties: { type: integer }
+        entry:
+          allOf: [{ $ref: "#/components/schemas/RecsUniq" }]
+          description: エントリー（エントリー日基準）。records=件数（社数）、candidates=人数
+        entryOutcomeNow:
+          type: object
+          description: 区切り内にエントリーした件のうち取得時点で辞退（declined）・見送り（rejected）・クローズ（closed）になっている件数。辞退・見送りの日付は無い
+          properties:
+            declined: { type: integer }
+            rejected: { type: integer }
+            closed: { type: integer }
+        selection:
+          type: object
+          description: 選考段階の日付が区切り内にある件数・人数（到達ベース）。documentSubmit=書類提出、documentPass=書類通過、firstInterview/secondInterview/finalInterview=一次/二次/最終面接、companyInterview=一次・二次・最終のいずれか（人数は company-kpi の companyInterviewCount と同じ）、offer=内定、acceptance=承諾、join=入社
+          properties:
+            documentSubmit: { $ref: "#/components/schemas/RecsUniq" }
+            documentPass: { $ref: "#/components/schemas/RecsUniq" }
+            firstInterview: { $ref: "#/components/schemas/RecsUniq" }
+            secondInterview: { $ref: "#/components/schemas/RecsUniq" }
+            finalInterview: { $ref: "#/components/schemas/RecsUniq" }
+            companyInterview: { $ref: "#/components/schemas/RecsUniq" }
+            offer: { $ref: "#/components/schemas/RecsUniq" }
+            acceptance: { $ref: "#/components/schemas/RecsUniq" }
+            join: { $ref: "#/components/schemas/RecsUniq" }
+        activity:
+          type: object
+          description: CA本人の操作回数（groups=activity 指定時のみ）。tasksCreated、documentTasksCreated、advisorChatSessions、interviewPrepRooms、dailyReports、contactMails
+          additionalProperties: { type: integer }
+    CurrentStatusRow:
+      type: object
+      description: 取得時点の選考状況（期間に依存しない）。選考中の段階と、辞退・見送り・クローズ・入社済の累計
+      properties:
+        ca: { type: string }
+        entered: { type: integer, description: エントリー済み（書類提出前） }
+        documentScreening: { type: integer, description: 書類選考中 }
+        firstInterview: { type: integer, description: 一次面接の段階 }
+        secondInterview: { type: integer, description: 二次面接の段階 }
+        finalInterview: { type: integer, description: 最終面接の段階 }
+        interviewOther: { type: integer, description: 面接段階で詳細未分類 }
+        offered: { type: integer, description: 内定（承諾前） }
+        acceptedNotJoined: { type: integer, description: 承諾済み未入社 }
+        joined: { type: integer, description: 入社済（累計） }
+        declined: { type: integer, description: 辞退（累計・日付なし） }
+        rejected: { type: integer, description: 見送り（累計・日付なし） }
+        closed: { type: integer, description: クローズ（累計） }
+    Definition:
+      type: object
+      properties:
+        definition: { type: string }
+        dateBasis: { type: string }
+        reliableFrom: { type: string }
+        caution: { type: string }
+    CaKpiResponse:
+      type: object
+      properties:
+        generatedAt: { type: string, description: 取得時刻（JST・ISO 8601） }
+        timezone: { type: string }
+        scope: { type: string, description: 常に CA_ONLY }
+        attribution: { type: string, description: 常に current_ca（求職者の現在の担当CAで集計） }
+        caAssignmentHistorySince: { type: [string, "null"], description: 担当CA替えの記録が始まった日（JST）。それより前の担当替えは分からない }
+        period:
+          type: object
+          properties:
+            from: { type: string }
+            to: { type: string, description: 今日より後を指定したときは今日に丸めた値 }
+            requestedTo: { type: string }
+            toClampedToToday: { type: boolean }
+        granularity: { type: string, enum: [day, week, month] }
+        bucketNote: { type: string }
+        limits: { type: object, additionalProperties: true }
+        groups: { type: array, items: { type: string } }
+        availableGroups: { type: array, items: { type: string } }
+        dataFreshness: { type: object, additionalProperties: { type: [string, "null"] }, description: 各テーブルの最終更新時刻 }
+        caveats: { type: array, items: { type: string }, description: 必ず守る注意書き }
+        definitions:
+          type: object
+          description: 数値ごとの定義・基準日付・信頼できる開始日・注意点
+          additionalProperties: { $ref: "#/components/schemas/Definition" }
+        caCount: { type: integer }
+        cas:
+          type: array
+          items:
+            type: object
+            properties:
+              employeeNumber: { type: string }
+              name: { type: string }
+        allRowNote: { type: [string, "null"] }
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              from: { type: string }
+              to: { type: string }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/CaKpiRow" }
+        currentStatus:
+          type: array
+          items: { $ref: "#/components/schemas/CurrentStatusRow" }
+    CompanyKpiBlock:
+      type: object
+      description: 1 レンジ分の会社KPI（売上系は粗利ベースの目標と比較する）
+      properties:
+        invoiceRevenue: { type: number, description: 請求売上（税抜）。承諾日が期間内の JobEntry の SUM(revenue) }
+        grossProfit: { type: number, description: 粗利＝請求売上 − 求人DB費 − 仕入。実績表の「決定粗利」 }
+        revenueTarget: { type: number, description: 粗利ベースの目標（PerformanceTarget）。比較対象は grossProfit }
+        caInterviewCount: { type: integer, description: CAと求職者の面談件数（辞退除く） }
+        companyInterviewCount: { type: [integer, "null"], description: 企業面接（一次/二次/最終のいずれか）があった求職者の人数 }
+        entryCount: { type: integer, description: エントリーした求職者の人数（件数ではない） }
+        documentPassCount: { type: integer, description: 書類通過の人数 }
+        offerCount: { type: integer, description: 内定の人数 }
+        decidedDealCount: { type: integer, description: 承諾の件数（社数） }
+        decidedCandidateCount: { type: integer, description: 承諾の人数 }
+        averageInvoiceUnitPrice: { type: [number, "null"] }
+        averageGrossUnitPrice: { type: [number, "null"] }
+    CompanyKpiResponse:
+      type: object
+      properties:
+        asOf: { type: string }
+        timezone: { type: string }
+        scope: { type: string }
+        scopeNote: { type: string }
+        definitions: { type: object, additionalProperties: { type: string } }
+        caCount: { type: integer }
+        year:
+          allOf: [{ $ref: "#/components/schemas/CompanyKpiBlock" }]
+          description: 対象年（当年は 1/1〜今日）
+        month:
+          allOf: [{ $ref: "#/components/schemas/CompanyKpiBlock" }]
+          description: 対象月（当月は 1 日〜今日）
+        byCa:
+          type: array
+          items:
+            type: object
+            properties:
+              employeeNumber: { type: string }
+              name: { type: string }
+              year: { $ref: "#/components/schemas/CompanyKpiBlock" }
+              month: { $ref: "#/components/schemas/CompanyKpiBlock" }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+security:
+  - bearerAuth: []
+paths:
+  /api/ai/ca-kpi:
+    get:
+      operationId: getCaKpi
+      summary: CA別実績（期間 × 粒度 × CA）
+      description: |
+        指定期間を day / week / month の区切りに分け、区切り × CA ごとの実績（面談・求人紹介・ブックマーク・AI評価・エントリー・
+        選考段階）と、取得時点の選考状況（currentStatus）を返す。数値ごとの定義と注意書き（definitions / caveats）が同梱されるので、
+        分析の前に必ず読むこと。
+        - 応答の rows は推定 85KB まで（1 行 ≈ 1.1KB・既定グループ）。全CA（8 名 + 全員行 = 9 行/区切り）の月別なら最大 8 か月。
+          それ以上は期間を分けて複数回呼ぶ、caId で 1 人に絞る（day 92 日・week/month 400 日まで）、groups で返す項目を減らす
+          （例 groups=interview,entry,selection）のいずれかで対応する。400 の本文に具体的な上限が書いてある。
+        - 当月を含む期間は未来の予約・未入力の分だけ値が動く。確定値は過去の月で見る。
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: 期間の開始日（JST・YYYY-MM-DD）
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+          description: 期間の終了日（JST・YYYY-MM-DD・両端を含む）。今日より後は今日に丸められる
+        - name: granularity
+          in: query
+          required: false
+          schema: { type: string, enum: [day, week, month], default: month }
+          description: 区切り。week は月曜〜日曜（実績表と同じ）。最初と最後の区切りは from/to で切り詰めた端数になる
+        - name: caId
+          in: query
+          required: false
+          schema: { type: string }
+          description: 社員番号（例 1000001）。省略時は CA職種の在籍者全員 + 全員行（ca="ALL"）
+        - name: groups
+          in: query
+          required: false
+          schema: { type: string }
+          description: 返すグループをカンマ区切りで指定（interview, proposal, rating, entry, selection, activity）。既定は activity 以外の全部。応答を小さくしたいときに絞る
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaKpiResponse" }
+              example:
+                generatedAt: "2026-10-01T10:15:00+09:00"
+                timezone: Asia/Tokyo
+                scope: CA_ONLY
+                attribution: current_ca
+                caAssignmentHistorySince: "2026-10-01"
+                period: { from: "2026-08-01", to: "2026-08-31", requestedTo: "2026-08-31", toClampedToToday: false }
+                granularity: month
+                groups: [interview, proposal, rating, entry, selection]
+                caCount: 2
+                cas:
+                  - { employeeNumber: "CA-A", name: "CA-A" }
+                  - { employeeNumber: "CA-B", name: "CA-B" }
+                buckets:
+                  - { key: "2026-08", from: "2026-08-01", to: "2026-08-31" }
+                rows:
+                  - ca: ALL
+                    bucket: "2026-08"
+                    interview: { total: 65, first: 30, existing: 35, interviewPrep: 4, booked: 72, noShow: 5, cancelled: 2, rescheduled: 1, minutesTotal: 2400, minutesKnown: 60, minutesAvg: 40 }
+                    interviewRank: { S: 0, A+: 2, A: 5, B+: 6, B: 10, C: 5, D: 0, unrated: 2 }
+                    proposal: { records: 700, candidates: 40 }
+                    bookmark: { created: 820, createdAuto: 0, introduced: 690 }
+                    bookmarkRatingCurrent: { A: 120, B+: 90, B: 260, C: 200, D: 60, unrated: 90 }
+                    aiRatingHistory: { A: 0, B+: 0, B: 0, C: 0, D: 0, other: 0 }
+                    entry: { records: 90, candidates: 19 }
+                    entryOutcomeNow: { declined: 6, rejected: 40, closed: 2 }
+                    selection:
+                      documentSubmit: { records: 50, candidates: 15 }
+                      documentPass: { records: 20, candidates: 11 }
+                      firstInterview: { records: 15, candidates: 9 }
+                      secondInterview: { records: 1, candidates: 1 }
+                      finalInterview: { records: 5, candidates: 4 }
+                      companyInterview: { records: 21, candidates: 11 }
+                      offer: { records: 5, candidates: 4 }
+                      acceptance: { records: 4, candidates: 3 }
+                      join: { records: 1, candidates: 1 }
+                  - ca: "CA-A"
+                    bucket: "2026-08"
+                    interview: { total: 40, first: 18, existing: 22, interviewPrep: 3, booked: 46, noShow: 4, cancelled: 1, rescheduled: 1, minutesTotal: 1520, minutesKnown: 38, minutesAvg: 40 }
+                    interviewRank: { S: 0, A+: 1, A: 3, B+: 4, B: 6, C: 3, D: 0, unrated: 1 }
+                    proposal: { records: 410, candidates: 25 }
+                    bookmark: { created: 480, createdAuto: 0, introduced: 400 }
+                    bookmarkRatingCurrent: { A: 70, B+: 55, B: 150, C: 120, D: 35, unrated: 50 }
+                    aiRatingHistory: { A: 0, B+: 0, B: 0, C: 0, D: 0, other: 0 }
+                    entry: { records: 52, candidates: 11 }
+                    entryOutcomeNow: { declined: 3, rejected: 24, closed: 1 }
+                    selection:
+                      documentSubmit: { records: 30, candidates: 9 }
+                      documentPass: { records: 12, candidates: 7 }
+                      firstInterview: { records: 9, candidates: 6 }
+                      secondInterview: { records: 0, candidates: 0 }
+                      finalInterview: { records: 3, candidates: 3 }
+                      companyInterview: { records: 12, candidates: 7 }
+                      offer: { records: 3, candidates: 3 }
+                      acceptance: { records: 2, candidates: 2 }
+                      join: { records: 1, candidates: 1 }
+                currentStatus:
+                  - { ca: ALL, entered: 30, documentScreening: 25, firstInterview: 12, secondInterview: 1, finalInterview: 4, interviewOther: 3, offered: 2, acceptedNotJoined: 5, joined: 900, declined: 1500, rejected: 2000, closed: 300 }
+                  - { ca: "CA-A", entered: 15, documentScreening: 12, firstInterview: 7, secondInterview: 0, finalInterview: 2, interviewOther: 1, offered: 1, acceptedNotJoined: 3, joined: 120, declined: 200, rejected: 260, closed: 40 }
+        "400":
+          description: パラメータ不正・期間超過・応答が大きすぎる（本文 error に理由）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: 認証なし・不一致
+        "404":
+          description: caId に該当する社員がいない
+  /api/ai/company-kpi:
+    get:
+      operationId: getCompanyKpi
+      summary: 会社KPI（年・月・CA別）
+      description: |
+        対象年（1/1〜、当年は今日まで）と対象月（1 日〜、当月は今日まで）の会社KPI（請求売上・粗利・目標・面談・エントリー人数・
+        書類通過・内定・承諾）を全社と CA別で返す。売上は CA売上（人材紹介）のみで会社全体の売上ではない。
+        entryCount は人数（件数ではない）。
+      parameters:
+        - name: year
+          in: query
+          required: false
+          schema: { type: string, pattern: "^\\d{4}$" }
+          description: 対象年 YYYY（省略時は今年）
+        - name: month
+          in: query
+          required: false
+          schema: { type: string, pattern: "^\\d{4}-\\d{2}$" }
+          description: 対象月 YYYY-MM（省略時は今月）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompanyKpiResponse" }
+        "400":
+          description: パラメータ不正
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: 認証なし・不一致

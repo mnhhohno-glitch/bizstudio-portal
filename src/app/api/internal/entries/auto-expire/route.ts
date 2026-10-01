@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateInternalApiKey } from "@/lib/internal-auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
+// T-XXX step5B: 未応募化（entry_flag_detail / is_active の変更）を同じトランザクションで記録する（定期処理なので変更者は NULL）
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusUpdates } from "@/lib/entry-status-history";
 
 const CHUNK_SIZE = 50;
 
@@ -66,12 +68,18 @@ export async function POST(request: NextRequest) {
       const ids = chunks[i].map((t) => t.id);
       // 「未応募」化: entryFlagDetail のみ更新し isActive=false で一覧から外す。
       // 「本人辞退」系の companyFlag / personFlag は実態（応募に至っていない）と合わないためセットしない。
-      const result = await prisma.jobEntry.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          entryFlagDetail: "未応募",
-          isActive: false,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        const before = await tx.jobEntry.findMany({ where: { id: { in: ids } }, select: ENTRY_STATUS_SELECT });
+        const r = await tx.jobEntry.updateMany({
+          where: { id: { in: ids } },
+          data: {
+            entryFlagDetail: "未応募",
+            isActive: false,
+          },
+        });
+        const after = await tx.jobEntry.findMany({ where: { id: { in: ids } }, select: ENTRY_STATUS_SELECT });
+        await recordJobEntryStatusUpdates(tx, { before, after, changedByUserId: null, route: ENTRY_STATUS_ROUTES.autoExpire });
+        return r;
       });
       expired += result.count;
       chunkLog.push({ chunkIndex: i + 1, size: ids.length, durationMs: Date.now() - cStart });

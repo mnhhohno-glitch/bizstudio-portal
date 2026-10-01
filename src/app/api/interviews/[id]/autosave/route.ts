@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { sanitizeDateTimeFields } from "@/lib/date-utils";
 import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
+// T-XXX step5B: 自動保存で変わった希望条件（選択式）を履歴に残す（同じトランザクション）
+import { PREFERENCE_ROUTES, loadInterviewDetailBaseline, recordInterviewDetailPreferenceChanges } from "@/lib/preference-history";
 
 export const runtime = "nodejs";
 
@@ -94,10 +96,19 @@ export async function PATCH(
       if (body.detail && typeof body.detail === "object") {
         const DETAIL_DT = ["resignationDate", "nextInterviewDate", "jobSendDeadline"];
         sanitizeDateTimeFields(body.detail, DETAIL_DT);
+        const baseline = await loadInterviewDetailBaseline(tx, { interviewRecordId: id, candidateId: updated.candidateId });
         await tx.interviewDetail.upsert({
           where: { interviewRecordId: id },
           create: { interviewRecordId: id, ...body.detail },
           update: body.detail,
+        });
+        await recordInterviewDetailPreferenceChanges(tx, {
+          candidateId: updated.candidateId,
+          interviewRecordId: id,
+          baseline,
+          patch: body.detail as Record<string, unknown>,
+          changedByUserId: user.id,
+          route: PREFERENCE_ROUTES.interviewAutosave,
         });
       }
 
@@ -115,7 +126,7 @@ export async function PATCH(
     // T-080: autosave で resultFlag が変更された場合、最新面談基準で Candidate.supportStatus を自動更新。
     // トランザクション外で実行（candidate 側更新は読み書きが分離しているため、失敗しても autosave 自体は成功扱い）。
     if (Object.prototype.hasOwnProperty.call(body, "resultFlag")) {
-      await applyLatestInterviewResultToSupportStatus(result.candidateId);
+      await applyLatestInterviewResultToSupportStatus(result.candidateId, user.id);
     }
 
     return NextResponse.json({

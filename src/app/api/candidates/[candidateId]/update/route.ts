@@ -5,6 +5,11 @@ import { resetSubStatusForStatus } from "@/lib/support-sub-status";
 import { isAutoRecommendAdmin } from "@/lib/auto-recommend-admin";
 import { fetchCandidateConditions } from "@/lib/recommend/job-platform-conditions";
 import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
+// T-XXX step2: 担当CAが変わったときだけ履歴を 1 行追記（同じトランザクション内）
+import { recordCaAssignmentChange, CA_ASSIGNMENT_ROUTES } from "@/lib/ca-assignment-history";
+// T-XXX step5B: 支援状況・希望条件（選択式）が変わる保存を同じトランザクションで記録する
+import { SUPPORT_STATUS_ROUTES, recordSupportStatusChange } from "@/lib/support-status-history";
+import { PREFERENCE_ROUTES, recordCandidatePreferenceChanges } from "@/lib/preference-history";
 
 type RouteContext = { params: Promise<{ candidateId: string }> };
 
@@ -202,12 +207,41 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     updateData.supportEndComment = body.supportEndComment || null;
   }
 
-  const updated = await prisma.candidate.update({
-    where: { id: candidateId },
-    data: updateData,
-    include: {
-      employee: { select: { id: true, name: true } },
-    },
+  // T-XXX step2: 担当CA（employeeId）が変わる保存では、更新と同じトランザクションで履歴を追記する。
+  //   担当が変わらない保存（同じCA・担当以外の項目だけ）では recordCaAssignmentChange が何もしない。
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.candidate.update({
+      where: { id: candidateId },
+      data: updateData,
+      include: {
+        employee: { select: { id: true, name: true } },
+      },
+    });
+    if (body.assignedEmployeeId !== undefined) {
+      await recordCaAssignmentChange(tx, {
+        candidateId,
+        fromEmployeeId: existing.employeeId,
+        toEmployeeId: row.employeeId,
+        changedByUserId: user.id,
+        route: CA_ASSIGNMENT_ROUTES.candidateUpdate,
+      });
+    }
+    // T-XXX step5B: 支援状況（大項目・中項目・終了理由・終了日）と希望条件（選択式）は、変わったときだけ履歴に残す。
+    await recordSupportStatusChange(tx, {
+      candidateId,
+      before: existing,
+      after: row,
+      changedByUserId: user.id,
+      route: SUPPORT_STATUS_ROUTES.candidateUpdate,
+    });
+    await recordCandidatePreferenceChanges(tx, {
+      candidateId,
+      before: existing as unknown as Record<string, unknown>,
+      patch: updateData,
+      changedByUserId: user.id,
+      route: PREFERENCE_ROUTES.candidateUpdate,
+    });
+    return row;
   });
 
   // T-190: 配信日（scoutDeliveryDate）の JST 暦日が変わったら、紐づく配信枠も張り替える。

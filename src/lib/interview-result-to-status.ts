@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import type { SupportStatus } from "@/lib/support-status-constants";
 import { SUPPORT_SUB_STATUS_DEFAULT } from "@/lib/support-status-constants";
 import { calculateSubStatus } from "@/lib/support-sub-status";
+// T-XXX step5B: 面談結果からの自動反映で支援状況が変わったときに履歴へ残す（更新と同じトランザクション）
+import { SUPPORT_STATUS_SELECT, SUPPORT_STATUS_ROUTES, recordSupportStatusChange } from "@/lib/support-status-history";
 
 /**
  * 面談結果 → supportStatus マッピング表。
@@ -39,6 +41,7 @@ export const RESULT_FLAG_TO_SUPPORT_STATUS: Record<string, SupportStatus> = {
  */
 export async function applyLatestInterviewResultToSupportStatus(
   candidateId: string,
+  changedByUserId: string | null = null,
 ): Promise<void> {
   try {
     const latest = await prisma.interviewRecord.findFirst({
@@ -55,7 +58,7 @@ export async function applyLatestInterviewResultToSupportStatus(
 
     const candidate = await prisma.candidate.findUnique({
       where: { id: candidateId },
-      select: { supportStatus: true, supportSubStatusManual: true },
+      select: { ...SUPPORT_STATUS_SELECT, supportSubStatusManual: true },
     });
     if (!candidate) return;
     if (candidate.supportStatus === nextStatus) return;
@@ -71,9 +74,13 @@ export async function applyLatestInterviewResultToSupportStatus(
       }
     }
 
-    await prisma.candidate.update({
-      where: { id: candidateId },
-      data,
+    await prisma.$transaction(async (tx) => {
+      const after = await tx.candidate.update({
+        where: { id: candidateId },
+        data,
+        select: SUPPORT_STATUS_SELECT,
+      });
+      await recordSupportStatusChange(tx, { candidateId, before: candidate, after, changedByUserId, route: SUPPORT_STATUS_ROUTES.interviewResult });
     });
   } catch (err) {
     console.error("[T-080] applyLatestInterviewResultToSupportStatus failed", {

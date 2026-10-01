@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
+// T-XXX step5B: 選考ステータスが変わる行だけ、同じトランザクションで履歴を追記する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
 type UpdateItem = {
   id: string;
@@ -26,7 +28,7 @@ export async function POST(req: NextRequest) {
       // entryFlag / personFlag は本APIでは変更しないため既存値をマージして判定する。
       const existing = await tx.jobEntry.findUnique({
         where: { id: u.id },
-        select: { entryFlag: true, personFlag: true },
+        select: ENTRY_STATUS_SELECT,
       });
       const isActive = resolveEntryIsActive({
         entryFlag: existing?.entryFlag ?? null,
@@ -34,14 +36,18 @@ export async function POST(req: NextRequest) {
         companyFlag: u.companyFlag,
         personFlag: existing?.personFlag ?? null,
       });
-      await tx.jobEntry.update({
+      const after = await tx.jobEntry.update({
         where: { id: u.id },
         data: {
           entryFlagDetail: u.entryFlagDetail,
           companyFlag: u.companyFlag,
           isActive,
         },
+        select: ENTRY_STATUS_SELECT,
       });
+      if (existing) {
+        await recordJobEntryStatusChange(tx, { event: "update", before: existing, after, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.autoProgress });
+      }
       updatedIds.push(u.id);
     }
   });

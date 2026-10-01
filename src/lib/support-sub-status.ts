@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { SUPPORT_SUB_STATUS_DEFAULT } from "@/lib/support-status-constants";
+// T-XXX step5B: 中項目の自動再計算で値が変わったときだけ支援状況の履歴に残す
+import { SUPPORT_STATUS_SELECT, SUPPORT_STATUS_ROUTES, recordSupportStatusChange } from "@/lib/support-status-history";
 
 export {
   SUPPORT_STATUS_VALUES,
@@ -80,17 +82,23 @@ export async function resetSubStatusForStatus(
  * 自動判定トリガー: エントリーフラグ変更 / BOOKMARK追加・削除 などから呼ぶ。
  * supportStatus が ACTIVE の場合のみ再計算を実行する。
  */
-export async function recalculateSubStatusIfAuto(candidateId: string): Promise<void> {
+export async function recalculateSubStatusIfAuto(candidateId: string, changedByUserId: string | null = null): Promise<void> {
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { supportStatus: true },
+    select: SUPPORT_STATUS_SELECT,
   });
   if (!candidate) return;
   if (candidate.supportStatus !== "ACTIVE") return;
 
   const next = await calculateSubStatus(candidateId);
-  await prisma.candidate.update({
-    where: { id: candidateId },
-    data: { supportSubStatus: next },
+  // T-XXX step5B: 変わらないときは書かない。変わるときは更新と同じトランザクションで履歴を 1 行追記する。
+  if ((candidate.supportSubStatus ?? null) === next) return;
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.candidate.update({
+      where: { id: candidateId },
+      data: { supportSubStatus: next },
+      select: SUPPORT_STATUS_SELECT,
+    });
+    await recordSupportStatusChange(tx, { candidateId, before: candidate, after, changedByUserId, route: SUPPORT_STATUS_ROUTES.subStatusAuto });
   });
 }

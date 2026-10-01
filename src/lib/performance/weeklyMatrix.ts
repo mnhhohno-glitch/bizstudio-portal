@@ -78,36 +78,30 @@ export function applyAdditiveTotals(total: WeeklyMatrix, columns: WeeklyMatrix[]
 }
 
 // timestamp(無tz, UTC 保存) 列と比較するための UTC wall-clock リテラル。
-function tsLit(d: Date): string {
+export function tsLit(d: Date): string {
   return d.toISOString().replace("T", " ").replace("Z", "");
 }
 function per(recs: number, uniq: number): number | null {
   return uniq > 0 ? recs / uniq : null;
 }
-const DECLINED_SQL = INTERVIEW_DECLINED_FLAGS.map((f) => `'${f}'`).join(",");
+export const DECLINED_SQL = INTERVIEW_DECLINED_FLAGS.map((f) => `'${f}'`).join(",");
 
-export async function computeWeeklyMatrix(params: {
-  employeeId: string;
-  userId: string;
-  from: Date;
-  to: Date;
-  allCas?: boolean; // true なら全CA合算（担当・User フィルタを外す。数え方は同じ）
-  // ※ 旧 rankWindow（新規/既存を表示期間でランク付けする窓）は廃止。
-  //    新規判定は「暦月(JST)の1件目」に変わり、表示期間に依存しなくなったため不要。
-}): Promise<WeeklyMatrix> {
-  const { employeeId, userId, from, to, allCas } = params;
-  const F = tsLit(from);
-  const T = tsLit(to);
-  // 全員モードでは担当軸フィルタを外す（対象を全候補者に広げるだけ）。
-  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
-  void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
+// T-XXX step2: 以下の SQL 部品は /api/ai/ca-kpi（src/lib/aiRead/caKpi.ts）でも同じ定義で数えるために export する。
+//   computeWeeklyMatrix が組み立てる SQL 文字列は export 前と 1 文字も変えていない（関数に切り出しただけ）。
+//   数え方を変えるときはここだけを直せば実績表と ca-kpi の両方に効く。
+/** エントリーとして数える entry_flag（SQL の IN リスト用）。 */
+export const ENTRY_FLAGS_COUNTED_SQL = "'応募','エントリー','書類選考','面接','内定','入社済'";
 
-  // 提案イベント（両ソース統合）の共通 CTE 文。scoped 計算で再利用。
-  // 件数＝生レコード（1行＝1件）。**同一求職者×同一求人×同一日の GROUP BY 潰しはしない**：
-  //   external_job_id は求人未紐付けのとき 0 が入るため、同じ人が同じ日に出した別会社の応募まで 1 件に潰れていた。
-  // ord＝同日内の並び順を決める安定キー（新規＝その月の1件目 の判定に使う）。
-  // 移行期の二重記録ガード（CF 側 NOT EXISTS）は業務上必要なので残す。
-  const PROPOSAL_EVENTS = `
+/**
+ * 提案イベント（両ソース統合）の共通 CTE 本文。scoped 計算と ca-kpi で再利用。
+ * 件数＝生レコード（1行＝1件）。**同一求職者×同一求人×同一日の GROUP BY 潰しはしない**：
+ *   external_job_id は求人未紐付けのとき 0 が入るため、同じ人が同じ日に出した別会社の応募まで 1 件に潰れていた。
+ * ord＝同日内の並び順を決める安定キー（新規＝その月の1件目 の判定に使う）。
+ * 移行期の二重記録ガード（CF 側 NOT EXISTS）は業務上必要なので残す。
+ * @param empPred 担当軸の述語（`c.employee_id = '...'` または全員なら `TRUE`）
+ */
+export function proposalEventsSql(empPred: string): string {
+  return `
       SELECT je.candidate_id, je.job_intro_date AS pdate, je.id AS ord
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL AND je.job_intro_date IS NOT NULL
@@ -126,11 +120,39 @@ export async function computeWeeklyMatrix(params: {
             AND (je2.job_intro_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
               = (COALESCE(cf.last_exported_at, cf.introduced_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo')::date
         )`;
-  const ENTRY_EVENTS = `
+}
+
+/**
+ * エントリーイベント（JobEntry・担当軸・archived 除く・entry_flag が有効値）の CTE 本文。
+ * @param empPred 担当軸の述語（`c.employee_id = '...'` または全員なら `TRUE`）
+ */
+export function entryEventsSql(empPred: string): string {
+  return `
       SELECT je.candidate_id, je.entry_date AS pdate, je.id AS ord
       FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
       WHERE ${empPred} AND je.archived_at IS NULL AND je.entry_date IS NOT NULL
-        AND je.entry_flag IN ('応募','エントリー','書類選考','面接','内定','入社済')`;
+        AND je.entry_flag IN (${ENTRY_FLAGS_COUNTED_SQL})`;
+}
+
+export async function computeWeeklyMatrix(params: {
+  employeeId: string;
+  userId: string;
+  from: Date;
+  to: Date;
+  allCas?: boolean; // true なら全CA合算（担当・User フィルタを外す。数え方は同じ）
+  // ※ 旧 rankWindow（新規/既存を表示期間でランク付けする窓）は廃止。
+  //    新規判定は「暦月(JST)の1件目」に変わり、表示期間に依存しなくなったため不要。
+}): Promise<WeeklyMatrix> {
+  const { employeeId, userId, from, to, allCas } = params;
+  const F = tsLit(from);
+  const T = tsLit(to);
+  // 全員モードでは担当軸フィルタを外す（対象を全候補者に広げるだけ）。
+  const empPred = allCas ? "TRUE" : `c.employee_id = '${employeeId}'`;
+  void userId; // 求人紹介も candidate.employeeId 軸に統一したため User.id は未使用（signature は後方互換で維持）。
+
+  // 提案イベント（両ソース統合）の共通 CTE 文。scoped 計算で再利用（本文は proposalEventsSql・T-XXX step2 で切り出し）。
+  const PROPOSAL_EVENTS = proposalEventsSql(empPred);
+  const ENTRY_EVENTS = entryEventsSql(empPred);
   // 新規/既存（scoped）: **候補者×暦月(JST)** で日付の早い順（同日は ord 順）に順位を付け、rn=1 を新規・rn>=2 を既存とする。
   //   順位付けは表示期間に依存しない（月の全イベントが母集団）ので、期間を変えても同じ行が新規になる。
   //   件数：新規+既存=合計（縦）、Σ週=合計（横・1レコード=1件なので必ず一致）。

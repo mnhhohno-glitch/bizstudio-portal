@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, revokeAllUserSessions } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 
 export async function POST(
@@ -27,12 +27,18 @@ export async function POST(
     select: { id: true, email: true, status: true },
   });
 
+  // T-XXX step5A: 無効化したユーザーのログインセッションをすべて失効させる（次のリクエストから 401 / ログイン画面）。
+  let revokedSessions = 0;
+  if (status === "disabled") {
+    revokedSessions = await revokeAllUserSessions(target.id, "user_disabled");
+  }
+
   await writeAudit({
     actorUserId: actor.id,
     action: "USER_STATUS_CHANGED",
     targetType: "USER",
     targetId: target.id,
-    metadata: { email: target.email, status: target.status },
+    metadata: { email: target.email, status: target.status, revokedSessions },
   });
 
   return NextResponse.json({ ok: true, user: target });

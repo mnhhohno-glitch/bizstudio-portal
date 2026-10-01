@@ -47,7 +47,7 @@
 CandidateDetailPage (100% width, no max-width)
   └─ InterviewHistoryTab (100% width)
        └─ InterviewForm (100% width)
-            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・案内メール〔T-207〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示。T-205 の「面談準備」と T-208 step2 の「台本」は step4 で外した＝入口は「面談スクリプト」タブ）
+            ├─ ヘッダー（削除・一覧に戻る・キャンセル・PDF表示・面談準備〔T-205・T-208 fix で復活〕・案内メール〔T-207〕・保存のボタン。面談サポートは SHOW_INTERVIEW_SUPPORT=false で非表示。T-208 step2 の「台本」は step4 で外した＝入口は「面談スクリプト」タブ）
             └─ div.grid.grid-cols-2 (line 1045 周辺)
                  ├─ LEFT COLUMN (50%)
                  │    ├─ 面談基本情報（面談日、時刻、求職者ID、氏名、フリガナ、生年月日 等）
@@ -1603,7 +1603,9 @@ OAuth フロー（lib/googleCalendar.ts getAuthUrl）:
 
 ### 入口ボタン（T-205 step2 で配置変更・2026-09-27 → T-208 step4 で撤去・2026-09-30）
 
-- ~~`InterviewForm` ヘッダーの「面談準備」・空状態の「面談準備」~~ → **T-208 step4 で両方外した**。面談準備は求職者詳細の「面談スクリプト」タブ（`?view=script`）の右側に常に埋め込む（`InterviewPrepPanel embedded`）。右から開く横のパネル（`InterviewHistoryTab` の `prepOpen` / `onOpenInterviewPrep`）も使わなくなった。パネル本体・API・保存は同じ。
+- 面談準備の入口は3つ（T-208 fix, 2026-09-30）: ①`InterviewForm` ヘッダーの「面談準備」（「PDF表示」と「案内メール」の間）②面談記録0件の空状態の「面談準備」（①②とも `InterviewHistoryTab` の `prepOpen` で右から開く横パネル＝縦いっぱい・広げる・Esc で閉じる）③求職者詳細の「面談スクリプト」タブ（`?view=script`）の右側に埋め込み（`InterviewPrepPanel embedded`）。部品は1つ（`InterviewPrepPanel`）で、横パネルと埋め込みの違いは `embedded` による外枠（portal・固定配置・×・広げる・Esc）だけ。中身・API・保存・よく使う質問は同じ。
+  - 横パネルの `interviewId` は表示中の面談記録（①）／null（②）。①ではスクリプトの答えが【面談スクリプトで分かったこと】としてチャットに添えられる。
+  - 経緯: step4 で①②を外したが、縦いっぱいの横パネルが見やすいため、スクリプト完成までの間 T-208 fix で戻した。
 - 面談一覧バー（「面談:」の並び）のボタンは step2 で撤去。
 
 ### パネルの構造
@@ -1732,9 +1734,9 @@ CandidateDetailPage（activeView === "script"）
 - 面談履歴タブとの行き来（17-tab-navigation-rules）: 面談履歴タブを離れる前に未保存分を保存（`InterviewForm.onRegisterFlush` → `CandidateDetailPage.handleViewChange` が await）。戻ったら読み直し。
 
 ### 外したもの（T-208 step4）
-- `InterviewForm`: 台本モード（`scriptMode` と `InterviewScriptMode` の埋め込み）、ヘッダーの「台本」「面談準備」ボタン、欄の横の提案バッジ `scriptProposalBadge`（31か所）、`setDetailState` / `setWorkHistories` へ直接入れていた `applyScriptWrites` / `acceptScriptProposalFor` / `dismissScriptProposal` / `importScriptCompanies`、PUT script-answers のデバウンス保存。配色 `CSS_VARS` は `interview-form-vars.ts` に移して共有。
-- `InterviewHistoryTab`: 空状態の「面談準備」ボタン、横の `InterviewPrepPanel`（`prepOpen`）、`onOpenInterviewPrep`。新規作成と一覧取得は `interview-create.ts` に寄せた。props に `initialSelectedId`（`?interview=`）と `onRegisterFlush` を追加。
-- 面談準備の入口は「面談スクリプト」タブに一本化。
+- `InterviewForm`: 台本モード（`scriptMode` と `InterviewScriptMode` の埋め込み）、ヘッダーの「台本」ボタン（「面談準備」ボタンも外したが T-208 fix で戻した）、欄の横の提案バッジ `scriptProposalBadge`（31か所）、`setDetailState` / `setWorkHistories` へ直接入れていた `applyScriptWrites` / `acceptScriptProposalFor` / `dismissScriptProposal` / `importScriptCompanies`、PUT script-answers のデバウンス保存。配色 `CSS_VARS` は `interview-form-vars.ts` に移して共有。
+- `InterviewHistoryTab`: ~~空状態の「面談準備」ボタン、横の `InterviewPrepPanel`（`prepOpen`）、`onOpenInterviewPrep`~~（T-208 fix で戻した）。新規作成と一覧取得は `interview-create.ts` に寄せた。props に `initialSelectedId`（`?interview=`）と `onRegisterFlush` を追加。
+- ~~面談準備の入口は「面談スクリプト」タブに一本化~~ → T-208 fix で入口は3つ（「面談準備チャット」節）。
 
 ## 初回面談の台本モード `InterviewScriptMode`（T-208 step2, 2026-09-30 → step4 で「面談スクリプト」タブの部品に）
 

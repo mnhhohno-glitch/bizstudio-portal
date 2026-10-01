@@ -720,3 +720,65 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - push 前の待機は `node scripts/wait_railway_idle.mjs`（この開発機に Python は無い）。
 
 **関連**: T-205（2026-09-27）で手順化。`07-deploy-rules.md`・`11-cursor-prompt-templates.md` にも追記。
+
+---
+
+## 54. 面談の「実施者」欄（`interview_records.interviewer_user_id`）は予約を入れた人であって、担当CAではない
+
+**罠**: `InterviewRecord.interviewerUserId`（画面の「実施者」）は、面談記録を作った人が初期値で入る（`src/components/candidates/interview-create.ts` で `currentEmployeeId`。作成者 `created_by_user_id` と全件一致）。2026-05 以降は予約を入力する社員（CA職種以外の 4 名）が 87% を占め、**担当CAと一致するのは約 9%**（1〜4月の移行データは 99% 一致していたので、見た目では気づきにくい）。
+
+- CA実績（面談数・初回面談・面談時間・ランク分布）は **担当CA軸（`candidates.employee_id`）で数える**。実績表（`computeWeeklyMatrix`）・`company-kpi`・`ca-kpi` はすべてこの軸。
+- `interviewer_user_id` で「誰が面談したか」を集計してはいけない。`src/lib/dailyReport/metrics.ts` 81 行付近のコメントは古い（実装は担当軸）。
+- 担当CAの変更履歴は 2026-10-01 から `candidate_ca_assignment_histories` に残る（T-XXX step2・`src/lib/ca-assignment-history.ts` に書き込みを集約）。それより前の担当替えは分からないので、CA別の過去実績は「今の担当」で付く。
+
+**関連**: `docs/survey_T-XXX_ca-kpi-api.md` §5-3・§4。
+
+## 55. ChatGPT 向け MCP 入口（`/api/mcp/[secret]`）は秘密URL方式。URL が漏れたら `MCP_PATH_SECRET` を作り直して止める
+
+**状況（T-XXX step3, 2026-10-01）**: ChatGPT の「MCP アプリ」は認証が「OAuth」か「認証なし」しか選べない。ポータルの CA別実績を読ませる MCP 入口 `src/app/api/mcp/[secret]/route.ts` は **認証なし＋推測できない長い秘密のURL**（環境変数 `MCP_PATH_SECRET`・48 文字の英数字）で守っている。Bearer の `AI_READ_API_KEY` は使っていない。
+
+**罠**:
+- **URL そのものが鍵**。秘密のURLを知っている人は誰でも（ログインなしで）呼べる。URL・秘密の値を画面・ログ・ファイル（リポジトリ内）・コミット・報告文・チャットに出さない。渡すときはリポジトリ外のファイル（デスクトップの `portal-mcp-url.txt`）経由で、貼ったら削除する
+- **ログに URL を出さない**。入口のログはツール呼び出しの 1 行（ツール名・パラメータ・処理時間・結果サイズ）だけ（`src/lib/mcp/caKpiServer.ts`）。`next dev` のリクエストログはパス全体（秘密を含む）を出すので、ローカルで試すときは本番の秘密を使わない。本番（`next start`）は Next のリクエストログを出さないが、**Railway の HTTP ログ（Observability → HTTP Logs）にはリクエストのパスが秘密ごと残る**（2026-10-01 に GraphQL `httpLogs(filter:"@path:…")` で実測。対策は未実装・案は `docs/survey_T-XXX_ca-kpi-api.md` step3）。Railway のプロジェクトを見られる人は秘密を見られる前提で扱う
+- **漏れた疑いがあるときは秘密を作り直す**（`railway variables --set "MCP_PATH_SECRET=<新>" --service bizstudio-portal` → 再デプロイ完了で旧URLは即 404 → ChatGPT のアプリのURLを差し替え）。手順は `docs/gpt/ca-kpi-gpt-setup.md` §4-5。完全に止めるなら変数を削除する（未設定＝404）
+- 未設定・空・32 文字未満・不一致はすべて **404**（入口の存在を知らせない。`src/lib/mcp/secret.ts`）。「設定したのに 404」のときは長さを疑う
+- 回数制限は入口全体で 1 分 60 回（`src/lib/mcp/rateLimit.ts`・プロセス内固定窓）。超えると 429。コンテナが複数台になると台数分ゆるくなる
+- `src/middleware.ts` は `/api/` を素通しにしているので、この入口のための除外は追加していない。将来 `/api/` を認証必須にするときはこのパスの除外を忘れない
+- ツールは HTTP API（`/api/ai/ca-kpi`・`/api/ai/company-kpi`）と**同じ組み立て関数**（`src/lib/aiRead/caKpiResponse.ts`・`companyKpiResponse.ts`）を直接呼ぶ。数え方を変えるときはその関数を直せば HTTP と MCP の両方に効く。HTTP で自分の API を呼び直す作りにしない
+
+## 56. ログインセッション（`bs_session`）は乱数トークン＋サーバー側 `user_sessions`。旧形式（User.id そのまま）の Cookie は受け付けない
+
+**状況（T-XXX step5A, 2026-10-02）**: 以前は Cookie の中身が `User.id` そのもので、ID を知られるとその人としてログインできた。今は `src/lib/auth.ts` が **`bss_` + 32 バイト base64url の乱数トークン**を発行し、`user_sessions` にその SHA-256 だけを保存して、毎回 失効（`revoked_at`）・期限（`expires_at`・作成から 7 日）・`users.status` を確かめる。
+
+- **旧形式の Cookie は形式判定（`src/lib/session-token.ts` `isSessionTokenFormat`）で落とす**。`src/middleware.ts` も同じ判定で `/login` へ流し、旧 Cookie を消す。本番反映後は全員がログインし直し
+- `getSessionUser()` の戻り値（id / name / email / role / status）は旧実装と同じなので呼び出し側（334 か所）は変えていない。ログインは `loginAndSetSessionCookie(userId)`（`setSessionUserId` は互換の別名）。ログアウトは `clearSession()` がセッションを失効させる。**ユーザー無効化（`/api/admin/users/[id]/status` → disabled）で `revokeAllUserSessions` が全セッションを失効させる**。ユーザーを無効にする経路を増やしたら必ず呼ぶ
+- **ローカル dev で要ログイン画面を見る方法が変わった**: 「別ポートで `bs_session=<User.id>` を返す」裏技は使えない。ローカル DB でテストユーザーを作って `/login` からログインする（架空データは `scripts/seed-analytics-fixture-t-xxx-step5.ts`、確認は `scripts/test-session-auth-t-xxx-step5.ts`）
+- Cookie 以外の認証（`x-api-secret` / `x-api-key` / `x-rpa-secret` / Bearer `AI_READ_API_KEY` / `/api/mcp/[secret]` / `AppSession` の Bearer）は `src/lib/auth.ts` を通らないので影響なし
+- `last_used_at` は 10 分に 1 回だけ更新（`getSessionUser` は 1 リクエストで何度も呼ばれる）。期限切れから 30 日経った行はログイン時に掃除
+
+**関連**: `docs/survey_T-XXX_step4_analytics-inventory.md`「step5 実装結果」。
+
+## 57. 選考ステータス・支援状況・希望条件の変更履歴と日次スナップショットは 2026-10-02 から。記録開始日は `historySince` で返す
+
+**状況（T-XXX step5B）**: 次の 4 つの表は本番反映日（2026-10-02）から記録が始まる。それより前の履歴は**無い**（推定で埋めていない）。分析ツールと `get_data_quality` が `historySince` に各表の最初の行の日時を返すので、それより前を聞かれたら「記録が無い」が正しい答え。
+
+| 表 | 書き込みの集約先 | 経路（route 列） |
+|--|--|--|
+| `job_entry_status_histories`（entry_flag / detail / company_flag / person_flag / is_active / archived の変化、作成・削除） | `src/lib/entry-status-history.ts` | entry_update / entry_flags / bulk_flags / auto_progress / bulk_archive / entry_create / candidate_entries_create / bookmark_to_entry / auto_expire / bulk_import / entry_delete / bulk_delete / revert_bulk / auto_purge / bulk_import_delete |
+| `candidate_support_status_histories`（support_status / sub_status / end_reason / end_date） | `src/lib/support-status-history.ts` | candidate_update / bulk_archive / bulk_change_status / interview_result / sub_status_auto |
+| `candidate_preference_histories`（面談詳細と求職者行の選択式の希望条件・1 項目 1 行） | `src/lib/preference-history.ts` | interview_create / interview_update / interview_autosave / script_apply / candidate_update |
+| `ca_pipeline_daily_snapshots`（CA別の集計値・1 日 1 回 23:50 JST） | `src/lib/pipeline-snapshot.ts` → `POST /api/internal/pipeline-snapshot`（GitHub Actions `t-xxx-pipeline-snapshot.yml`） | 同日 2 回は上書き（run_count） |
+
+- **方針は step2 の担当CA履歴と同じ: 更新と同じトランザクションで書く**（履歴の書き込みに失敗したら本体の更新も戻る）。変わらない保存では書かない
+- `job_entry_status_histories.job_entry_id` に外部キーは無い（削除後も「いつ消されたか」を残す）。他は求職者に Cascade
+- **job_entries / candidates.support_* / interview_details の希望条件 を書き換える経路を増やしたら、必ず上の集約先を呼ぶ**（ステータス以外の列だけを書く経路＝sync-task の Google ToDo ID・tasks の task_requested_at・entryDate だけの PATCH は対象外）
+- `recalculateSubStatusIfAuto(candidateId, changedByUserId?)` と `applyLatestInterviewResultToSupportStatus(candidateId, changedByUserId?)` は第 2 引数が増えた（省略可・変更者を履歴に残すため）
+- 日次スナップショットの workflow は master に無いと schedule が動かない。疎通は `workflow_dispatch`（dry_run=true）
+
+## 58. 承諾後辞退は既存ツール（company-kpi / ca-kpi）の承諾件数・売上に含まれている。新ツール `get_accept_revenue` で分ける
+
+**状況（T-XXX step5C）**: 承諾日がある行は、その後に本人辞退になっても `acceptance_date` と `revenue` が残り、`computeWeeklyMatrix` / `company-kpi` / `ca-kpi` の承諾件数・売上に入る（定義として据え置き・既存の数字は変えない）。MCP の分析ツール `get_accept_revenue` は同じ母集団を使い、**`acceptedThenDeclined`（承諾後辞退）を内数として分け、`net`（承諾−承諾後辞退）も返す**。ALL の `revenue` / `grossProfit` / `deals` は `get_company_kpi` の `invoiceRevenue` / `grossProfit` / `decidedDealCount` と一致する（本番 2026-07・08 で確認）。
+
+- 分析ツール（`src/lib/aiRead/analytics/*`）の共通定義: 在籍CA＝`employees.job_category='CA'`、在籍月＝入社月〜退職月（入社日未登録は全期間＋warnings）、初回面談＝辞退・日程再調整を除く最も早い実施済み面談（`interview_count` は使わない）、粗利＝売上−求人DB費−仕入、人数 5 未満のグループは伏せる（`SUPPRESS_THRESHOLD`）、2026-04 以前は `reference: true`
+- 既存 4 ツールの出力は変えていない（tools/list は 13 本に増えた。`scripts/test-mcp-ca-kpi-t-xxx-step3.ts` は既存 4 本の存在を見る形に変更）
+- `entryStageCaseSql()`（`src/lib/aiRead/caKpi.ts`）が選考段階の判定の単一ソース（`currentStatus`・日次スナップショット・分析ツールで共有）。段階の判定を変えるとここ 1 か所

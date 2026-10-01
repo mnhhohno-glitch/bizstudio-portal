@@ -4,6 +4,8 @@ import { getSessionUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { sanitizeDateTimeFields } from "@/lib/date-utils";
 import { applyLatestInterviewResultToSupportStatus } from "@/lib/interview-result-to-status";
+// T-XXX step5B: 面談フォームの保存で変わった希望条件（選択式）を履歴に残す（更新と同じトランザクション）
+import { PREFERENCE_ROUTES, loadInterviewDetailBaseline, recordInterviewDetailPreferenceChanges } from "@/lib/preference-history";
 
 export async function GET(
   _req: NextRequest,
@@ -66,32 +68,47 @@ export async function PATCH(
     sanitizeDateTimeFields(detail, DETAIL_DT);
   }
 
-  const record = await prisma.interviewRecord.update({
-    where: { id },
-    data: {
-      ...recordFields,
-      detail: detail ? {
-        upsert: { create: detail, update: detail },
-      } : undefined,
-      rating: rating ? {
-        upsert: { create: rating, update: rating },
-      } : undefined,
-    },
-    include: {
-      detail: true,
-      rating: true,
-      memos: { orderBy: { date: "desc" } },
-      attachments: { orderBy: { uploadedAt: "desc" } },
-      workHistories: { orderBy: { order: "asc" } },
-      candidate: { select: { id: true, name: true, candidateNumber: true } },
-      interviewer: { select: { id: true, name: true } },
-    },
+  const record = await prisma.$transaction(async (tx) => {
+    const target = detail ? await tx.interviewRecord.findUnique({ where: { id }, select: { candidateId: true } }) : null;
+    const baseline = target ? await loadInterviewDetailBaseline(tx, { interviewRecordId: id, candidateId: target.candidateId }) : null;
+    const updated = await tx.interviewRecord.update({
+      where: { id },
+      data: {
+        ...recordFields,
+        detail: detail ? {
+          upsert: { create: detail, update: detail },
+        } : undefined,
+        rating: rating ? {
+          upsert: { create: rating, update: rating },
+        } : undefined,
+      },
+      include: {
+        detail: true,
+        rating: true,
+        memos: { orderBy: { date: "desc" } },
+        attachments: { orderBy: { uploadedAt: "desc" } },
+        workHistories: { orderBy: { order: "asc" } },
+        candidate: { select: { id: true, name: true, candidateNumber: true } },
+        interviewer: { select: { id: true, name: true } },
+      },
+    });
+    if (detail && target) {
+      await recordInterviewDetailPreferenceChanges(tx, {
+        candidateId: target.candidateId,
+        interviewRecordId: id,
+        baseline,
+        patch: detail as Record<string, unknown>,
+        changedByUserId: user.id,
+        route: PREFERENCE_ROUTES.interviewUpdate,
+      });
+    }
+    return updated;
   });
 
   // T-080: resultFlag が変更された場合、最新面談基準で Candidate.supportStatus を自動更新。
   // 変更が無くても候補者単位で最新面談を見直すだけなので副作用は小さい。
   if (Object.prototype.hasOwnProperty.call(recordFields, "resultFlag")) {
-    await applyLatestInterviewResultToSupportStatus(record.candidateId);
+    await applyLatestInterviewResultToSupportStatus(record.candidateId, user.id);
   }
 
   return NextResponse.json({ record });

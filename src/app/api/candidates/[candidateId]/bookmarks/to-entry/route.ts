@@ -8,6 +8,8 @@ import {
   resolveBookmarkMedia,
 } from "@/lib/constants/source-media";
 import { resolveBookmarkJobSnapshot } from "@/lib/bookmark-job-snapshot";
+// T-XXX step5B: 作成を選考ステータス履歴（event=create）として同じトランザクションで記録する
+import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChanges } from "@/lib/entry-status-history";
 
 // ブックマークを求人ツール（kyuujin）を経由せず JobEntry（エントリー）へ直接登録する。
 // T-161 で対象を2種類に拡張:
@@ -215,8 +217,14 @@ export async function POST(
 
   let created = 0;
   if (rows.length > 0) {
-    const result = await prisma.jobEntry.createMany({ data: rows });
-    created = result.count;
+    created = await prisma.$transaction(async (tx) => {
+      const createdRows = await tx.jobEntry.createManyAndReturn({ data: rows, select: ENTRY_STATUS_SELECT });
+      await recordJobEntryStatusChanges(
+        tx,
+        createdRows.map((r) => ({ event: "create" as const, before: null, after: r, changedByUserId: user.id, route: ENTRY_STATUS_ROUTES.bookmarkToEntry })),
+      );
+      return createdRows.length;
+    });
   }
 
   return NextResponse.json({
