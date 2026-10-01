@@ -732,3 +732,16 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - 担当CAの変更履歴は 2026-10-01 から `candidate_ca_assignment_histories` に残る（T-XXX step2・`src/lib/ca-assignment-history.ts` に書き込みを集約）。それより前の担当替えは分からないので、CA別の過去実績は「今の担当」で付く。
 
 **関連**: `docs/survey_T-XXX_ca-kpi-api.md` §5-3・§4。
+
+## 55. ChatGPT 向け MCP 入口（`/api/mcp/[secret]`）は秘密URL方式。URL が漏れたら `MCP_PATH_SECRET` を作り直して止める
+
+**状況（T-XXX step3, 2026-10-01）**: ChatGPT の「MCP アプリ」は認証が「OAuth」か「認証なし」しか選べない。ポータルの CA別実績を読ませる MCP 入口 `src/app/api/mcp/[secret]/route.ts` は **認証なし＋推測できない長い秘密のURL**（環境変数 `MCP_PATH_SECRET`・48 文字の英数字）で守っている。Bearer の `AI_READ_API_KEY` は使っていない。
+
+**罠**:
+- **URL そのものが鍵**。秘密のURLを知っている人は誰でも（ログインなしで）呼べる。URL・秘密の値を画面・ログ・ファイル（リポジトリ内）・コミット・報告文・チャットに出さない。渡すときはリポジトリ外のファイル（デスクトップの `portal-mcp-url.txt`）経由で、貼ったら削除する
+- **ログに URL を出さない**。入口のログはツール呼び出しの 1 行（ツール名・パラメータ・処理時間・結果サイズ）だけ（`src/lib/mcp/caKpiServer.ts`）。`next dev` のリクエストログはパス全体（秘密を含む）を出すので、ローカルで試すときは本番の秘密を使わない。本番（`next start`）は Next のリクエストログを出さないが、**Railway の HTTP ログ（Observability → HTTP Logs）にはリクエストのパスが秘密ごと残る**（2026-10-01 に GraphQL `httpLogs(filter:"@path:…")` で実測。対策は未実装・案は `docs/survey_T-XXX_ca-kpi-api.md` step3）。Railway のプロジェクトを見られる人は秘密を見られる前提で扱う
+- **漏れた疑いがあるときは秘密を作り直す**（`railway variables --set "MCP_PATH_SECRET=<新>" --service bizstudio-portal` → 再デプロイ完了で旧URLは即 404 → ChatGPT のアプリのURLを差し替え）。手順は `docs/gpt/ca-kpi-gpt-setup.md` §4-5。完全に止めるなら変数を削除する（未設定＝404）
+- 未設定・空・32 文字未満・不一致はすべて **404**（入口の存在を知らせない。`src/lib/mcp/secret.ts`）。「設定したのに 404」のときは長さを疑う
+- 回数制限は入口全体で 1 分 60 回（`src/lib/mcp/rateLimit.ts`・プロセス内固定窓）。超えると 429。コンテナが複数台になると台数分ゆるくなる
+- `src/middleware.ts` は `/api/` を素通しにしているので、この入口のための除外は追加していない。将来 `/api/` を認証必須にするときはこのパスの除外を忘れない
+- ツールは HTTP API（`/api/ai/ca-kpi`・`/api/ai/company-kpi`）と**同じ組み立て関数**（`src/lib/aiRead/caKpiResponse.ts`・`companyKpiResponse.ts`）を直接呼ぶ。数え方を変えるときはその関数を直せば HTTP と MCP の両方に効く。HTTP で自分の API を呼び直す作りにしない

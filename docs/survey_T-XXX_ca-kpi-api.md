@@ -556,3 +556,90 @@ Authorization: Bearer <AI_READ_API_KEY>
 | 2026-08・全CA（再確認） | 200・22KB・0.5 秒。全員行 185／82／48 人・229 件／26／10／9 人・10 件（変わらず） |
 
 備考: 上限の推定は ASCII バイト数で、`definitions`（日本語・約 6KB）を足しても ChatGPT の「約 10 万文字」に収まる見込み。ChatGPT 側の実測は未実施（GPT 登録後に確認）。
+
+---
+
+## step3 実装結果（2026-10-01・commit 5aede6d → master・ChatGPT MCP アプリ入口）
+
+### 方式
+
+ChatGPT の「MCP アプリ」は認証が「OAuth」か「認証なし」しか選べないため、**認証なし＋推測できない長い秘密のURL**（`/api/mcp/<MCP_PATH_SECRET>`）で接続する方式にした。分析の手順は ChatGPT の「スキル」として別に登録する（`docs/gpt/ca-kpi-skill/SKILL.md`）。
+
+### 実装したもの
+
+| 区分 | ファイル | 内容 |
+|--|--|--|
+| MCP 入口 | `src/app/api/mcp/[secret]/route.ts` | Streamable HTTP（ステートレス）。秘密の照合（定数時間比較・未設定/空/32 文字未満/不一致は **404**＝Next の通常の 404 と同じ応答）→ 回数制限（入口全体で 1 分 60 回・超過 429・`Retry-After` 付き）→ SDK の handler。GET/DELETE はステートレスのため SDK が 405 |
+| 秘密の照合 | `src/lib/mcp/secret.ts` | `isValidMcpSecret`（純粋関数・ログ無し） |
+| 回数制限 | `src/lib/mcp/rateLimit.ts` | プロセス内の固定窓（純粋関数 `takeRateLimitToken` ＋ モジュール変数） |
+| ツール 4 本 | `src/lib/mcp/caKpiServer.ts` | `get_metric_definitions` / `list_cas` / `get_ca_kpi` / `get_company_kpi`。すべて `readOnlyHint: true`。説明は日本語で「何が返るか・いつ使うか」。入力は zod で検証。エラーは `isError` ＋ 対処法つきの文。呼び出しごとに 1 行ログ（ツール名・パラメータ・ms・bytes・ok）。URL・秘密は出さない |
+| 本文組み立ての共有 | `src/lib/aiRead/caKpiResponse.ts`・`companyKpiResponse.ts` | step2 の `route.ts` にあった組み立て（定義文・注意点・上限・集計呼び出し）をそのまま関数に移した。HTTP ルート（`/api/ai/ca-kpi`・`/api/ai/company-kpi`）は認証＋この関数の薄い包みになり、**本文・ステータス・ヘッダは変えていない**。MCP は同じ関数を直接呼ぶ（HTTP で自分の API を呼び直さない。`AI_READ_API_KEY` は使わない） |
+| middleware | （変更なし） | `src/middleware.ts` は `/api/` を素通しにしているので、この入口のための除外追加は不要だった |
+| 資料 | `docs/gpt/ca-kpi-skill/SKILL.md`（スキル本文＋zip 化手順）、`docs/gpt/ca-kpi-gpt-setup.md` §4（MCP アプリ＋スキル方式・確認の質問・URL が漏れたときの止め方） | |
+| テスト | `scripts/test-mcp-ca-kpi-t-xxx-step3.ts`（疎通・整合。URL は環境変数 `MCP_URL` で渡し表示しない）、`scripts/test-mcp-secret-rate-limit-t-xxx-step3.ts`（純粋関数） | |
+| ナレッジ | `.claude/12-pitfalls.md` #55 | 秘密URL方式・漏れたら `MCP_PATH_SECRET` 作り直し・ログに URL を出さない・Railway HTTP ログにはパスが残る |
+| 依存 | `package.json` | `@modelcontextprotocol/server` 2.2.0 |
+
+### ライブラリの選定理由
+
+候補は (a) `mcp-handler`（Vercel 製の Next.js 向けラッパ・2.2.0）、(b) `@modelcontextprotocol/sdk` 1.31（v1 系の単一パッケージ）、(c) `@modelcontextprotocol/server` 2.2.0（v2 系・サーバー専用パッケージ）。**(c) を採用**。
+
+- (c) は `createMcpHandler(factory)` が fetch 標準の `Request → Response` を返すので、App Router の Route Handler にそのまま置ける（Node の `http` へ変換するアダプタが要らない）。依存は `zod ^4.2` と `@modelcontextprotocol/core` だけで、portal の zod 4.3 と合う。`legacy: "stateless"` で 2025 系（今の ChatGPT が使う版）と 2026-07-28 系の両方のプロトコルを 1 つの定義で返せる
+- (a) は内部で (c) を使う薄いラッパで、SSE 用の Redis 設定などこの用途に不要な機能が主。選ぶ理由が無かった
+- (b) は express・hono・ajv など依存が多く、v2 系が出た後の保守系統。新規採用なら v2 が自然
+- Next 16.1.6 で `tsc`・`eslint`・`next build` が通ることを確認した
+
+### テスト（§5）
+
+| 項目 | 結果 |
+|--|--|
+| ローカル（docker postgres:16 の空DB＋テスト用 CA 2 名・dev サーバー・ローカル専用の秘密） | `scripts/test-mcp-ca-kpi-t-xxx-step3.ts --rate-limit` **31/31 PASS**（initialize / tools/list 4 本・全部 readOnlyHint / 4 ツールの呼び出し / 入力誤り 6 種が分かりやすい文で isError / 誤った秘密 404・秘密なし 404・GET 405 / 61 回目以降 429・Retry-After あり） |
+| 純粋関数 | `scripts/test-mcp-secret-rate-limit-t-xxx-step3.ts` **15/15 PASS**（未設定・空・短すぎ・不一致・前方一致 → false、一致 → true、60 回許可・61 回目拒否・60 秒後に新しい窓） |
+| 既存テスト | `scripts/test-ca-kpi-params-t-xxx-step2.ts` 9 件 PASS |
+| 型・lint・ビルド | `tsc --noEmit` OK、`eslint`（変更ファイル）OK、`npx prisma generate && npx next build` OK |
+| 「未設定なら 404」 | 本番で、デプロイ直後（`MCP_PATH_SECRET` 未設定）に正しい秘密のURLへ POST → **404** を確認してから変数を設定した |
+
+ローカルの DB は空なので、ローカルでは応答の形・エラー・404/429 だけを確認し、2026-08 の数値一致は本番で確認した（下記）。
+
+### 本番確認（§6）
+
+本番（`bizstudio-portal-production.up.railway.app`・デプロイ済みコミット 5aede6d を `railway deployment list --service bizstudio-portal` で確認。`MCP_PATH_SECRET` 設定後の再デプロイも SUCCESS）に対して `scripts/test-mcp-ca-kpi-t-xxx-step3.ts --expect-2026-08` を実行:
+
+| 確認 | 結果 |
+|--|--|
+| `initialize` | 200・serverInfo.name=`bizstudio-portal-ca-kpi`・instructions あり |
+| `tools/list` | 4 ツール・全部 `readOnlyHint: true`・`get_ca_kpi` の入力は from/to/granularity/caId/groups |
+| `get_metric_definitions` | 12.9KB。definitions / caveats / companyKpi.definitions / dataFreshness / caAssignmentHistorySince |
+| `list_cas` | 在籍 CA 8 名（個人情報の列なし） |
+| `get_ca_kpi`（2026-08-01〜08-31・month・全CA） | 22.2KB・0.8 秒。全員行 **面談 185・初回 82・エントリー 48 人／229 件・書類通過 26 人・内定 10 人・承諾 9 人／10 件**（step1 §7-3・step2 本番確認と全項目一致）。CA 別 8 行の面談合計 185 ＝ 全員行 |
+| `get_company_kpi`（month=2026-08） | 7.8KB・2.5 秒。面談 185・エントリー人数 48・決定人数 9（step2 と一致） |
+| 入力誤り | from の形式違い／granularity 不正／groups 不正 → zod の検証文、期間超過（day 608 日）→「上限は 92 日」、caId 不在 → list_cas の案内、month 不正 → 形式の案内 |
+| 誤った秘密 → **404**、秘密なし（`/api/mcp/`）→ **404**、GET → 405 | 確認 |
+| HTTP ルートの生存 | `/api/ai/ca-kpi`・`/api/ai/company-kpi` にキーなしで GET → 401（fail-closed のまま） |
+| 合計 | **41/41 PASS** |
+
+回数制限（429）は本番では試していない（ローカルで確認済み。本番で 61 回叩くと最長 60 秒この入口が使えなくなるため）。
+
+### Railway のアクセスログにパスが残るか（§1）
+
+**残る**。Railway GraphQL の `httpLogs(deploymentId, filter: "@path:<パス>")` で、本番テスト時の `GET /api/mcp/<秘密 48 文字>` が **405 の行として秘密を含むパス全体つきで返ってきた**（誤った秘密の 404・秘密なしの 404 も同様）。一方、アプリ側のログ（deploymentLogs）には `[mcp] tool=... params=... ms=... bytes=... ok=...` の 7 行だけで、秘密は含まれていない。
+
+意味: Railway のプロジェクト（Observability → HTTP Logs）を見られる人は秘密のURLを見られる。今回は対策を実装していない。案:
+
+1. 秘密を定期的に作り直す（`docs/gpt/ca-kpi-gpt-setup.md` §4-5 の手順。ChatGPT 側の URL 差し替えが要る）
+2. Railway プロジェクトのメンバーを最小にする（HTTP ログの保持期間は Railway のプラン依存）
+3. 根本対策は ChatGPT 側の「OAuth」を使うこと（パスではなくヘッダで認証するのでアクセスログに残らない）。認可サーバーの実装が要るため今回は見送り
+
+### 実際に確認できたこと
+
+- 本番の MCP 入口が ChatGPT と同じ手順（initialize → tools/list → tools/call）で応答し、2026-08 の数値が step1・step2・`company-kpi` と一致すること
+- 未設定・誤り・無しの秘密がすべて 404 になること（本番）、回数制限が 429 になること（ローカル）
+- HTTP ルート（`/api/ai/ca-kpi`・`/api/ai/company-kpi`）の切り出し後も認証が fail-closed で、同じ関数が同じ数値を返すこと
+- アプリのログに URL・秘密が出ないこと／Railway の HTTP ログにはパスが残ること
+
+### 確認できていないこと
+
+- **ChatGPT の画面からの接続**（MCP アプリの作成・スキルの登録・確認の質問は大野さんの作業）。ChatGPT 側が SSE と JSON のどちらを要求するかはテストクライアントで両方を受けられるようにしてあり、SDK がどちらにも応答する
+- 本番での 429（上記の理由で未実施）
+- 回数制限はコンテナ 1 台のプロセス内で数えている。複数台にスケールすると台数分ゆるくなる
+- `next start`（本番）が Next のリクエストログを出さないことは Railway の deploymentLogs に該当行が無いことで確認したが、`next dev` はパス全体（秘密を含む）を出すので、ローカルで試すときは本番の秘密を使わないこと
