@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { resetSubStatusForStatus } from "@/lib/support-sub-status";
+// T-XXX step2: 一括「担当CA変更」で担当が変わる行だけ履歴を追記（同じトランザクション内）
+import { recordCaAssignmentChanges, CA_ASSIGNMENT_ROUTES } from "@/lib/ca-assignment-history";
 
 const VALID_STATUSES = ["BEFORE", "ACTIVE", "WAITING", "ENDED", "ARCHIVED"];
 
@@ -62,9 +64,27 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      const result = await prisma.candidate.updateMany({
-        where: { id: { in: candidateIds } },
-        data: { employeeId: newAssigneeUserId },
+      // T-XXX step2: 変更前の担当を読んでから更新し、担当が変わる行だけ履歴を追記する（同じトランザクション）。
+      const result = await prisma.$transaction(async (tx) => {
+        const before = await tx.candidate.findMany({
+          where: { id: { in: candidateIds } },
+          select: { id: true, employeeId: true },
+        });
+        const r = await tx.candidate.updateMany({
+          where: { id: { in: candidateIds } },
+          data: { employeeId: newAssigneeUserId },
+        });
+        await recordCaAssignmentChanges(
+          tx,
+          before.map((b) => ({
+            candidateId: b.id,
+            fromEmployeeId: b.employeeId,
+            toEmployeeId: newAssigneeUserId,
+            changedByUserId: user.id,
+            route: CA_ASSIGNMENT_ROUTES.bulkChangeAssignee,
+          })),
+        );
+        return r;
       });
       updatedCount = result.count;
       message = `${updatedCount}件の担当CAを${employee.name}に変更しました`;

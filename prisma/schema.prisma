@@ -582,6 +582,7 @@ model Candidate {
   jobApplications        CandidateJobApplication[]
   responseSubmissions    CandidateResponseSubmission[] // T-133 P1: まとめ送信バッチ
   mynaviScoutHistories   MynaviScoutHistory[] // T-190 Step3-1: マイナビ スカウト履歴一覧の受け口
+  caAssignmentHistories  CandidateCaAssignmentHistory[] // T-XXX step2: 担当CA変更の記録（追加のみ）
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -3821,4 +3822,27 @@ model InterviewScriptAnswer {
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
   @@map("interview_script_answers")
+}
+
+// ========================================
+// T-XXX step2: 担当CA変更の記録（CA実績の担当替え履歴）
+// ========================================
+// 求職者の担当CA（Candidate.employeeId）が変わるたびに 1 行追記する。追加のみ（更新・削除はしない）。
+// 書き込みは src/lib/ca-assignment-history.ts に集約し、担当が変わらない保存では書かない。
+// 変更前CA が NULL かつ route='initial_snapshot' の行は、記録開始時点の「今の担当CA」のスナップショット
+// （マイグレーション 20261001100000 で 1 回だけ投入）。それより前の担当替えは分からない。
+// 集計（/api/ai/ca-kpi）は今は現在の担当CAで数えており、この履歴は「当時の担当で数える」将来の集計のための材料。
+model CandidateCaAssignmentHistory {
+  id              String    @id @default(cuid())
+  candidateId     String    @map("candidate_id")
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  fromEmployeeId  String?   @map("from_employee_id") // 変更前の担当CA（Employee.id）。未設定からの付与・スナップショットは NULL
+  toEmployeeId    String?   @map("to_employee_id") // 変更後の担当CA（Employee.id）。担当解除は NULL
+  changedAt       DateTime  @default(now()) @map("changed_at")
+  changedByUserId String?   @map("changed_by_user_id") // 変更した社員（User.id）。システム・スナップショットは NULL
+  route           String // 変更経路: candidate_update / bulk_change_assignee / candidate_create / initial_snapshot
+
+  @@index([candidateId, changedAt])
+  @@index([changedAt])
+  @@map("candidate_ca_assignment_histories")
 }

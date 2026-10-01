@@ -720,3 +720,15 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - push 前の待機は `node scripts/wait_railway_idle.mjs`（この開発機に Python は無い）。
 
 **関連**: T-205（2026-09-27）で手順化。`07-deploy-rules.md`・`11-cursor-prompt-templates.md` にも追記。
+
+---
+
+## 54. 面談の「実施者」欄（`interview_records.interviewer_user_id`）は予約を入れた人であって、担当CAではない
+
+**罠**: `InterviewRecord.interviewerUserId`（画面の「実施者」）は、面談記録を作った人が初期値で入る（`src/components/candidates/interview-create.ts` で `currentEmployeeId`。作成者 `created_by_user_id` と全件一致）。2026-05 以降は予約を入力する社員（CA職種以外の 4 名）が 87% を占め、**担当CAと一致するのは約 9%**（1〜4月の移行データは 99% 一致していたので、見た目では気づきにくい）。
+
+- CA実績（面談数・初回面談・面談時間・ランク分布）は **担当CA軸（`candidates.employee_id`）で数える**。実績表（`computeWeeklyMatrix`）・`company-kpi`・`ca-kpi` はすべてこの軸。
+- `interviewer_user_id` で「誰が面談したか」を集計してはいけない。`src/lib/dailyReport/metrics.ts` 81 行付近のコメントは古い（実装は担当軸）。
+- 担当CAの変更履歴は 2026-10-01 から `candidate_ca_assignment_histories` に残る（T-XXX step2・`src/lib/ca-assignment-history.ts` に書き込みを集約）。それより前の担当替えは分からないので、CA別の過去実績は「今の担当」で付く。
+
+**関連**: `docs/survey_T-XXX_ca-kpi-api.md` §5-3・§4。

@@ -9,6 +9,8 @@ import { autoLinkCandidateToSlot } from "@/lib/scout/auto-link";
 import { findDuplicateCandidate, DUPLICATE_MATCH_LABELS } from "@/lib/mynavi-rpa/duplicate-check";
 // T-170: 求職者管理一覧の追加5列（include=metrics 指定時のみ付与）
 import { computeCandidateListMetrics, EMPTY_CANDIDATE_LIST_METRICS } from "@/lib/candidates/list-metrics";
+// T-XXX step2: 新規登録で担当CAを付けたら履歴を 1 行追記（担当なしで登録したときは書かない）
+import { recordCaAssignmentChange, CA_ASSIGNMENT_ROUTES } from "@/lib/ca-assignment-history";
 
 // GET: 求職者一覧取得
 export async function GET(request: NextRequest) {
@@ -223,34 +225,45 @@ export async function POST(request: NextRequest) {
 
     // 氏名を整形して登録
     const formattedName = formatName(name);
-    const candidate = await prisma.candidate.create({
-      data: {
-        candidateNumber,
-        name: formattedName,
-        nameKana: nameKana.trim(),
-        ...(email ? { email: email.trim() } : {}),
-        ...(phone ? { phone: phone.trim() } : {}),
-        ...(address ? { address: address.trim() } : {}),
-        gender,
-        ...(birthday ? { birthday: new Date(birthday + "T12:00:00.000Z") } : {}),
-        ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
-        ...(applicationRoute?.trim() ? { applicationRoute: applicationRoute.trim() } : {}),
-        ...(mediaSource?.trim() ? { mediaSource: mediaSource.trim() } : {}),
-        ...(scoutNumber?.trim() ? { scoutNumber: scoutNumber.trim() } : {}),
-        // 配信日・応募日は JST暦日として正午UTCで保存（罠#17: TZ巻き戻り回避）
-        ...(scoutDeliveryDate?.trim() ? { scoutDeliveryDate: new Date(scoutDeliveryDate.trim() + "T12:00:00.000Z") } : {}),
-        ...(applicationDate?.trim() ? { applicationDate: new Date(applicationDate.trim() + "T12:00:00.000Z") } : {}),
-        ...(masType?.trim() ? { masType: masType.trim() } : {}),
-        ...(desiredJobType1?.trim() ? { desiredJobType1: desiredJobType1.trim() } : {}),
-        ...(desiredJobType2?.trim() ? { desiredJobType2: desiredJobType2.trim() } : {}),
-        ...(desiredIndustry1?.trim() ? { desiredIndustry1: desiredIndustry1.trim() } : {}),
-        ...(desiredIndustry2?.trim() ? { desiredIndustry2: desiredIndustry2.trim() } : {}),
-        ...(desiredPrefecture1?.trim() ? { desiredPrefecture1: desiredPrefecture1.trim() } : {}),
-        ...(desiredPrefecture2?.trim() ? { desiredPrefecture2: desiredPrefecture2.trim() } : {}),
-        ...(desiredEmploymentType?.trim() ? { desiredEmploymentType: desiredEmploymentType.trim() } : {}),
-        ...(typeof desiredSalaryMin === "number" ? { desiredSalaryMin } : {}),
-        ...(employeeId ? { employeeId } : {}),
-      },
+    const candidate = await prisma.$transaction(async (tx) => {
+      const created = await tx.candidate.create({
+        data: {
+          candidateNumber,
+          name: formattedName,
+          nameKana: nameKana.trim(),
+          ...(email ? { email: email.trim() } : {}),
+          ...(phone ? { phone: phone.trim() } : {}),
+          ...(address ? { address: address.trim() } : {}),
+          gender,
+          ...(birthday ? { birthday: new Date(birthday + "T12:00:00.000Z") } : {}),
+          ...(recruiterName?.trim() ? { recruiterName: recruiterName.trim() } : {}),
+          ...(applicationRoute?.trim() ? { applicationRoute: applicationRoute.trim() } : {}),
+          ...(mediaSource?.trim() ? { mediaSource: mediaSource.trim() } : {}),
+          ...(scoutNumber?.trim() ? { scoutNumber: scoutNumber.trim() } : {}),
+          // 配信日・応募日は JST暦日として正午UTCで保存（罠#17: TZ巻き戻り回避）
+          ...(scoutDeliveryDate?.trim() ? { scoutDeliveryDate: new Date(scoutDeliveryDate.trim() + "T12:00:00.000Z") } : {}),
+          ...(applicationDate?.trim() ? { applicationDate: new Date(applicationDate.trim() + "T12:00:00.000Z") } : {}),
+          ...(masType?.trim() ? { masType: masType.trim() } : {}),
+          ...(desiredJobType1?.trim() ? { desiredJobType1: desiredJobType1.trim() } : {}),
+          ...(desiredJobType2?.trim() ? { desiredJobType2: desiredJobType2.trim() } : {}),
+          ...(desiredIndustry1?.trim() ? { desiredIndustry1: desiredIndustry1.trim() } : {}),
+          ...(desiredIndustry2?.trim() ? { desiredIndustry2: desiredIndustry2.trim() } : {}),
+          ...(desiredPrefecture1?.trim() ? { desiredPrefecture1: desiredPrefecture1.trim() } : {}),
+          ...(desiredPrefecture2?.trim() ? { desiredPrefecture2: desiredPrefecture2.trim() } : {}),
+          ...(desiredEmploymentType?.trim() ? { desiredEmploymentType: desiredEmploymentType.trim() } : {}),
+          ...(typeof desiredSalaryMin === "number" ? { desiredSalaryMin } : {}),
+          ...(employeeId ? { employeeId } : {}),
+        },
+      });
+      // T-XXX step2: 担当CA付きで登録したときだけ履歴（変更前CA=なし）を同じトランザクションで追記
+      await recordCaAssignmentChange(tx, {
+        candidateId: created.id,
+        fromEmployeeId: null,
+        toEmployeeId: created.employeeId,
+        changedByUserId: user.id,
+        route: CA_ASSIGNMENT_ROUTES.candidateCreate,
+      });
+      return created;
     });
 
     // T-065: 手動登録でもスカウト配信枠へ自動紐付け（PDF経路と同じ共通関数を使用）
