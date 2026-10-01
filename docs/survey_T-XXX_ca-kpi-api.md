@@ -466,3 +466,93 @@ Authorization: Bearer <AI_READ_API_KEY>
 
 **CA別の実績は「今の担当CA」でまとめて数える方式でよいですか？**
 今のポータルには担当替えの記録が残らないため、求職者の担当を替えると、前の担当が出した面談・エントリー・内定もすべて新しい担当の実績として数えられます（実績表も同じです）。このままでよければ step2 はこの方式で作ります。「担当替えの前の実績は前の担当に残したい」場合は、先に担当替えの履歴を残す仕組みを入れる必要があり、それより前の分は戻せません。
+
+---
+
+## step2 実装結果（2026-10-01・commit 166025b → master・追補 commit は末尾参照）
+
+### 実装したもの
+
+| 区分 | ファイル | 内容 |
+|--|--|--|
+| 新規API | `src/app/api/ai/ca-kpi/route.ts` | `GET /api/ai/ca-kpi?from&to&granularity=day/week/month&caId&groups`。Bearer `AI_READ_API_KEY`（既存の `assertAiReadAuth`）。`definitions`（定義・基準日付・信頼できる開始日・注意点）・`caveats`・`dataFreshness`・`attribution: current_ca`・`caAssignmentHistorySince`・`currentStatus`（取得時点の選考状況）を同梱 |
+| 集計 | `src/lib/aiRead/caKpi.ts` | 区切りの表（VALUES）と JOIN して GROUPING SETS で「全員＋担当ごと」を 1 グループ 1 クエリで出す。CA × 区切りごとに `computeWeeklyMatrix` を呼ぶ方式は day 粒度で数千クエリになるため採らなかった |
+| 部品の共有 | `src/lib/performance/weeklyMatrix.ts` | `proposalEventsSql` / `entryEventsSql` / `DECLINED_SQL` / `ENTRY_FLAGS_COUNTED_SQL` / `tsLit` を export（関数に切り出しただけ。`computeWeeklyMatrix` が発行する SQL は refactor 前後で byte 一致することを `$queryRawUnsafe` の差し替えで確認） |
+| パラメータ | `src/lib/aiRead/caKpiParams.ts` | 検証・区切り（week は月曜〜日曜・実績表と同じ）・上限（day 92 日／week・month 400 日／rows 推定 85KB） |
+| 担当CA替えの記録 | `prisma/schema.prisma`・`prisma/migrations/20261001100000_t_xxx_candidate_ca_assignment_history/`・`src/lib/ca-assignment-history.ts` | `candidate_ca_assignment_histories`（求職者ID・変更前CA・変更後CA・変更日時・変更した社員・経路）。書き込みはこのファイルに集約し、担当が変わらない保存では書かない。更新と同じトランザクション |
+| 記録を入れた経路 | `src/app/api/candidates/[candidateId]/update/route.ts`（`candidate_update`）、`src/app/api/master/candidates/bulk-update/route.ts`（`bulk_change_assignee`）、`src/app/api/master/candidates/route.ts`（`candidate_create`・担当付きで登録したときだけ） | |
+| スナップショット | 上記マイグレーションの末尾 INSERT | 「今の担当CA」を変更前CA=NULL・経路=`initial_snapshot`・id=`snap_`+求職者ID で 1 回だけ投入。Railway のビルド（`prisma migrate deploy`）で適用されるため `railway ssh` 不要 |
+| GPT 登録資料 | `docs/gpt/ca-kpi-openapi.yaml`（OpenAPI 3.1・`company-kpi` 同梱・架空の例）、`docs/gpt/ca-kpi-gpt-setup.md`（登録手順・指示文） | |
+| 検証 | `scripts/verify-ca-kpi-t-xxx-step2.ts`（正本との一致・読み取り専用）、`scripts/test-ca-kpi-params-t-xxx-step2.ts`（純粋関数）、`scripts/test-ca-assignment-history-t-xxx-step2.ts`（ローカル検証DB専用・書き込みあり） | |
+| ナレッジ | `.claude/12-pitfalls.md` #54 | 面談の「実施者」欄は予約を入れた人であって担当CAではない |
+
+### 担当CAを書き換える経路の一覧（漏れの確認）
+
+`src/` 全体で `Candidate.employeeId` / `candidates.employee_id` を書き換える箇所を検索した結果:
+
+| 経路 | ファイル | 記録 |
+|--|--|--|
+| 求職者詳細の基本情報編集 | `PATCH /api/candidates/[candidateId]/update`（`assignedEmployeeId`） | ○ `candidate_update` |
+| 求職者一覧の一括「担当CA変更」 | `POST /api/master/candidates/bulk-update`（`change_assignee`） | ○ `bulk_change_assignee`（変わる行だけ） |
+| 新規登録 | `POST /api/master/candidates`（`employeeId`） | ○ `candidate_create`（担当付きのときだけ） |
+| マイナビRPA の PDF 取り込み・スカウト履歴・一次返信メール・重複チェック | `src/app/api/rpa/mynavi/*`、`src/lib/mynavi-rpa/*` | 担当CAを書かない（対象外） |
+| 外部API（求職者サイト・日程調整・スカウト条件 等） | `src/app/api/external/*` | 担当CAを書かない（読むだけ） |
+| その他の `candidate.update` 20 か所（支援状況・配信枠・OneDrive・自動配信など） | `src/lib/*`、`src/app/api/scout/*` 等 | 担当CAを書かない |
+| 過去の一回限りの修正スクリプト | `scripts/fix-bs-employees-and-remap.ts`、`scripts/fix-duplicate-employees*.ts`（2026-05〜06 の社員重複整理） | 実行済み・今後は使わない。再実行するなら `recordCaAssignmentChanges` を通すこと |
+
+生SQL（`UPDATE candidates`）で担当を書く箇所は `src/` に無い。
+
+### テスト（§4）
+
+| 項目 | 結果 |
+|--|--|
+| 2026-08・全CA の合計が step1 の数字と一致 | **一致**（本番で確認。下記） |
+| 認証なし／誤ったキー → 401 | 本番で 401 / 401 |
+| 期間超過 → 400 | 本番で 400（day 365 日: 「上限は 92 日」）、応答過大 → 400（全CA × 12 か月） |
+| 担当CA替えで履歴が 1 行増え、変わらない保存では増えない | ローカル検証DB（docker postgres:16）で `scripts/test-ca-assignment-history-t-xxx-step2.ts` PASS（同じCAで再保存→増えない／変更→1行／解除→1行／一括は変わる行だけ／担当なし登録→増えない／履歴側の失敗で更新も戻る） |
+| 既存テスト・型チェック・ビルド | `scripts/test-ca-kpi-params-t-xxx-step2.ts` 9 件 PASS、`tsc --noEmit` OK、`eslint` OK、`npx prisma generate && npx next build` OK |
+| `computeWeeklyMatrix` の発行 SQL | refactor 前後で 6 本とも byte 一致（担当指定・全員の 2 ケース） |
+| 架空データでの定義確認 | ローカル検証DB に架空の求職者 7 名・面談 13 件・エントリー 15 件・ブックマーク 9 件を入れ、手計算の期待値と API の全項目（面談・時間・ランク・紹介・ブックマーク・評価・エントリー・選考段階・現在の状況・活動）が一致。`computeWeeklyMatrix` との突合 335 項目 PASS |
+
+### 本番確認（§5）
+
+本番（`bizstudio-portal-production.up.railway.app`・デプロイ済みコミット 166025b を Railway API で確認）に対して実施:
+
+| 確認 | 結果 |
+|--|--|
+| `GET /api/ai/ca-kpi?from=2026-08-01&to=2026-08-31&granularity=month`（全CA 8 名） | 200・22KB・1.0 秒。全員行: 面談 **185**・初回 **82**・既存 103・エントリー **48 人／229 件**・書類通過 **26 人**（50 件）・内定 **10 人**（13 件）・承諾 **9 人／10 件**・入社 2・企業面接 28 人（57 件）・一次 23 人／40 件・二次 4・最終 12 人／13 件・紹介 1,774 件／107 人・ブックマーク作成 2,180／紹介 1,774・面談時間 7,222 分（170 件・平均 42.5 分）。**step1 §7-3 と全項目一致**。CA別 8 行の面談合計 185・エントリー 229 件／48 人も全員行と一致 |
+| `company-kpi?month=2026-08` との突合 | 面談 185＝185、エントリー人数 48＝48、書類通過 26＝26、内定 10＝10、成約件数 10＝10、企業面接人数 28＝28 |
+| コンテナ上で `scripts/verify-ca-kpi-t-xxx-step2.ts --from 2026-08-01 --to 2026-08-31 --expect-2026-08`（`railway ssh`・読み取り専用接続） | **1,044 項目すべて一致・PASS**（全員＋CA 8 名 × month 1 区切り＋week 6 区切り × 面談3・紹介2・エントリー2・選考6・企業面接1・ランク分布、caId 指定クエリとの一致、step1 の 8 数値） |
+| 担当CA替えの記録（`railway ssh` 経由の SELECT） | `initial_snapshot` **4,334 行 ＝ 担当CAが入っている求職者 4,334 名**（担当なし 277 名）。全行 変更前CA=NULL・変更した社員=NULL。スナップショットの変更後CA と `candidates.employee_id` の不一致 0 件。マイグレーション完了 2026-10-01 20:20:50 JST（`_prisma_migrations`）。`caAssignmentHistorySince` = 2026-10-01 |
+| 認証・上限 | キーなし 401／誤ったキー 401／day 365 日 400／全CA × 12 か月 400 |
+| 応答サイズ・時間（既定グループ） | 全CA × 月別 11 か月: 114KB・1.9 秒（→ 上限を超えるため追補で 400 にした）、全CA × 日別 10 日: 104KB・1.2 秒、1 CA × 週別 3 か月（activity 込み）: 23KB・0.5 秒、1 CA × 日別 92 日: 109KB・0.7 秒 |
+
+**追補（同日）**: 上の実測で 1 行 ≈ 1.1KB と分かり、全CA × 11 か月（99 行）が ChatGPT Actions の応答上限（約 10 万文字）を超えるため、行数の上限（100 行）を **rows の推定バイト数 85KB** に改めた（`checkCaKpiSizeLimit`。既定グループで全CA月別は 8 か月、`groups` を減らせば長くできる。400 の本文に区切りの上限と対処を書く）。この変更後に本番で 400／200 を再確認した（末尾の「追補の本番確認」）。
+
+### 実際に確認できたこと
+
+- 本番 API の 2026-08 の数値が step1・`company-kpi`・`computeWeeklyMatrix` と一致すること（API の HTTP 応答と、コンテナ上の検証スクリプトの両方）
+- スナップショットの件数が担当CAあり求職者数と一致し、値も現在の担当と一致すること
+- 認証（401）・期間超過（400）・応答過大（400）の挙動
+- 担当CA替えの記録が「変わるときだけ」書かれること（ローカル検証DBでの関数テスト。本番では画面からの担当替えがまだ発生していないため `candidate_update` 等の行は 0 件）
+- 応答サイズと応答時間（上表）
+
+### 確認できていないこと
+
+- **本番の画面から実際に担当CAを替えて履歴が 1 行増えること**（本番データを動かす操作なので行っていない。関数レベルの動作はローカルで確認済み。最初の担当替えのあとに `SELECT route, count(*) FROM candidate_ca_assignment_histories GROUP BY route` で `candidate_update` 等が増えていることを見るとよい）
+- カスタムGPT への登録と、ChatGPT 側の応答サイズ・応答時間の上限（約 10 万文字・数十秒と言われているが実測していない）。登録後に `docs/gpt/ca-kpi-gpt-setup.md` の動作確認を行う
+- `activity` グループは user 軸（操作した本人）であり、担当CA軸の数値と母集団が違う点の業務上の妥当性
+- `currentStatus` の declined / rejected / closed は全期間の累計（FileMaker 移行分を含む。全員行で辞退 24,214・見送り 3,973）。期間を絞った値が必要なら `entryOutcomeNow`（エントリー月別）を使う
+- 2026-08 以外の月の値（検証スクリプトは任意の期間で実行できる。例: `--from 2026-05-01 --to 2026-09-30`）
+
+### 追補の本番確認（commit 0de02d1・デプロイ済みコミットを Railway API で確認）
+
+| 確認 | 結果 |
+|--|--|
+| 全CA × 月別 11 か月（2025-11〜2026-09） | 400「応答が大きすぎます（11 区切り × 9 行 = 99 行・推定 106KB、上限 85KB）。同じ条件なら区切りは 8 個まで…」 |
+| 全CA × 月別 8 か月（2026-02〜2026-09） | 200・86.9KB（72 行）・1.1 秒 |
+| 1 CA × 日別 92 日・既定グループ | 400（groups を減らす案内） |
+| 1 CA × 日別 92 日・`groups=interview,entry,selection` | 200・81KB（92 行）・0.7 秒 |
+| 2026-08・全CA（再確認） | 200・22KB・0.5 秒。全員行 185／82／48 人・229 件／26／10／9 人・10 件（変わらず） |
+
+備考: 上限の推定は ASCII バイト数で、`definitions`（日本語・約 6KB）を足しても ChatGPT の「約 10 万文字」に収まる見込み。ChatGPT 側の実測は未実施（GPT 登録後に確認）。
