@@ -9,14 +9,19 @@
 //   - 少人数の伏せ: 人数（分母）が 1〜4 のグループは内訳を null にして suppressed=true。日数の分布は標本 5 未満なら null。
 //   - 2026-04 以前は FileMaker 移行データが混ざるため参考値（reference=true）。既定の対象期間は 2026-05-01 以降。
 //   - 日付列は timestamp（UTC 保存）なので JST への変換は jstExpr（AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tokyo'）で行う。
+//   - (step6) 稼働しない期間（employee_inactive_periods）は退職後・入社前と同じ「在籍していない日」。CA の月の行に稼働日数・稼働人月
+//     （availability）を付け、CA 平均・1人あたりはこれで割る。その期間に記録された活動は捨てずに CA の行に数え、warnings に件数を出す。
+//   - (step6) 退職後に決まった成果（退職日より後の日付のエントリー・承諾など）は ALL（会社全体）に含め、CA の行からは外して
+//     postExit（元担当 CA ごと）に分けて返す。退職後の月は稼働人月 0 なので活動の分母にも入らない。
 
 import { prisma } from "@/lib/prisma";
 import { DECLINED_SQL } from "@/lib/performance/weeklyMatrix";
 import { todayJstDateString } from "@/lib/dailyReport/jstDate";
 import { jstIso, jstYmd } from "@/lib/aiRead/caKpiResponse";
 import { queryCaKpiMeta } from "@/lib/aiRead/caKpi";
+import { dbDateToYmd, monthAvailability, nextYmd, type InactivePeriodYmd, type MonthAvailability } from "@/lib/employee-inactive-periods";
 
-export const DEFINITION_VERSION = "2026-10-02";
+export const DEFINITION_VERSION = "2026-10-02.step6";
 /** 少人数の伏せの閾値（これ未満の人数のグループは内訳を伏せる）。 */
 export const SUPPRESS_THRESHOLD = 5;
 /** 信頼できる期間の開始（これより前は参考値）。 */
@@ -102,19 +107,51 @@ export interface RosterCa {
   tenureFromMonth: string | null;
   /** 在籍月の終了（YYYY-MM）。在籍中・未登録なら null */
   tenureToMonth: string | null;
+  /** (step6) 稼働しない期間（日付だけ。理由は持たない） */
+  inactivePeriods: InactivePeriodYmd[];
+}
+
+const EMPLOYEE_ROSTER_SELECT = {
+  id: true,
+  employeeNumber: true,
+  name: true,
+  status: true,
+  hireDate: true,
+  resignDate: true,
+  inactivePeriods: { select: { startDate: true, endDate: true }, orderBy: { startDate: "asc" } },
+} as const;
+
+type EmployeeRosterRow = {
+  id: string;
+  employeeNumber: string;
+  name: string;
+  status: string;
+  hireDate: Date | null;
+  resignDate: Date | null;
+  inactivePeriods: { startDate: Date; endDate: Date | null }[];
+};
+
+function toRosterCa(r: EmployeeRosterRow): RosterCa {
+  return {
+    id: r.id,
+    employeeNumber: r.employeeNumber,
+    name: r.name,
+    status: r.status,
+    hireDate: r.hireDate,
+    resignDate: r.resignDate,
+    tenureFromMonth: r.hireDate ? jstYmd(r.hireDate)!.slice(0, 7) : null,
+    tenureToMonth: r.resignDate ? jstYmd(r.resignDate)!.slice(0, 7) : null,
+    inactivePeriods: r.inactivePeriods.map((p) => ({ startDate: dbDateToYmd(p.startDate)!, endDate: dbDateToYmd(p.endDate) })),
+  };
 }
 
 export async function loadRoster(): Promise<RosterCa[]> {
   const rows = await prisma.employee.findMany({
     where: { jobCategory: "CA" },
-    select: { id: true, employeeNumber: true, name: true, status: true, hireDate: true, resignDate: true },
+    select: EMPLOYEE_ROSTER_SELECT,
     orderBy: { employeeNumber: "asc" },
   });
-  return rows.map((r) => ({
-    ...r,
-    tenureFromMonth: r.hireDate ? jstYmd(r.hireDate)!.slice(0, 7) : null,
-    tenureToMonth: r.resignDate ? jstYmd(r.resignDate)!.slice(0, 7) : null,
-  }));
+  return rows.map(toRosterCa);
 }
 
 /** その月に在籍しているか（入社日が未登録なら true＝含める。退職日が未登録なら status=active で判定）。 */
@@ -153,15 +190,10 @@ export async function resolveCas(caId: string | undefined): Promise<{ roster: Ro
       // CA 以外の社員が指定された可能性（担当として求職者を持つ場合がある）
       const emp = await prisma.employee.findFirst({
         where: { OR: [{ employeeNumber: caId }, { id: caId }] },
-        select: { id: true, employeeNumber: true, name: true, status: true, hireDate: true, resignDate: true },
+        select: EMPLOYEE_ROSTER_SELECT,
       });
       if (!emp) throw new Error(`caId に該当する社員が見つかりません: ${caId}。get_ca_roster / list_cas で employeeNumber を確認してください`);
-      const extra: RosterCa = {
-        ...emp,
-        tenureFromMonth: emp.hireDate ? jstYmd(emp.hireDate)!.slice(0, 7) : null,
-        tenureToMonth: emp.resignDate ? jstYmd(emp.resignDate)!.slice(0, 7) : null,
-      };
-      return { roster, targets: [extra], single: true };
+      return { roster, targets: [toRosterCa(emp)], single: true };
     }
     return { roster, targets: [ca], single: true };
   }
@@ -169,6 +201,112 @@ export async function resolveCas(caId: string | undefined): Promise<{ roster: Ro
 }
 
 export const caLabel = (ca: RosterCa) => ({ employeeNumber: ca.employeeNumber, name: ca.name });
+
+// ---- (step6) 稼働日数・退職後の成果 ---------------------------------------------
+
+/** 退職日（JST の暦日）。未登録なら null。 */
+export const resignYmdOf = (ca: RosterCa): string | null => jstYmd(ca.resignDate);
+
+/** その月の稼働日数・稼働人月（入社日〜退職日 − 稼働しない期間。暦日按分）。 */
+export function availabilityOf(ca: RosterCa, month: string): MonthAvailability {
+  return monthAvailability({ hireYmd: jstYmd(ca.hireDate), resignYmd: resignYmdOf(ca), periods: ca.inactivePeriods }, month);
+}
+
+/** CA の月の行に付ける稼働の情報（返す形）。 */
+export function availabilityBlock(ca: RosterCa, month: string) {
+  const a = availabilityOf(ca, month);
+  return { calendarDays: a.calendarDays, activeDays: a.activeDays, inactiveDays: a.inactiveDays, fte: a.fte };
+}
+
+/** 期間の稼働人月の合計（CA の期間合計の行に付ける）。 */
+export function activeMonthsOf(ca: RosterCa, months: string[]): number {
+  return Math.round(months.reduce((s, m) => s + availabilityOf(ca, m).fte, 0) * 1000) / 1000;
+}
+
+/** その日付が退職日より後か（退職日未登録・日付なしは false）。 */
+export function isAfterExit(ca: RosterCa, d: Date | null | undefined): boolean {
+  const r = resignYmdOf(ca);
+  if (!r || !d) return false;
+  return jstYmd(d)! > r;
+}
+
+/** CA の行に入れるか: 在籍月であり、退職日より後でない（退職後の成果は postExit に分ける）。 */
+export function inCaScope(ca: RosterCa, d: Date | null | undefined): boolean {
+  if (!d) return false;
+  return inTenureMonth(ca, jstMonthOf(d)!) && !isAfterExit(ca, d);
+}
+
+/** 退職日が今日より前の CA（退職後の成果を分けて出す対象）。 */
+export function exitedCas(roster: RosterCa[], today = todayJstDateString()): RosterCa[] {
+  return roster.filter((c) => {
+    const r = resignYmdOf(c);
+    return r != null && r < today;
+  });
+}
+
+/**
+ * 退職後の成果（元担当 CA ごと）。single なら指定 CA だけ、そうでなければ退職済みの CA 全員。行が無い CA は出さない。
+ * ALL（会社全体）にはこの分が既に含まれている（ALL は担当を問わず全行を数える）。
+ */
+export function buildPostExit<T extends { employee_id: string | null }>(
+  roster: RosterCa[],
+  targets: RosterCa[],
+  single: boolean,
+  rows: T[],
+  dateOf: (r: T) => Date | null,
+  summarize: (rs: T[]) => object,
+  opts: { byMonth?: boolean } = {},
+): Record<string, unknown>[] {
+  const cas = single ? targets.filter((c) => resignYmdOf(c) != null) : exitedCas(roster);
+  const out: Record<string, unknown>[] = [];
+  for (const ca of cas) {
+    const hit = rows.filter((r) => r.employee_id === ca.id && isAfterExit(ca, dateOf(r)));
+    if (!hit.length) continue;
+    const block: Record<string, unknown> = { ca: ca.employeeNumber, name: ca.name, resignDate: resignYmdOf(ca), total: summarize(hit) };
+    if (opts.byMonth) {
+      const ms = [...new Set(hit.map((r) => jstMonthOf(dateOf(r))!))].sort();
+      block.byMonth = ms.map((m) => ({ month: m, ...summarize(hit.filter((r) => jstMonthOf(dateOf(r)) === m)) }));
+    }
+    out.push(block);
+  }
+  return out;
+}
+
+/**
+ * 稼働しない期間に記録された活動（面談の実施・エントリー）の件数。今の担当CAで数える（他の集計と同じ担当軸）。
+ * 捨てずに CA の行に数えているので、件数を warnings で知らせる。
+ */
+export async function inactiveActivityWarnings(cas: RosterCa[]): Promise<string[]> {
+  const withPeriods = cas.filter((c) => c.inactivePeriods.length > 0);
+  if (!withPeriods.length) return [];
+  // (employee_id, 開始日の JST 0:00 を UTC にした時刻, 終了日翌日の JST 0:00 を UTC にした時刻 or NULL) の表
+  const utcStart = (ymd: string) => `(${sqlStr(ymd)}::timestamp - interval '9 hours')`;
+  const values = withPeriods
+    .flatMap((c) => c.inactivePeriods.map((p) => `(${sqlStr(c.id)}, ${utcStart(p.startDate)}, ${p.endDate ? utcStart(nextYmd(p.endDate)) : "NULL::timestamp"})`))
+    .join(", ");
+  const rows = await prisma.$queryRawUnsafe<{ employee_id: string; interviews: number; entries: number }[]>(`
+    WITH p(employee_id, f, t) AS (VALUES ${values})
+    SELECT p.employee_id,
+      (SELECT COUNT(*)::int FROM interview_records ir JOIN candidates c ON c.id = ir.candidate_id
+        WHERE c.employee_id = p.employee_id AND ${heldInterviewPred("ir")} AND ir.interview_date <= ${NOW_UTC}
+          AND ir.interview_date >= p.f AND (p.t IS NULL OR ir.interview_date < p.t)) AS interviews,
+      (SELECT COUNT(*)::int FROM job_entries je JOIN candidates c ON c.id = je.candidate_id
+        WHERE c.employee_id = p.employee_id AND je.archived_at IS NULL AND je.entry_date IS NOT NULL
+          AND je.entry_date >= p.f AND (p.t IS NULL OR je.entry_date < p.t)) AS entries
+    FROM p;`);
+  const byCa = new Map<string, { interviews: number; entries: number }>();
+  for (const r of rows) {
+    const x = byCa.get(r.employee_id) ?? { interviews: 0, entries: 0 };
+    byCa.set(r.employee_id, { interviews: x.interviews + Number(r.interviews), entries: x.entries + Number(r.entries) });
+  }
+  const parts = withPeriods
+    .map((c) => ({ c, x: byCa.get(c.id) ?? { interviews: 0, entries: 0 } }))
+    .filter(({ x }) => x.interviews + x.entries > 0)
+    .map(({ c, x }) => `${c.employeeNumber}（${c.name}）面談 ${x.interviews} 件・エントリー ${x.entries} 件`);
+  return parts.length
+    ? [`稼働しない期間に記録された活動（今の担当CAで数えた件数）: ${parts.join("・")}。捨てずに CA の行・ALL に数えている（代理対応・担当替え前の記録の可能性）`]
+    : [];
+}
 
 // ---- 集計ヘルパ ---------------------------------------------------------------
 
@@ -282,8 +420,9 @@ export interface EnvelopeInput {
 
 /** すべての新ツールが返す共通部分。 */
 export async function buildEnvelope(input: EnvelopeInput): Promise<Record<string, unknown>> {
-  const [meta, since] = await Promise.all([queryCaKpiMeta(), queryHistorySince()]);
-  const warnings = [...rosterWarnings(input.roster ?? input.cas), ...input.warnings];
+  const rosterForWarnings = input.roster ?? input.cas;
+  const [meta, since, inactiveWarn] = await Promise.all([queryCaKpiMeta(), queryHistorySince(), inactiveActivityWarnings(rosterForWarnings)]);
+  const warnings = [...rosterWarnings(rosterForWarnings), ...inactiveWarn, ...input.warnings];
   return {
     tool: input.tool,
     definitionVersion: DEFINITION_VERSION,
@@ -326,7 +465,10 @@ export function tenureMonthsFor(ca: RosterCa, months: string[]): string[] {
 export const COMMON_DEFINITIONS = {
   attribution: "担当CAは求職者の『今の』担当（candidates.employee_id）。担当替え記録（historySince.caAssignment）より前の担当替えは分からない",
   firstInterview: "その求職者の面談記録のうち result_flag が辞退系（連絡なし辞退・連絡あり辞退・辞退）でも日程再調整でもなく、面談日が過去の最も早い 1 件。interview_count は使わない",
-  tenure: "在籍CA＝job_category='CA'。CA別の月の行は入社月〜退職月だけ返す（入社月・退職月は 1 か月と数える）。入社日未登録の CA は全月を返し warnings に出す",
+  tenure: "在籍CA＝job_category='CA'。CA別の月の行は入社月〜退職月だけ返す。入社月・退職月・稼働しない期間を含む月は availability（稼働日数・稼働人月）で按分する。入社日未登録の CA は全月を返し warnings に出す",
+  availability: "CA の月の行の availability: calendarDays=その月の暦日数、activeDays=稼働日数（入社日〜退職日の在籍日から稼働しない期間の日を除いた暦日数・土日祝を区別しない）、inactiveDays=在籍日のうち稼働しない期間の日数、fte=稼働人月（activeDays ÷ calendarDays・小数 3 桁。月の半分なら 0.5）。期間合計の行の activeMonths は fte の合計。CA 平均・1人あたりは fte（activeMonths）の合計で割る。fte=0 の月は分母に入れない（活動 0 として評価しない）",
+  inactivePeriods: "稼働しない期間（休業など）は退職後・入社前と同じく在籍していない日として扱う。保存しているのは期間の日付だけで理由は持たない。その期間に記録された活動は捨てずに CA の行と ALL に数え、件数を warnings に出す",
+  postExit: "退職後の成果: 退職日（resign_date・JST）より後の日付で起きたエントリー・選考・承諾・承諾売上・今の進行中案件。ALL（会社全体）には含める。CA の行からは外し、元担当 CA ごとに postExit に分けて返す（ALL と CA 行の合計の差には postExit・担当なし・CA 以外の担当の分が入る）。退職後の月は稼働人月 0 なので活動の平均の分母に入れない（新規の面談などの活動は退職日まで）",
   reference: `${RELIABLE_FROM_MONTH} より前の月は FileMaker 移行データが混ざるため参考値（reference=true）`,
   suppression: `人数 1〜${SUPPRESS_THRESHOLD - 1} のグループは内訳を伏せる（suppressed=true）。分布は標本 ${SUPPRESS_THRESHOLD} 未満で伏せる`,
   counts: "records=件数（案件）、candidates/people=人数（求職者ユニーク）。期間のユニーク人数は期間全体で重複を除くので月の合計と一致しない",

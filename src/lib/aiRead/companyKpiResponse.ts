@@ -116,6 +116,9 @@ export const COMPANY_KPI_DEFINITIONS = {
     "企業との面接。JobEntry の firstInterviewDate / secondInterviewDate / finalInterviewDate のいずれかが期間内にある求職者のユニーク人数（同一人の複数社・複数段階は 1 人）",
   averageInvoiceUnitPrice: "invoiceRevenue ÷ decidedDealCount。decidedDealCount が 0 のときは null",
   averageGrossUnitPrice: "grossProfit ÷ decidedDealCount。decidedDealCount が 0 のときは null",
+  // T-XXX step6
+  inactiveAndPostExit:
+    "全社（全CA合算）は担当を問わず全求職者を数えるので、退職した CA の担当分（退職後に決まった承諾・売上を含む）も入る。CA 別の行は在籍CAだけ。CA 1人あたりにするときは get_ca_roster の availabilityByMonth の fte（稼働人月・稼働しない期間と入社前・退職後を除く）の合計で割る（caCount で割らない）",
 } as const;
 
 export const COMPANY_KPI_SCOPE_NOTE =

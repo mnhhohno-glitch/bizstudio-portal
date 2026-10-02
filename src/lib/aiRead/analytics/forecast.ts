@@ -7,8 +7,9 @@ import { loadCohortRows } from "./cohort";
 import { summarizeRevenue } from "./revenue";
 import { computePipelineSnapshotRows, SNAPSHOT_CA_KEY_ALL } from "@/lib/pipeline-snapshot";
 import {
-  buildEnvelope, resolveCas, resolveMonthRange, daysBetween, distribution, ratio, tenureMonthsFor, jstMonthOf, checkResponseSize,
+  buildEnvelope, resolveCas, resolveMonthRange, daysBetween, distribution, ratio, tenureMonthsFor, checkResponseSize,
   COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  inCaScope, activeMonthsOf, exitedCas, isAfterExit, resignYmdOf,
 } from "./common";
 import { todayJstDateString } from "@/lib/dailyReport/jstDate";
 
@@ -51,16 +52,17 @@ export async function buildForecastInputs(input: { baseFrom?: string; baseTo?: s
   ]);
   const snapByKey = new Map(snap.map((r) => [r.caKey, r]));
   const perScope = (ca: RosterCa | null) => {
-    const okMonths = ca ? new Set(tenureMonthsFor(ca, months)) : null;
-    const er = ca ? entryRows.filter((r) => r.employee_id === ca.id && okMonths!.has(jstMonthOf(r.entry_at)!)) : entryRows;
-    const cr = ca ? cohortRows.filter((r) => r.employee_id === ca.id && okMonths!.has(jstMonthOf(r.first_at)!)) : cohortRows;
-    const ar = ca ? acceptRows.filter((r) => r.employee_id === ca.id && okMonths!.has(jstMonthOf(r.acceptance_at)!)) : acceptRows;
+    // CA の行は在籍月かつ退職日まで（退職後の成果は postExit）。ALL は全行
+    const er = ca ? entryRows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.entry_at)) : entryRows;
+    const cr = ca ? cohortRows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.first_at)) : cohortRows;
+    const ar = ca ? acceptRows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.acceptance_at)) : acceptRows;
     const s = snapByKey.get(ca ? ca.id : SNAPSHOT_CA_KEY_ALL);
     const cohortAccepted = cr.filter((r) => r.acceptance_at);
     const cohortObserving = cr.filter((r) => !r.acceptance_at && (r.in_selection || r.support_status === "ACTIVE" || r.support_status === "WAITING"));
     const rev = summarizeRevenue(ar);
     return {
       ca: ca ? ca.employeeNumber : ALL_KEY,
+      ...(ca ? { activeMonths: activeMonthsOf(ca, tenureMonthsFor(ca, months)) } : {}),
       stageToAcceptance: stageToAcceptance(er),
       firstInterviewToAcceptance: {
         people: cr.length,
@@ -104,6 +106,33 @@ export async function buildForecastInputs(input: { baseFrom?: string; baseTo?: s
   const scopes: Record<string, unknown>[] = [];
   if (!single) scopes.push(perScope(null));
   for (const ca of targets) scopes.push(perScope(ca));
+  // 退職後の成果（元担当 CA ごと）: 今の進行中案件・学習期間中に退職日より後で起きた承諾とエントリー。ALL には含まれている
+  const postExit: Record<string, unknown>[] = [];
+  for (const ca of exitedCas(single ? targets : roster)) {
+    const s = snapByKey.get(ca.id);
+    const ar = acceptRows.filter((r) => r.employee_id === ca.id && isAfterExit(ca, r.acceptance_at));
+    const er = entryRows.filter((r) => r.employee_id === ca.id && isAfterExit(ca, r.entry_at));
+    const pipelineRecords = s ? s.entered + s.inSelectionRecords + s.acceptedNotJoined : 0;
+    if (!ar.length && !er.length && !pipelineRecords && !(s?.activeCandidates ?? 0)) continue;
+    const rev = summarizeRevenue(ar);
+    postExit.push({
+      ca: ca.employeeNumber,
+      name: ca.name,
+      resignDate: resignYmdOf(ca),
+      pipelineNow: s
+        ? {
+            entered: s.entered,
+            inSelection: { records: s.inSelectionRecords, people: s.inSelectionCandidates },
+            offered: s.offered,
+            acceptedNotJoined: s.acceptedNotJoined,
+            activeCandidates: s.activeCandidates,
+            upcomingInterviews: { first: s.upcomingInterviewsFirst, existing: s.upcomingInterviewsExisting },
+          }
+        : null,
+      acceptedAfterExit: { deals: rev.deals, revenue: rev.revenue, grossProfit: rev.grossProfit },
+      entriesAfterExit: { records: er.length, inProgress: er.filter((r) => outcomeOf(r) === "inProgress").length },
+    });
+  }
   const env = await buildEnvelope({
     tool: "get_forecast_inputs",
     period: { baseFrom: from, baseTo: to, months: months.length, note: "割合・日数・単価の学習期間。進行中案件・面談予約は取得時点" },
@@ -126,10 +155,13 @@ export async function buildForecastInputs(input: { baseFrom?: string; baseTo?: s
       pending: "結果待ち: entriesInProgress=学習期間の案件で選考中、cohortObserving=学習期間のコホートで承諾なし・活動中",
       attribution: COMMON_DEFINITIONS.attribution,
       tenure: COMMON_DEFINITIONS.tenure,
+      activeMonths: "CA の scope の activeMonths = 学習期間の稼働人月の合計（" + COMMON_DEFINITIONS.availability + "）",
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods,
+      postExit: COMMON_DEFINITIONS.postExit + "。このツールでは、退職済み CA の今の進行中案件（pipelineNow）と、学習期間に退職日より後で起きた承諾（acceptedAfterExit）・エントリー（entriesAfterExit）。ALL の pipelineNow・割合・単価に含まれている。予測では ALL を使えば退職後の分も入る。CA 別に積み上げる場合は postExit の進行中案件を足す",
       suppression: COMMON_DEFINITIONS.suppression,
     },
   });
-  const body = { ...env, scopes };
+  const body = { ...env, scopes, postExit };
   const tooBig = checkResponseSize(body);
   if (tooBig) throw new Error(tooBig);
   return body;

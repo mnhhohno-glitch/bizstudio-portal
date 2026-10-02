@@ -2,7 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { entryStageCaseSql } from "@/lib/aiRead/caKpi";
 import { computePipelineSnapshotRows, SNAPSHOT_CA_KEY_ALL, SNAPSHOT_CA_KEY_NONE } from "@/lib/pipeline-snapshot";
-import { buildEnvelope, resolveCas, daysBetween, distribution, jstMonthOf, checkResponseSize, COMMON_DEFINITIONS, NOW_UTC, ALL_KEY } from "./common";
+import { buildEnvelope, resolveCas, daysBetween, distribution, jstMonthOf, checkResponseSize, COMMON_DEFINITIONS, NOW_UTC, ALL_KEY, exitedCas, resignYmdOf } from "./common";
 
 interface StageRow {
   candidate_id: string;
@@ -72,10 +72,25 @@ export async function buildPipelineNow(input: { caId?: string }): Promise<Record
       ...summarizeStages(rs),
     };
   };
+  // 退職済み CA の今の進行中案件は「退職後の成果」として postExit に分ける（ALL には含まれている）。
+  // 既定の対象（在籍CA）に退職済みの人は入らないので、ふつうは rows と重ならない。caId で退職済み CA を指定したときは postExit だけに出す。
+  const exited = exitedCas(single ? targets : roster);
+  const exitedIds = new Set(exited.map((c) => c.id));
   const rows: Record<string, unknown>[] = [];
   if (!single) rows.push(caBlock(SNAPSHOT_CA_KEY_ALL, ALL_KEY, stageRows));
-  for (const ca of targets) rows.push(caBlock(ca.id, ca.employeeNumber, stageRows.filter((r) => r.employee_id === ca.id)));
+  for (const ca of targets) {
+    if (exitedIds.has(ca.id)) continue;
+    rows.push(caBlock(ca.id, ca.employeeNumber, stageRows.filter((r) => r.employee_id === ca.id)));
+  }
   if (!single) rows.push(caBlock(SNAPSHOT_CA_KEY_NONE, "NONE", stageRows.filter((r) => r.employee_id == null)));
+  const postExit: Record<string, unknown>[] = [];
+  for (const ca of exited) {
+    const rs = stageRows.filter((r) => r.employee_id === ca.id);
+    const s = snapByKey.get(ca.id);
+    const upcoming = s ? s.upcomingInterviewsFirst + s.upcomingInterviewsExisting : 0;
+    if (!rs.length && !(s?.activeCandidates ?? 0) && !upcoming) continue;
+    postExit.push({ name: ca.name, resignDate: resignYmdOf(ca), ...caBlock(ca.id, ca.employeeNumber, rs) });
+  }
 
   const env = await buildEnvelope({
     tool: "get_pipeline_now",
@@ -95,11 +110,12 @@ export async function buildPipelineNow(input: { caId?: string }): Promise<Record
       activeCandidates: "support_status が ACTIVE / WAITING の人数",
       upcomingInterviews: `面談日が今より後で辞退系・日程再調整でない面談予約。first=その求職者に過去の実施済み面談が無い（初回）、existing=2 回目以降。NOW は ${NOW_UTC} で判定`,
       NONE: "担当CAが未設定の求職者の分（ALL には含まれる）",
+      postExit: COMMON_DEFINITIONS.postExit + "。このツールでは、退職済み CA が今も担当として持っている進行中案件・活動中の求職者・面談予約（退職日より後の今の値なのですべて退職後の成果）。ALL に含まれ、rows の CA 行には出さない。担当替えが済めば新しい担当の行に移る",
       attribution: COMMON_DEFINITIONS.attribution,
       suppression: "件数・人数は伏せない（運用上の現在値）。分布だけ標本 5 未満で伏せる",
     },
   });
-  const body = { ...env, rows };
+  const body = { ...env, rows, postExit };
   const tooBig = checkResponseSize(body);
   if (tooBig) throw new Error(tooBig);
   return body;

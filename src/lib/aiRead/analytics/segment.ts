@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { loadCohortRows } from "./cohort";
 import {
   buildEnvelope, resolveCas, resolveMonthRange, firstInterviewCteSql, jstMonthExpr, sqlStr, daysBetween, distribution, ratio, shouldSuppress,
-  tenureMonthsFor, jstMonthOf, checkResponseSize, COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  tenureMonthsFor, checkResponseSize, COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  inCaScope, activeMonthsOf,
 } from "./common";
 
 export const SEGMENTS = [
@@ -114,8 +115,7 @@ export async function buildSegmentBreakdown(input: { segment: Segment; from?: st
     };
   };
   const scopeRows = (ca: RosterCa | null) => {
-    const okMonths = ca ? new Set(tenureMonthsFor(ca, months)) : null;
-    const rows = ca ? cohort.filter((r) => r.employee_id === ca.id && okMonths!.has(jstMonthOf(r.first_at)!)) : cohort;
+    const rows = ca ? cohort.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.first_at)) : cohort;
     const groups = new Map<string, typeof rows>();
     for (const r of rows) {
       const v = segmentValue(input.segment, detailById.get(r.candidate_id));
@@ -125,7 +125,7 @@ export async function buildSegmentBreakdown(input: { segment: Segment; from?: st
     const segs = [...groups.entries()]
       .sort((a, b) => b[1].length - a[1].length)
       .map(([value, rs]) => ({ value, ...summarize(rs) }));
-    return { ca: ca ? ca.employeeNumber : ALL_KEY, people: rows.length, withDetail: rows.filter((r) => detailById.has(r.candidate_id)).length, segments: segs };
+    return { ca: ca ? ca.employeeNumber : ALL_KEY, ...(ca ? { activeMonths: activeMonthsOf(ca, tenureMonthsFor(ca, months)) } : {}), people: rows.length, withDetail: rows.filter((r) => detailById.has(r.candidate_id)).length, segments: segs };
   };
   const scopes: Record<string, unknown>[] = [];
   if (!single) scopes.push(scopeRows(null));
@@ -149,6 +149,9 @@ export async function buildSegmentBreakdown(input: { segment: Segment; from?: st
       observing: "承諾なしで活動中（支援中/待機）または選考中の人数",
       firstInterview: COMMON_DEFINITIONS.firstInterview,
       attribution: COMMON_DEFINITIONS.attribution,
+      activeMonths: "CA の scope の activeMonths = 期間の稼働人月の合計（" + COMMON_DEFINITIONS.availability + "）",
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods,
+      postExit: "CA の scope は初回面談日が在籍月かつ退職日までの人だけ。退職後の分は ALL にだけ入る（詳しくは get_cohort_funnel の postExit）",
       suppression: COMMON_DEFINITIONS.suppression,
     },
   });

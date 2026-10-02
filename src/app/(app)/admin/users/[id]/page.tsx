@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { toJstDateString, todayJstDateString } from "@/lib/dailyReport/jstDate";
+import { dbDateToYmd } from "@/lib/employee-inactive-periods";
 import EmployeeDetailClient from "./EmployeeDetailClient";
 import type { EmployeeDetailData } from "./detail-types";
 
@@ -83,6 +84,7 @@ export default async function AdminUserDetailPage({
       equipment: true,
       dependents: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
       leaveRequests: { orderBy: { targetDate: "desc" }, take: 200 },
+      inactivePeriods: { orderBy: { startDate: "asc" }, select: { id: true, startDate: true, endDate: true } },
     },
   });
 
@@ -188,6 +190,11 @@ export default async function AdminUserDetailPage({
         halfDay: lr.halfDay,
         status: lr.status,
         reason: lr.reason,
+      })),
+      inactivePeriods: emp.inactivePeriods.map((p) => ({
+        id: p.id,
+        startDate: dbDateToYmd(p.startDate)!,
+        endDate: dbDateToYmd(p.endDate),
       })),
     };
   }

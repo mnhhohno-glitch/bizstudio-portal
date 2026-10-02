@@ -7,6 +7,7 @@ import { loadEntryRows, outcomeOf, type EntryRow } from "./conversion";
 import {
   buildEnvelope, resolveCas, resolveMonthRange, jstMonthOf, distribution, ratio, tenureMonthsFor, checkResponseSize,
   COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  inCaScope, availabilityBlock, activeMonthsOf, buildPostExit,
 } from "./common";
 
 const gross = (r: EntryRow): number | null => (r.revenue == null ? null : r.revenue - (r.job_db_cost ?? 0) - (r.cost ?? 0));
@@ -64,6 +65,8 @@ export async function buildAcceptRevenue(input: { from?: string; to?: string; ca
     ca: ca ? ca.employeeNumber : ALL_KEY,
     month,
     reference: month ? month < RELIABLE_FROM_MONTH : false,
+    ...(ca && month ? { availability: availabilityBlock(ca, month) } : {}),
+    ...(ca && !month ? { activeMonths: activeMonthsOf(ca, tenureMonthsFor(ca, months)) } : {}),
     ...summarizeRevenue(rs),
   });
   const monthRows: Record<string, unknown>[] = [];
@@ -73,16 +76,17 @@ export async function buildAcceptRevenue(input: { from?: string; to?: string; ca
     if (byCa || single) {
       for (const ca of targets) {
         if (!tenureMonthsFor(ca, [m]).length) continue;
-        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id)));
+        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.acceptance_at))));
       }
     }
   }
   const totalRows: Record<string, unknown>[] = [];
   if (!single) totalRows.push(groupRow(null, null, rows));
   for (const ca of targets) {
-    const okMonths = new Set(tenureMonthsFor(ca, months));
-    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && okMonths.has(jstMonthOf(r.acceptance_at)!))));
+    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.acceptance_at))));
   }
+  // 退職後に承諾した案件（ALL・会社全体の承諾売上には含まれている）を元担当 CA ごとに分ける
+  const postExit = buildPostExit(roster, targets, single, rows, (r) => r.acceptance_at, summarizeRevenue, { byMonth: true });
   const env = await buildEnvelope({
     tool: "get_accept_revenue",
     period: { from, to, months: months.length, basis: "承諾日（acceptance_date）の JST 月" },
@@ -109,11 +113,14 @@ export async function buildAcceptRevenue(input: { from?: string; to?: string; ca
       people: "承諾した求職者ユニーク。同じ人が複数社で承諾すると deals > people",
       attribution: COMMON_DEFINITIONS.attribution,
       tenure: COMMON_DEFINITIONS.tenure,
+      availability: COMMON_DEFINITIONS.availability,
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods,
+      postExit: COMMON_DEFINITIONS.postExit + "。このツールでは承諾日が退職日より後の案件の承諾売上・粗利。ALL の revenue / grossProfit に含まれ、CA の行の total には入らない",
       suppression: "件数・合計金額は伏せない（既存 get_company_kpi と同じ）。分布だけ標本 5 未満で伏せる",
       reference: COMMON_DEFINITIONS.reference,
     },
   });
-  const body = { ...env, currency: "JPY", taxBasis: "税抜", byMonth: monthRows, total: totalRows };
+  const body = { ...env, currency: "JPY", taxBasis: "税抜", byMonth: monthRows, total: totalRows, postExit };
   const tooBig = checkResponseSize(body);
   if (tooBig) throw new Error(tooBig);
   return body;

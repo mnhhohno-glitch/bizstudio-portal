@@ -374,7 +374,14 @@ export default function EmployeeDetailClient({
 
       {/* タブコンテンツ */}
       <div>
-        {tab === "basic" && <BasicInfoTab employee={e} todayJst={todayJst} aiFillData={aiFillData} />}
+        {tab === "basic" && (
+          <BasicInfoTab
+            employee={e}
+            todayJst={todayJst}
+            aiFillData={aiFillData}
+            inactivePeriods={detail.inactivePeriods}
+          />
+        )}
         {tab === "bank" && (
           <BankAccountTab employeeId={e.id} bankAccount={detail.bankAccount} aiFillData={aiFillData} />
         )}

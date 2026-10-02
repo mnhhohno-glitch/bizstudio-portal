@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { EmployeeBasic } from "./detail-types";
+import type { EmployeeBasic, InactivePeriodItem } from "./detail-types";
 import { calcAge, calcTenure } from "./detail-types";
 import {
   FormField,
@@ -20,6 +20,7 @@ import {
 import { useResumeAiFill, useAiFillData } from "./useResumeAiFill";
 import { filledMessage } from "./resume-ai-merge";
 import { isLineWorksUrl } from "@/lib/candidate-mail/line-works-url";
+import InactivePeriodsSection from "./InactivePeriodsSection";
 
 // AI読み取りの未保存バーに出す項目ラベル（BASIC_AI_KEYS と対応）。
 const BASIC_AI_LABELS: Record<string, string> = {
@@ -58,10 +59,12 @@ export default function BasicInfoTab({
   employee,
   todayJst,
   aiFillData,
+  inactivePeriods,
 }: {
   employee: EmployeeBasic;
   todayJst: string;
   aiFillData?: Record<string, unknown> | null;
+  inactivePeriods: InactivePeriodItem[];
 }) {
   const initial = {
     employeeNumber: employee.employeeNumber,
@@ -208,6 +211,9 @@ export default function BasicInfoTab({
           <ReadOnlyField>{tenure ?? "—"}</ReadOnlyField>
         </FormField>
       </div>
+
+      {/* T-XXX step6: 稼働しない期間（期間だけ・理由は入力しない） */}
+      <InactivePeriodsSection employeeId={employee.id} initialPeriods={inactivePeriods} />
 
       <div className="mt-5">
         <BlockTitle>連絡先</BlockTitle>

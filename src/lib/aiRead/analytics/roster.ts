@@ -3,7 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { entryStageCaseSql } from "@/lib/aiRead/caKpi";
 import { todayJstDateString } from "@/lib/dailyReport/jstDate";
 import { jstYmd } from "@/lib/aiRead/caKpiResponse";
-import { buildEnvelope, loadRoster, isDefaultCa, monthsBetween, currentMonthJst, COMMON_DEFINITIONS, ALL_KEY, type RosterCa } from "./common";
+import {
+  buildEnvelope, loadRoster, isDefaultCa, monthsBetween, currentMonthJst, availabilityOf, exitedCas, resignYmdOf,
+  COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+} from "./common";
 
 type Raw = Record<string, unknown> & { grp: string };
 const n = (v: unknown): number => (typeof v === "number" ? v : v == null ? 0 : Number(v));
@@ -39,6 +42,8 @@ export async function buildCaRoster(): Promise<Record<string, unknown>> {
   }
   const today = todayJstDateString();
   const curMonth = currentMonthJst();
+  // 稼働日数を返す月: 信頼できる期間の開始（2026-05）〜今月
+  const availabilityMonths = monthsBetween(RELIABLE_FROM_MONTH, curMonth);
   const row = (ca: RosterCa) => {
     const x = byKey.get(ca.id) ?? {};
     const from = ca.tenureFromMonth;
@@ -51,6 +56,11 @@ export async function buildCaRoster(): Promise<Record<string, unknown>> {
       hireDate: jstYmd(ca.hireDate),
       resignDate: jstYmd(ca.resignDate),
       registration: { hireDateRegistered: !!ca.hireDate, resignDateRegistered: !!ca.resignDate },
+      // (step6) 稼働しない期間（日付だけ。理由は返さない）と月ごとの稼働日数
+      inactivePeriods: ca.inactivePeriods.map((p) => ({ startDate: p.startDate, endDate: p.endDate })),
+      availabilityByMonth: availabilityMonths
+        .map((m) => availabilityOf(ca, m))
+        .map((a) => ({ month: a.month, calendarDays: a.calendarDays, employedDays: a.employedDays, inactiveDays: a.inactiveDays, activeDays: a.activeDays, fte: a.fte })),
       tenure: {
         fromMonth: from,
         toMonth: ca.tenureToMonth,
@@ -73,11 +83,26 @@ export async function buildCaRoster(): Promise<Record<string, unknown>> {
     cas: roster,
     single: false,
     exclusions: ["職種が CA 以外の社員（スカウト担当・事務など）は一覧に含めない。担当として求職者を持っていても ALL にだけ入る"],
-    counts: { cas: roster.length, defaultCas: roster.filter((c) => isDefaultCa(c, today)).length },
-    warnings: [],
+    counts: {
+      cas: roster.length,
+      defaultCas: roster.filter((c) => isDefaultCa(c, today)).length,
+      withInactivePeriods: roster.filter((c) => c.inactivePeriods.length > 0).length,
+      exited: exitedCas(roster, today).length,
+    },
+    warnings: [
+      ...roster
+        .filter((c) => isDefaultCa(c, today) && c.inactivePeriods.some((p) => p.startDate <= today && (p.endDate == null || today <= p.endDate)))
+        .map((c) => `${c.employeeNumber}（${c.name}）は今日が稼働しない期間に入っている。在籍CAとして一覧に出るが、その期間の月は availabilityByMonth の fte が下がる（CA 平均の分母から外す）`),
+      ...exitedCas(roster, today).map(
+        (c) => `${c.employeeNumber}（${c.name}）は退職済み（退職日 ${resignYmdOf(c)}）。今も担当として持っている案件・退職後の成果は各ツールの postExit に分けて返す（ALL には含まれる）`,
+      ),
+    ],
     definitions: {
       caJudgement: "CA かどうか＝employees.job_category='CA'。在籍＝status='active' かつ退職日が無いか未来",
       tenure: COMMON_DEFINITIONS.tenure,
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods + "。inactivePeriods は期間（startDate〜endDate・endDate=null は終了未定）だけを返す",
+      availabilityByMonth: `${RELIABLE_FROM_MONTH}〜今月の月ごとの稼働。${COMMON_DEFINITIONS.availability}。employedDays=在籍日数（入社日〜退職日と月の重なり。入社日未登録は月初から在籍とみなす）`,
+      postExit: COMMON_DEFINITIONS.postExit,
       assignedCandidates: "candidates.employee_id がその CA の求職者数（FileMaker 移行分を含むため大きい）",
       activeCandidates: "support_status が ACTIVE または WAITING の人数",
       inSelection: "有効（is_active・未アーカイブ）なエントリーのうち段階が 書類選考〜内定（承諾前）の件数・人数",

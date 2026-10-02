@@ -40,6 +40,9 @@ export const CA_KPI_DEFINITIONS = {
     dateBasis: "各数値の基準日付（下記）が区切り（bucket）の JST 0:00〜23:59:59.999 に入る行を数える",
     reliableFrom: "2026-05-01（2026-04 以前は FileMaker から移行したデータが混ざるため参考値）",
     caution: "担当CAは現在の担当で数えている。担当替えの記録（caAssignmentHistorySince）より前の担当替えは分からず、担当が替わると前の担当の時期の実績も新しい担当に付く。実績表（ホーム画面）と同じ数え方",
+    // T-XXX step6
+    inactiveAndPostExit:
+      "このツールの CA 行は稼働日数で按分しない（在籍していない日・稼働しない期間の月も 0 として並ぶ）。CA を比べる・平均するときは get_ca_roster の availabilityByMonth の fte（稼働人月）で割り、fte=0 の月は分母に入れない。退職済みの CA（status=disabled）は caId 省略時の CA 行に出ないが、その担当の退職後の成果も全員行（ALL）には入っている（caId 指定で個別に取れる。分析ツールでは postExit に分けて返る）",
   },
   interview: {
     definition: "CAと求職者の面談（interview_records）。total=実施（辞退系 result_flag を除く・interview_count>=1）、first=初回（interview_count=1）、existing=2回目以降、interviewPrep=面接対策（interview_type）、booked=予約数（辞退を含む全記録）、noShow=連絡なし辞退、cancelled=連絡あり辞退・辞退、rescheduled=日程再調整",

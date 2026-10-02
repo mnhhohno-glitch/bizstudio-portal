@@ -108,6 +108,15 @@ export type EmployeeDetailData = {
   equipment: EquipmentData | null;
   dependents: DependentData[];
   leaveRequests: LeaveRequestItem[];
+  /** T-XXX step6: 稼働しない期間（期間だけ。理由は持たない） */
+  inactivePeriods: InactivePeriodItem[];
+};
+
+/** T-XXX step6: 稼働しない期間（"YYYY-MM-DD"・終了日 null = 終了未定）。 */
+export type InactivePeriodItem = {
+  id: string;
+  startDate: string;
+  endDate: string | null;
 };
 
 /** "YYYY-MM-DD" 同士の文字列演算で満年齢を計算（タイムゾーン非依存）。 */

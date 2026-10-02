@@ -795,3 +795,21 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - 復元手順は Railway に依存しない形で書いてある（別の PostgreSQL 17 に `pg_restore` → 環境変数 JSON から入れ直す）。
 - パスフレーズ（GitHub Secrets `BACKUP_PASSPHRASE`）を無くすとコピーは誰にも開けない。
 - 復元テストの成功通知（LINE WORKS、毎週日曜 05:07 JST ごろ）が**来ないこと自体を異常**として扱う。
+
+## 60. 稼働しない期間（休業など）は期間の日付だけを保存する。理由は保存しない・受け取らない・返さない
+
+**状況（T-XXX step6・2026-10-02）**: 社員詳細（基本情報タブ）の「稼働しない期間」で、社員ごとに複数の期間（開始日・終了日／終了日空欄＝終了未定）を登録できる。表は `employee_inactive_periods`、読み書きは admin 限定 API `/api/admin/employees/[employeeId]/inactive-periods`、検証・重複判定・保存・稼働日数の計算は **`src/lib/employee-inactive-periods.ts` 1 か所**。
+
+- **理由（産休・育休・病気など）の列は作っていない**。画面に理由の入力欄を足さない。API は body の他のキーを読まない。MCP（`get_ca_roster`）も日付だけを返す。要配慮情報を CA 分析（ChatGPT）に流さないため
+- 同じ社員の期間の重複は保存時に 409（両端を含む・終了未定は無限扱い）。判定〜書き込みは社員単位の `pg_advisory_xact_lock`（`$executeRaw`）
+- CA 分析では退職後・入社前と同じ「在籍していない日」。CA の月の行に `availability`（稼働日数・稼働人月 `fte`＝暦日按分）を付け、CA 平均・1人あたりは `fte` で割る（`src/lib/aiRead/analytics/common.ts` の `availabilityOf`）。その期間に記録された活動は捨てずに数え、`warnings` に件数を出す
+- 期間は**職種が CA の社員にしか集計で効かない**（`get_ca_roster` は `job_category='CA'` だけ）。CA 以外の社員に登録しても集計は変わらない
+
+## 61. 退職後に決まった成果は会社全体（ALL）に含め、CA の行からは外して `postExit` に分ける
+
+**状況（T-XXX step6）**: 担当軸は「今の担当CA」なので、退職した CA の担当のまま残った求職者の承諾・エントリー・進行中案件は、全社合計（`get_company_kpi` / `get_ca_kpi` の ALL / 分析ツールの ALL）には**元から入っている**（ALL は担当を問わず全求職者を数える）。抜けていたのは CA 別の表示で、退職済み CA は既定の対象（在籍CA）から外れ、退職後の月の CA 行も出ないため見えなかった。
+
+- 分析ツールは、退職日（JST）より後の日付の行を CA の行から外し、`postExit`（元担当 CA ごと・`resignDate` 付き）に返す（`buildPostExit` / `isAfterExit` / `inCaScope`）。`get_pipeline_now` は退職済み CA の今の進行中案件を `rows` に出さず `postExit` に出す
+- 退職後の月は稼働人月 0（活動の平均の分母に入らない）。新規の面談などの活動は退職日まで
+- **退職日が未登録だと退職後の扱いにならない**（在籍として全期間が CA の行に入る）。業務委託で成約まで続ける人も、社員詳細に退職日（契約終了日）を入れる
+- 既存 4 ツール（`get_ca_kpi` / `get_company_kpi` など）の数字は変えていない（definitions に説明を足しただけ）

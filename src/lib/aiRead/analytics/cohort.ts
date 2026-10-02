@@ -7,6 +7,7 @@ import { entryStageCaseSql } from "@/lib/aiRead/caKpi";
 import {
   buildEnvelope, resolveCas, resolveMonthRange, firstInterviewCteSql, jstMonthExpr, sqlStr, daysBetween, jstMonthOf,
   distribution, ratio, shouldSuppress, tenureMonthsFor, checkResponseSize, COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  inCaScope, availabilityBlock, activeMonthsOf, buildPostExit,
 } from "./common";
 
 export const COHORT_STAGES = ["proposal", "entry", "documentPass", "companyInterview", "offer", "acceptance", "join"] as const;
@@ -125,6 +126,8 @@ export async function buildCohortFunnel(input: { cohortFrom?: string; cohortTo?:
     ca: ca ? ca.employeeNumber : ALL_KEY,
     month,
     reference: month ? month < RELIABLE_FROM_MONTH : false,
+    ...(ca && month ? { availability: availabilityBlock(ca, month) } : {}),
+    ...(ca && !month ? { activeMonths: activeMonthsOf(ca, tenureMonthsFor(ca, months)) } : {}),
     ...summarizeCohort(rs),
   });
   for (const m of months) {
@@ -133,7 +136,7 @@ export async function buildCohortFunnel(input: { cohortFrom?: string; cohortTo?:
     if (byCa || single) {
       for (const ca of targets) {
         if (!tenureMonthsFor(ca, [m]).length) continue;
-        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id)));
+        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.first_at))));
       }
     }
   }
@@ -141,9 +144,10 @@ export async function buildCohortFunnel(input: { cohortFrom?: string; cohortTo?:
   const totalRows: Record<string, unknown>[] = [];
   if (!single) totalRows.push(groupRow(null, null, rows));
   for (const ca of targets) {
-    const okMonths = new Set(tenureMonthsFor(ca, months));
-    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && okMonths.has(jstMonthOf(r.first_at)!))));
+    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.first_at))));
   }
+  // 退職日より後に初回面談した求職者（本来は起きない。担当替え漏れ・記録の誤りの可能性）。ALL には含まれている
+  const postExit = buildPostExit(roster, targets, single, rows, (r) => r.first_at, summarizeCohort);
 
   const env = await buildEnvelope({
     tool: "get_cohort_funnel",
@@ -176,11 +180,14 @@ export async function buildCohortFunnel(input: { cohortFrom?: string; cohortTo?:
       firstInterview: COMMON_DEFINITIONS.firstInterview,
       attribution: COMMON_DEFINITIONS.attribution,
       tenure: COMMON_DEFINITIONS.tenure,
+      availability: COMMON_DEFINITIONS.availability,
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods,
+      postExit: "初回面談は活動なので CA の行は退職日まで。退職日より後に初回面談した人がいれば postExit に分けて返す（本来は起きない・担当替え漏れの可能性）。退職前に初回面談した人がその後に承諾した分は、初回面談の月の CA の行に入る（コホートは人で追うため）",
       suppression: COMMON_DEFINITIONS.suppression,
       reference: COMMON_DEFINITIONS.reference,
     },
   });
-  const body = { ...env, stages: COHORT_STAGES, byMonth: monthRows, total: totalRows };
+  const body = { ...env, stages: COHORT_STAGES, byMonth: monthRows, total: totalRows, postExit };
   const tooBig = checkResponseSize(body);
   if (tooBig) throw new Error(tooBig);
   return body;

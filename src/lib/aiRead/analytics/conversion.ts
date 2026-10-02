@@ -5,6 +5,7 @@ import { entryStageCaseSql } from "@/lib/aiRead/caKpi";
 import {
   buildEnvelope, resolveCas, resolveMonthRange, jstMonthExpr, sqlStr, daysBetween, jstMonthOf, distribution, ratio, shouldSuppress,
   tenureMonthsFor, checkResponseSize, COMMON_DEFINITIONS, RELIABLE_FROM_MONTH, ALL_KEY, type RosterCa,
+  inCaScope, availabilityBlock, activeMonthsOf, buildPostExit,
 } from "./common";
 
 export const SELECTION_STAGES_C = ["documentSubmit", "documentPass", "firstInterview", "secondInterview", "finalInterview", "companyInterview", "offer", "acceptance", "join"] as const;
@@ -120,6 +121,8 @@ export async function buildSelectionConversion(input: { from?: string; to?: stri
     ca: ca ? ca.employeeNumber : ALL_KEY,
     month,
     reference: month ? month < RELIABLE_FROM_MONTH : false,
+    ...(ca && month ? { availability: availabilityBlock(ca, month) } : {}),
+    ...(ca && !month ? { activeMonths: activeMonthsOf(ca, tenureMonthsFor(ca, months)) } : {}),
     ...summarizeConversion(rs),
   });
   const monthRows: Record<string, unknown>[] = [];
@@ -129,16 +132,17 @@ export async function buildSelectionConversion(input: { from?: string; to?: stri
     if (byCa || single) {
       for (const ca of targets) {
         if (!tenureMonthsFor(ca, [m]).length) continue;
-        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id)));
+        monthRows.push(groupRow(ca, m, rs.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.entry_at))));
       }
     }
   }
   const totalRows: Record<string, unknown>[] = [];
   if (!single) totalRows.push(groupRow(null, null, rows));
   for (const ca of targets) {
-    const okMonths = new Set(tenureMonthsFor(ca, months));
-    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && okMonths.has(jstMonthOf(r.entry_at)!))));
+    totalRows.push(groupRow(ca, null, rows.filter((r) => r.employee_id === ca.id && inCaScope(ca, r.entry_at))));
   }
+  // 退職後にエントリーした案件（ALL には含まれている）を元担当 CA ごとに分ける
+  const postExit = buildPostExit(roster, targets, single, rows, (r) => r.entry_at, summarizeConversion, { byMonth: true });
   const env = await buildEnvelope({
     tool: "get_selection_conversion",
     period: { from, to, months: months.length, basis: "エントリー日（entry_date）の JST 月" },
@@ -159,11 +163,14 @@ export async function buildSelectionConversion(input: { from?: string; to?: stri
       companyInterview: "一次・二次・最終のいずれか最初の面接日",
       attribution: COMMON_DEFINITIONS.attribution,
       tenure: COMMON_DEFINITIONS.tenure,
+      availability: COMMON_DEFINITIONS.availability,
+      inactivePeriods: COMMON_DEFINITIONS.inactivePeriods,
+      postExit: COMMON_DEFINITIONS.postExit + "。このツールではエントリー日が退職日より後の案件（その後の段階・結果も含めてまとめる）",
       suppression: COMMON_DEFINITIONS.suppression,
       reference: COMMON_DEFINITIONS.reference,
     },
   });
-  const body = { ...env, stages: SELECTION_STAGES_C, outcomes: OUTCOMES, byMonth: monthRows, total: totalRows };
+  const body = { ...env, stages: SELECTION_STAGES_C, outcomes: OUTCOMES, byMonth: monthRows, total: totalRows, postExit };
   const tooBig = checkResponseSize(body);
   if (tooBig) throw new Error(tooBig);
   return body;

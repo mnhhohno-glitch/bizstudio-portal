@@ -269,15 +269,15 @@ export function createCaKpiMcpServer(): McpServer {
     });
 
   const COMMON_RETURNS =
-    "共通で返るもの: definitionVersion・generatedAt（JST）・observationEnd（観測終了日＝今日）・period・cas（対象CA）・exclusions（除外条件）・suppression（伏せ方）・dataFreshness（最終更新時刻）・historySince（各記録の開始日）・counts（件数・除外・欠損率）・warnings（品質警告）・definitions（分母と定義）。";
+    "共通で返るもの: definitionVersion・generatedAt（JST）・observationEnd（観測終了日＝今日）・period・cas（対象CA）・exclusions（除外条件）・suppression（伏せ方）・dataFreshness（最終更新時刻）・historySince（各記録の開始日）・counts（件数・除外・欠損率）・warnings（品質警告）・definitions（分母と定義）。CA の月の行には availability（稼働日数・稼働人月 fte）、期間合計の行には activeMonths（稼働人月の合計）が付く。CA 平均・1人あたりは fte で割る（稼働しない期間・入社前・退職後は分母に入れない）。退職済み CA の退職後の成果は ALL に含まれ、CA の行からは外して postExit に分けて返る。";
 
   server.registerTool(
     "get_ca_roster",
     {
       title: "CA 一覧と在籍期間",
       description:
-        "CA（キャリアアドバイザー）の一覧と在籍期間（入社日・退職日・登録状況・在籍月数）、今の担当人数・活動中（支援中/待機）・選考中（件数と人数）・承諾済み未入社を返す。" +
-        "いつ使うか: 深い分析の最初（get_data_quality の次）に、どの CA をどの期間で比べてよいかを決めるとき。入社日未登録の CA は warnings に出る（在籍前の月を除けない）。" +
+        "CA（キャリアアドバイザー）の一覧と在籍期間（入社日・退職日・登録状況・在籍月数）、稼働しない期間（inactivePeriods・日付だけ）、月ごとの稼働日数と稼働人月（availabilityByMonth・2026-05〜今月）、今の担当人数・活動中（支援中/待機）・選考中（件数と人数）・承諾済み未入社を返す。" +
+        "いつ使うか: 深い分析の最初（get_data_quality の次）に、どの CA をどの期間で比べてよいかを決めるとき。CA を比べる・平均するときの分母（稼働人月）もここで取る。入社日未登録の CA は warnings に出る（在籍前の月を除けない）。" +
         "分母: 在籍CA＝job_category='CA'。current の数は取得時点の値。引数なし。" + COMMON_RETURNS,
       inputSchema: z.object({}),
       annotations: { ...READ_ONLY, title: "CA 一覧と在籍期間" },

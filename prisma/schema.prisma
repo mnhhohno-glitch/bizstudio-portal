@@ -277,10 +277,32 @@ model Employee {
   equipment   EmployeeEquipment?
   dependents  EmployeeDependent[]
 
+  // T-XXX step6: 稼働しない期間（期間だけ。理由は保存しない）
+  inactivePeriods EmployeeInactivePeriod[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("employees")
+}
+
+// T-XXX step6: 社員の「稼働しない期間」（休業など）。CA 分析（MCP）で在籍していない日として扱い、CA 平均・1人あたりの分母から外す。
+//   - 保存するのは期間（開始日・終了日）だけ。**理由（産休など）は保存しない**（列を作らない・画面にも入力欄を作らない）。
+//   - 1 人に複数期間を持てる。同じ社員の期間の重複は保存時にはじく（src/lib/employee-inactive-periods.ts）。
+//   - 終了日 NULL = 終了未定（今も稼働しない）。日付は JST の暦日（UTC 0:00 で保存・他の @db.Date と同じ）。
+//   - 読み書きは admin 限定 API（/api/admin/employees/[employeeId]/inactive-periods）のみ。
+model EmployeeInactivePeriod {
+  id              String    @id @default(cuid())
+  employeeId      String    @map("employee_id")
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime? @map("end_date") @db.Date
+  createdByUserId String?   @map("created_by_user_id") // 登録した社員（User.id）。スクリプト登録は NULL
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([employeeId, startDate])
+  @@map("employee_inactive_periods")
 }
 
 // ========================================
