@@ -213,6 +213,25 @@ Postgres 側の劣化の見え方:
 **関連ケース**:
 - 2026-08-10: 03:08 UTC（JST 12:08）に checkpoint 停止、05:05 UTC（JST 14:05）頃までに DB 応答が回復（`/api/health` の DB 往復 3〜99ms を実測）。利用者からは半日規模の停止として報告された。切り分け手順は罠 #41、監視実装は T-160（`4f49d46`）
 
+### L-2. 全ページで Railway の「Not Found / The train has not arrived at the station」（Railway 全体障害・ドメインルーティング 404）
+
+**症状**: 本番の**全ページ**が、portal のエラー画面ではなく **Railway の 404 ページ**「Not Found — The train has not arrived at the station」になる。Railway が自動付与するドメイン（`*.up.railway.app`）でも同じ表示になる（カスタムドメインの DNS の問題ではない）。L-1（502「Application failed to respond」）と違い、リクエストが portal のコンテナまで届いていない。
+
+**実例**: 2026-09-30 16:4x JST。Railway 全体の障害（status.railway.com incident **IFBXJTGG**、ドメインルーティングの 404。Railway 発表で約 5 分）。同時刻に portal のログへ Prisma **`P1017`（Server has closed the connection = DB が接続を切断）**が出た。DB 側も同じ障害の影響を受けていたため。
+
+**最重要の判定**: **全ページが一斉に Railway の 404 になるなら、原因はこちらのコードでもデプロイでもない**。
+
+1. **最初に status.railway.com を見る**（incident が出ていればそれ）。
+2. 同時刻の Railway のログに `P1017` 等の接続断があっても、それは結果であって原因ではない。
+3. **コードの差し戻し・再デプロイは不要**。数分で Railway 側が復旧する。手を動かすとかえって L-1 の「過負荷でデプロイが FAILED」を引き起こしかねない。
+
+**検知（死活監視 T-160 は検知できなかった）**: `uptime-monitor.yml` は 5 分ごとの schedule だが、**実際には 1 日 4〜6 回しか走っていない**（2026-09-26〜10-01 の実行履歴: 1 日 4〜6 回、間隔 3〜6 時間）。9/30 は 02:28 UTC の次が **08:57 UTC（17:57 JST）**で、障害時刻 07:4x UTC（16:4x JST）に実行が無く、**検知も通知もしていない**。これは GitHub Actions の schedule が public リポジトリで大幅に間引かれるため（GitHub の仕様: 混雑時に遅延・欠落する。`*/5` のような高頻度 cron は特に落ちる）。5 分間の障害を 5 分間隔の監視で拾う前提自体が成り立っていない。
+
+- 対処の候補（未実施）: 外部の監視サービス（UptimeRobot 等の無料枠・1〜5 分間隔）に乗り換える、または Actions の schedule を当てにしない設計にする。
+- 同じ理由で、夜間バックアップ（`db-backup.yml`、毎日 1 回）も欠落し得る。欠落は復元テスト（`db-restore-test.yml`）の「最新コピーが 36 時間より古ければ失敗」で拾う設計にしてある（T-XXX step3・`docs/ops_backup.md`）。
+
+**関連**: L-1（I/O 飽和による 502 は Railway の個別ホスト起因、こちらは Railway 全体のルーティング起因）、罠 #59（Railway 標準バックアップはボリュームと運命を共にする）。
+
 ## カテゴリM: 通知の宛先欠落系
 
 ### M-1. タスク通知が「先頭1名」にしか届かない（担当者配列が [0] で潰される）

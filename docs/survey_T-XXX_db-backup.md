@@ -257,3 +257,61 @@
 ### 限界
 
 Railway 標準バックアップはボリュームと一緒に消える（wipe でバックアップも全消去）ため、この対処では Railway 障害やボリューム消失には備えられない。Railway の外への退避は step3 で行う。
+
+---
+
+## step3 対処記録（2026-10-02）
+
+実施: 2026-10-02 09:45〜10:10 JST。コミット `35827b5`（ワークフロー・スクリプト）＋ docs コミット。  
+本番DBへの操作は読み取り（`pg_dump` / 件数 `SELECT`）のみ。Railway の設定（公開設定・ボリューム・バックアップ・再起動・再デプロイ）は変えていない。
+
+### 作ったもの
+
+| ファイル | 役割 |
+|--|--|
+| `.github/workflows/db-backup.yml` | 毎日 03:07 JST（`7 18 * * *` UTC）。pg_dump → 件数表 → Railway 変数 → gpg AES-256 → Google ドライブ → 世代整理。失敗時 LINE WORKS |
+| `.github/workflows/db-restore-test.yml` | 毎週日曜 05:07 JST（`7 20 * * 6` UTC）。最新一式を取得（36時間超で失敗）→ 復号 → 使い捨て postgres:17 に pg_restore → 件数突き合わせ → 変数 JSON 検証。成功・失敗とも LINE WORKS |
+| `.github/scripts/pg-dump-with-counts.sh` | postgres:17 コンテナ内で実行。`pg_export_snapshot` → `pg_dump --snapshot` で、ダンプと件数表を同一スナップショットにする |
+| `.github/scripts/pg-restore-test.sh` | 冒頭で復元先ホストが localhost 以外なら即中断（exit 90/91）。復元後に件数表と全テーブル突き合わせ |
+| `.github/scripts/railway-vars-export.mjs` | Railway GraphQL で全プロジェクト・全環境・全サービスの変数を JSON に |
+| `.github/scripts/drive-lib.mjs` / `drive-upload.mjs` / `drive-retention.mjs` / `drive-fetch-latest.mjs` | サービスアカウント JWT で Drive REST を直接呼ぶ（npm install 不要）。暗号化していないファイルのアップロードは拒否。整理は `appProperties` の目印があるファイルだけ |
+| `.github/scripts/backup-notify.mjs` | LINE WORKS 通知（`uptime-notify.mjs` と同方式・同宛先。本文を環境変数で渡せる版。`uptime-notify.mjs` は未変更） |
+| `docs/ops_backup.md` | 仕組み・置き場・Railway 非依存の復元手順・通知の見方・パスフレーズの扱い |
+
+### 事前調査の結果と選んだ経路
+
+| 項目 | 結果 |
+|--|--|
+| Google ドライブの認証方式 | portal は **サービスアカウント**（`GOOGLE_SERVICE_ACCOUNT_KEY`、`kyuujin-pdf-uploader@kyuujin-pdf-tool.iam.gserviceaccount.com`）。ドメイン全体の委任は**無し**（`agent@bizstudio.co.jp` の偽装は `unauthorized_client`） |
+| 書き込み先 | サービスアカウントがコンテンツ管理者として入っている共有ドライブ「**求人票格納フォルダ**」（メンバーはサービスアカウントと `agent@bizstudio.co.jp` の 2 つだけ）の直下に、専用フォルダ「**システムバックアップ（自動・暗号化）**」を API で作成した。**人の操作は不要だった** |
+| GitHub Secrets の設定手段 | `gh` が `mnhhohno-glitch` でログイン済み（scope: repo）。`gh secret set` で設定 |
+| GitHub Actions の利用枠 | リポジトリは **public** のため、標準ランナーの分数は**無料・無制限**（billing API は `user` scope が無く読めなかったが、public repo は課金対象外）。今回の追加は 1 日 1 回 約 1.5 分 + 週 1 回 約 1 分で、仮に private でも月 60 分未満 |
+| Railway トークン | 専用トークン **`github-backup`** をワークスペース単位で新規発行（`apiTokenCreate`）。既存トークンは流用していない |
+| 本番 DB の構成 | 拡張 `plpgsql` のみ、スキーマ `public` のみ、所有者 `postgres` のみ → 素の postgres:17 に戻せる |
+
+### 初回実行の結果
+
+| 項目 | 値 |
+|--|--|
+| バックアップ run | [36949094008](https://github.com/mnhhohno-glitch/bizstudio-portal/actions/runs/36949094008)・2026-10-02 10:03 JST・**成功**・所要 1 分 23 秒 |
+| ダンプ | 93,000,344 bytes（pg_dump 17.11 ↔ サーバー 17.11）。暗号化後 88.7MB |
+| 件数表 | 145 テーブル・599,195 行 |
+| Railway 変数 | 9 プロジェクト・22 サービス・28 サービス×環境・680 変数（暗号化後 81KB） |
+| Drive に置かれたファイル | `portal-db_2026-10-02_1003.dump.gpg` / `portal-db_2026-10-02_1003.counts.json` / `railway-vars_2026-10-02_1003.json.gpg`（API で 3 件確認） |
+| 復元テスト run | [36949306970](https://github.com/mnhhohno-glitch/bizstudio-portal/actions/runs/36949306970)・2026-10-02 10:06 JST・**成功**・所要 39 秒 |
+| 件数突き合わせ | **145 テーブル・599,195 行すべて一致** |
+| 変数 JSON | 復号・JSON 解析 OK（9 / 28 / 680） |
+| LINE WORKS | 「【復元テスト成功】portal 本番DBのコピーは戻せます」を送信（HTTP 成功をログで確認） |
+| ログの漏えい確認 | 2 run のログに DB パスワード・ホスト名・パスフレーズ・秘密鍵の文字列が無いことを grep で確認（いずれも 0 件） |
+| 安全装置の動作確認 | ローカルで復元先に `trolley.proxy.rlwy.net` を渡すと `exit 90` で中断することを確認 |
+
+### 事後処理
+
+- 開発機の `C:\bizstudio\backups\railway_prod_20260608_120043.dump`（暗号化なし・個人情報あり）は、復元テスト成功を確認してから**削除した**。
+- パスフレーズは `C:\bizstudio\backups\BACKUP_PASSPHRASE_受け渡し用.txt` にのみ書き出した（リポジトリ外・git 管理外）。将幸さんがパスワード管理と紙に控えたらファイルを削除する。
+- 作業中に scratchpad に置いた鍵・接続文字列・トークン・平文ダンプは削除した。
+
+### 残課題（人の操作が必要なもの）
+
+- **無し**。共有ドライブの作成・メンバー追加は不要だった。
+- 任意: 死活監視 `uptime-monitor.yml` が実際には 1 日 4〜6 回しか走っていない（08-bug-patterns L-2）。5 分間隔の監視としては機能していないので、外部監視サービスへの乗り換えを別タスクで検討する。

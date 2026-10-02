@@ -782,3 +782,16 @@ DBから 氏名・カナ・社員名・メール・電話・生年月日・住�
 - 分析ツール（`src/lib/aiRead/analytics/*`）の共通定義: 在籍CA＝`employees.job_category='CA'`、在籍月＝入社月〜退職月（入社日未登録は全期間＋warnings）、初回面談＝辞退・日程再調整を除く最も早い実施済み面談（`interview_count` は使わない）、粗利＝売上−求人DB費−仕入、人数 5 未満のグループは伏せる（`SUPPRESS_THRESHOLD`）、2026-04 以前は `reference: true`
 - 既存 4 ツールの出力は変えていない（tools/list は 13 本に増えた。`scripts/test-mcp-ca-kpi-t-xxx-step3.ts` は既存 4 本の存在を見る形に変更）
 - `entryStageCaseSql()`（`src/lib/aiRead/caKpi.ts`）が選考段階の判定の単一ソース（`currentStatus`・日次スナップショット・分析ツールで共有）。段階の判定を変えるとここ 1 か所
+
+## 59. Railway 標準バックアップは Railway の外への退避ではない（ボリューム wipe で全消失）
+
+**罠**: Railway の Postgres サービスにある「Backups」（毎日／毎週／毎月のスケジュール・手動バックアップ）は、**同じボリュームの Copy-on-Write スナップショット**。ボリュームを wipe すると**バックアップも全部一緒に消える**。復元先も同じプロジェクト・同じ環境に固定で、「別の場所で中身だけ覗く」ことはできない。Railway 自体の障害・アカウント停止・ボリューム消失には**まったく効かない**（公式 https://docs.railway.com/reference/backups）。
+
+- 2026-09-30 の調査（`docs/survey_T-XXX_db-backup.md`）時点で、本番 DB の最新状態は Railway の 1 本のボリュームにしか無く、Railway の外にあるのは 2026-06-08 の手動ダンプ 1 本だけだった。
+- step2 で Railway 内のスケジュール（全 11 ボリューム）は有効化したが、それは「誤操作から 6〜89 日前に戻す」ためのもので、BCP ではない。
+
+**対処**: Railway の外（会社の Google ドライブ）への毎晩の暗号化コピーと、週 1 回の復元テストを GitHub Actions で回している（T-XXX step3・2026-10-02）。仕組み・置き場・復元手順・パスフレーズの扱いは **`docs/ops_backup.md`**。
+
+- 復元手順は Railway に依存しない形で書いてある（別の PostgreSQL 17 に `pg_restore` → 環境変数 JSON から入れ直す）。
+- パスフレーズ（GitHub Secrets `BACKUP_PASSPHRASE`）を無くすとコピーは誰にも開けない。
+- 復元テストの成功通知（LINE WORKS、毎週日曜 05:07 JST ごろ）が**来ないこと自体を異常**として扱う。
