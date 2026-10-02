@@ -1,0 +1,153 @@
+# T-XXX step3: 週1回の復元テスト。Google ドライブの最新コピーを使い捨ての PostgreSQL 17 に戻し、
+# 件数表と一致することを確かめる。「バックアップは取れているが戻せない」を防ぐための儀式。
+#
+# 設計:
+#  - 毎週日曜 05:07 JST（土曜 20:07 UTC）。0 分を避けるのは db-backup.yml と同じ理由。
+#  - 最新コピーが 36 時間より古ければ失敗にする。「夜間バックアップが黙って止まっている」状態を拾うため。
+#  - 復元先は Actions 内に立てた postgres:17 コンテナ（localhost）だけ。本番には一切つながない。
+#    スクリプト冒頭（.github/scripts/pg-restore-test.sh）の安全装置で、復元先が localhost 以外なら即中断する。
+#    本番の接続文字列（PROD_DATABASE_PUBLIC_URL）はこのワークフローに渡していない。
+#  - 変数 JSON も復号して JSON として読めることを確認する（値は出さない。件数だけ）。
+#  - 結果は成功・失敗とも LINE WORKS に通知する。「成功通知が日曜朝に来ない」こと自体を異常として気づけるように。
+#  - 復号した平文はジョブ終了時に必ず消す。artifact にも残さない。
+
+name: T-XXX DB restore test (weekly Sun 05:07 JST)
+
+on:
+  schedule:
+    - cron: "7 20 * * 6"
+  workflow_dispatch:
+    inputs:
+      max_age_hours:
+        description: "最新コピーの許容経過時間（時間）。既定 36。"
+        required: false
+        default: "36"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-restore-test
+  cancel-in-progress: false
+
+jobs:
+  restore-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PG_IMAGE: postgres:17
+      PG_CONTAINER: restore-pg
+      # 使い捨てコンテナ用。localhost 限定・ジョブ終了で消えるので秘密ではない。
+      RESTORE_URL: "postgresql://postgres:restoretest@127.0.0.1:5432/postgres"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Prepare work dir
+        id: prep
+        run: |
+          WORK="$RUNNER_TEMP/restore-work"
+          mkdir -p "$WORK" && chmod 777 "$WORK"
+          echo "work=$WORK" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch latest backup set from Google Drive (fail if older than 36h)
+        id: fetch
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          BACKUP_DRIVE_FOLDER_ID: ${{ secrets.BACKUP_DRIVE_FOLDER_ID }}
+          WORK: ${{ steps.prep.outputs.work }}
+          MAX_AGE: ${{ github.event.inputs.max_age_hours || '36' }}
+        run: node .github/scripts/drive-fetch-latest.mjs "$WORK" "$MAX_AGE"
+
+      - name: Decrypt and validate variables JSON (values are not printed)
+        id: vars
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          WORK: ${{ steps.prep.outputs.work }}
+          STAMP: ${{ steps.fetch.outputs.stamp }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --output "$WORK/railway-vars.json" --decrypt "$WORK/railway-vars_${STAMP}.json.gpg"
+          PROJECTS=$(jq -e '.projects | length' "$WORK/railway-vars.json")
+          SERVICES=$(jq -e '[.projects[].environments[].services[]] | length' "$WORK/railway-vars.json")
+          VARS=$(jq -e '[.projects[].environments[].services[].variables | keys[]] | length' "$WORK/railway-vars.json")
+          rm -f "$WORK/railway-vars.json"
+          echo "変数JSON OK: projects=$PROJECTS service-env=$SERVICES variables=$VARS"
+          echo "projects=$PROJECTS" >> "$GITHUB_OUTPUT"
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+          echo "vars=$VARS" >> "$GITHUB_OUTPUT"
+
+      - name: Decrypt DB dump
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          WORK: ${{ steps.prep.outputs.work }}
+          STAMP: ${{ steps.fetch.outputs.stamp }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --output "$WORK/db.dump" --decrypt "$WORK/portal-db_${STAMP}.dump.gpg"
+          rm -f "$WORK/portal-db_${STAMP}.dump.gpg" "$WORK/railway-vars_${STAMP}.json.gpg"
+          chmod 644 "$WORK/db.dump" "$WORK/portal-db_${STAMP}.counts.json"
+          echo "復号 OK: $(stat -c %s "$WORK/db.dump") bytes"
+
+      - name: Start throwaway PostgreSQL 17 (localhost only)
+        env:
+          WORK: ${{ steps.prep.outputs.work }}
+        run: |
+          set -euo pipefail
+          docker pull -q "$PG_IMAGE"
+          docker run -d --name "$PG_CONTAINER" \
+            -e POSTGRES_PASSWORD=restoretest \
+            -v "$WORK:/work" \
+            -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
+            "$PG_IMAGE"
+          for i in $(seq 1 30); do
+            if docker exec "$PG_CONTAINER" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then echo "ready ($i)"; break; fi
+            sleep 2
+          done
+          docker exec "$PG_CONTAINER" pg_isready -U postgres -h 127.0.0.1
+
+      - name: pg_restore into throwaway DB and compare counts
+        id: restore
+        env:
+          WORK: ${{ steps.prep.outputs.work }}
+          STAMP: ${{ steps.fetch.outputs.stamp }}
+        run: |
+          set -euo pipefail
+          docker exec -e RESTORE_URL="$RESTORE_URL" "$PG_CONTAINER" \
+            bash /scripts/pg-restore-test.sh /work/db.dump "/work/portal-db_${STAMP}.counts.json"
+          cat "$WORK/portal-db_${STAMP}.counts.json.result" >> "$GITHUB_OUTPUT"
+          cat "$WORK/portal-db_${STAMP}.counts.json.result"
+
+      - name: Notify LINE WORKS (成功・失敗とも)
+        if: always()
+        env:
+          NOTIFY_TITLE: ${{ job.status == 'success' && '【復元テスト成功】portal 本番DBのコピーは戻せます' || '【復元テスト失敗】portal 本番DBのコピーを確認してください' }}
+          NOTIFY_BODY: |
+            対象コピー: ${{ steps.fetch.outputs.stamp || '(取得できず)' }}（Drive 作成から ${{ steps.fetch.outputs.age_hours || '?' }} 時間・${{ steps.fetch.outputs.dump_mb || '?' }} MB）
+            件数一致: ${{ steps.restore.outcome == 'success' && format('OK（テーブル {0}・合計 {1} 行）', steps.restore.outputs.tables, steps.restore.outputs.rows) || steps.restore.outcome }}
+            変数JSON: ${{ steps.vars.outcome == 'success' && format('OK（{0} プロジェクト・{1} サービス環境・{2} 変数）', steps.vars.outputs.projects, steps.vars.outputs.services, steps.vars.outputs.vars) || steps.vars.outcome }}
+            次回: 来週日曜 05:07 JST（成功通知が来なければ異常）
+          LW_CLIENT_ID: ${{ secrets.LINEWORKS_CLIENT_ID }}
+          LW_CLIENT_SECRET: ${{ secrets.LINEWORKS_CLIENT_SECRET }}
+          LW_SERVICE_ACCOUNT: ${{ secrets.LINEWORKS_SERVICE_ACCOUNT }}
+          LW_PRIVATE_KEY: ${{ secrets.LINEWORKS_PRIVATE_KEY }}
+          LW_BOT_ID: ${{ secrets.LINEWORKS_TASK_BOT_ID }}
+          LW_USER_ID: ${{ secrets.LINEWORKS_ALERT_USER_ID }}
+        run: node .github/scripts/backup-notify.mjs
+
+      - name: Cleanup (container + plaintext)
+        if: always()
+        env:
+          WORK: ${{ steps.prep.outputs.work }}
+        run: |
+          docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
+          if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+            sudo find "$WORK" -type f -exec shred -u -n 1 {} + 2>/dev/null || true
+            sudo rm -rf "$WORK"
+          fi
+          echo "cleaned"

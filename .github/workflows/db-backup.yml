@@ -1,0 +1,178 @@
+# T-XXX step3: 本番DBと Railway 環境変数を、毎晩 Railway の外（会社の Google ドライブ）へ暗号化して退避する。
+#
+# 背景: step1（docs/survey_T-XXX_db-backup.md）で、本番DBの最新状態が Railway の1本のボリュームにしか
+#       無いことが分かった。step2 で Railway 標準バックアップを有効化したが、それはボリュームと運命を
+#       共にする（wipe で全消失）ため、Railway の障害・消失には効かない。ここで別会社へコピーを置く。
+#
+# 設計:
+#  - 実行場所は GitHub Actions（portal 自身に持たせると portal と一緒に死ぬ。死活監視 T-160 と同じ理由）。
+#  - 本番DBは読み取り（pg_dump）だけ。サーバーと同じ版の pg_dump を使うため postgres:17 コンテナで取る。
+#  - 件数表（テーブルごとの件数だけ。個人情報なし）をダンプと同じスナップショットで取り、
+#    週1回の復元テスト（db-restore-test.yml）で突き合わせる。
+#  - Railway 全プロジェクトの環境変数（外部サービスの鍵）も JSON にまとめて退避する。
+#  - ダンプと変数 JSON は gpg の AES-256（パスフレーズ = Secrets の BACKUP_PASSPHRASE）で暗号化してから置く。
+#    平文はジョブ終了時に必ず消す。Actions の artifact にも残さない。
+#  - 置き場: 共有ドライブ「求人票格納フォルダ」内の専用フォルダ「システムバックアップ（自動・暗号化）」
+#    （Secrets の BACKUP_DRIVE_FOLDER_ID）。書き込みは portal と同じサービスアカウント。
+#  - 保持: 直近35日分 + 毎月1日分を12か月分。それより古いものは「このワークフローが作ったファイル」に限って消す。
+#  - 失敗したら LINE WORKS に通知（死活監視と同じ Bot・同じ宛先）。
+#  - 復元手順は docs/ops_backup.md。
+#
+#  - 実行時刻は 03:07 JST。GitHub の schedule は毎時 0 分に集中して遅延・欠落しやすいので、0 分を避けている
+#    （この repo の 5 分おき死活監視が実際には 1 日 4〜6 回しか走っていない。L-2 参照）。
+#    欠落は復元テスト側の「最新コピーが36時間より古ければ失敗」で拾う。
+#  - default branch (master) に置かないと schedule が動かない。
+
+name: T-XXX DB backup (nightly 03:07 JST, encrypted to Google Drive)
+
+on:
+  schedule:
+    - cron: "7 18 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_retention:
+        description: "世代整理（古いコピーの削除）を飛ばす場合は true"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PG_IMAGE: postgres:17
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 接続文字列そのものは Secrets なので自動でマスクされるが、
+      # 分解された部分（パスワード・ホスト）が別経路でログに出ても隠れるよう追加でマスクする。
+      - name: Mask connection parts
+        env:
+          DB_URL: ${{ secrets.PROD_DATABASE_PUBLIC_URL }}
+        run: |
+          node -e '
+            const u = new URL(process.env.DB_URL);
+            for (const v of [u.password, u.username, u.hostname, decodeURIComponent(u.password)]) {
+              if (v && v.length >= 4) console.log("::add-mask::" + v);
+            }
+          '
+
+      - name: Prepare work dir and stamp (JST)
+        id: prep
+        run: |
+          WORK="$RUNNER_TEMP/backup-work"
+          mkdir -p "$WORK" && chmod 700 "$WORK"
+          echo "work=$WORK" >> "$GITHUB_OUTPUT"
+          STAMP="$(TZ=Asia/Tokyo date +%Y-%m-%d_%H%M)"
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          echo "stamp(JST)=$STAMP"
+
+      - name: Pull PostgreSQL 17 image
+        run: docker pull -q "$PG_IMAGE"
+
+      - name: pg_dump (custom format) + counts table from the same snapshot
+        env:
+          DB_URL: ${{ secrets.PROD_DATABASE_PUBLIC_URL }}
+          WORK: ${{ steps.prep.outputs.work }}
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e DB_URL \
+            -v "$WORK:/work" \
+            -v "$GITHUB_WORKSPACE/.github/scripts:/scripts:ro" \
+            "$PG_IMAGE" bash /scripts/pg-dump-with-counts.sh /work/db.dump /work/counts.json
+          ls -la "$WORK"
+          echo "tables=$(jq -r '.tableCount' "$WORK/counts.json") rows=$(jq -r '[.tables[]] | add' "$WORK/counts.json") serverVersion=$(jq -r '.serverVersion' "$WORK/counts.json")"
+          echo "dump_bytes=$(stat -c %s "$WORK/db.dump")" >> "$GITHUB_OUTPUT"
+        id: dump
+
+      - name: Export Railway variables (all projects / environments / services)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_BACKUP_TOKEN }}
+          WORK: ${{ steps.prep.outputs.work }}
+        run: node .github/scripts/railway-vars-export.mjs "$WORK/railway-vars.json"
+
+      - name: Encrypt (AES-256, gpg symmetric) and remove plaintext
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          WORK: ${{ steps.prep.outputs.work }}
+          STAMP: ${{ steps.prep.outputs.stamp }}
+        run: |
+          set -euo pipefail
+          if [ "${#BACKUP_PASSPHRASE}" -lt 32 ]; then echo "BACKUP_PASSPHRASE が短すぎます" >&2; exit 1; fi
+          enc() {
+            printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --quiet \
+              --pinentry-mode loopback --passphrase-fd 0 \
+              --symmetric --cipher-algo AES256 \
+              --s2k-mode 3 --s2k-count 65011712 --s2k-digest-algo SHA512 \
+              --compress-algo none \
+              --output "$2" "$1"
+          }
+          enc "$WORK/db.dump" "$WORK/portal-db_${STAMP}.dump.gpg"
+          enc "$WORK/railway-vars.json" "$WORK/railway-vars_${STAMP}.json.gpg"
+          cp "$WORK/counts.json" "$WORK/portal-db_${STAMP}.counts.json"
+          # 平文は即座に消す
+          rm -f "$WORK/db.dump" "$WORK/railway-vars.json" "$WORK/counts.json"
+          ls -la "$WORK"
+          # 復号できることを自分で確かめる（パスフレーズの取り違えをここで検知する）
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt "$WORK/railway-vars_${STAMP}.json.gpg" | jq -e '.projects | length' > /dev/null
+          echo "暗号化・復号確認 OK"
+
+      - name: Upload to Google Drive (dedicated folder)
+        id: upload
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          BACKUP_DRIVE_FOLDER_ID: ${{ secrets.BACKUP_DRIVE_FOLDER_ID }}
+          WORK: ${{ steps.prep.outputs.work }}
+          STAMP: ${{ steps.prep.outputs.stamp }}
+        run: |
+          node .github/scripts/drive-upload.mjs \
+            "$WORK/portal-db_${STAMP}.dump.gpg:portal-db_${STAMP}.dump.gpg" \
+            "$WORK/portal-db_${STAMP}.counts.json:portal-db_${STAMP}.counts.json" \
+            "$WORK/railway-vars_${STAMP}.json.gpg:railway-vars_${STAMP}.json.gpg"
+
+      - name: Retention (keep 35 days + 1st of month for 12 months)
+        if: ${{ github.event.inputs.skip_retention != 'true' }}
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          BACKUP_DRIVE_FOLDER_ID: ${{ secrets.BACKUP_DRIVE_FOLDER_ID }}
+        run: node .github/scripts/drive-retention.mjs
+
+      - name: Notify LINE WORKS (失敗時のみ)
+        if: failure()
+        env:
+          NOTIFY_TITLE: "【バックアップ失敗】portal 本番DB・Railway 変数の夜間退避"
+          NOTIFY_BODY: |
+            ワークフロー: db-backup.yml（${{ github.event_name }}）
+            Google ドライブに今夜のコピーが置けていない可能性があります。ログを確認してください。
+          LW_CLIENT_ID: ${{ secrets.LINEWORKS_CLIENT_ID }}
+          LW_CLIENT_SECRET: ${{ secrets.LINEWORKS_CLIENT_SECRET }}
+          LW_SERVICE_ACCOUNT: ${{ secrets.LINEWORKS_SERVICE_ACCOUNT }}
+          LW_PRIVATE_KEY: ${{ secrets.LINEWORKS_PRIVATE_KEY }}
+          LW_BOT_ID: ${{ secrets.LINEWORKS_TASK_BOT_ID }}
+          LW_USER_ID: ${{ secrets.LINEWORKS_ALERT_USER_ID }}
+        run: node .github/scripts/backup-notify.mjs
+
+      # 平文・暗号文ともランナーに残さない（ランナーは使い捨てだが、方針として明示的に消す）。
+      - name: Cleanup work dir
+        if: always()
+        env:
+          WORK: ${{ steps.prep.outputs.work }}
+        run: |
+          if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+            find "$WORK" -type f -exec shred -u -n 1 {} + 2>/dev/null || rm -rf "$WORK"
+            rm -rf "$WORK"
+          fi
+          echo "cleaned"
