@@ -55,6 +55,7 @@ export default async function CandidateMasterPage() {
     name: c.name,
     nameKana: c.nameKana,
     gender: c.gender,
+    phone: c.phone, // フリー検索の電話番号照合用
     employee: c.employee,
     recruiterName: c.recruiterName,
     applicationRoute: c.applicationRoute,

@@ -34,3 +34,30 @@ export function normalizePhoneNumber(
 
   return digits;
 }
+
+/**
+ * フリー検索用: NFKC（全角→半角）後に数字以外をすべて除去する。桁数チェックはしない。
+ */
+export function phoneDigits(input: string | null | undefined): string {
+  if (!input) return "";
+  return input.normalize("NFKC").replace(/\D/g, "");
+}
+
+// ハイフン類・空白・括弧（NFKC 前の全角も含む）
+const PHONE_QUERY_SEPARATORS = /[-‐‑‒–—―−ーｰ－\s()（）［］[\]]/g;
+
+/**
+ * フリー検索語を電話番号照合用の数字列にする。
+ * 区切り（ハイフン類・空白・括弧）を除いた結果が数字のみ・4桁以上のときだけ返し、それ以外は null。
+ */
+export function phoneSearchQuery(q: string): string | null {
+  const s = q.normalize("NFKC").replace(PHONE_QUERY_SEPARATORS, "");
+  return /^\d{4,}$/.test(s) ? s : null;
+}
+
+/** 保存値の電話番号が検索語に部分一致するか（書式・全角差は無視）。検索語が電話番号扱いでなければ false */
+export function phoneMatchesSearch(phone: string | null | undefined, q: string): boolean {
+  const needle = phoneSearchQuery(q);
+  if (!needle) return false;
+  return phoneDigits(phone).includes(needle);
+}

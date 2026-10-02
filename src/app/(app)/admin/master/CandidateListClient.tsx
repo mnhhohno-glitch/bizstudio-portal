@@ -8,6 +8,7 @@ import CandidateRegistrationModal from "./CandidateRegistrationModal";
 import SupportEndModal from "@/components/candidates/SupportEndModal";
 import { SUPPORT_END_REASONS, REASON_LABEL_MAP } from "@/lib/constants/support-end-reasons";
 import { formatRecruiterName, splitRecruiterDisplay } from "@/lib/recruiterDisplay";
+import { phoneMatchesSearch } from "@/lib/phone-normalize";
 import { FilterShell, FilterTopRow, FilterGroup, FilterField, DateRangeField, FilterClearButton, FilterMultiSelectField, FILTER_INPUT_CLS } from "@/components/filters/FilterLayout";
 
 // T-181: 担当CAフィルタで「担当CA未設定」を表す特別値（Employee.id と衝突しない固定文字列）
@@ -41,6 +42,8 @@ type CandidateRow = {
   candidateNumber: string;
   name: string;
   nameKana: string | null;
+  // フリー検索の電話番号照合用（一覧には表示しない）
+  phone?: string | null;
   gender: string | null;
   employee: { id: string; name: string } | null;
   recruiterName: string | null;
@@ -187,7 +190,8 @@ function applyNonTabFilters(rows: CandidateRow[], f: NonTabFilters): CandidateRo
         c.candidateNumber.toLowerCase().includes(q) ||
         c.name.toLowerCase().includes(q) ||
         (!!c.nameKana && c.nameKana.toLowerCase().includes(q)) ||
-        (!!c.employee?.name && c.employee.name.toLowerCase().includes(q));
+        (!!c.employee?.name && c.employee.name.toLowerCase().includes(q)) ||
+        phoneMatchesSearch(c.phone, q);
       if (!hit) return false;
     }
     // T-181: 担当CA（複数選択・OR）。判定は行データの employee.id で行う（表示整形は使わない）
@@ -780,7 +784,7 @@ export default function CandidateListClient({
             <FilterField label="フリー検索">
               <input
                 type="text"
-                placeholder="求職者ID、氏名、担当CA"
+                placeholder="求職者ID、氏名、担当CA、電話番号"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className={`w-56 ${FILTER_INPUT_CLS}`}
