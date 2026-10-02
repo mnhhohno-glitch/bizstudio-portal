@@ -647,3 +647,88 @@ MCP の認可仕様（2025-06-18 版）と、ChatGPT のアプリ連携の一般
 - 日次スナップショットの**定期実行（23:50 JST）**はまだ 1 回も動いていない（手動実行で 1 回保存済み）。10/2 23:50 の分が `run_count=2` で上書きされ、10/3 以降は毎日 1 行ずつ増える見込み
 - ChatGPT 画面からの新ツールの利用（スキル zip の再アップロードは大野さんの作業）
 - 入社日未登録の 5 名の在籍期間（入力されるまで全期間を在籍として扱う）
+
+## step6 実装結果（2026-10-02・commit d21c100 → master・本番 SUCCESS）
+
+稼働しない期間（休業など）の登録と、退職後に決まった成果の集計。新規テーブル 1 つの追加のみ（既存レコードの書き換えなし）・master 直 push。
+
+### A. 稼働しない期間の登録
+
+| 項目 | 内容 |
+|--|--|
+| 表 | `employee_inactive_periods`（`employee_id`・`start_date`・`end_date`（NULL＝終了未定）・`created_by_user_id`・`created_at`・`updated_at`）。**理由の列は無い**。1 人に複数期間。社員削除で Cascade |
+| 重複 | 同じ社員の期間が 1 日でも重なれば保存しない（両端を含む・終了未定は無限）。社員単位の `pg_advisory_xact_lock` で判定〜書き込みを直列化。API は 409 |
+| API | `GET/POST/PATCH/DELETE /api/admin/employees/[employeeId]/inactive-periods`（admin 限定＝社員詳細と同じ権限）。body の startDate / endDate 以外は読まない |
+| 画面 | 社員詳細 → 基本情報タブの「入社日・退社日」の下に「稼働しない期間」（一覧・追加・編集・削除）。理由の入力欄は無い |
+| 集約 | `src/lib/employee-inactive-periods.ts`（入力検証・重複判定・保存・月の稼働日数） |
+
+**§1 の登録結果: 0 件（登録していない）**。社員マスタに完全一致する氏名が無かったため（指示どおり登録せず候補を報告）:
+
+| 指示の氏名 | 社員マスタの候補 | 職種 | 状態 |
+|--|--|--|--|
+| 上原 千春（開始 2026-10-01） | 1000005「上原 千遥」（「春」と「遥」が違う） | **未設定（CA ではない）** | active |
+| 藤本 夏実（開始 2026-11-01） | 1000003「藤本 夏海」（「実」と「海」が違う） | **未設定（CA ではない）** | active |
+
+- 2 人とも `job_category` が空なので、登録しても CA 分析（`get_ca_roster` は職種 CA だけ）の数字は変わらない。CA として集計に入れるなら職種の設定も要る
+- 岡田 愛子さん（1000007）は指示どおり登録していない（開始日未確定）
+
+### B. 集計での扱い
+
+| 対象 | 扱い |
+|--|--|
+| 稼働日数 | 月ごとに「入社日〜退職日の在籍日 − 稼働しない期間の日」を暦日で数える（土日祝を区別しない）。稼働人月 `fte` = 稼働日数 ÷ その月の暦日数（小数 3 桁。月の半分なら 0.5）。入社日未登録は月初から在籍とみなす |
+| CA の月の行 | `get_cohort_funnel` / `get_selection_conversion` / `get_accept_revenue` の CA の月の行に `availability`（calendarDays・activeDays・inactiveDays・fte）、CA の期間合計の行と `get_forecast_inputs` / `get_segment_breakdown` の CA の scope に `activeMonths`（fte の合計）。CA 平均・1人あたりはこれで割る（スキルにも記載） |
+| 休業中の活動 | 捨てずに CA の行・ALL に数え、`warnings` に CA ごとの件数（実施した面談・エントリー・今の担当CAで数える）を出す |
+| 退職後の成果 | 退職日（JST）より後の日付の行は CA の行から外し、`postExit`（元担当 CA ごと・resignDate 付き）に返す。ALL には元から含まれている。`get_pipeline_now` は退職済み CA の今の進行中案件を rows に出さず postExit に出す。退職後の月は fte=0 |
+| `get_ca_roster` | 各 CA に `inactivePeriods`（日付のみ）と `availabilityByMonth`（2026-05〜今月の employedDays・inactiveDays・activeDays・fte）。counts に withInactivePeriods・exited。今日が休業中の CA・退職済み CA を warnings に出す |
+| 既存ツール | `get_ca_kpi` / `get_company_kpi` は数字を変えず、definitions に `inactiveAndPostExit`（按分しないこと・ALL に退職後の分が入ること・fte で割ること）を足した |
+| definitionVersion | `2026-10-02.step6` |
+
+### C. 退職後の成果（南條さん 1000009・退職日 2026-07-31）の確認結果
+
+反映前（step5 のコード）の時点で、社員マスタの南條さんは `status=disabled`・退職日 2026-07-31 が登録済みだった（step4 調査時は未登録。その後に入力された）。
+
+**本番の値（集計値のみ・2026-10-02 12:50 JST 前後）**:
+
+| 項目 | 退職日より後の件数・金額 | 反映前の扱い | 反映後 |
+|--|--|--|--|
+| エントリー（応募月 2026-08） | 7 件（1 名・すべて結果が出た状態・選考中 0） | ALL に含まれる。CA の行には出ない（退職済みは既定の対象外）＝**元担当として見えなかった** | ALL は同じ。`get_selection_conversion.postExit` に 1000009 として 7 件（1 名なので内訳は伏せる） |
+| 書類通過・企業面接・内定 | 0 件 | — | — |
+| 承諾・承諾売上 | 0 件・0 円（南條さん担当の 5 月以降の承諾は 2026-05 の 1 件 799,000 円だけで、退職前） | — | `get_accept_revenue.postExit` は空 |
+| 今の進行中案件 | 選考中 0・承諾済み未入社 0・今後の面談予約 0、活動中の求職者 9 名（支援中） | ALL に含まれる。CA 行には出ない | `get_pipeline_now.postExit` / `get_forecast_inputs.postExit` に 1000009 として出る |
+| 面談（活動） | 退職後 0 件（2026-05: 35・06: 26・07: 8） | — | 退職後の月の fte=0 |
+
+- 有効・未アーカイブで entry_flag が選考系の行が 2 件あるが、詳細がクローズ／本人辞退なので段階判定では選考中ではない（0 件が正しい）
+- **会社全体の合計は抜けていなかった**（ALL は担当を問わず全求職者を数えるため）。抜けていたのは CA 別の表示だけで、step6 で postExit として分けて出すようにした
+
+**会社全体の合計が変わっていないこと**: 反映前と反映後に `scripts/check-mcp-totals-t-xxx-step6.ts`（MCP 経由・集計値のみ）を実行して比べ、次の 7 つがすべて一致:
+`get_accept_revenue` の ALL（月別 2026-05〜09・期間合計 27 件・21,051,502 円・粗利 15,252,630 円）、`get_selection_conversion` の ALL（月別）、`get_cohort_funnel` の ALL（月別）、`get_pipeline_now` の ALL（選考中 98 件・34 名、承諾済み未入社 11、活動中 156）、`get_forecast_inputs` の ALL、`get_company_kpi` 2026-08（請求売上 7,890,832・粗利 5,609,880・成約 10・面談 185・企業面接 28）、`get_ca_kpi` 2026-08 の ALL（面談 185・初回 82・エントリー 48 人／229 件）。
+
+### D. テスト
+
+| 区分 | 内容 | 結果 |
+|--|--|--|
+| step6 | `scripts/test-inactive-periods-t-xxx-step6.ts`（ローカル docker postgres＋step5 の架空データ＋dev サーバー）: 入力検証・重複判定・按分（月の途中開始/終了・終了未定・入社日/退職日と重なる・2 期間）、追加・編集・削除・重複の拒否・別社員の id、表に理由の列が無い、roster の期間と稼働日数・休業中の活動の警告、CA の月の行の availability／activeMonths、退職後の成果（承諾売上・応募・進行中・予測材料の ALL に含まれ postExit に分かれ CA 行に入らない・caId 指定）、company-kpi 全社が期間の有無で不変、画面の API（admin の一覧・追加・編集・削除、409、400、admin 以外 403、理由を返さない、社員詳細画面に欄が出る） | **70/70**（2 回連続） |
+| 既存（ローカル） | `test-analytics-t-xxx-step5` 71/71、`test-mcp-analytics-t-xxx-step5` 64/64、`test-mcp-ca-kpi-t-xxx-step3` 29/29、`verify-ca-kpi-t-xxx-step2` すべて一致、`test-ca-kpi-params` 9、`test-mcp-secret-rate-limit` 15/15 | PASS |
+| 既存（本番 MCP） | `test-mcp-analytics-t-xxx-step5 --prod` **70/70**、`test-mcp-ca-kpi-t-xxx-step3 --expect-2026-08` **41/41**（tools/list 13 本・2026-08 の面談 185・初回 82・エントリー 48 人／229 件が不変） | PASS |
+| 型・lint・ビルド | `tsc --noEmit` OK、`eslint`（変更ファイル。BasicInfoTab の ref 代入 1 件は既存）、`npx prisma generate && npx next build` OK | OK |
+
+### E. デプロイと本番確認
+
+- push → Railway 自動デプロイ SUCCESS、MCP の `definitionVersion` が `2026-10-02.step6` になったことで新コードの稼働を確認
+- 本番 DB（読み取り専用）: `_prisma_migrations` に `20261002130000_t_xxx_step6_employee_inactive_periods`（適用済み）、`employee_inactive_periods` は 0 行
+- `get_ca_roster`（本番）: 8 名に `inactivePeriods`（全員空）と `availabilityByMonth` が返る。南條さんは 2026-08 以降 fte=0、奥村さん（6/12 入社）は 2026-06 が 0.633。入社日未登録の警告は 1000001・1000007 の 2 名に減っていた（他は入力済み）
+
+### 確認できたこと
+
+- 稼働しない期間の追加・編集・削除・重複の拒否・admin 以外の拒否・理由を保存しないこと（ローカル）
+- 稼働日数の按分と、CA の行への availability／activeMonths の付与（ローカル・本番の roster）
+- 退職後の成果が ALL に含まれ、元担当の postExit に分かれ、CA の行・活動の分母に入らないこと（ローカルの架空データで承諾売上まで、本番で南條さんのエントリー 7 件と活動中 9 名）
+- 会社全体の合計値が反映前後で変わらないこと（本番 MCP・7 項目）
+
+### 確認できていないこと
+
+- §1 の 2 件の登録（氏名が一致しないため未登録。大野さんの確認待ち）。休業中の CA が実際に登録されたときの本番の warnings・fte（今は登録 0 件なので未確認。ローカルでは確認済み）
+- 本番の社員詳細画面での操作（ログインが要るため本番では画面を操作していない。ローカルの dev で画面に欄が出ること・API の動作を確認）
+- 退職後に**承諾・承諾売上が出たケース**の本番の表示（南條さんは退職後の承諾が 0 件のため。ローカルの架空データでは確認済み）
+- ChatGPT 画面からの利用（スキルの再アップロードと MCP アプリの「ツールを更新」は大野さんの作業）
