@@ -166,3 +166,53 @@ export function scheduleOutlook(input: ScheduleOutlookInput): ScheduleOutlook {
     joinLabel: formatMonthRange(addMonths(offerFrom, joinMin), addMonths(offerTo, joinMax)),
   };
 }
+
+/* ---------- T-208 不具合修正 #2: 年月の読み取りと間隔（空白期間の判定） ---------- */
+
+export type YearMonth = { y: number; m: number };
+
+const YEAR_MONTH_RE = /(\d{4})\s*(?:年\s*(\d{1,2})\s*月|[-/.](\d{1,2}))/g;
+
+/** 文字の中の年月をすべて読む（"2019年4月〜2021年3月" → 2つ、"2019-03-01" → 1つ）。年だけ（月が無い）は読まない＝判定に使わない */
+export function yearMonthsIn(s: string | null | undefined): YearMonth[] {
+  if (!s) return [];
+  const text = String(s).replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const out: YearMonth[] = [];
+  for (const m of text.matchAll(YEAR_MONTH_RE)) {
+    const mo = Number(m[2] ?? m[3]);
+    if (mo >= 1 && mo <= 12) out.push({ y: Number(m[1]), m: mo });
+  }
+  return out;
+}
+
+/** 先頭の年月（"2019年4月〜…" の始まり）。無ければ null */
+export function firstYearMonth(s: string | null | undefined): YearMonth | null {
+  return yearMonthsIn(s)[0] ?? null;
+}
+
+/** 最後の年月（"…〜2021年3月" の終わり）。1つしか無ければそれ。無ければ null */
+export function lastYearMonth(s: string | null | undefined): YearMonth | null {
+  const list = yearMonthsIn(s);
+  return list.length > 0 ? list[list.length - 1] : null;
+}
+
+/** 期間の終わり（"2019年4月〜2021年3月" の 2021年3月）。"〜現在" や始まりしか無いときは null */
+export function periodEnd(period: string | null | undefined): YearMonth | null {
+  const list = yearMonthsIn(period);
+  return list.length >= 2 ? list[list.length - 1] : null;
+}
+
+/** a から b までの月数（b が前なら負） */
+export function monthsBetween(a: YearMonth, b: YearMonth): number {
+  return (b.y - a.y) * 12 + (b.m - a.m);
+}
+
+/** 月数の表示（18 → "1年6ヶ月"、7 → "7ヶ月"、24 → "2年"） */
+export function formatMonthsJa(months: number): string {
+  const n = Math.max(0, Math.round(months));
+  const y = Math.floor(n / 12);
+  const m = n % 12;
+  if (y > 0 && m > 0) return `${y}年${m}ヶ月`;
+  if (y > 0) return `${y}年`;
+  return `${m}ヶ月`;
+}

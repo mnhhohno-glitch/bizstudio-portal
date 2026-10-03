@@ -1,7 +1,8 @@
 // T-208 step2: 読むセリフの差し込みと条件分岐（純粋関数）。
 // - 〔氏名〕〔CA名〕〔CA姓〕〔時刻〕〔直近の会社〕〔学校名〕〔学部学科〕〔卒業年〕〔会社名〕〔入社年月〕〔仕事内容〕〔頭の文字〕
 //   ＋ 場面の答えから決まる 〔内容〕〔時期の目安〕〔内定の目安〕〔入社の目安〕〔転職時期〕〔LINE／メール〕〔電話／オンライン〕〔日時〕
-// - {{if:条件}}…{{else}}…{{/if}}（入れ子なし）。条件は値の有無・手法・答えの分岐。
+//   ＋ 空白期間の場面（T-208 不具合修正 #2）〔前の所〕〔次の会社〕〔空白の期間〕〔空白の中身〕〔空白の時期〕
+// - {{if:条件}}…{{else}}…{{/if}}（入れ子は内側から解く）。条件は値の有無・手法・答えの分岐・高校（highSchool）。
 // 値が無いときは、台本に書いてある代わりの言い方を使う（例: 会社名が読めないときは「現在は、お仕事をされていますか？」）。
 
 import type { AnswerMap, ScriptContext } from "./types";
@@ -29,7 +30,15 @@ function resolveIfBlocks(text: string, flags: Flags): string {
 
 export function baseValues(ctx: ScriptContext): DerivedValues {
   const company = ctx.companyIndex != null ? ctx.companies[ctx.companyIndex] : undefined;
+  // T-208 不具合修正 #2: 空白期間の場面の差し込み。前の所が無いときは「ご卒業」（最初の会社の前）／「前の会社」
+  const gap = ctx.gapIndex != null ? ctx.gaps.find((g) => g.index === ctx.gapIndex) : undefined;
+  const gapBefore = gap ? gap.before || (gap.position === 0 ? "ご卒業" : "前の会社") : "";
   return {
+    "前の所": gapBefore,
+    "次の会社": gap?.after ?? "",
+    "空白の期間": gap?.length ?? "",
+    "空白の中身": gap?.title ?? "",
+    "空白の時期": gap?.period ?? "",
     "氏名": ctx.candidateName,
     // T-208 fix: 挨拶の〔CA名〕は電話で自然な名字だけ（T-207 の〔CA姓〕と同じ取り方＝resolveSender の familyName）。
     //   社員名に空白が無いときは名前全体（caFamilyNameOf の決まり）。フルネームは差し込みに使わない。
@@ -64,6 +73,12 @@ export function baseFlags(ctx: ScriptContext, values: DerivedValues): Flags {
     first: (ctx.companyIndex ?? 0) === 0,
     currentCompany: !!company?.isCurrent,
     emailHead: !!values["頭の文字"],
+    // T-208 不具合修正 #3: 最終学歴が高校なら学部を聞く文を出さない
+    highSchool: !!ctx.schoolIsHighSchool,
+    // T-208 不具合修正 #2: 空白期間（次の会社があるか・期間の長さが分かるか・整理の時系列に項目があったか）
+    gapAfter: !!values["次の会社"],
+    gapLength: !!values["空白の期間"],
+    gapNote: !!values["空白の中身"],
   };
 }
 

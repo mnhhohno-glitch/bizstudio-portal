@@ -18,10 +18,10 @@ import {
   expandScenes,
   firstIndexOfPart,
   isLastOfPart,
+  nextSceneOf,
   prepQuestionsForScene,
   readMeta,
   renderScene,
-  resolveNextKey,
   writeMeta,
   type PrepSummaryLike,
   type WorkHistoryLike,
@@ -219,20 +219,36 @@ export default function InterviewScriptMode({
   const rs: RuntimeScene | undefined = scenes[currentIndex];
   const doneParts = new Set<PartId>(meta.doneParts ?? []);
 
+  // T-208 不具合修正 #4: 押した答え・進み具合を入れた「いまの答え」。親の props が追いつく前でも、次の場面はこれで並べ直して決める
+  const latestAnswersRef = useRef<AnswerMap>(answers);
+  useEffect(() => {
+    latestAnswersRef.current = answers;
+  }, [answers]);
+
   const setMeta = (patch: { currentKey?: string; doneParts?: PartId[] }) => {
-    onNavigate(writeMeta(answers, { ...meta, ...patch }));
+    const next = writeMeta(latestAnswersRef.current, { ...readMeta(latestAnswersRef.current), ...patch });
+    latestAnswersRef.current = next;
+    onNavigate(next);
   };
 
-  const goTo = (index: number) => {
-    const target = scenes[Math.max(0, Math.min(index, scenes.length - 1))];
+  /** 場面の並び list（省略時は画面の並び）の index へ進む。from はその並びでの今の位置 */
+  const goTo = (index: number, list: RuntimeScene[] = scenes, from: number = currentIndex) => {
+    const target = list[Math.max(0, Math.min(index, list.length - 1))];
     if (!target) return;
+    const cur = list[from];
     const nextDone = new Set(doneParts);
-    if (rs && index > currentIndex) {
+    if (cur && index > from) {
       // 今のパートを通り過ぎたら ✓
-      if (isLastOfPart(scenes, currentIndex) || target.scene.part !== rs.scene.part) nextDone.add(rs.scene.part);
+      if (isLastOfPart(list, from) || target.scene.part !== cur.scene.part) nextDone.add(cur.scene.part);
     }
     setMeta({ currentKey: target.key, doneParts: [...nextDone] });
     setDraftInputs({});
+  };
+
+  /** ［次へ］［飛ばす］: いまの答えで場面を並べ直してから行き先を決める（when 付きの場面が答えで出入りするため） */
+  const goNext = (nextId?: string) => {
+    const r = nextSceneOf(ctx, latestAnswersRef.current, nextId);
+    goTo(r.nextIndex, r.scenes, r.currentIndex);
   };
 
   const sceneAnswer: SceneAnswer = (rs && answers[rs.key]) || {};
@@ -240,7 +256,8 @@ export default function InterviewScriptMode({
   // 答えを更新して親に渡す（親がサーバーに保存し、欄に入れる）
   const commitSceneAnswer = (nextSa: SceneAnswer) => {
     if (!rs) return;
-    const nextAnswers: AnswerMap = { ...answers, [rs.key]: { ...nextSa, at: new Date().toISOString() } };
+    const nextAnswers: AnswerMap = { ...latestAnswersRef.current, [rs.key]: { ...nextSa, at: new Date().toISOString() } };
+    latestAnswersRef.current = nextAnswers;
     onSceneAnswer(rs.key, nextAnswers);
     if (rightTab !== "inputs") setInputsUpdated(true);
   };
@@ -282,7 +299,7 @@ export default function InterviewScriptMode({
   })();
 
   const say = rs ? renderScene(rs, ctx, answers) : "";
-  const calcLines = rs?.scene.calc ? rs.scene.calc(sceneAnswer, { ...ctx, companyIndex: rs.companyIndex }, answers) : [];
+  const calcLines = rs?.scene.calc ? rs.scene.calc(sceneAnswer, { ...ctx, companyIndex: rs.companyIndex, gapIndex: rs.gapIndex }, answers) : [];
   const pickups: string[] = [];
   if (rs) {
     for (const g of rs.scene.groups ?? []) {
@@ -294,11 +311,12 @@ export default function InterviewScriptMode({
         if (b?.pickup) pickups.push(b.pickup);
       }
     }
-    const dyn = rs.scene.pickup?.(sceneAnswer, { ...ctx, companyIndex: rs.companyIndex }, answers);
+    const dyn = rs.scene.pickup?.(sceneAnswer, { ...ctx, companyIndex: rs.companyIndex, gapIndex: rs.gapIndex }, answers);
     if (dyn) pickups.push(dyn);
   }
 
   const company = rs?.companyIndex != null ? ctx.companies[rs.companyIndex] : undefined;
+  const gap = rs?.gapIndex != null ? ctx.gaps.find((g) => g.index === rs.gapIndex) : undefined;
   // T-208 step3: この場面に出す面談準備の質問（会社ごと／全体の振り分けは runtime の prepQuestionsForScene 1か所）
   const scenePrepQuestions = rs ? prepQuestionsForScene(ctx, rs) : [];
   const allPlaceholder = ctx.companies.length > 0 && ctx.companies.every((c) => c.placeholder);
@@ -440,6 +458,13 @@ export default function InterviewScriptMode({
                   <span className="ml-2" style={{ fontSize: 12, fontWeight: 400, color: "var(--im-fg2)" }}>
                     {rs.companyIndex! + 1}社目{company.name ? `：${company.name}` : ""}
                     {company.placeholder && "（職歴の行なし）"}
+                  </span>
+                )}
+                {gap && rs.scene.repeat === "gap" && (
+                  <span className="ml-2" style={{ fontSize: 12, fontWeight: 400, color: "var(--im-fg2)" }}>
+                    {gap.position < ctx.companies.length ? `${gap.position + 1}社目の前` : "最後の会社の後"}
+                    {gap.period ? `：${gap.period}` : ""}
+                    {gap.source === "interval" ? "（日付の間隔から）" : ""}
                   </span>
                 )}
               </h3>
@@ -620,13 +645,13 @@ export default function InterviewScriptMode({
                 </button>
                 <div className="flex-1" />
                 {rs.scene.skippable && (
-                  <button type="button" onClick={() => goTo(resolveNextKey(scenes, currentIndex))} style={{ ...BTN_BASE, color: "var(--im-fg2)" }}>
+                  <button type="button" onClick={() => goNext()} style={{ ...BTN_BASE, color: "var(--im-fg2)" }}>
                     飛ばす
                   </button>
                 )}
                 <button
                   type="button"
-                  onClick={() => goTo(resolveNextKey(scenes, currentIndex, chosenNext))}
+                  onClick={() => goNext(chosenNext)}
                   disabled={currentIndex >= scenes.length - 1}
                   style={{ ...BTN_ON, opacity: currentIndex >= scenes.length - 1 ? 0.4 : 1 }}
                 >

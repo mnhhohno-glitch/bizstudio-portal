@@ -70,10 +70,31 @@ export type ScriptCompany = {
   index: number;
   name: string;
   hireDate: string;
+  /** 退職年月（空白期間の間隔の判定に使う。無ければ ""） */
+  leaveDate: string;
   jobDesc: string;
   isCurrent: boolean;
   /** 職歴の行がまだ無い（登録情報からの仮の会社）。欄には入れられない */
   placeholder?: boolean;
+};
+
+/**
+ * T-208 不具合修正 #2: 空白期間（勤め先の名前が無い期間、または学校／会社と次の会社の間が6か月以上空いた期間）。
+ * position は「この空白の次の会社の番号」（最後の会社の後なら companies.length）。会社ごとの場面の並びの中で、その会社の前に出す。
+ */
+export type ScriptGap = {
+  index: number;
+  position: number;
+  /** 前の学校／会社の名前（無ければ ""。差し込みでは「ご卒業」「前の会社」に言い換える） */
+  before: string;
+  /** 次の会社の名前（無ければ ""＝今まで） */
+  after: string;
+  /** 期間の長さ（"1年6ヶ月"。分からなければ ""） */
+  length: string;
+  /** 面談準備の整理の時系列に項目があったときの中身と時期（"受験勉強"・"2021年4月〜2021年9月"）。間隔から出したときは "" */
+  title: string;
+  period: string;
+  source: "timeline" | "interval";
 };
 
 /** 面談準備の質問（台本用）。index は整理の questions の添字（Q番号・「聞いた」のキー）。company は関わる会社名か「全体」（T-208 step3） */
@@ -92,7 +113,11 @@ export type ScriptContext = {
   school: string;
   department: string;
   gradYear: string;
+  /** T-208 不具合修正 #3: 最終学歴が高校（高専・高等専修学校は含まない）。学部を聞く文を出さない */
+  schoolIsHighSchool: boolean;
   companies: ScriptCompany[];
+  /** T-208 不具合修正 #2: 空白期間（position 順） */
+  gaps: ScriptGap[];
   /** 登録メールアドレスの先頭の文字 */
   emailHead: string;
   /** 在職状況（面談記録の欄。台本で答えたらそちらを優先） */
@@ -100,6 +125,8 @@ export type ScriptContext = {
   prepQuestions: PrepQuestionView[];
   /** 会社ごとにくり返す場面のときの会社番号（0始まり） */
   companyIndex?: number;
+  /** 空白期間の場面のときの空白の番号（gaps の index） */
+  gapIndex?: number;
   /** 今日（自動計算の基準。確認スクリプトで固定できる） */
   today?: Date;
 };
@@ -114,8 +141,11 @@ export type ScriptScene = {
   inputs?: ScriptInput[];
   /** ［飛ばす］ボタンを出す */
   skippable?: boolean;
-  /** 会社ごとにくり返す */
-  repeat?: "company";
+  /**
+   * 会社ごとにくり返す／空白期間ごとにくり返す。
+   * T-208 不具合修正 #1: 連続する repeat 付きの場面は1つのかたまりとして、会社を外側にして一周ずつ展開する（expandScenes）
+   */
+  repeat?: "company" | "gap";
   /** false のときはこの場面を飛ばす */
   when?: (ctx: ScriptContext, answers: AnswerMap) => boolean;
   /** 会社ごとにくり返す場面で、false の会社はその場面を出さない（T-208 step3: その会社の質問が無ければ出さない） */
@@ -132,11 +162,12 @@ export type ScriptScene = {
   kind?: "prep-questions" | "contact";
 };
 
-/** 会社ごとに展開した、画面で使う場面 */
+/** 会社ごと・空白期間ごとに展開した、画面で使う場面 */
 export type RuntimeScene = {
   key: string;
   scene: ScriptScene;
   companyIndex?: number;
+  gapIndex?: number;
 };
 
 /** answers の中に入れる進み具合（場面の答えとは別のキー） */

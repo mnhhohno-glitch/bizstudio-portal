@@ -33,6 +33,7 @@ import {
 import { SCRIPT_FACTS_HEADER } from "@/lib/interview-script/facts";
 import {
   calcSalary,
+  formatMan,
   nextInterviewGuide,
   overtimeDayToMonth,
   overtimeMonthToDay,
@@ -40,10 +41,10 @@ import {
   scheduleOutlook,
 } from "@/lib/interview-script/calc";
 import { DESIRED_OVERTIME_OPTIONS, DETAIL_SELECT_OPTIONS, WORK_STYLE_OPTIONS } from "@/lib/interview-script/field-options";
-import { allButtons, buildContext, expandScenes, renderScene, runtimeSceneOfKey, sceneWrites, sceneWritesWithClears, scriptStats } from "@/lib/interview-script/runtime";
-import { DERIVED_TARGETS, RESIGN_REASON_BUTTONS, SCRIPT_SCENES, SCRIPT_VERSION } from "@/lib/interview-script/script-v1";
+import { allButtons, buildContext, deriveValues, expandScenes, isHighSchoolName, nextSceneOf, renderScene, runtimeSceneOfKey, sceneWrites, sceneWritesWithClears, scriptStats, timelineItemKind } from "@/lib/interview-script/runtime";
+import { DERIVED_TARGETS, RESIGN_REASON_BUTTONS, SCRIPT_SCENES, SCRIPT_VERSION, agentOf, docsOf, employedOf, timelineOf } from "@/lib/interview-script/script-v1";
 import { caFamilyNameOf } from "@/lib/candidate-mail/templates";
-import type { AppliedMap, FieldTarget, RuntimeScene } from "@/lib/interview-script/types";
+import type { AnswerMap, AppliedMap, FieldTarget, RuntimeScene, SceneAnswer } from "@/lib/interview-script/types";
 
 let failed = 0;
 function check(label: string, ok: boolean, extra = "") {
@@ -402,6 +403,143 @@ check("plan: work style check added, existing CA check kept", pW.detailPatch.wor
 
 // (g) 場面キー → 実行時の場面（サーバーの apply API が使う）
 check("runtimeSceneOfKey: plain / company / unknown", runtimeSceneOfKey("s4-timeline")?.scene.id === "s4-timeline" && runtimeSceneOfKey("s5-wh-reason#1")?.companyIndex === 1 && runtimeSceneOfKey("nope") === null && runtimeSceneOfKey("s5-wh-reason#x") === null);
+
+/* ---------- 7. T-208 不具合修正（会社ごとの並び・空白期間・最終学歴・条件付き場面） ---------- */
+const baseInput = {
+  candidateName: "架空 太郎",
+  candidateEmail: null,
+  caName: "大野",
+  caFamilyName: "大野",
+  startTime: "",
+  tool: "電話",
+  detail: {},
+  askedQuestions: {},
+  today: base,
+};
+const p5Keys = (c: ReturnType<typeof buildContext>, answers: AnswerMap = {}) => expandScenes(c, answers).filter((s) => s.scene.part === "p5").map((s) => s.key);
+
+// (1) 会社2社＋各社の面談準備の質問あり → 1社目の全場面 → 2社目の全場面
+const ctxOrder = buildContext({
+  ...baseInput,
+  workHistories: [
+    { order: 1, companyName: "架空商事株式会社", jobTypeFlag: "営業", jobTypeMemo: null, hireDate: "2019年4月", leaveDate: "2021年3月" },
+    { order: 2, companyName: "架空システム株式会社", jobTypeFlag: null, jobTypeMemo: "社内SE", hireDate: "2021年4月", leaveDate: null },
+  ],
+  prepSummary: {
+    timeline: [],
+    works: [{ company: "架空商事株式会社" }, { company: "架空システム株式会社" }],
+    questions: [
+      { question: "営業の数字は？", why: "", mismatch: false, company: "架空商事株式会社" },
+      { question: "在籍年数は？", why: "食い違い", mismatch: true, company: "架空システム株式会社" },
+    ],
+  },
+});
+check(
+  "T-208 fix #1: scenes run company by company (intro→work→prep→reason, then next company)",
+  p5Keys(ctxOrder).join(",") === "s5-education,s5-wh-intro#0,s5-wh-work#0,s5-wh-prep-questions#0,s5-wh-reason#0,s5-wh-intro#1,s5-wh-work#1,s5-wh-prep-questions#1,s5-wh-reason#1,s5-prep-questions",
+  p5Keys(ctxOrder).join(","),
+);
+check("T-208 fix #1: company scene keys unchanged (id#companyIndex)", p5Keys(ctxOrder).filter((k) => k.includes("#")).every((k) => /^s5-wh-[a-z-]+#\d$/.test(k)));
+
+// (2) 整理の時系列に勤め先の名前が無い期間（受験勉強）→ 会社に出ず、その位置に空白期間の場面が1つ
+const ctxGapItem = buildContext({
+  ...baseInput,
+  workHistories: [],
+  prepSummary: {
+    timeline: [
+      { period: "2015年4月〜2019年3月", title: "架空大学 経済学部 卒業", detail: "" },
+      { period: "2019年4月〜2021年3月", title: "架空商事株式会社 正社員", detail: "" },
+      { period: "2021年4月〜2021年12月", title: "受験勉強", detail: "公務員試験" },
+      { period: "2022年1月〜現在", title: "架空システム株式会社 正社員", detail: "" },
+    ],
+    works: [],
+    questions: [],
+  },
+});
+check("T-208 fix #2: gap item is not a company", ctxGapItem.companies.length === 2 && ctxGapItem.companies.map((c) => c.name).join("/") === "架空商事株式会社/架空システム株式会社");
+check("T-208 fix #2: one gap scene between the two companies", p5Keys(ctxGapItem).join(",") === "s5-education,s5-wh-intro#0,s5-wh-work#0,s5-wh-reason#0,s5-gap#0,s5-wh-intro#1,s5-wh-work#1,s5-wh-reason#1,s5-prep-questions", p5Keys(ctxGapItem).join(","));
+const gapScene = expandScenes(ctxGapItem, {}).find((s) => s.scene.id === "s5-gap")!;
+const gapSay = renderScene(gapScene, ctxGapItem, {});
+check("T-208 fix #2: gap say inserts previous company / next company / length / note", gapSay.includes("架空商事株式会社から架空システム株式会社様に入社されるまでの間が8ヶ月ぐらいあるんですけれども") && gapSay.includes("「受験勉強」2021年4月〜2021年12月"), gapSay.split("\n")[0]);
+check("T-208 fix #2: timelineItemKind", ["受験勉強", "転職活動", "療養", "アルバイト", "自営業", "家事・育児"].every((t) => timelineItemKind(t) === "gap") && ["架空商事株式会社 正社員", "コンビニ アルバイト", "〇〇病院 休職", "山田工務店 パート"].every((t) => timelineItemKind(t) === "company") && timelineItemKind("架空高校 卒業") === "school");
+check("T-208 fix #2: runtimeSceneOfKey handles gap keys", runtimeSceneOfKey("s5-gap#1")?.gapIndex === 1 && runtimeSceneOfKey("s5-gap#1")?.companyIndex === undefined);
+const ctxGapEnd = buildContext({
+  ...baseInput,
+  detail: { employmentStatus: "離職中" },
+  workHistories: [{ order: 1, companyName: "架空商事株式会社", jobTypeFlag: null, jobTypeMemo: null, hireDate: "2019年4月", leaveDate: "2025年12月" }],
+  prepSummary: { timeline: [], works: [], questions: [] },
+});
+check("T-208 fix #2: gap after the last company when retired 9 months ago (today 2026-09)", p5Keys(ctxGapEnd).join(",") === "s5-education,s5-wh-intro#0,s5-wh-work#0,s5-wh-reason#0,s5-gap#0,s5-prep-questions" && renderScene(expandScenes(ctxGapEnd, {}).find((s) => s.scene.id === "s5-gap")!, ctxGapEnd, {}).startsWith("架空商事株式会社を退職されてから今までの間は"));
+
+// (3) 会社と会社の間が7か月 → 空白期間の場面。5か月 → 出ない
+const whInterval = (leave: string, hire: string) => [
+  { order: 1, companyName: "架空商事株式会社", jobTypeFlag: null, jobTypeMemo: null, hireDate: "2019年4月", leaveDate: leave },
+  { order: 2, companyName: "架空システム株式会社", jobTypeFlag: null, jobTypeMemo: null, hireDate: hire, leaveDate: null },
+];
+const ctx7 = buildContext({ ...baseInput, workHistories: whInterval("2021年3月", "2021年10月"), prepSummary: null });
+const ctx5 = buildContext({ ...baseInput, workHistories: whInterval("2021-03-31", "2021-08-01"), prepSummary: null });
+check("T-208 fix #2: 7-month interval -> gap scene (interval, 7ヶ月)", ctx7.gaps.length === 1 && ctx7.gaps[0].source === "interval" && ctx7.gaps[0].length === "7ヶ月" && p5Keys(ctx7).includes("s5-gap#0"), JSON.stringify(ctx7.gaps));
+check("T-208 fix #2: 5-month interval (ISO dates) -> no gap", ctx5.gaps.length === 0 && !p5Keys(ctx5).some((k) => k.startsWith("s5-gap")));
+check("T-208 fix #2: dates unknown -> no gap", ctxOrder.gaps.length === 0 && ctx.gaps.length === 0);
+const ctxSchoolGap = buildContext({
+  ...baseInput,
+  workHistories: [{ order: 1, companyName: "架空商事株式会社", jobTypeFlag: null, jobTypeMemo: null, hireDate: "2020年10月", leaveDate: null }],
+  prepSummary: { timeline: [{ period: "2016年4月〜2020年3月", title: "架空大学 卒業", detail: "" }], works: [], questions: [] },
+});
+check("T-208 fix #2: graduation -> first company 7 months -> gap before company 1 (before = school)", ctxSchoolGap.gaps.length === 1 && ctxSchoolGap.gaps[0].position === 0 && ctxSchoolGap.gaps[0].before === "架空大学" && p5Keys(ctxSchoolGap)[1] === "s5-gap#0");
+
+// (4) 「高校→大学」→ 大学が差し込まれる。「高校のみ」→ 学部を聞く文が出ない
+const ctxHsUniv = buildContext({
+  ...baseInput,
+  workHistories: [],
+  prepSummary: { timeline: [{ period: "2012年4月〜2015年3月", title: "架空高校 卒業", detail: "" }, { period: "2015年4月〜2019年3月", title: "架空大学 卒業", detail: "" }, { period: "2019年4月〜現在", title: "架空商事株式会社 正社員", detail: "" }], works: [], questions: [] },
+});
+const eduUniv = renderScene(expandScenes(ctxHsUniv, {}).find((s) => s.scene.id === "s5-education")!, ctxHsUniv, {});
+check("T-208 fix #3: high school → university: the university is the final education", ctxHsUniv.school === "架空大学" && ctxHsUniv.gradYear === "2019年3月" && !ctxHsUniv.schoolIsHighSchool && eduUniv.includes("最終学歴は、架空大学を2019年3月にご卒業") && eduUniv.includes("学部（学科）はどちらでしたか"), ctxHsUniv.school);
+const ctxHsOnly = buildContext({
+  ...baseInput,
+  workHistories: [],
+  prepSummary: { timeline: [{ period: "2012年4月〜2015年3月", title: "架空高等学校 卒業", detail: "" }, { period: "2015年4月〜現在", title: "架空商事株式会社 正社員", detail: "" }], works: [], questions: [] },
+});
+const eduHs = renderScene(expandScenes(ctxHsOnly, {}).find((s) => s.scene.id === "s5-education")!, ctxHsOnly, {});
+check("T-208 fix #3: high school only: no department question", ctxHsOnly.schoolIsHighSchool && eduHs.includes("最終学歴は、架空高等学校を2015年3月にご卒業") && !eduHs.includes("学部") && !eduHs.includes("学ばれていましたか"), eduHs);
+check("T-208 fix #3: 高専・高等専修学校 are not high school; detail.educationMemo also judged", !isHighSchoolName("架空高等専門学校") && !isHighSchoolName("架空高等専修学校") && isHighSchoolName("県立架空高校") && buildContext({ ...baseInput, workHistories: [], prepSummary: null, detail: { educationMemo: "架空高校" } }).schoolIsHighSchool);
+const ctxUnivFirst = buildContext({
+  ...baseInput,
+  workHistories: [],
+  prepSummary: { timeline: [{ period: "2015年4月〜2019年3月", title: "架空大学 卒業", detail: "" }, { period: "2019年4月〜2020年3月", title: "架空専門学校 卒業", detail: "" }], works: [], questions: [] },
+});
+check("T-208 fix #3: the latest graduation wins regardless of timeline order", ctxUnivFirst.school === "架空専門学校");
+// 本番にある形: 「英会話スクール運営会社 正社員」は会社（学校の言葉を含むが働いていた）。最終学歴は大学のまま
+const ctxSchoolLike = buildContext({
+  ...baseInput,
+  workHistories: [],
+  prepSummary: { timeline: [{ period: "2013年4月〜2017年3月", title: "架空大学人間文化学部 卒業", detail: "" }, { period: "2017年4月〜2021年3月", title: "英会話スクール運営会社 正社員", detail: "" }, { period: "2021年4月〜現在", title: "自動車関連会社 派遣社員", detail: "" }], works: [], questions: [] },
+});
+check("T-208 fix #2/#3: 'スクール運営会社 正社員' is a company, the university stays the final education", ctxSchoolLike.school === "架空大学人間文化学部" && ctxSchoolLike.companies.map((c) => c.name).join("/") === "英会話スクール運営会社/自動車関連会社" && timelineItemKind("架空学園 職員") === "company" && timelineItemKind("架空学園 卒業") === "school");
+
+// (5) 希望職種で［まだ分からない］→ s6-job-direction、［ある］→ s6-job-detail（押した答えで並べ直してから決める）
+const atJob = (has: string): AnswerMap => ({ __meta: { currentKey: "s6-job" } as unknown as SceneAnswer, "s6-job": { choices: { has } } });
+const nUnknown = nextSceneOf(ctx, atJob("まだ分からない・はっきりない"), "s6-job-direction");
+const nHas = nextSceneOf(ctx, atJob("ある"), "s6-job-detail");
+check("T-208 fix #4: まだ分からない -> s6-job-direction", nUnknown.scenes[nUnknown.nextIndex].key === "s6-job-direction" && nUnknown.scenes[nUnknown.currentIndex].key === "s6-job" && !nUnknown.scenes.some((s) => s.key === "s6-job-detail"));
+check("T-208 fix #4: ある -> s6-job-detail", nHas.scenes[nHas.nextIndex].key === "s6-job-detail" && !nHas.scenes.some((s) => s.key === "s6-job-direction"));
+// 画面に出ていた並び（答えを保存する前）で探すと s6-job-detail に進んでしまう＝直す前の症状
+const stale = expandScenes(ctx, { __meta: { currentKey: "s6-job" } as unknown as SceneAnswer });
+const staleIdx = stale.findIndex((s) => s.key === "s6-job");
+check("T-208 fix #4: (before the fix) stale expansion would go to s6-job-detail", stale[Math.min(staleIdx + 1, stale.length - 1)].key === "s6-job-detail");
+// 他の when 付き場面でも同じ（s4-retired-when: 離職中を押したら次へで出る）
+const nRetired = nextSceneOf(ctx, { __meta: { currentKey: "s4-employment" } as unknown as SceneAnswer, "s4-employment": { choices: { status: "離職中（辞めている）" } } }, "s4-retired-when");
+check("T-208 fix #4: other when-scenes (s4-retired-when) resolve the same way", nRetired.scenes[nRetired.nextIndex].key === "s4-retired-when");
+// 押した答えは表示名で保存される。値（「離職中」「年収は賞与込み」「利用経験あり」…）に直してから比べる
+check("T-208 fix #4: label → value for cross-scene conditions (employed / agent / docs / timeline / bonus)",
+  employedOf({ "s4-employment": { choices: { status: "離職中（辞めている）" } } }, ctx) === false &&
+  agentOf({ "s2-agent": { choices: { agent: "利用経験あり（途中でやめた）" } } }) === "利用経験あり" &&
+  docsOf({ "s3-docs": { choices: { docs: "未着手（まだ）" } } }) === "未着手" &&
+  timelineOf({ "s4-timeline": { choices: { timeline: "半年以内（3〜6ヶ月）" } } }) === "半年以内" &&
+  deriveValues(ctx, { "s6-salary-current": { choices: { bonus: "含まれている" }, inputs: { annual: "400", bonusAnnual: "60" } } })["月給"] === formatMan(340 / 12) &&
+  expandScenes(ctx, { "s2-agent": { choices: { agent: "利用経験あり（途中でやめた）" } } }).some((s) => s.key === "s3-agent-kind"),
+);
 
 console.log(failed === 0 ? "ALL OK" : `FAILED: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

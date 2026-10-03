@@ -141,14 +141,34 @@ export const TRANSFER_BUTTONS: Array<{ label: string; value: string; memo?: stri
 ];
 
 /* ---------- 答えを横断して使う小さな判定 ---------- */
+
+/**
+ * T-208 不具合修正 #4: 押した答えは「ボタンの表示名（label）」で保存される（画面の pressButton・sceneWrites の突き合わせもそれ）。
+ * 一方、条件分岐・自動計算が比べるのは保存する値（value: 「離職中（辞めている）」→「離職中」等）。
+ * 表示名のまま比べると when 付きの場面（退職の予定・退職後の期間・大手エージェント等）が出ず、賞与込みの計算も効かないので、
+ * ここで表示名 → 値に直してから返す。ボタンが見つからなければそのまま（表示名＝値のボタンはどちらでも同じ）。
+ */
+function buttonValueOf(sceneId: string, groupKey: string, label: string): string {
+  if (!label) return "";
+  const group = SCRIPT_SCENES.find((s) => s.id === sceneId)?.groups?.find((g) => g.key === groupKey);
+  const btn = group?.buttons.find((b) => b.label === label);
+  return btn ? (btn.value ?? btn.label) : label;
+}
+export function choiceValueOf(a: AnswerMap, sceneId: string, groupKey: string): string {
+  return buttonValueOf(sceneId, groupKey, choiceOf(a, sceneId, groupKey));
+}
+export function choiceValuesOf(a: AnswerMap, sceneId: string, groupKey: string): string[] {
+  return choicesOf(a, sceneId, groupKey).map((label) => buttonValueOf(sceneId, groupKey, label));
+}
+
 export function timelineOf(a: AnswerMap): string {
-  return choiceOf(a, "s4-timeline", "timeline");
+  return choiceValueOf(a, "s4-timeline", "timeline");
 }
 export function hasSelectionOf(a: AnswerMap): boolean {
-  return choiceOf(a, "s4-applications", "type") === "選考中" || choicesOf(a, "s4-applications", "offer").includes("内定あり");
+  return choiceValueOf(a, "s4-applications", "type") === "選考中" || choiceValuesOf(a, "s4-applications", "offer").includes("内定あり");
 }
 export function employedOf(a: AnswerMap, ctx: ScriptContext): boolean | null {
-  const v = choiceOf(a, "s4-employment", "status") || ctx.employmentStatus;
+  const v = choiceValueOf(a, "s4-employment", "status") || ctx.employmentStatus;
   if (v === "在職中") return true;
   if (v === "離職中") return false;
   return null;
@@ -157,16 +177,16 @@ export function retireMonthsOf(a: AnswerMap): number | null {
   return parseNumber(inputOf(a, "s4-retire-plan", "months"));
 }
 export function contactOf(a: AnswerMap): string {
-  return choiceOf(a, "s7-contact", "method");
+  return choiceValueOf(a, "s7-contact", "method");
 }
 export function nextToolOf(a: AnswerMap): string {
-  return choiceOf(a, "s7-next", "tool");
+  return choiceValueOf(a, "s7-next", "tool");
 }
 export function docsOf(a: AnswerMap): string {
-  return choiceOf(a, "s3-docs", "docs");
+  return choiceValueOf(a, "s3-docs", "docs");
 }
 export function agentOf(a: AnswerMap): string {
-  return choiceOf(a, "s2-agent", "agent");
+  return choiceValueOf(a, "s2-agent", "agent");
 }
 
 /** 次回面談の日（入力が無ければ今日） */
@@ -482,7 +502,8 @@ export const SCRIPT_SCENES: ScriptScene[] = [
       "",
       "{{if:school}}最終学歴は、〔学校名〕{{if:dept}}〔学部学科〕{{/if}}を{{if:gradYear}}〔卒業年〕に{{/if}}ご卒業、ということでお間違いないでしょうか？{{else}}最終学歴は、どちらの学校を、いつご卒業でしょうか？{{/if}}",
       "",
-      "{{if:dept}}そちらでは、主にどんなことを学ばれていましたか？（普通科など、特に専攻が無いときは省く）{{else}}ちなみに、学部（学科）はどちらでしたか？{{/if}}",
+      // T-208 不具合修正 #3: 最終学歴が高校（高専・高等専修学校は除く）のときは学部を聞く文を出さない
+      "{{if:highSchool}}{{else}}{{if:dept}}そちらでは、主にどんなことを学ばれていましたか？（普通科など、特に専攻が無いときは省く）{{else}}ちなみに、学部（学科）はどちらでしたか？{{/if}}{{/if}}",
     ].join("\n"),
     inputs: [
       { key: "school", label: "学校名", type: "text", target: dm("educationMemo") },
@@ -497,6 +518,26 @@ export const SCRIPT_SCENES: ScriptScene[] = [
       ]),
     ],
     targetsHint: "最終学歴（学校名・卒業年）",
+  },
+  {
+    // T-208 不具合修正 #2: 空白期間（勤め先の名前が無い期間、または学校／会社と次の会社の間が6か月以上）。
+    // その空白の次の会社の場面の前に出す（展開は runtime の expandScenes）。中身は仮（大野の面談ログ oono-handbook 5-5 から）。次の段階で整える。
+    id: "s5-gap",
+    part: "p5",
+    title: "職歴：空白期間",
+    repeat: "gap",
+    say: [
+      "{{if:gapAfter}}〔前の所〕から〔次の会社〕様に入社されるまでの間が{{if:gapLength}}〔空白の期間〕ぐらい{{/if}}あるんですけれども、この間はどんな感じで過ごされていましたか？{{else}}〔前の所〕を退職されてから今までの間は、どんな感じで過ごされていましたか？{{/if}}",
+      "",
+      "{{if:gapNote}}（面談準備の整理では「〔空白の中身〕」〔空白の時期〕）{{/if}}",
+    ].join("\n"),
+    inputs: [{ key: "detail", label: "この間の過ごし方（本人の言葉）", type: "text" }],
+    groups: [
+      pickupGroup([
+        ["空白を気にしている", "退職後の空白を企業から聞かれることはたまにあるんですけれども、状況を建設的に説明すれば、だいたいの会社は理解してくれますので、そんなに深く考えなくても大丈夫です。お伝えの仕方もちゃんとレクチャーしますので"],
+      ]),
+    ],
+    targetsHint: "（入れ先は次の段階で決める。答えはスクリプトの記録に残る）",
   },
   {
     id: "s5-wh-intro",
@@ -622,7 +663,7 @@ export const SCRIPT_SCENES: ScriptScene[] = [
     id: "s6-job-detail",
     part: "p6",
     title: "職種：希望がある",
-    when: (_ctx, a) => choiceOf(a, "s6-job", "has") !== "まだ分からない・はっきりない",
+    when: (_ctx, a) => choiceValueOf(a, "s6-job", "has") !== "まだ分からない・はっきりない",
     say: [
       "ありがとうございます。ほかにも、少しでも気になっている職種はありますか？",
       "",
@@ -646,7 +687,7 @@ export const SCRIPT_SCENES: ScriptScene[] = [
     id: "s6-job-direction",
     part: "p6",
     title: "職種：まだ分からない",
-    when: (_ctx, a) => choiceOf(a, "s6-job", "has") === "まだ分からない・はっきりない",
+    when: (_ctx, a) => choiceValueOf(a, "s6-job", "has") === "まだ分からない・はっきりない",
     say: [
       "迷われている方も多いので、大丈夫ですよ。では、これまでのご経験を生かしていきたいですか？ それとも、まったく新しいことに挑戦してみたいですか？",
       "",
