@@ -50,6 +50,8 @@ T-067 以降、面談ログ・添付ファイルを含む全ての求職者関�
 - `analyze-with-intake/route.ts` も `CandidateFile`(MEETING) + `downloadFileFromDrive` 経由で解析対象を取得
 - T-029 Phase D-2 の Google フォーム作成（extract-resume）も同じ CandidateFile + Drive 経路
 - 旧 `/api/interviews/[id]/attachments` 系 API は残置のみ（将来削除予定）
+- T-208 調査（2026-10-04）: 大野将幸（社員番号 1000001）が面談官または担当CAの初回面談は DB 上 1,035 件だが、MEETING の .txt を持つ求職者は 141 人・195 ファイル（2026-03-25 以降）。初回面談のログは **ファイル名の接頭辞「初回面談」** で特定でき（138 件）、接頭辞のない 2 件だけ作成日と中身で判定した。面談記録の `interviewerUserId` は予約入力者なので面談官の判定には使えない。
+- 話者の判定: 逐語ログの話者ラベルは「話者 N」のほか、Notta の実名ラベル（CA 名・求職者名がそのまま入る）と、タイムスタンプ行の次にラベルが来る形式の 3 種がある。CA 本人かは冒頭の名乗り（「ビズスタジオの大野と申します」）か実名ラベルで判定する。同姓の社員がいるため、姓だけの名乗りは予約入力者が別人のとき区別できない（8 件）。書き出しとメモの実体は `C:/bizstudio/_work/T-208_oono-logs_2026-10-04/`（git 外）、手本集は `docs/interview-script/oono-handbook.md`、ズレ表は `docs/interview-script/script-gap-report.md`。
 
 ## 面談関連の AI 自動生成（T-029）
 
