@@ -4,7 +4,8 @@ import { getSessionUser } from "@/lib/auth";
 import { PERSON_FLAG_RULES, COMPANY_FLAG_RULES, applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
-import { jstDateStringToDbDate, todayJstDateString } from "@/lib/dailyReport/jstDate";
+import { todayJstDateString } from "@/lib/dailyReport/jstDate";
+import { needsStageAutoDates, stageAutoDates } from "@/lib/entries/documentPassDate";
 // T-XXX step5B: 選考ステータスが変わる保存を同じトランザクションで記録する
 import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
@@ -63,33 +64,15 @@ export async function PATCH(
   if (personFlag !== undefined) data.personFlag = personFlag;
 
   // 段階日付の自動入力：フラグが進んだとき、対応する日付欄が空なら JST 当日をセットする。
-  //  - entryFlag が「書類選考」に変わったとき → 書類提出日（提出して書類選考フェーズに入った日）
-  //  - entryFlag が「面接 / 内定 / 入社済」に変わったとき → 書類通過日（面接以降＝書類は通過済み）
-  //  - entryFlag が「内定」に変わったとき → 内定日
-  //  - entryFlagDetail が「承諾」に変わったとき → 承諾日
-  // ただし既存値が入っているレコードは上書きしない（手入力値を保護）。
-  // JST 当日は jstDateStringToDbDate(todayJstDateString()) で UTC midnight Date に変換
-  // （他の日付フィールドの保存規約と同じ。toISOString().slice(0,10) は使わない）。
-  const reachedInterviewOrBeyond = entryFlag === "面接" || entryFlag === "内定" || entryFlag === "入社済";
-  const reachedDocReview = entryFlag === "書類選考";
-  if (reachedDocReview || reachedInterviewOrBeyond || entryFlag === "内定" || entryFlagDetail === "承諾") {
+  // 既存値が入っているレコードは上書きしない（手入力・訂正済みの書類通過日などを保護）。
+  // ルール本体は src/lib/entries/documentPassDate.ts の stageAutoDates（テスト対象）。
+  const stageChange = { entryFlag, entryFlagDetail };
+  if (needsStageAutoDates(stageChange)) {
     const existing = await prisma.jobEntry.findUnique({
       where: { id: entryId },
       select: { documentSubmitDate: true, documentPassDate: true, offerDate: true, acceptanceDate: true },
     });
-    const today = jstDateStringToDbDate(todayJstDateString());
-    if (reachedDocReview && existing && existing.documentSubmitDate == null) {
-      data.documentSubmitDate = today;
-    }
-    if (reachedInterviewOrBeyond && existing && existing.documentPassDate == null) {
-      data.documentPassDate = today;
-    }
-    if (entryFlag === "内定" && existing && existing.offerDate == null) {
-      data.offerDate = today;
-    }
-    if (entryFlagDetail === "承諾" && existing && existing.acceptanceDate == null) {
-      data.acceptanceDate = today;
-    }
+    if (existing) Object.assign(data, stageAutoDates(stageChange, existing, todayJstDateString()));
   }
 
   const transformedData = applyEntryFlagAutoTransitions(data);

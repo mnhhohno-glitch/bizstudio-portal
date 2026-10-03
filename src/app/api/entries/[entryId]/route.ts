@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { recalculateSubStatusIfAuto } from "@/lib/support-sub-status";
 import { applyEntryFlagAutoTransitions } from "@/lib/constants/entry-flag-rules";
 import { resolveEntryIsActive } from "@/lib/entries/resolveEntryIsActive";
+import { isDocumentPassDateOnlyUpdate, isValidDocumentPassDateBody } from "@/lib/entries/documentPassDate";
 // T-XXX step5B: 選考ステータスが変わる保存・削除を同じトランザクションで記録する
 import { ENTRY_STATUS_SELECT, ENTRY_STATUS_ROUTES, recordJobEntryStatusChange } from "@/lib/entry-status-history";
 
@@ -40,6 +41,11 @@ export async function PATCH(
   if ("entryDate" in body && !body.entryDate) {
     return NextResponse.json({ error: "エントリー日は必須です（空にできません）" }, { status: 400 });
   }
+  if ("documentPassDate" in body && !isValidDocumentPassDateBody(body.documentPassDate)) {
+    return NextResponse.json({ error: "書類通過日の形式が正しくありません" }, { status: 400 });
+  }
+  // 書類通過日だけの訂正（エントリー編集画面・書類選考タブのセル）は、選考フラグ・連絡状況・有効/無効を一切動かさない。
+  const documentPassDateOnly = isDocumentPassDateOnlyUpdate(body);
 
   // Allow updating any field
   const allowedFields = [
@@ -131,7 +137,8 @@ export async function PATCH(
   });
   const mergedFlag = <K extends "entryFlag" | "entryFlagDetail" | "companyFlag" | "personFlag">(k: K) =>
     k in transformedData ? (transformedData[k] as string | null) : (existingFlags?.[k] ?? null);
-  transformedData.isActive = resolveEntryIsActive({
+  // 書類通過日だけの更新では is_active を再計算しない（既存値のまま。T-140 の双方向再計算は他の更新で従来どおり）。
+  if (!documentPassDateOnly) transformedData.isActive = resolveEntryIsActive({
     entryFlag: mergedFlag("entryFlag"),
     entryFlagDetail: mergedFlag("entryFlagDetail"),
     companyFlag: mergedFlag("companyFlag"),

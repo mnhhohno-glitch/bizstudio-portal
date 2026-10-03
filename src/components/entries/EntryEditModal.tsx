@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { JOB_TYPE_BY_ROUTE, getJobTypeOptionsForRoute } from "@/lib/constants/job-types";
 import { useOverlayClose } from "@/hooks/useOverlayClose";
 import type { Entry } from "./EntryBoard";
+import { documentPassDateFromInput, documentPassDateToInput } from "@/lib/entries/documentPassDate";
 
 type Props = {
   entry: Entry;
@@ -34,6 +35,10 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
   const [externalJobNo, setExternalJobNo] = useState(entry.externalJobNo || "");
   const [entryDate, setEntryDate] = useState(toDateInput(entry.entryDate));
   const [documentSubmitDate, setDocumentSubmitDate] = useState(toDateInput(entry.documentSubmitDate));
+  // 書類通過日：選考段階（面接・内定・選考終了後）に関係なく確認・訂正・空欄化できる。
+  // 日付定義は書類選考タブのセルと同じ（保存=JST日付のUTC正午、表示=JST日付）。src/lib/entries/documentPassDate.ts
+  const initialDocumentPassDate = documentPassDateToInput(entry.documentPassDate);
+  const [documentPassDate, setDocumentPassDate] = useState(initialDocumentPassDate);
   const [memo, setMemo] = useState(entry.memo || "");
   const [saving, setSaving] = useState(false);
   const overlayClose = useOverlayClose(onClose);
@@ -52,22 +57,32 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
 
   const handleSave = async () => {
     if (!canSave || saving) return;
+    // 変更した項目だけを送る（書類通過日だけを直したときに、他の日付・フラグ・有効/無効を動かさないため）。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: Record<string, any> = {};
+    const trimmedOrNull = (v: string) => v.trim() || null;
+    if (companyName.trim() !== (entry.companyName || "").trim()) payload.companyName = companyName.trim();
+    if (trimmedOrNull(jobTitle) !== trimmedOrNull(entry.jobTitle || "")) payload.jobTitle = trimmedOrNull(jobTitle);
+    if (trimmedOrNull(jobCategory) !== trimmedOrNull(entry.jobCategory || "")) payload.jobCategory = trimmedOrNull(jobCategory);
+    if ((jobDb || null) !== (entry.jobDb || null)) payload.jobDb = jobDb || null;
+    if ((jobType || null) !== (entry.jobType || null)) payload.jobType = jobType || null;
+    if (trimmedOrNull(externalJobNo) !== trimmedOrNull(entry.externalJobNo || "")) payload.externalJobNo = trimmedOrNull(externalJobNo);
+    if (entryDate !== toDateInput(entry.entryDate)) payload.entryDate = toIsoOrNull(entryDate);
+    if (documentSubmitDate !== toDateInput(entry.documentSubmitDate)) payload.documentSubmitDate = toIsoOrNull(documentSubmitDate);
+    if (documentPassDate !== initialDocumentPassDate) payload.documentPassDate = documentPassDateFromInput(documentPassDate);
+    if (trimmedOrNull(memo) !== trimmedOrNull(entry.memo || "")) payload.memo = trimmedOrNull(memo);
+
+    if (Object.keys(payload).length === 0) {
+      onClose();
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch(`/api/entries/${entry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyName: companyName.trim(),
-          jobTitle: jobTitle.trim() || null,
-          jobCategory: jobCategory.trim() || null,
-          jobDb: jobDb || null,
-          jobType: jobType || null,
-          externalJobNo: externalJobNo.trim() || null,
-          entryDate: toIsoOrNull(entryDate),
-          documentSubmitDate: toIsoOrNull(documentSubmitDate),
-          memo: memo.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         toast.error("更新に失敗しました");
@@ -216,6 +231,30 @@ export default function EntryEditModal({ entry, onClose, onSaved }: Props) {
                   disabled={saving}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
                 />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">書類通過日</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={documentPassDate}
+                    onChange={(e) => setDocumentPassDate(e.target.value)}
+                    disabled={saving}
+                    data-testid="entry-edit-document-pass-date"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] focus:outline-none"
+                  />
+                  {documentPassDate && (
+                    <button
+                      type="button"
+                      onClick={() => setDocumentPassDate("")}
+                      disabled={saving}
+                      title="書類通過日を空欄にする"
+                      className="shrink-0 text-xs text-gray-500 hover:text-red-600 disabled:opacity-50"
+                    >
+                      クリア
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </fieldset>
