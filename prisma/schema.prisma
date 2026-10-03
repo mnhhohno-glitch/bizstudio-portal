@@ -151,6 +151,8 @@ model User {
   archivedCandidateFiles   CandidateFile[]           @relation("CandidateFileArchivedBy")
   advisorSessions          AdvisorChatSession[]      @relation("UserAdvisorSessions")
   interviewPrepRooms       InterviewPrepRoom[]       @relation("UserInterviewPrepRooms") // T-205
+  interviewPrepPagesCreated InterviewPrepPage[]        @relation("UserInterviewPrepPages") // T-206
+  interviewPrepPageVersions InterviewPrepPageVersion[] @relation("UserInterviewPrepPageVersions") // T-206
   contactMailLogs          CandidateContactMailLog[] @relation("UserContactMailLogs") // T-207
   interviewScriptAnswers   InterviewScriptAnswer[]   @relation("UserInterviewScriptAnswers") // T-208
   interviewPrepMessages    InterviewPrepMessage[]    @relation("UserInterviewPrepMessages") // T-205
@@ -592,6 +594,7 @@ model Candidate {
   oneDriveFolderUrlLedger OneDriveFolderUrlLedger?
   advisorSessions        AdvisorChatSession[]
   interviewPrepRooms     InterviewPrepRoom[] // T-205
+  interviewPrepPages     InterviewPrepPage[] // T-206: 面接対策ページ
   contactMailLogs        CandidateContactMailLog[] // T-207
   jobEntries             JobEntry[]
   hiddenJobIntroductions HiddenJobIntroduction[]
@@ -2035,6 +2038,9 @@ model JobEntry {
   offerMeetingGcalId   String? @map("offer_meeting_gcal_id")
   interviewPrepGtaskId String? @map("interview_prep_gtask_id")
   interviewPrepGcalId  String? @map("interview_prep_gcal_id")
+
+  // T-206: このエントリーにひもづく面接対策ページ（エントリー削除時は紐付けだけ外す）
+  interviewPrepPages InterviewPrepPage[]
 
   @@index([candidateId])
   @@index([externalJobId])
@@ -4006,4 +4012,68 @@ model CaPipelineDailySnapshot {
   @@unique([snapshotDate, caKey])
   @@index([snapshotDate])
   @@map("ca_pipeline_daily_snapshots")
+}
+
+// =============================================================================
+// T-206: 面接対策ページ（求職者へ渡す面接対策資料 HTML の公開管理）
+//   - 1 URL = 1 記録。回が変われば新しい記録。同じ回の作り直しは「差し替え」（版を追加・URL と期限はそのまま）
+//   - 「期限切れ」「選考終了」は status に持たず、expiresAt とエントリーの状態から表示・配信時に計算する
+//   - 閲覧数・失敗回数は DB 側で加算（increment）し、読んでから書かない
+//   - 生年月日は Candidate.birthday を照合に使う（ここには持たない）
+// =============================================================================
+model InterviewPrepPage {
+  id          String    @id @default(cuid())
+  candidateId String    @map("candidate_id")
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  entryId     String?   @map("entry_id")
+  entry       JobEntry? @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  stage         String    // 一次面接 / 二次面接 / 三次面接 / 最終面接 / 模擬面接まとめ / その他
+  title         String
+  interviewDate DateTime? @map("interview_date") // JST 暦日を UTC 00:00 で保存（罠#17）
+
+  slug String @unique // 英大小文字＋数字 7 文字（公開 URL の末尾）
+
+  status        String    @default("draft") // draft / published / stopped
+  publishedAt   DateTime? @map("published_at")
+  expiresAt     DateTime? @map("expires_at") // この時刻から見られない（公開日＋30日の 0:00 JST）
+  stoppedAt     DateTime? @map("stopped_at")
+  stoppedReason String?   @map("stopped_reason")
+
+  useWrapper       Boolean @default(true) @map("use_wrapper")       // 共通ヘッダー・フッター・検索除けを付ける
+  requireBirthdate Boolean @default(true) @map("require_birthdate") // 初回に生年月日で本人確認する
+
+  firstViewedAt DateTime? @map("first_viewed_at")
+  lastViewedAt  DateTime? @map("last_viewed_at")
+  viewCount     Int       @default(0) @map("view_count")
+
+  verifyFailCount       Int       @default(0) @map("verify_fail_count")
+  verifyFailWindowStart DateTime? @map("verify_fail_window_start")
+  verifyLockedUntil     DateTime? @map("verify_locked_until")
+
+  createdById String @map("created_by_id")
+  createdBy   User   @relation("UserInterviewPrepPages", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  versions InterviewPrepPageVersion[]
+
+  @@index([candidateId])
+  @@index([entryId])
+  @@map("interview_prep_pages")
+}
+
+model InterviewPrepPageVersion {
+  id           String            @id @default(cuid())
+  pageId       String            @map("page_id")
+  page         InterviewPrepPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  versionNo    Int               @map("version_no") // 現在の版 = 最大の versionNo
+  html         String            @db.Text
+  uploadedById String            @map("uploaded_by_id")
+  uploadedBy   User              @relation("UserInterviewPrepPageVersions", fields: [uploadedById], references: [id])
+  note         String?
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  @@unique([pageId, versionNo])
+  @@map("interview_prep_page_versions")
 }

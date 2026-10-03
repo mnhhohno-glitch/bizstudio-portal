@@ -13,6 +13,8 @@ import CandidateHeader from "@/components/candidates/CandidateHeader";
 import InterviewHistoryTab from "@/components/candidates/InterviewHistoryTab";
 // T-208 step4: 「面談スクリプト」タブ（左: スクリプト／右: 面談準備）と、そのときの1行の上部表示
 import InterviewScriptTab from "@/components/candidates/InterviewScriptTab";
+// T-206: 面接対策ページ（?view=mensetsu）
+import MensetsuPagesTab from "@/components/candidates/MensetsuPagesTab";
 import CandidateCompactHeader from "@/components/candidates/CandidateCompactHeader";
 import SettingsHistoryTab from "@/components/candidates/SettingsHistoryTab";
 import DashboardTab from "@/components/candidates/DashboardTab";
@@ -130,6 +132,8 @@ const TOP_VIEWS = [
   { key: "interview", label: "面談履歴" },
   // T-208 step4: 面談スクリプト（?view=script）。面談履歴の右
   { key: "script", label: "面談スクリプト" },
+  // T-206: 面接対策（?view=mensetsu）。面談スクリプトの右
+  { key: "mensetsu", label: "面接対策" },
   { key: "settings-history", label: "設定履歴" },
   { key: "dashboard", label: "ダッシュボード" },
 ] as const;
@@ -1954,7 +1958,7 @@ function CandidateDetailPageBody() {
       </div>
 
       {/* T-208 step4: 面談スクリプトタブは上部を1行の小さな表示にまとめ、下を広く取る */}
-      {activeView === "script" && <CandidateCompactHeader candidate={candidate} />}
+      {(activeView === "script" || activeView === "mensetsu") && <CandidateCompactHeader candidate={candidate} />}
 
       {/* 候補者の基本情報ヘッダー: 基本・ダッシュボードタブのみ表示（面談履歴・面談スクリプト・設定履歴では非表示） */}
       {(activeView === "basic" || activeView === "dashboard") && (
@@ -2033,6 +2037,8 @@ function CandidateDetailPageBody() {
           candidate={{ name: candidate.name, email: candidate.email }}
           onOpenHistory={openInterviewHistory}
         />
+      ) : activeView === "mensetsu" ? (
+        <MensetsuPagesTab candidateId={candidateId} />
       ) : activeView === "settings-history" ? (
         <SettingsHistoryTab candidateId={candidateId} />
       ) : activeView === "dashboard" ? (
