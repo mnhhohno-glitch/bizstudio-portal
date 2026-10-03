@@ -16,6 +16,7 @@
 | **scout-scheduler** | Vercel (schedule.bizstudio.co.jp) | Vercel | 日程調整アプリ |
 | **manus-input-packager** | TypeScript | (確認) | キャリアカウンセリング資料生成 |
 | **offerbox-scout-generator** | TypeScript / Railway | Railway | OfferBox スカウト文章生成 |
+| **bizstudio-mensetsu** | 静的 HTML / Vercel Middleware | Vercel (mensetsu.bizstudio.co.jp) | 面接対策資料の公開サイト。portal の外部 API `/api/external/mensetsu/…` から中身・状態を受け取る（T-206 step2 で切替）|
 
 ## データフロー（マイページ操作の例）
 

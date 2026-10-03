@@ -1546,3 +1546,71 @@ AI の指示（SKILL.md）と AI に送る中身を変えたので staging で�
 - **保存する CA の発言は画面に打った文だけ**（`question`）。添えた部分は保存しない。ログに `script_facts=yes/no`。
 - SKILL.md「CAの質問に答えるとき」に3行追加（【台本で分かったこと】は使ってよい・レジュメの希望条件は使わない／別の職種・業種の提案は必ず別の職種か別の業種／次に聞くことは【台本で分かったこと】とレジュメを踏まえる）。
 - 確認: `npx tsx scripts/verify/interview-prep-step3-dryrun.ts --no-ai`（AI/DB なし・37項目）。staging: `railway ssh --service bizstudio-portal-staging "cd /app && npx tsx scripts/verify/interview-prep-step3-dryrun.ts 5008627"`（AI 最大4回・保存なし）。
+
+## 面接対策ページ管理（T-206 step1, master, 2026-10-04）
+
+求職者に渡す面接対策資料（GPT 等で作った HTML）を、求職者詳細「面接対策」タブでアップロード → 下書き → プレビュー → 公開 → URL・案内文コピー → 差し替え／延長／停止／再公開／版の履歴まで扱う。公開サイト `https://mensetsu.bizstudio.co.jp/{slug}`（別リポジトリ bizstudio-mensetsu・Vercel）は **step2 でこのポータルの外部 API から中身と状態を受け取るだけ**になる（step1 時点の公開サイトは `pages.json` ＋ `public/{slug}.html` の手置きのまま）。
+
+### 決めごと
+- 1 URL ＝ 1 記録。回が変わる（一次→二次→最終）ときは新しい記録・新しい URL。同じ回の作り直しは「差し替え」（版を足す。URL・公開期限・閲覧記録・本人確認済みの端末はそのまま）
+- 公開期限は既定 30 日。`expiresAt` ＝「この時刻から見られない」＝公開日（JST）＋30 日の 0:00 JST（公開日を 1 日目として 30 日目の 23:59 まで表示。表示最終日は前日）。「延長」は今日（JST）＋30 日の 0:00 JST に張り替え
+- 「期限切れ」「選考終了」は **status に保存せず表示・配信時に計算**（`resolveDisplayStatus`: 下書き → 公開停止 → 選考終了 → 期限切れ → 公開中）
+- 本人確認: 公開 URL を開くと初回だけ生年月日を入力させ、`Candidate.birthday` と一致したら 90 日有効のトークンを返す（**ポータル内に求人マイページ用の照合処理は無い**＝照合は kyuujinPDF 側の hash で行っているため、`src/lib/mensetsu/birthdate.ts` に独立実装）
+- 閲覧記録は本人確認を通った端末からの閲覧だけ数える。CA の確認はポータルのプレビュー（閲覧数に数えない）
+- 岡野 佑美 様（`jb6oFtu`）は案内済みのため `useWrapper=false`（資料にヘッダー・フッター入り）／`requireBirthdate=false` で移行済み（Dr.JOY株式会社のエントリーにひもづけ・publishedAt 2026-09-30・expiresAt 2026-10-30 0:00 JST）
+
+### 保存先（追加のみ・migration `20261004100000_t206_interview_prep_pages`）
+
+| テーブル（モデル） | 主な列 |
+|--|--|
+| `interview_prep_pages`（`InterviewPrepPage`） | candidateId（Cascade）/ entryId（JobEntry・SetNull・任意）/ stage（一次面接・二次面接・三次面接・最終面接・模擬面接まとめ・その他）/ title / interviewDate（JST 暦日を UTC 00:00・任意）/ **slug**（英大小文字＋数字 7 文字・一意・`crypto.randomInt`・衝突時は作り直し）/ **status**（draft / published / stopped）/ publishedAt / expiresAt / stoppedAt / stoppedReason / useWrapper（既定 true）/ requireBirthdate（既定 true）/ firstViewedAt / lastViewedAt / viewCount / verifyFailCount / verifyFailWindowStart / verifyLockedUntil / createdById（User） |
+| `interview_prep_page_versions`（`InterviewPrepPageVersion`） | pageId（Cascade）/ versionNo（pageId と組で一意・現在の版＝最大）/ html（Text）/ uploadedById（User）/ note |
+
+- 閲覧数・失敗回数は **DB 側で加算**（`recordView` は `UPDATE … view_count = view_count + 1, first_viewed_at = COALESCE(first_viewed_at, now)`、`recordVerifyFailure` は窓判定込みの `UPDATE … RETURNING`）。読んでから書かない
+- 生年月日は `Candidate.birthday` を使う（新しく持たない）。保存形式は UTC 00:00（732 件）と UTC 12:00（3,861 件）が混在するが、**JST の暦日**（`toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})`）で取り出せばどちらも同じ日になる（罠#17）
+
+### 選考終了の判定（`src/lib/mensetsu/constants.ts` `isEntryClosed`・変更禁止ファイルは読むだけ）
+ひもづいたエントリーが次のいずれかなら「選考終了」＝自動で公開終了（外部 API は 410 `closed`。ひもづけを外すか付け替えれば戻る）。
+- `entryFlag` ＝ 入社済
+- `entryFlagDetail` ∈ 選考落ち・本人辞退・本人辞退_他社決・本人辞退_自社他・クローズ・求人クローズ（`SELECTION_ENDED_DETAILS`）＋ 書類見送り・面接見送り・**承諾**（内定承諾）
+- `personFlag` ∈ 見送り通知送信済・見送り通知済み・辞退受付済・入社済（**見送り通知未送信は含めない**＝本人へ未通知）
+- `companyFlag` ∈ 辞退報告済・入社報告済
+- `entryFlag`＝内定 かつ `acceptanceDate` あり
+- `archivedAt` あり
+- 公開・再公開・「差し替えて公開」は、終了状態のエントリーにひもづいていると 400 `entry_closed`（公開した瞬間に 410 になるのを防ぐ）
+
+### 内部 API（CA 用。**middleware は `/api/` を素通しなので、全ルートの冒頭で `requireActor()`＝`getSessionUser()`・未ログイン 403**）
+
+| メソッド | パス | 内容 |
+|--|--|--|
+| GET | `/api/candidates/[candidateId]/mensetsu-pages` | 一覧（新しい順・`PageRow`）＋ `candidate.hasBirthday` ＋ その求職者のエントリー（`closed` 付き） |
+| POST | 同上 | 下書き作成。body `{ stage, title?, entryId?, interviewDate?, html, note? }`。title 省略時は `{種別}対策（{企業名}）`。html は 4MB 以内 |
+| GET / PATCH | `/api/mensetsu-pages/[pageId]` | 詳細＋版の一覧 ／ title・stage・entryId・interviewDate の変更 |
+| GET / POST | `/api/mensetsu-pages/[pageId]/preview` | 公開時と同じ最終形の HTML。GET `?version=N`（省略＝現在の版）／POST `{ html }`＝未保存 HTML の確認（保存しない） |
+| POST | `…/publish` | 下書き → 公開。生年月日未登録（requireBirthdate のとき）は 400 `birthday_missing` |
+| POST | `…/replace` | 版を足す。body `{ html, note?, publish? }`。`publish=true` かつ下書きなら続けて公開 |
+| POST | `…/extend` | expiresAt ＝ 今日＋30 日（下書きは 400） |
+| POST | `…/stop` / `…/republish` | 公開中 → 停止 ／ 停止 → 公開中（期限切れなら今日＋30 日に張り直し） |
+| POST | `…/unlock` | 生年月日入力ミスのロック解除（失敗回数も 0） |
+| GET | `…/versions` | 版の一覧（戻す機能は無い。各版は preview?version=N） |
+
+### 外部 API（公開サイト向け・`x-api-secret` ＝ `MENSETSU_API_SECRET`・ログイン確認の対象外・`Cache-Control: no-store`）
+
+| メソッド | パス | 応答 |
+|--|--|--|
+| GET | `/api/external/mensetsu/pages/{slug}` | 401 秘密不一致 ／ 404 存在しない・下書き・形式外 slug ／ 410 `{ reason: expired \| stopped \| closed }` ／ 403 `{ reason: "verify" }`（requireBirthdate で `x-viewer-token` が無い・不正・90 日超。中身・氏名は返さない）／ 200 `{ html, expiresAt }`（html は共通ヘッダー・フッター・検索除け入りの最終形。useWrapper=false はそのまま） |
+| POST | `/api/external/mensetsu/pages/{slug}/verify` | body `{ birthdate }`。404 / 410 は GET と同じ ／ 429 `{ reason: "locked", until }` ／ 200 `{ token, maxAgeSeconds: 7776000 }` ／ 400 `{ reason: "mismatch" }` |
+
+- 閲覧の記録（200 のときだけ）: requireBirthdate=true は「正しいトークン ＋ `x-viewer-ua` がロボットでない」、false は「`x-viewer-ua` がロボットでない」。**`x-viewer-ua` が無ければどちらも数えない**。ロボット判定は `src/lib/mensetsu/robot.ts`（bot / crawler / spider / preview / line-poker / facebookexternalhit / slack-imgproxy …。LINE のトーク内ブラウザ `Line/14.x` は本人なので対象外）
+- 生年月日の入力ゆれ: 全角数字→半角、`/`・`／`・`-`・`－`・`.`・空白・「年月日」を除去して 8 桁（`1990年4月15日` も可）。照合は JST 暦日
+- 回数制限（記録ごと・24 時間の窓）: 5 の倍数回（5・10・15）で 15 分ロック、20 回で 24 時間ロック。ロックに達した回も 429。ロック中は照合しない。一致で 0 に戻る。CA は一覧の「ロック解除」で解ける
+- トークン: `{pageId}.{発行時刻ms}.{HMAC-SHA256(base64url)}`（鍵 `MENSETSU_TOKEN_SECRET`・DB に保存しない）。別の記録・改ざん・発行から 90 日超は無効（Cookie の期限だけに頼らない）
+- 共通ヘッダー・フッター（`src/lib/mensetsu/wrapper.ts` `wrapMensetsuHtml`・プレビューと配信で同じ関数）: `<head>` に robots noindex,nofollow,noarchive と referrer no-referrer、`<body>` 直後に「株式会社ビズスタジオ／{氏名}様 専用ページ」、`</body>` 直前に「第三者への転送・共有はお控えください」。クラス名は `bzs-` 接頭辞・スタイルは要素に直接指定。`<head>`／`<body>` が無い HTML は最小限の骨組みで包む
+
+### 環境変数（Railway 本番 `bizstudio-portal` に設定済み）
+`MENSETSU_API_SECRET`（外部 API）／`MENSETSU_TOKEN_SECRET`（トークン署名・ポータルだけ）／`MENSETSU_PUBLIC_BASE_URL`（既定 `https://mensetsu.bizstudio.co.jp`）。step2 用に bizstudio-mensetsu の `.env.local`（git 管理外）へ `MENSETSU_API_SECRET`・`PORTAL_API_BASE`・`MENSETSU_TEST_SLUG`・`MENSETSU_TEST_BIRTHDATE`・`MENSETSU_TEST_STOPPED_SLUG` を書いてある（大野テストの「step2確認用」公開中／「step2確認用（停止）」の 2 件）。
+
+### スクリプト
+- `scripts/t206-unit-check.ts` … 判定関数の単体確認（DB 不要・85 項目）
+- `scripts/t206-prod-check.ts` … 本番の通し確認（外部 API・内部 API・閲覧記録・ロック・410 の 3 種類・90 日超トークン。テスト用セッション行とテスト記録を作って最後に消す）
+- `scripts/t206-register-okano.ts` … 岡野様 1 件の移行（実行済み・slug 重複時は何もしない）

@@ -130,6 +130,13 @@ portal モーダルが Phase 4 で更新されたため、現在は常に `compa
 
 経理・会計システム。Railway。Phase 1-2 完了。
 
+## bizstudio-mensetsu
+
+面接対策資料の公開サイト（`C:izstudioizstudio-mensetsu`・Vercel・mensetsu.bizstudio.co.jp）。URL は `/{英数字7文字 slug}`。
+- T-206 step1（portal 側）までは `pages.json`（slug → publishedAt / expiresAt）＋ `public/{slug}.html` の手置きで、期限判定は `middleware.js` / `lib/expiry.js`。
+- T-206 step2 でこのサイトは「portal の外部 API（`GET /api/external/mensetsu/pages/{slug}` / `POST …/verify`・`x-api-secret`）から中身と状態を受け取って返すだけ」に切り替える。本人確認（生年月日→トークン Cookie）・閲覧記録・期限・選考終了の判定はすべて portal 側（03-portal-spec「面接対策ページ管理」）。
+- step2 用の値は同リポジトリの `.env.local`（git 管理外）に書いてある: `MENSETSU_API_SECRET` / `PORTAL_API_BASE` / `MENSETSU_TEST_SLUG` / `MENSETSU_TEST_BIRTHDATE` / `MENSETSU_TEST_STOPPED_SLUG`。
+
 ## scout-scheduler
 
 日程調整アプリ。Vercel / schedule.bizstudio.co.jp。

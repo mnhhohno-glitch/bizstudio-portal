@@ -1783,3 +1783,24 @@ InterviewForm（ヘッダーはそのまま）
 - 右の面談準備（`InterviewPrepPanel embedded`）: 入力欄の上に「よく使う質問」5つ（横のパネルと同じ・`quick-questions.ts`）。fill のボタンは `pendingSelectRef` で値の描画後に textarea を focus して〔　〕を `setSelectionRange`。
 - `InterviewPrepPanel` に props `interviewId`（省略可）。`InterviewForm` → `InterviewScriptMode`（props `interviewId`）→ パネル、横のパネルは `InterviewHistoryTab` の `selectedId`。チャット送信の body は `{ content, interviewId }`（台本の答えの添付はサーバー側・画面の吹き出しと保存は打った文だけ）。
 - カード「面談で聞くこと」（`InterviewPrepSummaryCards`）の各質問に会社名の灰色の札（「全体」は出さない）。上部バーの `OldFormatNotice` は、カード表示の古い部屋（step3 より前）では「「作り直す」と、面談で聞くことが会社ごとに振り分けられます。」。
+
+## 「面接対策」タブ `MensetsuPagesTab`（T-206 step1, 2026-10-04）
+
+求職者詳細の上部タブ（基本／面談履歴／面談スクリプト／**面接対策**／設定履歴／ダッシュボード）。`?view=mensetsu`。仕様は 03-portal-spec「面接対策ページ管理」。
+
+```
+CandidateDetailPage（activeView === "mensetsu"）
+  ├─ CandidateCompactHeader（面談スクリプトタブと同じ 1 行表示）
+  └─ MensetsuPagesTab（src/components/candidates/MensetsuPagesTab.tsx・props: candidateId）
+       ├─ 見出し「面接対策ページ」＋注意書き「中身の確認はプレビューで行ってください（公開URLは生年月日の入力が必要です）」／右「＋ 面接対策ページを作る」
+       ├─ 生年月日未登録の注意（黄）: 登録するまで「公開」「再公開」ボタンは disabled
+       ├─ 一覧テーブル（新しい順）: タイトル（種別・作成日時・作成者・「本人確認なし」バッジ）／企業名／面接日／状態バッジ（下書き・公開中・期限切れ・公開停止・選考終了）／公開期限「M/D まで」（表示最終日）／閲覧（「未閲覧」or「初回 M/D HH:MM・N回」＋最終・ロック中は「入力ロック中（〜HH:MM）」＋［ロック解除］）／版（クリックで履歴）／操作
+       │    操作: ［公開］（下書きのみ・プレビューを開いて確定）／［プレビュー］／［URLコピー］［案内文コピー］（公開後。版 2 以降は差し替え後の文面）／［差し替え］／［延長］／［公開停止］（公開中）or［再公開］（停止中）／［版の履歴］
+       ├─ CreateModal: HtmlDropZone（.html・4MB・ドラッグ or クリック）→ 種別・面接日・企業（エントリーから選択。終了状態は【選考終了】付き）・タイトル（`{種別}対策（{企業名}）` を自動入力・編集可）→「下書き保存してプレビュー」→ 保存後そのまま PreviewModal（［公開］付き）
+       ├─ ReplaceModal: 新しい HTML を選ぶ →「プレビュー」→ PreviewModal（POST preview で未保存 HTML を確認・確定ボタン「差し替えて公開」）
+       ├─ VersionsModal: 版・日時・担当・メモ・［プレビュー］（preview?version=N）
+       └─ PreviewModal: iframe `srcDoc`・`sandbox="allow-scripts"`（**allow-same-origin は付けない**）・「PC幅／スマホ幅（390px）」切替・確定ボタン（公開／差し替えて公開）
+```
+
+- 公開 URL は通さない（プレビューは内部 API）ので閲覧数に数えない。
+- 一覧行の文言・案内文・公開 URL はサーバー（`toPageRow`）で作って返す。画面は組み立てない。
